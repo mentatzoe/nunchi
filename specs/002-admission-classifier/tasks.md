@@ -123,7 +123,7 @@
 - [x] T039 Review successful result payloads for absence of `message`, `reply`, `draft`, `content`, or other ordinary visible participation prose fields
 - [x] T040 Review diff against `origin/main` to confirm adapters, Discord/cc-connect integration, broad benchmarks, launch claims, and marketing copy remain out of scope
 - [x] T041 Commit the SpecKit artifacts and implementation on branch `002-admission-classifier`
-- [ ] T042 Open PR for TUR-11 and include evidence for tests, quickstart install, adversarial fixtures, classifier identity, and fake-done scope review
+- [x] T042 Open PR for TUR-11 and include evidence for tests, quickstart install, adversarial fixtures, classifier identity, and fake-done scope review
 
 ---
 
@@ -176,5 +176,6 @@
 - User Story 3 tasks: 9
 - Polish/final verification tasks: 6
 - Suggested MVP scope: complete through T017 before claiming selected classifier path/audit identity works; do not claim product classifier completion until the product/default path, not just `deterministic`, is verified.
+
 
 
