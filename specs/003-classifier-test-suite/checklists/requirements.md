@@ -53,3 +53,18 @@ No re-iteration was required; all 16 checklist items pass on the first validatio
 - The spec assumes the TUR-12 corpus comment is correct; the suite implementer must reconstruct fixture envelopes from the trigger/context summaries there. If the corpus comment is later revised, the FR-001 / FR-002 source pointers must be re-verified before `/speckit-implement`.
 - The five-second / five-minute / "standard developer laptop" thresholds in SC-004 and SC-005 are derived from common test-suite expectations, not from a measured baseline on this codebase. If a future planning step uncovers a justification to relax either threshold, the spec should be revisited rather than the SC silently softened.
 - The "regex-based classifier" example in US2.2 is illustrative of implementation-agnosticism; it is not a hint that a regex classifier is the intended fix.
+
+### Validation walkthrough (iteration 2, after human-conversation expansion on 2026-05-25)
+
+Re-walked the 16-item checklist against the expanded spec (US3 added at P1, FR-018 through FR-021 added, SC-009 through SC-011 added, new Discord-pilot-shape edge-case subsection, new Key Entities for envelope shape and Discord suppressor, expanded Sources of evidence and Assumptions). All 16 items remain passing:
+
+- **Implementation-details cleanliness**: the new content references `~/github/pilot-bot/before-you-respond.md` and the pilot-bot session log path as *evidence sources*, not as runtime dependencies. The suite is still language- and framework-agnostic; the `source_shape` field is a metadata convention, not a stack choice. FR-020's "typed verdict, not a transport-layer string" is expressed as a contract assertion, not as a Python enum, Rust type, or anything stack-specific.
+- **Stakeholder readability**: US3's opening paragraph defines each Discord-shape failure mode in plain language ("vocative greetings", "bracketed persona framings", "casual pivots with emotional padding") with concrete quoted examples from the pilot. No jargon precedes its explanation.
+- **Testability of FRs**: FR-018 enumerates the required fixture set discretely; FR-019 names a single metadata field and a single CLI-style filter; FR-020 names the exact malformed-sentinel variants observed in the pilot; FR-021 enumerates the four named suppressors. Every new FR is countable.
+- **Success-criteria measurability**: SC-009 / SC-010 / SC-011 each name a concrete artifact (a count, a filter behaviour, a specific malformed-string set) that a reviewer can verify by running the suite against a known-broken and a known-good classifier.
+- **Acceptance scenarios**: US3 carries three Given/When/Then scenarios mapping directly to the new FRs and SCs (US3.1 → SC-010 / FR-018; US3.2 → FR-019; US3.3 → FR-018 + SC-006).
+- **Edge-case coverage**: the new "Discord-pilot-shape edge cases" subsection enumerates 11 named cases, each tied to either a runtime quote from the pilot session or to a published rule in `before-you-respond.md`.
+- **Scope bounding**: the new Sources of evidence subsection makes explicit that the suite is one corpus drawn from two evidence pools. The new Assumption (pilot-bot session is the authoritative Discord-shape source; the suite tracks `before-you-respond.md` policy) makes the pool ownership explicit.
+- **Dependencies/assumptions**: the new Discord-shape Assumption acknowledges that if TurnAware's default-PASS policy changes, the Discord-shape fixtures and their expected verdicts must move alongside; this is a known maintenance dependency, not a hidden one.
+
+No re-iteration required; all 16 items remain passing after the expansion. Caveats specific to the expansion are noted in the "Caveats" subsection above.
