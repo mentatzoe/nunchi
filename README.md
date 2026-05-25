@@ -76,11 +76,14 @@ it does not prescribe speech shape beyond the admission verdict.
 ## Classifier selection
 
 The documented default classifier path is `product`. It is the main admission
-classifier path used when no classifier is supplied.
+classifier path used when no classifier is supplied. In this slice it is backed
+by the named local model boundary `turnaware-local-admission-v1`, which scores
+competing PASS/ACK/ASK/SPEAK hypotheses over the supplied envelope. It is not a
+relabelled deterministic verifier.
 
 `deterministic` is an explicit offline evidence path for local and CI
 verification. It is not the product default and is never selected silently as a
-fallback for invalid configuration.
+fallback for invalid or unavailable product configuration.
 
 Classifier selection can be supplied by:
 

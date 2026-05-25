@@ -8,7 +8,7 @@ Command:
 turnaware admit [--classifier PATH] [--classifier-config JSON_OR_PATH] [--input PATH]
 ```
 
-Input may still be read from stdin or `--input PATH`. This slice supports at least two paths: the documented product/default classifier path, and explicit `deterministic` for offline/CI evidence. Classifier selection may be supplied by CLI flags and/or envelope fields; if both are present, the CLI `--classifier` flag takes precedence over the envelope `classifier` field. This precedence rule must be covered by deterministic tests. If the product/default path is unavailable, TurnAware fails clearly rather than silently falling back to `deterministic`.
+Input may still be read from stdin or `--input PATH`. This slice supports at least two paths: the documented product/default classifier path, and explicit `deterministic` for offline/CI evidence. The product/default path is backed by the named local model boundary `turnaware-local-admission-v1`; the deterministic verifier is a separate implementation for fixture evidence. Classifier selection may be supplied by CLI flags and/or envelope fields; if both are present, the CLI `--classifier` flag takes precedence over the envelope `classifier` field. This precedence rule must be covered by deterministic tests. If the product/default path is unavailable, TurnAware fails clearly rather than silently falling back to `deterministic`.
 
 ### Successful stdout payload
 

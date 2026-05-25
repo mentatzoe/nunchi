@@ -2,7 +2,7 @@ import unittest
 
 from tests.test_core import load_fixture
 from turnaware import evaluate
-from turnaware.classifiers import SUPPORTED_CLASSIFIERS
+from turnaware.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
 from turnaware.errors import ValidationError
 
 
@@ -10,6 +10,43 @@ class ClassifierTests(unittest.TestCase):
     def test_registry_supports_product_default_and_deterministic_evidence_paths(self):
         self.assertIn("product", SUPPORTED_CLASSIFIERS)
         self.assertIn("deterministic", SUPPORTED_CLASSIFIERS)
+
+    def test_product_and_deterministic_are_distinct_implementations_not_relabelled_same_engine(self):
+        product = get_classifier("product")
+        deterministic = get_classifier("deterministic")
+
+        self.assertNotEqual(type(product), type(deterministic))
+        self.assertNotEqual(getattr(product, "model_id", None), getattr(deterministic, "model_id", None))
+
+    def test_product_payload_is_not_deterministic_payload_with_only_classifier_relabelled(self):
+        product = evaluate(load_fixture("false_pass_no_corroboration"), classifier="product")
+        deterministic = evaluate(load_fixture("false_pass_no_corroboration"), classifier="deterministic")
+
+        product_without_identity = {key: value for key, value in product.items() if key != "classifier"}
+        deterministic_without_identity = {key: value for key, value in deterministic.items() if key != "classifier"}
+        self.assertNotEqual(product_without_identity, deterministic_without_identity)
+
+    def test_product_classifier_returns_representative_pass_ack_ask_speak(self):
+        cases = {
+            "pass": "PASS",
+            "ack": "ACK",
+            "ask": "ASK",
+            "speak": "SPEAK",
+        }
+
+        for fixture_name, expected in cases.items():
+            with self.subTest(fixture=fixture_name):
+                result = evaluate(load_fixture(fixture_name), classifier="product")
+                self.assertEqual(result["classifier"], "product")
+                self.assertEqual(result["verdict"], expected)
+
+    def test_unavailable_product_model_fails_without_deterministic_fallback(self):
+        with self.assertRaises(ValidationError) as caught:
+            evaluate(load_fixture("speak"), classifier="product", classifier_config={"model": "missing-model"})
+
+        message = str(caught.exception).casefold()
+        self.assertIn("unavailable", message)
+        self.assertIn("product", message)
 
     def test_false_ack_comment_back_is_speak_not_ack(self):
         for classifier in ("product", "deterministic"):

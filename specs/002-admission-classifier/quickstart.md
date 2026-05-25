@@ -27,7 +27,7 @@ Expected coverage includes:
 
 ## 3. Verify selected classifier identity in CLI output
 
-Product/default path evidence:
+Product/default path evidence (uses `turnaware-local-admission-v1`, not the deterministic verifier):
 
 ```sh
 turnaware admit --input tests/fixtures/speak.json
