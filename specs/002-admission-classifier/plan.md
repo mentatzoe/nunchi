@@ -8,13 +8,13 @@
 
 ## Summary
 
-Complete the next vertical TurnAware slice by replacing the current substring-only admission heuristic with a configurable classifier boundary while preserving the existing admission-only CLI/core contract. The product/default classifier path must be the actual admission classifier requested for TurnAware, while `deterministic` remains an explicit offline/CI evidence path. Both must expose classifier identity in audit output, reject the known false ACK/PASS cases, keep legitimate PASS reachable only with corroborating inspected context, and remain verified through the public CLI and callable core.
+Complete the next vertical TurnAware slice by replacing the current substring-only admission heuristic with a configurable provider-backed classifier boundary while preserving the existing admission-only CLI/core contract. The product/default classifier path is the actual admission classifier requested for TurnAware; Zoe explicitly rejected a selectable `deterministic` classifier path on 2026-05-25. Product results must expose classifier/provider/model identity in audit output, reject the known false ACK/PASS cases through deterministic provider-fixture evidence, keep legitimate PASS reachable only with corroborating inspected context, and remain verified through the public CLI and callable core.
 
 ## Technical Context
 
 **Language/Version**: Python 3.11+ using the standard library
 
-**Primary Dependencies**: Deterministic offline path uses the standard library; product/default classifier path may use configured provider/model credentials or an equivalent local model boundary, but absence/unavailability must fail clearly with no silent deterministic fallback
+**Primary Dependencies**: Standard-library OpenAI-compatible provider client; product/default classifier path uses configured provider/model credentials. Offline CI evidence uses a deterministic fixture provider transport, not a public classifier path. Absence/unavailability must fail clearly with no silent local/deterministic fallback.
 
 **Storage**: N/A; per-request evaluation with no persistence
 
@@ -24,11 +24,11 @@ Complete the next vertical TurnAware slice by replacing the current substring-on
 
 **Project Type**: Library plus CLI
 
-**Performance Goals**: Deterministic fixture set evaluates in under 2 seconds from process start on a typical developer machine; no network dependency for CI evidence
+**Performance Goals**: Deterministic provider-fixture set evaluates in under 2 seconds from process start on a typical developer machine; no network dependency for CI evidence
 
-**Constraints**: Admission-only; no reply composition; verdict vocabulary remains PASS/ACK/ASK/SPEAK; `context_checked` only names inspected supplied material; invalid classifier config fails clearly with no silent fallback; adapters, Discord/cc-connect integration, broad benchmarks, launch claims, and marketing copy are excluded
+**Constraints**: Admission-only; no reply composition; verdict vocabulary remains PASS/ACK/ASK/SPEAK; `context_checked` only names inspected supplied material; invalid classifier/provider config fails clearly with no silent fallback; no selectable deterministic classifier; adapters, Discord/cc-connect integration, broad benchmarks, launch claims, and marketing copy are excluded
 
-**Scale/Scope**: Single admission request per CLI invocation; product classifier covers supplied conversation/context envelopes, and deterministic corpus covers known false ACK/PASS cases plus representative PASS/ACK/ASK/SPEAK cases
+**Scale/Scope**: Single admission request per CLI invocation; product classifier covers supplied conversation/context envelopes, and deterministic provider-fixture corpus covers known false ACK/PASS cases plus representative PASS/ACK/ASK/SPEAK cases
 
 ## Constitution Check
 
@@ -40,7 +40,7 @@ Complete the next vertical TurnAware slice by replacing the current substring-on
 | II. Hard-Stop PASS Is Load-Bearing | PASS | PASS remains terminal for ordinary visible participation and must be backed by inspected completion evidence. |
 | III. CLI-First, Modular Core | PASS | Existing `turnaware admit` and `src/turnaware/core.py` remain the shared boundary; classifier selection must be reachable from both. |
 | IV. Vertical, Independently Testable Slices | PASS | Slice is end-to-end: input envelope + classifier config -> verdict + audit evidence through CLI/core. |
-| V. Test-First Contract and Fixture Discipline | PASS | Plan requires deterministic fixtures for all verdicts, known false cases, invalid config, and context truth before implementation is accepted. |
+| V. Test-First Contract and Fixture Discipline | PASS | Plan requires deterministic provider fixtures for all verdicts, known false cases, invalid config, and context truth before implementation is accepted. |
 | VI. Adapter Tier Honesty and Consumer Boundaries | PASS | No downstream adapter implementation or adapter launch claim is in scope. |
 | VII. Context Truth and Room Inference | PASS | Classifier may reason over supplied context but `context_checked` must stay a subset of actually inspected trigger/context references. |
 | VIII. Documentation Is Product | PASS | Quickstart evidence is limited to runnable CLI/core commands and public install checks. |
@@ -77,7 +77,7 @@ src/
     ├── errors.py
     ├── models.py           # request/result models include classifier identity in result payload
     ├── schema.py           # validate request/result/config fields
-    └── classifiers.py      # deterministic classifier registry and selection boundary
+    └── classifiers.py      # product classifier registry and provider boundary
 
 tests/
 ├── fixtures/
@@ -98,7 +98,7 @@ tests/
 
 ## Phase 0: Research Summary
 
-Research decisions are captured in [research.md](./research.md). Key decisions: the product classifier path is primary; deterministic offline classifier is an explicit required evidence path, not the product default; classifier identity is a first-class audit/result field; unsupported classifier configuration is a validation/runtime failure rather than fallback; contradiction handling must inspect supplied context before PASS; public install verification remains part of done.
+Research decisions are captured in [research.md](./research.md). Key decisions: the product classifier path is the only supported classifier path; deterministic offline evidence is provided through a provider fixture, not a selectable classifier; classifier/provider/model identity is first-class audit/result evidence; unsupported classifier/provider configuration is a validation/runtime failure rather than fallback; contradiction handling must inspect supplied context before PASS; public install verification remains part of done.
 
 ## Phase 1: Design Summary
 

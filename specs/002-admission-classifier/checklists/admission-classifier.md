@@ -8,11 +8,11 @@
 
 ## Requirement Completeness
 
-- [x] CHK001 Are supported classifier paths explicitly defined, including the deterministic offline path required for CI evidence? [Completeness, Spec §FR-001/FR-006, Plan §Technical Context]
+- [x] CHK001 Are supported classifier paths explicitly defined, including the absence of a public deterministic path and the fixture-provider mechanism required for CI evidence? [Completeness, Spec §FR-001/FR-006, Plan §Technical Context]
 - [x] CHK002 Is the selected classifier identity required in a machine-readable successful result or equivalent audit evidence for every successful evaluation? [Completeness, Spec §FR-002, Contract §Successful stdout payload]
 - [x] CHK003 Are invalid, unavailable, and unsupported classifier configurations all covered by clear failure requirements with no silent fallback? [Completeness, Spec §FR-007, Contract §Failure semantics]
 - [x] CHK004 Are the known false ACK and false PASS cases both represented as explicit requirements and measurable success criteria? [Completeness, Spec §FR-008/FR-009, SC-002/SC-003]
-- [x] CHK005 Are representative PASS, ACK, ASK, and SPEAK cases required in deterministic evidence, not just implied by the verdict vocabulary? [Completeness, Spec §FR-014, SC-004]
+- [x] CHK005 Are representative PASS, ACK, ASK, and SPEAK cases required in deterministic provider-fixture evidence, not just implied by the verdict vocabulary? [Completeness, Spec §FR-014, SC-004]
 
 ## Requirement Clarity
 
@@ -20,20 +20,20 @@
 - [x] CHK007 If both CLI flags and envelope fields can select classifiers, is precedence specified with one testable rule? [Ambiguity, Contract §Public CLI]
 - [x] CHK008 Is "equivalent evidence" for classifier identity and contradictory context constrained enough to avoid prose-only or untestable audit receipts? [Clarity, Spec §FR-002/FR-011]
 - [x] CHK009 Is "legitimate PASS" defined with sufficient corroborating inspected context to distinguish it from resolved-looking trigger text alone? [Clarity, Spec §FR-010, Research §PASS]
-- [x] CHK010 Are confidence requirements specific enough to prevent a fixed high-confidence template while still allowing deterministic implementation choices? [Clarity, Spec §FR-013, Research §confidence]
+- [x] CHK010 Are confidence requirements specific enough to prevent a fixed high-confidence template while still allowing deterministic fixture-provider evidence? [Clarity, Spec §FR-013, Research §confidence]
 
 ## Requirement Consistency
 
 - [x] CHK011 Do classifier-selection requirements preserve the existing PASS/ACK/ASK/SPEAK verdict vocabulary without requiring a contract migration? [Consistency, Spec §FR-003, Constitution I]
 - [x] CHK012 Do the plan and contract preserve the admission-only boundary by excluding reply prose and draft-message fields from successful results? [Consistency, Spec §FR-005, Constitution I/II, Contract §Successful stdout payload]
 - [x] CHK013 Are CLI and callable-core requirements aligned so classifier selection cannot become CLI-only behavior? [Consistency, Spec §FR-016, Plan §Structure Decision]
-- [x] CHK014 Does the deterministic offline path requirement align with public install/quickstart verification without requiring network or credentials? [Consistency, Spec §FR-006/FR-015, Quickstart §1-3]
+- [x] CHK014 Does the deterministic fixture-provider requirement align with public install/quickstart verification without requiring network or credentials? [Consistency, Spec §FR-006/FR-015, Quickstart §1-3]
 - [x] CHK015 Are adapter, Discord/cc-connect, benchmark, launch, and marketing exclusions consistent across spec, plan, contract, and quickstart? [Consistency, Spec §FR-017, Plan §Constraints, Contract §Out of scope]
 
 ## Acceptance Criteria Quality
 
 - [x] CHK016 Can SC-001 be objectively verified from every successful result payload or audit artifact? [Measurability, Spec §SC-001]
-- [x] CHK017 Can SC-002 and SC-003 be verified by deterministic fixture commands with expected verdict and checked-context assertions? [Measurability, Spec §SC-002/SC-003, Quickstart §4-5]
+- [x] CHK017 Can SC-002 and SC-003 be verified by deterministic provider-fixture commands with expected verdict and checked-context assertions? [Measurability, Spec §SC-002/SC-003, Quickstart §4-5]
 - [x] CHK018 Is public install success defined by concrete commands rather than a broad "works" claim? [Measurability, Spec §SC-006, Quickstart §1]
 - [x] CHK019 Is invalid classifier failure defined with observable exit/status/output behavior and no successful result? [Measurability, Spec §SC-007, Contract §Failure semantics]
 - [x] CHK020 Is absence of reply composition measurable through forbidden result fields or equivalent schema assertions? [Measurability, Spec §SC-008, Data Model §Admission Result]
@@ -50,7 +50,7 @@
 
 - [x] CHK026 Is the TUR-12 corpus treated as evidence input without depending on old branch artifacts existing in the repo? [Assumption, Spec §Assumptions]
 - [x] CHK027 Is the current 001 CLI/core contract identified as the compatibility baseline before adding classifier identity? [Dependency, Plan §Summary, Data Model §Admission Result]
-- [x] CHK028 Are future/provider-backed classifier paths explicitly optional so deterministic offline evidence remains sufficient for this slice? [Assumption, Spec §Assumptions, Research §deterministic]
+- [x] CHK028 Is deterministic offline evidence explicitly separated from public classifier selection so provider-backed product behavior is not bypassed? [Assumption, Spec §Assumptions, Research §deterministic]
 - [x] CHK029 Are documentation updates gated on runnable verification commands to avoid planned-capability claims? [Dependency, Constitution VIII, Quickstart]
 - [x] CHK030 Is each known out-of-scope area documented as excluded rather than silently deferred? [Boundary, Spec §FR-017, Contract §Out of scope]
 

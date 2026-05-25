@@ -26,7 +26,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     admit = subparsers.add_parser("admit", help="evaluate one admission request")
     admit.add_argument("--input", "-i", metavar="PATH", help="read admission request JSON from a file")
-    admit.add_argument("--classifier", metavar="PATH", help="classifier path to use; overrides envelope classifier")
+    admit.add_argument("--classifier", metavar="PATH", help="classifier path to use; only product is supported")
     admit.add_argument(
         "--classifier-config",
         metavar="JSON_OR_PATH",

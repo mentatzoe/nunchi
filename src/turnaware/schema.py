@@ -118,6 +118,14 @@ def validate_result(raw):
     if not isinstance(classifier, str) or not classifier.strip():
         raise ValidationError("result.classifier must be a non-empty string")
 
+    classifier_provider = data.get("classifier_provider")
+    if classifier_provider is not None and (not isinstance(classifier_provider, str) or not classifier_provider.strip()):
+        raise ValidationError("result.classifier_provider must be a non-empty string when supplied")
+
+    classifier_model = data.get("classifier_model")
+    if classifier_model is not None and (not isinstance(classifier_model, str) or not classifier_model.strip()):
+        raise ValidationError("result.classifier_model must be a non-empty string when supplied")
+
     confidences = _require_mapping(data.get("confidences"), "result.confidences")
     missing = set(VERDICTS).difference(confidences)
     extra = set(confidences).difference(VERDICTS)

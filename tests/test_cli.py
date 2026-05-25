@@ -4,7 +4,9 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from tests.provider_helpers import fixture_case, provider_env
 from tests.test_core import load_fixture
 from turnaware import evaluate
 
@@ -33,7 +35,8 @@ class CliTests(unittest.TestCase):
     def test_admit_reads_json_from_stdin_and_writes_success_json(self):
         fixture = (FIXTURE_DIR / "speak.json").read_text(encoding="utf-8")
 
-        completed = run_cli(stdin=fixture)
+        with patch.dict(os.environ, fixture_case("speak", "SPEAK"), clear=True):
+            completed = run_cli(stdin=fixture)
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
@@ -42,16 +45,23 @@ class CliTests(unittest.TestCase):
         self.assertEqual(completed.stderr, "")
 
     def test_admit_reads_json_from_file(self):
-        completed = run_cli(["--classifier", "deterministic", "--input", str(FIXTURE_DIR / "pass.json")])
+        env = provider_env(
+            "PASS",
+            checked=["trigger:trigger-pass", "context:ctx-pass-handled"],
+            confidences={"PASS": 0.8, "ACK": 0.05, "ASK": 0.1, "SPEAK": 0.05},
+        )
+        with patch.dict(os.environ, env, clear=True):
+            completed = run_cli(["--input", str(FIXTURE_DIR / "pass.json")])
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["classifier"], "deterministic")
+        self.assertEqual(payload["classifier"], "product")
         self.assertEqual(payload["verdict"], "PASS")
         self.assertNotIn("reply", payload)
 
     def test_cli_classifier_overrides_envelope_classifier(self):
-        completed = run_cli(["--classifier", "product", "--input", str(FIXTURE_DIR / "speak_cli_precedence.json")])
+        with patch.dict(os.environ, fixture_case("speak-cli-precedence", "SPEAK"), clear=True):
+            completed = run_cli(["--classifier", "product", "--input", str(FIXTURE_DIR / "speak_cli_precedence.json")])
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
@@ -59,34 +69,46 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["verdict"], "SPEAK")
 
     def test_cli_classifier_config_json_is_used(self):
-        completed = run_cli([
-            "--classifier",
-            "deterministic",
-            "--classifier-config",
-            '{"strict": true}',
-            "--input",
-            str(FIXTURE_DIR / "speak.json"),
-        ])
+        env = fixture_case("speak", "SPEAK")
+        with patch.dict(os.environ, env, clear=True):
+            completed = run_cli([
+                "--classifier",
+                "product",
+                "--classifier-config",
+                '{"model": "turnaware-test-model"}',
+                "--input",
+                str(FIXTURE_DIR / "speak.json"),
+            ])
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(json.loads(completed.stdout)["classifier"], "deterministic")
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["classifier"], "product")
+        self.assertEqual(payload["classifier_model"], "turnaware-test-model")
 
     def test_cli_and_core_are_contract_equivalent_for_fixture_set(self):
-        fixture_names = (
-            "pass",
-            "ack",
-            "ask",
-            "speak",
-            "false_ack_comment_back",
-            "false_pass_contradicted_done",
-            "false_pass_no_corroboration",
-        )
-        for fixture_name in fixture_names:
+        fixture_cases = {
+            "pass": ("PASS", ["trigger:trigger-pass", "context:ctx-pass-handled"]),
+            "ack": ("ACK", ["trigger:trigger-ack"]),
+            "ask": ("ASK", ["trigger:trigger-ask"]),
+            "speak": ("SPEAK", ["trigger:trigger-speak"]),
+            "false_ack_comment_back": (
+                "SPEAK",
+                ["trigger:trigger-false-ack-comment-back", "context:ctx-false-ack-assignment"],
+            ),
+            "false_pass_contradicted_done": (
+                "SPEAK",
+                ["trigger:trigger-false-pass-contradicted-done", "context:ctx-false-pass-missing-work"],
+            ),
+            "false_pass_no_corroboration": ("ASK", ["trigger:trigger-false-pass-no-corroboration"]),
+        }
+        for fixture_name, (expected, checked) in fixture_cases.items():
             with self.subTest(fixture=fixture_name):
-                completed = run_cli(["--classifier", "deterministic", "--input", str(FIXTURE_DIR / f"{fixture_name}.json")])
+                env = provider_env(expected, checked=checked)
+                with patch.dict(os.environ, env, clear=True):
+                    completed = run_cli(["--input", str(FIXTURE_DIR / f"{fixture_name}.json")])
+                    core_payload = evaluate(load_fixture(fixture_name), classifier="product")
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 cli_payload = json.loads(completed.stdout)
-                core_payload = evaluate(load_fixture(fixture_name), classifier="deterministic")
                 self.assertEqual(cli_payload, core_payload)
 
     def test_invalid_classifier_fails_without_success_stdout(self):

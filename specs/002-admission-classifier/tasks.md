@@ -4,7 +4,7 @@
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/admission-classifier.md, quickstart.md, checklists/admission-classifier.md
 
-**Tests**: Required. The feature specification requires product classifier path evidence plus deterministic offline evidence for known false ACK/PASS cases, representative PASS/ACK/ASK/SPEAK, invalid classifier configuration, public CLI/core equivalence, and public install/CLI smoke.
+**Tests**: Required. The feature specification requires product classifier path evidence plus deterministic provider-fixture evidence for known false ACK/PASS cases, representative PASS/ACK/ASK/SPEAK, invalid classifier configuration, public CLI/core equivalence, and public install/CLI smoke.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing.
 
@@ -24,7 +24,7 @@
 
 - [x] T004 Add classifier selection fields (`classifier`, `classifier_config`) to request parsing/model validation in `src/turnaware/models.py` and `src/turnaware/schema.py`
 - [x] T005 Add machine-readable `classifier` identity to successful admission results in `src/turnaware/models.py` and `src/turnaware/schema.py`
-- [x] T006 Create classifier registry with product/default path plus explicit `deterministic` evidence path and invalid-classifier errors in `src/turnaware/classifiers.py`
+- [x] T006 Create classifier registry with product/default path, provider/model configuration, fixture-provider test evidence, and invalid-classifier errors in `src/turnaware/classifiers.py`
 - [x] T007 Refactor `src/turnaware/core.py` so `evaluate()` delegates verdict choice through the classifier registry instead of inline substring-only classification
 - [x] T008 Wire CLI flags `--classifier` and `--classifier-config` into `src/turnaware/cli.py`, with CLI classifier taking precedence over envelope classifier
 
@@ -34,9 +34,9 @@
 
 ## Phase 3: User Story 1 - Host selects an auditable classifier path (Priority: P1) 🎯 MVP
 
-**Goal**: A host can use the product/default classifier path or explicitly select the deterministic evidence path, and every successful result names the selected classifier.
+**Goal**: A host can use the product/default classifier path, every successful result names the selected classifier/provider/model, and `deterministic` is not exposed as a selectable classifier.
 
-**Independent Test**: Evaluate the same valid envelope through default product selection, explicit deterministic CLI selection, envelope selection, and CLI precedence; every successful result includes classifier identity and valid PASS/ACK/ASK/SPEAK result fields. If the product path is unavailable, default selection fails clearly and does not use deterministic.
+**Independent Test**: Evaluate valid envelopes through default product selection, explicit product CLI selection, envelope selection, CLI precedence, and deterministic fixture-provider output; every successful result includes classifier/provider/model identity and valid PASS/ACK/ASK/SPEAK result fields. If the product path is unavailable, default selection fails clearly and does not use local/deterministic fallback.
 
 ### Tests for User Story 1
 
@@ -44,12 +44,12 @@
 
 - [x] T009 [P] [US1] Add fixture with envelope-level classifier selection in `tests/fixtures/speak_with_classifier.json`
 - [x] T010 [P] [US1] Add fixture for CLI-vs-envelope classifier precedence in `tests/fixtures/speak_cli_precedence.json`
-- [x] T011 [US1] Add core tests for product/default classifier identity, explicit deterministic classifier identity, and envelope classifier identity in `tests/test_core.py`
-- [x] T012 [US1] Add CLI tests for default product classifier, `--classifier deterministic`, CLI-over-envelope precedence, and no silent fallback when product config is unavailable in `tests/test_cli.py`
+- [x] T011 [US1] Add core tests for product/default classifier identity, unsupported deterministic classifier path, fixture-provider output, and envelope classifier identity in `tests/test_core.py`
+- [x] T012 [US1] Add CLI tests for default product classifier, rejected `--classifier deterministic`, CLI-over-envelope precedence, and no silent fallback when product config is unavailable in `tests/test_cli.py`
 
 ### Implementation for User Story 1
 
-- [x] T013 [US1] Implement default classifier selection as the product classifier path in `src/turnaware/classifiers.py` and `src/turnaware/core.py`; keep `deterministic` explicit for offline evidence
+- [x] T013 [US1] Implement default classifier selection as the product classifier path in `src/turnaware/classifiers.py` and `src/turnaware/core.py`; keep deterministic evidence as a fixture provider rather than a classifier path
 - [x] T014 [US1] Implement envelope classifier selection in request validation in `src/turnaware/schema.py`
 - [x] T015 [US1] Implement CLI classifier/config override precedence in `src/turnaware/cli.py`
 - [x] T016 [US1] Ensure all successful result payloads include `classifier` in `src/turnaware/models.py`
@@ -61,9 +61,9 @@
 
 ## Phase 4: User Story 2 - Reviewer verifies known false verdicts are rejected (Priority: P2)
 
-**Goal**: Product classifier behavior and deterministic offline evidence reject the known false ACK and false PASS cases while preserving a legitimate PASS path.
+**Goal**: Product classifier behavior and deterministic provider-fixture evidence reject the known false ACK and false PASS cases while preserving a legitimate PASS path.
 
-**Independent Test**: Run adversarial fixtures through the deterministic classifier and the product classifier path where configured, asserting expected verdicts, reasons, confidence shape, and checked-context evidence.
+**Independent Test**: Run adversarial fixtures through the product classifier path with deterministic fixture-provider results, asserting expected verdicts, reasons, confidence shape, and checked-context evidence.
 
 ### Tests for User Story 2
 
@@ -91,7 +91,7 @@
 
 **Goal**: Public CLI and callable core stay contract-equivalent, installable, admission-only, and documented truthfully.
 
-**Independent Test**: Run all deterministic fixtures through CLI and core, compare contract-equivalent result fields, verify invalid classifier failures, and complete quickstart install/CLI smoke.
+**Independent Test**: Run all provider-fixture scenarios through CLI and core, compare contract-equivalent result fields, verify invalid classifier failures, and complete quickstart install/CLI smoke.
 
 ### Tests for User Story 3
 
@@ -106,7 +106,7 @@
 
 - [x] T032 [US3] Implement invalid classifier/config errors with no silent fallback in `src/turnaware/classifiers.py`, `src/turnaware/errors.py`, and `src/turnaware/cli.py`
 - [x] T033 [US3] Ensure `context_checked` only names inspected supplied references in `src/turnaware/classifiers.py` and `src/turnaware/schema.py`
-- [x] T034 [US3] Ensure callable core and CLI emit contract-equivalent JSON fields for the deterministic fixture set in `src/turnaware/core.py` and `src/turnaware/cli.py`
+- [x] T034 [US3] Ensure callable core and CLI emit contract-equivalent JSON fields for the provider-fixture set in `src/turnaware/core.py` and `src/turnaware/cli.py`
 - [x] T035 [US3] Update `README.md` only with verified classifier-selection usage and no adapter/launch/marketing claims
 - [x] T036 [US3] Run `python -m unittest` and verify all tests pass
 
@@ -119,7 +119,7 @@
 **Purpose**: Final fake-done review and public install evidence.
 
 - [x] T037 Run quickstart install smoke in a clean virtual environment from `specs/002-admission-classifier/quickstart.md`
-- [x] T038 Run CLI evidence commands for product/default classifier identity, explicit deterministic classifier identity, false ACK, false PASS, and invalid classifier cases from `specs/002-admission-classifier/quickstart.md`
+- [x] T038 Run CLI evidence commands for product/default classifier/provider identity, rejected deterministic classifier, false ACK, false PASS, and invalid classifier cases from `specs/002-admission-classifier/quickstart.md`
 - [x] T039 Review successful result payloads for absence of `message`, `reply`, `draft`, `content`, or other ordinary visible participation prose fields
 - [x] T040 Review diff against `origin/main` to confirm adapters, Discord/cc-connect integration, broad benchmarks, launch claims, and marketing copy remain out of scope
 - [x] T041 Commit the SpecKit artifacts and implementation on branch `002-admission-classifier`
@@ -165,8 +165,8 @@
 ### Incremental Delivery
 
 1. Add classifier selection/audit identity (US1).
-2. Add adversarial judgement fixes and deterministic evidence (US2).
-3. Add CLI/core equivalence for product/default and deterministic paths, invalid classifier failure, docs, and public install evidence (US3 + Polish).
+2. Add adversarial judgement fixes and deterministic provider-fixture evidence (US2).
+3. Add CLI/core equivalence for product/default path, invalid classifier failure, docs, and public install evidence (US3 + Polish).
 
 ### Completion Summary
 
@@ -175,7 +175,6 @@
 - User Story 2 tasks: 10
 - User Story 3 tasks: 9
 - Polish/final verification tasks: 6
-- Suggested MVP scope: complete through T017 before claiming selected classifier path/audit identity works; do not claim product classifier completion until the product/default path, not just `deterministic`, is verified.
-
+- Suggested MVP scope: complete through T017 before claiming selected classifier path/audit identity works; do not claim product classifier completion until the provider-backed product/default path and deterministic provider-fixture evidence are verified.
 
 

@@ -55,6 +55,8 @@ class AdmissionResult:
     context_checked: tuple[str, ...]
     reasons: tuple[str, ...]
     request_id: str | None = None
+    classifier_provider: str | None = None
+    classifier_model: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -66,6 +68,10 @@ class AdmissionResult:
         }
         if self.request_id is not None:
             payload["request_id"] = self.request_id
+        if self.classifier_provider is not None:
+            payload["classifier_provider"] = self.classifier_provider
+        if self.classifier_model is not None:
+            payload["classifier_model"] = self.classifier_model
         return payload
 
 

@@ -1,6 +1,6 @@
 {
   "request_id": "fixture-speak-envelope-classifier",
-  "classifier": "deterministic",
+  "classifier": "product",
   "trigger": {
     "id": "trigger-speak-classifier",
     "author": "zoe",

@@ -17,7 +17,7 @@ New/clarified fields:
 
 Validation rules:
 - `classifier` must match a registered classifier path.
-- Missing classifier uses exactly one documented product default when its configuration is available; unavailable defaults fail clearly with no deterministic fallback.
+- Missing classifier uses exactly one documented product default when its provider configuration is available; unavailable defaults fail clearly with no local/deterministic fallback.
 - Invalid classifier/configuration produces no successful admission result and no fallback result.
 
 ## Trigger
@@ -50,16 +50,15 @@ Reference form in `context_checked`: `context:<id>`.
 Host-selected classifier path and options.
 
 Required supported paths for this slice:
-- product/default classifier path: the actual admission classifier used by hosts for product evaluation. Its concrete registry name and configuration schema must be documented in the implementation artifacts and exposed in every result.
-- `deterministic`: explicit offline, repeatable evidence classifier used for local and CI verification. It is not the product default and must not be selected silently as fallback.
+- `product`: the actual admission classifier used by hosts for product evaluation. It is backed by configured provider/model credentials and exposed in every successful result.
 
-This slice is complete only if the product classifier path exists and deterministic evidence works without network or credentials.
+There is no selectable `deterministic` classifier path in this slice. Deterministic offline evidence works without network or credentials through provider-fixture tests behind the product path.
 
 Validation rules:
 - Unknown path is an error.
 - Unavailable path is an error.
 - Invalid option is an error.
-- The active path must be exposed in every successful result.
+- The active path, provider, and model must be exposed in every successful result.
 
 ## Admission Result
 
@@ -73,7 +72,9 @@ Fields inherited from 001:
 - `request_id`: optional echo of request ID.
 
 New/clarified fields:
-- `classifier`: machine-readable selected classifier identity/configuration summary.
+- `classifier`: machine-readable selected classifier identity.
+- `classifier_provider`: machine-readable provider or fixture transport identity.
+- `classifier_model`: machine-readable provider model identity.
 
 Constraints:
 - Successful payload must not include `message`, `reply`, `draft`, `content`, or other ordinary visible participation prose fields.
@@ -83,7 +84,7 @@ Constraints:
 
 ## Adversarial Evidence Case
 
-Fixture or documented deterministic case used to prove verdict quality.
+Fixture or documented deterministic provider case used to prove verdict quality.
 
 Required cases:
 - False ACK guard: assignment wording includes `comment back with results`; expected verdict `SPEAK`, not `ACK`.

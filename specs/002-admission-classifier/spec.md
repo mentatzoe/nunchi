@@ -6,7 +6,7 @@
 
 **Status**: Draft
 
-**Input**: User description: "Complete TUR-11: build the next vertical TurnAware slice by moving admission judgement beyond the current keyword heuristic while preserving the CLI/core contract. Hosts must be able to choose an admission classifier path/configuration, receive auditable PASS/ACK/ASK/SPEAK verdicts for supplied conversation/context envelopes, reject known false ACK/PASS cases from TUR-12, keep public install working, and provide deterministic offline evidence without expanding into adapters, benchmarks, launch claims, or reply composition."
+**Input**: User description: "Complete TUR-11: build the next vertical TurnAware slice by moving admission judgement beyond the current keyword heuristic while preserving the CLI/core contract. Hosts must be able to choose the product admission classifier path/configuration, receive auditable PASS/ACK/ASK/SPEAK verdicts for supplied conversation/context envelopes, reject known false ACK/PASS cases from TUR-12, keep public install working, and provide deterministic offline evidence through provider fixtures without expanding into adapters, benchmarks, launch claims, or reply composition. Zoe explicitly rejected a selectable deterministic classifier path on 2026-05-25."
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -16,7 +16,7 @@ A host or harness owner evaluates a supplied shared-work conversation envelope w
 
 **Why this priority**: The slice exists to make admission judgement configurable and auditable without changing TurnAware's admission-only contract.
 
-**Independent Test**: Can be fully tested by evaluating the same envelope through the product classifier path and the deterministic offline evidence path, verifying that the result names the selected path and returns a valid admission verdict with truthful audit fields.
+**Independent Test**: Can be fully tested by evaluating envelopes through the product classifier path with configured provider/model identity and deterministic provider fixtures, verifying that the result names the selected path/configuration and returns a valid admission verdict with truthful audit fields.
 
 **Acceptance Scenarios**:
 
@@ -28,7 +28,7 @@ A host or harness owner evaluates a supplied shared-work conversation envelope w
 
 ### User Story 2 - Reviewer verifies known false verdicts are rejected (Priority: P2)
 
-A reviewer runs deterministic checks against adversarial shared-work cases from the smoke evidence corpus and verifies that the classifier no longer misclassifies routine assignment text as ACK or fake-done trigger text as PASS.
+A reviewer runs deterministic provider-fixture checks against adversarial shared-work cases from the smoke evidence corpus and verifies that the product classifier path no longer accepts routine assignment text as ACK or fake-done trigger text as PASS.
 
 **Why this priority**: PASS is a hard stop and SPEAK is what permits assigned work. The known false PASS/ACK cases are the direct quality failures this slice must close.
 
@@ -66,7 +66,7 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 - Multiple supplied context items support different verdicts; the result must surface uncertainty or conflicting evidence instead of silently ignoring later context.
 - No positive verdict signal is present; ASK must not become a high-confidence default merely because the classifier recognized nothing.
 - A selected classifier path is unavailable, misspelled, or configured with invalid options.
-- The deterministic offline path is selected in an environment with no network or provider credentials.
+- Product provider/model configuration is unavailable in an environment with no network or provider credentials.
 - Input contains unsupported verdict values, malformed context references, or invalid confidence data.
 
 ## Requirements *(mandatory)*
@@ -74,13 +74,13 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 ### Functional Requirements
 
 - **FR-001**: TurnAware MUST allow a host to evaluate a supplied admission envelope using the documented product classifier path, selected by CLI flag and/or envelope field.
-- **FR-001a**: TurnAware MUST also provide an explicit `deterministic` classifier path for repeatable offline/CI evidence, but `deterministic` MUST NOT be the product default or the only implemented selection path for this slice.
-- **FR-002**: TurnAware MUST expose the selected classifier path/configuration in the admission result, audit output, or equivalent evidence for every successful evaluation.
+- **FR-001a**: TurnAware MUST NOT provide a selectable `deterministic` classifier path for this slice; deterministic offline/CI evidence MUST be implemented as provider-fixture test evidence behind the product path.
+- **FR-002**: TurnAware MUST expose the selected classifier path and provider/model configuration in the admission result, audit output, or equivalent evidence for every successful evaluation.
 - **FR-002a**: When both CLI flag and envelope field specify a classifier, TurnAware MUST use the CLI flag as the single tested precedence rule.
 - **FR-003**: TurnAware MUST preserve the verdict vocabulary exactly as PASS, ACK, ASK, and SPEAK unless a future contract migration explicitly changes it.
 - **FR-004**: TurnAware MUST preserve the existing admission result semantics for confidences, reasons, and `context_checked`.
 - **FR-005**: TurnAware MUST NOT compose, suggest, or include ordinary user-visible reply text in any admission result.
-- **FR-006**: TurnAware MUST provide a deterministic offline classifier path suitable for repeatable local and CI verification, separate from the product classifier default.
+- **FR-006**: TurnAware MUST provide deterministic offline provider-fixture evidence suitable for repeatable local and CI verification without exposing it as a classifier path.
 - **FR-007**: TurnAware MUST fail clearly when a requested classifier path or configuration is unsupported, unavailable, or invalid instead of silently using a different path.
 - **FR-008**: TurnAware MUST classify routine direct-assignment language containing "comment back with results" as SPEAK rather than ACK when the envelope asks the current agent to perform substantive work.
 - **FR-009**: TurnAware MUST NOT return PASS solely because the trigger contains resolved-looking language when supplied context contradicts completion or evidence availability.
@@ -88,7 +88,7 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 - **FR-011**: TurnAware MUST include inspected contradictory or supporting context in `context_checked` or equivalent evidence whenever that context materially affects the verdict.
 - **FR-012**: TurnAware MUST keep `context_checked` truthful by listing only supplied trigger/context material that the classifier actually inspected.
 - **FR-013**: TurnAware MUST represent uncertainty or conflicting signals in reasons and confidences rather than returning the same high-confidence distribution for every keyword-shaped match.
-- **FR-014**: TurnAware MUST include deterministic acceptance evidence for the known false ACK case, the known false PASS case, and representative PASS, ACK, ASK, and SPEAK cases.
+- **FR-014**: TurnAware MUST include deterministic provider-fixture acceptance evidence for the known false ACK case, the known false PASS case, and representative PASS, ACK, ASK, and SPEAK cases.
 - **FR-015**: TurnAware MUST keep the public install and documented CLI usage working for existing valid admission envelopes.
 - **FR-016**: TurnAware MUST keep the public CLI and internal callable evaluation boundary contract-equivalent for the same valid inputs.
 - **FR-017**: TurnAware MUST keep adapters, Discord/cc-connect integration, broad benchmarks, launch claims, marketing copy, and reply-composition behavior out of scope for this slice.
@@ -98,7 +98,7 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 - **Admission Envelope**: The supplied trigger plus optional context items that describe the shared-work surface being evaluated.
 - **Trigger**: The current event or comment that may require the agent to participate, acknowledge, ask, or pass.
 - **Context Item**: Supplied historical or environmental evidence that may support, contradict, or qualify the trigger.
-- **Classifier Configuration**: The selected classifier path and any host-provided options that influence how the envelope is evaluated.
+- **Classifier Configuration**: The selected product classifier path, provider/model identity, and any host-provided options that influence how the envelope is evaluated.
 - **Admission Result**: The verdict, confidence distribution, reasons, checked-context evidence, and selected classifier identity returned to the host.
 - **Adversarial Evidence Case**: A fixture or documented case derived from smoke evidence that captures an expected verdict, observed prior failure if known, and why the case matters.
 
@@ -107,10 +107,10 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 ### Measurable Outcomes
 
 - **SC-001**: 100% of successful admission evaluations expose the selected classifier path/configuration in machine-readable result or audit evidence.
-- **SC-002**: The "comment back with results" adversarial case returns SPEAK, not ACK, in deterministic offline verification.
+- **SC-002**: The "comment back with results" adversarial case returns SPEAK, not ACK, in deterministic provider-fixture verification.
 - **SC-003**: The fake-done-with-contradictory-context adversarial case returns a non-PASS verdict and includes the contradictory evidence in checked-context output or equivalent audit evidence.
-- **SC-004**: At least one representative fixture for each verdict PASS, ACK, ASK, and SPEAK passes through deterministic offline verification.
-- **SC-005**: Public CLI and callable-core evaluations produce contract-equivalent results for the deterministic fixture set.
+- **SC-004**: At least one representative fixture for each verdict PASS, ACK, ASK, and SPEAK passes through deterministic provider-fixture verification.
+- **SC-005**: Public CLI and callable-core evaluations produce contract-equivalent results for the provider-fixture set.
 - **SC-006**: Existing public install and quickstart usage complete successfully from a clean environment using documented commands.
 - **SC-007**: Invalid classifier configuration produces a clear failure with no successful admission result and no silent fallback.
 - **SC-008**: No successful admission result contains reply prose, draft message fields, or other ordinary visible participation text.
@@ -118,8 +118,8 @@ A TurnAware maintainer can keep the public CLI and internal callable core aligne
 ## Assumptions
 
 - The TUR-12 adversarial corpus is the evidence input for required false-verdict cases, but the byte-for-byte smoke-run JSON files are not assumed to exist in the repository.
-- The deterministic offline path is required for CI and review evidence, but it is not the requested product classifier path.
-- The product default should be the actual admission classifier path requested for TurnAware; deterministic is selected explicitly for tests/offline evidence.
-- If product classifier configuration is absent or unavailable, TurnAware fails clearly rather than silently falling back to deterministic.
+- Deterministic offline evidence is required for CI and review, but it is not a selectable classifier path.
+- The product default is the actual admission classifier path requested for TurnAware.
+- If product classifier configuration is absent or unavailable, TurnAware fails clearly rather than silently falling back to local or deterministic behavior.
 - The existing CLI/core result contract remains the compatibility target unless the plan records and migrates an explicit contract change.
 - This slice may update docs and fixtures only when they are verified against runnable commands and do not imply out-of-scope adapters or release claims.
