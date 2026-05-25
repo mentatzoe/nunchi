@@ -75,6 +75,14 @@ class ProviderClassifierTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "SPEAK")
         request = opened.call_args.args[0]
         self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/chat/completions")
+        payload = json.loads(request.data.decode("utf-8"))
+        system_prompt = payload["messages"][0]["content"]
+        self.assertIn('"reasons":["short reason"]', system_prompt)
+        self.assertIn("reasons MUST be a non-empty JSON array of strings", system_prompt)
+        self.assertIn("do NOT return PASS", system_prompt)
+        self.assertIn("return SPEAK rather than ACK", system_prompt)
+        self.assertIn("Use ASK when", system_prompt)
+        self.assertIn("Use ACK only", system_prompt)
 
     def test_product_default_without_provider_config_fails_clearly(self):
         with patch.dict("os.environ", {}, clear=True):

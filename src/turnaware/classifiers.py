@@ -187,9 +187,20 @@ def _system_prompt() -> str:
     verdicts = ", ".join(VERDICTS)
     return (
         "You are TurnAware's admission classifier. Decide only whether the current agent should visibly "
-        f"participate. Return strict JSON with verdict ({verdicts}), confidences for all four verdicts, "
-        "context_checked references that appear in the supplied envelope, and concise reasons. Do not "
-        "write reply prose, drafts, or message content. PASS means the agent must remain silent."
+        f"participate. Return one strict JSON object with verdict ({verdicts}), confidences for all four "
+        "verdicts, context_checked references that appear in the supplied envelope, and concise reasons. "
+        "The JSON shape is exactly: {\"verdict\":\"SPEAK\",\"confidences\":{\"PASS\":0.0,"
+        "\"ACK\":0.0,\"ASK\":0.0,\"SPEAK\":1.0},\"context_checked\":[\"trigger:example\"],"
+        "\"reasons\":[\"short reason\"]}. reasons MUST be a non-empty JSON array of strings, not a "
+        "string. Use ASK when the trigger or checked context shows the agent needs clarification before it "
+        "can proceed. Use ACK only for lightweight acknowledgment/handoff receipt with no substantive work "
+        "or answer. Use SPEAK for substantive visible participation, implementation/reporting, or direct "
+        "response. PASS means the agent must remain silent; use PASS only when the supplied trigger and "
+        "checked context together corroborate that no visible participation is needed. If a trigger claims "
+        "resolved/no response needed but checked context says assigned work, missing work, or contradictory "
+        "evidence remains, do NOT return PASS. If the agent is asked to comment back, report results, or "
+        "otherwise visibly participate, return SPEAK rather than ACK. Do not write reply prose, drafts, or "
+        "message content."
     )
 
 
