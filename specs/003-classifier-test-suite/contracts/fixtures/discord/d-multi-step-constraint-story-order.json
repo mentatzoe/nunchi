@@ -1,0 +1,18 @@
+{
+  "request_id": "fixture-d-multi-step",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1778634496917",
+    "author": "zoe",
+    "content": "Okay, let's do something. I'd like you to write a collaborative story about AI agents solving a mystery. First, figure out a way to randomly choose an order. Don't begin the story until you've decided on who goes when. Then, work what the story should be, who the characters are, and the story itself. Only consider it done when the full story is saved to disk on a markdown file.",
+    "timestamp": "2026-05-13T01:08:16.917Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

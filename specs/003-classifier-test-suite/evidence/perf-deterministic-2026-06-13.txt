@@ -1,0 +1,24 @@
+SC-005 wall-clock evidence — deterministic path (T043, retimed post-002)
+Captured: 2026-06-13
+Tree: branch 003-classifier-test-suite with post-002 reconciliation applied
+      (classifier = provider-backed product path; run uses the pinned
+      TURNAWARE_CLASSIFIER_TEST_RESULT injection from quickstart.md, so no
+      network is involved)
+Command: python3 specs/003-classifier-test-suite/contracts/runner.py --format jsonl
+Adapter: subprocess (PYTHONPATH=src python -m turnaware fallback), 37 fixtures
+
+Run 1: 1481 ms   (37 fixtures: 18 pass, 19 fail, 0 error)
+Run 2: 1446 ms   (identical counts)
+Run 3: 1469 ms   (identical counts)
+
+p50: 1469 ms
+max: 1481 ms
+
+Budget: SC-005 requires the deterministic path under 5 s. p50 = 1.47 s — PASS
+with 3.5 s headroom at the current 37-fixture corpus (~40 ms/fixture via
+subprocess; the in-process adapter path used by the unittest self-tests runs
+the same corpus in milliseconds).
+
+Note: 18/19 pass/fail split is the expected shape for a single pinned SPEAK
+verdict (fixtures expecting other verdicts fail by design); the SC-005 claim
+is about wall-clock and zero adapter errors, not verdict judgment.

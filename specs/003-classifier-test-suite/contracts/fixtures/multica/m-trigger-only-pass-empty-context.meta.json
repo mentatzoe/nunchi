@@ -1,0 +1,23 @@
+{
+  "id": "m-trigger-only-pass-empty-context",
+  "title": "Trigger-only PASS invariant: bare claim with empty context must not produce PASS",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "structural invariant per spec FR-005; current classifier produces PASS from trigger-keywords alone with no corroborating context",
+  "expected": {
+    "verdict": [
+      "SPEAK",
+      "ASK"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "PASS produced from trigger alone with empty context (FR-005)",
+  "invariant": "PASS requires corroborating context",
+  "rationale": "A one-line 'I'm done' claim with no evidence in context is the easiest fake-done shape. Hard-stop PASS must not be that cheap.",
+  "fr_refs": [
+    "FR-005"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

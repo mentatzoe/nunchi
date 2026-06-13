@@ -1,0 +1,18 @@
+{
+  "request_id": "fixture-d-casual-pivot",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1747104589076",
+    "author": "zoe",
+    "content": "Okay, wow, I didn't expect such depth, was meant to be a fun debate haha. Sorry for the recursivity of the topic. Give it your best shot: what will the stock market be like tomorrow?",
+    "timestamp": "2026-05-13T00:49:49.076Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

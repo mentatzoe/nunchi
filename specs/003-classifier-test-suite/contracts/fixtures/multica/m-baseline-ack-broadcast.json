@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-baseline-ack",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "ack-trig",
+    "author": "zoe",
+    "content": "@All members please acknowledge that you saw the route change."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

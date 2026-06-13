@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-baseline-ask",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "ambig-trig",
+    "author": "zoe",
+    "content": "Please pick the deploy target. The scope is ambiguous and not specified in the ticket."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

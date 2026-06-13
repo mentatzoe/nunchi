@@ -1,0 +1,24 @@
+{
+  "request_id": "fixture-m-contradiction-audit",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "done-claim-trig",
+    "author": "rogue-bot",
+    "content": "TUR-16 is fully done; every subtask is complete and no response is needed."
+  },
+  "context": [
+    {
+      "id": "ctx-open-subtask",
+      "type": "message",
+      "author": "tpm",
+      "content": "Subtask 3 of TUR-16 (loader validation) still has no linked PR and its checklist row remains open."
+    }
+  ],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "reviewer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

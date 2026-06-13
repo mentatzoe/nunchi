@@ -1,0 +1,20 @@
+{
+  "id": "c-verdict-surface-typed",
+  "title": "Verdict-surface contract: well-formed typed verdict object must be accepted",
+  "source_shape": "contract",
+  "evidence": "predicted",
+  "predicted_basis": "positive surface-contract case per research.md R3 / SC-011: the adapter response-validation path (adapters._classify_raw_stdout) accepts a JSON object whose 'verdict' field is one of the four typed values",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": "typed-verdict"
+  },
+  "failure_mode": "adapter response is not a typed-verdict object: sentinel string, bare verdict string, or missing verdict field (FR-020 / SC-011)",
+  "invariant": "verdict surface is a typed value, not a transport-layer string the model must spell",
+  "rationale": "Inverted polarity of the sentinel-leak pair: this fixture runs the real adapter (no mock_adapter_output) against a PASS-shaped envelope with corroborating context, and passes when the classifier returns the typed value verdict=\"PASS\" through the adapter's response-validation path. SC-011 requires the contract fixture to pass on any classifier returning a typed PASS and to fail (as an adapter-level contract error, not a mis-verdict) on any sentinel leak.",
+  "fr_refs": [
+    "FR-020"
+  ],
+  "sc_refs": [
+    "SC-011"
+  ]
+}

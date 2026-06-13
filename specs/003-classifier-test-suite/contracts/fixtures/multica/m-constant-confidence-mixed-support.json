@@ -1,0 +1,24 @@
+{
+  "request_id": "fixture-m-constant-confidence",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "mixed-ack-trig",
+    "author": "zoe",
+    "content": "@All members please acknowledge that you saw the cutover notice."
+  },
+  "context": [
+    {
+      "id": "ctx-already-covered",
+      "type": "message",
+      "author": "peer",
+      "content": "Already acknowledged the cutover notice on the whole team's behalf earlier today; the thread is resolved and no further responses are needed."
+    }
+  ],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

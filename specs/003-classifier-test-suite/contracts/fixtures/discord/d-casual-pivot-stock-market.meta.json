@@ -1,0 +1,21 @@
+{
+  "id": "d-casual-pivot-stock-market",
+  "title": "Casual pivot with emotional padding; embedded ask at the end",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:49:49.076Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "padding substrings ('sorry', 'recursivity') may match incidental keywords; classifier may ACK/PASS instead of engaging the embedded ask (FR-018)",
+  "invariant": "ask-at-end position must dominate over stray padding substrings",
+  "rationale": "The real ask ('what will the stock market be like tomorrow?') is at the end; the padding contains incidental substrings that trip the keyword classifier.",
+  "fr_refs": [
+    "FR-018",
+    "FR-001"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

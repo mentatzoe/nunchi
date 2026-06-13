@@ -1,0 +1,21 @@
+{
+  "id": "d-bracketed-persona-podcast",
+  "title": "Bracketed persona/game framing \u2014 must SPEAK in-persona",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T22:25:45.624Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "no keyword recognition for persona framing; classifier falls through to ASK (FR-018)",
+  "invariant": "persona/game framing within brackets is admission-worthy SPEAK",
+  "rationale": "Operator explicitly invites a SPEAK turn via game framing. Classifier must engage in-persona, not ask for clarification.",
+  "fr_refs": [
+    "FR-018",
+    "FR-006"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

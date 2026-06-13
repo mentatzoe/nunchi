@@ -1,0 +1,24 @@
+{
+  "request_id": "fixture-m-predicted-co-owner-speak",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "co-owner-trig",
+    "author": "tpm",
+    "content": "Heads up: Mira is the co-owner of the TUR-15 rollout and will post the schedule update in this thread."
+  },
+  "context": [
+    {
+      "id": "ctx-co-owner-claimed",
+      "type": "message",
+      "author": "mira",
+      "content": "Taking the rollout schedule — draft going up within the hour."
+    }
+  ],
+  "agent": {
+    "id": "turnaware-vigil",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "m-baseline-ask-ambiguous",
+  "title": "Legitimate ASK \u2014 ambiguous scope flagged for clarification",
+  "source_shape": "multica",
+  "evidence": "runtime",
+  "runtime_source": "tur-6#e4c36dfc-dec2-4f95-a9b5-582b3f34540f@a132ccc",
+  "expected": {
+    "verdict": "ASK",
+    "surface_contract": null
+  },
+  "failure_mode": "(baseline)",
+  "invariant": "positive ASK from explicit ambiguity keeps working",
+  "rationale": "Distinguishes positive ASK from ASK-by-fallthrough.",
+  "fr_refs": [
+    "FR-003"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

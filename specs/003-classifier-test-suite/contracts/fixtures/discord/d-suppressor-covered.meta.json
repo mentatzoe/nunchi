@@ -1,0 +1,20 @@
+{
+  "id": "d-suppressor-covered",
+  "title": "Covered suppressor: peer already provided the value-add",
+  "source_shape": "discord",
+  "evidence": "predicted",
+  "predicted_basis": "before-you-respond.md Covered suppressor; current core has no suppressor concept",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no Covered suppressor in current classifier (FR-021)",
+  "invariant": "Covered suppressor PASSes when peer's latest message already provides the value-add",
+  "rationale": "Vigil's prior message is the answer Dalgos would have given; adding the same point is noise.",
+  "fr_refs": [
+    "FR-021"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

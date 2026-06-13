@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-trigger-only-pass-empty",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "fake-done-bare",
+    "author": "rogue-bot",
+    "content": "Already handled. Resolved. No response needed."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "reviewer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

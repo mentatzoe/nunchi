@@ -190,6 +190,18 @@ This is the adapter tier (Constitution VI): it depends on the core and is not a
 live Discord integration — it produces the sentinel an existing cc-connect
 deployment already understands.
 
+## Verdict test suite
+
+The classifier verdict test suite is the merge contract for classifier
+changes: a fixture corpus of observed and predicted failure modes
+(Multica-shaped agent traffic, Discord-shaped human conversation, and
+verdict-surface contract cases) run through a pluggable adapter against any
+classifier candidate. The single entry command is
+`python3 specs/003-classifier-test-suite/contracts/runner.py`; see
+[specs/003-classifier-test-suite/quickstart.md](specs/003-classifier-test-suite/quickstart.md)
+for the offline deterministic path, live evidence runs, and how to add a
+fixture.
+
 ## Development method
 
 This repository uses Spec Kit. The constitution at

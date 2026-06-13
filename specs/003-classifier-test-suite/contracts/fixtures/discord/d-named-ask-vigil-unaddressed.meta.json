@@ -1,0 +1,20 @@
+{
+  "id": "d-named-ask-vigil-unaddressed",
+  "title": "Direct-named maintenance ask; unaddressed agent must PASS",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:33:44.168Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no addressee recognition; classifier scores the ask identically for every agent and over-triggers for unaddressed Vigil (FR-018)",
+  "invariant": "an ask named to a different agent PASSes for unnamed agents",
+  "rationale": "Same trigger as d-named-ask-dalgos-addressed, evaluated as Vigil. The operator addressed Dalgos by name; Vigil has no addressee claim and must stay silent.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

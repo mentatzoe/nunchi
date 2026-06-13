@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-c-leak-4",
+  "source_shape": "contract",
+  "trigger": {
+    "id": "any-trig2",
+    "author": "zoe",
+    "content": "Please confirm the rollout is done."
+  },
+  "context": [],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

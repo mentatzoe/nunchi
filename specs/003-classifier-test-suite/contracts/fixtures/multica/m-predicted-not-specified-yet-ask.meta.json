@@ -1,0 +1,21 @@
+{
+  "id": "m-predicted-not-specified-yet-ask",
+  "title": "Predicted false ASK: 'not specified' matches inside 'not specified yet but already inferred'",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "_classify_text ASK branch matches 'not specified' inside 'not specified yet but already inferred', overriding the more accurate later signal (spec FR-004 predicted trap family)",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "substring trap: 'not specified' matches inside 'not specified yet but already inferred'; ASK branch fires even though the value is supplied and the work is assigned (FR-004)",
+  "invariant": "verdict keywords must not match across word boundaries",
+  "rationale": "The trigger resolves its own ambiguity in the same sentence (the inferred value 5 is supplied) and assigns concrete work, so no clarification is needed — the correct verdict is SPEAK. A shallow keyword/substring classifier baits on 'not specified' and asks a question that was already answered.",
+  "fr_refs": [
+    "FR-004"
+  ],
+  "sc_refs": [
+    "SC-003",
+    "SC-008"
+  ]
+}

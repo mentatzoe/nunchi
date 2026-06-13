@@ -1,0 +1,20 @@
+{
+  "id": "d-suppressor-duplicate",
+  "title": "Duplicate suppressor: own prior message already says what would be said",
+  "source_shape": "discord",
+  "evidence": "predicted",
+  "predicted_basis": "before-you-respond.md Duplicate suppressor; current core has no suppressor concept",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no Duplicate suppressor in current classifier (FR-021)",
+  "invariant": "Duplicate suppressor PASSes when receiving agent's own recent contributions already say the planned content",
+  "rationale": "Dalgos already weighed in on the cache topic; repeating itself is noise.",
+  "fr_refs": [
+    "FR-021"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

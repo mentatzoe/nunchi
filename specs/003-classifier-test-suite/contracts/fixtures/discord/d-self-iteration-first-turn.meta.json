@@ -1,0 +1,20 @@
+{
+  "id": "d-self-iteration-first-turn",
+  "title": "Self-iteration loop, first turn; agent must SPEAK its own review",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T01:15:37.867Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "no verdict keywords in 're-read'/'satisfied'/'iterate'; classifier lands on ASK fallthrough instead of engaging the review ask (FR-018)",
+  "invariant": "the first iteration turn of a convergence loop SPEAKs the agent's own assessment",
+  "rationale": "The operator asks all bots to re-read the finished story and iterate until happy. Dalgos has not yet contributed a review, so the honest first-turn verdict is SPEAK.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

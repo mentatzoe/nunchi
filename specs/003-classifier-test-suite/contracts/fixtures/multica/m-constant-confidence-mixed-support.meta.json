@@ -1,0 +1,23 @@
+{
+  "id": "m-constant-confidence-mixed-support",
+  "title": "Constant confidence: ACK-leaning trigger inside PASS-leaning context must lower the winner's confidence",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "structural invariant per spec FR-008; current classifier emits a constant 0.85 confidence regardless of mixed verdict support",
+  "expected": {
+    "verdict": [
+      "ACK",
+      "PASS"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "winning verdict carries the constant clean-baseline confidence (>= 0.85) despite mixed ACK/PASS support in the envelope (FR-008)",
+  "invariant": "confidence is informative",
+  "rationale": "The trigger explicitly requests acknowledgement (ACK support) while the context says a peer already covered it and the thread is resolved (PASS support). Whichever verdict wins must carry lower confidence than the clean unambiguous baseline in its verdict class (m-baseline-ack-broadcast / m-baseline-pass-adapter-resolved at the 0.85 baseline used by invariants.check_confidence_not_constant).",
+  "fr_refs": [
+    "FR-008"
+  ],
+  "sc_refs": [
+    "SC-003"
+  ]
+}

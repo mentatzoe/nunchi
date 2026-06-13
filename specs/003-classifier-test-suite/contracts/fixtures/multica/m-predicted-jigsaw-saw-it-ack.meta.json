@@ -1,0 +1,21 @@
+{
+  "id": "m-predicted-jigsaw-saw-it-ack",
+  "title": "Predicted false ACK: 'saw it' matches inside 'jigsaw items'",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "_classify_text ACK branch matches 'saw it' inside 'jigsaw items' (spec FR-004 predicted trap family; also fires on 'chainsaw items')",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "substring trap: 'saw it' matches across the word boundary inside 'jigsaw items'; ACK branch fires from incidental phrasing on a substantive work assignment (FR-004)",
+  "invariant": "verdict keywords must not match across word boundaries",
+  "rationale": "A direct triage assignment with a requested deliverable must be SPEAK. A shallow keyword/substring classifier baits on the incidental 'saw it' inside 'jigsaw items' and downgrades the assignment to a bare acknowledgement.",
+  "fr_refs": [
+    "FR-004"
+  ],
+  "sc_refs": [
+    "SC-003",
+    "SC-008"
+  ]
+}

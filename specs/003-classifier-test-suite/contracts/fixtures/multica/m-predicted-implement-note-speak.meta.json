@@ -1,0 +1,21 @@
+{
+  "id": "m-predicted-implement-note-speak",
+  "title": "Predicted false SPEAK: 'implement' matches inside 'implementation note' on an FYI",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "_classify_text SPEAK branch matches 'implement' inside 'implementation note' (spec FR-004 predicted trap family)",
+  "expected": {
+    "verdict": "ACK",
+    "surface_contract": null
+  },
+  "failure_mode": "substring trap: 'implement' matches inside 'implementation note'; SPEAK branch fires on an FYI that only asks for lightweight receipt (FR-004)",
+  "invariant": "verdict keywords must not match across word boundaries",
+  "rationale": "An informational 'implementation note' that explicitly asks only for receipt is the lightweight-acknowledgement case (ACK). A shallow keyword/substring classifier baits on 'implement' and escalates to SPEAK, producing substantive participation nobody asked for.",
+  "fr_refs": [
+    "FR-004"
+  ],
+  "sc_refs": [
+    "SC-003",
+    "SC-008"
+  ]
+}

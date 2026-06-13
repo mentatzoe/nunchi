@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-d-supp-dup",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-trigger-dup",
+    "author": "zoe",
+    "content": "Anyone want to weigh in on the cache thing?",
+    "timestamp": "2026-05-13T01:32:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-own-prior",
+      "type": "message",
+      "author": "dalgos",
+      "content": "I'd say the in-process LRU is the right call; Redis adds a network hop.",
+      "timestamp": "2026-05-13T01:31:30.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

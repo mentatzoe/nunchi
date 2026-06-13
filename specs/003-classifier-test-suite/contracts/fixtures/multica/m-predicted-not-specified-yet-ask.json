@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-predicted-not-specified-yet-ask",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "inferred-limit-trig",
+    "author": "tpm",
+    "content": "The retry limit was not specified yet but already inferred from the SLA appendix: use 5. Dalgos, please apply it and post the diff in this thread."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

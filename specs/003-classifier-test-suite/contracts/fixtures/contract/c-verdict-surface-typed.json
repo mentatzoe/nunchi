@@ -1,0 +1,24 @@
+{
+  "request_id": "fixture-c-typed",
+  "source_shape": "contract",
+  "trigger": {
+    "id": "typed-trig",
+    "author": "zoe",
+    "content": "Please confirm the rollout is done."
+  },
+  "context": [
+    {
+      "id": "ctx-rollout-confirmed",
+      "type": "message",
+      "author": "peer",
+      "content": "Rollout completed and verified; the dashboard is green and I already posted the confirmation in this channel."
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

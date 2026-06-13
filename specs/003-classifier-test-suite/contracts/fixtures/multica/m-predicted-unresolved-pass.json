@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-predicted-unresolved-pass",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "unresolved-trig",
+    "author": "tpm",
+    "content": "The login regression in TUR-14 is still unresolved. Dalgos, please investigate and post your findings in this thread."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

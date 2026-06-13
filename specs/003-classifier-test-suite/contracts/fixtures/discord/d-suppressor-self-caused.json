@@ -1,0 +1,18 @@
+{
+  "request_id": "fixture-d-supp-self",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-self-echo",
+    "author": "dalgos",
+    "content": "The bug in the OAuth flow is in the redirect URI handling.",
+    "timestamp": "2026-05-13T01:31:00.000Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

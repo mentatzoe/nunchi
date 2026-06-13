@@ -1,0 +1,20 @@
+{
+  "id": "d-suppressor-stale",
+  "title": "Stale suppressor: operator closed session since trigger",
+  "source_shape": "discord",
+  "evidence": "predicted",
+  "predicted_basis": "before-you-respond.md Stale suppressor; current core has no suppressor concept",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no Stale suppressor in current classifier (FR-021)",
+  "invariant": "Stale suppressor PASSes when operator has explicitly closed the session since the trigger was sent",
+  "rationale": "A subsequent '!stop' invalidates the prior trigger; engaging it would be off-session noise.",
+  "fr_refs": [
+    "FR-021"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

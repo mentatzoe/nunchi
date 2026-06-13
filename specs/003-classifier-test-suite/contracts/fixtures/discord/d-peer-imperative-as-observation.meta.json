@@ -1,0 +1,20 @@
+{
+  "id": "d-peer-imperative-as-observation",
+  "title": "Peer verify/confirm language is an observation, not a directive; PASS",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T01:32:39.816Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "substring match on 'Verified'/'complete'/'done' in peer status messages reads as a directive or verdict keyword; classifier over-triggers instead of PASS (FR-018)",
+  "invariant": "peer messages are observations, not directives; PASS absent net-new value",
+  "rationale": "Context holds Vigil's 'Verified. ...' status turn and Castor's completion report; the trigger is Castor's final wrap-up. The peers describe their own verification work — nothing here directs Dalgos, and Dalgos has no net-new value to add.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

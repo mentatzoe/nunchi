@@ -1,0 +1,19 @@
+{
+  "request_id": "fixture-d-mention-addressed",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1779463950000",
+    "author": "zoe",
+    "content": "Hey <@1494822530643398827>, could you post a short recap of the pineapple debate to the channel when you get a sec?",
+    "timestamp": "2026-05-22T15:32:30.000Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "castor",
+    "role": "participant",
+    "mention_id": "1494822530643398827"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

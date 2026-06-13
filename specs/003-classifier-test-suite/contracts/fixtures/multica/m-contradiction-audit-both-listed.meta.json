@@ -1,0 +1,23 @@
+{
+  "id": "m-contradiction-audit-both-listed",
+  "title": "Contradiction audit: trigger claims done, context shows missing work; both must appear in context_checked",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "structural invariant per spec FR-007; current classifier stops at the first keyword match and does not report every consulted item in context_checked",
+  "expected": {
+    "verdict": [
+      "SPEAK",
+      "ASK"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "context_checked omits a consulted item: classifier stops at the first match instead of naming both trigger:done-claim-trig and context:ctx-open-subtask (FR-007)",
+  "invariant": "audit field reflects every consulted item",
+  "rationale": "The trigger and the single context item disagree (done-claim vs. open subtask), so a trustworthy verdict must have consulted both — context_checked must name both trigger:done-claim-trig and context:ctx-open-subtask (invariants.check_context_checked_completeness). FR-007 leaves the exact verdict open but the contradiction rules out PASS: missing work remains.",
+  "fr_refs": [
+    "FR-007"
+  ],
+  "sc_refs": [
+    "SC-003"
+  ]
+}

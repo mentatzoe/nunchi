@@ -1,0 +1,24 @@
+{
+  "id": "m-trigger-only-pass-fake-done",
+  "title": "False PASS from fake-done trigger overriding contradicting context",
+  "source_shape": "multica",
+  "evidence": "runtime",
+  "runtime_source": "tur-9#multica_challenger_fake_done.json@a132ccc",
+  "expected": {
+    "verdict": [
+      "SPEAK",
+      "ASK"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "trigger-first short-circuit: PASS keywords in trigger fire before context items are weighed (FR-002)",
+  "invariant": "PASS must surface contradicting context, not silently drop it",
+  "rationale": "A rogue 'I already handled this' trigger paired with explicit no-PR-found evidence must yield non-PASS; the current classifier produces PASS at 0.85 and lists only the trigger in context_checked.",
+  "fr_refs": [
+    "FR-002",
+    "FR-007"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

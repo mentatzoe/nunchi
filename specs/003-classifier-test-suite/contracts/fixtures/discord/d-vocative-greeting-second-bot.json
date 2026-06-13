@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-d-vocative-second",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1747104742818-echo",
+    "author": "zoe",
+    "content": "Hi all, are you there?",
+    "timestamp": "2026-05-13T00:32:22.818Z"
+  },
+  "context": [
+    {
+      "id": "msg-pilot-1747104754963",
+      "type": "message",
+      "author": "vigil",
+      "content": "Here.",
+      "timestamp": "2026-05-13T00:32:34.963Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

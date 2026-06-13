@@ -1,0 +1,24 @@
+{
+  "id": "m-no-keyword-negative-control",
+  "title": "No-keyword negative control: ASK-fallthrough must not yield 0.85-confidence ASK",
+  "source_shape": "multica",
+  "evidence": "predicted",
+  "predicted_basis": "structural invariant per spec FR-006",
+  "expected": {
+    "verdict": [
+      "PASS",
+      "ACK",
+      "SPEAK"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "ASK fallthrough at 0.85 on no-keyword input erases the distinction between 'I need clarification' and 'I recognised nothing' (FR-006)",
+  "invariant": "ASK is not the fallthrough verdict",
+  "rationale": "Negative control. A future classifier that produces ASK at 0.85 here cannot be trusted to surface real clarifying needs.",
+  "fr_refs": [
+    "FR-006"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

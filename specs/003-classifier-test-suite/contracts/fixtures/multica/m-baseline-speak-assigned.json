@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-baseline-speak",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "assign-trig",
+    "author": "zoe",
+    "content": "Dalgos, you are assigned as owner. Please implement the CLI smoke and post the results comment when done."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

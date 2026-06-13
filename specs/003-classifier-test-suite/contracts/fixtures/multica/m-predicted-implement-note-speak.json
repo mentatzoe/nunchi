@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-predicted-implement-note-speak",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "fyi-note-trig",
+    "author": "tpm",
+    "content": "Implementation note for the record: the retry queue now drains strictly in order after this morning's deploy. Nothing for you to do here — just give a quick thumbs-up so I know it reached you."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

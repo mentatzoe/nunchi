@@ -1,0 +1,12 @@
+R4 deterministic self-test evidence — captured 2026-06-13
+Tree: branch 003-classifier-test-suite, post-002 reconciliation + invariant dispatch + full 37-fixture corpus
+Command: python3 -m unittest (repo root, offline: no provider env set)
+
+Ran 65 tests in 0.738s
+
+OK
+
+Self-test detail: python3 -m unittest tests.test_003_runner -v
+Ran 21 tests in 0.058s
+
+OK

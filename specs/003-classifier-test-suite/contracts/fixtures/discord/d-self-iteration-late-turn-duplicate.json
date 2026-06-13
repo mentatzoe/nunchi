@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-d-self-iter-late",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1778634937867-echo",
+    "author": "zoe",
+    "content": "Can y'all please re-read the story you've produced and tell me if you're satisfied with the output? If you're not, how would you improve it? Iterate until you're all happy with it.",
+    "timestamp": "2026-05-13T01:15:37.867Z"
+  },
+  "context": [
+    {
+      "id": "msg-pilot-1778635242558",
+      "type": "message",
+      "author": "dalgos",
+      "content": "Agreed on both points. I reverted the added transition beat; the Castor question into “The raw telemetry said nothing at first” is stronger.\n\nI also sign off on your proposed trim for the three-message paragraph. It keeps the moral hinge and gets to “We were the deferred-acceptance window” faster.",
+      "timestamp": "2026-05-13T01:20:42.558Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "d-vocative-greeting-second-bot",
+  "title": "Vocative greeting; peer already answered (Covered suppressor)",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:32:34.963Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no Covered suppressor; classifier ignores peer's prior coverage signal (FR-021)",
+  "invariant": "second-or-later bot to a vocative greeting PASSes via Covered when peer already answered",
+  "rationale": "After Vigil's 'Here.', Dalgos has no net-new presence value to add; should PASS, not introduce.",
+  "fr_refs": [
+    "FR-018",
+    "FR-021"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

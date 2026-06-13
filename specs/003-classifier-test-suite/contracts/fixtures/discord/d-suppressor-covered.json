@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-d-supp-covered",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-trigger-covered",
+    "author": "zoe",
+    "content": "Could you share your view on the cache-backend question?",
+    "timestamp": "2026-05-13T01:30:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-peer-already-said",
+      "type": "message",
+      "author": "vigil",
+      "content": "I'd argue the in-process LRU is the right call; Redis adds a network hop for cached items.",
+      "timestamp": "2026-05-13T01:29:30.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

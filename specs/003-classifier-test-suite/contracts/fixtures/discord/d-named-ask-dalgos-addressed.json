@@ -1,0 +1,18 @@
+{
+  "request_id": "fixture-d-named-ask",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1747104824168",
+    "author": "zoe",
+    "content": "Dalgos, can you update your CLAUDE.md so that it matches the same classifier the others have?",
+    "timestamp": "2026-05-13T00:33:44.168Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

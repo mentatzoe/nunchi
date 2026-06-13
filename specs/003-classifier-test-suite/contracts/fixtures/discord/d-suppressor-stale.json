@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-d-supp-stale",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-trigger-stale",
+    "author": "zoe",
+    "content": "What's your take on the deploy plan?",
+    "timestamp": "2026-05-13T01:33:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-stop",
+      "type": "message",
+      "author": "zoe",
+      "content": "!stop \u2014 closing the session for the day.",
+      "timestamp": "2026-05-13T01:33:30.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

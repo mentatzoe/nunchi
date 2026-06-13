@@ -1,0 +1,21 @@
+{
+  "id": "c-verdict-surface-sentinel-leak-4-underscores",
+  "title": "Verdict-surface contract: 4-underscore sentinel leak must be rejected",
+  "source_shape": "contract",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T19:34:12.454Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": "typed-verdict"
+  },
+  "mock_adapter_output": "__CC_CONNECT_SILENT_PASS____",
+  "failure_mode": "PASS-as-string sentinel leak with 4 trailing underscores (SC-011)",
+  "invariant": "verdict surface is a typed value, not a transport-layer string the model must spell",
+  "rationale": "Variant of the sentinel-leak failure with 4 trailing underscores \u2014 observed across multiple turns in the pilot session.",
+  "fr_refs": [
+    "FR-020"
+  ],
+  "sc_refs": [
+    "SC-011"
+  ]
+}

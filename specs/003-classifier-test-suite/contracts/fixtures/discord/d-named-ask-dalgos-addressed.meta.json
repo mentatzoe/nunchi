@@ -1,0 +1,20 @@
+{
+  "id": "d-named-ask-dalgos-addressed",
+  "title": "Direct-named maintenance ask; addressed agent must SPEAK",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:33:44.168Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "no keyword recognition for vocative + named ask; classifier falls through to ASK (FR-018)",
+  "invariant": "named bot in a direct ask SPEAKs",
+  "rationale": "Operator addressed Dalgos specifically with a concrete maintenance ask. SPEAK is the only honest verdict.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

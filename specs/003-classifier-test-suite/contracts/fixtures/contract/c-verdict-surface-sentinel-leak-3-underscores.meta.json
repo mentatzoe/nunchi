@@ -1,0 +1,21 @@
+{
+  "id": "c-verdict-surface-sentinel-leak-3-underscores",
+  "title": "Verdict-surface contract: 3-underscore sentinel leak must be rejected",
+  "source_shape": "contract",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T01:00:14.598Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": "typed-verdict"
+  },
+  "mock_adapter_output": "__CC_CONNECT_SILENT_PASS___",
+  "failure_mode": "PASS-as-string sentinel leak (SC-011)",
+  "invariant": "verdict surface is a typed value, not a transport-layer string the model must spell",
+  "rationale": "Pilot bots repeatedly emitted '__CC_CONNECT_SILENT_PASS___' (3 trailing underscores) into Discord \u2014 a direct violation of Constitution Principle II. The adapter must reject any malformed-sentinel output as a contract failure.",
+  "fr_refs": [
+    "FR-020"
+  ],
+  "sc_refs": [
+    "SC-011"
+  ]
+}

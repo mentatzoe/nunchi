@@ -1,0 +1,24 @@
+{
+  "request_id": "fixture-m-baseline-pass",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "ping-msg",
+    "author": "zoe",
+    "content": "Can turnaware-vigil respond here?"
+  },
+  "context": [
+    {
+      "id": "ctx-pass-handled",
+      "type": "message",
+      "author": "peer",
+      "content": "I already handled this request and posted the fix."
+    }
+  ],
+  "agent": {
+    "id": "turnaware-vigil",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

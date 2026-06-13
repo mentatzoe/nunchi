@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-no-keyword",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "neutral-trig",
+    "author": "zoe",
+    "content": "Hello team, the weather is nice today."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

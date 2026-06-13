@@ -1,0 +1,20 @@
+{
+  "id": "m-baseline-ack-broadcast",
+  "title": "Legitimate ACK \u2014 explicit acknowledgement broadcast",
+  "source_shape": "multica",
+  "evidence": "runtime",
+  "runtime_source": "tur-6#6465b7c0-f82e-4cec-a9ee-907ac62413cb@a132ccc",
+  "expected": {
+    "verdict": "ACK",
+    "surface_contract": null
+  },
+  "failure_mode": "(baseline)",
+  "invariant": "honest acknowledgement requests keep producing ACK",
+  "rationale": "An explicit 'please acknowledge' is the intended ACK case. Establishes baseline so the false-ACK case in FR-001 cannot be excused.",
+  "fr_refs": [
+    "FR-003"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

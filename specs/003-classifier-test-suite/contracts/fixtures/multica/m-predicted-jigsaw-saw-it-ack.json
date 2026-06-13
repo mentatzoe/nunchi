@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-predicted-jigsaw-saw-it-ack",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "jigsaw-trig",
+    "author": "tpm",
+    "content": "The jigsaw items in the triage backlog are piling up. Dalgos, please sort them by severity and post the resulting order in this thread."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}

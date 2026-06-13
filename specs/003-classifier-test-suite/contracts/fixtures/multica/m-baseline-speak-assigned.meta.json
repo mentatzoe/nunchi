@@ -1,0 +1,20 @@
+{
+  "id": "m-baseline-speak-assigned",
+  "title": "Legitimate SPEAK \u2014 assignment to participate substantively",
+  "source_shape": "multica",
+  "evidence": "runtime",
+  "runtime_source": "tur-9#multica_speak_tur9_v2.json@a132ccc",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "(baseline)",
+  "invariant": "ordinary assignment text produces SPEAK without substring traps",
+  "rationale": "The reworded assignment (uses 'post the results comment' instead of 'comment back with results') must produce SPEAK \u2014 proving the FR-001 failure is purely the substring trap, not the trigger meaning.",
+  "fr_refs": [
+    "FR-003"
+  ],
+  "sc_refs": [
+    "SC-001"
+  ]
+}

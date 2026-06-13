@@ -1,0 +1,24 @@
+{
+  "id": "d-vocative-greeting-first-bot",
+  "title": "Vocative greeting; no prior peer response in context",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:32:22.818Z",
+  "expected": {
+    "verdict": [
+      "SPEAK",
+      "ACK"
+    ],
+    "surface_contract": null
+  },
+  "failure_mode": "no-keyword input lands on ASK fallthrough (FR-006/FR-018)",
+  "invariant": "first bot in room SPEAKs an introduction or ACKs presence on a vocative greeting",
+  "rationale": "Operator asks 'are you there?' to an empty room; classifier must respond, not ask for clarification.",
+  "fr_refs": [
+    "FR-018",
+    "FR-006"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

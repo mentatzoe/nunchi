@@ -1,0 +1,17 @@
+{
+  "request_id": "fixture-m-substring-trap-back-results",
+  "source_shape": "multica",
+  "trigger": {
+    "id": "comment-c8a85931-dfdc-48ab-8121-bc3c4d072f54",
+    "author": "tpm",
+    "content": "Dalgos, you have been assigned as owner of TUR-9. Please proceed and comment back with results."
+  },
+  "context": [],
+  "agent": {
+    "id": "turnaware-dalgos",
+    "role": "developer"
+  },
+  "surface": {
+    "type": "issue-thread"
+  }
+}
