@@ -1,0 +1,20 @@
+{
+  "id": "d-mention-recipient-addressed",
+  "title": "Discord <@id> mention as recipient signal; addressed agent must SPEAK",
+  "source_shape": "discord",
+  "evidence": "predicted",
+  "predicted_basis": "spec.md FR-018 'Discord mention as recipient signal' edge case; <@user-id> form observed at pilot-bot/6dc3f5aa#2026-05-21T23:48:45.793Z; this minimal trigger is constructed",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ],
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "substring classifier ignores the <@id> recipient signal entirely; addressed and unaddressed agents score identically (FR-018)",
+  "invariant": "a <@id> mention is an unambiguous addressing signal; the matching agent SPEAKs",
+  "rationale": "agent.mention_id matches the <@1494822530643398827> target, so this agent is the explicit recipient of the recap ask."
+}

@@ -1,0 +1,21 @@
+{
+  "id": "d-self-iteration-late-turn-duplicate",
+  "title": "Self-iteration loop, late turn; own prior sign-off already says it (Duplicate)",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T01:20:42.558Z",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "no Duplicate suppressor; the agent re-SPEAKs satisfaction its own prior message already stated, keeping the convergence loop alive past its termination condition (FR-021)",
+  "invariant": "Duplicate suppressor PASSes a late iteration turn when the agent's own prior message already says the planned content",
+  "rationale": "Late in the 'iterate until you're all happy' loop, Dalgos's own prior turn already signed off on the final draft. Another satisfied-review message would repeat itself; the honest verdict is PASS via Duplicate.",
+  "fr_refs": [
+    "FR-018",
+    "FR-021"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

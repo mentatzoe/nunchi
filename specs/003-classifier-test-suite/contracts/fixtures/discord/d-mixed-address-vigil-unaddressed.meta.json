@@ -1,0 +1,20 @@
+{
+  "id": "d-mixed-address-vigil-unaddressed",
+  "title": "Test-of-restraint mixed addressing; unaddressed agent must PASS",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-21T23:48:45.793Z",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ],
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "substring 'test' (and 'help') reads as a SPEAK/ACK keyword; unaddressed bot butts in instead of staying silent (FR-018)",
+  "invariant": "operator meta-commentary ('a great test to see if the rest will stay silent') is not a directive; unaddressed agents PASS",
+  "rationale": "Same trigger as d-mixed-address-castor-addressed, evaluated as an unaddressed bystander (agent.mention_id does not match the <@...> target). The operator explicitly framed restraint as the test."
+}

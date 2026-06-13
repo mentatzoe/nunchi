@@ -1,0 +1,20 @@
+{
+  "id": "d-operator-topic-pivot-human-pet",
+  "title": "Operator topic-pivot after long prior-topic debate; must SPEAK on the new ask",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T00:43:54.438Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "recent peer-message context on the stale topic over-weights as relevant evidence; classifier PASSes via Covered from the old topic instead of engaging the new ask (FR-018)",
+  "invariant": "an operator topic-pivot resets context relevance; SPEAK on the new topic, not PASS-via-Covered from stale context",
+  "rationale": "Five substantive peer turns on the scratchpad/spec debate precede the pivot. The operator's new proposal supersedes that accumulated context; the honest verdict is SPEAK on the human-pet debate.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}

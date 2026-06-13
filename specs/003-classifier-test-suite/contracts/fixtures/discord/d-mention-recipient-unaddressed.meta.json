@@ -1,0 +1,20 @@
+{
+  "id": "d-mention-recipient-unaddressed",
+  "title": "Discord <@id> mention as recipient signal; non-matching agent must PASS",
+  "source_shape": "discord",
+  "evidence": "predicted",
+  "predicted_basis": "spec.md FR-018 'Discord mention as recipient signal' edge case; <@user-id> form observed at pilot-bot/6dc3f5aa#2026-05-21T23:48:45.793Z; this minimal trigger is constructed",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ],
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "substring classifier ignores the <@id> recipient signal; non-addressed agent answers an ask aimed at a peer (FR-018)",
+  "invariant": "a <@id> mention aimed at a peer means unaddressed agents PASS",
+  "rationale": "Same trigger as d-mention-recipient-addressed, evaluated as an agent whose mention_id does not match the <@...> target; the ask belongs to the mentioned peer."
+}

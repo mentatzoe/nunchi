@@ -1,0 +1,19 @@
+{
+  "request_id": "fixture-d-mixed-address-castor",
+  "source_shape": "discord",
+  "trigger": {
+    "id": "msg-pilot-1779407325793",
+    "author": "zoe",
+    "content": "Hey <@1494822530643398827> I need the codex-tpm in the Multica `sonste` project to be able to notify me via Discord using cc-connect to the channel `1507166911648239686`. Is this something you can help me with, or should I reach out through a different platform? (this could be a great test to see if the rest will stay silent or butt in :))",
+    "timestamp": "2026-05-21T23:48:45.793Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "castor",
+    "role": "participant",
+    "mention_id": "1494822530643398827"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

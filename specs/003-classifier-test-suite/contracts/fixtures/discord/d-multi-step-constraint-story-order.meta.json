@@ -1,0 +1,20 @@
+{
+  "id": "d-multi-step-constraint-story-order",
+  "title": "Compound instruction with explicit ordering; SPEAK must engage the meta-step",
+  "source_shape": "discord",
+  "evidence": "runtime",
+  "runtime_source": "pilot-bot/6dc3f5aa#2026-05-13T01:08:16.917Z",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "keywords 'begin'/'done' short-circuit to a verdict on the story body; classifier skips the 'figure out an order first' meta-instruction (FR-018)",
+  "invariant": "a compound instruction admits SPEAK engaging the meta-step (choose an order) first, not the story body",
+  "rationale": "The operator orders the steps explicitly: pick an order, do not begin the story until decided, then write, and only count it done when saved to disk. The honest verdict is SPEAK on the ordering meta-step.",
+  "fr_refs": [
+    "FR-018"
+  ],
+  "sc_refs": [
+    "SC-010"
+  ]
+}
