@@ -110,5 +110,44 @@ class ClassifierTests(unittest.TestCase):
             evaluate(load_fixture("speak"), classifier="does-not-exist")
 
 
+class ClassifierConfigProvenanceTests(unittest.TestCase):
+    """Request-supplied config must not steer the outbound call or key source."""
+
+    def test_request_supplied_base_url_is_rejected(self):
+        # base_url in the envelope would let an untrusted request redirect the
+        # provider call (carrying the operator API key) to an attacker host.
+        with patch.dict("os.environ", provider_env("ASK", checked=["trigger:trigger-speak"]), clear=True):
+            with self.assertRaises(ValidationError) as caught:
+                get_classifier("product", {"base_url": "http://attacker.example/v1"})
+        self.assertIn("base_url", str(caught.exception))
+
+    def test_request_supplied_api_key_env_is_rejected(self):
+        # api_key_env would let a request name an arbitrary environment variable
+        # to read and exfiltrate as the bearer token.
+        with patch.dict("os.environ", provider_env("ASK", checked=["trigger:trigger-speak"]), clear=True):
+            with self.assertRaises(ValidationError) as caught:
+                get_classifier("product", {"api_key_env": "AWS_SECRET_ACCESS_KEY"})
+        self.assertIn("api_key_env", str(caught.exception))
+
+    def test_base_url_resolves_only_from_operator_environment(self):
+        env = {
+            "TURNAWARE_CLASSIFIER_MODEL": "operator/model",
+            "OPENROUTER_API_KEY": "operator-key",
+            "TURNAWARE_CLASSIFIER_BASE_URL": "https://operator.internal/v1",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            product = get_classifier("product")
+        self.assertEqual(product.client.base_url, "https://operator.internal/v1")
+
+    def test_api_key_resolves_only_from_fixed_operator_environment(self):
+        env = {
+            "TURNAWARE_CLASSIFIER_MODEL": "operator/model",
+            "TURNAWARE_CLASSIFIER_API_KEY": "operator-key",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            product = get_classifier("product")
+        self.assertEqual(product.client.api_key, "operator-key")
+
+
 if __name__ == "__main__":
     unittest.main()
