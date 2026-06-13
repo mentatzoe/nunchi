@@ -102,7 +102,13 @@ class ProductAdmissionClassifier:
     def __init__(self, name: str = PRODUCT_CLASSIFIER, config: dict[str, Any] | None = None) -> None:
         self.name = name
         self.config = _normalise_config(config) or {}
-        unsupported = set(self.config).difference({"api_key_env", "base_url", "model", "provider", "timeout"})
+        # base_url and the API key source are operator-only. A request envelope
+        # carries classifier_config, so allowing it to set base_url would let an
+        # untrusted request redirect the provider call (with the operator's API
+        # key) to an attacker host, and api_key_env would let it name any env var
+        # to exfiltrate as the bearer token. Both are resolved exclusively from
+        # operator environment variables below.
+        unsupported = set(self.config).difference({"model", "provider", "timeout"})
         if unsupported:
             names = ", ".join(sorted(unsupported))
             raise ValidationError(f"unsupported classifier_config for {name}: {names}")
@@ -126,15 +132,14 @@ class ProductAdmissionClassifier:
                 "classifier provider model is required via classifier_config.model or TURNAWARE_CLASSIFIER_MODEL"
             )
 
-        api_key = _api_key(self.config)
+        api_key = _api_key()
         if not api_key:
             raise ValidationError(
                 "classifier provider API key is required via TURNAWARE_CLASSIFIER_API_KEY or OPENROUTER_API_KEY"
             )
 
         base_url = (
-            _string_config(self.config, "base_url")
-            or os.environ.get("TURNAWARE_CLASSIFIER_BASE_URL")
+            os.environ.get("TURNAWARE_CLASSIFIER_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
             or DEFAULT_BASE_URL
         )
@@ -176,10 +181,8 @@ def _timeout_config(config: dict[str, Any]) -> float:
     return float(value)
 
 
-def _api_key(config: dict[str, Any]) -> str | None:
-    api_key_env = _string_config(config, "api_key_env")
-    if api_key_env:
-        return os.environ.get(api_key_env)
+def _api_key() -> str | None:
+    # Operator-only: the caller never names which env var holds the key.
     return os.environ.get("TURNAWARE_CLASSIFIER_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 
 

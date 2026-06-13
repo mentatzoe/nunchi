@@ -30,6 +30,27 @@ The core verdicts are exactly:
 `PASS` is a hard stop: no ordinary user-visible room message may be emitted.
 Telemetry belongs outside the conversation surface.
 
+Admission results must never carry reply prose: `message`, `reply`, `draft`,
+and `content` are forbidden result fields (`FORBIDDEN_REPLY_FIELDS` in
+`src/turnaware/models.py`).
+
+## Commands and environment
+
+- Python 3.11+, zero runtime dependencies — stdlib only (HTTP via `urllib`).
+  Do not add third-party packages or pytest; tests use stdlib `unittest`.
+- Run tests: `python3 -m unittest` (no CI exists — run tests manually before
+  claiming anything is done).
+- Run the CLI from the repo root (requires classifier env, below):
+  `PYTHONPATH=src python3 -m turnaware admit < tests/fixtures/speak.json`
+- Live classifier requires `TURNAWARE_CLASSIFIER_MODEL` and `OPENROUTER_API_KEY`
+  (or `TURNAWARE_CLASSIFIER_API_KEY`); optional `TURNAWARE_CLASSIFIER_BASE_URL`
+  (defaults to OpenRouter).
+- Tests must stay offline and deterministic: inject classifier output via
+  `TURNAWARE_CLASSIFIER_TEST_RESULT` using the helpers in
+  `tests/provider_helpers.py` (the payload needs `verdict`, `confidences`,
+  `context_checked`, and `reasons`). Every verdict (and false-positive cases)
+  has a fixture under `tests/fixtures/`.
+
 ## SpecKit workflow
 
 Use the full production gate path unless the project owner explicitly authorizes a spike:

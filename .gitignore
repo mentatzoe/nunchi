@@ -31,3 +31,6 @@ pnpm-debug.log*
 
 # Agent/session worktrees
 .worktrees/
+
+# Embedding model cache from external tooling
+.fastembed_cache/

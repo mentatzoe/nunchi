@@ -94,13 +94,16 @@ Classifier selection can be supplied by:
 
 If both are present, the CLI flag takes precedence. Optional
 `classifier_config` / `--classifier-config` must be a JSON object. Supported
-product configuration keys are `provider`, `model`, `base_url`, `api_key_env`,
-and `timeout`. Unsupported classifier names or config keys fail clearly without
-emitting a success result.
+product configuration keys are `provider`, `model`, and `timeout`. Unsupported
+classifier names or config keys fail clearly without emitting a success result.
 
-Provider configuration can be supplied through environment variables:
+The provider endpoint and API key are operator-only and are never read from
+`classifier_config`: because a request envelope carries `classifier_config`, an
+untrusted request must not be able to redirect the provider call (which carries
+the operator's API key) or choose which environment variable the key is read
+from. These are resolved exclusively from operator environment variables:
 
-- `TURNAWARE_CLASSIFIER_MODEL` for the model name.
+- `TURNAWARE_CLASSIFIER_MODEL` for the model name (or `classifier_config.model`).
 - `TURNAWARE_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` for the API key.
 - `TURNAWARE_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` for the compatible API
   base URL; default is `https://openrouter.ai/api/v1`.

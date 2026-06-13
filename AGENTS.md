@@ -35,9 +35,9 @@ Telemetry belongs outside the conversation surface.
 Use the full production gate path unless the project owner explicitly authorizes a spike:
 
 ```text
-$speckit-constitution -> $speckit-specify -> $speckit-clarify ->
-$speckit-plan -> $speckit-checklist -> $speckit-tasks ->
-$speckit-analyze -> $speckit-implement
+/speckit-constitution -> /speckit-specify -> /speckit-clarify ->
+/speckit-plan -> /speckit-checklist -> /speckit-tasks ->
+/speckit-analyze -> /speckit-implement
 ```
 
 For Codex, invoke SpecKit skills through the installed `.agents/skills` skill
