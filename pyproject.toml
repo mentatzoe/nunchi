@@ -16,6 +16,7 @@ dependencies = []
 
 [project.scripts]
 turnaware = "turnaware.cli:main"
+turnaware-channel = "turnaware.adapters.channel:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

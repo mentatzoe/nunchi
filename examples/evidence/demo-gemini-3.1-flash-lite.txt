@@ -1,0 +1,29 @@
+agent: dalgos  (mention_id 1494822747856967683)
+The gate decides whether dalgos speaks; PASS emits the sentinel cc-connect suppresses.
+
+• operator addresses a different agent
+    trigger : vigil, can you rebase the classifier branch onto main?
+    verdict : PASS  -> emit 'CC_CONNECT_SILENT_PASS'  (suppressed)
+    reason  : The trigger is explicitly addressed to 'vigil', not this agent ('dalgos').
+
+• operator asks me directly for substantive work
+    trigger : dalgos, summarize the tradeoffs of the in-process cache for the channel.
+    verdict : SPEAK -> agent composes its turn
+    reason  : The user explicitly addressed the agent by name and requested a substantive summary of technical tradeoffs.
+
+• the trigger echoes my own earlier turn (Duplicate)
+    trigger : dalgos should double-check the rate-limit path.
+    verdict : PASS  -> emit 'CC_CONNECT_SILENT_PASS'  (suppressed)
+    reason  : The agent has already reviewed and confirmed the rate-limit path in the provided context.
+
+• an @mention aimed at someone else
+    trigger : Hey <@1494822530643398827>, could you post a recap when you get a sec?
+    verdict : PASS  -> emit 'CC_CONNECT_SILENT_PASS'  (suppressed)
+    reason  : The trigger mentions a specific ID (1494822530643398827) that does not match this agent's ID (dalgos) or mention_id (1494822747856967683).
+
+• operator hands me a genuinely new task
+    trigger : dalgos, draft the migration note for the cache change and share it here.
+    verdict : SPEAK -> agent composes its turn
+    reason  : The user explicitly requested this agent to perform a specific task (drafting a migration note).
+
+3 suppressed, 2 spoke — classifier model: google/gemini-3.1-flash-lite

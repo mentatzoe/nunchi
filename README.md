@@ -20,9 +20,13 @@ distribution, checked context, and reasons. There is no public `deterministic`
 classifier path; offline/CI evidence uses a test fixture provider behind the
 product path.
 
-Downstream adapters, live Discord/cc-connect integration, central orchestration,
-broad benchmarks, launch claims, and reply composition remain out of scope for
-this slice.
+The first **adapter** ships alongside the core: `turnaware.adapters.channel`
+maps a channel-local message shape to an admission request and routes the
+verdict for a participant agent (see "Consuming the gate" below). Live
+Discord/cc-connect process integration, central orchestration, broad benchmarks,
+launch claims, and reply composition remain out of scope — the adapter produces
+the sentinel an existing cc-connect deployment already understands; wiring it
+into a running bot is the consumer's step.
 
 ## Quickstart
 
@@ -134,6 +138,57 @@ result = evaluate({
 `result["classifier"]` identifies the selected path, `result["classifier_model"]`
 identifies the provider model, and `result["verdict"]` is one of `PASS`, `ACK`,
 `ASK`, or `SPEAK`.
+
+## Consuming the gate: the channel adapter
+
+A participant agent on a shared, turn-aware surface does not call the core
+directly — it uses the **channel adapter** (`turnaware.adapters.channel`), which
+maps its channel-local inputs (the triggering message, the recent transcript,
+its own identity) to an admission request, runs the gate, and routes the
+verdict. On `PASS` it emits the literal `CC_CONNECT_SILENT_PASS` sentinel that
+cc-connect already intercepts and suppresses; on `SPEAK`/`ASK`/`ACK` it returns a
+*run-shape* and lets the agent compose its own turn. It never writes replies.
+
+In-process (Python host):
+
+```python
+from turnaware.adapters.channel import gate
+
+result = gate(
+    {"content": "dalgos, summarize the cache tradeoffs", "author": "zoe",
+     "author_kind": "human", "message_id": "m-42"},
+    history=[                      # last ~10 channel messages, oldest first
+        {"content": "I'd go in-process LRU.", "author": "vigil",
+         "author_kind": "peer_bot", "message_id": "m-41"},
+    ],
+    agent_id="dalgos",            # plus optional agent_role, mention via surface
+    pinned_rules=None,            # optional channel governance text
+    fail_policy="open",           # open->SPEAK | closed->PASS | raise
+)
+
+if result.silent:
+    print(result.emit())          # "CC_CONNECT_SILENT_PASS" — host suppresses
+else:
+    # result.verdict / result.run_shape / result.reasons — host composes the turn
+    ...
+```
+
+Subprocess (non-Python host, e.g. cc-connect/Go) — JSON in, sentinel-or-JSON out:
+
+```sh
+echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
+       "history":[],"agent":{"id":"dalgos"},"fail_policy":"open"}' \
+  | PYTHONPATH=src python3 -m turnaware.adapters
+# -> CC_CONNECT_SILENT_PASS   (PASS; suppress the send)
+# -> {"verdict":"SPEAK",...}  (otherwise; proceed within run_shape)
+```
+
+A runnable multi-turn demo is in
+[`examples/read_the_room_demo.py`](examples/read_the_room_demo.py); the full
+contract is in [`specs/004-read-the-room-adapter/spec.md`](specs/004-read-the-room-adapter/spec.md).
+This is the adapter tier (Constitution VI): it depends on the core and is not a
+live Discord integration — it produces the sentinel an existing cc-connect
+deployment already understands.
 
 ## Verdict test suite
 
