@@ -9,7 +9,8 @@ This directory carries runtime artifacts produced by exercising the suite.
 | `a132ccc-baseline.jsonl` | 2026-05-25 | historical deterministic substring classifier (`a132ccc`) | the suite detects the 13 known failure classes (HISTORICAL — frozen; that classifier no longer exists on `main`) |
 | `perf-deterministic-2026-06-13.txt` | 2026-06-13 | n/a (pinned injection, plumbing only) | SC-005 wall-clock budget on the deterministic path at 37 fixtures |
 | `unittest-2026-06-13.txt` | 2026-06-13 | n/a (offline self-tests) | runner/loader/report/invariant machinery green via stdlib `unittest` |
-| `<sha>-live.jsonl` | pending (R5) | `main`'s provider-backed product classifier | live judgment evidence — no pass/fail claims about the live classifier exist until this is captured |
+| `0437537-live.jsonl` | 2026-06-13 | `main` product classifier on `google/gemini-3.1-flash-lite` | live judgment evidence for the selected model: 33/37 pass, 0 errors |
+| `model-selection-2026-06-13.md` + `bakeoff-2026-06-13/` | 2026-06-13 | 7 finalist models | the live bake-off that selected the model; per-model full-corpus JSONL runs |
 
 ## a132ccc-baseline.jsonl (historical)
 
