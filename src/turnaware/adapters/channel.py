@@ -11,11 +11,13 @@ It stays strictly inside the admission boundary: it returns a verdict and a
 contract is transport-neutral — the host branches on ``silent``/``verdict`` and
 owns how it stays quiet — so nothing here depends on a particular chat platform.
 
-cc-connect is supported as one transport, not a requirement: it intercepts a
-`CC_CONNECT_SILENT_PASS` sentinel to suppress a send, so an existing cc-connect
-deployment can drop this in via :meth:`ChannelGateResult.cc_connect_sentinel`
-or the CLI's ``--format cc-connect``. Any other host ignores the sentinel
-entirely and just checks ``result.silent``.
+Some transports suppress a send by recognizing a magic final-output string.
+That is the host's convention, not TurnAware's: supply your own token via
+:meth:`ChannelGateResult.silent_token` (or the CLI's ``--silent-token``). The
+`CC_CONNECT_SILENT_PASS` constant and ``--format cc-connect`` are just the
+cc-connect *preset* of that mechanism — one named transport among many, with no
+special status. Any other host ignores tokens entirely and branches on
+``result.silent``.
 
 Design reference: pilot-bot `before-you-respond.md` (the human-readable rubric
 this gate implements).
@@ -31,9 +33,9 @@ from typing import Any, Callable, Literal
 from ..core import evaluate
 from ..errors import TurnAwareError, ValidationError
 
-# cc-connect compatibility only: the sentinel cc-connect intercepts to suppress
-# an outbound send (matches its core/message.go SilentPassSentinel). Hosts that
-# are not cc-connect never need this — they branch on ChannelGateResult.silent.
+# The cc-connect preset suppression token (matches its core/message.go
+# SilentPassSentinel). It has no privileged status — it is one value you may pass
+# to silent_token()/--silent-token. Hosts on other transports supply their own.
 SILENT_PASS_SENTINEL = "CC_CONNECT_SILENT_PASS"
 
 FailPolicy = Literal["open", "closed", "raise"]
@@ -100,13 +102,19 @@ class ChannelGateResult:
     degraded: bool = False  # True when a fail policy produced this, not the classifier
     error: str | None = None  # off-surface telemetry only; never shown in-room
 
-    def cc_connect_sentinel(self) -> str:
-        """cc-connect compatibility helper: the exact final-output string that
-        cc-connect intercepts and suppresses on PASS (`CC_CONNECT_SILENT_PASS`),
-        or empty when not silent. Only relevant if your transport is cc-connect;
-        every other host should just branch on ``silent``.
+    def silent_token(self, token: str) -> str:
+        """Generic suppression helper: return ``token`` when silent, else "".
+
+        A transport that suppresses a send by recognizing a magic final-output
+        string supplies its own ``token`` here. The token is the host's
+        convention, not TurnAware's — most hosts never need this and just branch
+        on ``silent``.
         """
-        return SILENT_PASS_SENTINEL if self.silent else ""
+        return token if self.silent else ""
+
+    def cc_connect_sentinel(self) -> str:
+        """cc-connect preset of :meth:`silent_token` (`CC_CONNECT_SILENT_PASS`)."""
+        return self.silent_token(SILENT_PASS_SENTINEL)
 
 
 def _coerce_message(value: Any, name: str) -> ChannelMessage:
@@ -300,21 +308,34 @@ def _read_payload(argv: list[str]) -> dict:
         description="Channel-local admission gate. Reads a JSON payload "
         "(trigger, history, agent, [surface], [pinned_rules], [fail_policy]) "
         "from --input or stdin and prints a transport-neutral JSON directive "
-        "(verdict + silent + run_shape). Use --format cc-connect for the "
-        "drop-in cc-connect sentinel on PASS.",
+        "(verdict + silent + run_shape). To suppress via a magic final-output "
+        "string, give your platform's token with --silent-token (or use the "
+        "--format cc-connect preset).",
     )
     parser.add_argument("--input", default=None, help="payload JSON file (default: stdin)")
+    parser.add_argument(
+        "--silent-token",
+        default=None,
+        metavar="STR",
+        help="on PASS, print exactly STR (your transport's suppression sentinel) "
+        "instead of JSON. Generic: any platform supplies its own token.",
+    )
     parser.add_argument(
         "--format",
         choices=["json", "cc-connect"],
         default="json",
         help="json (default): always a JSON directive, transport-neutral. "
-        "cc-connect: print the CC_CONNECT_SILENT_PASS sentinel on PASS, JSON otherwise.",
+        "cc-connect: preset of --silent-token CC_CONNECT_SILENT_PASS.",
     )
     args = parser.parse_args(argv)
+    # Resolve the suppression token: an explicit --silent-token wins; the
+    # cc-connect format is just a named preset of one. Default None -> JSON only.
+    silent_token = args.silent_token
+    if silent_token is None and args.format == "cc-connect":
+        silent_token = SILENT_PASS_SENTINEL
     raw = open(args.input).read() if args.input else sys.stdin.read()
     try:
-        return {"payload": json.loads(raw), "format": args.format}
+        return {"payload": json.loads(raw), "silent_token": silent_token}
     except json.JSONDecodeError as exc:
         raise ValidationError(f"payload must be valid JSON: {exc}") from exc
 
@@ -341,13 +362,13 @@ def main(argv: list[str] | None = None) -> int:
 
     Default output is a transport-neutral JSON directive for every verdict — the
     host branches on ``silent``/``verdict`` and owns how it stays quiet, so the
-    CLI carries no dependency on any particular chat platform. ``--format
-    cc-connect`` opts into emitting the cc-connect sentinel on PASS for that
-    specific deployment.
+    CLI carries no dependency on any particular chat platform. ``--silent-token``
+    (or the ``--format cc-connect`` preset) opts into printing a transport's
+    suppression sentinel on PASS.
     """
     try:
         parsed = _read_payload(sys.argv[1:] if argv is None else argv)
-        payload, out_format = parsed["payload"], parsed["format"]
+        payload, silent_token = parsed["payload"], parsed["silent_token"]
         if not isinstance(payload, dict):
             raise ValidationError("payload must be a JSON object")
         agent = payload.get("agent") or {}
@@ -373,9 +394,9 @@ def main(argv: list[str] | None = None) -> int:
         # reason the gate degraded goes to stderr, never into the room.
         print(f"channel adapter degraded ({result.error})", file=sys.stderr)
 
-    if out_format == "cc-connect" and result.silent:
-        # Drop-in for cc-connect: its Discord platform intercepts this sentinel.
-        print(result.cc_connect_sentinel())
+    if silent_token is not None and result.silent:
+        # The host opted into suppression-by-sentinel; print its token verbatim.
+        print(result.silent_token(silent_token))
     else:
         print(_directive_json(result))
     return 0

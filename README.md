@@ -182,9 +182,11 @@ echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
 # -> {"verdict":"SPEAK","silent":false,...}  (host composes a turn)
 ```
 
-cc-connect is supported as one transport, not a dependency: pass
-`--format cc-connect` (or call `result.cc_connect_sentinel()`) to emit the
-`CC_CONNECT_SILENT_PASS` sentinel it intercepts on PASS.
+If your transport suppresses a send via a magic final-output string, pass your
+own with `--silent-token "<token>"` (or `result.silent_token("<token>")`) to
+print it on PASS. cc-connect is just a named preset of this — `--format
+cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS` — with no special status;
+no transport is a dependency.
 
 **[`docs/integration.md`](docs/integration.md) is the full integration guide** —
 scope, the three install/integration paths (loader instruction, in-process

@@ -60,20 +60,26 @@ The CLI default output is therefore a JSON directive for *every* verdict
  "degraded": false}
 ```
 
-### Optional: cc-connect compatibility
+### Optional: suppression-by-sentinel (any transport)
 
-cc-connect suppresses a send when an agent's final output is the literal
-`CC_CONNECT_SILENT_PASS` sentinel (`core/message.go: SilentPassSentinel`,
-matched tolerantly by `IsSilentPassResponse`; legacy `__CC_CONNECT_SILENT_PASS__`
-also accepted). If — and only if — your transport is cc-connect, opt into
-emitting that sentinel on PASS:
+Some transports suppress an outbound message when the agent's final output is a
+magic string. That string is **your platform's convention, not TurnAware's** —
+supply your own:
 
-- CLI: `turnaware-channel --format cc-connect` (prints the bare sentinel on PASS,
-  JSON otherwise)
-- Python: `result.cc_connect_sentinel()` (the sentinel when silent, else `""`)
+- CLI: `turnaware-channel --silent-token "<your-token>"` (prints exactly that
+  token on PASS, JSON otherwise)
+- Python: `result.silent_token("<your-token>")` (the token when silent, else `""`)
 
-Every other host ignores this and branches on `silent`. The decoupling is the
-point: cc-connect is one supported transport, not a dependency.
+cc-connect is one such transport: it intercepts `CC_CONNECT_SILENT_PASS`
+(`core/message.go: SilentPassSentinel`, matched tolerantly by
+`IsSilentPassResponse`; legacy `__CC_CONNECT_SILENT_PASS__` also accepted). It's
+provided as a named **preset** of the generic mechanism, with no special status:
+
+- CLI: `turnaware-channel --format cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS`
+- Python: `result.cc_connect_sentinel()` ≡ `result.silent_token(SILENT_PASS_SENTINEL)`
+
+Every other host ignores tokens entirely and just branches on `silent`. The
+point of the decoupling: no transport — cc-connect included — is privileged.
 
 ## Integration paths
 
@@ -234,6 +240,48 @@ key:
 ```sh
 export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
 ```
+
+## Configuration (self-service)
+
+Everything below is set by the integrating agent or human — no code changes.
+The full surface, and where each knob lives:
+
+| Knob | Where | Default | Notes |
+|------|-------|---------|-------|
+| classifier model | env `TURNAWARE_CLASSIFIER_MODEL`, or per-call `classifier_config.model` | — (required for live) | any OpenRouter / OpenAI-compatible model id |
+| API key | env `TURNAWARE_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` | — | operator-only; never read from the request |
+| provider endpoint | env `TURNAWARE_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` | OpenRouter | point at any OpenAI-compatible endpoint, incl. localhost |
+| request timeout | per-call `classifier_config.timeout` | 30s | positive seconds |
+| failure behavior | `gate(fail_policy=...)` / payload `fail_policy` | `open` (→SPEAK) | `open` \| `closed` (→PASS) \| `raise` |
+| suppression output | CLI `--silent-token STR` / `--format cc-connect`; Python `result.silent_token(...)` | none (JSON) | your transport's sentinel, if it uses one |
+| offline/dev decision | env `TURNAWARE_CLASSIFIER_TEST_RESULT` | unset | pin a verdict; no provider call |
+
+Recipes:
+
+```sh
+# 1. OpenRouter, pick any model
+export TURNAWARE_CLASSIFIER_MODEL="qwen/qwen3-235b-a22b-2507"
+export OPENROUTER_API_KEY="sk-or-v1-..."
+
+# 2. A self-hosted / local OpenAI-compatible model (vLLM, llama.cpp, LM Studio)
+export TURNAWARE_CLASSIFIER_BASE_URL="http://localhost:8000/v1"
+export TURNAWARE_CLASSIFIER_API_KEY="local-unused-but-required"
+export TURNAWARE_CLASSIFIER_MODEL="my-local-model"
+
+# 3. Per-request model/timeout override (envelope field, no env change)
+echo '{"trigger":{"content":"hi","id":"t"},"agent":{"id":"a"},
+       "classifier_config":{"model":"deepseek/deepseek-v3.2","timeout":20}}' \
+  | turnaware-channel
+
+# 4. Your transport's suppression sentinel (Slack example), with fail-closed
+echo '{"trigger":{"content":"hi","id":"t"},"agent":{"id":"a"},"fail_policy":"closed"}' \
+  | turnaware-channel --silent-token "<<SLACK_NOOP>>"
+```
+
+The base URL and key are deliberately env-only (operator-controlled): a request
+envelope can carry `classifier_config`, so letting it set those would let an
+untrusted message redirect the provider call or pick the key — see the README
+security note.
 
 ## Operational concerns
 

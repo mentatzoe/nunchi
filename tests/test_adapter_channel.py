@@ -111,6 +111,14 @@ class GateRoutingTests(unittest.TestCase):
         self.assertEqual(r.cc_connect_sentinel(), "")
         self.assertIn("participant turn", r.run_shape)
 
+    def test_silent_token_is_generic(self):
+        # Any transport supplies its own token; cc-connect is just one value.
+        r = gate({"content": "x", "id": "t"}, [], agent_id="d", evaluate_fn=_stub("PASS"))
+        self.assertEqual(r.silent_token("SLACK_SUPPRESS"), "SLACK_SUPPRESS")
+        self.assertEqual(r.cc_connect_sentinel(), SILENT_PASS_SENTINEL)
+        s = gate({"content": "x", "id": "t"}, [], agent_id="d", evaluate_fn=_stub("SPEAK"))
+        self.assertEqual(s.silent_token("SLACK_SUPPRESS"), "")
+
     def test_run_shapes_present_for_all_verdicts(self):
         for v in ("PASS", "ACK", "ASK", "SPEAK"):
             r = gate({"content": "x", "id": "t"}, [], agent_id="d", evaluate_fn=_stub(v))
@@ -203,6 +211,23 @@ class CliTests(unittest.TestCase):
             code, out, _ = self._run(payload, argv=["--format", "cc-connect"])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), SILENT_PASS_SENTINEL)
+
+    def test_cli_custom_silent_token_on_pass(self):
+        # Generic: any platform's suppression token, no cc-connect involved.
+        payload = {"trigger": {"content": "peer noise", "id": "t-1"},
+                   "history": [], "agent": {"id": "dalgos"}}
+        with mock.patch("turnaware.adapters.channel.evaluate", _stub("PASS")):
+            code, out, _ = self._run(payload, argv=["--silent-token", "<<HUSH>>"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "<<HUSH>>")
+
+    def test_cli_silent_token_ignored_when_not_silent(self):
+        payload = {"trigger": {"content": "implement X", "id": "t-1"},
+                   "agent": {"id": "dalgos"}}
+        with mock.patch("turnaware.adapters.channel.evaluate", _stub("SPEAK")):
+            code, out, _ = self._run(payload, argv=["--silent-token", "<<HUSH>>"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["verdict"], "SPEAK")
 
     def test_cli_speak_prints_json_directive(self):
         payload = {
