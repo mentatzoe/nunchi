@@ -16,7 +16,6 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       TURNAWARE_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +25,9 @@ jobs:
       - name: Install TurnAware
         run: pip install .
       - name: One real admit call, assert a verdict is returned
+        # Secret scoped to this step only, so the install step never sees it.
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
