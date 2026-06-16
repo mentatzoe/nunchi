@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,6 +21,15 @@ SUPPORTED_CLASSIFIERS = (PRODUCT_CLASSIFIER,)
 DEFAULT_PROVIDER = "openai-compatible"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 TEST_RESULT_ENV = "TURNAWARE_CLASSIFIER_TEST_RESULT"
+
+# Bounded retry defaults for transient OpenRouter failures (timeouts, provider
+# overload). DEFAULT_MAX_RETRIES=2 means up to 3 attempts total.
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_RETRY_BASE_DELAY = 0.5
+# HTTP status codes treated as transient and worth retrying. 429 (rate limit)
+# and 5xx (provider-side) are recoverable; every other 4xx is permanent
+# (auth/validation/quota-forbidden) and must abort immediately.
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True)
@@ -54,11 +65,22 @@ class FixtureAdmissionClient:
 class OpenAICompatibleAdmissionClient:
     """Minimal OpenAI-compatible chat-completions client using the stdlib."""
 
-    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: float) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        timeout: float,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_base_delay = retry_base_delay
 
     def classify(self, request: AdmissionRequest) -> dict[str, Any]:
         payload = {
@@ -81,19 +103,37 @@ class OpenAICompatibleAdmissionClient:
                 "Accept": "application/json",
             },
         )
-        try:
-            with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
-                response_body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
-            raise TurnAwareError(f"classifier provider HTTP {exc.code}: {details}") from exc
-        except OSError as exc:
-            raise TurnAwareError(f"classifier provider request failed: {exc}") from exc
+        response_body = self._read_with_retries(http_request)
 
         try:
             return json.loads(response_body)
         except json.JSONDecodeError as exc:
             raise TurnAwareError("classifier provider returned invalid JSON") from exc
+
+    def _read_with_retries(self, http_request: urllib.request.Request) -> str:
+        # Up to max_retries retries (max_retries + 1 attempts total). Only
+        # transient failures are retried; permanent errors abort immediately to
+        # avoid wasting tokens/time. The happy path makes exactly one call and
+        # never sleeps.
+        last_exc: TurnAwareError
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
+                    return response.read().decode("utf-8")
+            except urllib.error.HTTPError as exc:
+                details = exc.read().decode("utf-8", errors="replace")
+                error = TurnAwareError(f"classifier provider HTTP {exc.code}: {details}")
+                if exc.code not in RETRYABLE_STATUS_CODES:
+                    # Permanent (auth/validation/quota-forbidden): never retry.
+                    raise error from exc
+                last_exc = error
+            except (socket.timeout, urllib.error.URLError, OSError) as exc:
+                last_exc = TurnAwareError(f"classifier provider request failed: {exc}")
+
+            if attempt < self.max_retries:
+                time.sleep(self.retry_base_delay * (2 ** attempt))
+
+        raise last_exc
 
 
 class ProductAdmissionClassifier:
@@ -107,8 +147,12 @@ class ProductAdmissionClassifier:
         # untrusted request redirect the provider call (with the operator's API
         # key) to an attacker host, and api_key_env would let it name any env var
         # to exfiltrate as the bearer token. Both are resolved exclusively from
-        # operator environment variables below.
-        unsupported = set(self.config).difference({"model", "provider", "timeout"})
+        # operator environment variables below. max_retries and retry_base_delay
+        # only tune transient-failure resilience (no host/credential influence),
+        # so they are safe to accept from classifier_config.
+        unsupported = set(self.config).difference(
+            {"model", "provider", "timeout", "max_retries", "retry_base_delay"}
+        )
         if unsupported:
             names = ", ".join(sorted(unsupported))
             raise ValidationError(f"unsupported classifier_config for {name}: {names}")
@@ -149,6 +193,8 @@ class ProductAdmissionClassifier:
             api_key=api_key,
             model=self.model_id,
             timeout=timeout,
+            max_retries=_max_retries_config(self.config),
+            retry_base_delay=_retry_base_delay_config(self.config),
         )
 
     def classify(self, request: AdmissionRequest) -> ClassifierDecision:
@@ -178,6 +224,20 @@ def _timeout_config(config: dict[str, Any]) -> float:
     value = config.get("timeout", 30)
     if isinstance(value, bool) or not isinstance(value, Real) or value <= 0:
         raise ValidationError("classifier_config.timeout must be a positive number")
+    return float(value)
+
+
+def _max_retries_config(config: dict[str, Any]) -> int:
+    value = config.get("max_retries", DEFAULT_MAX_RETRIES)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValidationError("classifier_config.max_retries must be a non-negative integer")
+    return value
+
+
+def _retry_base_delay_config(config: dict[str, Any]) -> float:
+    value = config.get("retry_base_delay", DEFAULT_RETRY_BASE_DELAY)
+    if isinstance(value, bool) or not isinstance(value, Real) or value <= 0:
+        raise ValidationError("classifier_config.retry_base_delay must be a positive number")
     return float(value)
 
 
