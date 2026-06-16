@@ -1,19 +1,12 @@
 name: live-smoke
 
-# MANUAL ONLY. This job makes a real provider call (it costs money), so it never
-# runs on push or pull_request — only when a maintainer dispatches it. It is the
-# drift detector: run it at release time (or when a provider/model regression is
-# suspected) to confirm the configured model still returns a usable verdict.
-#
-# If the OPENROUTER_API_KEY secret is not configured, the job skips cleanly
-# (exit 0) instead of failing, so it is safe to leave wired up in a fork.
+# MANUAL ONLY. Makes a real provider call (it costs money), so it never runs on
+# push or pull_request -- only when a maintainer dispatches it. It is the drift
+# detector: run it at release time, or when a provider/model regression is
+# suspected, to confirm the configured model still returns a usable verdict.
+# If the OPENROUTER_API_KEY secret is not set, the job skips cleanly (exit 0).
 on:
   workflow_dispatch:
-    inputs:
-      model:
-        description: "Classifier model id (TURNAWARE_CLASSIFIER_MODEL)"
-        required: false
-        default: "google/gemini-3.1-flash-lite"
 
 permissions:
   contents: read
@@ -22,6 +15,9 @@ jobs:
   live-smoke:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      TURNAWARE_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,27 +26,13 @@ jobs:
       - name: Install TurnAware
         run: pip install .
       - name: One real admit call, assert a verdict is returned
-        # The secret is passed only through env (never interpolated into the
-        # run: script). The dispatch input is bound to an intermediate env var
-        # so untrusted ${{ github.event.* }} text never lands in the shell.
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          INPUT_MODEL: ${{ github.event.inputs.model }}
         shell: bash
         run: |
           set -euo pipefail
-
           if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-            echo "No OPENROUTER_API_KEY secret — skipping live smoke."
+            echo "No OPENROUTER_API_KEY secret -- skipping live smoke."
             exit 0
           fi
-
-          # Default the model here (not via ${{ }}) so the dispatch input stays
-          # out of the script body.
-          export TURNAWARE_CLASSIFIER_MODEL="${INPUT_MODEL:-google/gemini-3.1-flash-lite}"
           echo "Live smoke: model=${TURNAWARE_CLASSIFIER_MODEL}, fixture=tests/fixtures/speak.json"
-
-          # One live call through the installed console script, then assert the
-          # JSON carries a 'verdict'. Keep it to a single call to limit cost.
           turnaware admit --input tests/fixtures/speak.json \
             | python -c 'import json,sys; r=json.load(sys.stdin); assert "verdict" in r, "no verdict in result"; print("live smoke OK: verdict=%s model=%s" % (r["verdict"], r.get("classifier_model")))'
