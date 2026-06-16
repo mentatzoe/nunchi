@@ -149,13 +149,21 @@ class ProductAdmissionClassifier:
         # to exfiltrate as the bearer token. Both are resolved exclusively from
         # operator environment variables below. max_retries and retry_base_delay
         # only tune transient-failure resilience (no host/credential influence),
-        # so they are safe to accept from classifier_config.
+        # so they are safe to accept from classifier_config. require_pass_corroboration
+        # only post-processes the emitted verdict (a downgrade, never an upgrade),
+        # so it has no host/credential influence and is safe from classifier_config.
         unsupported = set(self.config).difference(
-            {"model", "provider", "timeout", "max_retries", "retry_base_delay"}
+            {"model", "provider", "timeout", "max_retries", "retry_base_delay", "require_pass_corroboration"}
         )
         if unsupported:
             names = ", ".join(sorted(unsupported))
             raise ValidationError(f"unsupported classifier_config for {name}: {names}")
+
+        # Opt-in structural guard for FR-005: every tested model PASSes on a bare
+        # unverified completion claim ("Already handled. Resolved.") with no
+        # corroborating context. When enabled, a PASS that did not consult any
+        # `context:` reference is downgraded to ASK (see _decision_from_provider_result).
+        self.require_pass_corroboration = _require_pass_corroboration_config(self.config)
 
         self.provider = _string_config(self.config, "provider") or DEFAULT_PROVIDER
         if self.provider != DEFAULT_PROVIDER:
@@ -200,7 +208,11 @@ class ProductAdmissionClassifier:
     def classify(self, request: AdmissionRequest) -> ClassifierDecision:
         provider_payload = self.client.classify(request)
         result_payload = _extract_result_payload(provider_payload)
-        return _decision_from_provider_result(result_payload, request)
+        return _decision_from_provider_result(
+            result_payload,
+            request,
+            require_pass_corroboration=self.require_pass_corroboration,
+        )
 
 
 def _normalise_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -239,6 +251,16 @@ def _retry_base_delay_config(config: dict[str, Any]) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or value <= 0:
         raise ValidationError("classifier_config.retry_base_delay must be a positive number")
     return float(value)
+
+
+def _require_pass_corroboration_config(config: dict[str, Any]) -> bool:
+    # Default False preserves current behavior (PASS emitted as the provider
+    # returned it). Only a literal bool is accepted; 1/0/"true" are rejected so
+    # the flag is unambiguous about whether the guard is armed.
+    value = config.get("require_pass_corroboration", False)
+    if not isinstance(value, bool):
+        raise ValidationError("classifier_config.require_pass_corroboration must be a boolean")
+    return value
 
 
 def _api_key() -> str | None:
@@ -358,7 +380,12 @@ def _extract_result_payload(provider_payload: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
-def _decision_from_provider_result(payload: dict[str, Any], request: AdmissionRequest) -> ClassifierDecision:
+def _decision_from_provider_result(
+    payload: dict[str, Any],
+    request: AdmissionRequest,
+    *,
+    require_pass_corroboration: bool = False,
+) -> ClassifierDecision:
     forbidden = FORBIDDEN_REPLY_FIELDS.intersection(payload)
     if forbidden:
         names = ", ".join(sorted(forbidden))
@@ -392,12 +419,41 @@ def _decision_from_provider_result(payload: dict[str, Any], request: AdmissionRe
     reasons = payload.get("reasons")
     if not isinstance(reasons, list) or not reasons or not all(isinstance(item, str) and item.strip() for item in reasons):
         raise TurnAwareError("classifier provider must return at least one reason")
+    reasons_tuple = tuple(reasons)
+
+    # Opt-in structural mitigation for FR-005. The provider may PASS on a bare
+    # completion claim ("Already handled. Resolved.") that no consulted context
+    # corroborates. When require_pass_corroboration is on, a PASS that did NOT
+    # consult any `context:` reference (justified by the trigger alone, or by
+    # nothing) is downgraded to ASK so the unverified claim is challenged.
+    #
+    # The rule is purely STRUCTURAL: it keys ONLY off whether context_checked
+    # contains a `context:` reference. It never inspects or pattern-matches the
+    # trigger/context text, so it cannot be reintroduced via keyword traps and a
+    # corroborated PASS (Covered/Duplicate, whose context_checked includes a
+    # context: ref) is always left untouched.
+    #
+    # DELIBERATE TRADE-OFF: this also downgrades legitimate empty-context PASSes
+    # (e.g. a trigger addressed to another agent, which warrants PASS with no
+    # context consulted). That is why it is OPT-IN and DEFAULT OFF: it pairs with
+    # the deterministic addressing fast-path that resolves "not my turn" before
+    # the model is ever consulted, so the only PASSes that reach this guard are
+    # the model's own judgement calls. Enable it on surfaces where unverified
+    # completion claims must be challenged rather than silently trusted.
+    if require_pass_corroboration and verdict == "PASS":
+        corroborated = any(ref.startswith("context:") for ref in checked_tuple)
+        if not corroborated:
+            verdict = "ASK"
+            reasons_tuple = reasons_tuple + (
+                "PASS not corroborated by any checked context item; "
+                "require_pass_corroboration downgraded PASS -> ASK",
+            )
 
     return ClassifierDecision(
         verdict=verdict,
         confidences=normalised_confidences,
         context_checked=checked_tuple,
-        reasons=tuple(reasons),
+        reasons=reasons_tuple,
     )
 
 
