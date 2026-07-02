@@ -1,8 +1,9 @@
-# TurnAware
+# Nunchi
 
-Pre-reply judgment for turn-aware agents.
+**nunchi** (눈치, *NOON-chee*): the art of reading the room and knowing
+whether it is your turn to speak. This library gives your agent that.
 
-TurnAware is a portable CLI/library for deciding whether an agent should visibly
+Nunchi is a portable CLI/library for deciding whether an agent should visibly
 participate on an unstructured shared surface before ordinary reply generation.
 It returns an auditable admission verdict:
 
@@ -20,7 +21,7 @@ distribution, checked context, and reasons. There is no public `deterministic`
 classifier path; offline/CI evidence uses a test fixture provider behind the
 product path.
 
-The first **adapter** ships alongside the core: `turnaware.adapters.channel`
+The first **adapter** ships alongside the core: `nunchi.adapters.channel`
 maps a channel-local message shape to an admission request and routes the
 verdict for a participant agent (see "Consuming the gate" below). Live
 Discord/cc-connect process integration, central orchestration, broad benchmarks,
@@ -34,12 +35,12 @@ Stdlib-only (Python 3.11+, no runtime dependencies). Not yet on PyPI; install
 from source:
 
 ```sh
-pip install "git+https://github.com/mentatzoe/turnaware.git"   # or: pip install .
+pip install "git+https://github.com/mentatzoe/nunchi.git"   # or: pip install .
 # zero-install one-shot:
-uvx --from "git+https://github.com/mentatzoe/turnaware.git" turnaware --help
+uvx --from "git+https://github.com/mentatzoe/nunchi.git" nunchi --help
 ```
 
-This provides the `turnaware` and `turnaware-channel` console scripts. See
+This provides the `nunchi` and `nunchi-channel` console scripts. See
 [`CHANGELOG.md`](CHANGELOG.md) for releases and [`docs/STABILITY.md`](docs/STABILITY.md)
 for the versioning / verdict-surface stability contract.
 
@@ -48,22 +49,22 @@ for the versioning / verdict-surface stability contract.
 Evaluate a request from stdin through the product/default classifier:
 
 ```sh
-export TURNAWARE_CLASSIFIER_MODEL="your/provider-model"
+export NUNCHI_CLASSIFIER_MODEL="your/provider-model"
 export OPENROUTER_API_KEY="..."
-PYTHONPATH=src python3 -m turnaware admit < tests/fixtures/speak.json
+PYTHONPATH=src python3 -m nunchi admit < tests/fixtures/speak.json
 ```
 
 Evaluate a request from a file through the product classifier:
 
 ```sh
-PYTHONPATH=src python3 -m turnaware admit --input tests/fixtures/pass.json
+PYTHONPATH=src python3 -m nunchi admit --input tests/fixtures/pass.json
 ```
 
 Evaluate with classifier selection in the envelope, or override it from the CLI:
 
 ```sh
-PYTHONPATH=src python3 -m turnaware admit --input tests/fixtures/speak_with_classifier.json
-PYTHONPATH=src python3 -m turnaware admit --classifier product --input tests/fixtures/speak_cli_precedence.json
+PYTHONPATH=src python3 -m nunchi admit --input tests/fixtures/speak_with_classifier.json
+PYTHONPATH=src python3 -m nunchi admit --classifier product --input tests/fixtures/speak_cli_precedence.json
 ```
 
 Run the verification suite:
@@ -95,7 +96,7 @@ Exit codes:
 - `2` — input source or JSON parse failure
 - `3` — admission request validation failure
 
-TurnAware owns admission, not composition. It does not draft the final reply and
+Nunchi owns admission, not composition. It does not draft the final reply and
 it does not prescribe speech shape beyond the admission verdict.
 
 ## Classifier selection
@@ -103,7 +104,7 @@ it does not prescribe speech shape beyond the admission verdict.
 The documented default classifier path is `product`. It is the only supported
 classifier path in this slice and is backed by a configured OpenAI-compatible
 provider/model. It is not a relabelled local keyword or deterministic verifier.
-If provider/model configuration is unavailable, TurnAware fails clearly instead
+If provider/model configuration is unavailable, Nunchi fails clearly instead
 of silently falling back to local logic.
 
 Classifier selection can be supplied by:
@@ -122,9 +123,9 @@ untrusted request must not be able to redirect the provider call (which carries
 the operator's API key) or choose which environment variable the key is read
 from. These are resolved exclusively from operator environment variables:
 
-- `TURNAWARE_CLASSIFIER_MODEL` for the model name (or `classifier_config.model`).
-- `TURNAWARE_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` for the API key.
-- `TURNAWARE_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` for the compatible API
+- `NUNCHI_CLASSIFIER_MODEL` for the model name (or `classifier_config.model`).
+- `NUNCHI_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` for the API key.
+- `NUNCHI_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` for the compatible API
   base URL; default is `https://openrouter.ai/api/v1`.
 
 The test suite sets a fixture provider response for deterministic offline
@@ -139,13 +140,13 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath("src"))
 
-from turnaware import evaluate
+from nunchi import evaluate
 
-os.environ["TURNAWARE_CLASSIFIER_MODEL"] = "your/provider-model"
+os.environ["NUNCHI_CLASSIFIER_MODEL"] = "your/provider-model"
 os.environ["OPENROUTER_API_KEY"] = "..."
 
 result = evaluate({
-    "trigger": {"content": "turnaware-vigil, please implement the CLI MVP."},
+    "trigger": {"content": "nunchi-vigil, please implement the CLI MVP."},
     "context": [],
 })
 ```
@@ -157,7 +158,7 @@ identifies the provider model, and `result["verdict"]` is one of `PASS`, `ACK`,
 ## Consuming the gate: the channel adapter
 
 A participant agent on a shared, turn-aware surface does not call the core
-directly — it uses the **channel adapter** (`turnaware.adapters.channel`), which
+directly — it uses the **channel adapter** (`nunchi.adapters.channel`), which
 maps its channel-local inputs (the triggering message, the recent transcript,
 its own identity) to an admission request, runs the gate, and returns a
 transport-neutral decision: `verdict` plus `silent`. If `silent`, the host posts
@@ -167,7 +168,7 @@ never writes replies, and nothing in it is tied to a specific chat platform.
 In-process (Python host):
 
 ```python
-from turnaware.adapters.channel import gate
+from nunchi.adapters.channel import gate
 
 result = gate(
     {"content": "dalgos, summarize the cache tradeoffs", "author": "zoe",
@@ -192,7 +193,7 @@ Subprocess (non-Python host) — JSON in, a transport-neutral JSON directive out
 ```sh
 echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
        "history":[],"agent":{"id":"dalgos"},"fail_policy":"open"}' \
-  | PYTHONPATH=src python3 -m turnaware.adapters
+  | PYTHONPATH=src python3 -m nunchi.adapters
 # -> {"verdict":"PASS","silent":true,...}    (host posts nothing)
 # -> {"verdict":"SPEAK","silent":false,...}  (host composes a turn)
 ```
@@ -219,7 +220,7 @@ as `pinned_rules` to opt a channel into that regime:
 
 ```python
 from pathlib import Path
-from turnaware.adapters.channel import gate
+from nunchi.adapters.channel import gate
 
 result = gate(trigger, history=history, agent_id="dalgos",
               pinned_rules=Path("profiles/open-floor.md").read_text())
@@ -269,5 +270,5 @@ conversation context to a verdict a harness can obey.
 
 ## License
 
-TurnAware is dual-licensed under MIT OR Apache-2.0, at your option. See
+Nunchi is dual-licensed under MIT OR Apache-2.0, at your option. See
 `LICENSE-MIT` and `LICENSE-APACHE`.

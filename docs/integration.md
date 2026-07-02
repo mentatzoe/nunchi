@@ -1,16 +1,16 @@
-# Integrating TurnAware
+# Integrating Nunchi
 
-This guide is for someone wiring TurnAware into a real agent or channel. It
-covers what TurnAware is responsible for, the integration paths and how to
+This guide is for someone wiring Nunchi into a real agent or channel. It
+covers what Nunchi is responsible for, the integration paths and how to
 choose one, how to wire it into a channel adapter (using cc-connect / pilot-bot
 as the worked example), installation, and how to generalize to other surfaces.
 
 For the verdict semantics themselves see the project `README.md`; for the
 classifier-quality evidence see `specs/003-classifier-test-suite/evidence/`.
 
-## Scope: what TurnAware decides (and what it does not)
+## Scope: what Nunchi decides (and what it does not)
 
-TurnAware is a **pre-reply admission gate**. Given a trigger and its
+Nunchi is a **pre-reply admission gate**. Given a trigger and its
 channel-local context, it returns exactly one verdict:
 
 - `PASS` — stay silent; emit no ordinary room message.
@@ -25,13 +25,13 @@ in logs, never in the conversation.
 
 What it is **not**: it is not a Discord bot, not a transport, and not an
 orchestrator. It is a library + CLI that produces a verdict. The adapter tier
-(`turnaware.adapters.channel`) maps a channel message to that verdict and routes
+(`nunchi.adapters.channel`) maps a channel message to that verdict and routes
 it; wiring the routed verdict into a running bot is the host's job.
 
 Why use it instead of having the agent judge inline? Today a participant agent
 typically reasons about "should I speak?" inline from a rubric in its loader
 file (this is how pilot-bot works). That judgment is invisible, untested, and
-varies per agent and per model. TurnAware turns the same decision into a single
+varies per agent and per model. Nunchi turns the same decision into a single
 component with a fixed rubric, a **selected model**
 (`google/gemini-3.1-flash-lite`, chosen by live bake-off — see the evidence
 dir), a regression corpus (spec 003), and an auditable result (verdict +
@@ -39,7 +39,7 @@ confidences + checked context + reasons).
 
 ## The contract is transport-neutral
 
-TurnAware does not depend on cc-connect or any other chat platform. The adapter
+Nunchi does not depend on cc-connect or any other chat platform. The adapter
 gives every integration the same two-field decision:
 
 - **`verdict`** — `PASS` / `ACK` / `ASK` / `SPEAK`
@@ -63,10 +63,10 @@ The CLI default output is therefore a JSON directive for *every* verdict
 ### Optional: suppression-by-sentinel (any transport)
 
 Some transports suppress an outbound message when the agent's final output is a
-magic string. That string is **your platform's convention, not TurnAware's** —
+magic string. That string is **your platform's convention, not Nunchi's** —
 supply your own:
 
-- CLI: `turnaware-channel --silent-token "<your-token>"` (prints exactly that
+- CLI: `nunchi-channel --silent-token "<your-token>"` (prints exactly that
   token on PASS, JSON otherwise)
 - Python: `result.silent_token("<your-token>")` (the token when silent, else `""`)
 
@@ -75,7 +75,7 @@ cc-connect is one such transport: it intercepts `CC_CONNECT_SILENT_PASS`
 `IsSilentPassResponse`; legacy `__CC_CONNECT_SILENT_PASS__` also accepted). It's
 provided as a named **preset** of the generic mechanism, with no special status:
 
-- CLI: `turnaware-channel --format cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS`
+- CLI: `nunchi-channel --format cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS`
 - Python: `result.cc_connect_sentinel()` ≡ `result.silent_token(SILENT_PASS_SENTINEL)`
 
 Every other host ignores tokens entirely and just branches on `silent`. The
@@ -89,7 +89,7 @@ Pick by what your host is and how much latency you can spend.
 
 For an LLM agent loaded from a `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` file.
 Instead of telling the agent to *reason* the PASS/ACK/ASK/SPEAK rubric inline,
-tell it to **call TurnAware first** and obey the verdict. This replaces ad-hoc
+tell it to **call Nunchi first** and obey the verdict. This replaces ad-hoc
 per-agent judgment with the tested gate while keeping the zero-code,
 markdown-loader deployment style. This is the path that lets you "just point an
 agent at the CLI" with no platform glue.
@@ -102,7 +102,7 @@ Loader snippet (adapt to your channel):
 Run the admission gate before composing anything. Build the payload from the
 triggering message, the recent transcript, and your identity, then run:
 
-    echo "$PAYLOAD" | python3 -m turnaware.adapters   # or: turnaware-channel
+    echo "$PAYLOAD" | python3 -m nunchi.adapters   # or: nunchi-channel
 
 Read the JSON it prints:
 - If `"silent": true`, post nothing this turn and stop.
@@ -117,14 +117,14 @@ A complete, copy-paste loader block is in
 [`examples/loader-snippet.md`](../examples/loader-snippet.md).
 
 Trade-off: the agent still spends a turn building the payload, but the *decision*
-is now TurnAware's, not the model's improvisation.
+is now Nunchi's, not the model's improvisation.
 
 ### Path B — in-process Python import
 
 For a Python host. Lowest overhead; no subprocess, no JSON round-trip.
 
 ```python
-from turnaware.adapters.channel import gate
+from nunchi.adapters.channel import gate
 
 result = gate(
     {"content": "dalgos, summarize the cache tradeoffs", "author": "zoe",
@@ -159,7 +159,7 @@ For a non-Python host. JSON in on stdin, a JSON directive out on stdout.
 echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
        "history":[],"agent":{"id":"dalgos","mention_id":"999"},
        "fail_policy":"open"}' \
-  | python3 -m turnaware.adapters
+  | python3 -m nunchi.adapters
 # -> {"verdict":"PASS","silent":true,"run_shape":...,...}     (exit 0; host posts nothing)
 # -> {"verdict":"SPEAK","silent":false,"run_shape":...,...}   (exit 0; host composes a turn)
 # bad input -> stderr message, no stdout directive            (exit 2)
@@ -188,7 +188,7 @@ cc-connect.
 
 cc-connect spawns each agent as a long-lived session bound to a `work_dir`
 (its loader files load once at startup) and routes inbound channel messages to
-it. To map that surface onto a TurnAware request:
+it. To map that surface onto a Nunchi request:
 
 - **trigger** ← the incoming message (`content`, the platform `message_id`, the
   sender as `author`, and `author_kind`: `human` for the operator, `peer_bot`
@@ -200,12 +200,12 @@ it. To map that surface onto a TurnAware request:
   what lets the classifier apply the Duplicate and Self-caused suppressors.
 - **agent.id** ← this agent's stable identity (e.g. `dalgos`). With multiple
   agents on one channel, cc-connect runs one session/identity each and routes by
-  sender; TurnAware sees one identity per call.
+  sender; Nunchi sees one identity per call.
 - **agent.mention_id** ← this agent's platform @mention handle, so the addressing
   rule can tell whether an `<@id>` targets this agent or someone else. (Omitting
   it was a real bug once — without it, mentions aimed elsewhere leak to SPEAK.)
 - **pinned_rules** ← optional. pilot-bot keeps channel norms in a
-  `pinned-rules.md` the agent reads as standing instruction; with TurnAware you
+  `pinned-rules.md` the agent reads as standing instruction; with Nunchi you
   can instead pass that text as `pinned_rules` so the verdict is channel-aware
   without baking policy into the loader. This is also how a room opts into a
   governance regime: the core prompt judges by plain social sense and applies
@@ -217,40 +217,40 @@ it. To map that surface onto a TurnAware request:
 A `surface` object (`{"type": "discord", ...}`) is passed through for the
 classifier's awareness and for your own logging.
 
-A built-in cc-connect `admission` config block that calls TurnAware before send
+A built-in cc-connect `admission` config block that calls Nunchi before send
 does **not** exist today — that would be a cc-connect change. Until then, use
 Path A (loader shells out) or Path C (the host shells out) — both reach the same
 sentinel interception that already ships in cc-connect.
 
 ## Installation
 
-TurnAware is stdlib-only (Python 3.11+, no runtime dependencies). It is not yet
+Nunchi is stdlib-only (Python 3.11+, no runtime dependencies). It is not yet
 on PyPI; install from source:
 
 ```sh
 pip install .                       # from a checkout
 # or
-pip install "git+https://github.com/mentatzoe/turnaware.git"
+pip install "git+https://github.com/mentatzoe/nunchi.git"
 ```
 
-This installs the `turnaware` and `turnaware-channel` console scripts. Without
+This installs the `nunchi` and `nunchi-channel` console scripts. Without
 installing, you can run from a checkout with `PYTHONPATH=src python3 -m
-turnaware.adapters`.
+nunchi.adapters`.
 
 Provider configuration is **operator-only**, read from the environment (never
 from the request payload — see the README security note):
 
 ```sh
-export TURNAWARE_CLASSIFIER_MODEL="google/gemini-3.1-flash-lite"   # the selected model
-export OPENROUTER_API_KEY="sk-or-v1-..."                           # or TURNAWARE_CLASSIFIER_API_KEY
-# optional: TURNAWARE_CLASSIFIER_BASE_URL (defaults to OpenRouter)
+export NUNCHI_CLASSIFIER_MODEL="google/gemini-3.1-flash-lite"   # the selected model
+export OPENROUTER_API_KEY="sk-or-v1-..."                           # or NUNCHI_CLASSIFIER_API_KEY
+# optional: NUNCHI_CLASSIFIER_BASE_URL (defaults to OpenRouter)
 ```
 
 For offline/dev wiring with no provider, inject a pinned decision instead of a
 key:
 
 ```sh
-export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
+export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
 ```
 
 ## Configuration (self-service)
@@ -261,44 +261,44 @@ Everything below is set by the integrating agent or human — no code changes.
 adversarial corpus, 6/7 load-bearing cases, ~1s latency). If you want an
 **open-weight** model with no big-3 dependency, `qwen/qwen3-235b-a22b-2507`
 matches that accuracy at roughly one-fifth the cost (with somewhat more latency
-variance). Either is a one-line `TURNAWARE_CLASSIFIER_MODEL` change; see the
+variance). Either is a one-line `NUNCHI_CLASSIFIER_MODEL` change; see the
 per-model evidence under `specs/003-classifier-test-suite/evidence/`.
 
 The full surface, and where each knob lives:
 
 | Knob | Where | Default | Notes |
 |------|-------|---------|-------|
-| classifier model | env `TURNAWARE_CLASSIFIER_MODEL`, or per-call `classifier_config.model` | — (required for live) | any OpenRouter / OpenAI-compatible model id |
-| API key | env `TURNAWARE_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` | — | operator-only; never read from the request |
-| provider endpoint | env `TURNAWARE_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` | OpenRouter | point at any OpenAI-compatible endpoint, incl. localhost |
+| classifier model | env `NUNCHI_CLASSIFIER_MODEL`, or per-call `classifier_config.model` | — (required for live) | any OpenRouter / OpenAI-compatible model id |
+| API key | env `NUNCHI_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` | — | operator-only; never read from the request |
+| provider endpoint | env `NUNCHI_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` | OpenRouter | point at any OpenAI-compatible endpoint, incl. localhost |
 | request timeout | per-call `classifier_config.timeout` | 30s | positive seconds |
 | provider retries | per-call `classifier_config.max_retries` / `retry_base_delay` | 2 / 0.5s | retries transient errors (429/5xx/timeouts) with exponential backoff; never retries 401/403/4xx |
-| fast-path | env `TURNAWARE_FASTPATH` | on (`0` disables) | resolves certain cases (an `<@id>` aimed at another agent, or a self-echo) to PASS with no provider call; anything ambiguous still goes to the model |
+| fast-path | env `NUNCHI_FASTPATH` | on (`0` disables) | resolves certain cases (an `<@id>` aimed at another agent, or a self-echo) to PASS with no provider call; anything ambiguous still goes to the model |
 | PASS corroboration | per-call `classifier_config.require_pass_corroboration` | `false` | when true, downgrades an uncorroborated PASS (no consulted `context:` ref) to ASK — for surfaces that must challenge unverified "done" claims; best paired with the fast-path |
 | failure behavior | `gate(fail_policy=...)` / payload `fail_policy` | `open` (→SPEAK) | `open` \| `closed` (→PASS) \| `raise` |
 | suppression output | CLI `--silent-token STR` / `--format cc-connect`; Python `result.silent_token(...)` | none (JSON) | your transport's sentinel, if it uses one |
-| offline/dev decision | env `TURNAWARE_CLASSIFIER_TEST_RESULT` | unset | pin a verdict; no provider call |
+| offline/dev decision | env `NUNCHI_CLASSIFIER_TEST_RESULT` | unset | pin a verdict; no provider call |
 
 Recipes:
 
 ```sh
 # 1. OpenRouter, pick any model
-export TURNAWARE_CLASSIFIER_MODEL="qwen/qwen3-235b-a22b-2507"
+export NUNCHI_CLASSIFIER_MODEL="qwen/qwen3-235b-a22b-2507"
 export OPENROUTER_API_KEY="sk-or-v1-..."
 
 # 2. A self-hosted / local OpenAI-compatible model (vLLM, llama.cpp, LM Studio)
-export TURNAWARE_CLASSIFIER_BASE_URL="http://localhost:8000/v1"
-export TURNAWARE_CLASSIFIER_API_KEY="local-unused-but-required"
-export TURNAWARE_CLASSIFIER_MODEL="my-local-model"
+export NUNCHI_CLASSIFIER_BASE_URL="http://localhost:8000/v1"
+export NUNCHI_CLASSIFIER_API_KEY="local-unused-but-required"
+export NUNCHI_CLASSIFIER_MODEL="my-local-model"
 
 # 3. Per-request model/timeout override (envelope field, no env change)
 echo '{"trigger":{"content":"hi","id":"t"},"agent":{"id":"a"},
        "classifier_config":{"model":"deepseek/deepseek-v3.2","timeout":20}}' \
-  | turnaware-channel
+  | nunchi-channel
 
 # 4. Your transport's suppression sentinel (Slack example), with fail-closed
 echo '{"trigger":{"content":"hi","id":"t"},"agent":{"id":"a"},"fail_policy":"closed"}' \
-  | turnaware-channel --silent-token "<<SLACK_NOOP>>"
+  | nunchi-channel --silent-token "<<SLACK_NOOP>>"
 ```
 
 The base URL and key are deliberately env-only (operator-controlled): a request
@@ -333,7 +333,7 @@ security note.
 
 ## Generalizing to another channel adapter (e.g. Slack)
 
-TurnAware is surface-agnostic; an adapter for another platform only has to:
+Nunchi is surface-agnostic; an adapter for another platform only has to:
 
 1. Map that platform's message + recent history + the agent's identity onto the
    request shape above (the `channel` adapter already does this for the

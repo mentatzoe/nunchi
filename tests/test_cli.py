@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from tests.provider_helpers import fixture_case, provider_env
 from tests.test_core import load_fixture
-from turnaware import evaluate
+from nunchi import evaluate
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures"
@@ -17,7 +17,7 @@ FIXTURE_DIR = ROOT / "tests" / "fixtures"
 def run_cli(args=None, stdin=None):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src")
-    cmd = [sys.executable, "-m", "turnaware", "admit"]
+    cmd = [sys.executable, "-m", "nunchi", "admit"]
     if args:
         cmd.extend(args)
     return subprocess.run(
@@ -75,7 +75,7 @@ class CliTests(unittest.TestCase):
                 "--classifier",
                 "product",
                 "--classifier-config",
-                '{"model": "turnaware-test-model"}',
+                '{"model": "nunchi-test-model"}',
                 "--input",
                 str(FIXTURE_DIR / "speak.json"),
             ])
@@ -83,7 +83,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["classifier"], "product")
-        self.assertEqual(payload["classifier_model"], "turnaware-test-model")
+        self.assertEqual(payload["classifier_model"], "nunchi-test-model")
 
     def test_cli_and_core_are_contract_equivalent_for_fixture_set(self):
         fixture_cases = {

@@ -16,24 +16,24 @@ magic string for a transport that suppresses sends by a final-output marker.
 Nothing here references cc-connect's sentinel.
 
 Run live (real classifier):
-    export TURNAWARE_CLASSIFIER_MODEL=google/gemini-3.1-flash-lite
+    export NUNCHI_CLASSIFIER_MODEL=google/gemini-3.1-flash-lite
     export OPENROUTER_API_KEY=...
     PYTHONPATH=src python3 examples/generic_host_demo.py
 
 Run offline (pin every verdict, just to see the routing/plumbing):
-    export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
+    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
     PYTHONPATH=src python3 examples/generic_host_demo.py
 
     # Or inject a different pinned verdict to watch it route a SPEAK:
-    export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["dev"]}'
+    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["dev"]}'
 """
 
 import os
 import sys
 
-from turnaware.adapters.channel import gate
+from nunchi.adapters.channel import gate
 
-# This host's own suppression marker. It is OUR convention, not TurnAware's — a
+# This host's own suppression marker. It is OUR convention, not Nunchi's — a
 # transport that drops an outbound message when the worker's final output equals
 # this string. (cc-connect has a different one; the gate is agnostic to both.)
 HOST_NOOP_SENTINEL = "<<HOST_NOOP>>"
@@ -66,10 +66,10 @@ QUEUE = [
 
 
 def main() -> int:
-    if not (os.environ.get("TURNAWARE_CLASSIFIER_MODEL")
-            or os.environ.get("TURNAWARE_CLASSIFIER_TEST_RESULT")):
-        print("Set TURNAWARE_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
-              "or TURNAWARE_CLASSIFIER_TEST_RESULT to see routing offline.",
+    if not (os.environ.get("NUNCHI_CLASSIFIER_MODEL")
+            or os.environ.get("NUNCHI_CLASSIFIER_TEST_RESULT")):
+        print("Set NUNCHI_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
+              "or NUNCHI_CLASSIFIER_TEST_RESULT to see routing offline.",
               file=sys.stderr)
         return 2
 

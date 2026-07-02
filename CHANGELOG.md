@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-02
+
 ### Changed
 
+- **Renamed to nunchi.** The project, package, module, console scripts, and
+  environment variables are now `nunchi` (눈치 — the art of reading the room
+  and knowing whether it is your turn to speak; the word means exactly what
+  the gate does). `turnaware` was never published to PyPI, so this is a clean
+  break: `TURNAWARE_*` environment variables become `NUNCHI_*`, the
+  `turnaware`/`turnaware-channel` scripts become `nunchi`/`nunchi-channel`,
+  and `TurnAwareError` becomes `NunchiError`. Historical spec narratives and
+  captured evidence keep the old name as a matter of record.
 - **Social core prompt.** The classifier system prompt now poses the
   read-the-room question — who is speaking, what has been said, who is this
   agent; is it this agent's turn? — judged as a socially competent participant

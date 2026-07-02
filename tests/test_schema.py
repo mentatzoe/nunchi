@@ -3,10 +3,10 @@ from unittest.mock import patch
 
 from tests.provider_helpers import fixture_case, provider_env
 from tests.test_core import load_fixture
-from turnaware import evaluate
-from turnaware.errors import ValidationError
-from turnaware.models import FORBIDDEN_REPLY_FIELDS, VERDICTS
-from turnaware.schema import validate_request, validate_result
+from nunchi import evaluate
+from nunchi.errors import ValidationError
+from nunchi.models import FORBIDDEN_REPLY_FIELDS, VERDICTS
+from nunchi.schema import validate_request, validate_result
 
 
 class SchemaTests(unittest.TestCase):
@@ -35,12 +35,12 @@ class SchemaTests(unittest.TestCase):
     def test_request_accepts_classifier_and_classifier_config(self):
         request = validate_request({
             "classifier": "product",
-            "classifier_config": {"model": "turnaware-test-model"},
+            "classifier_config": {"model": "nunchi-test-model"},
             "trigger": {"content": "Please acknowledge this."},
         })
 
         self.assertEqual(request.classifier, "product")
-        self.assertEqual(request.classifier_config, {"model": "turnaware-test-model"})
+        self.assertEqual(request.classifier_config, {"model": "nunchi-test-model"})
 
     def test_context_checked_references_only_request_items(self):
         request = load_fixture("pass")

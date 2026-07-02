@@ -1,6 +1,6 @@
-# TurnAware Agent Guidelines
+# Nunchi Agent Guidelines
 
-This repository builds TurnAware: a portable pre-reply admission gate for
+This repository builds Nunchi: a portable pre-reply admission gate for
 turn-aware agents.
 
 ## Source of truth
@@ -18,7 +18,7 @@ technologies, project structure, shell commands, and implementation constraints.
 
 ## Product boundary
 
-TurnAware decides admission, not reply composition.
+Nunchi decides admission, not reply composition.
 
 The core verdicts are exactly:
 

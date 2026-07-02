@@ -8,9 +8,9 @@ from unittest.mock import patch
 from tests.provider_helpers import provider_env
 from tests.test_cli import FIXTURE_DIR, run_cli
 from tests.test_core import load_fixture
-from turnaware import evaluate
-from turnaware.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
-from turnaware.errors import TurnAwareError, ValidationError
+from nunchi import evaluate
+from nunchi.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
+from nunchi.errors import NunchiError, ValidationError
 
 
 def fixture_provider_env(verdict="ACK"):
@@ -58,10 +58,10 @@ def _http_error(code):
     )
 
 
-# Provider env that omits TURNAWARE_CLASSIFIER_TEST_RESULT so the live
+# Provider env that omits NUNCHI_CLASSIFIER_TEST_RESULT so the live
 # OpenAICompatibleAdmissionClient path (with retry) is exercised.
 LIVE_PROVIDER_ENV = {
-    "TURNAWARE_CLASSIFIER_MODEL": "turnaware/provider-test-model",
+    "NUNCHI_CLASSIFIER_MODEL": "nunchi/provider-test-model",
     "OPENROUTER_API_KEY": "test-key",
 }
 
@@ -71,7 +71,7 @@ class ProviderRetryTests(unittest.TestCase):
         # First urlopen call raises a transient 503, second succeeds.
         side_effects = [_http_error(503), _FakeResponse(_ok_completion_response())]
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch("urllib.request.urlopen", side_effect=side_effects) as opened:
                     result = evaluate(load_fixture("speak"))
 
@@ -82,7 +82,7 @@ class ProviderRetryTests(unittest.TestCase):
     def test_socket_timeout_then_success_retries_and_succeeds(self):
         side_effects = [socket.timeout("timed out"), _FakeResponse(_ok_completion_response())]
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep"):
+            with patch("nunchi.classifiers.time.sleep"):
                 with patch("urllib.request.urlopen", side_effect=side_effects) as opened:
                     result = evaluate(load_fixture("speak"))
 
@@ -91,9 +91,9 @@ class ProviderRetryTests(unittest.TestCase):
 
     def test_401_aborts_immediately_without_retry(self):
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch("urllib.request.urlopen", side_effect=_http_error(401)) as opened:
-                    with self.assertRaises(TurnAwareError):
+                    with self.assertRaises(NunchiError):
                         evaluate(load_fixture("speak"))
 
         self.assertEqual(opened.call_count, 1)
@@ -101,20 +101,20 @@ class ProviderRetryTests(unittest.TestCase):
 
     def test_403_aborts_immediately_without_retry(self):
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch("urllib.request.urlopen", side_effect=_http_error(403)) as opened:
-                    with self.assertRaises(TurnAwareError):
+                    with self.assertRaises(NunchiError):
                         evaluate(load_fixture("speak"))
 
         self.assertEqual(opened.call_count, 1)
         self.assertEqual(slept.call_count, 0)
 
-    def test_exhausting_retries_raises_turnaware_error(self):
+    def test_exhausting_retries_raises_nunchi_error(self):
         # Always transient: default max_retries=2 -> 3 attempts -> 2 sleeps.
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch("urllib.request.urlopen", side_effect=_http_error(503)) as opened:
-                    with self.assertRaises(TurnAwareError):
+                    with self.assertRaises(NunchiError):
                         evaluate(load_fixture("speak"))
 
         self.assertEqual(opened.call_count, 3)
@@ -123,9 +123,9 @@ class ProviderRetryTests(unittest.TestCase):
     def test_max_retries_config_controls_attempt_count(self):
         config = {"max_retries": 1, "retry_base_delay": 0.1}
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch("urllib.request.urlopen", side_effect=_http_error(500)) as opened:
-                    with self.assertRaises(TurnAwareError):
+                    with self.assertRaises(NunchiError):
                         evaluate(load_fixture("speak"), classifier_config=config)
 
         self.assertEqual(opened.call_count, 2)
@@ -134,7 +134,7 @@ class ProviderRetryTests(unittest.TestCase):
     def test_retry_config_keys_accepted_via_classifier_config(self):
         config = {"max_retries": 0, "retry_base_delay": 1.5}
         with patch.dict("os.environ", LIVE_PROVIDER_ENV, clear=True):
-            with patch("turnaware.classifiers.time.sleep") as slept:
+            with patch("nunchi.classifiers.time.sleep") as slept:
                 with patch(
                     "urllib.request.urlopen",
                     return_value=_FakeResponse(_ok_completion_response()),
@@ -202,7 +202,7 @@ class ProviderClassifierTests(unittest.TestCase):
                 return json.dumps(completion_response).encode("utf-8")
 
         env = {
-            "TURNAWARE_CLASSIFIER_MODEL": "turnaware/provider-test-model",
+            "NUNCHI_CLASSIFIER_MODEL": "nunchi/provider-test-model",
             "OPENROUTER_API_KEY": "test-key",
         }
         with patch.dict("os.environ", env, clear=True):
@@ -211,7 +211,7 @@ class ProviderClassifierTests(unittest.TestCase):
 
         self.assertEqual(result["classifier"], "product")
         self.assertEqual(result["classifier_provider"], "openai-compatible")
-        self.assertEqual(result["classifier_model"], "turnaware/provider-test-model")
+        self.assertEqual(result["classifier_model"], "nunchi/provider-test-model")
         self.assertEqual(result["verdict"], "SPEAK")
         request = opened.call_args.args[0]
         self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/chat/completions")
@@ -287,7 +287,7 @@ class ProviderClassifierTests(unittest.TestCase):
             def read(self):
                 return json.dumps(completion).encode("utf-8")
 
-        env = {"TURNAWARE_CLASSIFIER_MODEL": "m", "OPENROUTER_API_KEY": "k"}
+        env = {"NUNCHI_CLASSIFIER_MODEL": "m", "OPENROUTER_API_KEY": "k"}
         with patch.dict("os.environ", env, clear=True):
             with patch("urllib.request.urlopen", return_value=FakeResponse()):
                 result = evaluate(load_fixture("pass"))

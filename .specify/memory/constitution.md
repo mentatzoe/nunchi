@@ -1,7 +1,7 @@
 <!--
 Sync Impact Report
 Version change: template -> 1.0.0
-Modified principles: all template placeholders replaced with TurnAware-specific principles
+Modified principles: all template placeholders replaced with Nunchi-specific principles
 Added sections: Product Boundaries; SpecKit Workflow & Review Gates; Agent Execution Hygiene
 Removed sections: placeholder Section 2 and Section 3 names/content
 Templates requiring updates:
@@ -9,17 +9,17 @@ Templates requiring updates:
 - ✅ .specify/templates/spec-template.md reviewed; user-story vertical slicing model retained
 - ✅ .specify/templates/tasks-template.md reviewed; independent-story tasking retained
 - ✅ .specify/templates/commands/ absent in this Spec Kit install; installed agent skill command docs retained
-- ✅ AGENTS.md and CLAUDE.md updated with TurnAware runtime guidance
+- ✅ AGENTS.md and CLAUDE.md updated with Nunchi runtime guidance
 Follow-up TODOs: none
 -->
 
-# TurnAware Constitution
+# Nunchi Constitution
 
 ## Core Principles
 
 ### I. Admission, Not Composition
 
-TurnAware MUST decide admission for shared-surface triggers: whether the current
+Nunchi MUST decide admission for shared-surface triggers: whether the current
 agent produces visible participation. The core verdict vocabulary is exactly
 `PASS`, `ACK`, `ASK`, and `SPEAK` unless this constitution is amended. The core
 MUST NOT draft reply prose, prescribe wording, or define speech-shape commands.
@@ -43,7 +43,7 @@ a quieter costume.
 
 ### III. CLI-First, Modular Core
 
-Every product capability MUST be reachable through the `turnaware` CLI and MUST
+Every product capability MUST be reachable through the `nunchi` CLI and MUST
 also live behind an internal callable core. A command-line wrapper that contains
 all decision logic inline is not acceptable. The core MUST expose a stable
 in-process evaluation boundary that tests and adapters can call without shelling
@@ -63,7 +63,7 @@ end-to-end path from supplied conversation context to a verdict that a harness
 can obey. A slice is not complete merely because schemas, docs, or internal
 pieces exist.
 
-Rationale: TurnAware's highest project risk is fake done. The first release
+Rationale: Nunchi's highest project risk is fake done. The first release
 candidate must do the product job, not only prepare to do it later.
 
 ### V. Test-First Contract and Fixture Discipline
@@ -81,7 +81,7 @@ agents from relabeling hopeful behavior as working behavior.
 
 ### VI. Adapter Tier Honesty and Consumer Boundaries
 
-TurnAware MUST support invocation at the earliest reliable boundary a host
+Nunchi MUST support invocation at the earliest reliable boundary a host
 harness exposes: wrapper/gateway, pre-input hook, pre-model hook, agent-invoked
 tool, or output-suppression fallback. Each adapter or handoff document MUST
 state its capability tier and whether PASS is guaranteed to produce no visible
@@ -118,7 +118,7 @@ whether they can trust and integrate the tool.
 
 ## Product Boundaries
 
-TurnAware is a portable pre-reply admission gate for unstructured multi-agent
+Nunchi is a portable pre-reply admission gate for unstructured multi-agent
 collaboration on shared surfaces such as chats, meetings, repos, or issue
 threads. It consumes supplied context and returns an auditable participation
 verdict. The core contract is:
@@ -141,7 +141,7 @@ moves them in:
 
 ## SpecKit Workflow & Review Gates
 
-TurnAware uses Spec Kit as the governing development workflow. The constitution
+Nunchi uses Spec Kit as the governing development workflow. The constitution
 MUST exist before product feature specs. Production features MUST use this gate
 sequence unless the project owner explicitly approves a narrower spike:
 

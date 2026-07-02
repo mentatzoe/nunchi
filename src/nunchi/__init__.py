@@ -1,4 +1,4 @@
-"""TurnAware public Python API."""
+"""Nunchi public Python API."""
 
 from .core import evaluate
 from .models import VERDICTS

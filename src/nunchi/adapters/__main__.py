@@ -1,4 +1,4 @@
-"""CLI entry for the adapter tier: `python -m turnaware.adapters`.
+"""CLI entry for the adapter tier: `python -m nunchi.adapters`.
 
 Defaults to the channel adapter (the only adapter shipped today).
 """

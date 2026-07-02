@@ -1,6 +1,6 @@
-# TurnAware Agent Guidelines
+# Nunchi Agent Guidelines
 
-This repository builds TurnAware: a portable pre-reply admission gate for
+This repository builds Nunchi: a portable pre-reply admission gate for
 turn-aware agents.
 
 ## Source of truth
@@ -18,7 +18,7 @@ technologies, project structure, shell commands, and implementation constraints.
 
 ## Product boundary
 
-TurnAware decides admission, not reply composition.
+Nunchi decides admission, not reply composition.
 
 The core verdicts are exactly:
 
@@ -32,7 +32,7 @@ Telemetry belongs outside the conversation surface.
 
 Admission results must never carry reply prose: `message`, `reply`, `draft`,
 and `content` are forbidden result fields (`FORBIDDEN_REPLY_FIELDS` in
-`src/turnaware/models.py`).
+`src/nunchi/models.py`).
 
 ## Commands and environment
 
@@ -41,12 +41,12 @@ and `content` are forbidden result fields (`FORBIDDEN_REPLY_FIELDS` in
 - Run tests: `python3 -m unittest`. CI (`.github/workflows/ci.yml`) runs this on
   a Python 3.11/3.12/3.13 matrix plus a clean-install packaging job, all offline.
 - Run the CLI from the repo root (requires classifier env, below):
-  `PYTHONPATH=src python3 -m turnaware admit < tests/fixtures/speak.json`
-- Live classifier requires `TURNAWARE_CLASSIFIER_MODEL` and `OPENROUTER_API_KEY`
-  (or `TURNAWARE_CLASSIFIER_API_KEY`); optional `TURNAWARE_CLASSIFIER_BASE_URL`
+  `PYTHONPATH=src python3 -m nunchi admit < tests/fixtures/speak.json`
+- Live classifier requires `NUNCHI_CLASSIFIER_MODEL` and `OPENROUTER_API_KEY`
+  (or `NUNCHI_CLASSIFIER_API_KEY`); optional `NUNCHI_CLASSIFIER_BASE_URL`
   (defaults to OpenRouter).
 - Tests must stay offline and deterministic: inject classifier output via
-  `TURNAWARE_CLASSIFIER_TEST_RESULT` using the helpers in
+  `NUNCHI_CLASSIFIER_TEST_RESULT` using the helpers in
   `tests/provider_helpers.py` (the payload needs `verdict`, `confidences`,
   `context_checked`, and `reasons`). Every verdict (and false-positive cases)
   has a fixture under `tests/fixtures/`.

@@ -4,7 +4,7 @@ These exercise loader correctness, report shape, the adapter contract, and
 the runner plumbing. They do NOT exercise classifier judgment — the
 classifier is provider-backed, so every test that actually invokes it
 injects a deterministic fixture-provider result via
-TURNAWARE_CLASSIFIER_TEST_RESULT and asserts that the runner observes and
+NUNCHI_CLASSIFIER_TEST_RESULT and asserts that the runner observes and
 reports exactly that verdict. Self-tests run offline in milliseconds.
 """
 
@@ -47,7 +47,7 @@ def _inject_provider_result(
 ):
     """patch.dict context manager injecting a deterministic classifier result.
 
-    The injected payload is what `turnaware.core.evaluate` (and the CLI)
+    The injected payload is what `nunchi.core.evaluate` (and the CLI)
     return instead of calling a live provider, keeping self-tests offline.
     """
     return mock.patch.dict(
@@ -197,7 +197,7 @@ class InProcessAdapterTests(unittest.TestCase):
     """Runner plumbing through the InProcessAdapter.
 
     The classifier is provider-backed; these tests inject a chosen verdict
-    via TURNAWARE_CLASSIFIER_TEST_RESULT and assert the adapter/runner
+    via NUNCHI_CLASSIFIER_TEST_RESULT and assert the adapter/runner
     observed and scored exactly that verdict. They verify suite machinery,
     not classifier judgment.
     """
@@ -567,7 +567,7 @@ class AddFixtureNoRunnerChangeTests(unittest.TestCase):
     TEMP_ID = "t-us4-fresh-fixture-speak"
 
     def _make_temp_fixtures_root(self) -> Path:
-        tmp = Path(tempfile.mkdtemp(prefix="turnaware-003-us4-"))
+        tmp = Path(tempfile.mkdtemp(prefix="nunchi-003-us4-"))
         self.addCleanup(shutil.rmtree, tmp, True)
         # Copy the schema of a real fixture pair, re-identified as a fresh case.
         src_env = FIXTURES_ROOT / "multica" / "m-baseline-speak-assigned.json"

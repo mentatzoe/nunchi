@@ -66,7 +66,7 @@ def _validate_envelope(envelope: Any, where: Path) -> dict[str, Any]:
     if not isinstance(trigger, dict) or not isinstance(trigger.get("content"), str):
         raise LoaderError(
             f"{where}: envelope.trigger.content must be a non-empty string "
-            f"(public turnaware admit schema)"
+            f"(public nunchi admit schema)"
         )
     return envelope
 

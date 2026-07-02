@@ -3,7 +3,7 @@
 Paste the block below into your agent's loader file (`CLAUDE.md`, `AGENTS.md`,
 `GEMINI.md`, or whatever your runtime loads as standing instruction). It
 implements **Path A** from [`docs/integration.md`](../docs/integration.md): the
-agent calls TurnAware first and obeys the verdict, instead of improvising the
+agent calls Nunchi first and obeys the verdict, instead of improvising the
 "should I speak?" decision inline.
 
 It is transport-neutral — nothing below assumes cc-connect, Discord, Slack, or
@@ -15,14 +15,14 @@ decides which.
 The host process must have the classifier configured in its environment before
 the agent runs. Set **one** of:
 
-- **Live:** `TURNAWARE_CLASSIFIER_MODEL` (e.g. `google/gemini-3.1-flash-lite`)
-  plus an API key (`OPENROUTER_API_KEY` or `TURNAWARE_CLASSIFIER_API_KEY`).
-- **Dev / offline (no provider call):** `TURNAWARE_CLASSIFIER_TEST_RESULT` set to
+- **Live:** `NUNCHI_CLASSIFIER_MODEL` (e.g. `google/gemini-3.1-flash-lite`)
+  plus an API key (`OPENROUTER_API_KEY` or `NUNCHI_CLASSIFIER_API_KEY`).
+- **Dev / offline (no provider call):** `NUNCHI_CLASSIFIER_TEST_RESULT` set to
   a pinned decision JSON, e.g.
   `{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}`.
 
-Install once with `pip install .` (gives you the `turnaware-channel` console
-script), or run from a checkout with `PYTHONPATH=src python3 -m turnaware.adapters`.
+Install once with `pip install .` (gives you the `nunchi-channel` console
+script), or run from a checkout with `PYTHONPATH=src python3 -m nunchi.adapters`.
 
 ---
 
@@ -72,9 +72,9 @@ would appear in the channel, run the admission gate and obey its verdict.
 
 2. Pipe that payload to the gate and read the JSON it prints:
 
-       echo "$PAYLOAD" | turnaware-channel
+       echo "$PAYLOAD" | nunchi-channel
        # or, from a checkout without installing:
-       echo "$PAYLOAD" | PYTHONPATH=src python3 -m turnaware.adapters
+       echo "$PAYLOAD" | PYTHONPATH=src python3 -m nunchi.adapters
 
 3. Act on the directive:
    - If the JSON has `"silent": true` -> **post nothing this turn. Stop.**
@@ -98,18 +98,18 @@ string. If yours is one of those, add `--silent-token` so the CLI prints **your*
 token (and nothing else) on PASS, instead of JSON:
 
 ```sh
-echo "$PAYLOAD" | turnaware-channel --silent-token "<YOUR_TRANSPORTS_SENTINEL>"
+echo "$PAYLOAD" | nunchi-channel --silent-token "<YOUR_TRANSPORTS_SENTINEL>"
 # PASS  -> prints exactly: <YOUR_TRANSPORTS_SENTINEL>   (emit it verbatim to stay silent)
 # other -> prints the normal JSON directive             (compose one turn)
 ```
 
-The token is **your platform's convention, not TurnAware's** — supply your own.
+The token is **your platform's convention, not Nunchi's** — supply your own.
 
 cc-connect is one such transport, provided as a named preset of this same
 mechanism (no special status):
 
 ```sh
-echo "$PAYLOAD" | turnaware-channel --format cc-connect
+echo "$PAYLOAD" | nunchi-channel --format cc-connect
 # equivalent to: --silent-token CC_CONNECT_SILENT_PASS
 ```
 

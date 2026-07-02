@@ -1,9 +1,9 @@
 """Channel-local admission adapter.
 
-This adapter bridges any turn-aware chat surface to the TurnAware core. It takes
+This adapter bridges any turn-aware chat surface to the Nunchi core. It takes
 the channel-local inputs a participant agent already has — the triggering
 message, the recent transcript, and the agent's own identity — maps them to a
-TurnAware admission request, runs the callable core, and routes the verdict
+Nunchi admission request, runs the callable core, and routes the verdict
 back into the host's action model.
 
 It stays strictly inside the admission boundary: it returns a verdict and a
@@ -12,7 +12,7 @@ contract is transport-neutral — the host branches on ``silent``/``verdict`` an
 owns how it stays quiet — so nothing here depends on a particular chat platform.
 
 Some transports suppress a send by recognizing a magic final-output string.
-That is the host's convention, not TurnAware's: supply your own token via
+That is the host's convention, not Nunchi's: supply your own token via
 :meth:`ChannelGateResult.silent_token` (or the CLI's ``--silent-token``). The
 `CC_CONNECT_SILENT_PASS` constant and ``--format cc-connect`` are just the
 cc-connect *preset* of that mechanism — one named transport among many, with no
@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from ..core import evaluate
-from ..errors import TurnAwareError, ValidationError
+from ..errors import NunchiError, ValidationError
 
 # The cc-connect preset suppression token (matches its core/message.go
 # SilentPassSentinel). It has no privileged status — it is one value you may pass
@@ -109,7 +109,7 @@ class ChannelGateResult:
 
         A transport that suppresses a send by recognizing a magic final-output
         string supplies its own ``token`` here. The token is the host's
-        convention, not TurnAware's — most hosts never need this and just branch
+        convention, not Nunchi's — most hosts never need this and just branch
         on ``silent``.
         """
         return token if self.silent else ""
@@ -146,7 +146,7 @@ def build_request(
     surface: dict[str, Any] | None = None,
     pinned_rules: str | None = None,
 ) -> dict[str, Any]:
-    """Map channel-local inputs to a TurnAware admission request envelope.
+    """Map channel-local inputs to a Nunchi admission request envelope.
 
     Transcript lines become ordered context items tagged with the speaker's
     normalized role (operator/peer/self); a line authored by ``agent_id`` is
@@ -249,7 +249,7 @@ def gate(
     run = evaluate_fn if evaluate_fn is not None else evaluate
     try:
         result = run(request)
-    except (TurnAwareError, ValidationError) as exc:
+    except (NunchiError, ValidationError) as exc:
         if fail_policy == "raise":
             raise
         verdict = "SPEAK" if fail_policy == "open" else "PASS"
@@ -306,7 +306,7 @@ def _read_payload(argv: list[str]) -> dict:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="turnaware.adapters.channel",
+        prog="nunchi.adapters.channel",
         description="Channel-local admission gate. Reads a JSON payload "
         "(trigger, history, agent, [surface], [pinned_rules], [fail_policy]) "
         "from --input or stdin and prints a transport-neutral JSON directive "
@@ -387,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
             pinned_rules=payload.get("pinned_rules"),
             fail_policy=payload.get("fail_policy", "open"),
         )
-    except (ValidationError, TurnAwareError) as exc:
+    except (ValidationError, NunchiError) as exc:
         print(f"channel adapter error: {exc}", file=sys.stderr)
         return 2
 

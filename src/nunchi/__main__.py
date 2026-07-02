@@ -1,4 +1,4 @@
-"""Module entry point for ``python -m turnaware``."""
+"""Module entry point for ``python -m nunchi``."""
 
 from .cli import main
 

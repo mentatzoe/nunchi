@@ -4,9 +4,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests.provider_helpers import fixture_case, provider_env
-from turnaware import evaluate
-from turnaware.errors import ValidationError
-from turnaware.models import FORBIDDEN_REPLY_FIELDS, VERDICTS
+from nunchi import evaluate
+from nunchi.errors import ValidationError
+from nunchi.models import FORBIDDEN_REPLY_FIELDS, VERDICTS
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
