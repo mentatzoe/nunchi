@@ -1,0 +1,9 @@
+name: nunchi-gate
+version: 0.2.0
+description: >
+  Nunchi admission gate for Hermes — evaluates every incoming channel message
+  via the nunchi-channel CLI and suppresses the Hermes agent reply when the
+  verdict is PASS (stay silent). Verdicts ACK, ASK, and SPEAK allow the normal
+  Hermes dispatch path to continue.
+provides_hooks:
+  - pre_gateway_dispatch
