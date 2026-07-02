@@ -19,9 +19,29 @@ Config block (in Hermes config.yaml):
       # Use "*" to gate all platforms regardless of name.
       platforms: discord
 
-      # channels (str or list of chat-ids, REQUIRED unless "*") — only these
-      # channel/chat IDs are gated.  Use "*" to gate every channel on the
-      # matched platform(s).
+      # channels — REQUIRED unless "*".  Three accepted forms:
+      #
+      #   Legacy CSV string (original behaviour, unchanged):
+      #     channels: "1518384310321811456,2222222222222222222"
+      #
+      #   Legacy list (original behaviour, unchanged):
+      #     channels:
+      #       - "1518384310321811456"
+      #       - "2222222222222222222"
+      #
+      #   Map form (new): channel-id -> per-channel config dict.
+      #   Per-channel keys fall back to the matching global key when absent.
+      #   Allowed per-channel keys: enabled, senders, allow_from, verbosity,
+      #   model, pinned_rules, pinned_rules_file, fail_open.
+      #   Use "*" as a key for a map-form wildcard (matches any channel).
+      #     channels:
+      #       "1518384310321811456":
+      #         senders: all
+      #         verbosity: debug
+      #       "9999999999999999999":
+      #         senders: allowlist
+      #         allow_from: [alice, "99"]
+      #         verbosity: normal
       channels: "1518384310321811456"
 
       # agent_id (str, default "agent") — the Hermes agent's display name as it
@@ -40,7 +60,36 @@ Config block (in Hermes config.yaml):
       # model (str, optional) — when set, NUNCHI_CLASSIFIER_MODEL is exported into
       # the subprocess environment, overriding any inherited value.  Useful for
       # selecting a non-default classifier model without touching the system env.
+      # Can be overridden per channel in the map form of `channels`.
       # model: anthropic/claude-opus-4-5
+
+      # senders (str, default "all") — controls which message senders are gated.
+      # Can be overridden per channel in the map form of `channels`.
+      #   all       — gate every message (current default behaviour).
+      #   humans    — bot-authored messages are dropped without calling the
+      #               classifier.  Requires DISCORD_ALLOW_BOTS=all globally so
+      #               bot messages reach the plugin at all.
+      #   allowlist — only senders whose user_name OR user_id (case-insensitive
+      #               for names) appear in `allow_from` are gated; everything
+      #               else is dropped without a classifier call.
+      # senders: all
+
+      # allow_from (list or CSV, optional) — required when senders=allowlist.
+      # Values are matched case-insensitively against user_name and literally
+      # against user_id.
+      # allow_from: [alice, "42"]
+
+      # verbosity (str, default "normal") — controls which fields are written
+      # to the gate log.  Can be overridden per channel in the map form.
+      #   minimal — ts, platform, channel_ids, message_id, verdict, silent,
+      #             action, elapsed_ms.
+      #   normal  — adds trigger_author, trigger_author_kind, history_len,
+      #             classifier_model, reasons[:3], and the full `confidences`
+      #             dict from the directive.
+      #   debug   — adds the complete payload sent to nunchi-channel and the
+      #             complete directive returned.
+      # Errors always log regardless of verbosity level.
+      # verbosity: normal
 
       # pinned_rules_file (str, optional) — path to a text file whose contents are
       # passed as "pinned_rules" in the payload on every gate invocation.  The file
@@ -54,6 +103,7 @@ Config block (in Hermes config.yaml):
 
       # fail_open (bool, default true) — when true, classifier errors allow the
       # Hermes reply through.  Set to false for strict gating.
+      # Can be overridden per channel in the map form of `channels`.
       fail_open: true
 
       # bypass_commands (bool, default true) — skip the gate for messages that
@@ -96,6 +146,13 @@ _CONTEXT_LINE = re.compile(r"^\[(?P<name>[^\]]+?)(?P<bot_tag>\s+\[bot\])?\]\s*(?
 
 # Pinned-rules file cache: maps absolute path string -> (mtime, content)
 _PINNED_RULES_CACHE: dict[str, tuple[float, str]] = {}
+
+# Keys that can be specified per-channel in the map form of ``channels``.
+# All other keys (binary, timeout_seconds, bypass_commands, log_path, …) are
+# global-only and are never overridden at the per-channel level.
+_PER_CHANNEL_KEYS: frozenset[str] = frozenset(
+    {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open"}
+)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -225,6 +282,69 @@ def _load_pinned_rules(path_str: str) -> str | None:
     except Exception:
         logger.debug("nunchi-gate: failed to read pinned_rules_file %s", path_str, exc_info=True)
         return None
+
+
+def resolve_channel_config(cfg: dict[str, Any], channel_ids: set[str]) -> dict[str, Any] | None:
+    """Resolve the effective config for a given set of channel IDs.
+
+    This is a pure function: given the global config dict and the event's
+    channel IDs, it returns either the effective config dict to use for this
+    event, or ``None`` if the event should not be gated (channel not matched).
+
+    **Legacy form** (``channels`` is a CSV string or list):
+    Returns *cfg* unchanged when any of *channel_ids* matches a listed ID, or
+    when ``"*"`` appears in the channels list (wildcard).  Returns ``None`` when
+    no channel matches.
+
+    **Map form** (``channels`` is a dict):
+    Searches *channel_ids* for an exact key match in the map; falls back to a
+    ``"*"`` key if present.  Returns ``None`` when no entry matches or the
+    matched entry has ``enabled: false``.  Otherwise merges per-channel keys
+    (``enabled``, ``senders``, ``allow_from``, ``verbosity``, ``model``,
+    ``pinned_rules``, ``pinned_rules_file``, ``fail_open``) on top of the
+    global config and returns the merged dict.  Global keys absent from the
+    per-channel entry are inherited unchanged.
+    """
+    channels_raw = cfg.get("channels") or cfg.get("channel_ids")
+
+    if isinstance(channels_raw, dict):
+        # Map form — find the best matching per-channel entry.
+        per_ch_raw: Any = None
+        found = False
+        for cid in channel_ids:
+            if cid in channels_raw:
+                per_ch_raw = channels_raw[cid]
+                found = True
+                break
+        if not found and "*" in channels_raw:
+            per_ch_raw = channels_raw["*"]
+            found = True
+        if not found:
+            return None
+
+        per_ch: dict[str, Any] = per_ch_raw if isinstance(per_ch_raw, dict) else {}
+
+        # Listed map channels are enabled by default; ``enabled: false`` opts out.
+        if not _coerce_bool(per_ch.get("enabled", True)):
+            return None
+
+        # Merge: start with a shallow copy of global config, override with
+        # per-channel keys that are explicitly present in the entry.
+        resolved: dict[str, Any] = {**cfg}
+        for key in _PER_CHANNEL_KEYS:
+            if key in per_ch:
+                resolved[key] = per_ch[key]
+        return resolved
+
+    # Legacy form: CSV string, list, or anything _coerce_list can handle.
+    if channels_raw is None:
+        return None
+    channels = set(_coerce_list(channels_raw))
+    if not channels:
+        return None
+    if "*" in channels or (channel_ids & channels):
+        return cfg
+    return None
 
 
 def _parse_channel_context(event: Any, agent_id: str) -> list[dict[str, Any]]:
@@ -360,6 +480,13 @@ def _write_gate_log(entry: dict[str, Any], cfg: dict[str, Any]) -> None:
 
 
 def _should_gate(event: Any, cfg: dict[str, Any]) -> bool:
+    """Check basic gating criteria: enabled, bypass_commands, platforms, and
+    non-empty text.
+
+    Channel matching is handled separately by :func:`resolve_channel_config`
+    after this function returns ``True``, so this function deliberately does
+    not inspect the ``channels`` config key.
+    """
     if not _coerce_bool(cfg.get("enabled"), default=False):
         return False
 
@@ -374,12 +501,6 @@ def _should_gate(event: Any, cfg: dict[str, Any]) -> bool:
     if platforms and "*" not in platforms and platform not in platforms:
         return False
 
-    channels = set(_coerce_list(cfg.get("channels") or cfg.get("channel_ids")))
-    if not channels:
-        return False
-    if "*" not in channels and not (_channel_ids(source) & channels):
-        return False
-
     text = str(getattr(event, "text", "") or "")
     return bool(text.strip())
 
@@ -390,46 +511,105 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
         return None
 
     source = getattr(event, "source", None)
+    ch_ids = _channel_ids(source)
+
+    # Resolve per-channel config (handles legacy and map forms).
+    # Returns None when the event's channel is not configured for gating.
+    resolved_cfg = resolve_channel_config(cfg, ch_ids)
+    if resolved_cfg is None:
+        return None
+
     started = time.time()
-    agent_id = str(cfg.get("agent_id") or "agent").strip() or "agent"
+    verbosity = str(resolved_cfg.get("verbosity") or "normal").strip().lower()
+    agent_id = str(resolved_cfg.get("agent_id") or "agent").strip() or "agent"
+
+    # ------------------------------------------------------------------ #
+    # Sender policy — checked before any subprocess call.                 #
+    # A "drop" emits {"action":"skip","reason":"nunchi:sender-policy"}    #
+    # and a receipt log entry, but never invokes nunchi-channel.          #
+    # ------------------------------------------------------------------ #
+    senders = str(resolved_cfg.get("senders") or "all").strip().lower()
+    if senders != "all":
+        is_bot = getattr(source, "is_bot", None)
+        user_name = str(getattr(source, "user_name", None) or "").strip()
+        user_id = str(getattr(source, "user_id", None) or "").strip()
+
+        drop = False
+        if senders == "humans":
+            drop = _coerce_bool(is_bot)
+        elif senders == "allowlist":
+            allow_from_raw = _coerce_list(resolved_cfg.get("allow_from") or [])
+            allow_set = {a.lower() for a in allow_from_raw}
+            drop = not (user_name.lower() in allow_set or user_id.lower() in allow_set)
+
+        if drop:
+            elapsed_ms = round((time.time() - started) * 1000)
+            log_entry: dict[str, Any] = {
+                "ts": started,
+                "platform": _platform_name(source),
+                "channel_ids": sorted(ch_ids),
+                "message_id": getattr(event, "message_id", None),
+                "action": "skip-sender-policy",
+                "elapsed_ms": elapsed_ms,
+            }
+            _write_gate_log(log_entry, resolved_cfg)
+            return {"action": "skip", "reason": "nunchi:sender-policy"}
+
+    # ------------------------------------------------------------------ #
+    # Normal classifier path.                                             #
+    # ------------------------------------------------------------------ #
     history = _parse_channel_context(event, agent_id)
-    payload = _build_payload(event, cfg, history)
-    base_log = {
+    payload = _build_payload(event, resolved_cfg, history)
+
+    # Base log fields present at every verbosity level.
+    base_log: dict[str, Any] = {
         "ts": started,
         "platform": _platform_name(source),
-        "channel_ids": sorted(_channel_ids(source)),
+        "channel_ids": sorted(ch_ids),
         "message_id": getattr(event, "message_id", None),
-        "payload_keys": sorted(payload.keys()),
-        "history_len": len(history),
-        "trigger_author": payload["trigger"].get("author"),
-        "trigger_author_kind": payload["trigger"].get("author_kind"),
     }
+    # normal and debug add author / history metadata.
+    if verbosity in ("normal", "debug"):
+        base_log["trigger_author"] = payload["trigger"].get("author")
+        base_log["trigger_author_kind"] = payload["trigger"].get("author_kind")
+        base_log["history_len"] = len(history)
 
     try:
-        result = _run_nunchi(payload, cfg)
+        result = _run_nunchi(payload, resolved_cfg)
         verdict = str(result.get("verdict") or "").upper()
         elapsed_ms = round((time.time() - started) * 1000)
+
         log_entry = {
             **base_log,
             "elapsed_ms": elapsed_ms,
             "verdict": verdict,
             "silent": result.get("silent"),
-            "classifier_model": result.get("classifier_model"),
-            "reasons": (result.get("reasons") or [])[:3],
         }
+
+        # normal adds classifier metadata + confidences; debug adds everything.
+        if verbosity in ("normal", "debug"):
+            log_entry["classifier_model"] = result.get("classifier_model")
+            log_entry["reasons"] = (result.get("reasons") or [])[:3]
+            confidences = result.get("confidences")
+            if confidences is not None:
+                log_entry["confidences"] = confidences
+        if verbosity == "debug":
+            log_entry["payload"] = payload
+            log_entry["directive"] = result
+
         if result.get("silent") is True or verdict == "PASS":
             log_entry["action"] = "skip"
-            _write_gate_log(log_entry, cfg)
+            _write_gate_log(log_entry, resolved_cfg)
             logger.info("nunchi-gate PASS -> skip channel_ids=%s", log_entry["channel_ids"])
             return {"action": "skip", "reason": "nunchi:PASS"}
         if verdict in _SPEAK_VERDICTS:
             log_entry["action"] = "allow"
-            _write_gate_log(log_entry, cfg)
+            _write_gate_log(log_entry, resolved_cfg)
             logger.info("nunchi-gate %s -> allow channel_ids=%s", verdict, log_entry["channel_ids"])
             return None
         raise RuntimeError(f"unknown nunchi verdict {verdict!r}")
     except Exception as exc:
-        fail_open = _coerce_bool(cfg.get("fail_open"), default=True)
+        fail_open = _coerce_bool(resolved_cfg.get("fail_open"), default=True)
         log_entry = {
             **base_log,
             "elapsed_ms": round((time.time() - started) * 1000),
@@ -437,7 +617,7 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
             "error": str(exc)[:500],
             "fail_open": fail_open,
         }
-        _write_gate_log(log_entry, cfg)
+        _write_gate_log(log_entry, resolved_cfg)
         logger.warning("nunchi-gate error (%s); fail_open=%s", exc, fail_open)
         if fail_open:
             return None

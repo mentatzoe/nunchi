@@ -551,5 +551,447 @@ class TestRegisterHook(unittest.TestCase):
         self.assertIs(registered["pre_gateway_dispatch"], p._gate_event)
 
 
+# ---------------------------------------------------------------------------
+# Feature 1: Per-channel configuration via resolve_channel_config()
+# ---------------------------------------------------------------------------
+
+class TestResolveChannelConfig(unittest.TestCase):
+    """resolve_channel_config() pure function — legacy and map forms."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    # --- Legacy form (CSV / list) stays exactly as before ---
+
+    def test_legacy_csv_matches_listed_channel(self) -> None:
+        cfg = _base_cfg(channels="1518384310321811456,other-chan")
+        result = self.p.resolve_channel_config(cfg, {"1518384310321811456"})
+        self.assertIs(result, cfg)
+
+    def test_legacy_csv_no_match_returns_none(self) -> None:
+        cfg = _base_cfg(channels="1518384310321811456")
+        result = self.p.resolve_channel_config(cfg, {"unknown-chan"})
+        self.assertIsNone(result)
+
+    def test_legacy_list_matches_listed_channel(self) -> None:
+        cfg = _base_cfg(channels=["1518384310321811456", "other-chan"])
+        result = self.p.resolve_channel_config(cfg, {"other-chan"})
+        self.assertIs(result, cfg)
+
+    def test_legacy_wildcard_matches_any_channel(self) -> None:
+        cfg = _base_cfg(channels="*")
+        result = self.p.resolve_channel_config(cfg, {"any-random-channel"})
+        self.assertIs(result, cfg)
+
+    def test_legacy_empty_channels_returns_none(self) -> None:
+        cfg = _base_cfg(channels="")
+        result = self.p.resolve_channel_config(cfg, {"1518384310321811456"})
+        self.assertIsNone(result)
+
+    # --- Map form ---
+
+    def test_map_exact_channel_match_returns_merged_config(self) -> None:
+        cfg = _base_cfg(channels={"1518384310321811456": {"senders": "humans"}, "chan2": {}})
+        result = self.p.resolve_channel_config(cfg, {"1518384310321811456"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["senders"], "humans")  # from per-channel
+        self.assertEqual(result["agent_id"], "aleph")  # inherited from global
+
+    def test_map_wildcard_used_when_no_exact_match(self) -> None:
+        cfg = _base_cfg(channels={"*": {"verbosity": "minimal"}})
+        result = self.p.resolve_channel_config(cfg, {"some-other-chan"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["verbosity"], "minimal")
+
+    def test_map_exact_match_preferred_over_wildcard(self) -> None:
+        cfg = _base_cfg(channels={
+            "exact-chan": {"verbosity": "debug"},
+            "*": {"verbosity": "minimal"},
+        })
+        result = self.p.resolve_channel_config(cfg, {"exact-chan"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["verbosity"], "debug")
+
+    def test_map_no_match_no_wildcard_returns_none(self) -> None:
+        cfg = _base_cfg(channels={"chan1": {}, "chan2": {}})
+        result = self.p.resolve_channel_config(cfg, {"unknown-chan"})
+        self.assertIsNone(result)
+
+    def test_map_enabled_false_returns_none(self) -> None:
+        cfg = _base_cfg(channels={"1518384310321811456": {"enabled": False}})
+        result = self.p.resolve_channel_config(cfg, {"1518384310321811456"})
+        self.assertIsNone(result)
+
+    def test_map_enabled_true_explicitly_still_gates(self) -> None:
+        cfg = _base_cfg(channels={"1518384310321811456": {"enabled": True}})
+        result = self.p.resolve_channel_config(cfg, {"1518384310321811456"})
+        self.assertIsNotNone(result)
+
+    def test_map_per_channel_falls_back_to_global_for_absent_keys(self) -> None:
+        """Per-channel entry without 'model' inherits the global model."""
+        cfg = _base_cfg(model="global-model", channels={"chan1": {"senders": "humans"}})
+        result = self.p.resolve_channel_config(cfg, {"chan1"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["senders"], "humans")    # per-channel
+        self.assertEqual(result["model"], "global-model")  # global fallback
+
+    def test_map_per_channel_model_overrides_global_model(self) -> None:
+        cfg = _base_cfg(model="global-model", channels={"chan1": {"model": "per-chan-model"}})
+        result = self.p.resolve_channel_config(cfg, {"chan1"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["model"], "per-chan-model")
+
+    def test_map_per_channel_fail_open_overrides_global(self) -> None:
+        cfg = _base_cfg(fail_open=True, channels={"chan1": {"fail_open": False}})
+        result = self.p.resolve_channel_config(cfg, {"chan1"})
+        self.assertIsNotNone(result)
+        self.assertFalse(result["fail_open"])
+
+    def test_map_disabled_channel_is_not_gated_end_to_end(self) -> None:
+        """An enabled:false map entry makes _gate_event return None without classifier."""
+        cfg = _base_cfg(channels={"1518384310321811456": {"enabled": False}})
+        called = False
+
+        def fake_run(payload: dict, c: dict) -> dict:
+            nonlocal called
+            called = True
+            return {"verdict": "PASS"}
+
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", fake_run):
+                result = self.p._gate_event(_event())
+
+        self.assertIsNone(result)
+        self.assertFalse(called)
+
+
+# ---------------------------------------------------------------------------
+# Feature 2: Sender policy
+# ---------------------------------------------------------------------------
+
+class TestSenderPolicy(unittest.TestCase):
+    """senders: all / humans / allowlist policy enforcement."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    def test_senders_all_calls_classifier_for_bot(self) -> None:
+        """Default senders=all routes bot messages through the classifier."""
+        called = []
+
+        def capture_run(payload: dict, cfg: dict) -> dict:
+            called.append(1)
+            return {"verdict": "SPEAK", "silent": False}
+
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=_base_cfg(senders="all")):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", capture_run):
+                result = self.p._gate_event(_event(is_bot=True))
+
+        self.assertTrue(len(called) > 0, "classifier should have been called")
+        self.assertIsNone(result)
+
+    def test_senders_humans_drops_bot_without_subprocess_call(self) -> None:
+        """senders=humans drops bot-authored messages and never invokes subprocess."""
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", return_value=_base_cfg(senders="humans")
+        ):
+            with unittest.mock.patch("subprocess.run") as mock_subproc:
+                result = self.p._gate_event(_event(is_bot=True))
+
+        mock_subproc.assert_not_called()
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:sender-policy"})
+
+    def test_senders_humans_passes_human_to_classifier(self) -> None:
+        """senders=humans allows human messages through to the classifier."""
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", return_value=_base_cfg(senders="humans")
+        ):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi",
+                return_value={"verdict": "SPEAK", "silent": False},
+            ):
+                result = self.p._gate_event(_event(is_bot=False))
+
+        self.assertIsNone(result)
+
+    def test_senders_allowlist_by_name_case_insensitive(self) -> None:
+        """allowlist: user_name match is case-insensitive; matched sender reaches classifier."""
+        cfg = _base_cfg(senders="allowlist", allow_from=["Zoe", "alice"])
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi",
+                return_value={"verdict": "SPEAK", "silent": False},
+            ):
+                # _event default: user_name="zoe" (lowercase); "Zoe" in allow_from
+                result = self.p._gate_event(_event(user_name="zoe"))
+
+        self.assertIsNone(result)
+
+    def test_senders_allowlist_by_user_id(self) -> None:
+        """allowlist: user_id match allows the sender through."""
+        cfg = _base_cfg(senders="allowlist", allow_from=["42"])  # user_id="42" in _event()
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi",
+                return_value={"verdict": "SPEAK", "silent": False},
+            ):
+                result = self.p._gate_event(_event())  # default user_id="42"
+
+        self.assertIsNone(result)
+
+    def test_senders_allowlist_drops_unlisted_sender_without_subprocess(self) -> None:
+        """allowlist: sender absent from allow_from is dropped; subprocess never called."""
+        cfg = _base_cfg(senders="allowlist", allow_from=["alice", "bob"])
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch("subprocess.run") as mock_subproc:
+                # default _event: user_name="zoe", user_id="42" — neither in allowlist
+                result = self.p._gate_event(_event())
+
+        mock_subproc.assert_not_called()
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:sender-policy"})
+
+    def test_sender_policy_drop_writes_receipt_with_skip_sender_policy(self) -> None:
+        """A sender-policy drop always writes a log entry with action skip-sender-policy."""
+        log_entries: list[dict] = []
+
+        def capture_log(entry: dict, cfg: dict) -> None:
+            log_entries.append(entry)
+
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", return_value=_base_cfg(senders="humans")
+        ):
+            with unittest.mock.patch.object(self.p, "_write_gate_log", capture_log):
+                result = self.p._gate_event(_event(is_bot=True))
+
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:sender-policy"})
+        self.assertEqual(len(log_entries), 1)
+        self.assertEqual(log_entries[0]["action"], "skip-sender-policy")
+
+    def test_sender_policy_drop_receipt_has_no_verdict_field(self) -> None:
+        """Sender-policy drops do not include a classifier verdict in the log."""
+        log_entries: list[dict] = []
+
+        def capture_log(entry: dict, cfg: dict) -> None:
+            log_entries.append(entry)
+
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", return_value=_base_cfg(senders="allowlist", allow_from=["bob"])
+        ):
+            with unittest.mock.patch.object(self.p, "_write_gate_log", capture_log):
+                result = self.p._gate_event(_event(user_name="zoe"))  # not in allowlist
+
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:sender-policy"})
+        self.assertNotIn("verdict", log_entries[0])
+
+    def test_per_channel_senders_policy_via_map_form(self) -> None:
+        """Per-channel senders=humans in map form applies to that channel only."""
+        cfg = _base_cfg(
+            senders="all",  # global default: allow bots through
+            channels={"1518384310321811456": {"senders": "humans"}},  # per-channel: humans only
+        )
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch("subprocess.run") as mock_subproc:
+                result = self.p._gate_event(_event(is_bot=True))
+
+        mock_subproc.assert_not_called()
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:sender-policy"})
+
+
+# ---------------------------------------------------------------------------
+# Feature 2: Per-channel model exported to subprocess over global model
+# ---------------------------------------------------------------------------
+
+class TestPerChannelModel(unittest.TestCase):
+    """Per-channel model key is exported to subprocess over global model."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    def test_per_channel_model_overrides_global_in_subprocess_env(self) -> None:
+        """Map-form per-channel model wins over global model in NUNCHI_CLASSIFIER_MODEL."""
+        captured: dict[str, str] = {}
+
+        def fake_subproc(cmd: list, **kwargs: object) -> subprocess.CompletedProcess:
+            captured.update(kwargs.get("env") or {})  # type: ignore[arg-type]
+            return _make_completed('{"verdict":"SPEAK","silent":false}')
+
+        cfg = _base_cfg(
+            model="global-model",
+            channels={"1518384310321811456": {"model": "per-channel-model"}},
+        )
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch("subprocess.run", fake_subproc):
+                self.p._gate_event(_event())
+
+        self.assertEqual(captured.get("NUNCHI_CLASSIFIER_MODEL"), "per-channel-model")
+
+
+# ---------------------------------------------------------------------------
+# Feature 3: Verbosity levels + confidences
+# ---------------------------------------------------------------------------
+
+class TestVerbosityLevels(unittest.TestCase):
+    """Log field selection controlled by the verbosity key."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    def _run_gate_capture_log(
+        self,
+        verbosity: str,
+        directive: dict | None = None,
+    ) -> dict:
+        """Run _gate_event with the given verbosity; return the captured log entry."""
+        if directive is None:
+            directive = {
+                "verdict": "PASS",
+                "silent": True,
+                "classifier_model": "test-model",
+                "reasons": ["r1", "r2", "r3", "r4"],
+                "confidences": {"PASS": 0.85, "SPEAK": 0.10, "ACK": 0.05},
+            }
+        log_entries: list[dict] = []
+
+        def capture_log(entry: dict, cfg: dict) -> None:
+            log_entries.append(entry)
+
+        cfg = _base_cfg(verbosity=verbosity)
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", return_value=directive):
+                with unittest.mock.patch.object(self.p, "_write_gate_log", capture_log):
+                    self.p._gate_event(_event())
+
+        self.assertEqual(len(log_entries), 1, f"Expected 1 log entry, got {len(log_entries)}")
+        return log_entries[0]
+
+    # --- minimal ---
+
+    def test_minimal_contains_required_base_fields(self) -> None:
+        entry = self._run_gate_capture_log("minimal")
+        for field in ("ts", "platform", "channel_ids", "message_id", "verdict", "silent", "action", "elapsed_ms"):
+            self.assertIn(field, entry, f"minimal log must contain '{field}'")
+
+    def test_minimal_omits_reasons_and_confidences(self) -> None:
+        entry = self._run_gate_capture_log("minimal")
+        self.assertNotIn("reasons", entry)
+        self.assertNotIn("confidences", entry)
+
+    def test_minimal_omits_author_and_history_fields(self) -> None:
+        entry = self._run_gate_capture_log("minimal")
+        self.assertNotIn("trigger_author", entry)
+        self.assertNotIn("trigger_author_kind", entry)
+        self.assertNotIn("history_len", entry)
+        self.assertNotIn("classifier_model", entry)
+
+    def test_minimal_omits_payload_and_directive(self) -> None:
+        entry = self._run_gate_capture_log("minimal")
+        self.assertNotIn("payload", entry)
+        self.assertNotIn("directive", entry)
+
+    # --- normal (default) ---
+
+    def test_normal_includes_confidences_from_directive(self) -> None:
+        entry = self._run_gate_capture_log("normal")
+        self.assertIn("confidences", entry)
+        self.assertEqual(entry["confidences"], {"PASS": 0.85, "SPEAK": 0.10, "ACK": 0.05})
+
+    def test_normal_includes_reasons_truncated_to_3(self) -> None:
+        entry = self._run_gate_capture_log("normal")
+        self.assertIn("reasons", entry)
+        self.assertEqual(entry["reasons"], ["r1", "r2", "r3"])  # 4 in directive, capped at 3
+
+    def test_normal_includes_trigger_author_and_history_metadata(self) -> None:
+        entry = self._run_gate_capture_log("normal")
+        self.assertIn("trigger_author", entry)
+        self.assertIn("trigger_author_kind", entry)
+        self.assertIn("history_len", entry)
+        self.assertIn("classifier_model", entry)
+
+    def test_normal_omits_payload_and_directive(self) -> None:
+        entry = self._run_gate_capture_log("normal")
+        self.assertNotIn("payload", entry)
+        self.assertNotIn("directive", entry)
+
+    def test_normal_omits_confidences_when_absent_from_directive(self) -> None:
+        """confidences is only logged when the directive actually contains it."""
+        directive = {"verdict": "SPEAK", "silent": False, "reasons": []}
+        entry = self._run_gate_capture_log("normal", directive)
+        self.assertNotIn("confidences", entry)
+
+    def test_default_verbosity_is_normal(self) -> None:
+        """When verbosity is unset, the log matches normal behaviour."""
+        log_entries: list[dict] = []
+
+        def capture_log(entry: dict, cfg: dict) -> None:
+            log_entries.append(entry)
+
+        # _base_cfg has no verbosity key → defaults to "normal"
+        cfg = _base_cfg()
+        directive = {
+            "verdict": "PASS",
+            "silent": True,
+            "confidences": {"PASS": 0.9},
+        }
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", return_value=directive):
+                with unittest.mock.patch.object(self.p, "_write_gate_log", capture_log):
+                    self.p._gate_event(_event())
+
+        self.assertEqual(len(log_entries), 1)
+        self.assertIn("confidences", log_entries[0])
+
+    # --- debug ---
+
+    def test_debug_includes_payload_sent_to_nunchi(self) -> None:
+        entry = self._run_gate_capture_log("debug")
+        self.assertIn("payload", entry)
+        self.assertIsInstance(entry["payload"], dict)
+        self.assertIn("trigger", entry["payload"])
+
+    def test_debug_includes_complete_directive(self) -> None:
+        entry = self._run_gate_capture_log("debug")
+        self.assertIn("directive", entry)
+        self.assertIn("verdict", entry["directive"])
+
+    def test_debug_includes_confidences(self) -> None:
+        entry = self._run_gate_capture_log("debug")
+        self.assertIn("confidences", entry)
+
+    def test_debug_includes_trigger_author_and_history_metadata(self) -> None:
+        entry = self._run_gate_capture_log("debug")
+        self.assertIn("trigger_author", entry)
+        self.assertIn("history_len", entry)
+
+    # --- per-channel verbosity via map form ---
+
+    def test_per_channel_verbosity_via_map_form(self) -> None:
+        """verbosity set in per-channel map entry controls the log for that channel."""
+        log_entries: list[dict] = []
+
+        def capture_log(entry: dict, cfg: dict) -> None:
+            log_entries.append(entry)
+
+        cfg = _base_cfg(
+            verbosity="debug",  # global says debug
+            channels={"1518384310321811456": {"verbosity": "minimal"}},  # per-channel says minimal
+        )
+        directive = {
+            "verdict": "PASS",
+            "silent": True,
+            "confidences": {"PASS": 0.9},
+        }
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", return_value=directive):
+                with unittest.mock.patch.object(self.p, "_write_gate_log", capture_log):
+                    self.p._gate_event(_event())
+
+        self.assertEqual(len(log_entries), 1)
+        entry = log_entries[0]
+        # minimal: must not have reasons/confidences/payload/directive
+        self.assertNotIn("confidences", entry)
+        self.assertNotIn("reasons", entry)
+        self.assertNotIn("payload", entry)
+
+
 if __name__ == "__main__":
     unittest.main()
