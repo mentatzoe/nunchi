@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from numbers import Real
 from typing import Any, Protocol
 
-from .errors import TurnAwareError, ValidationError
+from .errors import NunchiError, ValidationError
 from .models import AdmissionRequest, AdmissionResult, FORBIDDEN_REPLY_FIELDS, VERDICTS
 
 PRODUCT_CLASSIFIER = "product"
@@ -20,7 +20,7 @@ SUPPORTED_CLASSIFIERS = (PRODUCT_CLASSIFIER,)
 
 DEFAULT_PROVIDER = "openai-compatible"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-TEST_RESULT_ENV = "TURNAWARE_CLASSIFIER_TEST_RESULT"
+TEST_RESULT_ENV = "NUNCHI_CLASSIFIER_TEST_RESULT"
 
 # Bounded retry defaults for transient OpenRouter failures (timeouts, provider
 # overload). DEFAULT_MAX_RETRIES=2 means up to 3 attempts total.
@@ -108,27 +108,27 @@ class OpenAICompatibleAdmissionClient:
         try:
             return json.loads(response_body)
         except json.JSONDecodeError as exc:
-            raise TurnAwareError("classifier provider returned invalid JSON") from exc
+            raise NunchiError("classifier provider returned invalid JSON") from exc
 
     def _read_with_retries(self, http_request: urllib.request.Request) -> str:
         # Up to max_retries retries (max_retries + 1 attempts total). Only
         # transient failures are retried; permanent errors abort immediately to
         # avoid wasting tokens/time. The happy path makes exactly one call and
         # never sleeps.
-        last_exc: TurnAwareError
+        last_exc: NunchiError
         for attempt in range(self.max_retries + 1):
             try:
                 with urllib.request.urlopen(http_request, timeout=self.timeout) as response:
                     return response.read().decode("utf-8")
             except urllib.error.HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
-                error = TurnAwareError(f"classifier provider HTTP {exc.code}: {details}")
+                error = NunchiError(f"classifier provider HTTP {exc.code}: {details}")
                 if exc.code not in RETRYABLE_STATUS_CODES:
                     # Permanent (auth/validation/quota-forbidden): never retry.
                     raise error from exc
                 last_exc = error
             except (socket.timeout, urllib.error.URLError, OSError) as exc:
-                last_exc = TurnAwareError(f"classifier provider request failed: {exc}")
+                last_exc = NunchiError(f"classifier provider request failed: {exc}")
 
             if attempt < self.max_retries:
                 time.sleep(self.retry_base_delay * (2 ** attempt))
@@ -173,25 +173,25 @@ class ProductAdmissionClassifier:
         if test_result is not None:
             self.provider = "test-fixture"
             self.model_id = _string_config(self.config, "model") or os.environ.get(
-                "TURNAWARE_CLASSIFIER_MODEL", "turnaware-test-fixture-provider"
+                "NUNCHI_CLASSIFIER_MODEL", "nunchi-test-fixture-provider"
             )
             self.client = FixtureAdmissionClient(test_result)
             return
 
-        self.model_id = _string_config(self.config, "model") or os.environ.get("TURNAWARE_CLASSIFIER_MODEL")
+        self.model_id = _string_config(self.config, "model") or os.environ.get("NUNCHI_CLASSIFIER_MODEL")
         if not self.model_id:
             raise ValidationError(
-                "classifier provider model is required via classifier_config.model or TURNAWARE_CLASSIFIER_MODEL"
+                "classifier provider model is required via classifier_config.model or NUNCHI_CLASSIFIER_MODEL"
             )
 
         api_key = _api_key()
         if not api_key:
             raise ValidationError(
-                "classifier provider API key is required via TURNAWARE_CLASSIFIER_API_KEY or OPENROUTER_API_KEY"
+                "classifier provider API key is required via NUNCHI_CLASSIFIER_API_KEY or OPENROUTER_API_KEY"
             )
 
         base_url = (
-            os.environ.get("TURNAWARE_CLASSIFIER_BASE_URL")
+            os.environ.get("NUNCHI_CLASSIFIER_BASE_URL")
             or os.environ.get("OPENAI_BASE_URL")
             or DEFAULT_BASE_URL
         )
@@ -265,13 +265,13 @@ def _require_pass_corroboration_config(config: dict[str, Any]) -> bool:
 
 def _api_key() -> str | None:
     # Operator-only: the caller never names which env var holds the key.
-    return os.environ.get("TURNAWARE_CLASSIFIER_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    return os.environ.get("NUNCHI_CLASSIFIER_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 
 
 def _system_prompt() -> str:
     verdicts = ", ".join(VERDICTS)
     return (
-        "You are TurnAware's admission classifier. You are given one participant in a shared, multi-party "
+        "You are Nunchi's admission classifier. You are given one participant in a shared, multi-party "
         "conversation (\"this agent\") and the conversation around it. Decide ONLY whether this agent "
         "should visibly take a turn right now, and what shape of turn. Do not write any reply, draft, or "
         "message content.\n\n"
@@ -353,27 +353,27 @@ def _strip_json_fence(content: str) -> str:
 
 def _extract_result_payload(provider_payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(provider_payload, dict):
-        raise TurnAwareError("classifier provider response must be a JSON object")
+        raise NunchiError("classifier provider response must be a JSON object")
     choices = provider_payload.get("choices")
     if choices is None:
         return provider_payload
     if not isinstance(choices, list) or not choices:
-        raise TurnAwareError("classifier provider response did not include choices")
+        raise NunchiError("classifier provider response did not include choices")
     first = choices[0]
     if not isinstance(first, dict):
-        raise TurnAwareError("classifier provider choice must be an object")
+        raise NunchiError("classifier provider choice must be an object")
     message = first.get("message")
     if not isinstance(message, dict):
-        raise TurnAwareError("classifier provider choice did not include a message")
+        raise NunchiError("classifier provider choice did not include a message")
     content = message.get("content")
     if not isinstance(content, str):
-        raise TurnAwareError("classifier provider message content must be a JSON string")
+        raise NunchiError("classifier provider message content must be a JSON string")
     try:
         parsed = json.loads(_strip_json_fence(content))
     except json.JSONDecodeError as exc:
-        raise TurnAwareError("classifier provider message content was not valid JSON") from exc
+        raise NunchiError("classifier provider message content was not valid JSON") from exc
     if not isinstance(parsed, dict):
-        raise TurnAwareError("classifier provider message content must decode to a JSON object")
+        raise NunchiError("classifier provider message content must decode to a JSON object")
     return parsed
 
 
@@ -405,27 +405,27 @@ def _decision_from_provider_result(
     forbidden = FORBIDDEN_REPLY_FIELDS.intersection(payload)
     if forbidden:
         names = ", ".join(sorted(forbidden))
-        raise TurnAwareError(f"classifier provider returned forbidden reply fields: {names}")
+        raise NunchiError(f"classifier provider returned forbidden reply fields: {names}")
 
     verdict = payload.get("verdict")
     if verdict not in VERDICTS:
-        raise TurnAwareError("classifier provider returned an unsupported verdict")
+        raise NunchiError("classifier provider returned an unsupported verdict")
 
     confidences = payload.get("confidences")
     if not isinstance(confidences, dict):
-        raise TurnAwareError("classifier provider must return confidences")
+        raise NunchiError("classifier provider must return confidences")
     if set(confidences) != set(VERDICTS):
-        raise TurnAwareError("classifier provider confidences must contain exactly PASS, ACK, ASK, SPEAK")
+        raise NunchiError("classifier provider confidences must contain exactly PASS, ACK, ASK, SPEAK")
     normalised_confidences: dict[str, float] = {}
     for key in VERDICTS:
         value = confidences[key]
         if isinstance(value, bool) or not isinstance(value, Real):
-            raise TurnAwareError(f"classifier provider confidence for {key} must be numeric")
+            raise NunchiError(f"classifier provider confidence for {key} must be numeric")
         normalised_confidences[key] = float(value)
 
     checked = payload.get("context_checked")
     if not isinstance(checked, list) or not all(isinstance(item, str) and item.strip() for item in checked):
-        raise TurnAwareError("classifier provider must return context_checked as a list of references")
+        raise NunchiError("classifier provider must return context_checked as a list of references")
     # Reference bookkeeping must not kill an otherwise-valid verdict: providers
     # occasionally emit near-miss references ("trigger" for "trigger:<id>", or a
     # bare id without its "trigger:"/"context:" prefix). Near-misses normalise
@@ -442,7 +442,7 @@ def _decision_from_provider_result(
 
     reasons = payload.get("reasons")
     if not isinstance(reasons, list) or not reasons or not all(isinstance(item, str) and item.strip() for item in reasons):
-        raise TurnAwareError("classifier provider must return at least one reason")
+        raise NunchiError("classifier provider must return at least one reason")
     reasons_tuple = tuple(reasons)
 
     # Opt-in structural mitigation for FR-005. The provider may PASS on a bare

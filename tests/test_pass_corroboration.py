@@ -6,7 +6,7 @@ context. The guard is a purely STRUCTURAL post-process: when armed, a PASS
 whose `context_checked` contains no `context:` reference is downgraded to ASK.
 It never inspects trigger/context text, so a PASS that did consult context
 (Covered/Duplicate) is left untouched, and the default-off behavior is
-unchanged. All cases run offline via TURNAWARE_CLASSIFIER_TEST_RESULT.
+unchanged. All cases run offline via NUNCHI_CLASSIFIER_TEST_RESULT.
 """
 
 import unittest
@@ -14,9 +14,9 @@ from unittest.mock import patch
 
 from tests.provider_helpers import provider_env
 from tests.test_core import load_fixture
-from turnaware import evaluate
-from turnaware.classifiers import get_classifier
-from turnaware.errors import ValidationError
+from nunchi import evaluate
+from nunchi.classifiers import get_classifier
+from nunchi.errors import ValidationError
 
 
 class RequirePassCorroborationTests(unittest.TestCase):

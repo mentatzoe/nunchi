@@ -7,16 +7,16 @@ from .fastpath import fast_verdict
 from .models import result_to_dict
 from .schema import validate_request, validate_result
 
-FASTPATH_ENV = "TURNAWARE_FASTPATH"
+FASTPATH_ENV = "NUNCHI_FASTPATH"
 
 
 def _fastpath_active() -> bool:
     """Whether the deterministic fast-path should be consulted this call.
 
     The fast-path is enabled by default but INACTIVE when:
-      - ``TURNAWARE_CLASSIFIER_TEST_RESULT`` is set — deterministic test/injection
+      - ``NUNCHI_CLASSIFIER_TEST_RESULT`` is set — deterministic test/injection
         mode must reach the injected provider result, not be short-circuited; or
-      - ``TURNAWARE_FASTPATH`` is explicitly ``"0"`` (operator opt-out).
+      - ``NUNCHI_FASTPATH`` is explicitly ``"0"`` (operator opt-out).
     """
     if os.environ.get(TEST_RESULT_ENV) is not None:
         return False

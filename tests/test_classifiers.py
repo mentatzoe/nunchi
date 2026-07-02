@@ -3,9 +3,9 @@ from unittest.mock import patch
 
 from tests.provider_helpers import fixture_case, provider_env
 from tests.test_core import load_fixture
-from turnaware import evaluate
-from turnaware.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
-from turnaware.errors import ValidationError
+from nunchi import evaluate
+from nunchi.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
+from nunchi.errors import ValidationError
 
 
 class ClassifierTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class ClassifierTests(unittest.TestCase):
 
         self.assertEqual(type(product).__name__, "ProductAdmissionClassifier")
         self.assertEqual(getattr(product, "provider", None), "test-fixture")
-        self.assertEqual(getattr(product, "model_id", None), "turnaware-test-fixture-provider")
+        self.assertEqual(getattr(product, "model_id", None), "nunchi-test-fixture-provider")
 
     def test_deterministic_classifier_path_is_unsupported(self):
         with self.assertRaises(ValidationError):
@@ -131,9 +131,9 @@ class ClassifierConfigProvenanceTests(unittest.TestCase):
 
     def test_base_url_resolves_only_from_operator_environment(self):
         env = {
-            "TURNAWARE_CLASSIFIER_MODEL": "operator/model",
+            "NUNCHI_CLASSIFIER_MODEL": "operator/model",
             "OPENROUTER_API_KEY": "operator-key",
-            "TURNAWARE_CLASSIFIER_BASE_URL": "https://operator.internal/v1",
+            "NUNCHI_CLASSIFIER_BASE_URL": "https://operator.internal/v1",
         }
         with patch.dict("os.environ", env, clear=True):
             product = get_classifier("product")
@@ -141,8 +141,8 @@ class ClassifierConfigProvenanceTests(unittest.TestCase):
 
     def test_api_key_resolves_only_from_fixed_operator_environment(self):
         env = {
-            "TURNAWARE_CLASSIFIER_MODEL": "operator/model",
-            "TURNAWARE_CLASSIFIER_API_KEY": "operator-key",
+            "NUNCHI_CLASSIFIER_MODEL": "operator/model",
+            "NUNCHI_CLASSIFIER_API_KEY": "operator-key",
         }
         with patch.dict("os.environ", env, clear=True):
             product = get_classifier("product")

@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         records,
         duration_ms=total_ms,
         adapter_name=adapter.name,
-        classifier_commit=os.environ.get("TURNAWARE_CLASSIFIER_COMMIT"),
+        classifier_commit=os.environ.get("NUNCHI_CLASSIFIER_COMMIT"),
     )
     report.render(records, summary, args.format)
 

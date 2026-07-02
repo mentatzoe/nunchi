@@ -16,13 +16,13 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      TURNAWARE_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
+      NUNCHI_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install TurnAware
+      - name: Install Nunchi
         run: pip install .
       - name: One real admit call, assert a verdict is returned
         # Secret scoped to this step only, so the install step never sees it.
@@ -35,6 +35,6 @@ jobs:
             echo "No OPENROUTER_API_KEY secret -- skipping live smoke."
             exit 0
           fi
-          echo "Live smoke: model=${TURNAWARE_CLASSIFIER_MODEL}, fixture=tests/fixtures/speak.json"
-          turnaware admit --input tests/fixtures/speak.json \
+          echo "Live smoke: model=${NUNCHI_CLASSIFIER_MODEL}, fixture=tests/fixtures/speak.json"
+          nunchi admit --input tests/fixtures/speak.json \
             | python -c 'import json,sys; r=json.load(sys.stdin); assert "verdict" in r, "no verdict in result"; print("live smoke OK: verdict=%s model=%s" % (r["verdict"], r.get("classifier_model")))'

@@ -2,7 +2,7 @@
 
 Mapping and routing are tested offline with a stub classifier (the gate accepts
 an injected ``evaluate_fn``); the real core path is exercised via the
-deterministic fixture provider (`TURNAWARE_CLASSIFIER_TEST_RESULT`). Nothing
+deterministic fixture provider (`NUNCHI_CLASSIFIER_TEST_RESULT`). Nothing
 here touches a live provider.
 """
 
@@ -14,16 +14,16 @@ import re
 import unittest
 from unittest import mock
 
-from turnaware.adapters import channel
-from turnaware.adapters.channel import (
+from nunchi.adapters import channel
+from nunchi.adapters.channel import (
     SILENT_PASS_SENTINEL,
     ChannelMessage,
     build_request,
     gate,
 )
-from turnaware.errors import TurnAwareError, ValidationError
+from nunchi.errors import NunchiError, ValidationError
 
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "turnaware"
+SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "nunchi"
 
 
 def _stub(verdict, *, reasons=("stub",), checked=()):
@@ -133,7 +133,7 @@ class GateRoutingTests(unittest.TestCase):
 
 class FailPolicyTests(unittest.TestCase):
     def _boom(self, request):
-        raise TurnAwareError("provider down")
+        raise NunchiError("provider down")
 
     def test_fail_open_degrades_to_speak(self):
         r = gate({"content": "x", "id": "t"}, [], agent_id="d",
@@ -152,7 +152,7 @@ class FailPolicyTests(unittest.TestCase):
         self.assertTrue(r.degraded)
 
     def test_fail_raise_propagates(self):
-        with self.assertRaises(TurnAwareError):
+        with self.assertRaises(NunchiError):
             gate({"content": "x", "id": "t"}, [], agent_id="d",
                  fail_policy="raise", evaluate_fn=self._boom)
 
@@ -167,14 +167,14 @@ class RealCorePathTests(unittest.TestCase):
             "context_checked": list(checked),
             "reasons": [f"fixture provider chose {verdict}"],
         }
-        return mock.patch.dict(os.environ, {"TURNAWARE_CLASSIFIER_TEST_RESULT": json.dumps(payload)})
+        return mock.patch.dict(os.environ, {"NUNCHI_CLASSIFIER_TEST_RESULT": json.dumps(payload)})
 
     def test_real_gate_pass_is_silent(self):
         with self._inject("PASS", checked=["trigger:t-1"]):
             r = gate({"content": "already handled", "id": "t-1"}, [], agent_id="dalgos")
         self.assertTrue(r.silent)
         self.assertEqual(r.cc_connect_sentinel(), SILENT_PASS_SENTINEL)
-        self.assertEqual(r.classifier_model, "turnaware-test-fixture-provider")
+        self.assertEqual(r.classifier_model, "nunchi-test-fixture-provider")
 
     def test_real_gate_speak_routes_through(self):
         with self._inject("SPEAK", checked=["trigger:t-1"]):
@@ -196,7 +196,7 @@ class CliTests(unittest.TestCase):
         # host acts on via silent/verdict.
         payload = {"trigger": {"content": "peer noise", "id": "t-1"},
                    "history": [], "agent": {"id": "dalgos"}, "fail_policy": "open"}
-        with mock.patch("turnaware.adapters.channel.evaluate", _stub("PASS")):
+        with mock.patch("nunchi.adapters.channel.evaluate", _stub("PASS")):
             code, out, _ = self._run(payload)
         self.assertEqual(code, 0)
         directive = json.loads(out)
@@ -207,7 +207,7 @@ class CliTests(unittest.TestCase):
     def test_cli_cc_connect_format_prints_sentinel_on_pass(self):
         payload = {"trigger": {"content": "peer noise", "id": "t-1"},
                    "history": [], "agent": {"id": "dalgos"}}
-        with mock.patch("turnaware.adapters.channel.evaluate", _stub("PASS")):
+        with mock.patch("nunchi.adapters.channel.evaluate", _stub("PASS")):
             code, out, _ = self._run(payload, argv=["--format", "cc-connect"])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), SILENT_PASS_SENTINEL)
@@ -216,7 +216,7 @@ class CliTests(unittest.TestCase):
         # Generic: any platform's suppression token, no cc-connect involved.
         payload = {"trigger": {"content": "peer noise", "id": "t-1"},
                    "history": [], "agent": {"id": "dalgos"}}
-        with mock.patch("turnaware.adapters.channel.evaluate", _stub("PASS")):
+        with mock.patch("nunchi.adapters.channel.evaluate", _stub("PASS")):
             code, out, _ = self._run(payload, argv=["--silent-token", "<<HUSH>>"])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "<<HUSH>>")
@@ -224,7 +224,7 @@ class CliTests(unittest.TestCase):
     def test_cli_silent_token_ignored_when_not_silent(self):
         payload = {"trigger": {"content": "implement X", "id": "t-1"},
                    "agent": {"id": "dalgos"}}
-        with mock.patch("turnaware.adapters.channel.evaluate", _stub("SPEAK")):
+        with mock.patch("nunchi.adapters.channel.evaluate", _stub("SPEAK")):
             code, out, _ = self._run(payload, argv=["--silent-token", "<<HUSH>>"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["verdict"], "SPEAK")
@@ -234,7 +234,7 @@ class CliTests(unittest.TestCase):
             "trigger": {"content": "implement X", "id": "t-1"},
             "agent": {"id": "dalgos", "role": "peer"},
         }
-        with mock.patch("turnaware.adapters.channel.evaluate", _stub("SPEAK")):
+        with mock.patch("nunchi.adapters.channel.evaluate", _stub("SPEAK")):
             code, out, _ = self._run(payload)
         self.assertEqual(code, 0)
         directive = json.loads(out)

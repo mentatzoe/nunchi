@@ -1,4 +1,4 @@
-"""Validation helpers for TurnAware admission requests and results."""
+"""Validation helpers for Nunchi admission requests and results."""
 
 from collections.abc import Mapping
 from numbers import Real

@@ -1,10 +1,10 @@
-# TurnAware stability and versioning contract
+# Nunchi stability and versioning contract
 
 This document is the stability promise an integrator can build against. It
 states what is part of the public contract, what may change within a major
 version, and what is explicitly experimental and may shift in a minor release.
 
-For *how* to wire TurnAware in, see [`integration.md`](integration.md). For the
+For *how* to wire Nunchi in, see [`integration.md`](integration.md). For the
 classifier-quality evidence behind the default model and its known limitations,
 see [`../specs/003-classifier-test-suite/evidence/`](../specs/003-classifier-test-suite/evidence/).
 The verdict semantics live in the project [`README.md`](../README.md).
@@ -14,8 +14,8 @@ The verdict semantics live in the project [`README.md`](../README.md).
 ### Request envelope
 
 The admission request is validated by `validate_request` in
-`src/turnaware/schema.py` and modeled by `AdmissionRequest` in
-`src/turnaware/models.py`. The fields:
+`src/nunchi/schema.py` and modeled by `AdmissionRequest` in
+`src/nunchi/models.py`. The fields:
 
 | Field | Required | Type | Notes |
 |-------|----------|------|-------|
@@ -40,14 +40,14 @@ Only `trigger.content` (and each supplied `context[].content`) is strictly
 required. Everything else is optional. The provider endpoint and API key are
 deliberately **not** request fields: an untrusted envelope carries
 `classifier_config`, so the base URL and key are read exclusively from operator
-environment variables (`TURNAWARE_CLASSIFIER_BASE_URL` / `OPENAI_BASE_URL`,
-`TURNAWARE_CLASSIFIER_API_KEY` / `OPENROUTER_API_KEY`). See the README security
+environment variables (`NUNCHI_CLASSIFIER_BASE_URL` / `OPENAI_BASE_URL`,
+`NUNCHI_CLASSIFIER_API_KEY` / `OPENROUTER_API_KEY`). See the README security
 note.
 
 ### Result / verdict surface
 
-The result is modeled by `AdmissionResult` in `src/turnaware/models.py` and
-validated by `validate_result` in `src/turnaware/schema.py`:
+The result is modeled by `AdmissionResult` in `src/nunchi/models.py` and
+validated by `validate_result` in `src/nunchi/schema.py`:
 
 | Field | Always present | Type | Notes |
 |-------|----------------|------|-------|
@@ -69,15 +69,15 @@ shape the host composes.
 #### The forbidden-reply guarantee
 
 Admission results never carry reply prose. The set `FORBIDDEN_REPLY_FIELDS` in
-`src/turnaware/models.py` is exactly `{"message", "reply", "draft", "content"}`.
+`src/nunchi/models.py` is exactly `{"message", "reply", "draft", "content"}`.
 Both `result_to_dict` (`models.py`) and `validate_result` (`schema.py`) reject
-any result containing one of these keys. TurnAware decides **admission, not
+any result containing one of these keys. Nunchi decides **admission, not
 composition** — it tells the host *whether* and *in what shape* to speak, never
 *what* to say. This guarantee is part of the major-version contract.
 
-### CLI exit codes (`turnaware admit`)
+### CLI exit codes (`nunchi admit`)
 
-Defined in `src/turnaware/errors.py` and used by `src/turnaware/cli.py`:
+Defined in `src/nunchi/errors.py` and used by `src/nunchi/cli.py`:
 
 | Code | Constant | Meaning |
 |------|----------|---------|
@@ -90,9 +90,9 @@ On success the verdict JSON is written to stdout and the process exits `0`. On
 failure a diagnostic is written to stderr and no success verdict is emitted on
 stdout.
 
-### Adapter contract (`turnaware.adapters.channel`)
+### Adapter contract (`nunchi.adapters.channel`)
 
-The channel adapter (`src/turnaware/adapters/channel.py`) is transport-neutral.
+The channel adapter (`src/nunchi/adapters/channel.py`) is transport-neutral.
 Its decision is `verdict` + `silent`:
 
 - `verdict` — `PASS` / `ACK` / `ASK` / `SPEAK`.
@@ -102,7 +102,7 @@ A host branches on these directly: if `silent`, post nothing this turn;
 otherwise compose one turn in the returned `run_shape`. The adapter never writes
 the reply.
 
-**Suppression-by-token is the host's convention, not TurnAware's.** A transport
+**Suppression-by-token is the host's convention, not Nunchi's.** A transport
 that suppresses a send by recognizing a magic final-output string supplies its
 own token via `ChannelGateResult.silent_token(token)` (Python) or the CLI's
 `--silent-token` flag. Most hosts never need this and just branch on `silent`.
@@ -115,7 +115,7 @@ surface contain nothing cc-connect-specific.
 
 ## SemVer policy
 
-TurnAware follows semantic versioning. The promises below hold **within a major
+Nunchi follows semantic versioning. The promises below hold **within a major
 version** (e.g. across all `1.x`).
 
 ### Stable within a major version
@@ -130,7 +130,7 @@ These do not change except in a major version bump:
 - **The request field names**: `trigger` (+ `content`/`id`/`author`/`timestamp`),
   `context` items, `agent`, `surface`, `request_id`, `classifier`,
   `classifier_config`, and which of them are required vs optional.
-- **The CLI exit codes** `0`/`1`/`2`/`3` for `turnaware admit` and their meaning.
+- **The CLI exit codes** `0`/`1`/`2`/`3` for `nunchi admit` and their meaning.
 - **The forbidden-reply guarantee**: `message`/`reply`/`draft`/`content` never
   appear in a result.
 - **The adapter decision contract**: transport-neutral `verdict` + `silent`,
@@ -158,7 +158,7 @@ These are **not** part of the stable contract and may change in any minor:
   machine contract. Their count, phrasing, and ordering may change. Parse
   `verdict`, not `reasons`.
 - **The default model choice.** Today the operator must supply
-  `TURNAWARE_CLASSIFIER_MODEL`; the *recommended* default
+  `NUNCHI_CLASSIFIER_MODEL`; the *recommended* default
   (`google/gemini-3.1-flash-lite`, chosen by the spec 003 bake-off) is a
   recommendation that may be re-selected in a minor as evidence changes. Pin the
   model in your own env if you need it frozen.

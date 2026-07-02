@@ -11,10 +11,10 @@ import unittest
 from unittest.mock import patch
 
 from tests.provider_helpers import provider_env
-from turnaware import evaluate
-from turnaware.errors import ValidationError
+from nunchi import evaluate
+from nunchi.errors import ValidationError
 
-AGENT_ID = "turnaware-vigil"
+AGENT_ID = "nunchi-vigil"
 AGENT_MENTION_ID = "111111111111111111"
 
 # Empty environment: no provider key, no model, no test-result injection, and no
@@ -114,10 +114,10 @@ class FastPathDisabledTests(unittest.TestCase):
         self.assertNotEqual(result.get("classifier_provider"), "fastpath")
 
     def test_fastpath_disabled_flag_escalates(self):
-        # TURNAWARE_FASTPATH=0 opts out: the same mention-elsewhere envelope now
+        # NUNCHI_FASTPATH=0 opts out: the same mention-elsewhere envelope now
         # escalates to the classifier (which raises with no provider env).
         request = _request(trigger={"id": "t-off", "content": "hey <@999> handle this"})
-        with patch.dict("os.environ", {"TURNAWARE_FASTPATH": "0"}, clear=True):
+        with patch.dict("os.environ", {"NUNCHI_FASTPATH": "0"}, clear=True):
             with self.assertRaises(ValidationError):
                 evaluate(request)
 

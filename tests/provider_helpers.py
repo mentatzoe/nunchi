@@ -10,9 +10,9 @@ def provider_env(verdict, *, checked, reasons=None, confidences=None, model=None
         "context_checked": list(checked),
         "reasons": reasons or [f"Fixture provider selected {verdict}."],
     }
-    env = {"TURNAWARE_CLASSIFIER_TEST_RESULT": json.dumps(payload)}
+    env = {"NUNCHI_CLASSIFIER_TEST_RESULT": json.dumps(payload)}
     if model is not None:
-        env["TURNAWARE_CLASSIFIER_MODEL"] = model
+        env["NUNCHI_CLASSIFIER_MODEL"] = model
     return env
 
 

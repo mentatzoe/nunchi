@@ -8,12 +8,12 @@ This is the runnable, copy-paste integration doc the spec promises. If any comma
 
 ## Run the suite — offline deterministic path
 
-The classifier on `main` is provider-backed (spec 002). For a deterministic, offline run, inject a pinned classifier decision via `TURNAWARE_CLASSIFIER_TEST_RESULT`. The subprocess adapter inherits the environment, so the injected decision reaches the `turnaware` CLI:
+The classifier on `main` is provider-backed (spec 002). For a deterministic, offline run, inject a pinned classifier decision via `NUNCHI_CLASSIFIER_TEST_RESULT`. The subprocess adapter inherits the environment, so the injected decision reaches the `nunchi` CLI:
 
 ```bash
 # from repo root
-pip install -e .                                          # one-time, installs the `turnaware` CLI
-export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0.05,"ACK":0.05,"ASK":0.05,"SPEAK":0.8},"context_checked":[],"reasons":["pinned test verdict"]}'
+pip install -e .                                          # one-time, installs the `nunchi` CLI
+export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0.05,"ACK":0.05,"ASK":0.05,"SPEAK":0.8},"context_checked":[],"reasons":["pinned test verdict"]}'
 python3 specs/003-classifier-test-suite/contracts/runner.py
 ```
 
@@ -31,9 +31,9 @@ This path is fully deterministic — byte-identical JSONL across repeated runs w
 To measure the actual product classifier, unset the test injection and provide the provider environment before running (the subprocess adapter inherits it):
 
 ```bash
-unset TURNAWARE_CLASSIFIER_TEST_RESULT
-export TURNAWARE_CLASSIFIER_MODEL="<provider-model-id>"   # e.g. an OpenRouter model id
-export OPENROUTER_API_KEY="<key>"                         # or TURNAWARE_CLASSIFIER_API_KEY
+unset NUNCHI_CLASSIFIER_TEST_RESULT
+export NUNCHI_CLASSIFIER_MODEL="<provider-model-id>"   # e.g. an OpenRouter model id
+export OPENROUTER_API_KEY="<key>"                         # or NUNCHI_CLASSIFIER_API_KEY
 python3 specs/003-classifier-test-suite/contracts/runner.py --format jsonl > evidence-run.jsonl
 ```
 
@@ -79,7 +79,7 @@ Prints the index (id, source, evidence, expected verdict, FR refs) one per line.
    cp d-vocative-greeting-first-bot.meta.json d-my-new-case.meta.json
    ```
 
-2. Edit `d-my-new-case.json` — replace `trigger.content`, `trigger.id`, `request_id`, and any `context` items. Keep `source_shape` accurate. The envelope is a `turnaware admit --input` request; `turnaware admit --input d-my-new-case.json` should run end-to-end (with `TURNAWARE_CLASSIFIER_TEST_RESULT` or the provider environment set, per the run sections above).
+2. Edit `d-my-new-case.json` — replace `trigger.content`, `trigger.id`, `request_id`, and any `context` items. Keep `source_shape` accurate. The envelope is a `nunchi admit --input` request; `nunchi admit --input d-my-new-case.json` should run end-to-end (with `NUNCHI_CLASSIFIER_TEST_RESULT` or the provider environment set, per the run sections above).
 
 3. Edit `d-my-new-case.meta.json` — set `id`, `title`, `expected.verdict`, `failure_mode`, `invariant`, `rationale`, `fr_refs`, `sc_refs`. If the case came from runtime evidence, set `evidence: "runtime"` and `runtime_source`; if it came from code reading, set `evidence: "predicted"` and `predicted_basis`.
 
@@ -93,7 +93,7 @@ Prints the index (id, source, evidence, expected verdict, FR refs) one per line.
 
 ## Plug in a non-default adapter
 
-The bundled subprocess adapter calls `turnaware admit --input <tmp>.json`. To test against an in-process candidate (imports `turnaware.core.evaluate` directly):
+The bundled subprocess adapter calls `nunchi admit --input <tmp>.json`. To test against an in-process candidate (imports `nunchi.core.evaluate` directly):
 
 ```bash
 python3 specs/003-classifier-test-suite/contracts/runner.py --adapter in-process
@@ -102,7 +102,7 @@ python3 specs/003-classifier-test-suite/contracts/runner.py --adapter in-process
 To test against a CLI on a different path (e.g., a candidate build):
 
 ```bash
-python3 specs/003-classifier-test-suite/contracts/runner.py --adapter subprocess --cmd /path/to/candidate-turnaware
+python3 specs/003-classifier-test-suite/contracts/runner.py --adapter subprocess --cmd /path/to/candidate-nunchi
 ```
 
 To test a third-party / non-Python adapter, implement the `Adapter` protocol (see `contracts/adapters.py` `class Adapter(Protocol)`) and pass `--adapter custom:path/to/your_adapter.py:YourAdapter`.
@@ -113,11 +113,11 @@ To test a third-party / non-Python adapter, implement the `Adapter` protocol (se
 python3 -m unittest tests.test_003_runner -v
 ```
 
-These exercise loader correctness, report shape, JSONL stream validity, the adapter contract, and the metadata-driven `mock_adapter_output` path that the verdict-surface contract fixtures rely on. They pin per-fixture classifier decisions via `TURNAWARE_CLASSIFIER_TEST_RESULT`, so they run offline and deterministically. They do NOT exercise live classifier judgment — that's what the evidence run does. The self-tests run in milliseconds; the actual suite runs in seconds on the deterministic path.
+These exercise loader correctness, report shape, JSONL stream validity, the adapter contract, and the metadata-driven `mock_adapter_output` path that the verdict-surface contract fixtures rely on. They pin per-fixture classifier decisions via `NUNCHI_CLASSIFIER_TEST_RESULT`, so they run offline and deterministically. They do NOT exercise live classifier judgment — that's what the evidence run does. The self-tests run in milliseconds; the actual suite runs in seconds on the deterministic path.
 
 ## Troubleshooting
 
-- **`turnaware: command not found`** — run `pip install -e .` from repo root, or use `--adapter subprocess --cmd "$(python3 -c 'import sys; print(sys.executable)') -m turnaware"` to invoke the module directly.
-- **`classifier provider model is required …` / `classifier provider API key is required …`** — the provider-backed classifier needs its environment. Either export `TURNAWARE_CLASSIFIER_TEST_RESULT` (offline deterministic path) or export `TURNAWARE_CLASSIFIER_MODEL` plus `OPENROUTER_API_KEY`/`TURNAWARE_CLASSIFIER_API_KEY` (live evidence run) before invoking the runner.
-- **All fixtures report `error_kind: subprocess-crash`** — the adapter cannot find or execute the CLI, or the CLI is exiting on missing classifier environment. Verify directly with `turnaware admit --input tests/fixtures/pass.json` using the same environment.
+- **`nunchi: command not found`** — run `pip install -e .` from repo root, or use `--adapter subprocess --cmd "$(python3 -c 'import sys; print(sys.executable)') -m nunchi"` to invoke the module directly.
+- **`classifier provider model is required …` / `classifier provider API key is required …`** — the provider-backed classifier needs its environment. Either export `NUNCHI_CLASSIFIER_TEST_RESULT` (offline deterministic path) or export `NUNCHI_CLASSIFIER_MODEL` plus `OPENROUTER_API_KEY`/`NUNCHI_CLASSIFIER_API_KEY` (live evidence run) before invoking the runner.
+- **All fixtures report `error_kind: subprocess-crash`** — the adapter cannot find or execute the CLI, or the CLI is exiting on missing classifier environment. Verify directly with `nunchi admit --input tests/fixtures/pass.json` using the same environment.
 - **Determinism check** — on the offline deterministic path, run twice with `--deterministic-time`; the JSONL output should be byte-identical (FR-015 as re-scoped). If not, file a bug. Live provider runs are NOT expected to be byte-identical — same command, same fixture set, same schema, honestly captured evidence.

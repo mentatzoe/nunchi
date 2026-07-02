@@ -90,17 +90,17 @@ def _classify_raw_stdout(raw: str) -> dict:
 
 
 class SubprocessAdapter:
-    """Default adapter: shells out to `turnaware admit --input <tmp>.json` (research.md R1)."""
+    """Default adapter: shells out to `nunchi admit --input <tmp>.json` (research.md R1)."""
 
     def __init__(self, cmd: list[str] | None = None, timeout: float = 10.0) -> None:
         if cmd is not None:
             self._cmd = list(cmd)
         else:
-            resolved = shutil.which("turnaware")
+            resolved = shutil.which("nunchi")
             if resolved:
                 self._cmd = [resolved]
             else:
-                self._cmd = [sys.executable, "-m", "turnaware"]
+                self._cmd = [sys.executable, "-m", "nunchi"]
         self._timeout = timeout
         self.name = "subprocess:" + " ".join(self._cmd)
 
@@ -149,12 +149,12 @@ class SubprocessAdapter:
 
 
 class InProcessAdapter:
-    """In-process adapter: imports turnaware.core.evaluate (research.md R1 alt)."""
+    """In-process adapter: imports nunchi.core.evaluate (research.md R1 alt)."""
 
-    name = "in-process:turnaware.core.evaluate"
+    name = "in-process:nunchi.core.evaluate"
 
     def __init__(self) -> None:
-        from turnaware.core import evaluate
+        from nunchi.core import evaluate
 
         self._evaluate = evaluate
 

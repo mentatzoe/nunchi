@@ -1,4 +1,4 @@
-"""Command-line interface for TurnAware."""
+"""Command-line interface for Nunchi."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ from .errors import (
     EXIT_SUCCESS,
     EXIT_VALIDATION,
     InputError,
-    TurnAwareError,
+    NunchiError,
     ValidationError,
 )
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="turnaware")
+    parser = argparse.ArgumentParser(prog="nunchi")
     subparsers = parser.add_subparsers(dest="command", required=True)
     admit = subparsers.add_parser("admit", help="evaluate one admission request")
     admit.add_argument("--input", "-i", metavar="PATH", help="read admission request JSON from a file")
@@ -73,7 +73,7 @@ def _load_classifier_config(raw: str | None) -> dict[str, Any] | None:
     return config
 
 
-def _write_error(error: TurnAwareError) -> None:
+def _write_error(error: NunchiError) -> None:
     print(f"{error.label}: {error}", file=sys.stderr)
 
 
@@ -94,7 +94,7 @@ def main(argv: Sequence[str] | None = None):
     except ValidationError as exc:
         _write_error(exc)
         return EXIT_VALIDATION
-    except TurnAwareError as exc:
+    except NunchiError as exc:
         _write_error(exc)
         return EXIT_RUNTIME
 

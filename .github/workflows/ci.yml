@@ -5,8 +5,8 @@ on:
     branches: [main]
   pull_request:
 
-# TurnAware is stdlib-only and its tests are fully offline (the classifier is
-# stubbed via TURNAWARE_CLASSIFIER_TEST_RESULT), so CI needs no provider secrets.
+# Nunchi is stdlib-only and its tests are fully offline (the classifier is
+# stubbed via NUNCHI_CLASSIFIER_TEST_RESULT), so CI needs no provider secrets.
 # Live-provider evidence is captured manually at release time, not in CI.
 permissions:
   contents: read
@@ -45,17 +45,17 @@ jobs:
           /tmp/venv/bin/python -m pip install --upgrade pip
           /tmp/venv/bin/python -m pip install .
           # Importable without the tests/ sys.path shim
-          /tmp/venv/bin/python -c "import turnaware; from turnaware.adapters import channel; print('import OK')"
+          /tmp/venv/bin/python -c "import nunchi; from nunchi.adapters import channel; print('import OK')"
           # Console scripts are installed
-          /tmp/venv/bin/turnaware --help >/dev/null
+          /tmp/venv/bin/nunchi --help >/dev/null
           # End-to-end through the installed console scripts, offline (stubbed classifier)
-          export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["ci smoke"]}'
+          export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["ci smoke"]}'
           echo '{"trigger":{"content":"dalgos, summarize the change","id":"t-1"},"context":[],"classifier":"product"}' \
-            | /tmp/venv/bin/turnaware admit | grep -q '"verdict": "SPEAK"'
+            | /tmp/venv/bin/nunchi admit | grep -q '"verdict": "SPEAK"'
           # Channel adapter: default output is transport-neutral JSON ...
           PASS_PAYLOAD='{"trigger":{"content":"vigil, rebase","message_id":"m-1"},"history":[],"agent":{"id":"dalgos"}}'
-          export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["ci"]}'
-          echo "$PASS_PAYLOAD" | /tmp/venv/bin/turnaware-channel | grep -q '"silent": true'
+          export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["ci"]}'
+          echo "$PASS_PAYLOAD" | /tmp/venv/bin/nunchi-channel | grep -q '"silent": true'
           # ... and --format cc-connect opts into the cc-connect sentinel
-          echo "$PASS_PAYLOAD" | /tmp/venv/bin/turnaware-channel --format cc-connect | grep -q '^CC_CONNECT_SILENT_PASS$'
+          echo "$PASS_PAYLOAD" | /tmp/venv/bin/nunchi-channel --format cc-connect | grep -q '^CC_CONNECT_SILENT_PASS$'
           echo "packaging smoke OK"

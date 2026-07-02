@@ -3,17 +3,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "turnaware"
-version = "0.1.0"
-description = "Portable pre-reply admission gate for turn-aware agents"
+name = "nunchi"
+version = "0.2.0"
+description = "Read-the-room admission gate for agents on shared chat surfaces: should this agent speak now?"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT OR Apache-2.0" }
 authors = [
-  { name = "TurnAware contributors" }
+  { name = "Nunchi contributors" }
 ]
 dependencies = []
 keywords = [
+  "nunchi",
   "agents",
   "llm",
   "admission-gate",
@@ -36,13 +37,13 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mentatzoe/turnaware"
-Repository = "https://github.com/mentatzoe/turnaware"
-Issues = "https://github.com/mentatzoe/turnaware/issues"
+Homepage = "https://github.com/mentatzoe/nunchi"
+Repository = "https://github.com/mentatzoe/nunchi"
+Issues = "https://github.com/mentatzoe/nunchi/issues"
 
 [project.scripts]
-turnaware = "turnaware.cli:main"
-turnaware-channel = "turnaware.adapters.channel:main"
+nunchi = "nunchi.cli:main"
+nunchi-channel = "nunchi.adapters.channel:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

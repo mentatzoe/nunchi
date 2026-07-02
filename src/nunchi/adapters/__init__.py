@@ -1,6 +1,6 @@
-"""TurnAware adapter tier.
+"""Nunchi adapter tier.
 
-Adapters translate a host surface's message shape into a TurnAware admission
+Adapters translate a host surface's message shape into a Nunchi admission
 request, call the callable core, and route the verdict back into the host's
 action model. They depend on the core; the core never depends on them.
 

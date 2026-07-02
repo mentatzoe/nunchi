@@ -8,19 +8,19 @@ agent's transport would actually emit (the silent-pass sentinel, or nothing —
 leaving the agent to compose its own turn).
 
 Run live:
-    export TURNAWARE_CLASSIFIER_MODEL=google/gemini-2.5-flash
+    export NUNCHI_CLASSIFIER_MODEL=google/gemini-2.5-flash
     export OPENROUTER_API_KEY=...
     PYTHONPATH=src python3 examples/read_the_room_demo.py
 
 Run offline (pin every verdict, just to see the routing/plumbing):
-    export TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["pinned"]}'
+    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["pinned"]}'
     PYTHONPATH=src python3 examples/read_the_room_demo.py
 """
 
 import os
 import sys
 
-from turnaware.adapters.channel import gate
+from nunchi.adapters.channel import gate
 
 AGENT = {"id": "dalgos", "role": "participant", "mention_id": "1494822747856967683"}
 
@@ -65,9 +65,9 @@ TURNS = [
 
 
 def main() -> int:
-    if not (os.environ.get("TURNAWARE_CLASSIFIER_MODEL") or os.environ.get("TURNAWARE_CLASSIFIER_TEST_RESULT")):
-        print("Set TURNAWARE_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
-              "or TURNAWARE_CLASSIFIER_TEST_RESULT to see routing offline.", file=sys.stderr)
+    if not (os.environ.get("NUNCHI_CLASSIFIER_MODEL") or os.environ.get("NUNCHI_CLASSIFIER_TEST_RESULT")):
+        print("Set NUNCHI_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
+              "or NUNCHI_CLASSIFIER_TEST_RESULT to see routing offline.", file=sys.stderr)
         return 2
 
     print(f"agent: {AGENT['id']}  (mention_id {AGENT['mention_id']})")

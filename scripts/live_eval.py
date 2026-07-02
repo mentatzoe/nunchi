@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Live drift eval: run the 003 corpus against the configured model and report.
 
-Reads TURNAWARE_CLASSIFIER_MODEL (+ a provider key) from the environment, runs
+Reads NUNCHI_CLASSIFIER_MODEL (+ a provider key) from the environment, runs
 the verdict-test-suite corpus live, and prints pass/fail/error counts, accuracy
 over the model-scored fixtures, and the headline-case pass count. Always exits 0
 -- it is a report, not a gate.
 
 Offline dry run (proves parsing without a provider call):
-    TURNAWARE_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dry"]}' \
+    NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dry"]}' \
       PYTHONPATH=src python3 scripts/live_eval.py
 """
 
@@ -33,7 +33,7 @@ HEADLINE = {
 
 
 def main() -> int:
-    model = os.environ.get("TURNAWARE_CLASSIFIER_MODEL", "(unset)")
+    model = os.environ.get("NUNCHI_CLASSIFIER_MODEL", "(unset)")
     env = dict(os.environ)
     env.setdefault("PYTHONPATH", str(REPO / "src"))
     # The runner exits 1 when any fixture fails (expected); we parse its JSONL
