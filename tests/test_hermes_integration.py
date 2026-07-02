@@ -993,5 +993,363 @@ class TestVerbosityLevels(unittest.TestCase):
         self.assertNotIn("payload", entry)
 
 
+# ---------------------------------------------------------------------------
+# Feature A: Runtime state overrides wired into _gate_event
+# ---------------------------------------------------------------------------
+
+class TestStateOverridesInGate(unittest.TestCase):
+    """State-layer overrides are applied by _gate_event via state.merge_effective."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    def test_state_introduced_channel_is_gated(self) -> None:
+        """A channel absent from config.yaml but in state with enabled:true is gated."""
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "state.json")
+            state_data = {
+                "global": {},
+                "channels": {"new-chan": {"enabled": True}},
+            }
+            with open(state_file, "w") as f:
+                json.dump(state_data, f)
+
+            # config.yaml has channels: "1518384310321811456" — NOT new-chan.
+            cfg = _base_cfg(channels="1518384310321811456", state_path=state_file)
+
+            result_holder = []
+
+            def capture_run(payload, c):
+                result_holder.append(1)
+                return {"verdict": "SPEAK", "silent": False}
+
+            with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+                with unittest.mock.patch.object(self.p, "_run_nunchi", capture_run):
+                    result = self.p._gate_event(_event(chat_id="new-chan"))
+
+            # State-introduced channel → gated → SPEAK → allow (None)
+            self.assertIsNone(result)
+            self.assertTrue(len(result_holder) > 0, "classifier should have been called")
+
+    def test_state_disabled_channel_is_suppressed(self) -> None:
+        """state[channels][id] with enabled:false suppresses a baseline-gated channel."""
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "state.json")
+            state_data = {
+                "global": {},
+                "channels": {"1518384310321811456": {"enabled": False}},
+            }
+            with open(state_file, "w") as f:
+                json.dump(state_data, f)
+
+            cfg = _base_cfg(channels="1518384310321811456", state_path=state_file)
+            called = []
+
+            def capture_run(payload, c):
+                called.append(1)
+                return {"verdict": "SPEAK"}
+
+            with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+                with unittest.mock.patch.object(self.p, "_run_nunchi", capture_run):
+                    result = self.p._gate_event(_event())
+
+            self.assertIsNone(result)
+            self.assertEqual(called, [], "classifier must not be called for suppressed channel")
+
+    def test_state_global_enable_gates_previously_disabled(self) -> None:
+        """state[global][enabled]=True turns on a globally disabled gate."""
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "state.json")
+            state_data = {"global": {"enabled": True}}
+            with open(state_file, "w") as f:
+                json.dump(state_data, f)
+
+            # Baseline has enabled:False but state["global"]["enabled"] = True
+            cfg = _base_cfg(enabled=False, state_path=state_file)
+
+            with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+                with unittest.mock.patch.object(
+                    self.p, "_run_nunchi", return_value={"verdict": "SPEAK", "silent": False}
+                ):
+                    result = self.p._gate_event(_event())
+
+            self.assertIsNone(result)  # gated and allowed through
+
+
+# ---------------------------------------------------------------------------
+# Feature B: /nunchi slash command
+# ---------------------------------------------------------------------------
+
+_STATE_MODULE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "integrations" / "hermes" / "nunchi-gate" / "state.py"
+)
+
+
+def _load_state_mod():
+    import importlib.util, types
+    spec = importlib.util.spec_from_file_location("nunchi_gate_state_cmd_test", _STATE_MODULE_PATH)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class TestNunchiCommand(unittest.TestCase):
+    """_nunchi_command: subcommands, validation, whitelist, error handling."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+        self.tmp = tempfile.mkdtemp()
+        self.state_file = os.path.join(self.tmp, "state.json")
+        # Default config: state_path points to our temp file.
+        self.cfg = _base_cfg(state_path=self.state_file)
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, args_str: str) -> str:
+        """Run /nunchi with the given args string, using mocked _nunchi_config."""
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=self.cfg):
+            return self.p._nunchi_command(args_str)
+
+    def _load_state(self) -> dict:
+        if not os.path.exists(self.state_file):
+            return {}
+        with open(self.state_file) as f:
+            return json.load(f)
+
+    # --- status ---
+
+    def test_status_empty_state(self) -> None:
+        result = self._run("status")
+        self.assertIn("nunchi-gate status", result)
+        self.assertIn("state_path", result)
+
+    def test_status_shows_configured_channels(self) -> None:
+        self.cfg = _base_cfg(
+            channels="1518384310321811456",
+            state_path=self.state_file,
+        )
+        result = self._run("status")
+        self.assertIn("1518384310321811456", result)
+
+    def test_status_marks_global_override(self) -> None:
+        state_data = {"global": {"senders": "humans"}}
+        with open(self.state_file, "w") as f:
+            json.dump(state_data, f)
+        result = self._run("status")
+        self.assertIn("global-override", result)
+
+    def test_status_shows_state_introduced_channels(self) -> None:
+        """Status lists channels introduced via state even if absent from config.yaml."""
+        # config.yaml has channels: "" (empty) → nothing configured
+        self.cfg = _base_cfg(channels="", state_path=self.state_file)
+        state_data = {"channels": {"new-chan": {"enabled": True}}}
+        with open(self.state_file, "w") as f:
+            json.dump(state_data, f)
+        result = self._run("status")
+        self.assertIn("new-chan", result)
+        self.assertIn("state-introduced", result)
+
+    # --- enable / disable ---
+
+    def test_enable_global_sets_state(self) -> None:
+        result = self._run("enable global")
+        self.assertIn("enable", result.lower())
+        state = self._load_state()
+        self.assertTrue(state.get("global", {}).get("enabled"))
+
+    def test_disable_global_sets_state(self) -> None:
+        result = self._run("disable global")
+        state = self._load_state()
+        self.assertFalse(state.get("global", {}).get("enabled"))
+
+    def test_enable_channel_sets_state(self) -> None:
+        self._run("enable 1518384310321811456")
+        state = self._load_state()
+        self.assertTrue(state["channels"]["1518384310321811456"]["enabled"])
+
+    def test_disable_channel_sets_state(self) -> None:
+        self._run("disable 1518384310321811456")
+        state = self._load_state()
+        self.assertFalse(state["channels"]["1518384310321811456"]["enabled"])
+
+    def test_enable_without_target_returns_usage(self) -> None:
+        result = self._run("enable")
+        self.assertIn("Usage", result)
+        self.assertFalse(os.path.exists(self.state_file))
+
+    def test_enable_on_unlisted_channel_introduces_it(self) -> None:
+        """Enabling an unlisted channel introduces it in state and a gate event flows through."""
+        new_cid = "9999999999999999999"
+        # Enable the new channel.
+        self._run(f"enable {new_cid}")
+        state = self._load_state()
+        self.assertTrue(state["channels"][new_cid]["enabled"])
+
+        # Gate event on the new channel should now flow through (state-introduced).
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=self.cfg):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi", return_value={"verdict": "SPEAK", "silent": False}
+            ):
+                result = self.p._gate_event(_event(chat_id=new_cid))
+        self.assertIsNone(result)  # SPEAK → allow
+
+    # --- senders ---
+
+    def test_senders_valid_value_global(self) -> None:
+        result = self._run("senders humans")
+        self.assertIn("humans", result)
+        state = self._load_state()
+        self.assertEqual(state["global"]["senders"], "humans")
+
+    def test_senders_valid_value_channel(self) -> None:
+        self._run("senders allowlist 1518384310321811456")
+        state = self._load_state()
+        self.assertEqual(state["channels"]["1518384310321811456"]["senders"], "allowlist")
+
+    def test_senders_invalid_value_returns_error(self) -> None:
+        result = self._run("senders badvalue")
+        self.assertIn("invalid", result.lower())
+        self.assertFalse(os.path.exists(self.state_file), "state must not be written on error")
+
+    def test_senders_missing_value_returns_usage(self) -> None:
+        result = self._run("senders")
+        self.assertIn("Usage", result)
+
+    # --- verbosity ---
+
+    def test_verbosity_valid_value_global(self) -> None:
+        self._run("verbosity debug")
+        state = self._load_state()
+        self.assertEqual(state["global"]["verbosity"], "debug")
+
+    def test_verbosity_valid_value_channel(self) -> None:
+        self._run("verbosity minimal 1518384310321811456")
+        state = self._load_state()
+        self.assertEqual(
+            state["channels"]["1518384310321811456"]["verbosity"], "minimal"
+        )
+
+    def test_verbosity_invalid_value_returns_error(self) -> None:
+        result = self._run("verbosity extreme")
+        self.assertIn("invalid", result.lower())
+        self.assertFalse(os.path.exists(self.state_file))
+
+    def test_verbosity_missing_level_returns_usage(self) -> None:
+        result = self._run("verbosity")
+        self.assertIn("Usage", result)
+
+    # --- reset ---
+
+    def test_reset_no_arg_clears_all_overrides(self) -> None:
+        with open(self.state_file, "w") as f:
+            json.dump({"global": {"senders": "all"}, "channels": {"chan1": {"enabled": True}}}, f)
+        result = self._run("reset")
+        self.assertIn("all overrides cleared", result.lower())
+        state = self._load_state()
+        # After a full reset the state file is written with no user data;
+        # global/channels may be absent (None) or empty dict — both are valid.
+        self.assertEqual(state.get("global") or {}, {})
+        self.assertEqual(state.get("channels") or {}, {})
+
+    def test_reset_global_clears_all_overrides(self) -> None:
+        with open(self.state_file, "w") as f:
+            json.dump({"global": {"senders": "humans"}, "channels": {"ch1": {"enabled": True}}}, f)
+        self._run("reset global")
+        state = self._load_state()
+        self.assertEqual(state.get("global", {}), {})
+
+    def test_reset_channel_clears_that_channel_only(self) -> None:
+        initial = {
+            "global": {"senders": "all"},
+            "channels": {
+                "chan1": {"enabled": True},
+                "chan2": {"senders": "humans"},
+            },
+        }
+        with open(self.state_file, "w") as f:
+            json.dump(initial, f)
+        result = self._run("reset chan1")
+        self.assertIn("chan1", result)
+        state = self._load_state()
+        self.assertNotIn("chan1", state.get("channels", {}))
+        self.assertIn("chan2", state.get("channels", {}))  # chan2 untouched
+        self.assertEqual(state["global"]["senders"], "all")  # global untouched
+
+    def test_reset_nonexistent_channel_returns_not_found(self) -> None:
+        result = self._run("reset unknown-chan")
+        self.assertIn("no overrides", result.lower())
+
+    # --- bad input / unknown subcommand ---
+
+    def test_empty_args_returns_usage(self) -> None:
+        result = self._run("")
+        self.assertIn("Usage", result)
+
+    def test_unknown_subcommand_returns_usage(self) -> None:
+        result = self._run("frobnicate")
+        self.assertIn("Usage", result)
+
+    def test_never_raises(self) -> None:
+        """_nunchi_command must return a string even if internals error."""
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", side_effect=RuntimeError("boom")
+        ):
+            result = self.p._nunchi_command("status")
+        self.assertIsInstance(result, str)
+        self.assertIn("error", result.lower())
+
+    # --- Whitelist enforcement via slash ---
+
+    def test_slash_cannot_set_binary(self) -> None:
+        """The slash command has no 'binary' subcommand; any attempt to set it is harmless."""
+        # There's no direct path, but ensure the state module drops it if somehow present.
+        state_mod = _load_state_mod()
+        result = state_mod.filter_overridable({"binary": "/evil", "enabled": True})
+        self.assertNotIn("binary", result)
+
+    def test_slash_cannot_set_agent_id(self) -> None:
+        state_mod = _load_state_mod()
+        result = state_mod.filter_overridable({"agent_id": "evil-bot", "senders": "all"})
+        self.assertNotIn("agent_id", result)
+
+    # --- register() wires the command ---
+
+    def test_register_wires_command(self) -> None:
+        p = _load_plugin()
+        registered_hooks: dict = {}
+        registered_cmds: dict = {}
+
+        class FakeCtx:
+            def register_hook(self, name, fn):
+                registered_hooks[name] = fn
+
+            def register_command(self, name, handler, description="", args_hint=""):
+                registered_cmds[name] = {"handler": handler, "description": description}
+
+        p.register(FakeCtx())
+        self.assertIn("pre_gateway_dispatch", registered_hooks)
+        self.assertIn("nunchi", registered_cmds)
+        self.assertIs(registered_cmds["nunchi"]["handler"], p._nunchi_command)
+
+    def test_register_graceful_without_register_command(self) -> None:
+        """register() does not error when ctx lacks register_command (older Hermes)."""
+        p = _load_plugin()
+        registered: dict = {}
+
+        class FakeCtxNoCmd:
+            def register_hook(self, name, fn):
+                registered[name] = fn
+
+        p.register(FakeCtxNoCmd())  # must not raise
+        self.assertIn("pre_gateway_dispatch", registered)
+
+
 if __name__ == "__main__":
     unittest.main()

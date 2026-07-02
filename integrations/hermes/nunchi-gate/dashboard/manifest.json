@@ -1,0 +1,13 @@
+{
+  "name": "nunchi",
+  "label": "Nunchi",
+  "description": "Admission gate runtime config and receipt log viewer",
+  "icon": "Shield",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/nunchi",
+    "position": "after:skills"
+  },
+  "entry": "index.js",
+  "api": "plugin_api.py"
+}
