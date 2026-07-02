@@ -324,3 +324,213 @@ Example sender-policy drop entry:
   "ts": 1751234600.0
 }
 ```
+
+---
+
+## Runtime state overrides
+
+### Design: config.yaml vs state.json
+
+nunchi-gate uses a two-layer configuration model:
+
+| Layer | File | Who writes | When applied |
+|-------|------|------------|--------------|
+| **Baseline** | `~/.hermes/config.yaml` | Operator (editor / deploy) | At Hermes startup; comment-preserving |
+| **Overrides** | `~/.hermes/nunchi-gate.state.json` | `/nunchi` slash command, dashboard PUT `/state` | Hot; mtime-cached; no restart needed |
+
+The `state.json` file is always layered **on top of** the static baseline.  Hermes
+does not need to restart when the state file changes — the gate reads it on every
+event with mtime-based caching (no re-read unless the file changes on disk).
+
+**Who reads what:**
+- `_gate_event` in `__init__.py` applies `state["global"]` overrides before the
+  basic gate check, then calls `merge_effective` to apply `state["channels"][id]`
+  overrides on top of the config.yaml per-channel merge.
+- The `/nunchi` slash command and the dashboard PUT `/state` both write through
+  `state.save_state` with `updated_by="slash"` or `"dashboard"` respectively.
+
+**Effective config layering order (lowest → highest precedence):**
+
+1. config.yaml global keys (baseline)
+2. `state["global"]` runtime overrides
+3. config.yaml `channels` map per-channel keys (if using the map form)
+4. `state["channels"][<id>]` runtime per-channel overrides
+
+### Security whitelist
+
+The following keys can be set via state (slash command or dashboard):
+
+```
+enabled, senders, allow_from, verbosity, fail_open, model, pinned_rules_file
+```
+
+The following keys are **config.yaml-only** and cannot be changed at runtime:
+
+| Key | Rationale |
+|-----|-----------|
+| `binary` | Would allow a chat message to redirect the subprocess executable. |
+| `timeout_seconds` | Operator-controlled safety boundary. |
+| `log_path` | Prevents redirecting receipts to an attacker-controlled path. |
+| `agent_id` | Changing the bot identity at runtime would corrupt history parsing. |
+| `mention_id` | Same: identity must stay stable within a session. |
+| `state_path` | Prevents the state file from redirecting itself. |
+
+`state.py`'s `filter_overridable()` enforces this whitelist at ingestion time.
+Both the slash command and the dashboard API call through `filter_overridable`
+before writing, so neither surface can accidentally or maliciously bypass it.
+
+### Hot-adding channels without editing config.yaml
+
+You can add a new channel to the gate without touching `config.yaml` or
+restarting Hermes:
+
+```
+/nunchi enable 9999999999999999999
+```
+
+This writes `{"enabled": true}` into `state["channels"]["9999999999999999999"]`.
+`merge_effective` detects that the config.yaml baseline returned `None` for this
+channel but the state file has an explicit `enabled: true`, and gates the channel
+using the global-patched baseline config as the foundation (plus any additional
+per-channel state overrides).
+
+To remove a hot-added channel: `/nunchi reset 9999999999999999999`
+
+To list all currently active surfaces (baseline-listed + state-introduced):
+`/nunchi status`
+
+---
+
+## /nunchi slash command
+
+The `/nunchi` command lets operators inspect and modify the gate configuration
+at runtime from any Discord channel.  Changes take effect immediately — the next
+gate invocation reads the updated state file.
+
+> **Note:** the handler has no implicit channel context.  Channel IDs must be
+> given explicitly (e.g. `1518384310321811456`).  Use `global` to target the
+> cross-channel override.
+
+### Subcommands
+
+#### `status`
+
+```
+/nunchi status
+```
+
+Prints a compact effective-config summary for every configured channel (baseline
++ state-introduced).  Each config value carries a provenance badge:
+- *(no badge)* — from config.yaml baseline
+- `[global-override]` — set via `state["global"]`
+- `[channel-override]` — set via `state["channels"][id]`
+- `[state-introduced]` — channel exists only because of a state entry
+
+#### `enable` / `disable`
+
+```
+/nunchi enable  <channel-id | global>
+/nunchi disable <channel-id | global>
+```
+
+Sets `enabled: true` or `enabled: false` in the state for the given channel or
+globally.  `enable <channel-id>` works for channels that are not listed in
+config.yaml — the channel becomes state-introduced.
+
+#### `senders`
+
+```
+/nunchi senders <all | humans | allowlist> [channel-id | global]
+```
+
+Sets the sender policy override.  When no channel is given, sets the global
+override.  Valid values: `all`, `humans`, `allowlist`.
+
+#### `verbosity`
+
+```
+/nunchi verbosity <minimal | normal | debug> [channel-id | global]
+```
+
+Sets the log verbosity override.  When no channel is given, sets the global
+override.  Valid values: `minimal`, `normal`, `debug`.
+
+#### `reset`
+
+```
+/nunchi reset [channel-id | global]
+```
+
+- `reset` or `reset global` — clears **all** overrides (global + every channel).
+- `reset <channel-id>` — clears overrides for that channel only; global and
+  other channels are untouched.
+
+### Error handling
+
+All subcommands return a human-readable string.  Unknown subcommands and
+malformed arguments return the usage text.  Internal errors return an
+`error:` prefix line.  The handler never raises.
+
+---
+
+## Dashboard tab
+
+The dashboard plugin adds a **Nunchi** tab to the Hermes web interface.
+It requires the dashboard service to be running (`hermes dashboard`).
+
+### Install
+
+The plugin directory must be discoverable from `~/.hermes/plugins/`.  The
+existing gate symlink already covers this:
+
+```sh
+# Already done during gate install:
+ln -s "$(pwd)/integrations/hermes/nunchi-gate" ~/.hermes/plugins/nunchi-gate
+```
+
+The `dashboard/` subdirectory inside the symlinked plugin directory is
+discovered automatically at startup.  **A dashboard service restart is
+required** for the new tab to appear (the plugin is discovered at process
+start, not hot-reloaded):
+
+```sh
+# Restart hermes with the dashboard flag
+hermes dashboard
+```
+
+After restarting, the **Nunchi** tab should appear in the sidebar.
+
+### Dashboard routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `GET /api/plugins/nunchi/state` | GET | Returns `{baseline, overrides, effective}` for all configured + state-introduced channels. |
+| `PUT /api/plugins/nunchi/state` | PUT | Apply overrides.  Body: `{"global": {...}, "channels": {"<id>": {...}}}`.  Whitelist-enforced. |
+| `GET /api/plugins/nunchi/receipts?limit=N` | GET | Tail-parse the gate JSONL log (default 50, max 500).  Newest-first.  Malformed lines skipped. |
+
+### UI features
+
+- **Per-channel effective config table** — editable `senders`, `verbosity`,
+  and `enabled` fields with baseline / override provenance badges per field.
+- **Global override section** — set senders/verbosity globally.
+- **State-introduced channels** — channels introduced via `/nunchi enable` appear
+  with a `[state-introduced]` badge; they can be edited and reset from the UI.
+- **Save button** — applies pending edits via PUT `/state`.
+- **Reset All Overrides** — clears the entire state file.
+- **Receipts panel** — polls GET `/receipts` every 5 s; shows timestamp, verdict,
+  author, channel, and first reason per entry; colour-coded by verdict.
+
+### Manual verification steps
+
+After installing and restarting the dashboard:
+
+1. Open the Hermes dashboard in a browser.
+2. Check the sidebar for a **Nunchi** tab (Shield icon).
+3. The tab should load without errors; the **Channels** section shows channels
+   from config.yaml (or an empty state if none are configured).
+4. Toggle `enabled` on a channel, click **Save**, and verify the state file
+   was updated: `cat ~/.hermes/nunchi-gate.state.json`.
+5. Send a message in the gated channel and check the **Receipts** panel updates
+   within 5 seconds.
+6. Click **Reset All Overrides** and confirm the state file is cleared.
+7. Run `/nunchi status` in Discord; the output should reflect the cleared state.

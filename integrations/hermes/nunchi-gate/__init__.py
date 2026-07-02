@@ -122,6 +122,7 @@ Legacy support:
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import logging
 import os
@@ -137,8 +138,26 @@ logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "nunchi-gate"
 _DEFAULT_BINARY = shutil.which("nunchi-channel") or "/usr/local/bin/nunchi-channel"
 _DEFAULT_LOG_PATH = "~/.hermes/logs/nunchi-gate.jsonl"
+_DEFAULT_STATE_PATH = "~/.hermes/nunchi-gate.state.json"
 _DEFAULT_TIMEOUT_SECONDS = 30
 _SPEAK_VERDICTS = {"SPEAK", "ASK", "ACK"}
+
+# ---------------------------------------------------------------------------
+# Sibling module loader: state.py lives next to __init__.py.  We load it via
+# spec_from_file_location rather than a relative import so that the plugin
+# works when loaded via importlib.util.spec_from_file_location in tests
+# (where there is no package parent to anchor a relative import).
+# ---------------------------------------------------------------------------
+_state: Any = None
+try:
+    _state_file = Path(__file__).parent / "state.py"
+    _state_spec = importlib.util.spec_from_file_location("nunchi_gate_state", _state_file)
+    if _state_spec and _state_spec.loader:
+        _state_mod = importlib.util.module_from_spec(_state_spec)
+        _state_spec.loader.exec_module(_state_mod)  # type: ignore[union-attr]
+        _state = _state_mod
+except Exception:
+    pass  # state module unavailable → fall back to baseline config only
 
 # One backfilled channel_context line: "[DisplayName] content" with an
 # optional " [bot]" tag inside the brackets.
@@ -506,16 +525,43 @@ def _should_gate(event: Any, cfg: dict[str, Any]) -> bool:
 
 
 def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_: Any):
-    cfg = _nunchi_config()
+    base_cfg = _nunchi_config()
+
+    # Load runtime state overrides.  The state_path itself is config.yaml-only
+    # (not overridable at runtime) to prevent a chat command from redirecting
+    # the state file to an attacker-controlled path.
+    state_data: dict[str, Any] = {}
+    if _state is not None:
+        state_path = Path(str(base_cfg.get("state_path") or _DEFAULT_STATE_PATH)).expanduser()
+        try:
+            state_data = _state.load_state(state_path)
+        except Exception:
+            pass
+
+    # Pre-apply global state overrides so _should_gate sees the live 'enabled'
+    # value (in case an operator ran /nunchi enable global after startup).
+    cfg = base_cfg
+    if _state is not None and state_data:
+        g = _state.filter_overridable(state_data.get("global") or {})
+        if g:
+            cfg = {**base_cfg, **g}
+
     if not _should_gate(event, cfg):
         return None
 
     source = getattr(event, "source", None)
     ch_ids = _channel_ids(source)
 
-    # Resolve per-channel config (handles legacy and map forms).
-    # Returns None when the event's channel is not configured for gating.
-    resolved_cfg = resolve_channel_config(cfg, ch_ids)
+    # Full per-channel resolution: config.yaml map form + runtime state overlays.
+    # merge_effective re-applies the global overlay (idempotent) then adds the
+    # per-channel state layer on top of the config.yaml per-channel merge.
+    if _state is not None:
+        resolved_cfg = _state.merge_effective(
+            base_cfg, state_data, ch_ids,
+            _resolve_channel_config=resolve_channel_config,
+        )
+    else:
+        resolved_cfg = resolve_channel_config(base_cfg, ch_ids)
     if resolved_cfg is None:
         return None
 
@@ -624,5 +670,272 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
         return {"action": "skip", "reason": "nunchi:error"}
 
 
+# ---------------------------------------------------------------------------
+# /nunchi slash command
+# ---------------------------------------------------------------------------
+
+_VALID_SENDERS = {"all", "humans", "allowlist"}
+_VALID_VERBOSITY = {"minimal", "normal", "debug"}
+
+_NUNCHI_USAGE = (
+    "Usage: /nunchi <subcommand>\n"
+    "  status\n"
+    "  enable  <channel-id | global>\n"
+    "  disable <channel-id | global>\n"
+    "  senders <all | humans | allowlist> [channel-id | global]\n"
+    "  verbosity <minimal | normal | debug> [channel-id | global]\n"
+    "  reset   [channel-id | global]\n"
+    "\n"
+    "Channel IDs must be given explicitly (e.g. '1518384310321811456').\n"
+    "Use 'global' to set or reset the cross-channel override."
+)
+
+
+def _nunchi_state_path(cfg: dict[str, Any]) -> Path:
+    return Path(str(cfg.get("state_path") or _DEFAULT_STATE_PATH)).expanduser()
+
+
+def _channel_list_from_cfg(cfg: dict[str, Any]) -> list[str]:
+    """Return the list of explicitly configured channel IDs (no wildcards)."""
+    channels_raw = cfg.get("channels") or cfg.get("channel_ids")
+    if isinstance(channels_raw, dict):
+        return [k for k in channels_raw if k != "*"]
+    ids = _coerce_list(channels_raw)
+    return [c for c in ids if c != "*"]
+
+
+def _provenance(key: str, val: Any, ch_overrides: dict, global_overrides: dict) -> str:
+    """Return a short provenance badge for a config value."""
+    if key in ch_overrides:
+        return f"{val!r}  [channel-override]"
+    if key in global_overrides:
+        return f"{val!r}  [global-override]"
+    return f"{val!r}"
+
+
+def _cmd_status(cfg: dict[str, Any], state_path: Path) -> str:
+    """Return a compact effective-config summary per configured channel.
+
+    Lists both baseline-configured channels (from config.yaml) and
+    state-introduced channels (present in state["channels"] with
+    enabled:true but absent from config.yaml).  Each config value carries
+    a provenance badge: ``[channel-override]``, ``[global-override]``, or
+    no badge (from baseline).  State-introduced channels are marked
+    ``[state-introduced]``.
+    """
+    if _state is None:
+        return "nunchi-gate: state module not available"
+
+    state_data = _state.load_state(state_path)
+    global_overrides = _state.filter_overridable(state_data.get("global") or {})
+    ch_states: dict[str, Any] = state_data.get("channels") or {}
+
+    lines = [
+        "nunchi-gate status",
+        f"  state_path: {state_path}",
+    ]
+    if global_overrides:
+        lines.append(f"  global overrides: {global_overrides}")
+    else:
+        lines.append("  global overrides: none")
+
+    # Collect all channels to display: baseline-listed + state-introduced.
+    baseline_channels = set(_channel_list_from_cfg(cfg))
+    state_channels = set(ch_states.keys())
+    all_channel_ids = sorted(baseline_channels | state_channels)
+
+    if not all_channel_ids:
+        lines.append("  (no channels configured in config.yaml or state)")
+    else:
+        for cid in all_channel_ids:
+            is_state_introduced = cid not in baseline_channels
+            eff = _state.merge_effective(
+                cfg, state_data, {cid},
+                _resolve_channel_config=resolve_channel_config,
+            )
+            ch_ov = _state.filter_overridable(ch_states.get(cid) or {})
+            if eff is None:
+                tag = "  [state-disabled]" if cid in ch_states else "  [not gated]"
+                lines.append(f"\n  [{cid}]{tag}")
+                continue
+            intro_tag = "  [state-introduced]" if is_state_introduced else ""
+            lines.append(f"\n  [{cid}]{intro_tag}")
+            for key in ("enabled", "senders", "verbosity", "fail_open", "model"):
+                val = eff.get(key)
+                if val is not None or key in ("enabled", "senders", "verbosity", "fail_open"):
+                    lines.append(f"    {key:<12} {_provenance(key, val, ch_ov, global_overrides)}")
+
+    updated_at = state_data.get("updated_at")
+    if updated_at:
+        lines.append(
+            f"\n  last updated: {updated_at} by {state_data.get('updated_by', '?')}"
+        )
+    return "\n".join(lines)
+
+
+def _apply_override(
+    state_data: dict[str, Any],
+    target: str,  # "global" or a channel ID
+    key: str,
+    value: Any,
+) -> dict[str, Any]:
+    """Return a new state dict with the given override applied."""
+    out: dict[str, Any] = dict(state_data)
+    if target == "global":
+        g = dict(out.get("global") or {})
+        g[key] = value
+        out["global"] = g
+    else:
+        channels = dict(out.get("channels") or {})
+        ch = dict(channels.get(target) or {})
+        ch[key] = value
+        channels[target] = ch
+        out["channels"] = channels
+    return out
+
+
+def _cmd_enable_disable(sub: str, rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
+    if not rest:
+        return f"nunchi: '{sub}' requires a channel ID or 'global'\n\n{_NUNCHI_USAGE}"
+    if _state is None:
+        return "nunchi-gate: state module not available"
+    target = rest[0]
+    state_data = _state.load_state(state_path)
+    new_state = _apply_override(state_data, target, "enabled", sub == "enable")
+    _state.save_state(state_path, new_state, updated_by="slash")
+    scope = "global override" if target == "global" else f"channel {target}"
+    return f"nunchi: {sub}d ({scope})"
+
+
+def _cmd_senders(rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
+    if not rest:
+        return f"nunchi: 'senders' requires a value (all|humans|allowlist)\n\n{_NUNCHI_USAGE}"
+    value = rest[0].lower()
+    if value not in _VALID_SENDERS:
+        return (
+            f"nunchi: invalid senders value {value!r}; "
+            f"must be one of: {', '.join(sorted(_VALID_SENDERS))}"
+        )
+    if _state is None:
+        return "nunchi-gate: state module not available"
+    target = rest[1] if len(rest) > 1 else "global"
+    state_data = _state.load_state(state_path)
+    new_state = _apply_override(state_data, target, "senders", value)
+    _state.save_state(state_path, new_state, updated_by="slash")
+    scope = "global override" if target == "global" else f"channel {target}"
+    return f"nunchi: senders set to {value!r} ({scope})"
+
+
+def _cmd_verbosity(rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
+    if not rest:
+        return f"nunchi: 'verbosity' requires a level (minimal|normal|debug)\n\n{_NUNCHI_USAGE}"
+    value = rest[0].lower()
+    if value not in _VALID_VERBOSITY:
+        return (
+            f"nunchi: invalid verbosity {value!r}; "
+            f"must be one of: {', '.join(sorted(_VALID_VERBOSITY))}"
+        )
+    if _state is None:
+        return "nunchi-gate: state module not available"
+    target = rest[1] if len(rest) > 1 else "global"
+    state_data = _state.load_state(state_path)
+    new_state = _apply_override(state_data, target, "verbosity", value)
+    _state.save_state(state_path, new_state, updated_by="slash")
+    scope = "global override" if target == "global" else f"channel {target}"
+    return f"nunchi: verbosity set to {value!r} ({scope})"
+
+
+def _cmd_reset(rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
+    if _state is None:
+        return "nunchi-gate: state module not available"
+    state_data = _state.load_state(state_path)
+
+    if not rest or rest[0].lower() == "global":
+        # Clear all overrides (global + every channel).
+        new_state: dict[str, Any] = {}
+        _state.save_state(state_path, new_state, updated_by="slash")
+        return "nunchi: all overrides cleared"
+
+    cid = rest[0]
+    channels = dict(state_data.get("channels") or {})
+    if cid in channels:
+        del channels[cid]
+        new_state = dict(state_data)
+        new_state["channels"] = channels
+        _state.save_state(state_path, new_state, updated_by="slash")
+        return f"nunchi: overrides cleared for channel {cid}"
+    return f"nunchi: no overrides found for channel {cid}"
+
+
+def _nunchi_command(raw_args: str) -> str:
+    """Handler for the /nunchi slash command.
+
+    Subcommands
+    -----------
+    status
+        Compact effective-config summary per configured channel, with a
+        provenance badge showing whether each value comes from a runtime
+        override or the baseline config.yaml.
+
+    enable|disable <channel-id|global>
+        Set ``enabled`` true/false for the given channel or globally.
+
+    senders <all|humans|allowlist> [channel-id|global]
+        Set the sender policy.  Defaults to the global override when no
+        channel is given.
+
+    verbosity <minimal|normal|debug> [channel-id|global]
+        Set the log verbosity.  Defaults to the global override when no
+        channel is given.
+
+    reset [channel-id|global]
+        With a channel ID: clear that channel's overrides.
+        With 'global' or no argument: clear all overrides.
+
+    This handler has NO implicit channel context — channel IDs must be
+    supplied explicitly.  Mutations write to the state file via
+    ``state.save_state`` with ``updated_by='slash'`` so the gate path
+    and dashboard see consistent state.
+    """
+    args = raw_args.strip().split()
+    if not args:
+        return _NUNCHI_USAGE
+
+    sub = args[0].lower()
+    rest = args[1:]
+
+    try:
+        cfg = _nunchi_config()
+        state_path = _nunchi_state_path(cfg)
+
+        if sub == "status":
+            return _cmd_status(cfg, state_path)
+        if sub in ("enable", "disable"):
+            return _cmd_enable_disable(sub, rest, cfg, state_path)
+        if sub == "senders":
+            return _cmd_senders(rest, cfg, state_path)
+        if sub == "verbosity":
+            return _cmd_verbosity(rest, cfg, state_path)
+        if sub == "reset":
+            return _cmd_reset(rest, cfg, state_path)
+        return f"nunchi: unknown subcommand {sub!r}\n\n{_NUNCHI_USAGE}"
+    except Exception as exc:
+        # Never raise — always return a human-readable error string.
+        return f"nunchi: error: {exc}"
+
+
 def register(ctx):
     ctx.register_hook("pre_gateway_dispatch", _gate_event)
+    register_cmd = getattr(ctx, "register_command", None)
+    if callable(register_cmd):
+        register_cmd(
+            "nunchi",
+            _nunchi_command,
+            "Configure the nunchi admission gate",
+            args_hint=(
+                "status | enable|disable <channel|global> | "
+                "senders <all|humans|allowlist> [channel] | "
+                "verbosity <minimal|normal|debug> [channel] | "
+                "reset [channel]"
+            ),
+        )
