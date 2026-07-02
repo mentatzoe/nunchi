@@ -4,26 +4,26 @@ The gate decides whether dalgos speaks; PASS emits the sentinel cc-connect suppr
 • operator addresses a different agent
     trigger : vigil, can you rebase the classifier branch onto main?
     verdict : PASS  -> stay silent (host posts nothing)
-    reason  : The trigger is explicitly addressed to 'vigil', not this agent ('dalgos').
+    reason  : The message is explicitly addressed to 'vigil', not 'dalgos'.
 
 • operator asks me directly for substantive work
     trigger : dalgos, summarize the tradeoffs of the in-process cache for the channel.
     verdict : SPEAK -> agent composes its turn
     reason  : The user explicitly addressed the agent by name and requested a specific task (summarizing tradeoffs).
 
-• the trigger echoes my own earlier turn (Duplicate)
+• a peer nudges me about work my earlier turn already covered
     trigger : dalgos should double-check the rate-limit path.
-    verdict : PASS  -> stay silent (host posts nothing)
-    reason  : The agent has already reviewed and confirmed the rate-limit path in the previous turn.
+    verdict : SPEAK -> agent composes its turn
+    reason  : The trigger explicitly requests that this agent perform a task (double-check the rate-limit path).
 
 • an @mention aimed at someone else
     trigger : Hey <@1494822530643398827>, could you post a recap when you get a sec?
     verdict : PASS  -> stay silent (host posts nothing)
-    reason  : The trigger mentions a specific user ID (1494822530643398827) that does not match this agent's ID (dalgos) or mention_id (1494822747856967683).
+    reason  : Trigger @mentions other participants only; this agent is not addressed.
 
 • operator hands me a genuinely new task
     trigger : dalgos, draft the migration note for the cache change and share it here.
     verdict : SPEAK -> agent composes its turn
     reason  : The user explicitly requested the agent to perform a task (drafting a migration note).
 
-3 suppressed, 2 spoke — classifier model: google/gemini-3.1-flash-lite
+2 suppressed, 3 spoke — classifier model: google/gemini-3.1-flash-lite

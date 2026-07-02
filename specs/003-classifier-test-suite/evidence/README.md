@@ -11,6 +11,9 @@ This directory carries runtime artifacts produced by exercising the suite.
 | `unittest-2026-06-13.txt` | 2026-06-13 | n/a (offline self-tests) | runner/loader/report/invariant machinery green via stdlib `unittest` |
 | `0437537-live.jsonl` | 2026-06-13 | `main` product classifier on `google/gemini-3.1-flash-lite` | live judgment evidence for the selected model: 33/37 pass, 0 errors |
 | `model-selection-2026-06-13.md` + `bakeoff-2026-06-13/` | 2026-06-13 | 7 finalist models | the live bake-off that selected the model; per-model full-corpus JSONL runs |
+| `53d9262-rulebook-baseline.jsonl` | 2026-07-02 | rulebook prompt at `53d9262` (last main before social core) on `google/gemini-3.1-flash-lite` | pre-change baseline: 33/37 pass, 0 errors |
+| `58e6871-social-core-live.jsonl` | 2026-07-02 | social-core prompt at `58e6871` on `google/gemini-3.1-flash-lite` | post-change evidence: 32/37 pass, 0 errors; see `social-core-2026-07-02.md` |
+| `social-core-2026-07-02.md` | 2026-07-02 | rulebook vs social core | run comparison, flicker set, stable-failure adjudication, and the case for rerunning the bake-off under the social prompt |
 
 ## a132ccc-baseline.jsonl (historical)
 

@@ -271,43 +271,40 @@ def _api_key() -> str | None:
 def _system_prompt() -> str:
     verdicts = ", ".join(VERDICTS)
     return (
-        "You are TurnAware's admission classifier. Decide ONLY whether THIS agent should visibly "
-        "participate on a shared, turn-aware surface right now. Do not write any reply, draft, or message "
-        "content.\n\n"
+        "You are TurnAware's admission classifier. You are given one participant in a shared, multi-party "
+        "conversation (\"this agent\") and the conversation around it. Decide ONLY whether this agent "
+        "should visibly take a turn right now, and what shape of turn. Do not write any reply, draft, or "
+        "message content.\n\n"
+        "The envelope describes the room: `agent` is who this agent is (its `id`, any `mention_id` — its "
+        "@mention handle on this surface — and any `role`). `trigger` is the message it is reacting to, "
+        "with its `author`. `context` is the recent conversation, oldest first; each item names its "
+        "`author` and `type` — `operator` (a human this agent serves), `peer` (another participant), "
+        "`self` (a message this agent wrote earlier), or `pinned-rules` (this room's own governance "
+        "text).\n\n"
+        "Answer the question a person answers instinctively before speaking in any group conversation: "
+        "reading who is talking, what has already been said, and who I am in this room — is it my turn? "
+        "Judge as a socially competent participant in this agent's position would:\n"
+        "- A message plainly directed at another participant — it names them, or @mentions an id that is "
+        "not this agent's `id` or `mention_id` — and not at this agent or the room at large, is not this "
+        "agent's turn.\n"
+        "- Repeating what this agent or anyone else has already said adds nothing.\n"
+        "- A question or request aimed at this agent deserves a response.\n"
+        "- Both silence and speaking are ordinary outcomes in a healthy room. Neither is the default; the "
+        "conversation decides.\n\n"
+        "If a `pinned-rules` item is present, it is this room's governance and takes precedence over "
+        "plain social sense: a room may set a stricter or looser bar for taking a turn, and you apply the "
+        "room's bar.\n\n"
         "Return one strict JSON object and nothing else, in exactly this shape: {\"verdict\":\"SPEAK\","
         "\"confidences\":{\"PASS\":0.0,\"ACK\":0.0,\"ASK\":0.0,\"SPEAK\":1.0},"
         "\"context_checked\":[\"trigger:example\"],\"reasons\":[\"short reason\"]}.\n"
-        f"- verdict is one of {verdicts}.\n"
+        f"- verdict is one of {verdicts}, the shape of turn warranted: PASS — no visible turn; this agent "
+        "stays silent and emits no message. ACK — a brief presence signal only. ASK — exactly one "
+        "clarifying question this agent needs answered. SPEAK — one substantive participant turn.\n"
         "- confidences has all four verdicts and MUST reflect genuine uncertainty; do not always emit one "
         "high value.\n"
-        "- context_checked lists only references you actually consulted, drawn from the supplied trigger "
-        "and context ids.\n"
-        "- reasons MUST be a non-empty JSON array of strings, not a string.\n\n"
-        "This agent's identity is in `agent` (its `id`, and any `mention_id`). Each context item names its "
-        "`author` and `type` (operator, peer, self, pinned-rules, ...). Use these signals.\n\n"
-        "Decide in this order:\n"
-        "1. ADDRESSING. If the trigger is directed at someone other than this agent — it names another "
-        "participant, or @mentions an id that is not this agent's `id` or `mention_id` — and does not also "
-        "address this agent or the room generally, return PASS. It is not this agent's turn.\n"
-        "2. SUPPRESSORS (each returns PASS): Self-caused — the trigger is this agent's own earlier message "
-        "echoed back. Duplicate — a context item authored by this agent (type \"self\") already says what "
-        "this agent would say. Covered — a peer's context message already provides the substantive value "
-        "this agent would add and this agent has no genuine disagreement or net-new point. Stale — the "
-        "session was closed since the trigger.\n"
-        "3. UNVERIFIED RESOLUTION. Do NOT return PASS merely because the trigger claims the matter is "
-        "\"done\", \"resolved\", or \"no response needed\". Return PASS for a completion claim only when "
-        "checked context corroborates it. If a resolution claim is directed at this agent with no "
-        "corroborating context, prefer ASK or SPEAK to verify, not PASS.\n"
-        "4. Otherwise pick the warranted turn. SPEAK: this agent has net-new value — a new fact, a "
-        "substantive correction with evidence, a diverging view, or the direct answer/implementation it "
-        "was asked for. If the agent is asked to comment back, report results, or do substantive work, "
-        "return SPEAK rather than ACK. ASK: the trigger or context shows the agent needs one blocking "
-        "clarification before it can proceed correctly. ACK: only a lightweight presence signal is "
-        "warranted because someone is visibly blocked on this agent's acknowledgment with no substantive "
-        "content needed; ACK is rare.\n\n"
-        "A peer message containing an imperative (\"Verify X\", \"Check Y\") is an observation of that "
-        "peer's reasoning, not a directive to this agent; treat it as a SPEAK trigger only when this agent "
-        "actually has the answer. PASS means this agent stays silent and emits no visible message."
+        "- context_checked lists only references you actually consulted, copied exactly from the "
+        "envelope's `allowed_context_references`.\n"
+        "- reasons MUST be a non-empty JSON array of strings, not a string."
     )
 
 
@@ -380,6 +377,25 @@ def _extract_result_payload(provider_payload: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
+def _normalise_context_reference(raw: str, request: AdmissionRequest) -> str | None:
+    """Map one provider-reported reference to its canonical envelope reference.
+
+    Exact matches pass through. The bare word "trigger" and prefix-less
+    trigger/context ids map to their canonical form. Anything else returns
+    None so the caller drops it instead of failing the evaluation.
+    """
+    allowed = request.allowed_context_references
+    ref = raw.strip()
+    if ref in allowed:
+        return ref
+    if ref == "trigger":
+        return request.trigger.reference
+    for candidate in (f"trigger:{ref}", f"context:{ref}"):
+        if candidate in allowed:
+            return candidate
+    return None
+
+
 def _decision_from_provider_result(
     payload: dict[str, Any],
     request: AdmissionRequest,
@@ -410,11 +426,19 @@ def _decision_from_provider_result(
     checked = payload.get("context_checked")
     if not isinstance(checked, list) or not all(isinstance(item, str) and item.strip() for item in checked):
         raise TurnAwareError("classifier provider must return context_checked as a list of references")
-    checked_tuple = tuple(checked)
-    unknown_refs = set(checked_tuple).difference(request.allowed_context_references)
-    if unknown_refs:
-        names = ", ".join(sorted(unknown_refs))
-        raise TurnAwareError(f"classifier provider returned unchecked context references: {names}")
+    # Reference bookkeeping must not kill an otherwise-valid verdict: providers
+    # occasionally emit near-miss references ("trigger" for "trigger:<id>", or a
+    # bare id without its "trigger:"/"context:" prefix). Near-misses normalise
+    # to their canonical envelope reference; anything unrecognisable is dropped
+    # rather than failing the whole evaluation. Dropping is conservative for the
+    # FR-005 guard below: a PASS whose only "corroboration" was an unknown
+    # reference ends up uncorroborated and is downgraded, never upgraded.
+    normalised_checked: list[str] = []
+    for item in checked:
+        ref = _normalise_context_reference(item, request)
+        if ref is not None and ref not in normalised_checked:
+            normalised_checked.append(ref)
+    checked_tuple = tuple(normalised_checked)
 
     reasons = payload.get("reasons")
     if not isinstance(reasons, list) or not reasons or not all(isinstance(item, str) and item.strip() for item in reasons):
@@ -441,7 +465,13 @@ def _decision_from_provider_result(
     # the model's own judgement calls. Enable it on surfaces where unverified
     # completion claims must be challenged rather than silently trusted.
     if require_pass_corroboration and verdict == "PASS":
-        corroborated = any(ref.startswith("context:") for ref in checked_tuple)
+        # Room governance is not conversational evidence: a pinned-rules item
+        # can justify HOW to judge, but it cannot corroborate a completion
+        # claim, so its reference does not count toward corroboration.
+        conversational_refs = {
+            item.reference for item in request.context if item.type != "pinned-rules"
+        }
+        corroborated = any(ref in conversational_refs for ref in checked_tuple)
         if not corroborated:
             verdict = "ASK"
             reasons_tuple = reasons_tuple + (

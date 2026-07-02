@@ -16,5 +16,7 @@
   ],
   "sc_refs": [
     "SC-010"
-  ]
+  ],
+  "governance_profile": "open-floor",
+  "governance_profile_basis": "PASS requires treating Covered as a hard rule; plain social reading only says staying quiet is reasonable, not required (sweep: borderline-social)"
 }

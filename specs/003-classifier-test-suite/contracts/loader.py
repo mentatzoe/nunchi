@@ -14,6 +14,12 @@ _VERDICTS = {"PASS", "ACK", "ASK", "SPEAK"}
 _SOURCE_SHAPES = {"multica", "discord", "contract"}
 _EVIDENCE = {"runtime", "predicted"}
 
+# Governance profiles live at <repo>/profiles/<name>.md. A fixture whose meta
+# declares "governance_profile" gets that profile injected into its envelope as
+# a pinned-rules context item: its expected verdicts were adjudicated under that
+# room's doctrine, not under the core's bare social judgment.
+_PROFILES_ROOT = Path(__file__).resolve().parents[3] / "profiles"
+
 
 class LoaderError(Exception):
     """Raised when a fixture pair is malformed."""
@@ -41,6 +47,7 @@ class Fixture:
     predicted_basis: str | None = None
     mock_adapter_output: str | None = None
     title: str = ""
+    governance_profile: str | None = None
 
 
 def _read_json(path: Path) -> Any:
@@ -108,7 +115,41 @@ def _validate_meta(meta: Any, where: Path) -> dict[str, Any]:
         raise LoaderError(f"{where}: evidence=runtime requires runtime_source field")
     if meta["evidence"] == "predicted" and "predicted_basis" not in meta:
         raise LoaderError(f"{where}: evidence=predicted requires predicted_basis field")
+    profile = meta.get("governance_profile")
+    if profile is not None and (not isinstance(profile, str) or not profile.strip()):
+        raise LoaderError(f"{where}: governance_profile must be a non-empty string")
     return meta
+
+
+def _load_profile_text(name: str, where: Path) -> str:
+    profile_path = _PROFILES_ROOT / f"{name}.md"
+    try:
+        return profile_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise LoaderError(
+            f"{where}: governance_profile {name!r} not found at {profile_path} ({exc.strerror})"
+        ) from exc
+
+
+def _apply_governance_profile(envelope: dict[str, Any], name: str, where: Path) -> dict[str, Any]:
+    """Return a copy of envelope with the profile injected as pinned rules."""
+    context = envelope.get("context") or []
+    if not isinstance(context, list):
+        raise LoaderError(f"{where}: envelope.context must be a list")
+    for item in context:
+        if isinstance(item, dict) and item.get("type") == "pinned-rules":
+            raise LoaderError(
+                f"{where}: envelope already carries a pinned-rules item; "
+                f"drop it or drop governance_profile"
+            )
+    pinned = {
+        "id": "pinned-rules",
+        "type": "pinned-rules",
+        "content": _load_profile_text(name, where),
+    }
+    updated = dict(envelope)
+    updated["context"] = [pinned, *context]
+    return updated
 
 
 def load_fixture(envelope_path: Path) -> Fixture:
@@ -120,6 +161,9 @@ def load_fixture(envelope_path: Path) -> Fixture:
         raise LoaderError(f"{envelope_path}: missing sibling {meta_path.name}")
     envelope = _validate_envelope(_read_json(envelope_path), envelope_path)
     meta = _validate_meta(_read_json(meta_path), meta_path)
+    profile = meta.get("governance_profile")
+    if profile is not None:
+        envelope = _apply_governance_profile(envelope, profile, meta_path)
     verdicts = meta["expected"]["verdict"]
     if isinstance(verdicts, str):
         verdicts = [verdicts]
@@ -142,6 +186,7 @@ def load_fixture(envelope_path: Path) -> Fixture:
         predicted_basis=meta.get("predicted_basis"),
         mock_adapter_output=meta.get("mock_adapter_output"),
         title=meta.get("title", ""),
+        governance_profile=profile,
     )
 
 
@@ -184,6 +229,7 @@ def build_index(fixtures: list[Fixture]) -> dict[str, Any]:
                 "evidence": f.evidence,
                 "expected_verdict": list(f.expected_verdicts),
                 "surface_contract": f.surface_contract,
+                "governance_profile": f.governance_profile,
                 "fr_refs": list(f.fr_refs),
                 "sc_refs": list(f.sc_refs),
             }

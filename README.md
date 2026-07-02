@@ -203,6 +203,33 @@ print it on PASS. cc-connect is just a named preset of this — `--format
 cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS` — with no special status;
 no transport is a dependency.
 
+### Room governance profiles
+
+The classifier core judges by plain social sense: who is speaking, what has
+been said, who this agent is — is it this agent's turn? It carries no room
+doctrine of its own. A room that wants a specific bar for taking a turn
+supplies its norms as `pinned_rules`; the classifier applies the room's bar
+with precedence over plain social sense.
+
+[`profiles/open-floor.md`](profiles/open-floor.md) ships as the first reusable
+profile: the strict operator-led working-channel doctrine of the original
+open-floor pilot (default PASS, net-new-value bar for SPEAK, rare ACK,
+operator-only directives, corroboration for completion claims). Pass its text
+as `pinned_rules` to opt a channel into that regime:
+
+```python
+from pathlib import Path
+from turnaware.adapters.channel import gate
+
+result = gate(trigger, history=history, agent_id="dalgos",
+              pinned_rules=Path("profiles/open-floor.md").read_text())
+```
+
+Verdict-suite fixtures whose expected verdicts were adjudicated under that
+doctrine declare `"governance_profile": "open-floor"` in their metadata; the
+suite loader injects the profile into their envelopes so the corpus stays
+honest about which expectations are social sense and which are room policy.
+
 **[`docs/integration.md`](docs/integration.md) is the full integration guide** —
 scope, the three install/integration paths (loader instruction, in-process
 import, subprocess CLI), how to wire it into a channel adapter, and how to

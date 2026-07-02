@@ -43,7 +43,7 @@ TURNS = [
         [],
     ),
     (
-        "the trigger echoes my own earlier turn (Duplicate)",
+        "a peer nudges me about work my earlier turn already covered",
         {"content": "dalgos should double-check the rate-limit path.", "author": "castor",
          "author_kind": "peer_bot", "message_id": "m-3"},
         [{"content": "Rate-limit path looks correct to me after the last fix.",

@@ -19,5 +19,6 @@
   ],
   "sc_refs": [
     "SC-001"
-  ]
+  ],
+  "known_limitation": "live flash-lite PASSes this unverified completion claim under both the rulebook and social core prompts; the shipped mitigation is the opt-in require_pass_corroboration structural guard, not prompt doctrine"
 }

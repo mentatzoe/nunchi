@@ -16,5 +16,7 @@
   ],
   "sc_refs": [
     "SC-011"
-  ]
+  ],
+  "governance_profile": "open-floor",
+  "governance_profile_basis": "FR-020 vehicle envelope is a covered+corroborated scenario; its PASS expectation was adjudicated under open-floor doctrine"
 }

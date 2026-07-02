@@ -17,5 +17,7 @@
   ],
   "sc_refs": [
     "SC-010"
-  ]
+  ],
+  "governance_profile": "open-floor",
+  "governance_profile_basis": "second-bot presence PASS depends on the Covered suppressor as a hard rule; socially a second agent might still wave (sweep: doctrine)"
 }

@@ -105,6 +105,59 @@ class LoaderTests(unittest.TestCase):
         self.assertTrue(all(f.source_shape == "discord" for f in discord))
         self.assertTrue(all(f.source_shape == "contract" for f in contract))
 
+    def _write_fixture_pair(self, root: Path, *, meta_extra: dict, context=None):
+        envelope = {
+            "trigger": {"id": "t-1", "author": "zoe", "content": "status?"},
+            "context": context if context is not None else [],
+            "agent": {"id": "dalgos"},
+        }
+        meta = {
+            "id": "g-profile-case",
+            "source_shape": "discord",
+            "evidence": "predicted",
+            "predicted_basis": "loader self-test",
+            "expected": {"verdict": "PASS", "surface_contract": None},
+            "failure_mode": "n/a",
+            "rationale": "loader self-test",
+            **meta_extra,
+        }
+        (root / "case.json").write_text(json.dumps(envelope), encoding="utf-8")
+        (root / "case.meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        return root / "case.json"
+
+    def test_loader_injects_governance_profile_as_pinned_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_fixture_pair(
+                Path(tmp), meta_extra={"governance_profile": "open-floor"}
+            )
+            fixture = loader.load_fixture(path)
+        self.assertEqual(fixture.governance_profile, "open-floor")
+        first = fixture.envelope["context"][0]
+        self.assertEqual(first["type"], "pinned-rules")
+        self.assertEqual(first["id"], "pinned-rules")
+        self.assertIn("net-new value", first["content"])
+
+    def test_loader_rejects_unknown_governance_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_fixture_pair(
+                Path(tmp), meta_extra={"governance_profile": "no-such-profile"}
+            )
+            with self.assertRaises(loader.LoaderError) as caught:
+                loader.load_fixture(path)
+        self.assertIn("no-such-profile", str(caught.exception))
+
+    def test_loader_rejects_profile_over_existing_pinned_rules(self):
+        pinned = [{"id": "pinned-rules", "type": "pinned-rules", "content": "house rules"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_fixture_pair(
+                Path(tmp),
+                meta_extra={"governance_profile": "open-floor"},
+                context=pinned,
+            )
+            with self.assertRaises(loader.LoaderError) as caught:
+                loader.load_fixture(path)
+        self.assertIn("pinned-rules", str(caught.exception))
+
 
 class VerdictSurfaceContractTests(unittest.TestCase):
     """FR-020 verdict-surface checks, exercised via the MockAdapter."""

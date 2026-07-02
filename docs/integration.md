@@ -207,7 +207,12 @@ it. To map that surface onto a TurnAware request:
 - **pinned_rules** ← optional. pilot-bot keeps channel norms in a
   `pinned-rules.md` the agent reads as standing instruction; with TurnAware you
   can instead pass that text as `pinned_rules` so the verdict is channel-aware
-  without baking policy into the loader.
+  without baking policy into the loader. This is also how a room opts into a
+  governance regime: the core prompt judges by plain social sense and applies
+  `pinned_rules` with precedence, and `profiles/open-floor.md` ships the
+  original pilot doctrine (default PASS, net-new-value bar, rare ACK,
+  operator-only directives) as reusable profile text. Without `pinned_rules`,
+  expect meeting-shaped behavior, not strict silence-by-default.
 
 A `surface` object (`{"type": "discord", ...}`) is passed through for the
 classifier's awareness and for your own logging.

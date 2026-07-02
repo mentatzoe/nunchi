@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Social core prompt.** The classifier system prompt now poses the
+  read-the-room question — who is speaking, what has been said, who is this
+  agent; is it this agent's turn? — judged as a socially competent participant
+  would. Room doctrine inherited from the open-floor pilot (default-PASS,
+  net-new-value bar, ACK-rarity, operator-only directives, corroboration for
+  completion claims) is no longer baked into the core prompt; rooms opt into it
+  (or any other governance) via `pinned_rules`, which the prompt now applies
+  with precedence over plain social sense.
+- **Tolerant reference bookkeeping.** Near-miss `context_checked` references
+  from the provider (bare `trigger`, prefix-less ids) normalise to their
+  canonical envelope references, and unrecognisable references are dropped,
+  instead of failing the whole evaluation with "unchecked context references".
+  Dropping is conservative for `require_pass_corroboration`: a PASS whose only
+  corroboration was an unknown reference ends up uncorroborated and is
+  downgraded, never upgraded.
+
+### Added
+
+- **Room governance profiles.** `profiles/open-floor.md` preserves the
+  open-floor pilot doctrine as reusable `pinned_rules` text. The 003 verdict
+  suite loader accepts a `governance_profile` metadata field and injects the
+  named profile into the fixture envelope as a `pinned-rules` context item;
+  the five fixtures whose expected verdicts were adjudicated under that
+  doctrine now declare it explicitly.
+
 ## [0.1.0] - 2026-06-16
 
 ### Added

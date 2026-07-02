@@ -19,8 +19,10 @@ cc-connect *preset* of that mechanism — one named transport among many, with n
 special status. Any other host ignores tokens entirely and branches on
 ``result.silent``.
 
-Design reference: pilot-bot `before-you-respond.md` (the human-readable rubric
-this gate implements).
+Design lineage: pilot-bot `before-you-respond.md`, the open-floor pilot's
+channel protocol. The core now judges by plain social sense; that pilot
+doctrine survives as `profiles/open-floor.md`, supplied via ``pinned_rules``
+by rooms that want it.
 """
 
 from __future__ import annotations
@@ -49,9 +51,9 @@ RUN_SHAPE = {
     "PASS": "Stay silent. Post nothing to the channel for this turn.",
 }
 
-# Author-kind normalization. The classifier reasons about who spoke to apply the
-# suppressor rubric (Self-caused / Duplicate) and the operator-vs-peer directive
-# distinction, so every transcript line is tagged with a normalized role.
+# Author-kind normalization. The classifier reasons about who spoke — operator
+# vs peer vs this agent's own earlier turns — so every transcript line is
+# tagged with a normalized role.
 _ROLE_ALIASES = {
     "human": "operator",
     "operator": "operator",

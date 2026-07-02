@@ -85,6 +85,30 @@ class RequirePassCorroborationTests(unittest.TestCase):
             "require_pass_corroboration", " ".join(result["reasons"]).casefold()
         )
 
+    def test_pinned_rules_reference_does_not_corroborate(self):
+        # Room governance is judgment guidance, not conversational evidence: a
+        # PASS citing only the pinned-rules item is still uncorroborated.
+        request = load_fixture("pass")
+        request["context"] = [
+            {"id": "pinned-rules", "type": "pinned-rules", "content": "Default is PASS."}
+        ]
+        env = provider_env(
+            "PASS",
+            checked=["trigger:trigger-pass", "context:pinned-rules"],
+            reasons=["Provider PASSed citing the room rules only."],
+        )
+        with patch.dict("os.environ", env, clear=True):
+            result = evaluate(
+                request,
+                classifier="product",
+                classifier_config={"require_pass_corroboration": True},
+            )
+
+        self.assertEqual(result["verdict"], "ASK")
+        self.assertIn(
+            "require_pass_corroboration", " ".join(result["reasons"]).casefold()
+        )
+
     def test_default_absent_flag_preserves_uncorroborated_pass(self):
         # Current behavior must be preserved when the flag is not supplied.
         env = provider_env(

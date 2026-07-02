@@ -219,16 +219,37 @@ class ProviderClassifierTests(unittest.TestCase):
         system_prompt = payload["messages"][0]["content"]
         self.assertIn('"reasons":["short reason"]', system_prompt)
         self.assertIn("reasons MUST be a non-empty JSON array of strings", system_prompt)
-        # Admission rubric: the load-bearing pragmatic rules every candidate
-        # model must be told (addressing, suppressors, unverified-resolution).
-        self.assertIn("ADDRESSING", system_prompt)
+        # Social core: the prompt poses the read-the-room question and the
+        # envelope vocabulary; room doctrine arrives via pinned-rules, not here.
+        self.assertIn("socially competent participant", system_prompt)
         self.assertIn("mention_id", system_prompt)
-        self.assertIn("SUPPRESSORS", system_prompt)
-        self.assertIn("Covered", system_prompt)
-        self.assertIn("Duplicate", system_prompt)
-        self.assertIn("UNVERIFIED RESOLUTION", system_prompt)
-        self.assertIn("net-new value", system_prompt)
-        self.assertIn("return SPEAK rather than ACK", system_prompt)
+        self.assertIn("pinned-rules", system_prompt)
+        self.assertIn("room's governance", system_prompt)
+        self.assertIn("is it my turn", system_prompt)
+        # De-doctrination guard: pilot-channel governance must never be baked
+        # back into the substrate prompt (it belongs in a pinned-rules profile).
+        self.assertNotIn("net-new value", system_prompt)
+        self.assertNotIn("ACK is rare", system_prompt)
+        self.assertNotIn("UNVERIFIED RESOLUTION", system_prompt)
+
+    def test_product_normalises_near_miss_context_references(self):
+        # Providers occasionally emit "trigger" for "trigger:<id>" or a bare id
+        # without its prefix. These normalise to canonical references; a
+        # reference matching nothing in the envelope drops instead of failing
+        # the evaluation (the verdict survives reference-bookkeeping noise).
+        env = provider_env(
+            "PASS",
+            checked=["trigger", "ctx-speak-assignment", "context:nonexistent"],
+            reasons=["Addressed elsewhere."],
+        )
+        with patch.dict("os.environ", env, clear=True):
+            result = evaluate(load_fixture("speak"))
+
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(
+            result["context_checked"],
+            ["trigger:trigger-speak", "context:ctx-speak-assignment"],
+        )
 
     def test_product_default_without_provider_config_fails_clearly(self):
         with patch.dict("os.environ", {}, clear=True):
