@@ -504,21 +504,75 @@ After restarting, the **Nunchi** tab should appear in the sidebar.
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `GET /api/plugins/nunchi/state` | GET | Returns `{baseline, overrides, effective}` for all configured + state-introduced channels. |
+| `GET /api/plugins/nunchi/state` | GET | Returns `{baseline, overrides, effective, channel_names}`.  `channel_names` maps channel IDs to human-readable names resolved from `~/.hermes/channel_directory.json` (mtime-cached; tolerates absence). |
 | `PUT /api/plugins/nunchi/state` | PUT | Apply overrides.  Body: `{"global": {...}, "channels": {"<id>": {...}}}`.  Whitelist-enforced. |
 | `GET /api/plugins/nunchi/receipts?limit=N` | GET | Tail-parse the gate JSONL log (default 50, max 500).  Newest-first.  Malformed lines skipped. |
 
 ### UI features
 
-- **Per-channel effective config table** — editable `senders`, `verbosity`,
-  and `enabled` fields with baseline / override provenance badges per field.
-- **Global override section** — set senders/verbosity globally.
-- **State-introduced channels** — channels introduced via `/nunchi enable` appear
-  with a `[state-introduced]` badge; they can be edited and reset from the UI.
-- **Save button** — applies pending edits via PUT `/state`.
-- **Reset All Overrides** — clears the entire state file.
-- **Receipts panel** — polls GET `/receipts` every 5 s; shows timestamp, verdict,
-  author, channel, and first reason per entry; colour-coded by verdict.
+The dashboard tab is built entirely from Hermes SDK components
+(`Card`, `Button`, `Input`, `Label`, `Select`, `Badge`, `Tabs`, `Separator`)
+and host CSS custom properties — zero hardcoded colours or fonts.
+
+**Settings tab**
+
+- **Channel display names** — channel names from `channel_directory.json` shown
+  prominently above the raw snowflake ID (displayed in muted tertiary text).
+- **Global Overrides card** — set `senders`, `verbosity`, and `model` globally,
+  each with one-line help text and a provenance badge.
+- **Per-channel cards** — editable `enabled`, `senders`, `verbosity`, `model`,
+  and `pinned_rules` with provenance badges per field.
+  - `senders = allowlist` reveals an `allow_from` textarea (comma or
+    newline-separated names/IDs; stored as a list).
+  - **Model field** — text input; placeholder shows the effective value;
+    provenance badge shows whether the value is a channel override, global
+    override, or inherited.
+  - **Room governance (pinned rules)** — collapsible textarea per channel.
+    Inline rules (`pinned_rules` state key) take precedence over
+    `pinned_rules_file` when both are set; state-set `pinned_rules` overrides
+    any file-based value at the gate call site.
+- **Provenance badges** — amber **pending** while an edit is unsaved;
+  cream **channel** for a channel-level override; secondary **global** for a
+  global override; no badge for baseline values.
+- **Save button** — disabled (dimmed, `not-allowed` cursor, tooltip) when no
+  pending edits; amber **Unsaved changes** indicator when edits exist.
+- **Reset All Overrides** — sends `{global:{}, channels:{}}` which replaces
+  (clears) both sections via replace-on-empty semantics.
+- **Refresh** — reloads state from the server.
+
+**Receipts tab**
+
+- **Polling controls** — pause/resume button, interval selector (2 s / 5 s /
+  15 s / Off); selection persisted in `localStorage` under key `nunchi.poll`.
+- **Visibility suspension** — polling is automatically suspended when the tab
+  or window is hidden (`visibilitychange` listener); resumes on becoming visible.
+- **Verdict legend** — four distinct entries:
+  `PASS = suppressed (no message) · ACK = brief presence signal · ASK = one clarifying question · SPEAK = full turn`
+  styled with host semantic colour tokens (PASS = destructive, SPEAK = success,
+  ASK = warning, ACK = secondary).
+- **Confidence distribution** — when present, each receipt row renders the full
+  confidence dict sorted highest-first (e.g. `SPEAK 0.70 · PASS 0.20 · ACK 0.05 · ASK 0.05`),
+  with the winning verdict emphasised in bold.  A mini percentage bar below shows
+  the top-verdict share using a host token colour.
+- **Reasons** — up to three reasons joined with ` · `.
+- **Date-aware timestamps** — today's receipts show time only; older receipts
+  show date and time.
+
+**Overridable keys**
+
+`pinned_rules` (inline governance text) is now in the security whitelist
+alongside `enabled`, `senders`, `allow_from`, `verbosity`, `fail_open`,
+`model`, and `pinned_rules_file`.  `binary`, `timeout_seconds`, `log_path`,
+`agent_id`, `mention_id`, and `state_path` remain config.yaml-only.
+
+**pinned_rules precedence**
+
+When `pinned_rules` is set via state (dashboard or slash command), it takes
+precedence over `pinned_rules_file` in the gate payload.  The gate calls
+`cfg.get("pinned_rules")` before falling back to `pinned_rules_file`, so any
+state-merged `pinned_rules` value is applied first.  To revert to file-based
+rules, clear the `pinned_rules` state key (send `null` or leave the textarea
+empty and save).
 
 ### Manual verification steps
 
