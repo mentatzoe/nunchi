@@ -44,6 +44,63 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
+# Channel directory: resolve human names from ~/.hermes/channel_directory.json
+# ---------------------------------------------------------------------------
+
+_CHANNEL_DIR_PATH = Path("~/.hermes/channel_directory.json").expanduser()
+
+# Cache: (mtime_float, id_to_display_name_dict) | None
+_CHANNEL_DIR_CACHE: tuple[float, dict[str, str]] | None = None
+
+
+def _load_channel_names(path: Path | None = None) -> dict[str, str]:
+    """Return a mapping of channel-id → display name from the channel directory.
+
+    Display name format: ``"{guild} / #{name}"`` when a guild is present, else
+    ``"#{name}"``.  Tolerates absence (returns ``{}``) and parse errors.
+
+    Uses mtime-based caching: re-reads only when the file changes on disk.
+    """
+    global _CHANNEL_DIR_CACHE
+    if path is None:
+        path = _CHANNEL_DIR_PATH
+    try:
+        if not path.exists():
+            return {}
+        mtime = path.stat().st_mtime
+        if _CHANNEL_DIR_CACHE is not None:
+            cached_mtime, cached_names = _CHANNEL_DIR_CACHE
+            if cached_mtime == mtime:
+                return cached_names
+        raw = path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return {}
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        names: dict[str, str] = {}
+        platforms = data.get("platforms") or {}
+        for entries in platforms.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                cid = str(entry.get("id") or "").strip()
+                name = str(entry.get("name") or "").strip()
+                guild = str(entry.get("guild") or "").strip()
+                if not cid or not name:
+                    continue
+                if guild:
+                    names[cid] = f"{guild} / #{name}"
+                else:
+                    names[cid] = f"#{name}"
+        _CHANNEL_DIR_CACHE = (mtime, names)
+        return names
+    except Exception:
+        return {}
+
+# ---------------------------------------------------------------------------
 # Helpers: load sibling modules without relying on package imports.
 # ---------------------------------------------------------------------------
 
@@ -146,7 +203,13 @@ def get_state() -> dict[str, Any]:
                 log.warning("nunchi dashboard: merge_effective failed for %s: %s", cid, exc)
                 effective[cid] = None
 
-    return {"baseline": cfg, "overrides": overrides, "effective": effective}
+    channel_names = _load_channel_names()
+    return {
+        "baseline": cfg,
+        "overrides": overrides,
+        "effective": effective,
+        "channel_names": channel_names,
+    }
 
 
 def _coerce_list_simple(value: Any) -> list[str]:

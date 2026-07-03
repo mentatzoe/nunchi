@@ -52,6 +52,7 @@ class TestFilterOverridable(unittest.TestCase):
             "verbosity": "debug",
             "fail_open": False,
             "model": "test-model",
+            "pinned_rules": "No off-topic promotion.",
             "pinned_rules_file": "/tmp/rules.md",
         })
         self.assertEqual(set(result.keys()), set(self.m.OVERRIDABLE_KEYS))
@@ -89,6 +90,70 @@ class TestFilterOverridable(unittest.TestCase):
         result = self.m.filter_overridable(d)
         result["enabled"] = False
         self.assertTrue(d["enabled"], "original dict must not be mutated")
+
+    def test_pinned_rules_accepted(self) -> None:
+        """pinned_rules is in OVERRIDABLE_KEYS and passes filter_overridable."""
+        self.assertIn("pinned_rules", self.m.OVERRIDABLE_KEYS)
+        result = self.m.filter_overridable({"pinned_rules": "Open floor only."})
+        self.assertEqual(result, {"pinned_rules": "Open floor only."})
+
+    def test_pinned_rules_empty_string_accepted(self) -> None:
+        """An empty string for pinned_rules is a valid override value (clears inline rules)."""
+        result = self.m.filter_overridable({"pinned_rules": ""})
+        self.assertIn("pinned_rules", result)
+
+    def test_pinned_rules_does_not_affect_security_set(self) -> None:
+        """Adding pinned_rules to OVERRIDABLE_KEYS does not allow binary/log_path through."""
+        result = self.m.filter_overridable({
+            "pinned_rules": "Some rule.",
+            "binary": "/evil/bin",
+            "log_path": "/evil/log",
+        })
+        self.assertIn("pinned_rules", result)
+        self.assertNotIn("binary", result)
+        self.assertNotIn("log_path", result)
+
+
+# ---------------------------------------------------------------------------
+# TestPinnedRulesState — pinned_rules flows through apply_state_patch
+# ---------------------------------------------------------------------------
+
+class TestPinnedRulesState(unittest.TestCase):
+    """apply_state_patch accepts and stores pinned_rules overrides."""
+
+    def setUp(self) -> None:
+        self.m = _load_state_module()
+
+    def _patch(self, current: dict, patch: dict, baseline: dict | None = None) -> dict:
+        return self.m.apply_state_patch(current, patch, baseline or {})
+
+    def test_pinned_rules_accepted_in_global_patch(self) -> None:
+        """pinned_rules can be set via global override."""
+        result = self._patch({}, {"global": {"pinned_rules": "Open floor doctrine."}})
+        self.assertEqual(result["global"]["pinned_rules"], "Open floor doctrine.")
+
+    def test_pinned_rules_accepted_in_channel_patch(self) -> None:
+        """pinned_rules can be set as a per-channel override."""
+        result = self._patch(
+            {},
+            {"channels": {"C1": {"pinned_rules": "No off-topic links."}}},
+        )
+        self.assertEqual(result["channels"]["C1"]["pinned_rules"], "No off-topic links.")
+
+    def test_pinned_rules_null_deletes_key(self) -> None:
+        """A null pinned_rules value removes the key (deletion signal)."""
+        current = {"global": {"pinned_rules": "Old rule."}}
+        result = self._patch(current, {"global": {"pinned_rules": None}})
+        self.assertNotIn("pinned_rules", result.get("global", {}))
+
+    def test_binary_still_rejected_alongside_pinned_rules(self) -> None:
+        """binary is still rejected even when sent alongside pinned_rules."""
+        result = self._patch(
+            {},
+            {"global": {"binary": "/evil/bin", "pinned_rules": "Valid rule."}},
+        )
+        self.assertNotIn("binary", result.get("global", {}))
+        self.assertEqual(result["global"]["pinned_rules"], "Valid rule.")
 
 
 # ---------------------------------------------------------------------------

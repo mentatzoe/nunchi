@@ -50,6 +50,7 @@ OVERRIDABLE_KEYS: frozenset[str] = frozenset(
         "verbosity",
         "fail_open",
         "model",
+        "pinned_rules",
         "pinned_rules_file",
     }
 )
