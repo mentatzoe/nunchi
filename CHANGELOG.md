@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven
+  by a behavioral audit and direct owner review. Repair: Reset All actually
+  clears (empty-dict-replaces semantics in a new tested `apply_state_patch`),
+  per-field override deletion via `null`, overrides equal to the baseline are
+  pruned instead of accumulating, success messages auto-dismiss, pending edits
+  are badged, Save disables when clean, badges no longer pollute accessible
+  names. Redesign: native hermes theming via host CSS variables and SDK
+  components (zero hardcoded colors), human-readable channel names resolved
+  from the hermes channel directory, a real `allow_from` editor, in-place help
+  copy for sender policies and verbosity levels, per-channel `model` and
+  `pinned_rules` (room governance) editing — `pinned_rules` joins the state
+  whitelist — receipt rows show the full confidence distribution with a
+  corrected four-verdict legend, and the receipts poll gained pause/interval
+  controls plus visibility-aware suspension.
+
 ### Added
 
 - **Telegram reference adapter.** `nunchi.adapters.telegram` joins Telegram chats
