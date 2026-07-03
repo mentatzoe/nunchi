@@ -393,5 +393,187 @@ class TestMergeEffective(unittest.TestCase):
         self.assertIsNotNone(result)
 
 
+# ---------------------------------------------------------------------------
+# TestApplyStatePatch — reset semantics, null-delete, baseline pruning
+# ---------------------------------------------------------------------------
+
+class TestApplyStatePatch(unittest.TestCase):
+    """apply_state_patch: replace-empty, null-delete, equal-to-baseline pruning."""
+
+    def setUp(self) -> None:
+        self.m = _load_state_module()
+
+    def _patch(
+        self,
+        current: dict,
+        patch: dict,
+        baseline: dict | None = None,
+    ) -> dict:
+        return self.m.apply_state_patch(current, patch, baseline or {})
+
+    # ------------------------------------------------------------------
+    # B1 — Replace-on-empty (Reset All fix)
+    # ------------------------------------------------------------------
+
+    def test_empty_global_clears_global_section(self) -> None:
+        """B1: empty-dict patch for 'global' replaces (clears) it entirely."""
+        current = {"global": {"senders": "humans", "verbosity": "debug"}}
+        result = self._patch(current, {"global": {}})
+        self.assertNotIn("global", result)
+
+    def test_empty_channels_clears_channels_section(self) -> None:
+        """B1: empty-dict patch for 'channels' replaces (clears) it entirely."""
+        current = {"channels": {"C1": {"enabled": True}, "C2": {"senders": "all"}}}
+        result = self._patch(current, {"channels": {}})
+        self.assertNotIn("channels", result)
+
+    def test_reset_all_empty_both_sections(self) -> None:
+        """B1: Reset All — empty global AND channels both clear, leaving clean state."""
+        current = {
+            "global": {"senders": "humans"},
+            "channels": {"C1": {"enabled": True}},
+        }
+        result = self._patch(current, {"global": {}, "channels": {}})
+        self.assertNotIn("global", result)
+        self.assertNotIn("channels", result)
+
+    def test_absent_patch_key_is_noop(self) -> None:
+        """Absent 'global' or 'channels' in patch leaves that section unchanged."""
+        current = {"global": {"senders": "humans"}}
+        result = self._patch(current, {})
+        self.assertEqual(result.get("global"), {"senders": "humans"})
+
+    # ------------------------------------------------------------------
+    # B2a — Null as deletion signal
+    # ------------------------------------------------------------------
+
+    def test_null_value_deletes_key_from_global(self) -> None:
+        """B2a: null for an overridable key in global patch deletes that key."""
+        current = {"global": {"senders": "humans", "verbosity": "debug"}}
+        result = self._patch(current, {"global": {"senders": None}})
+        self.assertNotIn("senders", result.get("global", {}))
+        self.assertEqual(result["global"]["verbosity"], "debug")
+
+    def test_null_value_deletes_key_from_channel(self) -> None:
+        """B2a: null for an overridable key in a channel patch deletes that key."""
+        current = {"channels": {"C1": {"senders": "humans", "verbosity": "debug"}}}
+        result = self._patch(current, {"channels": {"C1": {"senders": None}}})
+        self.assertNotIn("senders", result.get("channels", {}).get("C1", {}))
+        self.assertEqual(result["channels"]["C1"]["verbosity"], "debug")
+
+    def test_null_deleting_last_key_prunes_channel_dict(self) -> None:
+        """B2a: null-deleting the only key in a channel dict removes the channel."""
+        current = {"channels": {"C1": {"senders": "humans"}}}
+        result = self._patch(current, {"channels": {"C1": {"senders": None}}})
+        self.assertNotIn("C1", result.get("channels", {}))
+
+    # ------------------------------------------------------------------
+    # B2b — Equal-to-baseline pruning
+    # ------------------------------------------------------------------
+
+    def test_channel_override_equal_to_baseline_is_pruned(self) -> None:
+        """B2b: a channel override key whose value matches the effective baseline
+        (baseline_cfg + global overlays) is dropped as redundant."""
+        baseline = {"senders": "all"}
+        current = {"channels": {"C1": {"senders": "all"}}}
+        result = self._patch(current, {}, baseline)
+        self.assertNotIn("C1", result.get("channels", {}))
+
+    def test_channel_override_differing_from_baseline_is_retained(self) -> None:
+        """B2b: a channel override that differs from the effective baseline is kept."""
+        baseline = {"senders": "all"}
+        current = {"channels": {"C1": {"senders": "humans"}}}
+        result = self._patch(current, {}, baseline)
+        self.assertEqual(result["channels"]["C1"]["senders"], "humans")
+
+    def test_empty_channel_dict_pruned_after_baseline_dedup(self) -> None:
+        """B2b: after all redundant keys are pruned, an empty channel dict is removed."""
+        baseline = {"senders": "all", "verbosity": "normal"}
+        current = {"channels": {"C1": {"senders": "all", "verbosity": "normal"}}}
+        result = self._patch(current, {}, baseline)
+        self.assertNotIn("C1", result.get("channels", {}))
+
+    def test_global_overlay_raises_baseline_for_pruning(self) -> None:
+        """B2b: the effective baseline used for pruning includes global overrides.
+
+        If state["global"]["senders"] = "humans" and C1["senders"] = "humans",
+        the channel override is redundant (global already provides the same value)
+        and should be pruned.
+        """
+        baseline = {"senders": "all"}
+        current = {
+            "global": {"senders": "humans"},
+            "channels": {"C1": {"senders": "humans"}},
+        }
+        result = self._patch(current, {}, baseline)
+        self.assertNotIn("C1", result.get("channels", {}))
+
+    def test_partial_redundancy_keeps_differing_keys(self) -> None:
+        """B2b: only redundant keys are dropped; unique overrides are kept."""
+        baseline = {"senders": "all", "verbosity": "normal"}
+        current = {
+            "channels": {
+                "C1": {"senders": "all", "verbosity": "debug"},
+            }
+        }
+        result = self._patch(current, {}, baseline)
+        ch = result.get("channels", {}).get("C1", {})
+        self.assertNotIn("senders", ch, "senders == baseline → should be pruned")
+        self.assertEqual(ch.get("verbosity"), "debug")
+
+    # ------------------------------------------------------------------
+    # Whitelist enforcement
+    # ------------------------------------------------------------------
+
+    def test_whitelist_enforced_in_global_patch(self) -> None:
+        """Non-overridable keys in the global patch are silently dropped."""
+        result = self._patch({}, {"global": {"binary": "/evil", "senders": "humans"}})
+        self.assertNotIn("binary", result.get("global", {}))
+        self.assertEqual(result["global"]["senders"], "humans")
+
+    def test_whitelist_enforced_in_channel_patch(self) -> None:
+        """Non-overridable keys in a channel patch are silently dropped."""
+        result = self._patch(
+            {}, {"channels": {"C1": {"log_path": "/evil", "enabled": True}}}
+        )
+        self.assertNotIn("log_path", result.get("channels", {}).get("C1", {}))
+        self.assertTrue(result["channels"]["C1"]["enabled"])
+
+    # ------------------------------------------------------------------
+    # Normal merge behaviour (regression)
+    # ------------------------------------------------------------------
+
+    def test_normal_merge_adds_new_keys(self) -> None:
+        """A non-empty patch merges per-key (additive)."""
+        current = {"global": {"senders": "all"}}
+        result = self._patch(current, {"global": {"verbosity": "debug"}})
+        self.assertEqual(result["global"]["senders"], "all")
+        self.assertEqual(result["global"]["verbosity"], "debug")
+
+    def test_normal_merge_overwrites_existing_keys(self) -> None:
+        """A non-empty patch overwrites keys present in the current state."""
+        current = {"global": {"senders": "all"}}
+        result = self._patch(current, {"global": {"senders": "humans"}})
+        self.assertEqual(result["global"]["senders"], "humans")
+
+    # ------------------------------------------------------------------
+    # Immutability
+    # ------------------------------------------------------------------
+
+    def test_does_not_mutate_current_state(self) -> None:
+        """apply_state_patch must not mutate its current_state argument."""
+        current = {"global": {"senders": "all"}}
+        patch = {"global": {"senders": "humans"}}
+        _ = self._patch(current, patch)
+        self.assertEqual(current["global"]["senders"], "all")
+
+    def test_does_not_mutate_patch(self) -> None:
+        """apply_state_patch must not mutate its patch argument."""
+        current = {}
+        patch = {"global": {"senders": "humans"}}
+        _ = self._patch(current, patch)
+        self.assertEqual(patch["global"]["senders"], "humans")
+
+
 if __name__ == "__main__":
     unittest.main()

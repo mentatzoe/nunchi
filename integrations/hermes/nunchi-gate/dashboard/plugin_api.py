@@ -35,10 +35,9 @@ import importlib.util
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
@@ -130,13 +129,19 @@ def get_state() -> dict[str, Any]:
             baseline_cids = set(_coerce_list_simple(channels_raw))
         state_cids = set((overrides.get("channels") or {}).keys())
         all_cids = sorted(baseline_cids | state_cids)
+        # mn1: only expose the overridable keys (+ enabled) in effective so
+        # operator-only fields (binary, timeout_seconds, log_path, agent_id,
+        # mention_id, state_path) are never returned to the dashboard JS.
+        effective_keys = state.OVERRIDABLE_KEYS  # enabled is already in the set
         for cid in all_cids:
             try:
                 eff = state.merge_effective(
                     cfg, overrides, {cid},
                     _resolve_channel_config=resolve_fn,
                 )
-                effective[cid] = eff if eff is not None else None
+                if eff is not None:
+                    eff = {k: v for k, v in eff.items() if k in effective_keys}
+                effective[cid] = eff
             except Exception as exc:
                 log.warning("nunchi dashboard: merge_effective failed for %s: %s", cid, exc)
                 effective[cid] = None
@@ -158,26 +163,14 @@ def _coerce_list_simple(value: Any) -> list[str]:
 # PUT /state
 # ---------------------------------------------------------------------------
 
-class StatePatch(BaseModel):
-    global_: Optional[dict[str, Any]] = None
-    channels: Optional[dict[str, dict[str, Any]]] = None
-
-    class Config:
-        # Allow "global" as the JSON key (maps to global_ in Python).
-        populate_by_name = True
-
-    @classmethod
-    def model_validate_json_body(cls, body: dict) -> "StatePatch":
-        # Re-map "global" JSON key -> "global_" field
-        mapped = dict(body)
-        if "global" in mapped:
-            mapped["global_"] = mapped.pop("global")
-        return cls(**mapped)
-
-
 @router.put("/state")
 def put_state(body: dict[str, Any]) -> dict[str, Any]:
-    """Apply whitelist-validated overrides.  Only OVERRIDABLE_KEYS are accepted."""
+    """Apply overrides via apply_state_patch (whitelist, null-delete, replace-empty).
+
+    Delegates all merge/reset/delete semantics to ``state.apply_state_patch``
+    so the logic is tested in isolation.  The body must be a JSON object with
+    optional ``"global"`` and ``"channels"`` keys.
+    """
     state = _get_state_mod()
     if state is None:
         raise HTTPException(status_code=503, detail="state module unavailable")
@@ -190,30 +183,13 @@ def put_state(body: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         current = {}
 
-    out: dict[str, Any] = dict(current)
-
-    # Apply global overrides (whitelist-enforced).
-    if "global" in body and body["global"] is not None:
-        g = dict(out.get("global") or {})
-        g.update(state.filter_overridable(body["global"]))
-        out["global"] = g
-
-    # Apply per-channel overrides (whitelist-enforced per channel).
-    if "channels" in body and body["channels"] is not None:
-        channels_patch = body["channels"]
-        if not isinstance(channels_patch, dict):
-            raise HTTPException(status_code=422, detail="'channels' must be an object")
-        channels = dict(out.get("channels") or {})
-        for cid, ch_patch in channels_patch.items():
-            if not isinstance(ch_patch, dict):
-                continue
-            ch = dict(channels.get(cid) or {})
-            ch.update(state.filter_overridable(ch_patch))
-            channels[cid] = ch
-        out["channels"] = channels
+    try:
+        new_state = state.apply_state_patch(current, body, cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid patch: {exc}")
 
     try:
-        state.save_state(sp, out, updated_by="dashboard")
+        state.save_state(sp, new_state, updated_by="dashboard")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to save state: {exc}")
 

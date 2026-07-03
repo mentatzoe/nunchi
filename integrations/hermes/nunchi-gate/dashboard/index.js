@@ -9,9 +9,18 @@
  *   - Per-channel effective config table with provenance badges and inline
  *     editable senders / verbosity / enabled fields.
  *   - Global override section.
- *   - Save button (PUT /api/plugins/nunchi/state).
- *   - Reset-overrides button (PUT with empty global+channels).
+ *   - Save button (PUT /api/plugins/nunchi/state) — disabled when no pending
+ *     changes, with amber "Unsaved changes" indicator when edits exist (M3).
+ *   - Reset-overrides button (PUT with empty global+channels, now correctly
+ *     clears state via replace-empty semantics — B1).
  *   - Receipts panel (GET /api/plugins/nunchi/receipts) polling every 5 s.
+ *
+ * Patch semantics (B1, B2):
+ *   - An empty {} for "global" or "channels" REPLACES (clears) that section.
+ *   - A null value for any per-channel override key is a deletion signal that
+ *     removes that key from stored overrides.
+ *   - When a user selects the same value as the static baseline, null is sent
+ *     so the server prunes the redundant override (B2).
  */
 (function () {
   "use strict";
@@ -44,14 +53,20 @@
   var POLL_INTERVAL_MS = 5000;
   var SENDERS_OPTIONS = ["all", "humans", "allowlist"];
   var VERBOSITY_OPTIONS = ["minimal", "normal", "debug"];
+  var SUCCESS_DISMISS_MS = 4000;
 
   // -------------------------------------------------------------------------
-  // Utility: provenance badge style
+  // Utility: provenance badge
+  // M4: aria-hidden="true" on the span so badge text is not read as part of
+  //     the field's accessible name.
+  // M2: pendingCh/pendingGl checked BEFORE saved-provenance so a pending edit
+  //     shows amber "pending" rather than the stale saved-provenance badge.
   // -------------------------------------------------------------------------
   function Badge(text, color) {
     return h(
       "span",
       {
+        "aria-hidden": "true",
         style: {
           marginLeft: "6px",
           padding: "1px 6px",
@@ -67,12 +82,32 @@
     );
   }
 
-  function provenanceBadge(key, chOverrides, globalOverrides) {
+  // pendingCh / pendingGl are optional; pass null when not applicable.
+  // A null value in pending counts as a pending edit (it is the deletion
+  // signal for a key); undefined values are treated as "no pending change".
+  function provenanceBadge(key, chOverrides, globalOverrides, pendingCh, pendingGl) {
+    if (pendingCh && pendingCh[key] !== undefined)
+      return Badge("pending", "#d97706");
+    if (pendingGl && pendingGl[key] !== undefined)
+      return Badge("pending", "#d97706");
     if (chOverrides && key in chOverrides)
       return Badge("channel-override", "#7c3aed");
     if (globalOverrides && key in globalOverrides)
       return Badge("global-override", "#0369a1");
     return null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Utility: receipt timestamp
+  // mn2: show date for receipts not from today.
+  // -------------------------------------------------------------------------
+  function formatReceiptTs(ts) {
+    var d = new Date(ts * 1000);
+    var now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return d.toLocaleTimeString();
+    }
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString();
   }
 
   // -------------------------------------------------------------------------
@@ -113,6 +148,7 @@
     var eff = props.effective || {};
     var chOv = props.chOverrides || {};
     var globalOv = props.globalOverrides || {};
+    var pendingCh = props.pendingCh || {};
 
     var isIntroduced = props.isIntroduced;
 
@@ -158,21 +194,21 @@
               value: String(eff.enabled !== false),
               options: ["true", "false"],
               onChange: function (v) { props.onChange(cid, "enabled", v === "true"); },
-              badge: provenanceBadge("enabled", chOv, globalOv),
+              badge: provenanceBadge("enabled", chOv, globalOv, pendingCh, null),
             }),
             h(SelectField, {
               label: "senders",
               value: eff.senders || "all",
               options: SENDERS_OPTIONS,
               onChange: function (v) { props.onChange(cid, "senders", v); },
-              badge: provenanceBadge("senders", chOv, globalOv),
+              badge: provenanceBadge("senders", chOv, globalOv, pendingCh, null),
             }),
             h(SelectField, {
               label: "verbosity",
               value: eff.verbosity || "normal",
               options: VERBOSITY_OPTIONS,
               onChange: function (v) { props.onChange(cid, "verbosity", v); },
-              badge: provenanceBadge("verbosity", chOv, globalOv),
+              badge: provenanceBadge("verbosity", chOv, globalOv, pendingCh, null),
             })
           )
     );
@@ -180,6 +216,9 @@
 
   // -------------------------------------------------------------------------
   // ReceiptsPanel: polls GET /receipts every 5 s
+  // p1: "PASS (suppressed)" label + one-line legend.
+  // mn2: date-aware timestamp (via formatReceiptTs).
+  // mn3: up to 3 reasons joined with " · ".
   // -------------------------------------------------------------------------
   function ReceiptsPanel() {
     var _s = useState([]);
@@ -210,8 +249,14 @@
       { style: { marginTop: "24px" } },
       h(
         "h3",
-        { style: { fontSize: "13px", fontWeight: "600", color: "#94a3b8", marginBottom: "8px" } },
+        { style: { fontSize: "13px", fontWeight: "600", color: "#94a3b8", marginBottom: "4px" } },
         "Gate Receipts (newest first, polling every 5 s)"
+      ),
+      // p1: legend under heading
+      h(
+        "p",
+        { style: { fontSize: "10px", color: "#64748b", margin: "0 0 8px 0" } },
+        "PASS = suppressed · SPEAK = full turn · ACK/ASK = brief turn"
       ),
       err
         ? h("p", { style: { color: "#f87171", fontSize: "12px" } }, err)
@@ -236,6 +281,11 @@
                   : verdict === "SPEAK" || r.action === "allow"
                   ? "#14532d"
                   : "#1e3a5f";
+              // p1: annotate PASS to make suppression semantics explicit.
+              var displayVerdict =
+                verdict === "PASS" || r.action === "skip"
+                  ? "PASS (suppressed)"
+                  : verdict;
               return h(
                 "div",
                 {
@@ -251,13 +301,16 @@
                     alignItems: "flex-start",
                   },
                 },
+                // mn2: date-aware timestamp
                 h("span", { style: { opacity: 0.7, minWidth: "80px" } },
-                  r.ts ? new Date(r.ts * 1000).toLocaleTimeString() : ""),
-                h("span", { style: { fontWeight: "700", minWidth: "48px" } }, verdict),
+                  r.ts ? formatReceiptTs(r.ts) : ""),
+                h("span", { style: { fontWeight: "700", minWidth: "72px" } }, displayVerdict),
                 h("span", { style: { opacity: 0.8 } },
                   r.trigger_author ? ("@" + r.trigger_author + " ") : ""),
-                r.reasons && r.reasons[0]
-                  ? h("span", { style: { opacity: 0.7, fontSize: "10px" } }, r.reasons[0])
+                // mn3: up to 3 reasons joined with " · "
+                r.reasons && r.reasons.length > 0
+                  ? h("span", { style: { opacity: 0.7, fontSize: "10px" } },
+                      r.reasons.slice(0, 3).join(" · "))
                   : null,
                 h("span", { style: { opacity: 0.5, marginLeft: "auto" } },
                   (r.channel_ids || []).join(", "))
@@ -302,29 +355,62 @@
 
     useEffect(function () { load(); }, [load]);
 
+    // B2: when the selected value equals the static baseline value for that
+    // field, send null (the server-side deletion signal) so redundant overrides
+    // are pruned.  Uses the stateData closure so deps must include stateData.
     var handleChannelChange = useCallback(
       function (cid, key, value) {
         setPending(function (prev) {
           var channels = Object.assign({}, prev.channels || {});
           var ch = Object.assign({}, channels[cid] || {});
-          ch[key] = value;
+
+          // Resolve baseline value for this key+channel from the static config.
+          // Map form: baseline.channels[cid][key]; list form: no per-channel
+          // config, so fall back to top-level baseline key.
+          var baseline = stateData.baseline || {};
+          var baselineChs = baseline.channels || baseline.channel_ids;
+          var chCfg = {};
+          if (
+            baselineChs &&
+            typeof baselineChs === "object" &&
+            !Array.isArray(baselineChs)
+          ) {
+            chCfg = baselineChs[cid] || {};
+          }
+          var baselineVal = key in chCfg ? chCfg[key] : baseline[key];
+
+          // Coerce the select string to the typed value used in effective config.
+          var coerced = key === "enabled" ? value === "true" : value;
+
+          // If the selected value matches the static baseline, send null so the
+          // server's apply_state_patch prunes the now-redundant override.
+          ch[key] = coerced === baselineVal ? null : coerced;
+
           channels[cid] = ch;
           return Object.assign({}, prev, { channels: channels });
         });
       },
-      []
+      [stateData]
     );
 
     var handleGlobalChange = useCallback(
       function (key, value) {
         setPending(function (prev) {
           var g = Object.assign({}, prev.global || {});
-          g[key] = value;
+          g[key] = value || undefined;
           return Object.assign({}, prev, { global: g });
         });
       },
       []
     );
+
+    // M1: auto-dismiss success status after 4 s; error messages persist.
+    function setSuccessStatus(msg) {
+      setStatus(msg);
+      setTimeout(function () {
+        setStatus(function (prev) { return prev === msg ? null : prev; });
+      }, SUCCESS_DISMISS_MS);
+    }
 
     var save = useCallback(
       function () {
@@ -334,7 +420,7 @@
           body: JSON.stringify(pending),
         })
           .then(function () {
-            setStatus("Saved.");
+            setSuccessStatus("Saved.");
             setPending({});
             load();
           })
@@ -346,13 +432,14 @@
     var resetAll = useCallback(
       function () {
         if (!window.confirm("Clear all nunchi-gate runtime overrides?")) return;
+        // B1: empty dicts signal REPLACE (clear), not merge.
         fetchJSON(API_BASE + "/state", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ global: {}, channels: {} }),
         })
           .then(function () {
-            setStatus("All overrides cleared.");
+            setSuccessStatus("All overrides cleared.");
             setPending({});
             load();
           })
@@ -373,9 +460,12 @@
       new Set(Object.keys(effective).concat(Object.keys(pendingChannels)))
     ).sort();
 
-    // Determine state-introduced channels (those absent from baseline channels)
+    // Determine state-introduced channels (those absent from baseline channels).
+    // p2: fall back to baseline.channel_ids when baseline.channels is absent.
     var baselineChannels = {};
-    var baselineChs = stateData.baseline && stateData.baseline.channels;
+    var baselineChs =
+      stateData.baseline &&
+      (stateData.baseline.channels || stateData.baseline.channel_ids);
     if (baselineChs && typeof baselineChs === "object" && !Array.isArray(baselineChs)) {
       Object.keys(baselineChs).forEach(function (k) {
         if (k !== "*") baselineChannels[k] = true;
@@ -383,6 +473,19 @@
     } else if (Array.isArray(baselineChs)) {
       baselineChs.forEach(function (k) { baselineChannels[k] = true; });
     }
+
+    // M3: compute whether there are any pending (unsaved) edits.
+    // undefined values in pendingGlobal come from the empty-string select
+    // option and are not real pending changes.  null values in channel pending
+    // are deletion signals and ARE real pending changes.
+    var hasPendingGlobal = Object.keys(pendingGlobal).some(function (k) {
+      return pendingGlobal[k] !== undefined;
+    });
+    var hasPendingChannels = Object.keys(pendingChannels).some(function (cid) {
+      var ch = pendingChannels[cid] || {};
+      return Object.keys(ch).length > 0;
+    });
+    var hasPending = hasPendingGlobal || hasPendingChannels;
 
     return h(
       "div",
@@ -400,7 +503,18 @@
         h("h2", { style: { fontSize: "18px", fontWeight: "700", margin: 0 } }, "Nunchi Gate"),
         loading ? h("span", { style: { fontSize: "12px", color: "#94a3b8" } }, "Loading…") : null,
         status
-          ? h("span", { style: { fontSize: "12px", color: "#38bdf8" } }, status)
+          ? h(
+              "span",
+              {
+                style: {
+                  fontSize: "12px",
+                  color: status.indexOf("failed") !== -1 || status.indexOf("Error") !== -1
+                    ? "#f87171"
+                    : "#38bdf8",
+                },
+              },
+              status
+            )
           : null
       ),
 
@@ -429,7 +543,7 @@
           onChange: function (v) {
             handleGlobalChange("senders", v || undefined);
           },
-          badge: globalOv.senders ? Badge("override", "#0369a1") : null,
+          badge: provenanceBadge("senders", null, globalOv, null, pendingGlobal),
         }),
         h(SelectField, {
           label: "verbosity",
@@ -438,7 +552,7 @@
           onChange: function (v) {
             handleGlobalChange("verbosity", v || undefined);
           },
-          badge: globalOv.verbosity ? Badge("override", "#0369a1") : null,
+          badge: provenanceBadge("verbosity", null, globalOv, null, pendingGlobal),
         })
       ),
 
@@ -479,33 +593,51 @@
                 effective: displayEff,
                 chOverrides: chStates[cid] || {},
                 globalOverrides: globalOv,
+                pendingCh: pendingChannels[cid] || {},
                 isIntroduced: !baselineChannels[cid],
                 onChange: handleChannelChange,
               });
             })
       ),
 
-      // Action buttons
+      // Action buttons + M3 unsaved-changes indicator
       h(
         "div",
-        { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
+        { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "16px" } },
         h(
           "button",
           {
             onClick: save,
+            disabled: !hasPending,
+            title: hasPending ? undefined : "No unsaved changes",
             style: {
               padding: "6px 16px",
               borderRadius: "6px",
-              background: "#2563eb",
+              background: hasPending ? "#2563eb" : "#1e3a5f",
               color: "#fff",
               border: "none",
-              cursor: "pointer",
+              cursor: hasPending ? "pointer" : "not-allowed",
               fontSize: "13px",
               fontWeight: "600",
+              opacity: hasPending ? 1 : 0.5,
             },
           },
           "Save"
         ),
+        // M3: amber "Unsaved changes" indicator shown only when hasPending
+        hasPending
+          ? h(
+              "span",
+              {
+                style: {
+                  fontSize: "12px",
+                  color: "#d97706",
+                  fontWeight: "600",
+                },
+              },
+              "Unsaved changes"
+            )
+          : null,
         h(
           "button",
           {
