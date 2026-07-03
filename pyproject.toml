@@ -36,6 +36,9 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 
+[project.optional-dependencies]
+discord = ["discord.py>=2.4"]
+
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"
 Repository = "https://github.com/mentatzoe/nunchi"
@@ -45,6 +48,8 @@ Issues = "https://github.com/mentatzoe/nunchi/issues"
 nunchi = "nunchi.cli:main"
 nunchi-channel = "nunchi.adapters.channel:main"
 nunchi-matrix = "nunchi.adapters.matrix:main"
+nunchi-telegram = "nunchi.adapters.telegram:main"
+nunchi-discord = "nunchi.adapters.discord:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

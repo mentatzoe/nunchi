@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Telegram reference adapter.** `nunchi.adapters.telegram` joins Telegram chats
+  as a gated participant using the Telegram Bot HTTP API over stdlib `urllib`
+  (zero extra dependencies). Ships the `nunchi-telegram` console script. Features:
+  - Long-polling `getUpdates` loop with offset persistence
+    (`NUNCHI_TELEGRAM_STATE`)
+  - Chat allowlist from `NUNCHI_TELEGRAM_CHATS` (comma-separated integer IDs)
+  - PASS/ACK/ASK/SPEAK gate-first architecture; text messages only
+  - Author-kind tagging: own messages are `self` (skipped as triggers),
+    `is_bot=true` users are `peer_bot`, everything else is `human`
+  - Pluggable responder callback; built-in demo responder shared with
+    `nunchi-matrix` via `nunchi.adapters._responder`
+  - `sendMessage` on non-silent verdicts (SPEAK/ACK/ASK)
+  - JSONL receipt log (`NUNCHI_TELEGRAM_LOG`) with the same field shape as the
+    Matrix adapter
+  - Retry/backoff on HTTP 429 — honours `retry_after` from the JSON response
+    body first, then the `Retry-After` header; permanent 4xx abort immediately
+  - `--dry-run` and `--once` flags
+
+- **Discord adapter (optional extra).** `nunchi.adapters.discord` joins Discord
+  channels as a gated participant via discord.py's event-driven client.
+  - Install with `pip install nunchi[discord]`; discord.py is not a default
+    dependency and never leaks into the core install path
+  - Configurable bot policy: `NUNCHI_DISCORD_BOT_POLICY=all` (default, gate all
+    bots as peers) or `allowlist` (only bots in `NUNCHI_DISCORD_PEER_BOTS`)
+  - History backfill of up to 10 messages via `channel.history` on the first
+    event per channel
+  - `NUNCHI_DISCORD_MAX_EVENTS` for bounded test runs (no `--once` — discord.py
+    is event-driven)
+  - Pure import-safe functions (`_resolve_author_kind`, `_append_to_history`,
+    `_build_receipt`) live at module level and are testable without discord.py
+  - Ships the `nunchi-discord` console script; `--dry-run` flag supported
+
+- **Shared demo responder.** `nunchi.adapters._responder._demo_responder`
+  extracted from the Matrix adapter into a shared internal module so Telegram,
+  Discord, and future platform adapters can reuse it without copying code. The
+  Matrix adapter public API is unchanged.
+
+- **Adapter docs index.** `docs/adapters.md` is the new single-source adapter
+  reference: an index table (adapter, surface, install weight, status), full
+  setup guides for Matrix, Telegram, and Discord, and links to the Hermes plugin
+  and Claude Code hook integration docs. The full Matrix adapter section has
+  moved from `README.md` to `docs/adapters.md`; the README now carries a compact
+  overview table with a link.
+
 - **Matrix reference adapter.** `nunchi.adapters.matrix` joins Matrix rooms as a
   gated participant using the Matrix Client-Server API over stdlib `urllib` (no
   `matrix-nio` or other runtime dependencies). Ships the `nunchi-matrix` console
