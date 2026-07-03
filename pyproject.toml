@@ -44,6 +44,7 @@ Issues = "https://github.com/mentatzoe/nunchi/issues"
 [project.scripts]
 nunchi = "nunchi.cli:main"
 nunchi-channel = "nunchi.adapters.channel:main"
+nunchi-matrix = "nunchi.adapters.matrix:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
