@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Matrix reference adapter.** `nunchi.adapters.matrix` joins Matrix rooms as a
+  gated participant using the Matrix Client-Server API over stdlib `urllib` (no
+  `matrix-nio` or other runtime dependencies). Ships the `nunchi-matrix` console
+  script: one command to stand up a read-the-room agent on Matrix. Features:
+  - Long-polling `/sync` loop with since-token persistence
+  - PASS/ACK/ASK/SPEAK gate-first architecture: every inbound message is checked
+    before any response is generated
+  - Pluggable responder callback (`respond(trigger, history, gate_result) -> str | None`);
+    a built-in demo responder (OpenAI-compatible chat-completions via `urllib`) is
+    included and clearly labelled a demo
+  - Author-kind tagging: own messages are `self`, user IDs matching
+    `NUNCHI_MATRIX_PEER_BOTS` are `peer_bot`, everything else is `human`
+  - Encrypted-room detection: `m.room.encrypted` events are skipped with a
+    one-time per-room warning; unencrypted rooms only
+  - JSONL receipt log per gated event with verdict, action, elapsed_ms, reasons
+  - Retry/backoff on HTTP 429 and 5xx; permanent 4xx errors abort immediately
+  - `--dry-run` flag (gates but never sends) and `--once` flag (one sync batch
+    then exit, for cron/testing)
+  - Room allowlist from `NUNCHI_MATRIX_ROOMS`; events outside the allowlist are
+    ignored
+  - Open Floor Protocol vocabulary alignment: SPEAK/PASS/ACK/ASK map onto OFP
+    floor semantics so future OFP compatibility requires no translation layer
+
 ## [0.2.0] - 2026-07-02
 
 ### Changed
