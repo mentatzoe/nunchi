@@ -40,7 +40,7 @@ pip install "git+https://github.com/mentatzoe/nunchi.git"   # or: pip install .
 uvx --from "git+https://github.com/mentatzoe/nunchi.git" nunchi --help
 ```
 
-This provides the `nunchi`, `nunchi-channel`, and `nunchi-matrix` console scripts. See
+This provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`, and `nunchi-telegram` console scripts (`nunchi-discord` requires `pip install nunchi[discord]`). See
 [`CHANGELOG.md`](CHANGELOG.md) for releases and [`docs/STABILITY.md`](docs/STABILITY.md)
 for the versioning / verdict-surface stability contract.
 
@@ -241,121 +241,24 @@ This is the adapter tier (Constitution VI): it depends on the core and is not a
 live Discord integration — it produces the sentinel an existing cc-connect
 deployment already understands.
 
-## Matrix adapter (reference)
+## Adapters
 
-`nunchi.adapters.matrix` is a reference integration that joins Matrix rooms as a
-gated participant. One command, zero extra dependencies.
-
-### One-command quickstart
-
-```sh
-pip install "git+https://github.com/mentatzoe/nunchi.git"
-
-export NUNCHI_MATRIX_HOMESERVER="https://matrix.example.com"
-export NUNCHI_MATRIX_TOKEN="<your-access-token>"
-export NUNCHI_MATRIX_ROOMS="!room1:example.com,!room2:example.com"
-export NUNCHI_CLASSIFIER_MODEL="openai/gpt-4o-mini"
-export OPENROUTER_API_KEY="<your-key>"
-
-nunchi-matrix
-```
-
-Use `--dry-run` to gate without sending, or `--once` to process one sync batch
-and exit (useful for cron or testing).
-
-#### Environment variables
-
-| Variable | Required | Default | Description |
+| Adapter | Surface | Install weight | Status |
 |---|---|---|---|
-| `NUNCHI_MATRIX_TOKEN` | yes | — | Matrix access token |
-| `NUNCHI_MATRIX_HOMESERVER` | yes | — | Base URL of your homeserver |
-| `NUNCHI_MATRIX_ROOMS` | yes | — | Comma-separated room IDs to watch |
-| `NUNCHI_CLASSIFIER_MODEL` | yes | — | Model for the admission gate |
-| `OPENROUTER_API_KEY` | yes | — | API key (gate + demo responder) |
-| `NUNCHI_MATRIX_STATE` | no | `~/.nunchi/matrix-sync.json` | Since-token persistence |
-| `NUNCHI_MATRIX_LOG` | no | `~/.nunchi/matrix-gate.jsonl` | JSONL receipt log |
-| `NUNCHI_MATRIX_AGENT_ID` | no | `bot_<localpart>` | Agent identity label |
-| `NUNCHI_MATRIX_PEER_BOTS` | no | `` | Comma-separated user IDs (or `@prefix*` globs) treated as `peer_bot` |
-| `NUNCHI_MATRIX_HISTORY` | no | `10` | Recent messages fed to the gate as context |
-| `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the built-in demo responder |
-| `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
+| `nunchi-channel` | Any (subprocess) | stdlib | stable |
+| `nunchi-matrix` | Matrix | stdlib | beta |
+| `nunchi-telegram` | Telegram | stdlib | beta |
+| `nunchi-discord` | Discord | `pip install nunchi[discord]` | beta |
+| Hermes plugin | Hermes gateway | stdlib | beta |
+| Claude Code hook | Claude Code PreToolUse | stdlib | beta |
 
-#### Obtaining a Matrix access token
+`nunchi-matrix` is the reference integration — one command, zero extra
+dependencies, unencrypted Matrix rooms only (encrypted rooms are skipped with a
+warning). `nunchi-telegram` and `nunchi-discord` follow the same gate-first
+architecture: every inbound message is checked before any response is generated.
 
-```sh
-curl -XPOST 'https://YOUR_HOMESERVER/_matrix/client/v3/login' \
-     -H 'Content-Type: application/json' \
-     -d '{"type":"m.login.password",
-          "identifier":{"type":"m.id.user","user":"@BOTUSER:HOMESERVER"},
-          "password":"SECRET"}'
-# Response includes "access_token"; export it as NUNCHI_MATRIX_TOKEN.
-```
-
-Or from Python:
-
-```python
-from nunchi.adapters.matrix import login
-token = login("https://matrix.example.com", "@bot:example.com", "secret")
-```
-
-### Bridge note
-
-One adapter covers Discord, Slack, Microsoft Teams, Telegram, and IRC via the
-[Matrix bridge ecosystem](https://matrix.org/ecosystem/bridges/). Deploy
-nunchi-matrix on your homeserver; the bridges handle protocol translation.
-
-### Limitation: unencrypted rooms only
-
-`nunchi-matrix` uses the Matrix Client-Server API directly without an E2EE
-library. Rooms that use `m.room.encrypted` are detected and skipped with a
-one-time warning per room. Use an unencrypted Matrix room or a bridge endpoint
-that decrypts before delivering.
-
-### Responder callback contract
-
-The built-in demo responder is clearly labelled a demo — the adapter's product
-is the gating loop. To wire a real agent, pass a callable:
-
-```python
-from nunchi.adapters.matrix import MatrixSyncLoop
-
-def my_responder(trigger: dict, history: list[dict], gate_result) -> str | None:
-    """
-    trigger  — dict with content/author/author_kind/message_id/timestamp
-    history  — list of the same shape, oldest first
-    gate_result — ChannelGateResult (verdict/silent/run_shape/reasons/confidences)
-
-    Return a string to post, or None to post nothing (receipt: responder-declined).
-    """
-    return f"[{gate_result.verdict}] I would respond here."
-
-loop = MatrixSyncLoop(
-    homeserver="https://matrix.example.com",
-    token="tok_...",
-    room_ids=["!room:example.com"],
-    agent_id="my-agent",
-    own_user_id="@my-agent:example.com",
-    peer_bot_specs=["@other-bot:example.com"],
-    history_len=10,
-    state_path=...,
-    log_path=...,
-    responder=my_responder,
-)
-loop.run()
-```
-
-### Open Floor Protocol alignment
-
-Nunchi verdicts map onto Open Floor Protocol floor semantics:
-
-- `SPEAK` — taking the floor (producing a substantive participant turn)
-- `PASS` — yielding the floor (posting nothing for this turn)
-- `ACK` — brief acknowledgement without claiming the floor
-- `ASK` — requesting clarification before proceeding
-
-The adapter uses these names explicitly so future OFP compatibility is
-vocabulary-aligned: a transport that implements OFP can map `gate_result.verdict`
-to OFP floor-request/yield primitives without a translation layer.
+Full setup guides, environment variable tables, and the responder callback
+contract for every adapter are in **[docs/adapters.md](docs/adapters.md)**.
 
 ## Verdict test suite
 
