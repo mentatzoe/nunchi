@@ -534,3 +534,62 @@ After installing and restarting the dashboard:
    within 5 seconds.
 6. Click **Reset All Overrides** and confirm the state file is cleared.
 7. Run `/nunchi status` in Discord; the output should reflect the cleared state.
+
+#### New behaviours introduced in UX audit round
+
+**B1 — Reset All is no longer a no-op**
+Click **Reset All Overrides** while overrides exist and confirm
+`cat ~/.hermes/nunchi-gate.state.json` contains neither a `"global"` nor a
+`"channels"` key afterwards.  Previously, sending `{global:{}, channels:{}}`
+was a no-op merge; it now replaces (clears) each section.
+
+**B2 — Null-deletion and redundant-override pruning**
+Set `senders` to a non-baseline value on a channel and save.  Open
+`state.json` and confirm the key is stored.  Now set `senders` back to the
+baseline value (e.g. `"all"` if that is the config.yaml default) and save
+again.  Confirm `senders` is gone from `state.json` — the dashboard sends
+`null` as the deletion signal, and the server prunes the now-redundant
+override.
+
+**M1 — Success messages auto-dismiss**
+After clicking **Save** or **Reset All Overrides** successfully, the status
+message ("Saved." / "All overrides cleared.") should disappear automatically
+after 4 seconds.  Error messages ("Save failed: …") must persist until the
+next action.
+
+**M2 — Pending badges**
+Change a field on a channel (do not click Save).  The field's provenance
+badge should change to amber **pending** immediately.  After saving, the badge
+should revert to **channel-override** (purple) or disappear if the server
+pruned the override.
+
+**M3 — Save button disabled when idle**
+On first load (no pending edits), the **Save** button should be visually
+dimmed, have `cursor: not-allowed`, and show a tooltip "No unsaved changes".
+After editing any field the amber **Unsaved changes** indicator should appear
+beside Save and the button should become active.  After a successful save both
+the indicator and the dimmed state should reset.
+
+**mn1 — Effective view is whitelist-filtered**
+`GET /api/plugins/nunchi/state` → inspect `effective["<channel-id>"]`.  Keys
+such as `binary`, `timeout_seconds`, `log_path`, `agent_id`, `mention_id`,
+and `state_path` must not appear; only `OVERRIDABLE_KEYS` values are returned.
+
+**mn2 — Receipts show date for non-today entries**
+In the receipts panel, a receipt whose `ts` timestamp is from a previous day
+should display a date prefix (e.g. `7/1/2026 3:04:05 PM`) while today's
+receipts show time only (e.g. `3:04:05 PM`).
+
+**mn3 — Up to three reasons shown**
+A receipt entry with multiple `reasons` strings should display up to three of
+them joined with ` · ` (e.g. `No direct address · Topic resolved · Low signal`).
+
+**p1 — PASS verdict labelled as suppressed**
+Receipts panel: a `PASS` verdict should display as **PASS (suppressed)**.  A
+one-line legend `PASS = suppressed · SPEAK = full turn · ACK/ASK = brief turn`
+should appear directly under the "Gate Receipts" heading.
+
+**p2 — Legacy channel_ids form works in provenance**
+Configure channels as a flat YAML list (`channel_ids: ["123", "456"]`).  The
+state-introduced badge logic should recognise these channels as baseline
+channels (not show them as `[state-introduced]`).

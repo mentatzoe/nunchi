@@ -238,3 +238,152 @@ def merge_effective(
         return None
 
     return resolved
+
+
+def apply_state_patch(
+    current_state: dict[str, Any],
+    patch: dict[str, Any],
+    baseline_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply *patch* to *current_state*, returning the new state dict.
+
+    This is the authoritative merge function called by PUT /state.  It
+    implements three semantic layers on top of the legacy "always merge"
+    behaviour:
+
+    Replace-on-empty (B1 — Reset All fix)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    An explicitly-present **empty dict** for ``"global"`` or ``"channels"``
+    **replaces** (clears) that entire section.  A non-empty dict merges
+    per-key as before.  An absent key is a no-op (section unchanged).
+
+    Null as deletion signal (B2a)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    A ``null`` (Python ``None``) value for any overridable key **deletes**
+    that key from the stored override, allowing an operator to revert a
+    single field back to its effective baseline value without clearing the
+    entire section.  Non-overridable keys are silently dropped regardless of
+    their value.
+
+    Equal-to-baseline pruning (B2b)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    After the patch is applied, any channel-override key whose value equals
+    the effective value that channel would have *without* that override
+    (global overrides + baseline, computed via :func:`merge_effective` with
+    no resolver) is dropped as redundant.  Channel dicts that become empty
+    after this pruning are removed entirely.
+
+    Parameters
+    ----------
+    current_state:
+        The current stored state dict (from :func:`load_state`).
+    patch:
+        The incoming patch body.  Keys: ``"global"`` (optional dict or
+        ``None``) and ``"channels"`` (optional dict mapping channel-id to
+        per-channel patch dict or ``None``).
+    baseline_cfg:
+        The raw ``config.yaml`` nunchi block.  Used for equal-to-baseline
+        pruning so that storing the same value as the static config is
+        treated as a no-op.
+
+    Returns
+    -------
+    dict
+        New state dict.  Does **not** include ``updated_at`` /
+        ``updated_by`` — those are stamped by :func:`save_state`.
+        The input dicts are never mutated.
+    """
+    out: dict[str, Any] = dict(current_state)
+
+    # ------------------------------------------------------------------ #
+    # 1. Apply global patch                                                #
+    # ------------------------------------------------------------------ #
+    if "global" in patch:
+        g_patch = patch["global"]
+        if isinstance(g_patch, dict):
+            if not g_patch:
+                # Empty dict → clear the whole section.
+                out.pop("global", None)
+            else:
+                current_g: dict[str, Any] = dict(out.get("global") or {})
+                for k, v in g_patch.items():
+                    if k not in OVERRIDABLE_KEYS:
+                        continue  # whitelist
+                    if v is None:
+                        current_g.pop(k, None)  # null = deletion signal
+                    else:
+                        current_g[k] = v
+                if current_g:
+                    out["global"] = current_g
+                else:
+                    out.pop("global", None)
+        # None/non-dict → no-op for the global section
+
+    # ------------------------------------------------------------------ #
+    # 2. Apply channels patch                                              #
+    # ------------------------------------------------------------------ #
+    if "channels" in patch:
+        ch_patch = patch["channels"]
+        if isinstance(ch_patch, dict):
+            if not ch_patch:
+                # Empty dict → clear the whole section.
+                out.pop("channels", None)
+            else:
+                current_channels: dict[str, Any] = dict(out.get("channels") or {})
+                for cid, ch_data in ch_patch.items():
+                    if not isinstance(ch_data, dict):
+                        continue
+                    current_ch: dict[str, Any] = dict(current_channels.get(cid) or {})
+                    for k, v in ch_data.items():
+                        if k not in OVERRIDABLE_KEYS:
+                            continue  # whitelist
+                        if v is None:
+                            current_ch.pop(k, None)  # null = deletion signal
+                        else:
+                            current_ch[k] = v
+                    if current_ch:
+                        current_channels[cid] = current_ch
+                    else:
+                        current_channels.pop(cid, None)
+                if current_channels:
+                    out["channels"] = current_channels
+                else:
+                    out.pop("channels", None)
+
+    # ------------------------------------------------------------------ #
+    # 3. Equal-to-baseline pruning (B2b)                                  #
+    #                                                                      #
+    # For each channel override, drop any key whose value already equals   #
+    # the effective value that channel would have without the override.    #
+    # This prevents redundant overrides from accumulating and ensures      #
+    # that saving a value identical to the baseline is a no-op at rest.   #
+    # ------------------------------------------------------------------ #
+    if out.get("channels"):
+        channels: dict[str, Any] = dict(out["channels"])
+        for cid in list(channels.keys()):
+            # Build a temporary state that excludes *this* channel's overrides
+            # so that merge_effective computes the "no per-channel override"
+            # baseline (global overrides + config.yaml baseline).
+            state_for_baseline: dict[str, Any] = {}
+            if out.get("global"):
+                state_for_baseline["global"] = out["global"]
+            remaining = {k: v for k, v in channels.items() if k != cid}
+            if remaining:
+                state_for_baseline["channels"] = remaining
+
+            baseline_eff = merge_effective(baseline_cfg, state_for_baseline, {cid})
+            if baseline_eff is not None:
+                ch_overrides: dict[str, Any] = dict(channels[cid])
+                for k in list(ch_overrides.keys()):
+                    if k in baseline_eff and ch_overrides[k] == baseline_eff[k]:
+                        del ch_overrides[k]
+                if ch_overrides:
+                    channels[cid] = ch_overrides
+                else:
+                    del channels[cid]
+        if channels:
+            out["channels"] = channels
+        else:
+            out.pop("channels", None)
+
+    return out
