@@ -504,9 +504,9 @@ After restarting, the **Nunchi** tab should appear in the sidebar.
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `GET /api/plugins/nunchi/state` | GET | Returns `{baseline, overrides, effective, channel_names}`.  `channel_names` maps channel IDs to human-readable names resolved from `~/.hermes/channel_directory.json` (mtime-cached; tolerates absence). |
+| `GET /api/plugins/nunchi/state` | GET | Returns `{baseline, overrides, effective, channel_names, available_channels, resolved_model}`.  `channel_names` maps IDs to human-readable names from `~/.hermes/channel_directory.json` (mtime-cached).  `available_channels` lists directory entries not yet configured (`{id, name}` objects).  `resolved_model` is `{value, source}` computed by the dashboard service process (see [Model resolution display](#model-resolution-display)). |
 | `PUT /api/plugins/nunchi/state` | PUT | Apply overrides.  Body: `{"global": {...}, "channels": {"<id>": {...}}}`.  Whitelist-enforced. |
-| `GET /api/plugins/nunchi/receipts?limit=N` | GET | Tail-parse the gate JSONL log (default 50, max 500).  Newest-first.  Malformed lines skipped. |
+| `GET /api/plugins/nunchi/receipts?limit=N` | GET | Tail-parse the gate JSONL log (default 50, max 500).  Newest-first.  All JSONL fields returned as-is — no filtering. |
 
 ### UI features
 
@@ -524,13 +524,17 @@ and host CSS custom properties — zero hardcoded colours or fonts.
   and `pinned_rules` with provenance badges per field.
   - `senders = allowlist` reveals an `allow_from` textarea (comma or
     newline-separated names/IDs; stored as a list).
-  - **Model field** — text input; placeholder shows the effective value;
+  - **Model field** — text input; helper shows the effective value with source
+    (see [Model resolution display](#model-resolution-display));
     provenance badge shows whether the value is a channel override, global
     override, or inherited.
   - **Room governance (pinned rules)** — collapsible textarea per channel.
     Inline rules (`pinned_rules` state key) take precedence over
     `pinned_rules_file` when both are set; state-set `pinned_rules` overrides
     any file-based value at the gate call site.
+- **Add channel** — a control at the bottom of the channel list that lets
+  operators hot-add a new channel without editing config.yaml or restarting
+  Hermes.  See [Adding channels from the dashboard](#adding-channels-from-the-dashboard).
 - **Provenance badges** — amber **pending** while an edit is unsaved;
   cream **channel** for a channel-level override; secondary **global** for a
   global override; no badge for baseline values.
@@ -550,13 +554,85 @@ and host CSS custom properties — zero hardcoded colours or fonts.
   `PASS = suppressed (no message) · ACK = brief presence signal · ASK = one clarifying question · SPEAK = full turn`
   styled with host semantic colour tokens (PASS = destructive, SPEAK = success,
   ASK = warning, ACK = secondary).
+- **Expandable receipt rows** — each row is a disclosure button (`aria-expanded`,
+  keyboard accessible via Enter/Space).  Collapsed: summary line (timestamp,
+  verdict chip, author, channel IDs, up to three reasons, confidence bar).
+  Expanded: every field present in the receipt JSONL object, including the full
+  reasons list, full confidence table, elapsed\_ms, classifier\_model, message\_id,
+  channel (with resolved display name), action, silent, and full ts.  At debug
+  verbosity, also shows the gate payload (trigger content, history entries,
+  pinned\_rules presence) and the full directive, rendered as labeled rows.
+  Fields absent from the receipt are silently omitted; a muted note
+  "Message content is only recorded at debug verbosity" appears when debug
+  fields are absent.
 - **Confidence distribution** — when present, each receipt row renders the full
   confidence dict sorted highest-first (e.g. `SPEAK 0.70 · PASS 0.20 · ACK 0.05 · ASK 0.05`),
   with the winning verdict emphasised in bold.  A mini percentage bar below shows
   the top-verdict share using a host token colour.
-- **Reasons** — up to three reasons joined with ` · `.
+- **Reasons** — up to three reasons joined with ` · ` in the collapsed summary;
+  the full list is shown in the expanded detail panel.
 - **Date-aware timestamps** — today's receipts show time only; older receipts
-  show date and time.
+  show date and time.  The expanded panel also shows a full locale date-time.
+
+### Adding channels from the dashboard
+
+The Settings tab includes an **Add channel** control below the channel list.
+It provides two ways to stage a new channel:
+
+1. **Channel directory select** — when `~/.hermes/channel_directory.json`
+   contains channels that are not already configured (either in `config.yaml`
+   or in the current state overrides), they appear in a dropdown by display
+   name (selecting pre-fills the ID field).
+2. **Free-text ID input** — type any channel ID directly.  Accepted: any
+   non-empty token without spaces.  Discord snowflakes (digits only) and
+   other platform-specific formats are all accepted.
+
+Clicking **Add** stages `channels.<id>.enabled = true` as a pending change,
+which goes through the normal Save flow (pending badge appears, Save button
+activates, server applies the change on Save).
+
+> **Gateway allowlist caveat:** adding a channel here writes `enabled: true`
+> into the gate's runtime state, but the channel must also be one the hermes
+> gateway forwards to plugins (`allowed_channels` in the gateway config).  If
+> the gateway never delivers messages from that channel, the gate never sees
+> them regardless of this setting.
+
+You can also add channels without the dashboard:
+
+```
+/nunchi enable <channel-id>   # from Discord chat
+```
+
+Or permanently, without needing a restart, via config.yaml:
+
+```yaml
+nunchi:
+  channels:
+    "<channel-id>":
+      senders: all
+```
+
+### Model resolution display
+
+The **model** field in the Global Overrides card and in each channel card shows
+helper text `currently: <value> (from <source>)` where `<source>` is one of:
+
+| Source | Meaning |
+|--------|---------|
+| `config` | Set explicitly in config.yaml or a state override |
+| `env var` | Inherited from `NUNCHI_CLASSIFIER_MODEL` in the dashboard service process environment |
+| `.env` | Found in `~/.hermes/.env` (the same file `_load_dotenv_into` injects into the subprocess at gate time) |
+| *(absent)* | Not configured anywhere |
+
+The resolution is computed by `resolve.py`'s `resolve_effective_model` helper
+using the same lookup order the plugin applies at gate time:
+`cfg["model"]` → `environ["NUNCHI_CLASSIFIER_MODEL"]` → `.env` file → `None`.
+
+> **Caveat:** this resolution is computed by the dashboard service process.
+> The gateway subprocess sees its own environment at gate time — which may
+> differ if the dashboard service was started in a different shell or with
+> different environment variables.  A tooltip on the helper text notes this.
+> The gateway's environment is always authoritative at gate time.
 
 **Overridable keys**
 

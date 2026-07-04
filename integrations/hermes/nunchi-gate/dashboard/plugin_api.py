@@ -11,10 +11,15 @@ source of truth.
 Routes
 ------
 GET  /state
-    Returns the current nunchi configuration as three views:
-      ``baseline``  — the config.yaml nunchi block (no state overlays)
-      ``overrides`` — the raw state file content (global + channel entries)
-      ``effective`` — merged effective config per configured channel
+    Returns the current nunchi configuration as five views:
+      ``baseline``          — the config.yaml nunchi block (no state overlays)
+      ``overrides``         — the raw state file content (global + channel entries)
+      ``effective``         — merged effective config per configured channel
+      ``available_channels``— channels in channel_directory.json not yet configured
+      ``resolved_model``    — effective model with source ("config"|"environment"|
+                              "dotenv"|null), computed by the dashboard service
+                              process; the gateway's environment is authoritative
+                              at gate time.
 
 PUT  /state
     Body: ``{"global": {...}, "channels": {"<id>": {...}}}``
@@ -23,7 +28,8 @@ PUT  /state
 
 GET  /receipts?limit=N
     Tail-parse the configured ``log_path`` JSONL (default 50, cap 500).
-    Returns newest-first.  Malformed lines are skipped without error.
+    Returns newest-first, all fields from each JSONL line preserved.
+    Malformed lines are skipped without error.
 
 Security note: plugin HTTP routes go through the dashboard's session-token
 auth middleware, just like core routes.  No additional auth is needed here.
@@ -34,6 +40,7 @@ import importlib
 import importlib.util
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +49,7 @@ from fastapi import APIRouter, HTTPException, Query
 log = logging.getLogger(__name__)
 
 # Increment when the response contract changes so old JS can detect a mismatch.
-PLUGIN_API_VERSION = "2"
+PLUGIN_API_VERSION = "3"
 
 router = APIRouter()
 
@@ -109,6 +116,7 @@ def _load_channel_names(path: Path | None = None) -> dict[str, str]:
 
 _state_mod: Any = None
 _plugin_init_mod: Any = None
+_resolve_mod: Any = None
 
 
 def _get_state_mod() -> Any:
@@ -133,6 +141,18 @@ def _get_plugin_mod() -> Any:
             spec.loader.exec_module(mod)  # type: ignore[union-attr]
             _plugin_init_mod = mod
     return _plugin_init_mod
+
+
+def _get_resolve_mod() -> Any:
+    global _resolve_mod
+    if _resolve_mod is None:
+        resolve_file = Path(__file__).parent.parent / "resolve.py"
+        spec = importlib.util.spec_from_file_location("nunchi_gate_resolve_api", resolve_file)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            _resolve_mod = mod
+    return _resolve_mod
 
 
 def _nunchi_config() -> dict[str, Any]:
@@ -164,8 +184,11 @@ def _log_path(cfg: dict[str, Any]) -> Path | None:
 
 @router.get("/state")
 def get_state() -> dict[str, Any]:
-    """Return baseline config, raw overrides, and per-channel effective config."""
+    """Return baseline config, raw overrides, per-channel effective config,
+    available channels from the directory, and the resolved classifier model.
+    """
     state = _get_state_mod()
+    resolve = _get_resolve_mod()
     cfg = _nunchi_config()
     sp = _state_path(cfg)
 
@@ -177,6 +200,9 @@ def get_state() -> dict[str, Any]:
             log.warning("nunchi dashboard: failed to load state: %s", exc)
 
     effective: dict[str, Any] = {}
+    baseline_cids: set[str] = set()
+    state_cids: set[str] = set()
+
     if state is not None:
         plugin = _get_plugin_mod()
         resolve_fn = getattr(plugin, "resolve_channel_config", None) if plugin else None
@@ -207,11 +233,35 @@ def get_state() -> dict[str, Any]:
                 effective[cid] = None
 
     channel_names = _load_channel_names()
+
+    # --- available_channels: directory entries not yet configured ----------
+    # Uses the testable stdlib helper from resolve.py.
+    available_channels: list[dict[str, str]] = []
+    if resolve is not None:
+        try:
+            configured_ids = baseline_cids | state_cids
+            available_channels = resolve.available_channels_from_directory(configured_ids)
+        except Exception as exc:
+            log.warning("nunchi dashboard: available_channels failed: %s", exc)
+
+    # --- resolved_model: honest model resolution --------------------------
+    # Computed by this dashboard service process.  The gateway's own
+    # environment is authoritative at gate time; this is an approximation
+    # suitable for display purposes only.
+    resolved_model: dict[str, Any] = {"value": None, "source": None}
+    if resolve is not None:
+        try:
+            resolved_model = resolve.resolve_effective_model(cfg, dict(os.environ))
+        except Exception as exc:
+            log.warning("nunchi dashboard: resolve_effective_model failed: %s", exc)
+
     return {
         "baseline": cfg,
         "overrides": overrides,
         "effective": effective,
         "channel_names": channel_names,
+        "available_channels": available_channels,
+        "resolved_model": resolved_model,
         "api_version": PLUGIN_API_VERSION,
     }
 
@@ -283,7 +333,12 @@ def put_state(body: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/receipts")
 def get_receipts(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
-    """Tail the gate JSONL log; returns newest-first, up to *limit* entries."""
+    """Tail the gate JSONL log; returns newest-first, up to *limit* entries.
+
+    All fields from each JSONL line are returned as-is — no filtering.
+    This lets the dashboard expand receipts to show debug payload/directive
+    fields when present.
+    """
     cfg = _nunchi_config()
     lp = _log_path(cfg)
     if lp is None:

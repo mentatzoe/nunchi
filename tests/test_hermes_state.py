@@ -778,5 +778,337 @@ class TestApplyStatePatchChannelClear(unittest.TestCase):
         self.assertEqual(result["channels"]["C2"]["verbosity"], "debug")
 
 
+# ---------------------------------------------------------------------------
+# Loader for resolve.py
+# ---------------------------------------------------------------------------
+
+_RESOLVE_PATH = _WORKTREE_ROOT / "integrations" / "hermes" / "nunchi-gate" / "resolve.py"
+
+
+def _load_resolve_module() -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location("nunchi_gate_resolve_under_test", _RESOLVE_PATH)
+    assert spec is not None and spec.loader is not None, f"Could not find resolve.py at {_RESOLVE_PATH}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
+
+
+# ---------------------------------------------------------------------------
+# TestResolveEffectiveModel — model resolution order and source labelling
+# ---------------------------------------------------------------------------
+
+class TestResolveEffectiveModel(unittest.TestCase):
+    """resolve_effective_model: all four sources, precedence, and malformed .env."""
+
+    def setUp(self) -> None:
+        self.m = _load_resolve_module()
+
+    def _resolve(
+        self,
+        cfg: dict,
+        environ: dict | None = None,
+        dotenv_path=None,
+    ) -> dict:
+        return self.m.resolve_effective_model(
+            cfg,
+            environ if environ is not None else {},
+            dotenv_path=dotenv_path,
+        )
+
+    # --- Source: config ---
+
+    def test_config_model_wins_over_all(self) -> None:
+        """cfg['model'] is highest precedence."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("NUNCHI_CLASSIFIER_MODEL=from-dotenv\n")
+            tmp = f.name
+        try:
+            result = self._resolve(
+                {"model": "from-config"},
+                environ={"NUNCHI_CLASSIFIER_MODEL": "from-env"},
+                dotenv_path=tmp,
+            )
+            self.assertEqual(result["value"], "from-config")
+            self.assertEqual(result["source"], "config")
+        finally:
+            os.unlink(tmp)
+
+    def test_config_model_empty_string_is_skipped(self) -> None:
+        """Empty string in cfg['model'] does not count as configured."""
+        result = self._resolve({"model": ""}, environ={"NUNCHI_CLASSIFIER_MODEL": "from-env"})
+        self.assertEqual(result["source"], "environment")
+
+    def test_config_model_none_is_skipped(self) -> None:
+        """None in cfg['model'] does not count as configured."""
+        result = self._resolve({"model": None}, environ={"NUNCHI_CLASSIFIER_MODEL": "from-env"})
+        self.assertEqual(result["source"], "environment")
+
+    # --- Source: environment ---
+
+    def test_environment_wins_over_dotenv(self) -> None:
+        """environ NUNCHI_CLASSIFIER_MODEL wins over .env file when cfg absent."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("NUNCHI_CLASSIFIER_MODEL=from-dotenv\n")
+            tmp = f.name
+        try:
+            result = self._resolve(
+                {},
+                environ={"NUNCHI_CLASSIFIER_MODEL": "from-env"},
+                dotenv_path=tmp,
+            )
+            self.assertEqual(result["value"], "from-env")
+            self.assertEqual(result["source"], "environment")
+        finally:
+            os.unlink(tmp)
+
+    def test_environment_model_empty_string_is_skipped(self) -> None:
+        """Empty string in environ is not treated as a configured value."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("NUNCHI_CLASSIFIER_MODEL=from-dotenv\n")
+            tmp = f.name
+        try:
+            result = self._resolve(
+                {},
+                environ={"NUNCHI_CLASSIFIER_MODEL": ""},
+                dotenv_path=tmp,
+            )
+            self.assertEqual(result["source"], "dotenv")
+        finally:
+            os.unlink(tmp)
+
+    # --- Source: dotenv ---
+
+    def test_dotenv_used_when_no_config_or_env(self) -> None:
+        """Falls through to .env file when cfg and environ both lack the key."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("NUNCHI_CLASSIFIER_MODEL=google/gemini-flash-lite\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertEqual(result["value"], "google/gemini-flash-lite")
+            self.assertEqual(result["source"], "dotenv")
+        finally:
+            os.unlink(tmp)
+
+    def test_dotenv_export_prefix_handled(self) -> None:
+        """'export KEY=value' form is parsed correctly."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("export NUNCHI_CLASSIFIER_MODEL=model-via-export\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertEqual(result["value"], "model-via-export")
+            self.assertEqual(result["source"], "dotenv")
+        finally:
+            os.unlink(tmp)
+
+    def test_dotenv_quoted_value_unquoted(self) -> None:
+        """Quoted values in .env are unwrapped."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write('NUNCHI_CLASSIFIER_MODEL="quoted-model"\n')
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertEqual(result["value"], "quoted-model")
+        finally:
+            os.unlink(tmp)
+
+    def test_dotenv_comment_lines_skipped(self) -> None:
+        """Lines starting with # are ignored."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("# NUNCHI_CLASSIFIER_MODEL=should-be-ignored\n")
+            f.write("NUNCHI_CLASSIFIER_MODEL=real-model\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertEqual(result["value"], "real-model")
+        finally:
+            os.unlink(tmp)
+
+    # --- Source: None ---
+
+    def test_returns_none_when_nothing_configured(self) -> None:
+        """All sources absent → value None, source None."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("OTHER_KEY=other-value\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertIsNone(result["value"])
+            self.assertIsNone(result["source"])
+        finally:
+            os.unlink(tmp)
+
+    # --- Malformed / absent .env ---
+
+    def test_malformed_dotenv_does_not_crash(self) -> None:
+        """A .env file with non-parseable content returns None (not an exception)."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("{this is not a dotenv file\x00\nNUNCHI_CLASSIFIER_MODEL\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            # Either the key was not found or parse was tolerant — must not raise.
+            self.assertIsInstance(result, dict)
+            self.assertIn("value", result)
+            self.assertIn("source", result)
+        finally:
+            os.unlink(tmp)
+
+    def test_missing_dotenv_file_returns_none(self) -> None:
+        """A non-existent .env path is tolerated — source is None."""
+        result = self._resolve({}, environ={}, dotenv_path="/nonexistent/path/.env")
+        self.assertIsNone(result["value"])
+        self.assertIsNone(result["source"])
+
+    def test_dotenv_key_not_present_falls_through_to_none(self) -> None:
+        """Key absent from .env (but other keys present) → source None."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
+            f.write("OPENROUTER_API_KEY=sk-abc123\n")
+            tmp = f.name
+        try:
+            result = self._resolve({}, environ={}, dotenv_path=tmp)
+            self.assertIsNone(result["value"])
+            self.assertIsNone(result["source"])
+        finally:
+            os.unlink(tmp)
+
+
+# ---------------------------------------------------------------------------
+# TestAvailableChannelsFromDirectory — excludes configured, tolerates errors
+# ---------------------------------------------------------------------------
+
+class TestAvailableChannelsFromDirectory(unittest.TestCase):
+    """available_channels_from_directory: filters configured ids, tolerates absence."""
+
+    def setUp(self) -> None:
+        self.m = _load_resolve_module()
+
+    def _make_dir_file(self, entries: list[dict], tmpdir: str) -> str:
+        """Write a channel_directory.json to tmpdir and return its path."""
+        data = {"platforms": {"discord": entries}}
+        p = Path(tmpdir) / "channel_directory.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return str(p)
+
+    def _available(self, configured_ids: set, path: str | None = None) -> list[dict]:
+        return self.m.available_channels_from_directory(configured_ids, path=path)
+
+    # --- Normal operation ---
+
+    def test_excludes_configured_channels(self) -> None:
+        """Entries whose id is in configured_ids are excluded."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([
+                {"id": "111", "name": "alpha", "guild": "Server"},
+                {"id": "222", "name": "beta", "guild": "Server"},
+                {"id": "333", "name": "gamma", "guild": "Server"},
+            ], tmp)
+            result = self._available({"111", "222"}, path=p)
+            ids = [e["id"] for e in result]
+            self.assertNotIn("111", ids)
+            self.assertNotIn("222", ids)
+            self.assertIn("333", ids)
+
+    def test_returns_all_when_none_configured(self) -> None:
+        """Empty configured_ids → all directory entries returned."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([
+                {"id": "111", "name": "alpha"},
+                {"id": "222", "name": "beta"},
+            ], tmp)
+            result = self._available(set(), path=p)
+            self.assertEqual(len(result), 2)
+
+    def test_returns_empty_when_all_configured(self) -> None:
+        """All directory entries configured → empty list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([
+                {"id": "111", "name": "alpha"},
+            ], tmp)
+            result = self._available({"111"}, path=p)
+            self.assertEqual(result, [])
+
+    def test_each_entry_has_id_and_name_keys(self) -> None:
+        """Returned dicts have exactly 'id' and 'name' keys."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([{"id": "999", "name": "testchan"}], tmp)
+            result = self._available(set(), path=p)
+            self.assertEqual(len(result), 1)
+            self.assertIn("id", result[0])
+            self.assertIn("name", result[0])
+            self.assertEqual(result[0]["id"], "999")
+
+    def test_name_format_guild_present(self) -> None:
+        """Guild present → name is 'Guild / #channel'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([{"id": "1", "name": "general", "guild": "MyServer"}], tmp)
+            result = self._available(set(), path=p)
+            self.assertEqual(result[0]["name"], "MyServer / #general")
+
+    def test_name_format_no_guild(self) -> None:
+        """No guild → name is '#channel'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([{"id": "1", "name": "general"}], tmp)
+            result = self._available(set(), path=p)
+            self.assertEqual(result[0]["name"], "#general")
+
+    def test_sorted_by_name_then_id(self) -> None:
+        """Results are sorted by (name.lower(), id)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([
+                {"id": "3", "name": "zeta"},
+                {"id": "1", "name": "alpha"},
+                {"id": "2", "name": "beta"},
+            ], tmp)
+            result = self._available(set(), path=p)
+            names = [e["name"] for e in result]
+            self.assertEqual(names, ["#alpha", "#beta", "#zeta"])
+
+    # --- Tolerates errors ---
+
+    def test_tolerates_missing_directory_file(self) -> None:
+        """Non-existent path returns empty list."""
+        result = self._available(set(), path="/nonexistent/path/channel_directory.json")
+        self.assertEqual(result, [])
+
+    def test_tolerates_malformed_json(self) -> None:
+        """A file with invalid JSON returns empty list without crashing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "channel_directory.json"
+            bad.write_text("{this is not json", encoding="utf-8")
+            result = self._available(set(), path=str(bad))
+            self.assertEqual(result, [])
+
+    def test_tolerates_empty_file(self) -> None:
+        """An empty file returns empty list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "channel_directory.json"
+            empty.write_text("", encoding="utf-8")
+            result = self._available(set(), path=str(empty))
+            self.assertEqual(result, [])
+
+    def test_tolerates_non_object_json(self) -> None:
+        """A JSON array (not an object) at top level returns empty list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            arr = Path(tmp) / "channel_directory.json"
+            arr.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+            result = self._available(set(), path=str(arr))
+            self.assertEqual(result, [])
+
+    def test_skips_entries_missing_id_or_name(self) -> None:
+        """Entries lacking 'id' or 'name' are silently skipped."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._make_dir_file([
+                {"id": "111", "name": "valid"},
+                {"id": "", "name": "no-id"},          # empty id
+                {"name": "missing-id"},                # no id key
+                {"id": "333"},                         # no name key
+            ], tmp)
+            result = self._available(set(), path=p)
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["id"], "111")
+
+
 if __name__ == "__main__":
     unittest.main()
