@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected four-verdict legend, and the receipts poll gained pause/interval
   controls plus visibility-aware suspension.
 
+- **Dashboard round 3.** The Nunchi tab can now add channels directly (a
+  picker of gateway-known channels not yet configured, plus free-text id
+  entry; staged through the normal Save flow) with an inline note that the
+  channel must also be one the gateway listens to. The global and per-channel
+  model fields show the actual resolved model and its source (config /
+  environment / .env) instead of an unhelpful "inherit" placeholder. Receipt
+  rows are expandable disclosures rendering every logged field — full reasons,
+  confidence table, model, message id, and (at debug verbosity) the complete
+  gate payload and directive.
 - **Dashboard verification round.** Fixed the text-input remount bug (typing
   no longer loses focus per keystroke), added an honest save contract (PUT
   echoes applied state and rejected keys; the UI reports fields the server
