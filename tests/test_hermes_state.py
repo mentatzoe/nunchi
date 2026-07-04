@@ -640,5 +640,143 @@ class TestApplyStatePatch(unittest.TestCase):
         self.assertEqual(patch["global"]["senders"], "humans")
 
 
+# ---------------------------------------------------------------------------
+# TestAuditPatch — audit_patch helper classifies applied vs rejected keys
+# ---------------------------------------------------------------------------
+
+class TestAuditPatch(unittest.TestCase):
+    """audit_patch: correctly classifies overridable vs blocked keys."""
+
+    def setUp(self) -> None:
+        self.m = _load_state_module()
+
+    def _audit(self, patch: dict) -> dict:
+        return self.m.audit_patch(patch)
+
+    def test_all_overridable_global_keys_applied(self) -> None:
+        """All OVERRIDABLE_KEYS in global patch appear in applied."""
+        patch = {"global": {"senders": "humans", "verbosity": "debug", "enabled": True}}
+        result = self._audit(patch)
+        self.assertIn("senders", result["applied"])
+        self.assertIn("verbosity", result["applied"])
+        self.assertIn("enabled", result["applied"])
+        self.assertEqual(result["rejected"], [])
+
+    def test_non_overridable_global_key_rejected(self) -> None:
+        """binary is NOT in OVERRIDABLE_KEYS → goes to rejected."""
+        patch = {"global": {"binary": "/evil", "senders": "humans"}}
+        result = self._audit(patch)
+        self.assertIn("binary", result["rejected"])
+        self.assertNotIn("binary", result["applied"])
+        self.assertIn("senders", result["applied"])
+
+    def test_channel_non_overridable_key_rejected(self) -> None:
+        """log_path in a channel patch is rejected."""
+        patch = {"channels": {"C1": {"log_path": "/evil", "enabled": True}}}
+        result = self._audit(patch)
+        self.assertIn("log_path", result["rejected"])
+        self.assertIn("enabled", result["applied"])
+
+    def test_empty_patch_returns_empty_applied_and_rejected(self) -> None:
+        result = self._audit({})
+        self.assertEqual(result["applied"], {})
+        self.assertEqual(result["rejected"], [])
+
+    def test_empty_global_dict_not_audited(self) -> None:
+        """Empty global (Reset All) contributes nothing to either list."""
+        result = self._audit({"global": {}})
+        self.assertEqual(result["applied"], {})
+        self.assertEqual(result["rejected"], [])
+
+    def test_empty_channel_dict_not_audited(self) -> None:
+        """Empty channel dict (channel-level clear) contributes nothing."""
+        result = self._audit({"channels": {"C1": {}}})
+        self.assertEqual(result["applied"], {})
+        self.assertEqual(result["rejected"], [])
+
+    def test_no_duplicate_rejections_across_sections(self) -> None:
+        """A key rejected in global and in a channel only appears once in rejected."""
+        patch = {
+            "global": {"binary": "/evil"},
+            "channels": {"C1": {"binary": "/also-evil"}},
+        }
+        result = self._audit(patch)
+        self.assertEqual(result["rejected"].count("binary"), 1)
+
+    def test_null_values_in_patch_are_audited(self) -> None:
+        """null (deletion signal) values for overridable keys count as applied."""
+        patch = {"global": {"senders": None}}
+        result = self._audit(patch)
+        self.assertIn("senders", result["applied"])
+        self.assertIsNone(result["applied"]["senders"])
+        self.assertEqual(result["rejected"], [])
+
+    def test_multiple_channels_rejected_keys_deduplicated(self) -> None:
+        """Same rejected key across multiple channels only listed once."""
+        patch = {
+            "channels": {
+                "C1": {"agent_id": "evil", "senders": "humans"},
+                "C2": {"agent_id": "also-evil", "verbosity": "debug"},
+            }
+        }
+        result = self._audit(patch)
+        self.assertEqual(result["rejected"].count("agent_id"), 1)
+        self.assertIn("senders", result["applied"])
+        self.assertIn("verbosity", result["applied"])
+
+
+# ---------------------------------------------------------------------------
+# TestApplyStatePatchChannelClear — per-channel empty-dict clear (B1 extension)
+# ---------------------------------------------------------------------------
+
+class TestApplyStatePatchChannelClear(unittest.TestCase):
+    """apply_state_patch: channels.{id}: {} clears that channel's overrides."""
+
+    def setUp(self) -> None:
+        self.m = _load_state_module()
+
+    def _patch(self, current: dict, patch: dict, baseline: dict | None = None) -> dict:
+        return self.m.apply_state_patch(current, patch, baseline or {})
+
+    def test_empty_channel_dict_clears_that_channel(self) -> None:
+        """B1 at channel level: {} for a specific channel removes its overrides."""
+        current = {"channels": {"C1": {"senders": "humans"}, "C2": {"verbosity": "debug"}}}
+        result = self._patch(current, {"channels": {"C1": {}}})
+        self.assertNotIn("C1", result.get("channels", {}))
+
+    def test_empty_channel_dict_leaves_other_channels_intact(self) -> None:
+        """Clearing one channel's overrides does not affect sibling channels."""
+        current = {"channels": {"C1": {"senders": "humans"}, "C2": {"verbosity": "debug"}}}
+        result = self._patch(current, {"channels": {"C1": {}}})
+        self.assertIn("C2", result.get("channels", {}))
+        self.assertEqual(result["channels"]["C2"]["verbosity"], "debug")
+
+    def test_empty_channel_dict_for_nonexistent_channel_is_noop(self) -> None:
+        """Clearing a channel that has no overrides does not crash."""
+        current = {"channels": {"C2": {"verbosity": "debug"}}}
+        result = self._patch(current, {"channels": {"C1": {}}})
+        self.assertNotIn("C1", result.get("channels", {}))
+        self.assertIn("C2", result.get("channels", {}))
+
+    def test_empty_channel_dict_removes_channels_section_when_last(self) -> None:
+        """When the last channel is cleared, the 'channels' key is removed entirely."""
+        current = {"channels": {"C1": {"senders": "humans"}}}
+        result = self._patch(current, {"channels": {"C1": {}}})
+        self.assertNotIn("channels", result)
+
+    def test_top_level_empty_channels_still_clears_all(self) -> None:
+        """B1 top-level: sending channels: {} clears ALL channels (unchanged)."""
+        current = {"channels": {"C1": {"senders": "humans"}, "C2": {"verbosity": "debug"}}}
+        result = self._patch(current, {"channels": {}})
+        self.assertNotIn("channels", result)
+
+    def test_mix_clear_and_merge_in_same_patch(self) -> None:
+        """Can clear one channel and merge another in the same PUT."""
+        current = {"channels": {"C1": {"senders": "humans"}, "C2": {"verbosity": "normal"}}}
+        result = self._patch(current, {"channels": {"C1": {}, "C2": {"verbosity": "debug"}}})
+        self.assertNotIn("C1", result.get("channels", {}))
+        self.assertEqual(result["channels"]["C2"]["verbosity"], "debug")
+
+
 if __name__ == "__main__":
     unittest.main()
