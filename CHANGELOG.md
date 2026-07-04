@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected four-verdict legend, and the receipts poll gained pause/interval
   controls plus visibility-aware suspension.
 
+- **Dashboard verification round.** Fixed the text-input remount bug (typing
+  no longer loses focus per keystroke), added an honest save contract (PUT
+  echoes applied state and rejected keys; the UI reports fields the server
+  did not accept instead of faking success) and an `api_version` handshake
+  that banners loudly when the dashboard service runs an outdated backend,
+  per-channel and global paths back to baseline (inherit options, per-channel
+  clear, `allow_from` cleanup on policy change), readable channel-ID pills,
+  effective-model display, verbosity meanings in the options, and label/input
+  association fixes.
+
 ### Added
 
 - **Telegram reference adapter.** `nunchi.adapters.telegram` joins Telegram chats
