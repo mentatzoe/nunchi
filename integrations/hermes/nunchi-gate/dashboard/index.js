@@ -1092,7 +1092,7 @@
 
     var load = useCallback(function () {
       setLoading(true);
-      fetchJSON(API_BASE + "/state")
+      return fetchJSON(API_BASE + "/state")
         .then(function (data) {
           setStateData(data);
           setApiVersion(data.api_version || null);
@@ -1259,13 +1259,16 @@
         })
           .then(function (resp) {
             var rejectedKeys = (resp && resp.rejected_keys) || [];
+            setPending({});
             if (rejectedKeys.length > 0) {
               setStatus("Reset failed: server did not accept some keys");
+              load();
             } else {
-              setSuccessStatus("All overrides cleared.");
+              // Toast after the reload settles so the re-render can't race it away.
+              Promise.resolve(load()).then(function () {
+                setSuccessStatus("All overrides cleared.");
+              });
             }
-            setPending({});
-            load();
           })
           .catch(function (e) { setStatus("Reset failed: " + e); });
       },
