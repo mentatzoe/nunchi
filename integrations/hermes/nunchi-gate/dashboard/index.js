@@ -20,9 +20,18 @@
  *   - All prior patch semantics preserved: apply_state_patch (empty-dict clears,
  *     null deletes, baseline-equal pruning), pending badges, unsaved-changes
  *     Save gating, auto-dismissing success messages, aria-hidden badges.
+ *   - Silent-failure contract: PUT /state echoes applied_state + rejected_keys;
+ *     JS diffs against sent keys and shows a persistent error on mismatch.
+ *   - Version handshake: api_version in GET /state; banner when outdated.
  */
 (function () {
   "use strict";
+
+  // -------------------------------------------------------------------------
+  // Idempotent registration guard — prevents double-mount when the retry
+  // injection at the bottom of this block fires a second time.
+  // -------------------------------------------------------------------------
+  if (window.__NUNCHI_REGISTERED__) return;
 
   var SDK = window.__HERMES_PLUGIN_SDK__;
   var PLUGINS = window.__HERMES_PLUGINS__;
@@ -67,8 +76,16 @@
   // Constants
   // -------------------------------------------------------------------------
   var API_BASE = "/api/plugins/nunchi";
+  // Must match PLUGIN_API_VERSION in dashboard/plugin_api.py.
+  var EXPECTED_API_VERSION = "2";
+
   var SENDERS_OPTIONS = ["all", "humans", "allowlist"];
-  var VERBOSITY_OPTIONS = ["minimal", "normal", "debug"];
+  // Objects so the label carries the short meaning (finding 8).
+  var VERBOSITY_OPTIONS = [
+    { value: "minimal", label: "minimal — verdict & action only" },
+    { value: "normal",  label: "normal — + reasons & confidences" },
+    { value: "debug",   label: "debug — + full payload" },
+  ];
   var POLL_INTERVALS = [
     { label: "2 s", value: 2000 },
     { label: "5 s", value: 5000 },
@@ -77,6 +94,14 @@
   ];
   var SUCCESS_DISMISS_MS = 4000;
   var LS_POLL_KEY = "nunchi.poll";
+
+  // -------------------------------------------------------------------------
+  // allow_from flush registry
+  // Keys: channel-id.  Values: function() -> parsed lines | undefined.
+  // Called by save() before building the patch so that save-without-blur
+  // still picks up the latest raw text from each allowlist textarea.
+  // -------------------------------------------------------------------------
+  var _allowFromFlush = {};
 
   // -------------------------------------------------------------------------
   // Owner-mandated help copy (verbatim)
@@ -197,6 +222,7 @@
 
   // -------------------------------------------------------------------------
   // FieldRow: label + control + provenance badge + help text
+  // Callers pass id so the SDKLabel's htmlFor associates with the control.
   // -------------------------------------------------------------------------
   function FieldRow(props) {
     return h(
@@ -232,16 +258,20 @@
   function GlobalCard(props) {
     var globalOv = props.globalOverrides || {};
     var pendingGl = props.pendingGlobal || {};
+    var effectiveModel = props.effectiveModel || "";
 
     var sendersVal = pendingGl.senders !== undefined
-      ? (pendingGl.senders || "")
+      ? (pendingGl.senders === null ? "" : (pendingGl.senders || ""))
       : (globalOv.senders || "");
     var verbosityVal = pendingGl.verbosity !== undefined
-      ? (pendingGl.verbosity || "")
+      ? (pendingGl.verbosity === null ? "" : (pendingGl.verbosity || ""))
       : (globalOv.verbosity || "");
     var modelVal = pendingGl.model !== undefined
-      ? (pendingGl.model || "")
+      ? (pendingGl.model === null ? "" : (pendingGl.model || ""))
       : (globalOv.model || "");
+
+    // Effective model displayed as helper text under the model input (finding 7).
+    var effectiveModelDisplay = modelVal || effectiveModel || "(from env)";
 
     return h(
       SDKCard,
@@ -260,12 +290,16 @@
 
           // senders
           h(FieldRow, {
+            id: "nunchi-global-senders",
             label: "senders",
             badge: makeProvBadge("senders", null, globalOv, null, pendingGl),
             help: sendersVal ? (HELP["senders_" + sendersVal] || null) : null,
             control: h(SDKSelect, {
               value: sendersVal,
-              onValueChange: function (v) { props.onChange("senders", v || undefined); },
+              onValueChange: function (v) {
+                // Pass null (not undefined) so it counts as a pending deletion.
+                props.onChange("senders", v === "" ? null : v);
+              },
               placeholder: "(inherit)",
             },
               h(SDKSelectOption, { value: "" }, "(inherit)"),
@@ -277,30 +311,38 @@
 
           // verbosity
           h(FieldRow, {
+            id: "nunchi-global-verbosity",
             label: "verbosity",
             badge: makeProvBadge("verbosity", null, globalOv, null, pendingGl),
             help: verbosityVal ? (HELP["verbosity_" + verbosityVal] || null) : null,
             control: h(SDKSelect, {
               value: verbosityVal,
-              onValueChange: function (v) { props.onChange("verbosity", v || undefined); },
+              onValueChange: function (v) {
+                props.onChange("verbosity", v === "" ? null : v);
+              },
               placeholder: "(inherit)",
             },
               h(SDKSelectOption, { value: "" }, "(inherit)"),
               VERBOSITY_OPTIONS.map(function (o) {
-                return h(SDKSelectOption, { key: o, value: o }, o);
+                return h(SDKSelectOption, { key: o.value, value: o.value }, o.label);
               })
             ),
           }),
 
           // model
           h(FieldRow, {
+            id: "nunchi-global-model",
             label: "model",
             labelWidth: "52px",
             badge: makeProvBadge("model", null, globalOv, null, pendingGl),
+            help: "currently: " + effectiveModelDisplay,
             control: h(SDKInput, {
+              id: "nunchi-global-model",
               type: "text",
               value: modelVal,
-              onChange: function (e) { props.onChange("model", e.target.value || undefined); },
+              onChange: function (e) {
+                props.onChange("model", e.target.value || null);
+              },
               placeholder: "default (from env)",
               style: { fontSize: "12px", height: "32px", flex: "1" },
             }),
@@ -322,38 +364,121 @@
     var pendingCh = props.pendingCh || {};
     var isIntroduced = props.isIntroduced;
     var isNull = props.effective === null;
+    var hasStoredOverrides = Object.keys(chOv).length > 0;
 
     var _pinnedOpen = useState(false);
     var pinnedOpen = _pinnedOpen[0];
     var setPinnedOpen = _pinnedOpen[1];
 
+    // --- allow_from: raw text local state (finding 1 + finding 1 allow_from) ---
+    // Derive the canonical allow_from text from effective/pending for initialisation
+    // and external-update sync.
+    var allowFromArr = pendingCh.allow_from !== undefined
+      ? (pendingCh.allow_from === null ? [] : (pendingCh.allow_from || []))
+      : (eff.allow_from || []);
+    var allowFromCanonical = Array.isArray(allowFromArr)
+      ? allowFromArr.join("\n")
+      : String(allowFromArr || "");
+
+    var _rawAllowFrom = useState(allowFromCanonical);
+    var rawAllowFrom = _rawAllowFrom[0];
+    var setRawAllowFrom = _rawAllowFrom[1];
+
+    // DOM ref so save() can flush the raw value without waiting for blur.
+    var allowFromDomRef = useRef(null);
+    // Editing flag: true between focus and blur; prevents external sync.
+    var allowFromEditing = useRef(false);
+
+    // Sync raw text when the canonical value changes externally (e.g., refresh).
+    useEffect(function () {
+      if (!allowFromEditing.current) {
+        setRawAllowFrom(allowFromCanonical);
+      }
+    }, [allowFromCanonical]);
+
+    // Register flush function in module registry so save() can read current text.
+    useEffect(function () {
+      _allowFromFlush[cid] = function () {
+        if (!allowFromDomRef.current) return undefined;
+        var text = allowFromDomRef.current.value;
+        var lines = text
+          .split(/[\n,]+/)
+          .map(function (s) { return s.trim(); })
+          .filter(Boolean);
+        return lines.length > 0 ? lines : null;
+      };
+      return function () { delete _allowFromFlush[cid]; };
+    }, [cid]);
+
+    // --- Derived select values for channel overrides ---
+    // Show "" (inherit) when there is no pending or stored channel-level override.
+    function _chSelectVal(key, fallback) {
+      if (pendingCh[key] !== undefined) {
+        return pendingCh[key] === null ? "" : (pendingCh[key] || "");
+      }
+      if (Object.prototype.hasOwnProperty.call(chOv, key)) {
+        return chOv[key] || "";
+      }
+      return ""; // no channel-level override → show inherit
+    }
+
+    var sendersSelectVal = _chSelectVal("senders", "all");
+    var verbositySelectVal = _chSelectVal("verbosity", "normal");
+    // enabled: special handling (bool)
+    var enabledSelectVal;
+    if (pendingCh.enabled !== undefined) {
+      enabledSelectVal = pendingCh.enabled === null ? "" : String(pendingCh.enabled !== false);
+    } else if (Object.prototype.hasOwnProperty.call(chOv, "enabled")) {
+      enabledSelectVal = String(chOv.enabled !== false);
+    } else {
+      enabledSelectVal = "";
+    }
+
+    // Effective values for help text / display (include inherited values).
     var sendersEff = pendingCh.senders !== undefined
-      ? (pendingCh.senders || "all")
+      ? (pendingCh.senders === null ? (eff.senders || "all") : (pendingCh.senders || "all"))
       : (eff.senders || "all");
 
-    // allow_from: pending value or effective value, displayed as newline-separated text
-    var allowFromRaw = pendingCh.allow_from !== undefined
-      ? pendingCh.allow_from
-      : (eff.allow_from || []);
-    var allowFromText = Array.isArray(allowFromRaw)
-      ? allowFromRaw.join("\n")
-      : String(allowFromRaw || "");
-
     var verbosityEff = pendingCh.verbosity !== undefined
-      ? (pendingCh.verbosity || "normal")
+      ? (pendingCh.verbosity === null ? (eff.verbosity || "normal") : (pendingCh.verbosity || "normal"))
       : (eff.verbosity || "normal");
 
     var modelEff = pendingCh.model !== undefined
-      ? (pendingCh.model || "")
+      ? (pendingCh.model === null ? "" : (pendingCh.model || ""))
       : (eff.model || "");
 
     var pinnedRulesEff = pendingCh.pinned_rules !== undefined
       ? (pendingCh.pinned_rules || "")
       : (eff.pinned_rules || "");
 
+    // Effective model display for helper text (finding 7).
+    var effectiveModelDisplay = modelEff || eff.model || props.globalModel || "(from env)";
+
     function handleChange(key, value) {
       props.onChange(cid, key, value);
     }
+
+    function handleSendersChange(v) {
+      var newSenders = v === "" ? null : v;
+      handleChange("senders", newSenders);
+      // Finding 3: when senders changes to anything other than "allowlist",
+      // also delete the allow_from override so it doesn't linger.
+      if (v !== "allowlist") {
+        handleChange("allow_from", null);
+      }
+    }
+
+    // Blur handler for allow_from textarea — parses raw text into an array.
+    function handleAllowFromBlur() {
+      allowFromEditing.current = false;
+      var lines = rawAllowFrom
+        .split(/[\n,]+/)
+        .map(function (s) { return s.trim(); })
+        .filter(Boolean);
+      handleChange("allow_from", lines.length > 0 ? lines : null);
+    }
+
+    var chIdForLabel = "ch-" + cid.replace(/\W/g, "_");
 
     return h(
       SDKCard,
@@ -378,11 +503,16 @@
                   },
                 }, displayName)
               : null,
+            // Finding 6: explicit background + padding so the ID is readable on
+            // any host theme (was cream-on-cream, contrast ratio ~1:1).
             h("code", {
               style: {
                 fontSize: "11px",
                 color: "var(--color-text-tertiary)",
                 fontFamily: "var(--theme-font-mono)",
+                background: "color-mix(in srgb, var(--midground-base) 8%, transparent)",
+                borderRadius: "3px",
+                padding: "1px 4px",
               },
             }, cid)
           ),
@@ -391,6 +521,20 @@
             : null,
           isNull
             ? h(SDKBadge, { tone: "destructive" }, "not gated")
+            : null,
+          // Finding 5: per-channel "Clear overrides" button — only when overrides exist.
+          hasStoredOverrides && !isNull
+            ? h(SDKButton, {
+                size: "sm",
+                ghost: true,
+                destructive: true,
+                onClick: function () {
+                  if (!window.confirm(
+                    "Clear all overrides for channel " + (displayName || cid) + "?\n\nThis cannot be undone."
+                  )) return;
+                  props.onClearChannel(cid);
+                },
+              }, "Clear overrides")
             : null
         )
       ),
@@ -408,28 +552,36 @@
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "12px" } },
 
-              // enabled
+              // enabled — finding 5: "(inherit)" option
               h(FieldRow, {
+                id: chIdForLabel + "-enabled",
                 label: "enabled",
                 badge: makeProvBadge("enabled", chOv, globalOv, pendingCh, null),
                 control: h(SDKSelect, {
-                  value: String(eff.enabled !== false),
-                  onValueChange: function (v) { handleChange("enabled", v === "true"); },
+                  id: chIdForLabel + "-enabled",
+                  value: enabledSelectVal,
+                  onValueChange: function (v) {
+                    handleChange("enabled", v === "" ? null : (v === "true"));
+                  },
                 },
+                  h(SDKSelectOption, { value: "" }, "(inherit)"),
                   h(SDKSelectOption, { value: "true" }, "true"),
                   h(SDKSelectOption, { value: "false" }, "false")
                 ),
               }),
 
-              // senders
+              // senders — finding 5: "(inherit)" option; finding 3: allow_from cleanup
               h(FieldRow, {
+                id: chIdForLabel + "-senders",
                 label: "senders",
                 badge: makeProvBadge("senders", chOv, globalOv, pendingCh, null),
                 help: HELP["senders_" + sendersEff] || HELP.senders_all,
                 control: h(SDKSelect, {
-                  value: sendersEff,
-                  onValueChange: function (v) { handleChange("senders", v); },
+                  id: chIdForLabel + "-senders",
+                  value: sendersSelectVal,
+                  onValueChange: handleSendersChange,
                 },
+                  h(SDKSelectOption, { value: "" }, "(inherit)"),
                   SENDERS_OPTIONS.map(function (o) {
                     return h(SDKSelectOption, { key: o, value: o }, o);
                   })
@@ -437,23 +589,28 @@
               }),
 
               // allow_from (revealed when senders=allowlist)
-              sendersEff === "allowlist"
+              // Finding 1: raw text kept locally; parse only on blur or save.
+              sendersEff === "allowlist" || sendersSelectVal === "allowlist"
                 ? h(
                     "div",
                     { style: { display: "flex", flexDirection: "column", gap: "4px" } },
                     h(
                       SDKLabel,
-                      { style: { fontSize: "12px", color: "var(--color-text-secondary)" } },
+                      {
+                        htmlFor: chIdForLabel + "-allow-from",
+                        style: { fontSize: "12px", color: "var(--color-text-secondary)" },
+                      },
                       "allow_from"
                     ),
                     h("textarea", {
-                      value: allowFromText,
+                      id: chIdForLabel + "-allow-from",
+                      ref: allowFromDomRef,
+                      value: rawAllowFrom,
+                      onFocus: function () { allowFromEditing.current = true; },
+                      onBlur: handleAllowFromBlur,
                       onChange: function (e) {
-                        var lines = e.target.value
-                          .split(/[\n,]+/)
-                          .map(function (s) { return s.trim(); })
-                          .filter(Boolean);
-                        handleChange("allow_from", lines);
+                        // Keystroke: keep raw text only — no parsing, no normalization.
+                        setRawAllowFrom(e.target.value);
                       },
                       placeholder: "user_name or user_id\none per line or comma-separated",
                       rows: 3,
@@ -462,27 +619,33 @@
                   )
                 : null,
 
-              // verbosity
+              // verbosity — finding 5: "(inherit)" option; finding 8: labeled options
               h(FieldRow, {
+                id: chIdForLabel + "-verbosity",
                 label: "verbosity",
                 badge: makeProvBadge("verbosity", chOv, globalOv, pendingCh, null),
                 help: HELP["verbosity_" + verbosityEff] || HELP.verbosity_normal,
                 control: h(SDKSelect, {
-                  value: verbosityEff,
-                  onValueChange: function (v) { handleChange("verbosity", v); },
+                  id: chIdForLabel + "-verbosity",
+                  value: verbositySelectVal,
+                  onValueChange: function (v) { handleChange("verbosity", v === "" ? null : v); },
                 },
+                  h(SDKSelectOption, { value: "" }, "(inherit)"),
                   VERBOSITY_OPTIONS.map(function (o) {
-                    return h(SDKSelectOption, { key: o, value: o }, o);
+                    return h(SDKSelectOption, { key: o.value, value: o.value }, o.label);
                   })
                 ),
               }),
 
-              // model
+              // model — finding 7: effective model helper text
               h(FieldRow, {
+                id: chIdForLabel + "-model",
                 label: "model",
                 labelWidth: "52px",
                 badge: makeProvBadge("model", chOv, globalOv, pendingCh, null),
+                help: "currently: " + effectiveModelDisplay,
                 control: h(SDKInput, {
+                  id: chIdForLabel + "-model",
                   type: "text",
                   value: modelEff,
                   onChange: function (e) { handleChange("model", e.target.value || null); },
@@ -586,7 +749,7 @@
       } catch (_) {}
     }, [paused, pollInterval]);
 
-    // Suspend polling when document is hidden (visibilitychange); resume on show
+    // Suspend polling when document is hidden (visibilitychange); resume on show.
     useEffect(function () {
       function onVis() { setIsHidden(document.hidden); }
       document.addEventListener("visibilitychange", onVis);
@@ -602,7 +765,8 @@
         .catch(function (e) { setErr(String(e)); });
     }, []);
 
-    // Polling effect — starts fresh whenever paused/hidden/interval changes
+    // Polling effect — single interval with cleanup; restarts when deps change.
+    // Finding 10: correct cleanup prevents duplicate polls from double-mounts.
     useEffect(function () {
       if (paused || isHidden || pollInterval === 0) return;
       poll();
@@ -665,7 +829,8 @@
       h(
         SDKCardContent,
         { className: "px-4 pb-4 pt-2" },
-        // Verdict legend — 4 distinct entries (corrected from previous 3-entry version)
+        // Verdict legend — 4 distinct entries.
+        // Finding 11: legend chip now says "PASS (suppressed)" to match receipt rows.
         h(
           "div",
           {
@@ -679,9 +844,9 @@
               borderBottom: "1px solid color-mix(in srgb, var(--midground-base) 10%, transparent)",
             },
           },
-          h(SDKBadge, { tone: "destructive" }, "PASS"),
+          h(SDKBadge, { tone: "destructive" }, "PASS (suppressed)"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } },
-            "= suppressed (no message)"),
+            "= no message"),
           h("span", { style: { color: "var(--color-text-tertiary)" } }, "·"),
           h(SDKBadge, { tone: "secondary" }, "ACK"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } },
@@ -741,6 +906,7 @@
                     { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
                     h("span", { style: { color: "var(--color-text-tertiary)", minWidth: "80px", flexShrink: 0 } },
                       r.ts ? formatReceiptTs(r.ts) : ""),
+                    // Finding 11: receipt rows already used "PASS (suppressed)" — preserved.
                     h(SDKBadge, { tone: verdictTone(displayVerdict) },
                       displayVerdict === "PASS" ? "PASS (suppressed)" : displayVerdict),
                     r.trigger_author
@@ -826,6 +992,82 @@
   }
 
   // -------------------------------------------------------------------------
+  // SettingsContent — hoisted to module scope (finding 1).
+  // Previously defined inside NunchiPanel.render(), causing a new component
+  // identity on every render, which unmounted and remounted the subtree on
+  // every keystroke (focus loss, cursor reset).  All dependencies are passed
+  // as props so the function reference is stable.
+  // -------------------------------------------------------------------------
+  function SettingsContent(props) {
+    var stateData = props.stateData || {};
+    var effective = props.effective || {};
+    var globalOv = props.globalOv || {};
+    var chStates = props.chStates || {};
+    var channelNames = props.channelNames || {};
+    var pendingGlobal = props.pendingGlobal || {};
+    var pendingChannels = props.pendingChannels || {};
+    var allCids = props.allCids || [];
+    var baselineChannels = props.baselineChannels || {};
+    var handleChannelChange = props.handleChannelChange;
+    var handleGlobalChange = props.handleGlobalChange;
+    var handleClearChannel = props.handleClearChannel;
+
+    // Effective model for global section (finding 7): use the global override
+    // or fall back to whatever the baseline specifies.
+    var globalModel = globalOv.model || (stateData.baseline && stateData.baseline.model) || "";
+
+    return h(
+      "div",
+      null,
+      // Finding 11: intro sentence at top of Settings tab.
+      h("p", {
+        style: {
+          fontSize: "12px",
+          color: "var(--color-text-secondary)",
+          margin: "0 0 16px 0",
+          lineHeight: "1.55",
+        },
+      },
+        "nunchi is an admission gate: before an agent replies in a channel, the gate " +
+        "judges whether it’s the agent’s turn to speak. These settings tune that " +
+        "judgment per channel."
+      ),
+      h(GlobalCard, {
+        globalOverrides: globalOv,
+        pendingGlobal: pendingGlobal,
+        effectiveModel: globalModel,
+        onChange: handleGlobalChange,
+      }),
+      h(SectionDivider, { label: "Channels" }),
+      allCids.length === 0
+        ? h("p", { style: { fontSize: "12px", color: "var(--color-text-tertiary)", margin: 0 } },
+            "No channels configured.")
+        : allCids.map(function (cid) {
+            var eff = effective[cid] !== undefined ? effective[cid] : null;
+            // Merge pending channel overrides into effective display
+            var displayEff = eff;
+            if (eff && pendingChannels[cid]) {
+              displayEff = Object.assign({}, eff, pendingChannels[cid]);
+            }
+            return h(ChannelCard, {
+              key: cid,
+              cid: cid,
+              displayName: channelNames[cid] || null,
+              effective: displayEff,
+              chOverrides: chStates[cid] || {},
+              globalOverrides: globalOv,
+              pendingCh: pendingChannels[cid] || {},
+              isIntroduced: !baselineChannels[cid],
+              baseline: stateData.baseline || {},
+              globalModel: globalModel,
+              onChange: handleChannelChange,
+              onClearChannel: handleClearChannel,
+            });
+          })
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Main plugin component
   // -------------------------------------------------------------------------
   function NunchiPanel() {
@@ -841,11 +1083,20 @@
     var _loading = useState(true);
     var loading = _loading[0], setLoading = _loading[1];
 
+    // Finding 2c: version handshake state.
+    var _apiVersion = useState(null);
+    var apiVersion = _apiVersion[0], setApiVersion = _apiVersion[1];
+
+    var _hasLoaded = useState(false);
+    var hasLoaded = _hasLoaded[0], setHasLoaded = _hasLoaded[1];
+
     var load = useCallback(function () {
       setLoading(true);
       fetchJSON(API_BASE + "/state")
         .then(function (data) {
           setStateData(data);
+          setApiVersion(data.api_version || null);
+          setHasLoaded(true);
           setLoading(false);
         })
         .catch(function (e) {
@@ -896,11 +1147,15 @@
       [stateData]
     );
 
+    // Finding 4: store null (not undefined) so null values appear as pending
+    // changes and can be serialised as JSON null (deletion signal).
     var handleGlobalChange = useCallback(
       function (key, value) {
         setPending(function (prev) {
           var g = Object.assign({}, prev.global || {});
-          g[key] = value || undefined;
+          // null = deletion signal (send to server to remove the override).
+          // "" is treated as null (caller normalises before here, but double-safe).
+          g[key] = (value === "" || value === undefined) ? null : value;
           return Object.assign({}, prev, { global: g });
         });
       },
@@ -917,19 +1172,80 @@
 
     var save = useCallback(
       function () {
+        // Finding 1 / allow_from: flush any unsaved raw textarea text into the
+        // patch before sending.  Flush functions read the DOM directly, so they
+        // work even when save is clicked without blurring the allow_from field.
+        var patchToSend = pending;
+        var flushed = {};
+        Object.keys(_allowFromFlush).forEach(function (cid) {
+          var parsed = _allowFromFlush[cid]();
+          if (parsed !== undefined) {
+            flushed[cid] = parsed;
+          }
+        });
+        if (Object.keys(flushed).length > 0) {
+          var mergedChannels = Object.assign({}, pending.channels || {});
+          Object.keys(flushed).forEach(function (cid) {
+            var existing = Object.assign({}, mergedChannels[cid] || {});
+            existing.allow_from = flushed[cid];
+            mergedChannels[cid] = existing;
+          });
+          patchToSend = Object.assign({}, pending, { channels: mergedChannels });
+        }
+
         fetchJSON(API_BASE + "/state", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(pending),
+          body: JSON.stringify(patchToSend),
         })
-          .then(function () {
-            setSuccessStatus("Saved.");
+          .then(function (resp) {
+            // Finding 2b: diff echoed applied_state against sent; surface rejections.
+            var rejectedKeys = (resp && resp.rejected_keys) || [];
+            if (rejectedKeys.length > 0) {
+              // Persistent error — NOT auto-dismissed.
+              setStatus(
+                "Server did not accept: " + rejectedKeys.join(", ") +
+                " — the dashboard service may be running an older plugin version"
+              );
+            } else {
+              setSuccessStatus("Saved.");
+            }
             setPending({});
             load();
           })
           .catch(function (e) { setStatus("Save failed: " + e); });
       },
       [pending, load]
+    );
+
+    // Finding 5: clear a single channel's overrides via PUT {channels: {id: {}}}.
+    var handleClearChannel = useCallback(
+      function (cid) {
+        var channelPatch = {};
+        channelPatch[cid] = {};
+        fetchJSON(API_BASE + "/state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channels: channelPatch }),
+        })
+          .then(function (resp) {
+            var rejectedKeys = (resp && resp.rejected_keys) || [];
+            if (rejectedKeys.length > 0) {
+              setStatus("Clear failed: server did not accept some keys");
+            } else {
+              setSuccessStatus("Overrides cleared for channel.");
+            }
+            // Remove pending edits for this channel too.
+            setPending(function (prev) {
+              var channels = Object.assign({}, prev.channels || {});
+              delete channels[cid];
+              return Object.assign({}, prev, { channels: channels });
+            });
+            load();
+          })
+          .catch(function (e) { setStatus("Clear failed: " + e); });
+      },
+      [load]
     );
 
     var resetAll = useCallback(
@@ -941,8 +1257,13 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ global: {}, channels: {} }),
         })
-          .then(function () {
-            setSuccessStatus("All overrides cleared.");
+          .then(function (resp) {
+            var rejectedKeys = (resp && resp.rejected_keys) || [];
+            if (rejectedKeys.length > 0) {
+              setStatus("Reset failed: server did not accept some keys");
+            } else {
+              setSuccessStatus("All overrides cleared.");
+            }
             setPending({});
             load();
           })
@@ -978,9 +1299,9 @@
     }
 
     // M3: compute whether there are any pending (unsaved) edits.
-    // undefined values in pendingGlobal come from the empty-string select
-    // option and are not real pending changes.  null values in channel pending
-    // are deletion signals and ARE real pending changes.
+    // Finding 4: null values in pendingGlobal ARE real pending changes (null !==
+    // undefined), so the existing check works correctly once handleGlobalChange
+    // stores null instead of undefined.
     var hasPendingGlobal = Object.keys(pendingGlobal).some(function (k) {
       return pendingGlobal[k] !== undefined;
     });
@@ -990,44 +1311,11 @@
     });
     var hasPending = hasPendingGlobal || hasPendingChannels;
 
-    var isError = status && (status.indexOf("failed") !== -1 || status.indexOf("Error") !== -1);
+    var isError = status && (status.indexOf("failed") !== -1 || status.indexOf("Error") !== -1 || status.indexOf("did not accept") !== -1);
 
-    // Settings tab content (extracted for clarity)
-    function SettingsContent() {
-      return h(
-        "div",
-        null,
-        h(GlobalCard, {
-          globalOverrides: globalOv,
-          pendingGlobal: pendingGlobal,
-          onChange: handleGlobalChange,
-        }),
-        h(SectionDivider, { label: "Channels" }),
-        allCids.length === 0
-          ? h("p", { style: { fontSize: "12px", color: "var(--color-text-tertiary)", margin: 0 } },
-              "No channels configured.")
-          : allCids.map(function (cid) {
-              var eff = effective[cid] !== undefined ? effective[cid] : null;
-              // Merge pending channel overrides into effective display
-              var displayEff = eff;
-              if (eff && pendingChannels[cid]) {
-                displayEff = Object.assign({}, eff, pendingChannels[cid]);
-              }
-              return h(ChannelCard, {
-                key: cid,
-                cid: cid,
-                displayName: channelNames[cid] || null,
-                effective: displayEff,
-                chOverrides: chStates[cid] || {},
-                globalOverrides: globalOv,
-                pendingCh: pendingChannels[cid] || {},
-                isIntroduced: !baselineChannels[cid],
-                baseline: stateData.baseline || {},
-                onChange: handleChannelChange,
-              });
-            })
-      );
-    }
+    // Finding 2c: version banner — shown after first successful load only.
+    var showVersionBanner = hasLoaded && !loading &&
+      (!apiVersion || parseInt(apiVersion, 10) < parseInt(EXPECTED_API_VERSION, 10));
 
     return h(
       "div",
@@ -1039,6 +1327,25 @@
           color: "var(--color-text-primary)",
         },
       },
+
+      // Finding 2c: version outdated banner — persistent, prominent.
+      showVersionBanner
+        ? h("div", {
+            style: {
+              background: "color-mix(in srgb, var(--color-warning) 15%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-warning) 60%, transparent)",
+              borderRadius: "var(--theme-radius, 4px)",
+              padding: "10px 14px",
+              fontSize: "12px",
+              color: "var(--color-text-primary)",
+              marginBottom: "16px",
+              lineHeight: "1.55",
+            },
+          },
+          "⚠️ The dashboard service is running an outdated nunchi backend — " +
+          "restart the hermes dashboard service to activate current features."
+        )
+        : null,
 
       // Page header
       h(
@@ -1130,8 +1437,24 @@
                 onClick: function () { setActiveTab("receipts"); },
               }, "Receipts")
             ),
+            // Finding 1: SettingsContent is now a stable module-scope component.
+            // Props are passed explicitly so NunchiPanel re-renders do not create
+            // a new component identity and remount the subtree.
             activeTab === "settings"
-              ? h(SettingsContent, null)
+              ? h(SettingsContent, {
+                  stateData: stateData,
+                  effective: effective,
+                  globalOv: globalOv,
+                  chStates: chStates,
+                  channelNames: channelNames,
+                  pendingGlobal: pendingGlobal,
+                  pendingChannels: pendingChannels,
+                  allCids: allCids,
+                  baselineChannels: baselineChannels,
+                  handleChannelChange: handleChannelChange,
+                  handleGlobalChange: handleGlobalChange,
+                  handleClearChannel: handleClearChannel,
+                })
               : h(ReceiptsPanel, null)
           );
         }
@@ -1139,6 +1462,8 @@
     );
   }
 
-  // Register with the host
+  // Register with the host — idempotent guard at top of IIFE already prevents
+  // duplicate registration from the SDK-not-ready retry injection.
+  window.__NUNCHI_REGISTERED__ = true;
   PLUGINS.register("nunchi", NunchiPanel);
 })();

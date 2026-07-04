@@ -647,3 +647,76 @@ should appear directly under the "Gate Receipts" heading.
 Configure channels as a flat YAML list (`channel_ids: ["123", "456"]`).  The
 state-introduced badge logic should recognise these channels as baseline
 channels (not show them as `[state-introduced]`).
+
+---
+
+#### New behaviours introduced in verification-audit round
+
+**VA-1 — Version banner when backend is outdated**
+`GET /api/plugins/nunchi/state` now returns `"api_version": "2"`.  If the
+response lacks `api_version` or its numeric value is below `2`, a prominent
+amber banner appears at the top of the Nunchi tab:
+> ⚠️ The dashboard service is running an outdated nunchi backend — restart the
+> hermes dashboard service to activate current features.
+
+To test: temporarily rename `plugin_api.py`'s `PLUGIN_API_VERSION` to `"1"` and
+reload the dashboard.  The banner should appear.  Restore to `"2"` and confirm
+the banner disappears on the next load.
+
+**VA-2 — Honest save contract (applied/rejected echo)**
+`PUT /api/plugins/nunchi/state` now responds with:
+```json
+{"ok": true, "applied_state": {"global": {...}, "channels": {...}}, "rejected_keys": [...]}
+```
+If `rejected_keys` is non-empty, the dashboard shows a **persistent** error:
+> Server did not accept: \<field names\> — the dashboard service may be running an
+> older plugin version
+
+To test: send a PUT body containing a non-overridable key (e.g.
+`{"global": {"binary": "/evil"}}`) directly via `curl`.  Confirm `rejected_keys`
+contains `"binary"` in the response.
+
+**VA-3 — Per-channel Clear overrides button**
+Each channel card with at least one stored override shows a small **Clear
+overrides** button in the header.  Clicking it presents a confirm dialog; on
+confirmation it sends `PUT /state` with `{"channels": {"<id>": {}}}` which
+wipes that channel's overrides without affecting other channels or global
+overrides.  Confirm `state.json` no longer contains the cleared channel's entry.
+
+**VA-4 — allow_from does not mangle input while typing**
+Open a channel card with `senders: allowlist`.  Type a comma-separated list
+such as `alice, bob` into the `allow_from` field.  The cursor should not jump
+and the text should not be re-ordered mid-keystroke.  Parsing into an array
+only occurs on blur (clicking away from the field) or on Save.
+
+**VA-5 — Global "(inherit)" removes override**
+In the **Global Overrides** card, select `(inherit)` for `senders` or
+`verbosity`.  The provenance badge should turn amber **pending**.  After saving,
+the global override key should be absent from `state.json` (not present as an
+empty value).
+
+**VA-6 — Per-channel selects have "(inherit)" option**
+Each channel card's `senders`, `verbosity`, and `enabled` selects include
+`(inherit)` as the first option.  Selecting it removes the channel-level
+override for that key on the next Save (server prunes the null deletion signal).
+
+**VA-7 — allow_from cleared when senders changes from allowlist**
+Set `senders: allowlist` and populate `allow_from`, then save.  Confirm both
+keys appear in `state.json`.  Change `senders` to `humans` and save.  Confirm
+`allow_from` is gone from `state.json` — the dashboard sends `allow_from: null`
+alongside the senders change.
+
+**VA-8 — Effective model displayed as helper text**
+In both the **Global Overrides** card and each channel card, the model field
+shows helper text `currently: <effective model>` reflecting the value that
+would actually be used (from override, global, baseline, or "(from env)").
+
+**VA-9 — Verbosity options carry short meanings**
+The verbosity selects in the global and channel cards now read:
+`minimal — verdict & action only`, `normal — + reasons & confidences`,
+`debug — + full payload`.
+
+**VA-10 — Channel-ID pill is readable on all themes**
+The snowflake ID shown below the channel display name now has an explicit
+translucent background and padding, ensuring it is legible regardless of the
+host dashboard theme (was invisible at ~1:1 contrast on light themes).

@@ -41,6 +41,9 @@ from fastapi import APIRouter, HTTPException, Query
 
 log = logging.getLogger(__name__)
 
+# Increment when the response contract changes so old JS can detect a mismatch.
+PLUGIN_API_VERSION = "2"
+
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
@@ -209,6 +212,7 @@ def get_state() -> dict[str, Any]:
         "overrides": overrides,
         "effective": effective,
         "channel_names": channel_names,
+        "api_version": PLUGIN_API_VERSION,
     }
 
 
@@ -247,6 +251,7 @@ def put_state(body: dict[str, Any]) -> dict[str, Any]:
         current = {}
 
     try:
+        audit = state.audit_patch(body)
         new_state = state.apply_state_patch(current, body, cfg)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid patch: {exc}")
@@ -256,7 +261,20 @@ def put_state(body: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to save state: {exc}")
 
-    return {"status": "ok", "state_path": str(sp)}
+    # Re-read the saved file to return the canonical overrides to the caller.
+    # The dashboard JS diffs this against what it sent to detect silent failures.
+    saved = state.load_state(sp)
+    applied_state: dict[str, Any] = {}
+    if "global" in saved:
+        applied_state["global"] = saved["global"]
+    if "channels" in saved:
+        applied_state["channels"] = saved["channels"]
+
+    return {
+        "ok": True,
+        "applied_state": applied_state,
+        "rejected_keys": audit["rejected"],
+    }
 
 
 # ---------------------------------------------------------------------------

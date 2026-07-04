@@ -71,6 +71,42 @@ def filter_overridable(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if k in OVERRIDABLE_KEYS}
 
 
+def audit_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    """Classify keys in *patch* as applied or rejected against ``OVERRIDABLE_KEYS``.
+
+    Returns ``{"applied": {key: val, ...}, "rejected": [key, ...]}`` where
+    *applied* maps the unique overridable keys found anywhere in the patch to
+    their last-seen values, and *rejected* lists unique non-overridable keys
+    that would be silently dropped by :func:`apply_state_patch`.
+
+    Used by the dashboard PUT /state route to build an honest response that
+    lets the browser detect mismatches between what was sent and what landed.
+    Empty dicts (Reset-All / channel-clear signals) contain no keys to audit
+    and contribute nothing to either list.
+    """
+    applied: dict[str, Any] = {}
+    rejected: list[str] = []
+
+    def _audit_dict(d: dict[str, Any]) -> None:
+        for k, v in d.items():
+            if k in OVERRIDABLE_KEYS:
+                applied[k] = v
+            elif k not in rejected:
+                rejected.append(k)
+
+    g_patch = patch.get("global")
+    if isinstance(g_patch, dict) and g_patch:
+        _audit_dict(g_patch)
+
+    ch_patch = patch.get("channels")
+    if isinstance(ch_patch, dict) and ch_patch:
+        for ch_data in ch_patch.values():
+            if isinstance(ch_data, dict) and ch_data:
+                _audit_dict(ch_data)
+
+    return {"applied": applied, "rejected": rejected}
+
+
 def load_state(path: Path) -> dict[str, Any]:
     """Load the state file at *path* with mtime-based caching.
 
@@ -333,6 +369,11 @@ def apply_state_patch(
                 current_channels: dict[str, Any] = dict(out.get("channels") or {})
                 for cid, ch_data in ch_patch.items():
                     if not isinstance(ch_data, dict):
+                        continue
+                    if not ch_data:
+                        # Empty dict → clear this channel's overrides entirely
+                        # (B1 at channel level — mirrors top-level replace-on-empty).
+                        current_channels.pop(cid, None)
                         continue
                     current_ch: dict[str, Any] = dict(current_channels.get(cid) or {})
                     for k, v in ch_data.items():
