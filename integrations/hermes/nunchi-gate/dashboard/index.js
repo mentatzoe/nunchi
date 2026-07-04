@@ -120,11 +120,11 @@
     senders_allowlist:
       "Only the senders listed below are judged; everyone else is dropped silently.",
     verbosity_minimal:
-      "Receipts record verdict and action only.",
+      "Receipt log: verdict and action only. (Does not change the agent's replies.)",
     verbosity_normal:
-      "Adds author, history size, reasons, and the confidence distribution.",
+      "Receipt log: adds author, history size, reasons, and confidences.",
     verbosity_debug:
-      "Adds the full gate payload and response — for troubleshooting.",
+      "Receipt log: adds the full gate payload and response — for troubleshooting.",
     pinned_rules:
       "Governance text the gate applies with precedence over plain social sense — e.g. a strict open-floor doctrine. This shapes the GATE's judgment; it does not change the agent's persona.",
   };
@@ -190,14 +190,16 @@
   // HelpText: small muted paragraph beneath a control
   // -------------------------------------------------------------------------
   function HelpText(props) {
-    return h("p", {
-      style: {
-        fontSize: "11px",
-        color: "var(--color-text-tertiary)",
-        margin: "2px 0 0 0",
-        lineHeight: "1.45",
-      },
-    }, props.children);
+    var base = {
+      fontSize: "11px",
+      color: "var(--color-text-tertiary)",
+      margin: "2px 0 0 0",
+      lineHeight: "1.45",
+    };
+    if (props.style) {
+      for (var k in props.style) { if (props.style.hasOwnProperty(k)) base[k] = props.style[k]; }
+    }
+    return h("p", { style: base }, props.children);
   }
 
   // -------------------------------------------------------------------------
@@ -239,6 +241,8 @@
   // Callers pass id so the SDKLabel's htmlFor associates with the control.
   // -------------------------------------------------------------------------
   function FieldRow(props) {
+    // helpInline: render the help text beside the control (same row) instead of
+    // on a line below — saves vertical space for short select descriptions.
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "3px" } },
@@ -260,9 +264,12 @@
               props.label
             )
           : null,
-        props.control
+        props.control,
+        props.helpInline && props.help
+          ? h(HelpText, { style: { margin: 0, flex: "1 1 12rem", minWidth: "10rem" } }, props.help)
+          : null
       ),
-      props.help ? h(HelpText, null, props.help) : null
+      !props.helpInline && props.help ? h(HelpText, null, props.help) : null
     );
   }
 
@@ -472,6 +479,7 @@
           h(FieldRow, {
             id: "nunchi-global-senders",
             label: "senders",
+            helpInline: true,
             badge: makeProvBadge("senders", null, globalOv, null, pendingGl),
             help: sendersVal ? (HELP["senders_" + sendersVal] || null) : null,
             control: h(SDKSelect, {
@@ -486,10 +494,12 @@
             ),
           }),
 
-          // verbosity
+          // verbosity (receipt-log detail — labeled "receipt detail" to avoid
+          // implying it changes the agent's own verbosity; config key stays "verbosity")
           h(FieldRow, {
             id: "nunchi-global-verbosity",
-            label: "verbosity",
+            label: "receipt detail",
+            helpInline: true,
             badge: makeProvBadge("verbosity", null, globalOv, null, pendingGl),
             help: verbosityVal ? (HELP["verbosity_" + verbosityVal] || null) : null,
             control: h(SDKSelect, {
@@ -688,7 +698,7 @@
               }),
 
               h(FieldRow, {
-                id: chIdForLabel + "-senders", label: "senders",
+                id: chIdForLabel + "-senders", label: "senders", helpInline: true,
                 badge: makeProvBadge("senders", chOv, globalOv, pendingCh, null),
                 help: HELP["senders_" + sendersEff] || HELP.senders_all,
                 control: h(SDKSelect, {
@@ -724,7 +734,7 @@
                 : null,
 
               h(FieldRow, {
-                id: chIdForLabel + "-verbosity", label: "verbosity",
+                id: chIdForLabel + "-verbosity", label: "receipt detail", helpInline: true,
                 badge: makeProvBadge("verbosity", chOv, globalOv, pendingCh, null),
                 help: HELP["verbosity_" + verbosityEff] || HELP.verbosity_normal,
                 control: h(SDKSelect, {
