@@ -75,7 +75,7 @@ logger = logging.getLogger("nunchi.adapters.matrix")
 # --------------------------------------------------------------------------- #
 
 _DEFAULT_SYNC_TIMEOUT_MS = 30_000
-_DEFAULT_HISTORY_LEN = 10
+_DEFAULT_HISTORY_LEN = 20
 _DEFAULT_STATE_FILE = "~/.nunchi/matrix-sync.json"
 _DEFAULT_LOG_FILE = "~/.nunchi/matrix-gate.jsonl"
 

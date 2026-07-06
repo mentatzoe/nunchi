@@ -523,20 +523,66 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
         self.assertEqual(payload["trigger"]["message_id"], "m1")
         self.assertEqual(len(payload["history"]), 0)
 
-    def test_history_capped_at_10(self):
-        """History is capped at 10 entries before the trigger."""
+    def test_history_capped_at_default_window(self):
+        """History is capped at NUNCHI_HOOK_HISTORY_WINDOW (default 25) before the trigger."""
         lines = []
-        for i in range(12):
+        for i in range(28):
             lines.append(
                 _user_channel_entry(
                     chat_id="c1", message_id=f"m{i}", user="zoe", body=f"msg {i}"
                 )
             )
-        # 12 entries: trigger = m11, history = last 10 before it = m1..m10
+        # 28 entries: trigger = m27, history capped at default 25 = m2..m26
         payload = self._run_and_get_payload(lines, "c1")
         self.assertIsNotNone(payload)
-        self.assertEqual(payload["trigger"]["message_id"], "m11")
-        self.assertLessEqual(len(payload["history"]), 10)
+        self.assertEqual(payload["trigger"]["message_id"], "m27")
+        self.assertLessEqual(len(payload["history"]), 25)
+
+
+    def test_history_window_env_var_limits_entries(self):
+        """NUNCHI_HOOK_HISTORY_WINDOW env var limits the number of history entries sent."""
+        import tempfile, textwrap, json as _json, os as _os, pathlib as _pathlib
+        entries = []
+        for i in range(15):
+            entries.append(
+                _user_channel_entry(
+                    chat_id="c1", message_id=f"m{i}", user="zoe", body=f"msg {i}"
+                )
+            )
+        # 15 entries: trigger=m14; with window=5, history <= 5 entries
+        tpath = _make_transcript(entries)
+        stub_code = textwrap.dedent("""\
+            #!/usr/bin/env python3
+            import sys, json
+            payload = json.loads(sys.stdin.read())
+            print(json.dumps({
+                "verdict": "SPEAK", "silent": False, "run_shape": "speak",
+                "reasons": ["test"], "confidences": {}, "context_checked": [],
+                "request_id": None, "classifier_model": None, "degraded": False,
+            }))
+            with open("/tmp/__nunchi_window_test.json", "w") as f:
+                json.dump(payload, f)
+            sys.exit(0)
+        """)
+        fd, stub_path = tempfile.mkstemp(suffix=".py")
+        with _os.fdopen(fd, "w") as fh:
+            fh.write(stub_code)
+        wrapper_fd, wrapper_path = tempfile.mkstemp(suffix=".sh")
+        with _os.fdopen(wrapper_fd, "w") as fh:
+            fh.write("#!/bin/sh\n" + sys.executable + " " + stub_path + ' "$@"\n')
+        _os.chmod(wrapper_path, 0o755)
+        inp = _hook_input(chat_id="c1", transcript_path=tpath)
+        _run_hook(inp, env_overrides={
+            "NUNCHI_CHANNEL_BIN": wrapper_path,
+            "NUNCHI_HOOK_HISTORY_WINDOW": "5",
+        })
+        _os.unlink(tpath)
+        _os.unlink(stub_path)
+        _os.unlink(wrapper_path)
+        payload_path = _pathlib.Path("/tmp/__nunchi_window_test.json")
+        if payload_path.exists():
+            payload = _json.loads(payload_path.read_text())
+            self.assertLessEqual(len(payload.get("history", [])), 5)
 
 
 class TestNoInboundAllowsUntriggered(unittest.TestCase):

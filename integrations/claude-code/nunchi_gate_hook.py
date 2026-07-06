@@ -23,6 +23,8 @@ NUNCHI_HOOK_FAIL_POLICY    What to do when the gate binary fails or is unavailab
 NUNCHI_HOOK_TIMEOUT        Subprocess timeout in seconds (default: 30).
 NUNCHI_HOOK_LOG            Path for per-call receipt log
                            (default: ~/.claude/nunchi-gate-receipts.jsonl).
+NUNCHI_HOOK_HISTORY_WINDOW  Transcript entries to include as history before
+                           the trigger (default: 25).
 NUNCHI_CHANNEL_BIN         Path or name of the nunchi-channel binary
                            (default: located via shutil.which("nunchi-channel")).
 """
@@ -74,7 +76,7 @@ _CHANNEL_TAG_RE = re.compile(
 # Regex to parse a single attribute from the <channel ...> opening tag.
 _ATTR_RE = re.compile(r'(\w+)=["\']([^"\']*)["\']')
 
-_MAX_HISTORY = 10
+_MAX_HISTORY = int(os.environ.get("NUNCHI_HOOK_HISTORY_WINDOW", "25"))
 
 # ---------------------------------------------------------------------------
 # Hook output helpers (Claude Code PreToolUse JSON contract)

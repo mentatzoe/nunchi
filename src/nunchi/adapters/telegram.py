@@ -61,7 +61,7 @@ logger = logging.getLogger("nunchi.adapters.telegram")
 # --------------------------------------------------------------------------- #
 
 _DEFAULT_POLL_TIMEOUT = 30  # seconds for getUpdates long-poll
-_DEFAULT_HISTORY_LEN = 10
+_DEFAULT_HISTORY_LEN = 20
 _DEFAULT_STATE_FILE = "~/.nunchi/telegram-sync.json"
 _DEFAULT_LOG_FILE = "~/.nunchi/telegram-gate.jsonl"
 
