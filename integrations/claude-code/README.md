@@ -141,3 +141,150 @@ Each gated call appends one JSON line to `NUNCHI_HOOK_LOG`:
   `NUNCHI_CHANNEL_BIN` at the module: `python3 -m nunchi.adapters.channel`).
 - A configured classifier environment for `nunchi-channel`
   (`NUNCHI_CLASSIFIER_MODEL` + `OPENROUTER_API_KEY` or equivalent).
+
+---
+
+# nunchi-prompt-gate — Claude Code UserPromptSubmit Integration
+
+## What it does
+
+`nunchi_prompt_gate.py` is a Claude Code **UserPromptSubmit hook** that gates
+*inbound* channel messages **before they reach the LLM**.  When Claude Code
+receives a submitted prompt that contains a `<channel ...>` tag (the format
+used by Discord/channel transport adapters), the hook:
+
+1. Parses the channel tag from the prompt to identify the sender, chat ID,
+   and message body.
+2. Parses the session transcript to build a history window of past events for
+   that channel (inbound messages + agent self-sends).
+3. Calls `nunchi-channel` with the trigger + history + agent identity.
+4. **On PASS**: outputs `{"decision": "block", "reason": "..."}`, suppressing
+   the prompt before any LLM inference runs.
+5. **On SPEAK / ACK / ASK**: exits 0 with no output, allowing the prompt
+   through normally.
+
+Suppressing on PASS costs one lightweight gate call instead of a full
+frontier-model turn.
+
+## What it does NOT enforce
+
+- **Operator prompts** (no `<channel>` tag) always pass through instantly —
+  zero gate calls, no receipt.  The operator's own messages are never gated.
+- **Outbound sends** are not gated here — that is handled separately by the
+  PreToolUse hook (`nunchi_gate_hook.py`).  Both hooks are designed to run
+  together; they complement each other.
+- **Transport bot-deafness** (the Discord adapter ignoring messages from other
+  bots by default) is a separate, upstream concern.  This hook operates on
+  whatever prompts Claude Code already received; it does not filter at the
+  transport layer.
+
+## Inbound vs outbound gate summary
+
+| Concern | Hook | Claude Code event |
+|---|---|---|
+| Channel message arrives (pre-LLM) | `nunchi_prompt_gate.py` | `UserPromptSubmit` |
+| Agent tries to send a reply (pre-tool) | `nunchi_gate_hook.py` | `PreToolUse` |
+
+## settings.json configuration
+
+Add **both** hooks to your project or user `settings.json`.  The inbound hook
+uses a `UserPromptSubmit` entry (no matcher needed — it self-selects on the
+`<channel>` tag in the prompt):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/integrations/claude-code/nunchi_prompt_gate.py",
+            "timeout": 35
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_discord_discord__reply",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/integrations/claude-code/nunchi_gate_hook.py",
+            "timeout": 35
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Both hooks share the same `NUNCHI_CHANNEL_BIN`, `NUNCHI_HOOK_AGENT_ID`,
+`NUNCHI_HOOK_LOG`, and other environment variables described below.
+
+**Note:** Hook configuration changes take effect immediately for new events,
+but an active Claude Code session must be restarted for changes to
+`settings.json` to be picked up by the running process.
+
+## Hook output contract
+
+The hook always exits 0.  It writes JSON to stdout or nothing at all.
+
+**Block** (PASS verdict):
+```json
+{"decision": "block", "reason": "nunchi gate: PASS — <first reason>."}
+```
+
+**Allow** (SPEAK / ACK / ASK verdict, non-channel prompt, or any gate error):
+No stdout output; exit 0.
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `NUNCHI_HOOK_AGENT_ID` | `agent` | Agent identifier in the nunchi payload. |
+| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. |
+| `NUNCHI_HOOK_PEER_BOTS` | _(empty)_ | Comma-separated usernames treated as `peer_bot`. |
+| `NUNCHI_HOOK_HISTORY_WINDOW` | `25` | Max transcript events included as history (most recent N). |
+| `NUNCHI_HOOK_TOOL_PATTERN` | `__reply$` | Regex identifying outbound self-sends in the transcript. |
+| `NUNCHI_HOOK_TIMEOUT` | `30` | Timeout in seconds for the nunchi-channel subprocess. |
+| `NUNCHI_HOOK_LOG` | `~/.claude/nunchi-gate-receipts.jsonl` | Path for per-call receipt log (JSONL). |
+| `NUNCHI_CHANNEL_BIN` | `shutil.which("nunchi-channel")` | Path to the nunchi-channel binary. |
+
+Note: `NUNCHI_HOOK_HISTORY_WINDOW` defaults to **25** for the inbound hook
+(vs. 10 for the outbound hook) because the inbound gate operates on the
+entire prior transcript; larger context improves admission accuracy.
+
+## Receipts log format
+
+The inbound hook appends one JSON line per gate decision to the same
+`NUNCHI_HOOK_LOG` file as the outbound hook.  The `"direction"` field
+distinguishes the two:
+
+```json
+{
+  "ts": "2026-07-06T12:00:00+00:00",
+  "direction": "inbound",
+  "session_id": "abc123",
+  "chat_id": "1488717251212476569",
+  "trigger_message_id": "1515760096783761541",
+  "trigger_author": "decisionparalysis",
+  "history_len": 12,
+  "verdict": "PASS",
+  "silent": true,
+  "action": "block-pass",
+  "elapsed_ms": 38.4,
+  "reasons": ["conversation is still active"]
+}
+```
+
+`action` values:
+- `block-pass` — gate returned PASS; prompt blocked before LLM
+- `allow-<verdict>` — gate returned non-PASS verdict (e.g. `allow-speak`)
+- `allow-gate-error` — gate failed; fail-open applied (always for inbound)
+
+The inbound hook is **permanently fail-open**: there is no `deny-gate-error`
+action.  Gate failures on the inbound path always allow the prompt through,
+ensuring a broken gate cannot silence the operator or wedge the session.
