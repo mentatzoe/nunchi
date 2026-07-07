@@ -451,12 +451,16 @@ class RoomRunner:
 
     def _wake_codex(self, prompt: str) -> tuple[int | None, str | None]:
         """Run one serialized ``codex exec`` wake; return (exit_code, error)."""
+        # Sandbox/approval flags live entirely in codex_extra_args: codex
+        # rejects combinations (--full-auto conflicts with the bypass flag,
+        # live-observed), and headless MCP tool calls are auto-declined
+        # under --full-auto, so the operator must pick the policy explicitly.
+        extra = self.config.codex_extra_args or ("--full-auto",)
         cmd = [
             self.config.codex_bin,
             "exec",
             "--skip-git-repo-check",
-            "--full-auto",
-            *self.config.codex_extra_args,
+            *extra,
             prompt,
         ]
         try:

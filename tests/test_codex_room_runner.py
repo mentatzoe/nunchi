@@ -334,7 +334,7 @@ class TestVerdictRouting(unittest.TestCase):
         argv = self.stubs.codex_argv()
         self.assertEqual(argv[0], "exec")
         self.assertIn("--skip-git-repo-check", argv)
-        self.assertIn("--full-auto", argv)
+        self.assertIn("--full-auto", argv)  # default when no extra args are set
         prompt = argv[-1]
         self.assertIn("verdict: SPEAK", prompt)
         self.assertIn("operator addressed the agent", prompt)
@@ -344,6 +344,24 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertIn("earlier context line", prompt)  # history window included
         self.assertIn("send_message", prompt)
         self.assertIn("reply_message", prompt)
+
+    def test_extra_codex_args_replace_sandbox_flags(self):
+        # codex rejects --full-auto combined with the approvals-bypass flag
+        # (live-observed), so operator-set extra args must REPLACE the default
+        # sandbox/approval flags, not join them.
+        runner = _make_runner(
+            self.stubs,
+            codex_extra_args=("--dangerously-bypass-approvals-and-sandbox",),
+        )
+        self.stubs.set_gate(_directive("SPEAK", ["operator addressed the agent"]))
+        action = runner.handle_notification(
+            _event(message_id="m1", author_name="zoe", content="dalgos, status?")
+        )
+
+        self.assertEqual(action, "wake-ok")
+        argv = self.stubs.codex_argv()
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+        self.assertNotIn("--full-auto", argv)
 
         receipts = _receipts(runner)
         self.assertEqual(receipts[-1]["action"], "wake-ok")
