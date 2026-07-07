@@ -569,3 +569,67 @@ class TestConfigFromEnv(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# 307 redirect following (mcp SDK mounts under a prefix; bare path redirects)
+# ---------------------------------------------------------------------------
+
+
+class _RedirectingStubHandler(_StubMcpHandler):
+    """Serves only at the trailing-slash path; 307s the bare form like the SDK app."""
+
+    def _redirect_if_bare(self) -> bool:
+        if self.path.endswith("/"):
+            return False
+        length = int(self.headers.get("Content-Length", "0"))
+        if length:
+            self.rfile.read(length)
+        self.send_response(307)
+        self.send_header("Location", self.path + "/")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
+    def do_POST(self):
+        if not self._redirect_if_bare():
+            super().do_POST()
+
+    def do_GET(self):
+        if not self._redirect_if_bare():
+            super().do_GET()
+
+
+class TestRedirectFollowing(unittest.TestCase):
+    def setUp(self):
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), _RedirectingStubHandler)
+        self.server.requests = []
+        notif = {
+            "jsonrpc": "2.0",
+            "method": runner_mod.NOTIFICATION_METHOD,
+            "params": _event(content="redirected stream says hi"),
+        }
+        self.server.sse_body = f"data: {json.dumps(notif)}\n\n"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        port = self.server.server_address[1]
+        # Bare path on purpose: the live transport 307s this to /mcp/.
+        self.url = f"http://127.0.0.1:{port}/mcp"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+
+    def test_follows_307_and_pins_slash_url(self):
+        client = runner_mod.TransportClient(self.url)
+        events = list(client.events())
+
+        self.assertEqual(client.session_id, _SESSION_ID)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["content"], "redirected stream says hi")
+        # After the first hop the client pins the redirected URL: exactly one
+        # redirect is served; every subsequent request lands on /mcp/ directly.
+        served = [m for m, body, _ in self.server.requests]
+        self.assertGreaterEqual(len(served), 3)  # initialize, initialized, GET
+        self.assertTrue(client.url.endswith("/mcp/"))

@@ -74,6 +74,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
@@ -196,9 +197,30 @@ class TransportClient:
     """Minimal streamable-HTTP MCP client: handshake + SSE notification stream."""
 
     def __init__(self, url: str, *, http_timeout: float = _HTTP_TIMEOUT) -> None:
-        self.url = url.rstrip("/")
+        self.url = url
         self.http_timeout = http_timeout
         self.session_id: str | None = None
+
+    def _open(self, req: urllib.request.Request, timeout: float):
+        # The SDK's streamable-HTTP app mounts under a path prefix, so the bare
+        # path 307s to its trailing-slash form; urllib refuses to follow a
+        # redirected POST, so follow one 307/308 hop by hand and pin the result.
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (307, 308):
+                raise
+            location = exc.headers.get("Location")
+            if not location:
+                raise
+            self.url = urllib.parse.urljoin(req.full_url, location)
+            retry = urllib.request.Request(
+                self.url,
+                data=req.data,
+                method=req.get_method(),
+                headers=dict(req.header_items()),
+            )
+            return urllib.request.urlopen(retry, timeout=timeout)
 
     def _post(self, body: dict, *, with_session: bool) -> "urllib.request.http.client.HTTPResponse":
         headers = {
@@ -210,7 +232,7 @@ class TransportClient:
         req = urllib.request.Request(
             self.url, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers
         )
-        return urllib.request.urlopen(req, timeout=self.http_timeout)
+        return self._open(req, self.http_timeout)
 
     def initialize(self) -> str:
         """Run the initialize / notifications-initialized handshake.
@@ -244,7 +266,7 @@ class TransportClient:
         if self.session_id:
             headers["mcp-session-id"] = self.session_id
         req = urllib.request.Request(self.url, method="GET", headers=headers)
-        return urllib.request.urlopen(req, timeout=_STREAM_READ_TIMEOUT)
+        return self._open(req, _STREAM_READ_TIMEOUT)
 
     def events(self) -> Iterator[dict]:
         """Handshake, then yield params of each discord message notification.
