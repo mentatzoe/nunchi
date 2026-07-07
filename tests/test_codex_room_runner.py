@@ -345,6 +345,13 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertIn("send_message", prompt)
         self.assertIn("reply_message", prompt)
 
+        receipts = _receipts(runner)
+        self.assertEqual(receipts[-1]["action"], "wake-ok")
+        self.assertEqual(receipts[-1]["verdict"], "SPEAK")
+        self.assertEqual(receipts[-1]["wake_exit"], 0)
+        self.assertEqual(receipts[-1]["history_len"], 1)
+        self.assertIn("confidences", receipts[-1])
+
     def test_extra_codex_args_replace_sandbox_flags(self):
         # codex rejects --full-auto combined with the approvals-bypass flag
         # (live-observed), so operator-set extra args must REPLACE the default
@@ -362,13 +369,6 @@ class TestVerdictRouting(unittest.TestCase):
         argv = self.stubs.codex_argv()
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
         self.assertNotIn("--full-auto", argv)
-
-        receipts = _receipts(runner)
-        self.assertEqual(receipts[-1]["action"], "wake-ok")
-        self.assertEqual(receipts[-1]["verdict"], "SPEAK")
-        self.assertEqual(receipts[-1]["wake_exit"], 0)
-        self.assertEqual(receipts[-1]["history_len"], 1)
-        self.assertIn("confidences", receipts[-1])
 
     def test_ack_and_ask_wake_codex(self):
         for verdict in ("ACK", "ASK"):
