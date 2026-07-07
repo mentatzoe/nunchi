@@ -56,7 +56,7 @@ from .channel import ChannelGateResult, gate as channel_gate
 
 logger = logging.getLogger("nunchi.adapters.discord")
 
-_DEFAULT_HISTORY_LEN = 10
+_DEFAULT_HISTORY_LEN = 20
 _DEFAULT_LOG_FILE = "~/.nunchi/discord-gate.jsonl"
 
 

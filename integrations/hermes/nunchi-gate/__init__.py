@@ -166,6 +166,14 @@ _CONTEXT_LINE = re.compile(r"^\[(?P<name>[^\]]+?)(?P<bot_tag>\s+\[bot\])?\]\s*(?
 # Pinned-rules file cache: maps absolute path string -> (mtime, content)
 _PINNED_RULES_CACHE: dict[str, tuple[float, str]] = {}
 
+# Rolling per-channel history buffer: channel_id -> list of history entries.
+# Bounded per channel by the `history_window` config key (default 20).
+# Total entries capped at _HISTORY_MAX_TOTAL to prevent memory growth in
+# long-running processes.
+_CHANNEL_HISTORY: dict[str, list[dict[str, Any]]] = {}
+_DEFAULT_HISTORY_WINDOW = 20
+_HISTORY_MAX_TOTAL = 20_000  # ~1000 channels x 20 entries each
+
 # Keys that can be specified per-channel in the map form of ``channels``.
 # All other keys (binary, timeout_seconds, bypass_commands, log_path, …) are
 # global-only and are never overridden at the per-channel level.
@@ -301,6 +309,50 @@ def _load_pinned_rules(path_str: str) -> str | None:
     except Exception:
         logger.debug("nunchi-gate: failed to read pinned_rules_file %s", path_str, exc_info=True)
         return None
+
+
+def _rolling_history(channel_id: str, history_window: int) -> list[dict[str, Any]]:
+    """Return a copy of the rolling buffer for *channel_id*, capped to *history_window*."""
+    buf = _CHANNEL_HISTORY.get(channel_id, [])
+    return list(buf[-history_window:])
+
+
+def _record_to_buffer(channel_id: str, event: Any, source: Any, history_window: int) -> None:
+    """Append the current event to the rolling buffer for *channel_id*.
+
+    Called after each gate judgment so the NEXT event for this channel has
+    history to work with.  Enforces per-channel FIFO eviction and a global
+    total-entries cap so the buffer stays bounded in long-running processes.
+    """
+    text = str(getattr(event, "text", "") or "").strip()
+    if not text:
+        return
+
+    author_raw = getattr(source, "user_name", None) or getattr(source, "user_id", None)
+    author = str(author_raw).strip() if author_raw is not None else None
+    is_bot = getattr(source, "is_bot", None)
+    author_kind = "peer_bot" if _coerce_bool(is_bot) else "human"
+    message_id = getattr(event, "message_id", None) or getattr(source, "message_id", None)
+
+    entry: dict[str, Any] = {
+        "content": text,
+        "author": author,
+        "author_kind": author_kind,
+    }
+    if message_id is not None:
+        entry["message_id"] = str(message_id)
+
+    buf = _CHANNEL_HISTORY.setdefault(channel_id, [])
+    buf.append(entry)
+    # Per-channel FIFO eviction.
+    if len(buf) > history_window:
+        del buf[: len(buf) - history_window]
+
+    # Global cap: drop the oldest channel when total entries exceed the limit.
+    total = sum(len(v) for v in _CHANNEL_HISTORY.values())
+    if total > _HISTORY_MAX_TOTAL:
+        oldest = next(iter(_CHANNEL_HISTORY))
+        del _CHANNEL_HISTORY[oldest]
 
 
 def resolve_channel_config(cfg: dict[str, Any], channel_ids: set[str]) -> dict[str, Any] | None:
@@ -604,7 +656,29 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
     # ------------------------------------------------------------------ #
     # Normal classifier path.                                             #
     # ------------------------------------------------------------------ #
-    history = _parse_channel_context(event, agent_id)
+    history_window = max(1, int(resolved_cfg.get("history_window") or _DEFAULT_HISTORY_WINDOW))
+
+    # Primary channel id for the rolling buffer.
+    primary_ch_id = next(iter(sorted(ch_ids)), "") if ch_ids else ""
+
+    # Rolling buffer: messages this plugin saw before the current event.
+    rolling = _rolling_history(primary_ch_id, history_window)
+
+    # event.channel_context is backfilled by the Discord adapter in some
+    # deployments.  It never populates at hook time in production (155/155
+    # calls returned empty), so rolling is the primary source.  When it
+    # does populate, prefer whichever list is longer and log at DEBUG.
+    ctx_history = _parse_channel_context(event, agent_id)
+    if ctx_history:
+        logger.debug(
+            "nunchi-gate: channel_context populated for %s (%d entries); "
+            "rolling=%d ctx=%d; using richer",
+            primary_ch_id, len(ctx_history), len(rolling), len(ctx_history),
+        )
+        history = ctx_history if len(ctx_history) >= len(rolling) else rolling
+    else:
+        history = rolling
+
     payload = _build_payload(event, resolved_cfg, history)
 
     # Base log fields present at every verbosity level.
@@ -668,6 +742,10 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
         if fail_open:
             return None
         return {"action": "skip", "reason": "nunchi:error"}
+    finally:
+        # Record this event in the rolling buffer so the next event for this
+        # channel has history.  Runs on all paths including errors.
+        _record_to_buffer(primary_ch_id, event, source, history_window)
 
 
 # ---------------------------------------------------------------------------
