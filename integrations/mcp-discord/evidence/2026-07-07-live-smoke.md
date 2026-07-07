@@ -34,7 +34,11 @@ in the Codex integration step.
 
 ## Not yet verified live
 
-- Gateway resume after a real network interruption (offline-tested only).
+- ~~Gateway resume after a real network interruption~~ **Verified 2026-07-07
+  16:37 local, unprompted**: after >13h uptime the gateway connection ended
+  (`code=None`) and the runner resumed automatically in 1.0s
+  (`gateway connected (resuming)`), no operator action, no missed-session
+  fallout observed.
 - Rate-limit backstop under real 429 pressure (offline-tested only).
 - A real harness (Codex/Kilo) consuming the push — next step.
 
