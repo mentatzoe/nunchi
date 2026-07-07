@@ -266,15 +266,19 @@ class TestHandshakeAndStream(unittest.TestCase):
             [
                 ("POST", "initialize"),
                 ("POST", "notifications/initialized"),
+                # tools/list is load-bearing: the transport only registers a
+                # session for broadcast on its first request.
+                ("POST", "tools/list"),
                 ("GET", None),
             ],
         )
         init_headers = self.server.requests[0][2]
         self.assertEqual(init_headers.get("content-type"), "application/json")
         self.assertIn("text/event-stream", init_headers.get("accept", ""))
-        # notifications/initialized and the GET must carry the issued session id.
+        # notifications/initialized, tools/list and the GET carry the session id.
         self.assertEqual(self.server.requests[1][2].get("mcp-session-id"), _SESSION_ID)
-        get_headers = self.server.requests[2][2]
+        self.assertEqual(self.server.requests[2][2].get("mcp-session-id"), _SESSION_ID)
+        get_headers = self.server.requests[3][2]
         self.assertEqual(get_headers.get("mcp-session-id"), _SESSION_ID)
         self.assertEqual(get_headers.get("accept"), "text/event-stream")
 

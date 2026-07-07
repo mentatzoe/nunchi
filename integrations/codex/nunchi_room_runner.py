@@ -258,6 +258,13 @@ class TransportClient:
             {"jsonrpc": "2.0", "method": "notifications/initialized"}, with_session=True
         ) as resp:
             resp.read()
+        # The transport only registers a session for server->client broadcast
+        # on its first *request* — initialize/initialized alone leave this
+        # session invisible to the notification pump (live-observed 2026-07-07).
+        with self._post(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, with_session=True
+        ) as resp:
+            resp.read()
         return self.session_id
 
     def open_stream(self):
@@ -276,6 +283,7 @@ class TransportClient:
         """
         self.initialize()
         with self.open_stream() as stream:
+            logger.info("transport stream open (session %s)", self.session_id)
             lines = (raw.decode("utf-8", errors="replace") for raw in stream)
             for data in iter_sse_data(lines):
                 try:
