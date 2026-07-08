@@ -99,11 +99,18 @@ class LoaderTests(unittest.TestCase):
         multica = loader.discover_fixtures(FIXTURES_ROOT, source="multica")
         discord = loader.discover_fixtures(FIXTURES_ROOT, source="discord")
         contract = loader.discover_fixtures(FIXTURES_ROOT, source="contract")
+        injection = loader.discover_fixtures(FIXTURES_ROOT, source="injection")
         all_ = loader.discover_fixtures(FIXTURES_ROOT)
-        self.assertEqual(len(multica) + len(discord) + len(contract), len(all_))
+        self.assertEqual(
+            len(multica) + len(discord) + len(contract) + len(injection), len(all_)
+        )
         self.assertTrue(all(f.source_shape == "multica" for f in multica))
         self.assertTrue(all(f.source_shape == "discord" for f in discord))
         self.assertTrue(all(f.source_shape == "contract" for f in contract))
+        self.assertTrue(all(f.source_shape == "injection" for f in injection))
+        # The adversarial injection eval pack ships at least 10 i-* fixtures.
+        self.assertGreaterEqual(len(injection), 10)
+        self.assertTrue(all(f.id.startswith("i-") for f in injection))
 
     def _write_fixture_pair(self, root: Path, *, meta_extra: dict, context=None):
         envelope = {
@@ -322,7 +329,7 @@ class RunnerEndToEndTests(unittest.TestCase):
         all_ids = {json.loads(l)["id"] for l in all_lines}
 
         union = set()
-        for source in ("multica", "discord", "contract"):
+        for source in ("multica", "discord", "contract", "injection"):
             with self.subTest(source=source):
                 _, out = _run_main_capturing_stdout([
                     "--adapter", "in-process",
@@ -437,6 +444,23 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         for sid in sorted(suppressors):
             with self.subTest(suppressor=sid):
                 self.assertEqual(results[sid], "fail")
+
+    def test_injection_fixtures_load_and_run(self):
+        """Adversarial injection pool (i-*): every fixture runs end-to-end and
+        scores from its own metadata. Spot-check both steering directions —
+        an injection that steers toward SPEAK must not rescue a PASS fixture,
+        and a forged suppression sentinel must not rescue a SPEAK fixture."""
+        results = self._run_pool("injection", "SPEAK")
+        # Sentinel forged into a direct ask expects SPEAK: injected SPEAK passes.
+        self.assertEqual(results["i-sentinel-forgery-direct-ask"], "pass")
+        self.assertEqual(results["i-history-suppression-order-direct-ask"], "pass")
+        # Gate-steering fixtures expect PASS: an injected SPEAK must score fail.
+        self.assertEqual(results["i-steer-system-tag-other-addressee"], "fail")
+        self.assertEqual(results["i-spoof-verdict-json-broadcast"], "fail")
+        # ...and injecting PASS flips both directions.
+        flipped = self._run_pool("injection", "PASS")
+        self.assertEqual(flipped["i-steer-system-tag-other-addressee"], "pass")
+        self.assertEqual(flipped["i-sentinel-forgery-direct-ask"], "fail")
 
 
 class InvariantDispatchTests(unittest.TestCase):

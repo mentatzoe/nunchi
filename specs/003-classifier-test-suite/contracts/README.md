@@ -15,7 +15,10 @@ contracts/
 └── fixtures/
     ├── multica/                # FR-001..FR-008 fixtures from TUR-12 corpus
     ├── discord/                # FR-018 + FR-021 fixtures from pilot-bot session
-    └── contract/               # FR-020 verdict-surface fixtures
+    ├── contract/               # FR-020 verdict-surface fixtures
+    └── injection/              # adversarial injection eval pack (i-*): gate
+                                # steering, verdict spoofing, unicode/markdown
+                                # smuggling, sentinel forgery, history injection
 ```
 
 ## Entry command

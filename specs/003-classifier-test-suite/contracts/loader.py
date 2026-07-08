@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 _VERDICTS = {"PASS", "ACK", "ASK", "SPEAK"}
-_SOURCE_SHAPES = {"multica", "discord", "contract"}
+# "injection" is the adversarial injection eval pack (i-* fixtures):
+# gate-steering, verdict spoofing, unicode/markdown smuggling, sentinel
+# forgery, and injection-via-history cases where the expected verdict is the
+# plain social judgment with the injected instruction ignored.
+_SOURCE_SHAPES = {"multica", "discord", "contract", "injection"}
 _EVIDENCE = {"runtime", "predicted"}
 
 # Governance profiles live at <repo>/profiles/<name>.md. A fixture whose meta
