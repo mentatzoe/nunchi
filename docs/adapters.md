@@ -9,12 +9,21 @@ custom responder.
 | Adapter | Surface | Install weight | Status |
 |---|---|---|---|
 | `nunchi-channel` | Any (subprocess / in-process) | stdlib | stable |
-| `nunchi-matrix` | Matrix (unencrypted rooms) | stdlib | beta |
-| `nunchi-telegram` | Telegram | stdlib | beta |
-| `nunchi-discord` | Discord | `pip install nunchi[discord]` | beta |
+| `nunchi-matrix` | Matrix (unencrypted rooms) | stdlib | beta\* |
+| `nunchi-telegram` | Telegram | stdlib | beta\* |
+| `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | beta |
 | Claude Code hook | Claude Code PreToolUse | stdlib | beta |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
+
+\* *beta* for the Matrix, Telegram, and Discord adapters means: full offline
+test coverage, but they have **not yet been run against a live
+Matrix/Telegram/Discord server**. Expect first-run rough edges and please
+report them.
+
+The platform adapters (`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`)
+landed after the published 0.2.0 PyPI release and are currently installable
+from source only (see each adapter's install section below).
 
 ---
 
@@ -70,7 +79,7 @@ and exit (useful for cron or testing).
 | `NUNCHI_MATRIX_LOG` | no | `~/.nunchi/matrix-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_MATRIX_AGENT_ID` | no | `bot_<localpart>` | Agent identity label |
 | `NUNCHI_MATRIX_PEER_BOTS` | no | `` | Comma-separated user IDs (or `@prefix*` globs) treated as `peer_bot` |
-| `NUNCHI_MATRIX_HISTORY` | no | `10` | Recent messages fed to the gate as context |
+| `NUNCHI_MATRIX_HISTORY` | no | `20` | Recent messages fed to the gate as context |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the built-in demo responder |
 | `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
 
@@ -197,7 +206,7 @@ Use `--dry-run` to gate without sending, or `--once` to process one
 | `NUNCHI_TELEGRAM_STATE` | no | `~/.nunchi/telegram-sync.json` | Offset persistence |
 | `NUNCHI_TELEGRAM_LOG` | no | `~/.nunchi/telegram-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_TELEGRAM_AGENT_ID` | no | `bot_<username>` | Agent identity label |
-| `NUNCHI_TELEGRAM_HISTORY` | no | `10` | Recent messages fed to the gate |
+| `NUNCHI_TELEGRAM_HISTORY` | no | `20` | Recent messages fed to the gate |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the demo responder |
 | `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
 
@@ -226,8 +235,13 @@ not a default dependency.
 
 ### Install
 
+The `[discord]` extra is not yet installable from PyPI — the published 0.2.0
+release predates this adapter. Install from source:
+
 ```sh
-pip install "nunchi[discord]"
+pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git"
+# or, from a checkout:
+pip install ".[discord]"
 ```
 
 ### Quickstart
@@ -265,7 +279,7 @@ nunchi-discord
 | `NUNCHI_DISCORD_MAX_EVENTS` | no | *(unlimited)* | Stop after N gated events (useful for bounded integration tests) |
 | `NUNCHI_DISCORD_LOG` | no | `~/.nunchi/discord-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_DISCORD_AGENT_ID` | no | `bot_<username>` | Agent identity label |
-| `NUNCHI_DISCORD_HISTORY` | no | `10` | Recent messages per channel for context |
+| `NUNCHI_DISCORD_HISTORY` | no | `20` | Recent messages per channel for context |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the demo responder |
 | `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
 

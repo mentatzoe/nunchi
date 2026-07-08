@@ -21,7 +21,7 @@ Optional env vars:
                              (default: ~/.nunchi/telegram-gate.jsonl)
     NUNCHI_TELEGRAM_AGENT_ID Agent identity (default: bot_<username>)
     NUNCHI_TELEGRAM_HISTORY  Number of recent messages in gate context
-                             (default: 10)
+                             (default: 20)
     NUNCHI_TELEGRAM_BACKSTOP_MAX_SENDS
                              Send backstop (amplification-loops guard, default
                              ON): max sends per chat per window (default: 5)

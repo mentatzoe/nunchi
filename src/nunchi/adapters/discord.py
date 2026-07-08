@@ -1,8 +1,12 @@
 """Discord adapter for nunchi.
 
-Requires discord.py (not a default dependency — opt-in only):
+Requires discord.py (not a default dependency — opt-in only). The `[discord]`
+extra is not on PyPI yet (the published 0.2.0 release predates this adapter);
+install from source:
 
-    pip install nunchi[discord]
+    pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git"
+    # or, from a checkout:
+    pip install ".[discord]"
 
 Joins Discord channels as a gated participant. Uses discord.py's event-driven
 client with the message_content intent. Every inbound text message is run
@@ -25,7 +29,7 @@ Optional env vars:
     NUNCHI_DISCORD_LOG          JSONL receipt log path
                                 (default: ~/.nunchi/discord-gate.jsonl)
     NUNCHI_DISCORD_AGENT_ID     Agent identity (default: bot_<username>)
-    NUNCHI_DISCORD_HISTORY      History window per channel (default: 10)
+    NUNCHI_DISCORD_HISTORY      History window per channel (default: 20)
     NUNCHI_DISCORD_BACKSTOP_MAX_SENDS
                                 Send backstop (amplification-loops guard, default
                                 ON): max sends per channel per window (default: 5)
@@ -195,7 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError:
         print(
             "nunchi-discord: discord.py is not installed.\n"
-            "Install it with: pip install nunchi[discord]",
+            "Install it with: pip install discord.py\n"
+            "(or reinstall nunchi from source with the extra: "
+            'pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git")',
             file=sys.stderr,
         )
         return 1

@@ -33,7 +33,7 @@ Optional env vars:
     NUNCHI_MATRIX_PEER_BOTS   Comma-separated Matrix user IDs (or @prefix prefixes)
                               treated as peer_bot, not human
     NUNCHI_MATRIX_HISTORY     Number of recent messages to include in gate context
-                              (default: 10)
+                              (default: 20)
     NUNCHI_MATRIX_BACKSTOP_MAX_SENDS
                               Send backstop (amplification-loops guard, default ON):
                               max sends per room per window (default: 5)

@@ -111,6 +111,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-allowlisted senders and "/nunchi ..."-looking message text) can never
   mutate state.
 
+### Fixed — documentation truthfulness sweep
+
+- **Honest install instructions.** `pip install nunchi[discord]` is impossible
+  from the published 0.2.0 release (PyPI 0.2.0 = core + `nunchi`/`nunchi-channel`
+  only; the platform adapters landed later). README, `docs/adapters.md`, the
+  Discord adapter docstring, and its missing-dependency error message now give
+  source-install commands (`pip install "nunchi[discord] @ git+…"` /
+  `pip install ".[discord]"`) with an availability note. Stale "not yet on
+  PyPI" claims in README and `docs/integration.md` (false since 0.2.0 shipped
+  on 2026-07-02) now state what PyPI actually carries versus what is
+  source-only.
+- **Beta labels disclose live-run status.** The adapter index tables in
+  `docs/adapters.md` and README now footnote that the Matrix/Telegram/Discord
+  adapters have full offline test coverage but have not yet been run against
+  live servers.
+- **Stale history defaults.** `NUNCHI_MATRIX_HISTORY`, `NUNCHI_TELEGRAM_HISTORY`,
+  and `NUNCHI_DISCORD_HISTORY` docs and module docstrings said `10`; the code
+  default has been `20` since the history-depth merge. A new enforcement test
+  (`tests/test_docs_truthfulness.py`) pins documented defaults to the code
+  constants so this class of drift fails CI.
+- **Hermes `history_window` documented.** The functional-but-undocumented
+  `history_window` config key (default 20, global `config.yaml` only — not a
+  per-channel key) is now in the nunchi-gate plugin config docstring, also
+  pinned by the enforcement test.
+- **Changelog link hygiene.** Added the missing `[0.2.0]` compare anchor,
+  pointed link references at `mentatzoe/nunchi` (was `mentatzoe/turnaware`),
+  and `[Unreleased]` now compares from `v0.2.0`.
+
 ### Changed
 
 - **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven
@@ -169,8 +197,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Discord adapter (optional extra).** `nunchi.adapters.discord` joins Discord
   channels as a gated participant via discord.py's event-driven client.
-  - Install with `pip install nunchi[discord]`; discord.py is not a default
-    dependency and never leaks into the core install path
+  - Install from source with the `[discord]` extra (`pip install ".[discord]"`
+    from a checkout); discord.py is not a default dependency and never leaks
+    into the core install path
   - Configurable bot policy: `NUNCHI_DISCORD_BOT_POLICY=all` (default, gate all
     bots as peers) or `allowlist` (only bots in `NUNCHI_DISCORD_PEER_BOTS`)
   - History backfill of up to 10 messages via `channel.history` on the first
@@ -322,5 +351,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integration for embedding the admission gate, including a drop-in loader
   template and a generic (non-cc-connect) host example.
 
-[Unreleased]: https://github.com/mentatzoe/turnaware/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/mentatzoe/turnaware/releases/tag/v0.1.0
+[Unreleased]: https://github.com/mentatzoe/nunchi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mentatzoe/nunchi/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/mentatzoe/nunchi/releases/tag/v0.1.0
