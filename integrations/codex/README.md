@@ -1,7 +1,13 @@
 # Nunchi × Codex
 
-Nunchi admission gating for Codex CLI on a Discord room, via the
-`nunchi-mcp-discord` transport server (`integrations/mcp-discord/`).
+Nunchi admission gating for Codex CLI on a Discord room, via the shared
+`nunchi-mcp-discord` transport server.
+
+Current branch status: this branch contains the Codex-side runner and
+UserPromptSubmit hook with offline tests. Live Discord participation is not
+proven here; it requires the shared `nunchi-mcp-discord` transport from the
+parallel transport branch, Discord credentials, and a configured Codex MCP
+server.
 
 Codex is **pull-only** as an MCP client: it can call the transport's tools,
 but it never reacts to server notifications on its own. So this integration
@@ -22,15 +28,16 @@ transport's MCP tools.
 | --- | --- | --- | --- |
 | Room message → Codex wake | Yes, pre-LLM | room runner | **fail-closed** (`NUNCHI_RUNNER_FAIL_POLICY=open` to override) — a gate outage must not become a frontier-call storm |
 | Channel-tagged prompt in an interactive session | Yes, pre-LLM (second layer) | `nunchi_prompt_gate_codex.py` | **fail-open** — a broken gate never silences the operator |
-| Outbound `send_message` / `reply_message` calls | **Not enforced this round** | — (Codex `PreToolUse` hooks *can* gate these; building that hook is explicitly out of scope this round) | — |
+| Outbound `send_message` / `reply_message` calls | **Not gated by Codex this round** | transport-side send backstop only, when running a transport build that includes it | Codex `PreToolUse` send gating is out of scope here; without the shared transport backstop, Codex has no outbound circuit breaker beyond tool/API failures |
 
 The runner's wake prompt deliberately carries **no** `<channel>` tag: the
 trigger was already gated, so the hook does not double-gate wakes. The hook
 covers other bridges that paste channel-tagged messages into interactive
 sessions.
 
-A future outbound `PreToolUse` hook would register like this (shown for
-completeness only — the hook script does not exist yet):
+A future outbound `PreToolUse` hook could add defense-in-depth send gating and
+would register like this (shown for completeness only — the hook script does
+not exist yet):
 
 ```json
 {
@@ -52,7 +59,7 @@ completeness only — the hook script does not exist yet):
 
 ## Setup
 
-1. Run the transport server (see `integrations/mcp-discord/README.md`):
+1. Run the shared transport server (from the transport branch/package):
 
    ```sh
    NUNCHI_DISCORD_TOKEN=... nunchi-mcp-discord
@@ -84,8 +91,9 @@ completeness only — the hook script does not exist yet):
    }
    ```
 
-4. Start the runner (long-running; needs `nunchi-channel` on PATH plus the
-   classifier env it requires — `NUNCHI_CLASSIFIER_MODEL`, `OPENROUTER_API_KEY`):
+4. Start the runner (long-running; it refuses to start unless `nunchi-channel`
+   resolves to an executable, and the gate still needs its classifier env —
+   `NUNCHI_CLASSIFIER_MODEL`, `OPENROUTER_API_KEY`):
 
    ```sh
    NUNCHI_RUNNER_AGENT_ID=dalgos NUNCHI_RUNNER_CHANNELS=123456789 \
@@ -107,7 +115,7 @@ completeness only — the hook script does not exist yet):
 | `NUNCHI_RUNNER_HISTORY_WINDOW` | `20` | Rolling per-channel history size fed to the gate |
 | `NUNCHI_RUNNER_AGENT_ID` | `agent` | Agent identity in the gate payload |
 | `NUNCHI_RUNNER_MENTION_ID` | — | Agent's @mention handle on the surface |
-| `NUNCHI_CHANNEL_BIN` | `which nunchi-channel` | Gate binary |
+| `NUNCHI_CHANNEL_BIN` | `which nunchi-channel` | Gate binary; the runner refuses startup if it is missing or not executable |
 | `NUNCHI_RUNNER_GATE_TIMEOUT` | `30` | Gate subprocess timeout (seconds) |
 | `NUNCHI_RUNNER_CODEX_BIN` | `codex` | Binary used for wakes (`codex exec --skip-git-repo-check --full-auto`) |
 | `NUNCHI_RUNNER_CODEX_ARGS` | — | Extra `codex exec` args, shell-split (e.g. `-c model_reasoning_effort=xhigh`) |
@@ -119,6 +127,11 @@ Wakes are serialized: the runner is single-threaded, so a wake blocks the
 consume loop and triggers arriving mid-wake queue in the stream (the
 transport's bounded queue drops the oldest backlog under overflow).
 
+History fed to the gate is the runner's rolling per-channel history from
+notifications observed since startup. The shared transport's `read_history`
+tool remains available to Codex after wake, but this runner does not yet use it
+to backfill gate history on startup.
+
 The hook reuses the Claude Code hook's env names for the shared knobs
 (`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_PEER_BOTS`,
 `NUNCHI_HOOK_HISTORY_WINDOW`, `NUNCHI_HOOK_TIMEOUT`,
@@ -127,8 +140,12 @@ The hook reuses the Claude Code hook's env names for the shared knobs
 
 ## Receipts
 
-One JSONL line per event: `ts`, `channel`, `message_id`, `author`,
+Runner receipts write one JSONL line per event: `ts`, `channel`, `message_id`, `author`,
 `verdict`, `confidences` (when the gate returned them), `action`
 (`pass-suppressed` | `wake-ok` | `wake-error` | `no-wake-gate-error` |
 `skipped-self` | `skipped-channel` | `skipped-empty`), `wake_exit` when a
 wake ran, `history_len`. Never message content, tokens, or keys.
+
+Hook receipts share the same file with `"direction": "hook-inbound"` and use
+`block-pass`, `allow-speak`, `allow-ack`, `allow-ask`, or
+`allow-gate-error`.

@@ -167,7 +167,13 @@ class RealCorePathTests(unittest.TestCase):
             "context_checked": list(checked),
             "reasons": [f"fixture provider chose {verdict}"],
         }
-        return mock.patch.dict(os.environ, {"NUNCHI_CLASSIFIER_TEST_RESULT": json.dumps(payload)})
+        return mock.patch.dict(
+            os.environ,
+            {
+                "NUNCHI_CLASSIFIER_TEST_RESULT": json.dumps(payload),
+                "NUNCHI_CLASSIFIER_MODEL": "nunchi-test-fixture-provider",
+            },
+        )
 
     def test_real_gate_pass_is_silent(self):
         with self._inject("PASS", checked=["trigger:t-1"]):

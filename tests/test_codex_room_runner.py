@@ -1,22 +1,23 @@
 """Tests for integrations/codex/nunchi_room_runner.py.
 
-All tests are stdlib-only (no pytest) and fully offline: the MCP transport is
-faked with an in-process http.server, and the gate/codex binaries are faked
-with tiny shell scripts written to a temp directory. No network, no real
+All tests are stdlib-only (no pytest) and fully offline: the MCP transport
+HTTP calls are faked by monkeypatching urllib, and the gate/codex binaries are
+faked with tiny shell scripts written to a temp directory. No network, no real
 model calls, no real Codex.
 """
 
 from __future__ import annotations
 
-import http.server
+import contextlib
+import io
 import importlib.util
 import json
 import pathlib
 import stat
 import sys
 import tempfile
-import threading
 import unittest
+from unittest import mock
 
 _RUNNER_PATH = (
     pathlib.Path(__file__).resolve().parent.parent
@@ -190,77 +191,106 @@ class TestSseParser(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Session handshake against a stub streamable-HTTP server
+# Session handshake against a stub streamable-HTTP transport
 # ---------------------------------------------------------------------------
 
 _SESSION_ID = "sess-test-123"
 
 
-class _StubMcpHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args):  # noqa: D102 — silence test output
-        pass
+class _FakeHttpResponse:
+    def __init__(
+        self,
+        *,
+        headers: dict[str, str] | None = None,
+        body: bytes = b"",
+        stream_body: bytes = b"",
+    ) -> None:
+        self.headers = headers or {}
+        self._body = body
+        self._stream_lines = stream_body.splitlines(keepends=True)
 
-    def do_POST(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        body = json.loads(self.rfile.read(length) or b"{}")
-        self.server.requests.append(("POST", body, {k.lower(): v for k, v in self.headers.items()}))
-        if body.get("method") == "initialize":
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def __iter__(self):
+        return iter(self._stream_lines)
+
+    def read(self) -> bytes:
+        return self._body
+
+
+class _FakeUrlopen:
+    def __init__(
+        self,
+        *,
+        sse_body: str,
+        missing_session_header: bool = False,
+        redirect_bare_path: bool = False,
+    ) -> None:
+        self.sse_body = sse_body.encode()
+        self.missing_session_header = missing_session_header
+        self.redirect_bare_path = redirect_bare_path
+        self.redirects = 0
+        self.requests: list[tuple[str, dict | None, dict[str, str]]] = []
+
+    def __call__(self, req, timeout=None):
+        if self.redirect_bare_path and not req.full_url.endswith("/"):
+            self.redirects += 1
+            raise runner_mod.urllib.error.HTTPError(
+                req.full_url,
+                307,
+                "Temporary Redirect",
+                {"Location": "/mcp/"},
+                None,
+            )
+
+        method = req.get_method()
+        body = json.loads(req.data.decode()) if req.data else None
+        headers = {k.lower(): v for k, v in req.header_items()}
+        self.requests.append((method, body, headers))
+
+        if method == "GET":
+            return _FakeHttpResponse(stream_body=self.sse_body)
+
+        if body and body.get("method") == "initialize":
             payload = json.dumps(
                 {"jsonrpc": "2.0", "id": body.get("id"), "result": {"capabilities": {}}}
             ).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.send_header("mcp-session-id", _SESSION_ID)
-            self.end_headers()
-            self.wfile.write(payload)
-        else:
-            self.send_response(202)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            headers = {} if self.missing_session_header else {"mcp-session-id": _SESSION_ID}
+            return _FakeHttpResponse(headers=headers, body=payload)
 
-    def do_GET(self):
-        self.server.requests.append(("GET", None, {k.lower(): v for k, v in self.headers.items()}))
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
-        self.wfile.write(self.server.sse_body.encode())
-        # HTTP/1.0 + no Content-Length: closing the connection ends the stream.
+        return _FakeHttpResponse(body=b"")
 
 
 class TestHandshakeAndStream(unittest.TestCase):
     def setUp(self):
-        self.server = http.server.HTTPServer(("127.0.0.1", 0), _StubMcpHandler)
-        self.server.requests = []
         notif = {
             "jsonrpc": "2.0",
             "method": runner_mod.NOTIFICATION_METHOD,
             "params": _event(content="stream says hi"),
         }
         unrelated = {"jsonrpc": "2.0", "method": "notifications/other", "params": {}}
-        self.server.sse_body = (
+        self.urlopen = _FakeUrlopen(
+            sse_body=(
             ": ping\n\n"
             f"event: message\ndata: {json.dumps(unrelated)}\n\n"
             f"data: {json.dumps(notif)}\n\n"
             "data: not json at all\n\n"
+            )
         )
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        port = self.server.server_address[1]
         # Trailing slash on purpose: the client must tolerate it.
-        self.url = f"http://127.0.0.1:{port}/mcp/"
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=5)
+        self.url = "http://transport.test/mcp/"
 
     def test_handshake_sequence_and_session_header(self):
         client = runner_mod.TransportClient(self.url)
-        events = list(client.events())
+        with mock.patch.object(runner_mod.urllib.request, "urlopen", self.urlopen):
+            events = list(client.events())
 
         self.assertEqual(client.session_id, _SESSION_ID)
-        kinds = [(method, body.get("method") if body else None) for method, body, _ in self.server.requests]
+        kinds = [(method, body.get("method") if body else None) for method, body, _ in self.urlopen.requests]
         self.assertEqual(
             kinds,
             [
@@ -272,13 +302,13 @@ class TestHandshakeAndStream(unittest.TestCase):
                 ("GET", None),
             ],
         )
-        init_headers = self.server.requests[0][2]
+        init_headers = self.urlopen.requests[0][2]
         self.assertEqual(init_headers.get("content-type"), "application/json")
         self.assertIn("text/event-stream", init_headers.get("accept", ""))
         # notifications/initialized, tools/list and the GET carry the session id.
-        self.assertEqual(self.server.requests[1][2].get("mcp-session-id"), _SESSION_ID)
-        self.assertEqual(self.server.requests[2][2].get("mcp-session-id"), _SESSION_ID)
-        get_headers = self.server.requests[3][2]
+        self.assertEqual(self.urlopen.requests[1][2].get("mcp-session-id"), _SESSION_ID)
+        self.assertEqual(self.urlopen.requests[2][2].get("mcp-session-id"), _SESSION_ID)
+        get_headers = self.urlopen.requests[3][2]
         self.assertEqual(get_headers.get("mcp-session-id"), _SESSION_ID)
         self.assertEqual(get_headers.get("accept"), "text/event-stream")
 
@@ -288,23 +318,11 @@ class TestHandshakeAndStream(unittest.TestCase):
 
     def test_missing_session_header_raises(self):
         # A server that never issues mcp-session-id is a broken transport.
-        original = _StubMcpHandler.do_POST
-
-        def no_session(handler):
-            length = int(handler.headers.get("Content-Length", "0"))
-            handler.rfile.read(length)
-            handler.send_response(200)
-            handler.send_header("Content-Length", "2")
-            handler.end_headers()
-            handler.wfile.write(b"{}")
-
-        _StubMcpHandler.do_POST = no_session
-        try:
-            client = runner_mod.TransportClient(self.url)
+        urlopen = _FakeUrlopen(sse_body="", missing_session_header=True)
+        client = runner_mod.TransportClient(self.url)
+        with mock.patch.object(runner_mod.urllib.request, "urlopen", urlopen):
             with self.assertRaises(RuntimeError):
                 list(client.events())
-        finally:
-            _StubMcpHandler.do_POST = original
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +464,27 @@ class TestGateFailurePolicy(unittest.TestCase):
 
         self.assertEqual(action, "no-wake-gate-error")
         self.assertFalse(self.stubs.codex_called())
+
+    def test_fail_closed_on_missing_verdict(self):
+        self.stubs.gate_directive.write_text(json.dumps({"silent": False}))
+        self.stubs.gate_exit_file.write_text("0")
+        runner = _make_runner(self.stubs)
+        action = runner.handle_notification(_event())
+
+        self.assertEqual(action, "no-wake-gate-error")
+        self.assertFalse(self.stubs.codex_called())
+        self.assertIn("malformed directive", _receipts(runner)[-1]["error"])
+
+    def test_fail_closed_on_contradictory_silent_flag(self):
+        directive = _directive("SPEAK")
+        directive["silent"] = True
+        self.stubs.set_gate(directive)
+        runner = _make_runner(self.stubs)
+        action = runner.handle_notification(_event())
+
+        self.assertEqual(action, "no-wake-gate-error")
+        self.assertFalse(self.stubs.codex_called())
+        self.assertIn("contradictory silent", _receipts(runner)[-1]["error"])
 
     def test_fail_closed_on_missing_gate_binary(self):
         runner = _make_runner(self.stubs, channel_bin=None)
@@ -589,8 +628,18 @@ class TestConfigFromEnv(unittest.TestCase):
         self.assertEqual(cfg.channel_bin, "/opt/bin/nunchi-channel")
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestStartupValidation(unittest.TestCase):
+    def test_main_refuses_nonexistent_gate_binary_before_transport_start(self):
+        cfg = runner_mod.RunnerConfig(channel_bin="/definitely/missing/nunchi-channel")
+        stderr = io.StringIO()
+        with mock.patch.object(runner_mod.RunnerConfig, "from_env", return_value=cfg):
+            with mock.patch.object(runner_mod, "run_forever") as run_forever:
+                with contextlib.redirect_stderr(stderr):
+                    rc = runner_mod.main([])
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(run_forever.called, "unsafe startup must not open the transport")
+        self.assertIn("nunchi-channel not found", stderr.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -598,60 +647,35 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 
-class _RedirectingStubHandler(_StubMcpHandler):
-    """Serves only at the trailing-slash path; 307s the bare form like the SDK app."""
-
-    def _redirect_if_bare(self) -> bool:
-        if self.path.endswith("/"):
-            return False
-        length = int(self.headers.get("Content-Length", "0"))
-        if length:
-            self.rfile.read(length)
-        self.send_response(307)
-        self.send_header("Location", self.path + "/")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return True
-
-    def do_POST(self):
-        if not self._redirect_if_bare():
-            super().do_POST()
-
-    def do_GET(self):
-        if not self._redirect_if_bare():
-            super().do_GET()
-
-
 class TestRedirectFollowing(unittest.TestCase):
     def setUp(self):
-        self.server = http.server.HTTPServer(("127.0.0.1", 0), _RedirectingStubHandler)
-        self.server.requests = []
         notif = {
             "jsonrpc": "2.0",
             "method": runner_mod.NOTIFICATION_METHOD,
             "params": _event(content="redirected stream says hi"),
         }
-        self.server.sse_body = f"data: {json.dumps(notif)}\n\n"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        port = self.server.server_address[1]
+        self.urlopen = _FakeUrlopen(
+            sse_body=f"data: {json.dumps(notif)}\n\n",
+            redirect_bare_path=True,
+        )
         # Bare path on purpose: the live transport 307s this to /mcp/.
-        self.url = f"http://127.0.0.1:{port}/mcp"
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=5)
+        self.url = "http://transport.test/mcp"
 
     def test_follows_307_and_pins_slash_url(self):
         client = runner_mod.TransportClient(self.url)
-        events = list(client.events())
+        with mock.patch.object(runner_mod.urllib.request, "urlopen", self.urlopen):
+            events = list(client.events())
 
         self.assertEqual(client.session_id, _SESSION_ID)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["content"], "redirected stream says hi")
         # After the first hop the client pins the redirected URL: exactly one
         # redirect is served; every subsequent request lands on /mcp/ directly.
-        served = [m for m, body, _ in self.server.requests]
+        self.assertEqual(self.urlopen.redirects, 1)
+        served = [m for m, body, _ in self.urlopen.requests]
         self.assertGreaterEqual(len(served), 3)  # initialize, initialized, GET
         self.assertTrue(client.url.endswith("/mcp/"))
+
+
+if __name__ == "__main__":
+    unittest.main()

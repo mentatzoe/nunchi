@@ -85,6 +85,7 @@ from typing import Iterable, Iterator
 logger = logging.getLogger("nunchi.integrations.codex.room_runner")
 
 NOTIFICATION_METHOD = "notifications/discord/message"
+VERDICTS = frozenset({"PASS", "ACK", "ASK", "SPEAK"})
 
 _DEFAULT_TRANSPORT_URL = "http://127.0.0.1:3993/mcp"
 _DEFAULT_HISTORY_WINDOW = 20
@@ -156,6 +157,24 @@ class RunnerConfig:
                 )
             ),
         )
+
+
+def _gate_binary_error(bin_path: str | None) -> str | None:
+    """Return a startup/use error for an unusable nunchi-channel binary."""
+    if not bin_path:
+        return "nunchi-channel not found; set NUNCHI_CHANNEL_BIN or install nunchi"
+
+    has_path_sep = os.sep in bin_path or (os.altsep is not None and os.altsep in bin_path)
+    if has_path_sep:
+        if not os.path.isfile(bin_path):
+            return f"nunchi-channel not found at {bin_path!r}"
+        if not os.access(bin_path, os.X_OK):
+            return f"nunchi-channel is not executable at {bin_path!r}"
+        return None
+
+    if shutil.which(bin_path):
+        return None
+    return f"nunchi-channel {bin_path!r} not found on PATH"
 
 
 # ---------------------------------------------------------------------------
@@ -422,8 +441,9 @@ class RoomRunner:
     def _call_gate(self, payload: dict) -> tuple[dict | None, str | None]:
         """Run nunchi-channel; return (directive, error). Exactly one is set."""
         bin_path = self.config.channel_bin
-        if not bin_path:
-            return None, "nunchi-channel not found; set NUNCHI_CHANNEL_BIN or install nunchi"
+        binary_error = _gate_binary_error(bin_path)
+        if binary_error is not None:
+            return None, binary_error
         try:
             result = subprocess.run(
                 [bin_path],
@@ -443,8 +463,13 @@ class RoomRunner:
             directive = json.loads(result.stdout)
         except (json.JSONDecodeError, ValueError) as exc:
             return None, f"nunchi-channel returned invalid JSON: {exc}"
-        if not isinstance(directive, dict) or "verdict" not in directive:
+        if not isinstance(directive, dict):
             return None, "nunchi-channel returned a malformed directive"
+        verdict = directive.get("verdict")
+        if verdict not in VERDICTS:
+            return None, "nunchi-channel returned a malformed directive"
+        if "silent" in directive and bool(directive.get("silent")) != (verdict == "PASS"):
+            return None, "nunchi-channel returned a contradictory silent flag"
         return directive, None
 
     # -- wake --------------------------------------------------------------
@@ -570,7 +595,7 @@ class RoomRunner:
             )
 
         verdict = directive.get("verdict", "")
-        if verdict == "PASS" or directive.get("silent"):
+        if verdict == "PASS":
             self._write_receipt(
                 params,
                 verdict=verdict,
@@ -638,13 +663,10 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     config = RunnerConfig.from_env()
-    if not config.channel_bin:
+    binary_error = _gate_binary_error(config.channel_bin)
+    if binary_error is not None:
         # Fail-closed would suppress every turn silently; refuse to start instead.
-        print(
-            "nunchi_room_runner: nunchi-channel not found; "
-            "set NUNCHI_CHANNEL_BIN or install nunchi",
-            file=sys.stderr,
-        )
+        print(f"nunchi_room_runner: {binary_error}", file=sys.stderr)
         return 1
     logger.info(
         "room runner starting: transport=%s channels=%s window=%d fail_policy=%s",

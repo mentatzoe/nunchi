@@ -286,6 +286,30 @@ class TestFailOpen(unittest.TestCase):
         self.assertEqual(out.strip(), "")
         self.assertEqual(stub.receipt_lines()[0]["action"], "allow-gate-error")
 
+    def test_gate_missing_verdict_allows_as_gate_error(self):
+        stub = _GateStub({"silent": False, "reasons": ["malformed"]})
+        rc, out, _ = _run_hook(
+            _hook_input(prompt=_channel_prompt()), env_overrides=stub.env()
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        receipts = stub.receipt_lines()
+        self.assertEqual(receipts[0]["action"], "allow-gate-error")
+        self.assertIn("malformed directive", receipts[0]["error"])
+
+    def test_gate_contradictory_silent_flag_allows_as_gate_error(self):
+        directive = _directive("SPEAK")
+        directive["silent"] = True
+        stub = _GateStub(directive)
+        rc, out, _ = _run_hook(
+            _hook_input(prompt=_channel_prompt()), env_overrides=stub.env()
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        receipts = stub.receipt_lines()
+        self.assertEqual(receipts[0]["action"], "allow-gate-error")
+        self.assertIn("contradictory silent", receipts[0]["error"])
+
     def test_missing_gate_binary_allows(self):
         with tempfile.TemporaryDirectory() as tmp:
             log = os.path.join(tmp, "receipts.jsonl")

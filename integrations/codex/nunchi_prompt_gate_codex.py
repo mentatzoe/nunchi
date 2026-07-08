@@ -97,6 +97,8 @@ _ATTR_RE = re.compile(r'(\w+)=["\']([^"\']*)["\']')
 # Tool/function-name pattern for identifying outbound self-sends.
 _TOOL_RE = re.compile(os.environ.get("NUNCHI_HOOK_TOOL_PATTERN", r"(?:send|reply)_message$"))
 
+_VERDICTS = frozenset({"PASS", "ACK", "ASK", "SPEAK"})
+
 # ---------------------------------------------------------------------------
 # Channel tag parsing
 # ---------------------------------------------------------------------------
@@ -374,13 +376,20 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
     except (json.JSONDecodeError, ValueError) as exc:
         _fail_open(f"nunchi-channel returned invalid JSON: {exc}")
 
+    if not isinstance(directive, dict):
+        _fail_open("nunchi-channel returned a malformed directive")
+
     verdict: str = directive.get("verdict", "")
-    silent: bool = directive.get("silent", False)
+    if verdict not in _VERDICTS:
+        _fail_open("nunchi-channel returned a malformed directive")
+    if "silent" in directive and bool(directive.get("silent")) != (verdict == "PASS"):
+        _fail_open("nunchi-channel returned a contradictory silent flag")
+
     reasons: list[str] = directive.get("reasons") or []
     elapsed_ms = (time.monotonic() - t0) * 1000
 
-    # PASS (or silent=true) → block the prompt before the LLM runs.
-    if verdict == "PASS" or silent:
+    # PASS → block the prompt before the LLM runs.
+    if verdict == "PASS":
         first_reason = (reasons[0] if reasons else "not this agent's turn").rstrip(".")
         _write_receipt(
             session_id=session_id,
