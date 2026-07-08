@@ -38,6 +38,7 @@ classifiers = [
 
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
+mcp-discord = ["mcp>=1.9,<2"]
 
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"
@@ -50,6 +51,7 @@ nunchi-channel = "nunchi.adapters.channel:main"
 nunchi-matrix = "nunchi.adapters.matrix:main"
 nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
+nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
