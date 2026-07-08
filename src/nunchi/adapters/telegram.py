@@ -22,6 +22,13 @@ Optional env vars:
     NUNCHI_TELEGRAM_AGENT_ID Agent identity (default: bot_<username>)
     NUNCHI_TELEGRAM_HISTORY  Number of recent messages in gate context
                              (default: 10)
+    NUNCHI_TELEGRAM_BACKSTOP_MAX_SENDS
+                             Send backstop (amplification-loops guard, default
+                             ON): max sends per chat per window (default: 5)
+    NUNCHI_TELEGRAM_BACKSTOP_WINDOW_SECONDS
+                             Send backstop window in seconds (default: 10).
+                             When the cap trips, the send is suppressed and the
+                             receipt records action='rate-limited'.
     NUNCHI_RESPONDER_MODEL   LLM model for the built-in demo responder;
                              defaults to NUNCHI_CLASSIFIER_MODEL
     OPENROUTER_API_KEY       API key for the demo responder
@@ -51,6 +58,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from ._backstop import SendBackstop, backstop_from_env
 from ._responder import _demo_responder
 from .channel import ChannelGateResult, gate as channel_gate
 
@@ -259,6 +267,7 @@ class TelegramPollLoop:
         fail_policy: str = "open",
         pinned_rules: str | None = None,
         poll_timeout: int = _DEFAULT_POLL_TIMEOUT,
+        backstop: SendBackstop | None = None,
     ) -> None:
         self.token = token
         self.chat_ids = frozenset(chat_ids)
@@ -273,6 +282,8 @@ class TelegramPollLoop:
         self.fail_policy = fail_policy
         self.pinned_rules = pinned_rules
         self.poll_timeout = poll_timeout
+        # Per-chat send backstop (amplification-loops guard) — default ON.
+        self._backstop = backstop if backstop is not None else SendBackstop()
 
         # Per-chat in-memory history: chat_id -> list of msg dicts
         self._chat_history: dict[int, list[dict]] = {}
@@ -441,6 +452,20 @@ class TelegramPollLoop:
         if reply_text is None:
             logger.debug("Responder declined msg=%s", trigger_record.get("message_id"))
             self._receipt(chat_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms)
+            return
+
+        # Send backstop: sliding-window cap on sends per chat (default ON).
+        # A tripped cap suppresses the send — it never queues.
+        wait = self._backstop.try_acquire(str(chat_id))
+        if wait > 0:
+            logger.warning(
+                "Send backstop tripped chat=%s (max %d per %.0fs); suppressing send, retry in %.1fs",
+                chat_id,
+                self._backstop.max_sends,
+                self._backstop.window_seconds,
+                wait,
+            )
+            self._receipt(chat_id, trigger_record, len(history_snapshot), result, "rate-limited", elapsed_ms)
             return
 
         try:
@@ -647,6 +672,7 @@ def _build_loop_from_env(dry_run: bool = False) -> TelegramPollLoop:
         log_path=log_path,
         responder=responder,
         dry_run=dry_run,
+        backstop=backstop_from_env("NUNCHI_TELEGRAM"),
     )
 
 

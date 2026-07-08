@@ -101,6 +101,18 @@ Config block (in Hermes config.yaml):
       # clamped to 1 second.
       timeout_seconds: 30
 
+      # backstop_max_sends (int, default 5) and backstop_window_seconds (number,
+      # default 10) — per-channel send backstop (amplification-loops guard,
+      # DEFAULT ON).  At most backstop_max_sends allowed replies per channel per
+      # backstop_window_seconds; both allow paths are bounded (SPEAK/ASK/ACK
+      # verdicts and fail-open error allows).  When the cap trips the reply is
+      # suppressed ({"action": "skip", "reason": "nunchi:rate-limited"}) and the
+      # gate log records action: rate-limited.  Like history_window these are
+      # global config.yaml keys only — operator-only, never per-channel and
+      # never runtime (state/slash/dashboard) overridable.
+      # backstop_max_sends: 5
+      # backstop_window_seconds: 10
+
       # fail_open (bool, default true) — when true, classifier errors allow the
       # Hermes reply through.  Set to false for strict gating.
       # Can be overridden per channel in the map form of `channels`.
@@ -129,7 +141,9 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -180,6 +194,68 @@ _HISTORY_MAX_TOTAL = 20_000  # ~1000 channels x 20 entries each
 _PER_CHANNEL_KEYS: frozenset[str] = frozenset(
     {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open"}
 )
+
+# ---------------------------------------------------------------------------
+# Send backstop (amplification-loops guard) — DEFAULT ON.
+#
+# Sliding-window cap on *allowed* Hermes replies per channel: at most
+# ``backstop_max_sends`` per ``backstop_window_seconds`` (defaults 5 / 10 s).
+# Both allow paths are bounded — SPEAK/ASK/ACK verdicts and fail-open error
+# allows.  When the cap trips the reply is suppressed via
+# {"action": "skip", "reason": "nunchi:rate-limited"} and the gate log records
+# action: rate-limited.  PASS/skip paths never consume window slots.
+#
+# Like ``history_window``, the knobs are global config.yaml keys only —
+# operator-only, never per-channel (_PER_CHANNEL_KEYS) and never runtime
+# overridable (state OVERRIDABLE_KEYS).  Mirrors the adapters' SendBackstop
+# (nunchi.adapters._backstop); duplicated here because this plugin is
+# standalone and must not import the nunchi package.
+# ---------------------------------------------------------------------------
+_DEFAULT_BACKSTOP_MAX_SENDS = 5
+_DEFAULT_BACKSTOP_WINDOW_SECONDS = 10.0
+
+
+class _SendBackstop:
+    """Sliding-window cap: at most *max_sends* per channel per *window_seconds*.
+
+    The ``clock`` attribute is injectable so tests run offline and instantly.
+    Limits are passed per call because Hermes config can change between events.
+    """
+
+    def __init__(self, clock: Any = time.monotonic) -> None:
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._sent: dict[str, deque] = {}
+
+    def try_acquire(self, channel_id: str, max_sends: int, window_seconds: float) -> float:
+        """Returns 0.0 and records the send if allowed; else seconds to wait."""
+        with self._lock:
+            now = self.clock()
+            window = self._sent.setdefault(str(channel_id), deque())
+            while window and window[0] <= now - window_seconds:
+                window.popleft()
+            if len(window) >= max_sends:
+                if not window:  # max_sends == 0: replies are disabled outright
+                    return window_seconds
+                return (window[0] + window_seconds) - now
+            window.append(now)
+            return 0.0
+
+
+_SEND_BACKSTOP = _SendBackstop()
+
+
+def _backstop_limits(cfg: dict[str, Any]) -> tuple[int, float]:
+    """Read the operator-only backstop knobs with lenient parsing."""
+    try:
+        max_sends = int(cfg.get("backstop_max_sends", _DEFAULT_BACKSTOP_MAX_SENDS))
+    except (TypeError, ValueError):
+        max_sends = _DEFAULT_BACKSTOP_MAX_SENDS
+    try:
+        window_seconds = float(cfg.get("backstop_window_seconds", _DEFAULT_BACKSTOP_WINDOW_SECONDS))
+    except (TypeError, ValueError):
+        window_seconds = _DEFAULT_BACKSTOP_WINDOW_SECONDS
+    return max(0, max_sends), max(0.0, window_seconds)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -723,6 +799,17 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
             logger.info("nunchi-gate PASS -> skip channel_ids=%s", log_entry["channel_ids"])
             return {"action": "skip", "reason": "nunchi:PASS"}
         if verdict in _SPEAK_VERDICTS:
+            # Send backstop: bound allowed replies per channel (default ON).
+            max_sends, window_seconds = _backstop_limits(resolved_cfg)
+            wait = _SEND_BACKSTOP.try_acquire(primary_ch_id, max_sends, window_seconds)
+            if wait > 0:
+                log_entry["action"] = "rate-limited"
+                _write_gate_log(log_entry, resolved_cfg)
+                logger.warning(
+                    "nunchi-gate %s -> rate-limited (send backstop, max %d per %.0fs; retry in %.1fs) channel_ids=%s",
+                    verdict, max_sends, window_seconds, wait, log_entry["channel_ids"],
+                )
+                return {"action": "skip", "reason": "nunchi:rate-limited"}
             log_entry["action"] = "allow"
             _write_gate_log(log_entry, resolved_cfg)
             logger.info("nunchi-gate %s -> allow channel_ids=%s", verdict, log_entry["channel_ids"])
@@ -730,15 +817,27 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
         raise RuntimeError(f"unknown nunchi verdict {verdict!r}")
     except Exception as exc:
         fail_open = _coerce_bool(resolved_cfg.get("fail_open"), default=True)
+        # A fail-open allow is still a reply — the backstop bounds it too, so a
+        # classifier-error loop cannot amplify unbounded.
+        rate_limited = False
+        if fail_open:
+            max_sends, window_seconds = _backstop_limits(resolved_cfg)
+            rate_limited = _SEND_BACKSTOP.try_acquire(primary_ch_id, max_sends, window_seconds) > 0
+        if rate_limited:
+            action = "rate-limited"
+        else:
+            action = "allow" if fail_open else "skip"
         log_entry = {
             **base_log,
             "elapsed_ms": round((time.time() - started) * 1000),
-            "action": "allow" if fail_open else "skip",
+            "action": action,
             "error": str(exc)[:500],
             "fail_open": fail_open,
         }
         _write_gate_log(log_entry, resolved_cfg)
         logger.warning("nunchi-gate error (%s); fail_open=%s", exc, fail_open)
+        if rate_limited:
+            return {"action": "skip", "reason": "nunchi:rate-limited"}
         if fail_open:
             return None
         return {"action": "skip", "reason": "nunchi:error"}

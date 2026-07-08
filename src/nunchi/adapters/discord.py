@@ -26,6 +26,13 @@ Optional env vars:
                                 (default: ~/.nunchi/discord-gate.jsonl)
     NUNCHI_DISCORD_AGENT_ID     Agent identity (default: bot_<username>)
     NUNCHI_DISCORD_HISTORY      History window per channel (default: 10)
+    NUNCHI_DISCORD_BACKSTOP_MAX_SENDS
+                                Send backstop (amplification-loops guard, default
+                                ON): max sends per channel per window (default: 5)
+    NUNCHI_DISCORD_BACKSTOP_WINDOW_SECONDS
+                                Send backstop window in seconds (default: 10).
+                                When the cap trips, the send is suppressed and
+                                the receipt records action='rate-limited'.
     NUNCHI_RESPONDER_MODEL      LLM model for the built-in demo responder
     OPENROUTER_API_KEY          API key for the demo responder
     NUNCHI_CLASSIFIER_MODEL     Model used by both classifier and demo responder
@@ -51,6 +58,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from ._backstop import backstop_from_env
 from ._responder import _demo_responder
 from .channel import ChannelGateResult, gate as channel_gate
 
@@ -260,6 +268,9 @@ def main(argv: list[str] | None = None) -> int:
 
     max_events_raw = os.environ.get("NUNCHI_DISCORD_MAX_EVENTS", "")
     max_events: int | None = int(max_events_raw) if max_events_raw.strip().isdigit() else None
+
+    # Per-channel send backstop (amplification-loops guard) — default ON.
+    backstop = backstop_from_env("NUNCHI_DISCORD")
 
     # Responder setup (resolved after we know the agent_id)
     api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("NUNCHI_CLASSIFIER_API_KEY", "")
@@ -481,6 +492,20 @@ def main(argv: list[str] | None = None) -> int:
             if reply_text is None:
                 logger.debug("Responder declined msg=%s", trigger_record.get("message_id"))
                 _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms))
+                return
+
+            # Send backstop: sliding-window cap on sends per channel (default
+            # ON). A tripped cap suppresses the send — it never queues.
+            wait = backstop.try_acquire(str(channel_id))
+            if wait > 0:
+                logger.warning(
+                    "Send backstop tripped channel=%s (max %d per %.0fs); suppressing send, retry in %.1fs",
+                    channel_id,
+                    backstop.max_sends,
+                    backstop.window_seconds,
+                    wait,
+                )
+                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "rate-limited", elapsed_ms))
                 return
 
             try:
