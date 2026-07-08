@@ -279,6 +279,162 @@ class TestWriteReceipt(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Send backstop (amplification-loops guard)
+# --------------------------------------------------------------------------- #
+
+
+class TestRateLimitedReceiptShape(unittest.TestCase):
+    """rate-limited receipts keep the standard field shape (import-safe)."""
+
+    def test_rate_limited_receipt_fields(self):
+        trigger = _make_msg()
+        result = _make_gate_result("SPEAK")
+        receipt = _build_receipt(12345, trigger, 2, result, "rate-limited", 7)
+        required = {
+            "ts", "room_id", "event_id", "author", "author_kind",
+            "history_len", "verdict", "silent", "action", "elapsed_ms",
+            "reasons", "confidences",
+        }
+        self.assertTrue(required.issubset(receipt.keys()))
+        self.assertEqual(receipt["action"], "rate-limited")
+        self.assertEqual(receipt["verdict"], "SPEAK")
+
+
+def _make_discord_stub(recorded_clients: list):
+    """Build a minimal stand-in for the discord.py module.
+
+    Only the surface main() touches is stubbed: Intents.default(), the Client
+    base class (init/get_channel/run), and async channel.send recording.
+    """
+    import types
+
+    stub = types.ModuleType("discord")
+
+    class Intents:
+        def __init__(self):
+            self.message_content = False
+
+        @classmethod
+        def default(cls):
+            return cls()
+
+    class _FakeChannel:
+        def __init__(self):
+            self.sent: list[str] = []
+
+        async def send(self, text):
+            self.sent.append(text)
+
+    class Client:
+        def __init__(self, **kwargs):
+            self._kwargs = kwargs
+            self._fake_channels: dict[int, _FakeChannel] = {}
+            recorded_clients.append(self)
+
+        def get_channel(self, cid):
+            return self._fake_channels.setdefault(cid, _FakeChannel())
+
+        def run(self, token, log_handler=None):
+            return None
+
+    stub.Intents = Intents
+    stub.Client = Client
+    return stub
+
+
+class TestSendBackstopWiring(unittest.TestCase):
+    """Drive the real main()-built client offline via a stubbed discord module."""
+
+    def setUp(self):
+        import tempfile
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _build_client(self, extra_env: dict | None = None):
+        from unittest.mock import patch
+        import nunchi.adapters.discord as dmod
+
+        clients: list = []
+        stub = _make_discord_stub(clients)
+        env = {
+            "NUNCHI_DISCORD_TOKEN": "tok",
+            "NUNCHI_DISCORD_CHANNELS": "111,222",
+            "NUNCHI_DISCORD_LOG": str(self.tmp / "log.jsonl"),
+            **(extra_env or {}),
+        }
+        with patch.dict(os.environ, env):
+            with patch.dict(sys.modules, {"discord": stub}):
+                rc = dmod.main([])
+        self.assertEqual(rc, 0)
+        client = clients[0]
+        # Bypass on_ready (no gateway in the stub): wire identity + responder.
+        client._own_user_id = 999
+        client._agent_id = "test-agent"
+        client._responder = lambda t, h, r: "reply!"
+        return client
+
+    def _gate(self, client, channel_id: int, verdict: str, msg_id: str):
+        import asyncio
+        from unittest.mock import patch
+
+        trigger = _make_msg(message_id=msg_id)
+        with patch("nunchi.adapters.discord.channel_gate", return_value=_make_gate_result(verdict)):
+            asyncio.run(client._gate_and_respond(channel_id, trigger, []))
+
+    def _read_receipts(self) -> list[dict]:
+        log_path = self.tmp / "log.jsonl"
+        if not log_path.exists():
+            return []
+        return [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+
+    def test_backstop_trips_send_suppressed_receipt_rate_limited(self):
+        client = self._build_client({"NUNCHI_DISCORD_BACKSTOP_MAX_SENDS": "1"})
+
+        self._gate(client, 111, "SPEAK", "d1")
+        self._gate(client, 111, "SPEAK", "d2")
+
+        self.assertEqual(client.get_channel(111).sent, ["reply!"])
+        receipts = self._read_receipts()
+        self.assertEqual([r["action"] for r in receipts], ["spoke", "rate-limited"])
+        self.assertEqual(receipts[1]["verdict"], "SPEAK")
+        self.assertEqual(receipts[1]["room_id"], "111")
+
+    def test_backstop_per_channel_isolation(self):
+        client = self._build_client({"NUNCHI_DISCORD_BACKSTOP_MAX_SENDS": "1"})
+
+        self._gate(client, 111, "SPEAK", "i1")
+        self._gate(client, 111, "SPEAK", "i2")   # suppressed
+        self._gate(client, 222, "SPEAK", "i3")   # other channel unaffected
+
+        self.assertEqual(client.get_channel(111).sent, ["reply!"])
+        self.assertEqual(client.get_channel(222).sent, ["reply!"])
+
+    def test_pass_semantics_untouched_and_no_slot_consumed(self):
+        client = self._build_client({"NUNCHI_DISCORD_BACKSTOP_MAX_SENDS": "1"})
+
+        self._gate(client, 111, "PASS", "p1")    # silent, must not consume the slot
+        self._gate(client, 111, "SPEAK", "p2")   # still sends
+
+        self.assertEqual(client.get_channel(111).sent, ["reply!"])
+        receipts = self._read_receipts()
+        self.assertEqual([r["action"] for r in receipts], ["silent", "spoke"])
+
+    def test_backstop_default_on(self):
+        """Without env knobs, 5 sends pass and the 6th is rate-limited."""
+        client = self._build_client()
+
+        for i in range(6):
+            self._gate(client, 111, "SPEAK", f"n{i}")
+
+        self.assertEqual(len(client.get_channel(111).sent), 5)
+        receipts = self._read_receipts()
+        self.assertEqual([r["action"] for r in receipts][-1], "rate-limited")
+
+
+# --------------------------------------------------------------------------- #
 # discord.py-dependent tests (skipped when not installed)
 # --------------------------------------------------------------------------- #
 

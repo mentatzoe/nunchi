@@ -1351,5 +1351,126 @@ class TestNunchiCommand(unittest.TestCase):
         self.assertIn("pre_gateway_dispatch", registered)
 
 
+class TestSendBackstop(unittest.TestCase):
+    """Per-channel send backstop (amplification-loops guard), default ON."""
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+        self.p._CHANNEL_HISTORY.clear()
+        # Deterministic clock: tests advance self.now[0] explicitly.
+        self.now = [0.0]
+        self.p._SEND_BACKSTOP.clock = lambda: self.now[0]
+
+    def _speak(self, cfg: dict, *, chat_id: str = "1518384310321811456"):
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi", return_value={"verdict": "SPEAK", "silent": False}
+            ):
+                return self.p._gate_event(_event("aleph?", chat_id=chat_id))
+
+    def test_default_on_caps_at_five_per_window(self) -> None:
+        cfg = _base_cfg()
+        results = [self._speak(cfg) for _ in range(6)]
+        self.assertTrue(all(r is None for r in results[:5]), results)
+        self.assertEqual(results[5], {"action": "skip", "reason": "nunchi:rate-limited"})
+
+    def test_window_slides(self) -> None:
+        cfg = _base_cfg(backstop_max_sends=1)
+        self.assertIsNone(self._speak(cfg))
+        self.assertEqual(
+            self._speak(cfg),
+            {"action": "skip", "reason": "nunchi:rate-limited"},
+        )
+        self.now[0] = 11.0  # past the 10s default window
+        self.assertIsNone(self._speak(cfg))
+
+    def test_per_channel_isolation(self) -> None:
+        cfg = _base_cfg(channels="*", backstop_max_sends=1)
+        self.assertIsNone(self._speak(cfg, chat_id="chan-A"))
+        self.assertEqual(
+            self._speak(cfg, chat_id="chan-A"),
+            {"action": "skip", "reason": "nunchi:rate-limited"},
+        )
+        self.assertIsNone(self._speak(cfg, chat_id="chan-B"))
+
+    def test_config_knobs_respected(self) -> None:
+        cfg = _base_cfg(backstop_max_sends=2, backstop_window_seconds=5)
+        self.assertIsNone(self._speak(cfg))
+        self.assertIsNone(self._speak(cfg))
+        self.assertEqual(
+            self._speak(cfg),
+            {"action": "skip", "reason": "nunchi:rate-limited"},
+        )
+        self.now[0] = 5.5  # past the configured 5s window
+        self.assertIsNone(self._speak(cfg))
+
+    def test_receipt_line_action_rate_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            log_file = Path(td) / "gate.jsonl"
+            cfg = _base_cfg(backstop_max_sends=0, log_path=str(log_file))
+            result = self._speak(cfg)
+            self.assertEqual(result, {"action": "skip", "reason": "nunchi:rate-limited"})
+
+            lines = [json.loads(l) for l in log_file.read_text().splitlines() if l.strip()]
+            self.assertEqual(len(lines), 1)
+            entry = lines[0]
+            self.assertEqual(entry["action"], "rate-limited")
+            self.assertEqual(entry["verdict"], "SPEAK")
+            required = {"ts", "platform", "channel_ids", "message_id", "verdict", "silent", "action", "elapsed_ms"}
+            self.assertTrue(required.issubset(entry.keys()), entry.keys())
+
+    def test_pass_semantics_untouched_and_no_slot_consumed(self) -> None:
+        cfg = _base_cfg(backstop_max_sends=1)
+        # PASS keeps its normal directive even while the backstop exists...
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(
+                self.p, "_run_nunchi", return_value={"verdict": "PASS", "silent": True}
+            ):
+                result = self.p._gate_event(_event("not for you"))
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:PASS"})
+
+        # ...and does not consume the single send slot.
+        self.assertIsNone(self._speak(cfg))
+        # The slot is only consumed by allowed sends.
+        self.assertEqual(
+            self._speak(cfg),
+            {"action": "skip", "reason": "nunchi:rate-limited"},
+        )
+
+    def test_fail_open_allows_are_also_backstopped(self) -> None:
+        """A classifier-error loop with fail_open=true is still bounded."""
+        def boom(payload: dict, cfg: dict) -> dict:
+            raise RuntimeError("classifier unavailable")
+
+        cfg = _base_cfg(fail_open=True, backstop_max_sends=1)
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", boom):
+                first = self.p._gate_event(_event("aleph?"))
+                second = self.p._gate_event(_event("aleph?"))
+
+        self.assertIsNone(first)
+        self.assertEqual(second, {"action": "skip", "reason": "nunchi:rate-limited"})
+
+    def test_fail_closed_untouched_by_backstop(self) -> None:
+        def boom(payload: dict, cfg: dict) -> dict:
+            raise RuntimeError("classifier unavailable")
+
+        cfg = _base_cfg(fail_open=False, backstop_max_sends=1)
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", boom):
+                result = self.p._gate_event(_event("aleph?"))
+
+        self.assertEqual(result, {"action": "skip", "reason": "nunchi:error"})
+
+    def test_backstop_keys_are_operator_only(self) -> None:
+        """Backstop knobs follow the history_window precedent: global config.yaml
+        keys, never per-channel and never runtime (state) overridable."""
+        self.assertNotIn("backstop_max_sends", self.p._PER_CHANNEL_KEYS)
+        self.assertNotIn("backstop_window_seconds", self.p._PER_CHANNEL_KEYS)
+        self.assertIsNotNone(self.p._state, "state module should load in tests")
+        self.assertNotIn("backstop_max_sends", self.p._state.OVERRIDABLE_KEYS)
+        self.assertNotIn("backstop_window_seconds", self.p._state.OVERRIDABLE_KEYS)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — send backstop on every sending surface
+
+- **Per-channel send backstop ported from the MCP Discord transport to all
+  other sending surfaces** (amplification-loops mitigation, DEFAULT ON).
+  A sliding-window cap — at most 5 sends per channel per 10 seconds by
+  default — now guards `nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`,
+  and the Hermes `nunchi-gate` plugin. When the cap trips the send is
+  suppressed (never queued) and a receipt line is written with
+  `action: rate-limited`; PASS and all other suppression semantics are
+  untouched, and silent verdicts never consume window slots.
+- Adapters share one implementation (`nunchi.adapters._backstop.SendBackstop`)
+  with operator-only env knobs: `NUNCHI_{MATRIX,TELEGRAM,DISCORD}_BACKSTOP_MAX_SENDS`
+  and `NUNCHI_{MATRIX,TELEGRAM,DISCORD}_BACKSTOP_WINDOW_SECONDS`.
+- The Hermes plugin gates both allow paths (SPEAK/ASK/ACK verdicts and
+  fail-open error allows — a broken-classifier loop with `fail_open: true`
+  is now bounded too), returning
+  `{"action": "skip", "reason": "nunchi:rate-limited"}` when tripped.
+  Knobs `backstop_max_sends` / `backstop_window_seconds` follow the
+  `history_window` precedent: global `config.yaml` keys only, never
+  per-channel and never runtime (state/slash/dashboard) overridable.
+- Offline deterministic tests (injected clock) cover window slide, per-channel
+  isolation, default-on behavior, rate-limited receipt shape, and untouched
+  PASS/suppression semantics on every surface, including a stub-discord.py
+  harness that drives the real `nunchi-discord` client wiring.
+
 ### Changed
 
 - **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven

@@ -791,6 +791,157 @@ class TestModuleExports(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Send backstop (amplification-loops guard)
+# --------------------------------------------------------------------------- #
+
+class TestSendBackstopWiring(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _make_gate_result(self, verdict: str) -> ChannelGateResult:
+        return ChannelGateResult(
+            verdict=verdict,
+            silent=(verdict == "PASS"),
+            run_shape="Stay silent." if verdict == "PASS" else "Produce one turn.",
+            reasons=(f"Fixture: {verdict}",),
+            confidences={v: 0.25 for v in ("PASS", "ACK", "ASK", "SPEAK")},
+            context_checked=(),
+            request_id="test-req",
+            classifier_model="fixture",
+        )
+
+    def _read_receipts(self, loop: MatrixSyncLoop) -> list[dict]:
+        if not loop.log_path.exists():
+            return []
+        return [json.loads(l) for l in loop.log_path.read_text().splitlines() if l.strip()]
+
+    def _speak(self, loop, room_id="!room1:example.com", msg_id="$b1", send_calls=None):
+        def _fake_send(homeserver, token, rid, text):
+            if send_calls is not None:
+                send_calls.append((rid, text))
+            return "$sent"
+
+        with patch("nunchi.adapters.matrix.channel_gate", return_value=self._make_gate_result("SPEAK")):
+            with patch("nunchi.adapters.matrix._send_message", side_effect=_fake_send):
+                loop._initial_sync_done = True
+                loop._gate_and_respond(
+                    room_id=room_id,
+                    trigger_record={"content": "hi", "author": "@u:x", "author_kind": "human", "message_id": msg_id},
+                    history_snapshot=[],
+                )
+
+    def test_backstop_default_on(self):
+        """A loop built without backstop knobs has the guard active (5/10s)."""
+        loop = _make_loop(tmp_path=self.tmp)
+        self.assertEqual(loop._backstop.max_sends, 5)
+        self.assertEqual(loop._backstop.window_seconds, 10.0)
+
+    def test_backstop_trips_send_suppressed_receipt_rate_limited(self):
+        from nunchi.adapters._backstop import SendBackstop
+
+        send_calls: list = []
+        loop = _make_loop(tmp_path=self.tmp, responder=lambda t, h, r: "reply")
+        fake_now = [0.0]
+        loop._backstop = SendBackstop(1, 10.0, clock=lambda: fake_now[0])
+
+        self._speak(loop, msg_id="$b1", send_calls=send_calls)
+        self._speak(loop, msg_id="$b2", send_calls=send_calls)
+
+        self.assertEqual(len(send_calls), 1)
+        receipts = self._read_receipts(loop)
+        self.assertEqual([r["action"] for r in receipts], ["spoke", "rate-limited"])
+        self.assertEqual(receipts[1]["verdict"], "SPEAK")
+        self.assertEqual(receipts[1]["room_id"], "!room1:example.com")
+
+    def test_backstop_window_slides(self):
+        from nunchi.adapters._backstop import SendBackstop
+
+        send_calls: list = []
+        loop = _make_loop(tmp_path=self.tmp, responder=lambda t, h, r: "reply")
+        fake_now = [0.0]
+        loop._backstop = SendBackstop(1, 10.0, clock=lambda: fake_now[0])
+
+        self._speak(loop, msg_id="$w1", send_calls=send_calls)   # t=0: sends
+        self._speak(loop, msg_id="$w2", send_calls=send_calls)   # t=0: suppressed
+        fake_now[0] = 11.0
+        self._speak(loop, msg_id="$w3", send_calls=send_calls)   # t=11: window slid
+
+        self.assertEqual(len(send_calls), 2)
+        receipts = self._read_receipts(loop)
+        self.assertEqual([r["action"] for r in receipts], ["spoke", "rate-limited", "spoke"])
+
+    def test_backstop_per_room_isolation(self):
+        from nunchi.adapters._backstop import SendBackstop
+
+        send_calls: list = []
+        loop = _make_loop(
+            tmp_path=self.tmp,
+            room_ids=("!a:example.com", "!b:example.com"),
+            responder=lambda t, h, r: "reply",
+        )
+        fake_now = [0.0]
+        loop._backstop = SendBackstop(1, 10.0, clock=lambda: fake_now[0])
+
+        self._speak(loop, room_id="!a:example.com", msg_id="$i1", send_calls=send_calls)
+        self._speak(loop, room_id="!a:example.com", msg_id="$i2", send_calls=send_calls)
+        self._speak(loop, room_id="!b:example.com", msg_id="$i3", send_calls=send_calls)
+
+        self.assertEqual([c[0] for c in send_calls], ["!a:example.com", "!b:example.com"])
+
+    def test_pass_semantics_untouched_and_no_slot_consumed(self):
+        """PASS stays silent as before and never consumes a backstop slot."""
+        from nunchi.adapters._backstop import SendBackstop
+
+        send_calls: list = []
+        loop = _make_loop(tmp_path=self.tmp, responder=lambda t, h, r: "reply")
+        fake_now = [0.0]
+        loop._backstop = SendBackstop(1, 10.0, clock=lambda: fake_now[0])
+
+        with patch("nunchi.adapters.matrix.channel_gate", return_value=self._make_gate_result("PASS")):
+            with patch("nunchi.adapters.matrix._send_message", side_effect=lambda *a: send_calls.append(a)):
+                loop._initial_sync_done = True
+                loop._gate_and_respond(
+                    room_id="!room1:example.com",
+                    trigger_record={"content": "hi", "author": "@u:x", "author_kind": "human", "message_id": "$p1"},
+                    history_snapshot=[],
+                )
+        self.assertEqual(send_calls, [])
+
+        # The PASS above must not have eaten the single slot: SPEAK still sends.
+        speak_sends: list = []
+        self._speak(loop, msg_id="$p2", send_calls=speak_sends)
+        self.assertEqual(len(speak_sends), 1)
+
+        receipts = self._read_receipts(loop)
+        self.assertEqual([r["action"] for r in receipts], ["silent", "spoke"])
+
+    def test_backstop_env_knobs(self):
+        """NUNCHI_MATRIX_BACKSTOP_* env vars tune the backstop shape."""
+        from nunchi.adapters.matrix import _build_loop_from_env
+
+        env = {
+            "NUNCHI_MATRIX_HOMESERVER": "https://matrix.example.com",
+            "NUNCHI_MATRIX_TOKEN": "tok",
+            "NUNCHI_MATRIX_ROOMS": "!room1:example.com",
+            "NUNCHI_MATRIX_STATE": str(self.tmp / "state.json"),
+            "NUNCHI_MATRIX_LOG": str(self.tmp / "log.jsonl"),
+            "NUNCHI_MATRIX_BACKSTOP_MAX_SENDS": "2",
+            "NUNCHI_MATRIX_BACKSTOP_WINDOW_SECONDS": "3.5",
+        }
+        with patch.dict(os.environ, env):
+            with patch("nunchi.adapters.matrix._whoami", return_value="@bot:example.com"):
+                loop = _build_loop_from_env()
+
+        self.assertEqual(loop._backstop.max_sends, 2)
+        self.assertEqual(loop._backstop.window_seconds, 3.5)
+
+
+# --------------------------------------------------------------------------- #
 # login() helper
 # --------------------------------------------------------------------------- #
 

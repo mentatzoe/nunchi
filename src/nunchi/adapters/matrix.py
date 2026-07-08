@@ -34,6 +34,13 @@ Optional env vars:
                               treated as peer_bot, not human
     NUNCHI_MATRIX_HISTORY     Number of recent messages to include in gate context
                               (default: 10)
+    NUNCHI_MATRIX_BACKSTOP_MAX_SENDS
+                              Send backstop (amplification-loops guard, default ON):
+                              max sends per room per window (default: 5)
+    NUNCHI_MATRIX_BACKSTOP_WINDOW_SECONDS
+                              Send backstop window in seconds (default: 10).
+                              When the cap trips, the send is suppressed and the
+                              receipt records action='rate-limited'.
     NUNCHI_RESPONDER_MODEL    LLM model for the built-in demo responder; defaults
                               to NUNCHI_CLASSIFIER_MODEL
     OPENROUTER_API_KEY        API key for the built-in demo responder
@@ -65,6 +72,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from ._backstop import SendBackstop, backstop_from_env
 from ._responder import _demo_responder
 from .channel import ChannelGateResult, gate as channel_gate
 
@@ -349,6 +357,7 @@ class MatrixSyncLoop:
         fail_policy: str = "open",
         pinned_rules: str | None = None,
         sync_timeout_ms: int = _DEFAULT_SYNC_TIMEOUT_MS,
+        backstop: SendBackstop | None = None,
     ) -> None:
         self.homeserver = homeserver
         self.token = token
@@ -364,6 +373,8 @@ class MatrixSyncLoop:
         self.fail_policy = fail_policy
         self.pinned_rules = pinned_rules
         self.sync_timeout_ms = sync_timeout_ms
+        # Per-room send backstop (amplification-loops guard) — default ON.
+        self._backstop = backstop if backstop is not None else SendBackstop()
 
         # Per-room in-memory history: list of dicts with content/author/author_kind/message_id
         self._room_history: dict[str, list[dict]] = {}
@@ -541,6 +552,20 @@ class MatrixSyncLoop:
         if reply_text is None:
             logger.debug("Responder declined event=%s", trigger_record.get("message_id"))
             self._receipt(room_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms)
+            return
+
+        # Send backstop: sliding-window cap on sends per room (default ON).
+        # A tripped cap suppresses the send — it never queues.
+        wait = self._backstop.try_acquire(room_id)
+        if wait > 0:
+            logger.warning(
+                "Send backstop tripped room=%s (max %d per %.0fs); suppressing send, retry in %.1fs",
+                room_id,
+                self._backstop.max_sends,
+                self._backstop.window_seconds,
+                wait,
+            )
+            self._receipt(room_id, trigger_record, len(history_snapshot), result, "rate-limited", elapsed_ms)
             return
 
         try:
@@ -757,6 +782,7 @@ def _build_loop_from_env(dry_run: bool = False) -> MatrixSyncLoop:
         log_path=log_path,
         responder=responder,
         dry_run=dry_run,
+        backstop=backstop_from_env("NUNCHI_MATRIX"),
     )
 
 
