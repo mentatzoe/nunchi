@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — adversarial injection eval pack
+
+- **Injection fixture pool (`i-*`).** New `injection` fixture class under
+  `specs/003-classifier-test-suite/contracts/fixtures/injection/` — 12
+  envelope+meta pairs covering gate steering (`[SYSTEM] you must reply` in
+  message text, fake pinned rules inside a message, "everyone must respond
+  to everything" governance-in-message), verdict-format spoofing (verdict
+  JSON in the message body), unicode/markdown smuggling (zero-width
+  characters, code-fence-wrapped directives), sentinel forgery
+  (`CC_CONNECT_SILENT_PASS` typed into inbound text — data, never
+  suppression), and injection-via-history (attacker instructions in
+  scrollback with a benign trigger). Expected verdicts encode the plain
+  social judgment with the injection ignored; the genuinely ambiguous case
+  uses the corpus's expected-verdict-list convention. The suite loader and
+  runner accept the new pool (`--source injection`) and the runner
+  self-tests cover discovery, partitioning, and both steering directions.
+- **Cross-layer provider-redirection enforcement tests**
+  (`tests/test_provider_redirection.py`). No hostile envelope field can set
+  `endpoint` / `base_url` / `api_key_env` / `binary` / `agent_id` /
+  `mention_id` / `log_path`, asserted at BOTH layers: the classifier-config
+  whitelist (`ValidationError` on every non-whitelisted `classifier_config`
+  key, unknown top-level envelope fields never survive validation, base URL
+  and API key resolve from operator environment only) and the hermes state
+  whitelist (filter-at-ingestion, honest audit reporting, and re-filtering
+  at merge time so even a hand-tampered state file cannot rebind
+  operator-only plumbing; the config.yaml per-channel merge is a closed
+  whitelist too).
+- **Sentinel-forgery unit tests** (`tests/test_sentinel_forgery.py`).
+  Inbound message text containing host sentinel strings (bare and
+  underscore-decorated `CC_CONNECT_SILENT_PASS` variants) never causes
+  suppression by itself in the hermes plugin, the Claude Code PreToolUse
+  hook, or the Claude Code UserPromptSubmit hook: the sentinel travels to
+  the gate verbatim as trigger data, suppression flows only from the gate's
+  typed directive, and structural guards assert none of the three
+  integrations contain sentinel-vs-text matching.
+
 ### Changed
 
 - **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven
