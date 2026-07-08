@@ -14,6 +14,9 @@ This directory carries runtime artifacts produced by exercising the suite.
 | `53d9262-rulebook-baseline.jsonl` | 2026-07-02 | rulebook prompt at `53d9262` (last main before social core) on `google/gemini-3.1-flash-lite` | pre-change baseline: 33/37 pass, 0 errors |
 | `58e6871-social-core-live.jsonl` | 2026-07-02 | social-core prompt at `58e6871` on `google/gemini-3.1-flash-lite` | post-change evidence: 32/37 pass, 0 errors; see `social-core-2026-07-02.md` |
 | `social-core-2026-07-02.md` | 2026-07-02 | rulebook vs social core | run comparison, flicker set, stable-failure adjudication, and the case for rerunning the bake-off under the social prompt |
+| `model-selection-openweight-2026-06-14.md` + `bakeoff-openweight-2026-06-14/` | 2026-06-14 | 10 open-weight / non-big3 models | owner-Q1 follow-up bake-off: qwen3-235b matches the incumbent's accuracy at ~1/5 the cost; per-model full-corpus JSONL runs |
+| `history-depth-2026-07-07.md` | 2026-07-07 | product classifier on `google/gemini-3.1-flash-lite` via `nunchi-channel` | scrollback-vs-trigger experiment on real room receipts: history flips 24% of borderline verdicts, almost always toward silence |
+| `room-sessions-2026-07-02+05.md` | 2026-07-09 (sessions 2026-07-02 / 2026-07-05) | production gate, live multi-agent Discord room | stats-only receipt evidence for the two organic room sessions: verdict distributions per participant, enforced denials, fastpath hits, history_len, and itemized discrepancies vs the operator retrospective |
 
 ## a132ccc-baseline.jsonl (historical)
 

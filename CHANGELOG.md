@@ -216,6 +216,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Open Floor Protocol vocabulary alignment: SPEAK/PASS/ACK/ASK map onto OFP
     floor semantics so future OFP compatibility requires no translation layer
 
+### Evidence (room sessions)
+
+- **Room-session receipt evidence (003).** New stats-only evidence file
+  `specs/003-classifier-test-suite/evidence/room-sessions-2026-07-02+05.md`
+  covering the 2026-07-02 first live in-room deployment and the 2026-07-05
+  organic multi-agent session: per-participant verdict distributions, the
+  three enforced denials, mention-fastpath hits, history_len stats (100%
+  hermes-side blind — the F1 regression, quantified), UTC timeline bounds,
+  integration paths, and itemized discrepancies against the operator's
+  private retrospective (two off-by-one counts and a fastpath count
+  corrected). States the Station receipts-log test-artifact contamination as
+  a caveat. Zero message content, per the evidence redaction convention.
+- **Evidence index repaired.** The evidence `README.md` index now lists the
+  open-weight bake-off (`model-selection-openweight-2026-06-14.md` +
+  `bakeoff-openweight-2026-06-14/`), `history-depth-2026-07-07.md`, and the
+  new room-sessions file.
+
 ## [0.2.0] - 2026-07-02
 
 ### Changed
