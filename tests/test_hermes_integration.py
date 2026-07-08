@@ -76,6 +76,10 @@ def _base_cfg(**overrides: object) -> dict:
         "bypass_commands": True,
         "fail_open": True,
         "log_path": "",
+        # Deterministic: never read the operator's real state file
+        # (the default would resolve to ~/.hermes/nunchi-gate.state.json,
+        # whose live overrides could flip verdict routing in these tests).
+        "state_path": "/nonexistent/nunchi-gate-test-state.json",
     }
     cfg.update(overrides)
     return cfg
@@ -296,6 +300,7 @@ class TestLegacyConfigFallback(unittest.TestCase):
                 "bypass_commands": True,
                 "fail_open": True,
                 "log_path": "",
+                "state_path": "/nonexistent/nunchi-gate-test-state.json",
             }
         }
 

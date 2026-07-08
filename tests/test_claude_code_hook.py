@@ -16,6 +16,8 @@ import tempfile
 import textwrap
 import unittest
 
+from tests.hook_sandbox import sandbox_env
+
 # Path to the hook script under test
 _HOOK = (
     pathlib.Path(__file__).resolve().parent.parent
@@ -34,8 +36,12 @@ def _run_hook(
     *,
     env_overrides: dict | None = None,
 ) -> tuple[int, str, str]:
-    """Run the hook with hook_input JSON on stdin; return (returncode, stdout, stderr)."""
-    env = {**os.environ, **(env_overrides or {})}
+    """Run the hook with hook_input JSON on stdin; return (returncode, stdout, stderr).
+
+    The env is always sandboxed (HOME + NUNCHI_HOOK_LOG pinned to a temp dir)
+    so no receipt can ever fall through to the operator's real log file.
+    """
+    env = sandbox_env(env_overrides)
     result = subprocess.run(
         [sys.executable, str(_HOOK)],
         input=json.dumps(hook_input),
@@ -301,6 +307,7 @@ class TestInboundChannelExtraction(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, "-c", code],
             capture_output=True, text=True,
+            env=sandbox_env(),
         )
         os.unlink(tpath)
         if result.returncode != 0:
@@ -383,7 +390,10 @@ class TestInboundChannelExtraction(unittest.TestCase):
             events = mod._parse_transcript(tpath, "c1")
             print(json.dumps(events))
         """)
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True,
+            env=sandbox_env(),
+        )
         events = json.loads(result.stdout)
         self.assertEqual(events[0]["author_kind"], "peer_bot")
 
@@ -403,7 +413,10 @@ class TestSelfSendExtraction(unittest.TestCase):
             events = mod._parse_transcript(r"{tpath}", "{chat_id}")
             print(json.dumps(events))
         """)
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True,
+            env=sandbox_env(),
+        )
         os.unlink(tpath)
         return json.loads(result.stdout)
 
@@ -433,20 +446,21 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
     def _run_and_get_payload(self, lines: list[dict], chat_id: str) -> dict | None:
         """Run the hook with a captured stub that prints the payload it received."""
         tpath = _make_transcript(lines)
+        side_file = tempfile.mktemp(suffix=".payload.json")
         # Stub that echoes back the payload it receives (for inspection)
-        stub_code = textwrap.dedent("""\
+        stub_code = textwrap.dedent(f"""\
             #!/usr/bin/env python3
             import sys, json
             payload = json.loads(sys.stdin.read())
             # Print SPEAK so hook allows
-            print(json.dumps({
+            print(json.dumps({{
                 "verdict": "SPEAK", "silent": False,
                 "run_shape": "speak", "reasons": ["test"],
-                "confidences": {}, "context_checked": [],
+                "confidences": {{}}, "context_checked": [],
                 "request_id": None, "classifier_model": None, "degraded": False,
-            }))
+            }}))
             # Also dump payload to a side file
-            with open(r"/tmp/__nunchi_test_payload.json", "w") as f:
+            with open({side_file!r}, "w") as f:
                 json.dump(payload, f)
             sys.exit(0)
         """)
@@ -466,7 +480,7 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
         os.unlink(stub_path)
         os.unlink(wrapper_path)
 
-        payload_path = pathlib.Path("/tmp/__nunchi_test_payload.json")
+        payload_path = pathlib.Path(side_file)
         if not payload_path.exists():
             return None
         result = json.loads(payload_path.read_text())
@@ -551,16 +565,17 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
             )
         # 15 entries: trigger=m14; with window=5, history <= 5 entries
         tpath = _make_transcript(entries)
-        stub_code = textwrap.dedent("""\
+        side_file = tempfile.mktemp(suffix=".payload.json")
+        stub_code = textwrap.dedent(f"""\
             #!/usr/bin/env python3
             import sys, json
             payload = json.loads(sys.stdin.read())
-            print(json.dumps({
+            print(json.dumps({{
                 "verdict": "SPEAK", "silent": False, "run_shape": "speak",
-                "reasons": ["test"], "confidences": {}, "context_checked": [],
+                "reasons": ["test"], "confidences": {{}}, "context_checked": [],
                 "request_id": None, "classifier_model": None, "degraded": False,
-            }))
-            with open("/tmp/__nunchi_window_test.json", "w") as f:
+            }}))
+            with open({side_file!r}, "w") as f:
                 json.dump(payload, f)
             sys.exit(0)
         """)
@@ -579,9 +594,10 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
         _os.unlink(tpath)
         _os.unlink(stub_path)
         _os.unlink(wrapper_path)
-        payload_path = _pathlib.Path("/tmp/__nunchi_window_test.json")
+        payload_path = _pathlib.Path(side_file)
         if payload_path.exists():
             payload = _json.loads(payload_path.read_text())
+            payload_path.unlink()
             self.assertLessEqual(len(payload.get("history", [])), 5)
 
 
