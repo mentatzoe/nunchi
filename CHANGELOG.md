@@ -139,6 +139,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pointed link references at `mentatzoe/nunchi` (was `mentatzoe/turnaware`),
   and `[Unreleased]` now compares from `v0.2.0`.
 
+### Claude Code peer-hearing — transport patch + hook docs
+
+- **Operator-carried Discord transport patch.**
+  `integrations/claude-code/transport-patch/` ships
+  `0001-allow-bot-messages-allowfrom.patch` for the official Claude Code
+  Discord plugin (`anthropics/claude-plugins-official`): the unconditional
+  bot-drop in the `messageCreate` handler (`if (msg.author.bot) return`)
+  becomes a self-only drop, so explicitly allowlisted peer bots reach the
+  session while the plugin's existing `gate()`/`allowFrom` access control
+  remains the authorization layer (upstream issues #1153/#1559, still open).
+  Built from and `git apply --check`-verified against upstream HEAD
+  (`server.ts` blob `0595fc7`, fetched 2026-07-09); community reference:
+  chenjr0719 fork, branch `fix/allow-bot-messages` (commit `e0474df`). The
+  accompanying README documents what changes and why, exact apply steps
+  (git checkout and installed-copy paths), how `access.json` composes as the
+  second authorization layer — including the empty-`allowFrom` and
+  bot-echo-loop caveats — and a live verification recipe with a negative
+  check (non-allowlisted bot stays dropped).
+- **Claude Code docs cover both hooks.** The Claude Code section of
+  `docs/adapters.md` now documents the inbound `UserPromptSubmit` gate
+  (merged 2026-07-08, previously missing from the adapter reference)
+  alongside the outbound `PreToolUse` hook, with a direction/event/on-PASS
+  summary table, the bot-deaf transport gap plus transport-patch pointer,
+  and honest status wording: hooks merged and exercised against live channel
+  traffic; transport patch is a local operator step, upstream fix pending.
+- **Fixed stale outbound history default.** `integrations/claude-code/README.md`
+  claimed the outbound hook's history window default was 10; the code default
+  is 25 for both hooks (`NUNCHI_HOOK_HISTORY_WINDOW`). The note is corrected
+  and the variable now appears in the outbound hook's environment table.
+
 ### Changed
 
 - **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven
