@@ -34,3 +34,4 @@ pnpm-debug.log*
 
 # Embedding model cache from external tooling
 .fastembed_cache/
+.claude/
