@@ -129,6 +129,11 @@ Config block (in Hermes config.yaml):
 Legacy support:
 - Config block ``turnaware:`` is accepted when ``nunchi:`` is absent and a
   deprecation warning is emitted.  Rename the block to migrate.
+
+Security / trust chain:
+- The ``/nunchi`` slash command's authorization boundary is hermes' command
+  dispatcher, not this plugin — see the ``_nunchi_command`` docstring for the
+  precise trust chain and the whitelist that bounds its blast radius.
 """
 
 from __future__ import annotations
@@ -1073,6 +1078,36 @@ def _nunchi_command(raw_args: str) -> str:
     supplied explicitly.  Mutations write to the state file via
     ``state.save_state`` with ``updated_by='slash'`` so the gate path
     and dashboard see consistent state.
+
+    Trust chain (authorization boundary)
+    ------------------------------------
+    Authorization does NOT live in this plugin.  Hermes' command dispatcher
+    is the authorization boundary: it decides whose "/nunchi ..." messages
+    are routed to this handler at all.  The handler receives only the raw
+    argument string — no sender identity, channel, or role — so per-user
+    checks are structurally impossible here, and every invocation hermes
+    forwards is equally privileged.  Operators who need to restrict who can
+    reconfigure the gate must do so in hermes' command permissions, not in
+    chat-visible gate settings.
+
+    Two properties bound the blast radius of whatever hermes lets through:
+
+    1. Whitelist: all mutations funnel through ``state.save_state`` and are
+       consumed via ``filter_overridable`` / ``merge_effective``, so only
+       ``OVERRIDABLE_KEYS`` (see ``state.py``) ever take effect.  Operator-
+       only keys — ``binary``, ``log_path``, ``state_path``, ``agent_id``,
+       ``mention_id``, ``timeout_seconds`` — are unreachable from any slash
+       input.  The slash surface itself can write only ``enabled``,
+       ``senders``, and ``verbosity``.
+    2. Pinned target: state is written only to the ``state_path`` resolved
+       from config.yaml; since ``state_path`` is not overridable, no chat or
+       UI input can redirect where state lands.
+
+    Note the gate hook is NOT part of this chain: with ``bypass_commands``
+    enabled, ``_gate_event`` simply declines to gate "/"-prefixed message
+    text — it never executes commands, so a message that merely looks like
+    "/nunchi disable global" cannot mutate state through the gate path.
+    Covered by ``tests/test_slash_command_authz.py``.
     """
     args = raw_args.strip().split()
     if not args:

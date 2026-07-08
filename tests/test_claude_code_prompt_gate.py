@@ -18,6 +18,8 @@ import tempfile
 import textwrap
 import unittest
 
+from tests.hook_sandbox import sandbox_env
+
 # Path to the hook script under test
 _HOOK = (
     pathlib.Path(__file__).resolve().parent.parent
@@ -36,8 +38,12 @@ def _run_hook(
     *,
     env_overrides: dict | None = None,
 ) -> tuple[int, str, str]:
-    """Run the hook with hook_input JSON on stdin; return (returncode, stdout, stderr)."""
-    env = {**os.environ, **(env_overrides or {})}
+    """Run the hook with hook_input JSON on stdin; return (returncode, stdout, stderr).
+
+    The env is always sandboxed (HOME + NUNCHI_HOOK_LOG pinned to a temp dir)
+    so no receipt can ever fall through to the operator's real log file.
+    """
+    env = sandbox_env(env_overrides)
     result = subprocess.run(
         [sys.executable, str(_HOOK)],
         input=json.dumps(hook_input),
@@ -400,7 +406,7 @@ class TestMalformedStdinFailsOpen(unittest.TestCase):
     """Malformed or non-dict stdin must allow through (exit 0, no output)."""
 
     def test_invalid_json_fails_open(self):
-        env = {**os.environ, "NUNCHI_CHANNEL_BIN": "/nonexistent"}
+        env = sandbox_env({"NUNCHI_CHANNEL_BIN": "/nonexistent"})
         result = subprocess.run(
             [sys.executable, str(_HOOK)],
             input="not valid json {{{{",
@@ -413,7 +419,7 @@ class TestMalformedStdinFailsOpen(unittest.TestCase):
 
     def test_json_array_fails_open(self):
         """A valid JSON array (not dict) on stdin must fail open."""
-        env = {**os.environ, "NUNCHI_CHANNEL_BIN": "/nonexistent"}
+        env = sandbox_env({"NUNCHI_CHANNEL_BIN": "/nonexistent"})
         result = subprocess.run(
             [sys.executable, str(_HOOK)],
             input='["not", "a", "dict"]',
@@ -425,7 +431,7 @@ class TestMalformedStdinFailsOpen(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_empty_stdin_fails_open(self):
-        env = {**os.environ, "NUNCHI_CHANNEL_BIN": "/nonexistent"}
+        env = sandbox_env({"NUNCHI_CHANNEL_BIN": "/nonexistent"})
         result = subprocess.run(
             [sys.executable, str(_HOOK)],
             input="",
@@ -498,11 +504,15 @@ class TestGateBinaryFailureFailsOpen(unittest.TestCase):
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
         inp = _hook_input(prompt=prompt)
         # Set to empty string and ensure PATH has nothing useful
-        env = {**os.environ}
-        env["NUNCHI_CHANNEL_BIN"] = ""
-        env["PATH"] = "/nonexistent"  # prevent which("nunchi-channel") from finding anything
-        env["NUNCHI_HOOK_LOG"] = "/dev/null"
-        rc, out, err = _run_hook(inp, env_overrides=env)
+        rc, out, err = _run_hook(
+            inp,
+            env_overrides={
+                "NUNCHI_CHANNEL_BIN": "",
+                # prevent which("nunchi-channel") from finding anything
+                "PATH": "/nonexistent",
+                "NUNCHI_HOOK_LOG": "/dev/null",
+            },
+        )
         self.assertEqual(rc, 0)
         self.assertEqual(out.strip(), "")
 
@@ -720,14 +730,12 @@ class TestHistoryWindowRespected(unittest.TestCase):
             chat_id="c1", message_id="trigger", user="zoe", body="trigger"
         )
         inp = _hook_input(prompt=prompt, transcript_path=tpath)
-        env_overrides = {
+        # Do NOT set NUNCHI_HOOK_HISTORY_WINDOW — test the default
+        env = sandbox_env({
             "NUNCHI_CHANNEL_BIN": wrapper_path,
             "NUNCHI_HOOK_LOG": "/dev/null",
-        }
-        # Do NOT set NUNCHI_HOOK_HISTORY_WINDOW — test the default
-        env = {**os.environ, **env_overrides}
-        if "NUNCHI_HOOK_HISTORY_WINDOW" in env:
-            del env["NUNCHI_HOOK_HISTORY_WINDOW"]
+        })
+        env.pop("NUNCHI_HOOK_HISTORY_WINDOW", None)
         subprocess.run(
             [sys.executable, str(_HOOK)],
             input=json.dumps(inp),

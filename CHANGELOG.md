@@ -68,6 +68,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typed directive, and structural guards assert none of the three
   integrations contain sentinel-vs-text matching.
 
+### Hardening & test hygiene (dashboard sinks, slash trust chain, receipt-log leak)
+
+- **Test hygiene fix (real observed bug): hook tests no longer pollute the
+  operator's live receipt log.** Several tests ran the Claude Code hook
+  scripts as subprocesses with the parent environment inherited, letting
+  `NUNCHI_HOOK_LOG` fall through to its home-anchored default — the
+  operator's `~/.claude/nunchi-gate-receipts.jsonl` accumulated 700+ test
+  artifacts (`chat_id` values like `c1`). New `tests/hook_sandbox.sandbox_env`
+  pins `HOME` and `NUNCHI_HOOK_LOG` into a fresh temp dir for every hook
+  subprocess; all hook-running tests (`test_claude_code_hook`,
+  `test_claude_code_prompt_gate`, `test_history_buffer`) now route through
+  it. New enforcement suite `tests/test_no_home_writes.py` scans the ENTIRE
+  tests/ tree (no home-path resolution anywhere; no bare-`os.environ`
+  subprocess env in hook-running modules), self-tests its own detectors, and
+  runs a runtime canary proving the home-default fall-through is contained.
+  Fixed shared `/tmp` side-file names replaced with unique temp paths.
+- **Determinism: hermes gate tests no longer read the operator's live state
+  file.** `_base_cfg` in `test_hermes_integration` / `test_history_buffer`
+  now pins `state_path` to a nonexistent path instead of falling through to
+  `~/.hermes/nunchi-gate.state.json`, whose live overrides could flip
+  verdict routing mid-suite.
+- **Dashboard injection audit + enforcement.** Audited the hermes dashboard
+  renderer (`integrations/hermes/nunchi-gate/dashboard/index.js`): all
+  untrusted receipt/channel content is rendered through
+  `React.createElement` text nodes; no unsafe sinks found. New enforcement
+  test `tests/test_dashboard_asset_safety.py` scans every served web asset
+  in the whole repository (js/ts/html/vue/svelte, not selected files) for
+  `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`,
+  `dangerouslySetInnerHTML`, and `srcdoc`, self-tests the detector, and
+  fails if the dashboard bundle drops out of the scan.
+- **/nunchi slash-command trust chain documented and pinned by test.**
+  Authorization lives in hermes' command dispatcher, not the plugin: the
+  handler receives only the raw argument string (no sender identity), so
+  per-user checks are structurally impossible in-plugin. The trust chain and
+  the whitelist bounding its blast radius are now documented precisely in
+  the plugin docstrings and enforced by `tests/test_slash_command_authz.py`:
+  the handler signature excludes identity, adversarial slash input cannot
+  touch operator-only keys (`binary`, `log_path`, `state_path`, `agent_id`,
+  `mention_id`, `timeout_seconds`), mutations land only in the
+  config-pinned state file, and the conversational gate path (including
+  non-allowlisted senders and "/nunchi ..."-looking message text) can never
+  mutate state.
+
 ### Changed
 
 - **Hermes dashboard tab: UX repair and product redesign.** Two rounds driven

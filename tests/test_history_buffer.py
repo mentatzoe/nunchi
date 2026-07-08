@@ -19,6 +19,8 @@ import unittest
 import unittest.mock
 from types import SimpleNamespace
 
+from tests.hook_sandbox import sandbox_env
+
 _WORKTREE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _PLUGIN_PATH = _WORKTREE_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 _HOOK_PATH = _WORKTREE_ROOT / "integrations" / "claude-code" / "nunchi_gate_hook.py"
@@ -79,6 +81,9 @@ def _base_cfg(**overrides: object) -> dict:
         "bypass_commands": True,
         "fail_open": True,
         "log_path": "",
+        # Deterministic: never read the operator's real state file
+        # (the default would resolve to ~/.hermes/nunchi-gate.state.json).
+        "state_path": "/nonexistent/nunchi-gate-test-state.json",
     }
     cfg.update(overrides)
     return cfg
@@ -404,7 +409,9 @@ class TestHookHistoryWindowEnvVar(unittest.TestCase):
     """NUNCHI_HOOK_HISTORY_WINDOW controls how many transcript entries are used."""
 
     def _run_hook(self, hook_input: dict, env_overrides: dict | None = None) -> tuple[int, str, str]:
-        env = {**os.environ, **(env_overrides or {})}
+        # Sandboxed env: HOME + NUNCHI_HOOK_LOG pinned to a temp dir so hook
+        # receipts can never fall through to the operator's real log file.
+        env = sandbox_env(env_overrides)
         result = subprocess.run(
             [sys.executable, str(_HOOK_PATH)],
             input=__import__("json").dumps(hook_input),
@@ -508,7 +515,8 @@ class TestHookHistoryWindowEnvVar(unittest.TestCase):
 
     def test_env_var_backward_compat_absent(self) -> None:
         """When NUNCHI_HOOK_HISTORY_WINDOW is absent, hook runs with default 25."""
-        env = {k: v for k, v in os.environ.items() if k != "NUNCHI_HOOK_HISTORY_WINDOW"}
+        env = sandbox_env()
+        env.pop("NUNCHI_HOOK_HISTORY_WINDOW", None)
         lines = [self._user_entry("c1", "m1", "alice", "only msg")]
         lines.append(self._user_entry("c1", "m2", "alice", "trigger"))
         transcript = self._make_transcript(lines)
