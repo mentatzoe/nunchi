@@ -102,6 +102,7 @@ process.
 | `NUNCHI_HOOK_AGENT_ID` | `agent` | Agent identifier sent in the nunchi payload. |
 | `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. |
 | `NUNCHI_HOOK_PEER_BOTS` | _(empty)_ | Comma-separated usernames treated as `peer_bot` (all others are `human`). |
+| `NUNCHI_HOOK_HISTORY_WINDOW` | `25` | Max transcript events included as history before the trigger (most recent N). |
 | `NUNCHI_HOOK_FAIL_POLICY` | `open` | Gate error handling: `open` → allow, `closed` → deny. |
 | `NUNCHI_HOOK_TIMEOUT` | `30` | Timeout in seconds for the nunchi-channel subprocess. |
 | `NUNCHI_HOOK_LOG` | `~/.claude/nunchi-gate-receipts.jsonl` | Path for per-call receipt log (JSONL). |
@@ -173,10 +174,12 @@ frontier-model turn.
 - **Outbound sends** are not gated here — that is handled separately by the
   PreToolUse hook (`nunchi_gate_hook.py`).  Both hooks are designed to run
   together; they complement each other.
-- **Transport bot-deafness** (the Discord adapter ignoring messages from other
-  bots by default) is a separate, upstream concern.  This hook operates on
-  whatever prompts Claude Code already received; it does not filter at the
-  transport layer.
+- **Transport bot-deafness** (the official Claude Code Discord plugin ignoring
+  messages from other bots) is a separate, upstream concern.  This hook
+  operates on whatever prompts Claude Code already received; it does not
+  filter at the transport layer.  An operator-carried fix for the plugin's
+  bot-drop — with apply instructions and a live verification recipe — lives in
+  [`transport-patch/`](transport-patch/README.md).
 
 ## Inbound vs outbound gate summary
 
@@ -253,9 +256,10 @@ No stdout output; exit 0.
 | `NUNCHI_HOOK_LOG` | `~/.claude/nunchi-gate-receipts.jsonl` | Path for per-call receipt log (JSONL). |
 | `NUNCHI_CHANNEL_BIN` | `shutil.which("nunchi-channel")` | Path to the nunchi-channel binary. |
 
-Note: `NUNCHI_HOOK_HISTORY_WINDOW` defaults to **25** for the inbound hook
-(vs. 10 for the outbound hook) because the inbound gate operates on the
-entire prior transcript; larger context improves admission accuracy.
+Note: `NUNCHI_HOOK_HISTORY_WINDOW` defaults to **25** for both hooks — the
+outbound PreToolUse hook reads the same variable with the same default.
+Larger context improves admission accuracy; raise the window if your channels
+are busy enough that 25 transcript events cover too little conversation.
 
 ## Receipts log format
 
@@ -288,3 +292,19 @@ distinguishes the two:
 The inbound hook is **permanently fail-open**: there is no `deny-gate-error`
 action.  Gate failures on the inbound path always allow the prompt through,
 ensuring a broken gate cannot silence the operator or wedge the session.
+
+---
+
+# transport-patch — hearing peer bots on the official Discord plugin
+
+The hooks gate what the session hears and says, but the official Claude Code
+Discord plugin (`anthropics/claude-plugins-official`) drops every bot-authored
+message before its own access control runs — peer agents are never delivered
+at all, allowlisted or not (upstream issues #1153/#1559, open).
+
+[`transport-patch/`](transport-patch/README.md) carries the operator-applied
+patch (drop only self-messages; the plugin's existing `gate()`/`allowFrom`
+access control remains the authorization layer), exact apply instructions,
+and a live verification recipe for confirming a peer-bot message reaches the
+session. Applying it is a local step on your own plugin checkout; the
+upstream fix is pending.

@@ -13,7 +13,7 @@ custom responder.
 | `nunchi-telegram` | Telegram | stdlib | beta |
 | `nunchi-discord` | Discord | `pip install nunchi[discord]` | beta |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | beta |
-| Claude Code hook | Claude Code PreToolUse | stdlib | beta |
+| Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | beta |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
 ---
@@ -304,11 +304,51 @@ Full setup and configuration: [`integrations/hermes/README.md`](../integrations/
 
 ---
 
-## Claude Code hook
+## Claude Code hooks
 
-`nunchi_gate_hook.py` is a Claude Code **PreToolUse hook** that gates outbound
-channel sends through the nunchi admission classifier before they reach the tool
-layer.
+Two complementary hooks under `integrations/claude-code/` put the nunchi gate
+on both sides of a Claude Code session that participates in a chat channel:
+
+| Direction | Hook | Claude Code event | On PASS |
+|---|---|---|---|
+| Inbound — channel message arrives | `nunchi_prompt_gate.py` | `UserPromptSubmit` | prompt blocked before any LLM inference runs |
+| Outbound — agent attempts a reply | `nunchi_gate_hook.py` | `PreToolUse` | reply-tool call denied; the model is instructed to stay silent |
+
+**Inbound (`nunchi_prompt_gate.py`, UserPromptSubmit — merged 2026-07-08).**
+Gates channel-sourced prompts *before they reach the LLM*. The hook
+self-selects on the `<channel ...>` tag that channel transports put in the
+prompt, builds a per-channel history window from the session transcript, and
+calls `nunchi-channel`. A PASS suppresses the prompt for the cost of one
+lightweight gate call instead of a full frontier-model turn. Operator prompts
+(no channel tag) always pass through ungated, and the inbound path is
+permanently fail-open — a broken gate cannot silence the operator.
+
+**Outbound (`nunchi_gate_hook.py`, PreToolUse).** Gates reply-tool
+invocations (matcher such as `mcp__plugin_discord_discord__reply`) against the
+most recent inbound trigger for that channel. On PASS it emits a `deny`
+permission decision, converting voluntary instruction-following into a hard
+gate at the tooling layer. Fail policy is configurable (`open`/`closed`).
+
+The hooks are designed to run together: inbound saves the model turn, outbound
+backstops whatever slips through. They share configuration
+(`NUNCHI_CHANNEL_BIN`, agent identity, `NUNCHI_HOOK_HISTORY_WINDOW` — default
+25 for both) and append to the same JSONL receipts log, distinguished by a
+`direction` field.
+
+**Known transport gap: the official Discord plugin is bot-deaf.** The upstream
+Claude Code Discord plugin (`anthropics/claude-plugins-official`) drops every
+bot-authored message before its own access control runs
+(`if (msg.author.bot) return`), so peer-agent messages never reach the session
+and the inbound hook never sees them (upstream issues #1153/#1559, open). An
+operator-carried patch — a one-guard delta that drops only self-messages and
+lets the plugin's existing `gate()`/`allowFrom` access control authorize peer
+bots — ships with apply instructions and a live verification recipe at
+[`integrations/claude-code/transport-patch/`](../integrations/claude-code/transport-patch/README.md).
+
+**Status:** both hooks are merged and have been exercised against live Discord
+channel traffic. The transport patch is a local operator step applied to your
+own plugin checkout — the upstream fix is still pending, so peer-hearing is
+not available out of the box.
 
 Full setup and configuration: [`integrations/claude-code/README.md`](../integrations/claude-code/README.md)
 
