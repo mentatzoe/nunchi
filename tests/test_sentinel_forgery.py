@@ -31,6 +31,7 @@ import os
 import pathlib
 import subprocess
 import sys
+from tests.hook_sandbox import sandbox_env
 import tempfile
 import textwrap
 import types
@@ -232,7 +233,7 @@ class HermesSentinelForgeryTests(_TempDirMixin):
 
 
 def _run_hook_script(hook: pathlib.Path, hook_input: dict, env_overrides: dict) -> tuple[int, str, str]:
-    env = {**os.environ, **env_overrides}
+    env = sandbox_env(env_overrides)
     result = subprocess.run(
         [sys.executable, str(hook)],
         input=json.dumps(hook_input),
