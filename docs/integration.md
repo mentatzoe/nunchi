@@ -224,12 +224,16 @@ sentinel interception that already ships in cc-connect.
 
 ## Installation
 
-Nunchi is stdlib-only (Python 3.11+, no runtime dependencies). It is not yet
-on PyPI; install from source:
+Nunchi is stdlib-only (Python 3.11+, no runtime dependencies). The published
+PyPI release (0.2.0) carries the core gate and the `nunchi`/`nunchi-channel`
+console scripts — enough for everything in this guide. The platform adapters
+(`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`) landed after that
+release and currently require a source install:
 
 ```sh
+pip install nunchi                  # PyPI 0.2.0: core + nunchi/nunchi-channel
+# or, from source (core + platform adapters):
 pip install .                       # from a checkout
-# or
 pip install "git+https://github.com/mentatzoe/nunchi.git"
 ```
 

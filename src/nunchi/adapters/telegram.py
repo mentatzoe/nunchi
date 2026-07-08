@@ -21,7 +21,7 @@ Optional env vars:
                              (default: ~/.nunchi/telegram-gate.jsonl)
     NUNCHI_TELEGRAM_AGENT_ID Agent identity (default: bot_<username>)
     NUNCHI_TELEGRAM_HISTORY  Number of recent messages in gate context
-                             (default: 10)
+                             (default: 20)
     NUNCHI_RESPONDER_MODEL   LLM model for the built-in demo responder;
                              defaults to NUNCHI_CLASSIFIER_MODEL
     OPENROUTER_API_KEY       API key for the demo responder

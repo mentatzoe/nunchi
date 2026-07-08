@@ -114,6 +114,12 @@ Config block (in Hermes config.yaml):
       # JSONL file recording every gated message.  Set to "" or false to disable.
       log_path: ~/.hermes/logs/nunchi-gate.jsonl
 
+      # history_window (int, default 20) — number of rolling per-channel history
+      # entries kept in memory and passed to the gate as conversation context.
+      # Global config.yaml only — NOT overridable per channel in the map form
+      # of `channels`.
+      # history_window: 20
+
 Legacy support:
 - Config block ``turnaware:`` is accepted when ``nunchi:`` is absent and a
   deprecation warning is emitted.  Rename the block to migrate.

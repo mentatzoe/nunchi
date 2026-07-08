@@ -33,7 +33,7 @@ Optional env vars:
     NUNCHI_MATRIX_PEER_BOTS   Comma-separated Matrix user IDs (or @prefix prefixes)
                               treated as peer_bot, not human
     NUNCHI_MATRIX_HISTORY     Number of recent messages to include in gate context
-                              (default: 10)
+                              (default: 20)
     NUNCHI_RESPONDER_MODEL    LLM model for the built-in demo responder; defaults
                               to NUNCHI_CLASSIFIER_MODEL
     OPENROUTER_API_KEY        API key for the built-in demo responder

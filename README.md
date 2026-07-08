@@ -31,16 +31,23 @@ into a running bot is the consumer's step.
 
 ## Install
 
-Stdlib-only (Python 3.11+, no runtime dependencies). Not yet on PyPI; install
-from source:
+Stdlib-only (Python 3.11+, no runtime dependencies). The published PyPI
+release (0.2.0) carries the core gate and the `nunchi`/`nunchi-channel`
+console scripts; the platform adapters (`nunchi-matrix`, `nunchi-telegram`,
+`nunchi-discord`) landed after that release and currently install from
+source only:
 
 ```sh
-pip install "git+https://github.com/mentatzoe/nunchi.git"   # or: pip install .
+pip install nunchi                                          # PyPI 0.2.0: core + CLI
+pip install "git+https://github.com/mentatzoe/nunchi.git"   # source: core + adapters
 # zero-install one-shot:
 uvx --from "git+https://github.com/mentatzoe/nunchi.git" nunchi --help
 ```
 
-This provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`, and `nunchi-telegram` console scripts (`nunchi-discord` requires `pip install nunchi[discord]`). See
+A source install provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`, and
+`nunchi-telegram` console scripts. `nunchi-discord` additionally needs the
+`[discord]` extra — also source-only for now:
+`pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git"`. See
 [`CHANGELOG.md`](CHANGELOG.md) for releases and [`docs/STABILITY.md`](docs/STABILITY.md)
 for the versioning / verdict-surface stability contract.
 
@@ -246,11 +253,14 @@ deployment already understands.
 | Adapter | Surface | Install weight | Status |
 |---|---|---|---|
 | `nunchi-channel` | Any (subprocess) | stdlib | stable |
-| `nunchi-matrix` | Matrix | stdlib | beta |
-| `nunchi-telegram` | Telegram | stdlib | beta |
-| `nunchi-discord` | Discord | `pip install nunchi[discord]` | beta |
+| `nunchi-matrix` | Matrix | stdlib | beta\* |
+| `nunchi-telegram` | Telegram | stdlib | beta\* |
+| `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
 | Hermes plugin | Hermes gateway | stdlib | beta |
 | Claude Code hook | Claude Code PreToolUse | stdlib | beta |
+
+\* full offline test coverage, but not yet run against a live
+Matrix/Telegram/Discord server.
 
 `nunchi-matrix` is the reference integration — one command, zero extra
 dependencies, unencrypted Matrix rooms only (encrypted rooms are skipped with a
