@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
+from .events import message_text
 from .ratelimit import SendBackstop
 from .rest import DiscordRestError
 
@@ -114,7 +115,7 @@ def shape_message(msg: dict) -> dict:
         "author_id": str(author.get("id", "")),
         "author_name": str(author.get("username", "")),
         "author_is_bot": bool(author.get("bot", False)),
-        "content": msg.get("content") or "",
+        "content": message_text(msg),
         "timestamp": msg.get("timestamp"),
     }
 

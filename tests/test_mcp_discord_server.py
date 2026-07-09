@@ -40,6 +40,7 @@ from nunchi.mcp_discord.config import load_config
 from nunchi.mcp_discord.events import (
     NOTIFICATION_METHOD,
     filter_message_create,
+    message_text,
     notification_params,
 )
 from nunchi.mcp_discord.gateway import GatewayProtocol
@@ -149,11 +150,81 @@ class TestContentBehavior(unittest.TestCase):
         with self.assertNoLogs("nunchi.mcp_discord.events", level="WARNING"):
             event = filter_message_create(data, "999")
         self.assertIsNotNone(event)
+        self.assertEqual(event.content, "[Discord rich message]\nan embed")
 
     def test_empty_content_with_attachment_no_warning(self):
         data = _create_data(content="", attachments=[{"id": "1", "filename": "x.png"}])
         with self.assertNoLogs("nunchi.mcp_discord.events", level="WARNING"):
-            filter_message_create(data, "999")
+            event = filter_message_create(data, "999")
+        self.assertEqual(event.content, "[Discord rich message]\n[attachment] x.png")
+
+    def test_plain_content_wins_over_rich_fallback(self):
+        data = _create_data(
+            content="  exact plain content  ",
+            embeds=[{"title": "must not be appended"}],
+            components=[{"type": 10, "content": "also excluded"}],
+        )
+        event = filter_message_create(data, "999")
+        self.assertEqual(event.content, "  exact plain content  ")
+
+    def test_rich_only_message_normalizes_visible_conversational_text(self):
+        data = _create_data(
+            content="",
+            embeds=[
+                {
+                    "author": {"name": "Review agent"},
+                    "title": "Review complete",
+                    "description": "No blockers found.",
+                    "fields": [{"name": "Warning", "value": "Receipt is soft."}],
+                    "footer": {"text": "123 tests passed"},
+                }
+            ],
+            components=[
+                {
+                    "type": 1,
+                    "components": [
+                        {"type": 10, "content": "Approval is still required."},
+                        {"type": 2, "label": "Approve command"},
+                    ],
+                }
+            ],
+            attachments=[{"description": "review.txt", "filename": "ignored.txt"}],
+            sticker_items=[{"name": "Reviewed"}],
+            poll={
+                "question": {"text": "Merge now?"},
+                "answers": [
+                    {"poll_media": {"text": "Yes"}},
+                    {"poll_media": {"text": "No"}},
+                ],
+            },
+        )
+
+        content = message_text(data)
+
+        self.assertTrue(content.startswith("[Discord rich message]\n"))
+        for expected in (
+            "Review agent",
+            "Review complete",
+            "No blockers found.",
+            "Warning: Receipt is soft.",
+            "123 tests passed",
+            "Approval is still required.",
+            "[attachment] review.txt",
+            "[sticker] Reviewed",
+            "[poll] Merge now?",
+            "- Yes",
+            "- No",
+        ):
+            self.assertIn(expected, content)
+        self.assertNotIn("Approve command", content)
+        self.assertNotIn("ignored.txt", content)
+
+    def test_rich_only_message_is_bounded(self):
+        content = message_text(
+            _create_data(content="", embeds=[{"description": "x" * 7000}])
+        )
+        self.assertEqual(len(content), 6000)
+        self.assertTrue(content.endswith("..."))
 
 
 # --------------------------------------------------------------------------- #
@@ -405,6 +476,14 @@ class TestToolExecutor(unittest.TestCase):
         self.assertEqual(rest.history_calls, [("100", 10, "77")])
         self.assertEqual(len(payload["messages"]), 2)
         self.assertIn("author_is_bot", payload["messages"][0])
+
+    def test_read_history_normalizes_rich_only_messages(self):
+        shaped = shape_message(
+            _api_message(content="", embeds=[{"title": "Approval required"}])
+        )
+        self.assertEqual(
+            shaped["content"], "[Discord rich message]\nApproval required"
+        )
 
     def test_non_numeric_channel_id_rejected(self):
         executor, rest = self._executor()

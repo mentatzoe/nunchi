@@ -65,6 +65,13 @@ Every non-self message (human or bot) arrives as an unsolicited notification:
 }
 ```
 
+Plain Discord `content` is preserved exactly. When Discord presents a message
+only through rich surfaces, the transport supplies a tagged, bounded text
+fallback from conversational embed fields, Components V2 text displays,
+attachment descriptions or names, stickers, and polls. Button labels are not
+treated as speech. Live notifications and `read_history` use the same
+normalization so admission sees the same message after a reconnect.
+
 Tools: `send_message(channel_id, content)`,
 `reply_message(channel_id, message_id, content)`,
 `read_history(channel_id, limit=50, before?)`.
@@ -111,5 +118,6 @@ python3 -m unittest tests.test_mcp_discord_gateway tests.test_mcp_discord_server
 Offline-only: gateway resume after simulated disconnect, the load-bearing
 bot-delivered/self-dropped filter, MESSAGE_CONTENT warning behavior, exact
 notification schema against a mock MCP client, 429/backstop enforcement, and
-token hygiene. Tests that need the `mcp` SDK are skipped with a reason when
-it is not installed (same pattern as the discord.py-gated tests).
+token hygiene. Rich-only message normalization is covered for both live-event
+and history shapes. Tests that need the `mcp` SDK are skipped with a reason
+when it is not installed (same pattern as the discord.py-gated tests).

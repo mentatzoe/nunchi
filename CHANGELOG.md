@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed single-run Vigil smoke evidence record. The live record supports
   only that narrow wake/outbound smoke, not sustained operations; the app has
   offline protocol and responsive interaction evidence in this change.
+- Normalized Discord rich-only peer messages into tagged, bounded text for
+  both live events and history, while preserving ordinary content and excluding
+  button labels. This prevents visible embed-only reviews or approval notices
+  from being misclassified as empty room events.
 
 ### Added — `nunchi-install`: copy-based installer for operator artifacts
 

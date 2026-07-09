@@ -287,9 +287,12 @@ transport's bounded queue drops the oldest backlog under overflow).
 History fed to the gate is the runner's rolling per-channel history. On each
 transport connection, configured channels are backfilled through the shared
 transport's `read_history` tool (newest-first from Discord, reversed to
-oldest-first before gating). If `NUNCHI_RUNNER_CHANNELS` / `channels` is empty
-(`watch all`), startup backfill is skipped because there is no finite channel
-list to fetch.
+oldest-first before gating). Plain Discord content is preserved; rich-only
+peer messages are converted by the transport into tagged, bounded text from
+their visible conversational fields. Live notifications and history use the
+same conversion. If `NUNCHI_RUNNER_CHANNELS` / `channels` is empty (`watch
+all`), startup backfill is skipped because there is no finite channel list to
+fetch.
 
 The hook reuses the Claude Code hook's env names for the shared knobs
 (`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_ALIASES`,

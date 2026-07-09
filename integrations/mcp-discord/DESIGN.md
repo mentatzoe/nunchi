@@ -80,7 +80,8 @@ tool registration, session tracking, notification push, uvicorn lifecycle.
 | Discord 429 on send | Per-route bucket guard sleeps out `X-RateLimit-Reset-After`; on 429 the `retry_after` (global flag honored) is respected with at most 3 retries, then a tool error. |
 | Transport backstop exceeded | Tool call fails immediately with `retry in Ns` — never queued, never sent. |
 | Discord 401/403 on send | Non-retryable: tool error on the first response. |
-| Empty `content` on MESSAGE_CREATE with no embeds/attachments | Signature of a missing MESSAGE_CONTENT intent: loud WARNING with the portal remediation step; the notification is still delivered with `content: ""` (documented, tested — no silent garbage). |
+| Empty `content` with rich message data | Normalize conversational embed fields, Components V2 text displays, attachment descriptions/names, stickers, and polls into tagged, bounded text. Exclude interaction chrome such as button labels. Live notifications and history use the same normalizer. |
+| Empty `content` on MESSAGE_CREATE with no rich data | Signature of a missing MESSAGE_CONTENT intent: loud WARNING with the portal remediation step; the notification is still delivered with `content: ""` (documented, tested — no silent garbage). |
 | SIGTERM / SIGINT | Uvicorn graceful shutdown -> lifespan drain: stop pumping, wait for in-flight sends (default 10s), close gateway with 1000, exit. |
 
 ## Security posture
@@ -94,7 +95,9 @@ tool registration, session tracking, notification push, uvicorn lifecycle.
   is absent.
 - **No gate logic.** The transport never decides who may speak; it drops
   exactly one author: itself (`author.id == our bot user id`). Everything
-  else — human or bot — is delivered unfiltered and untransformed.
+  else — human or bot — is delivered. Plain message content is unchanged;
+  rich-only messages receive the documented text fallback so downstream
+  admission does not mistake visible speech for an empty event.
 - **One server per bot account.** Identity is the process boundary; no
   tenant mixing, no shared token store.
 - **Send backstop, default on.** Sliding-window cap (5 sends / 10s per
