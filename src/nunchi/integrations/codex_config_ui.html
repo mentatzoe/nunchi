@@ -174,6 +174,7 @@
       <div class="actions">
         <button class="button" id="refresh" type="button">Refresh</button>
         <button class="button danger" id="reset" type="button">Reset</button>
+        <button class="button danger" id="session-reset" type="button" disabled>New session</button>
         <button class="button primary" id="save" type="button" disabled>Save</button>
       </div>
     </header>
@@ -203,6 +204,8 @@
       var pollSeconds = 5;
       var resetArmed = false;
       var resetTimer = null;
+      var sessionResetArmed = false;
+      var sessionResetTimer = null;
 
       var loadingEl = document.getElementById("loading");
       var settingsEl = document.getElementById("settings");
@@ -210,6 +213,7 @@
       var noticeEl = document.getElementById("notice");
       var saveButton = document.getElementById("save");
       var resetButton = document.getElementById("reset");
+      var sessionResetButton = document.getElementById("session-reset");
 
       function append(parent, child) {
         if (child == null) return;
@@ -336,6 +340,7 @@
         snapshot = data;
         pending = {};
         disarmReset();
+        disarmSessionReset();
         loadingEl.classList.add("hidden");
         saveButton.disabled = true;
         showNotice("", "");
@@ -347,11 +352,20 @@
         var health = (snapshot && snapshot.health) || {};
         var gate = health.gate_binary || {};
         var codex = health.codex_binary || {};
+        var session = health.codex_session || {};
         var healthEl = document.getElementById("health");
         healthEl.replaceChildren(
           node("span", { className: "badge " + (gate.available ? "ok" : "bad") }, "Gate " + (gate.available ? "ready" : "missing")),
           node("span", { className: "badge " + (codex.available ? "ok" : "bad") }, "Codex " + (codex.available ? "ready" : "missing"))
         );
+        if (session.mode === "fresh") {
+          append(healthEl, node("span", { className: "badge" }, "Session fresh"));
+        } else if (session.error) {
+          append(healthEl, node("span", { className: "badge bad", title: session.error }, "Session error"));
+        } else {
+          append(healthEl, node("span", { className: "badge " + (session.active ? "ok" : "") }, session.active ? "Session active" : "Session waiting"));
+        }
+        sessionResetButton.disabled = session.mode !== "persistent" || (!session.active && !session.error);
         if (health.last_receipt_action) append(healthEl, node("span", { className: "badge" }, health.last_receipt_action));
       }
 
@@ -671,6 +685,29 @@
           showNotice("Runtime overrides reset.", "success");
         }).catch(function (error) { showNotice(error.message, "error"); });
       }
+      function disarmSessionReset() {
+        sessionResetArmed = false;
+        sessionResetButton.textContent = "New session";
+        if (sessionResetTimer) window.clearTimeout(sessionResetTimer);
+        sessionResetTimer = null;
+      }
+      function resetSession() {
+        if (sessionResetButton.disabled) return;
+        if (!sessionResetArmed) {
+          sessionResetArmed = true;
+          sessionResetButton.textContent = "Confirm new session";
+          showNotice("Confirm to clear Vigil's current room context.", "warning");
+          sessionResetTimer = window.setTimeout(function () { disarmSessionReset(); showNotice("", ""); }, 8000);
+          return;
+        }
+        disarmSessionReset();
+        callTool("reset_nunchi_session", {}).then(function (result) {
+          var data = toolStructured(result) || {};
+          if (!data.ok) throw new Error(data.error || "Vigil's session was not reset");
+          acceptSnapshot(data.snapshot);
+          showNotice("The next admitted wake will start a new Vigil session.", "success");
+        }).catch(function (error) { showNotice(error.message, "error"); });
+      }
       function switchTab(tab) {
         currentTab = tab;
         document.getElementById("settings-tab").setAttribute("aria-selected", String(tab === "settings"));
@@ -683,6 +720,7 @@
       document.getElementById("refresh").addEventListener("click", refresh);
       document.getElementById("save").addEventListener("click", save);
       document.getElementById("reset").addEventListener("click", resetAll);
+      document.getElementById("session-reset").addEventListener("click", resetSession);
       document.getElementById("settings-tab").addEventListener("click", function () { switchTab("settings"); });
       document.getElementById("receipts-tab").addEventListener("click", function () { switchTab("receipts"); });
 

@@ -14,13 +14,18 @@ operations. Sustained participation still requires the shared
 `nunchi-mcp-discord` transport, Discord credentials, the installed plugin, and
 the long-running room runner.
 
-Codex is **pull-only** as an MCP client: it can call the transport's tools,
-but it never reacts to server notifications on its own. So this integration
-has four pieces:
+An open Codex task does not react to MCP server notifications on its own. The
+long-running room runner therefore holds the transport's SSE stream and reacts
+to Discord events as they arrive; it does not poll the room. Admitted events
+resume one dedicated, persisted Vigil Codex task. They are not injected into an
+arbitrary desktop task that happens to be open. `PASS` events still enter the
+runner's rolling history but deliberately do not wake the frontier model.
+
+The integration has four pieces:
 
 | Piece | What it is |
 | --- | --- |
-| `nunchi-codex-room-runner` (`nunchi_room_runner.py`) | The agent's **ear**. A long-running process that consumes the transport's SSE notification stream, runs every room message through `nunchi-channel`, and wakes Codex (`codex exec`) only for admitted turns (SPEAK / ACK / ASK). PASS = receipt only, zero frontier tokens. |
+| `nunchi-codex-room-runner` (`nunchi_room_runner.py`) | The agent's **ear**. A long-running process that consumes the transport's SSE notification stream, runs every room message through `nunchi-channel`, and wakes Codex only for admitted turns (SPEAK / ACK / ASK). The first wake creates a dedicated Codex task; later wakes use `codex exec resume` with its persisted thread id. PASS = receipt only, zero frontier tokens. |
 | `nunchi-codex-prompt-gate` (`nunchi_prompt_gate_codex.py`) | Defense-in-depth **UserPromptSubmit hook** for interactive Codex sessions. Gates only prompts carrying a `<channel source=...>` tag; blocks on PASS; fail-open on gate errors (an operator typing must never be silenced by a gate outage). |
 | `nunchi-codex-send-gate` (`nunchi_send_gate_codex.py`) | **PreToolUse hook** for outbound room sends. Re-checks supported `send_message`/`reply_message` MCP tool calls against Nunchi immediately before the tool runs. Matching sends with malformed or missing current context, repeated or concurrent sends for one admitted context, and allows whose receipt cannot be persisted are denied. |
 | `nunchi-codex-config-app` | An **MCP Apps operator panel** for hot global/per-channel presence settings, health, and recent gate receipts. It writes the same state read by the runner and both hooks. |
@@ -171,6 +176,8 @@ to render the panel in the current task.
    agent_id = "vigil"
    mention_id = "1494822530643398827"
    aliases = ["Vigil", "Codex"]
+   session_mode = "persistent"
+   session_path = "~/.nunchi/codex-room-session.json"
    enabled = true
    senders = "all"
    verbosity = "normal"
@@ -199,6 +206,9 @@ The panel can change `enabled`, `senders`, `allow_from`, `verbosity`, `model`,
 and `pinned_rules` globally or for one channel. It can hot-add a channel with
 `enabled = true`, disable an existing channel as a circuit breaker, reset one
 channel, reset all runtime overrides, and inspect newest-first receipts.
+It also reports whether the dedicated Codex room session is waiting, active,
+or invalid, and can clear that session after confirmation so the next admitted
+wake starts a new task.
 
 Changes are written atomically to `NUNCHI_RUNNER_STATE` (default
 `~/.nunchi/codex-room.state.json`, mode `0600`) and are read again for every
@@ -262,13 +272,15 @@ message bodies.
 | `NUNCHI_RUNNER_SELF_ID` | — | Discord user id of the runner's own bot; matching authors are skipped (belt-and-braces; the transport already drops its own) |
 | `NUNCHI_RUNNER_CHANNELS` | (all) | Comma-separated channel ids to watch |
 | `NUNCHI_RUNNER_HISTORY_WINDOW` | `20` | Rolling per-channel history size fed to the gate |
-| `NUNCHI_RUNNER_AGENT_ID` | `agent` | Agent identity in the gate payload |
+| `NUNCHI_RUNNER_AGENT_ID` | `agent` | Agent identity in the gate payload and dedicated room-task wake prompt |
 | `NUNCHI_RUNNER_MENTION_ID` | — | Agent's @mention handle on the surface. This is the **platform mention token** — on Discord the numeric snowflake (e.g. `1496355876234199040`) — **not** the display name. A display name here makes the gate blind to real @-mentions: a direct `@<snowflake>` mention reads as "someone else" and PASSes (observed live 2026-07-08). Names belong in `NUNCHI_RUNNER_ALIASES` |
-| `NUNCHI_RUNNER_ALIASES` | — | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, extra mention tokens, e.g. `Vigil,Codex,Aether`) → `agent.aliases`. Absent means behavior is unchanged |
+| `NUNCHI_RUNNER_ALIASES` | — | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, extra mention tokens, e.g. `Vigil,Codex,Aether`) → `agent.aliases` and room-task identity metadata. Absent means behavior is unchanged |
 | `NUNCHI_CHANNEL_BIN` | `which nunchi-channel` | Gate binary; the runner refuses startup if it is missing or not executable |
 | `NUNCHI_RUNNER_GATE_TIMEOUT` | `30` | Gate subprocess timeout (seconds) |
 | `NUNCHI_RUNNER_CODEX_BIN` | `codex` | Binary used for wakes (`codex exec --skip-git-repo-check --full-auto`) |
 | `NUNCHI_RUNNER_CODEX_ARGS` | — | Extra `codex exec` args, shell-split (e.g. `-c model_reasoning_effort=xhigh`) |
+| `NUNCHI_RUNNER_SESSION_MODE` | `persistent` | `persistent`: create once, then resume the same dedicated Codex room task. `fresh`: create an isolated task for every admitted wake |
+| `NUNCHI_RUNNER_SESSION_STATE` | `~/.nunchi/codex-room-session.json` | Atomic mode-`0600` state holding the dedicated Codex thread id (`session_path` in TOML) |
 | `NUNCHI_RUNNER_WAKE_TIMEOUT` | `300` | Wake subprocess timeout (seconds) |
 | `NUNCHI_RUNNER_FAIL_POLICY` | `closed` | `closed`: gate error → no wake, loud receipt. `open`: degraded SPEAK-shaped wake |
 | `NUNCHI_RUNNER_LOG` | `~/.nunchi/codex-runner-receipts.jsonl` | Receipt JSONL (shared with the hook; hook records carry `"direction": "hook-inbound"`) |
@@ -280,9 +292,10 @@ message bodies.
 | `NUNCHI_RUNNER_MODEL` | `NUNCHI_CLASSIFIER_MODEL` | Baseline classifier model; runtime state can override without restarting the runner |
 | `NUNCHI_RUNNER_PINNED_RULES` | — | Baseline room-governance text sent to the admission gate |
 
-Wakes are serialized: the runner is single-threaded, so a wake blocks the
-consume loop and triggers arriving mid-wake queue in the stream (the
-transport's bounded queue drops the oldest backlog under overflow).
+Wakes are serialized so two `codex exec resume` calls cannot race the same
+task. While a wake runs, triggers arriving on the already-open SSE stream queue
+in the transport; the transport's bounded queue drops the oldest backlog under
+overflow.
 
 History fed to the gate is the runner's rolling per-channel history. On each
 transport connection, configured channels are backfilled through the shared
@@ -318,7 +331,9 @@ Runner receipts write one JSONL line per event: `ts`, `channel`, `message_id`, `
 (`pass-suppressed` | `wake-ok` | `wake-error` | `no-wake-gate-error` |
 `no-wake-state-error` | `skipped-self` | `skipped-channel` |
 `skipped-sender-policy` | `skipped-duplicate` | `skipped-empty`), `wake_exit` when a
-wake ran, `history_len`. `minimal` and `normal` omit message content; `debug`
+wake ran, `codex_session_id` when Codex reported its task id, and `history_len`.
+The session id lets operators verify that admitted wakes resumed one task.
+`minimal` and `normal` omit message content; `debug`
 adds the gate payload/directive and can therefore include room content. API
 tokens and keys are never written intentionally.
 

@@ -95,6 +95,7 @@ class _StubBinDir:
         self.gate_model = self.dir / "gate_model.txt"
         self.codex_args = self.dir / "codex_args.txt"
         self.codex_exit_file = self.dir / "codex_exit"
+        self.codex_thread_id = self.dir / "codex_thread_id"
 
         self.gate_bin = self.dir / "stub-nunchi-channel.sh"
         self.gate_bin.write_text(
@@ -109,6 +110,10 @@ class _StubBinDir:
         self.codex_bin.write_text(
             "#!/bin/sh\n"
             f'printf \'%s\\n<<<ARG>>>\\n\' "$@" > "{self.codex_args}"\n'
+            f'thread_id=$(cat "{self.codex_thread_id}")\n'
+            "if [ -n \"$thread_id\" ]; then\n"
+            "  printf '{\"type\":\"thread.started\",\"thread_id\":\"%s\"}\\n' \"$thread_id\"\n"
+            "fi\n"
             f'exit "$(cat "{self.codex_exit_file}")"\n'
         )
         for p in (self.gate_bin, self.codex_bin):
@@ -116,6 +121,7 @@ class _StubBinDir:
 
         self.set_gate(_directive("SPEAK"))
         self.codex_exit_file.write_text("0")
+        self.codex_thread_id.write_text("019f4914-a9c7-7090-bec3-0e78fa9b84e1")
 
     def set_gate(self, directive: dict, exit_code: int = 0) -> None:
         self.gate_directive.write_text(json.dumps(directive))
@@ -143,6 +149,7 @@ def _make_runner(stubs: _StubBinDir, **overrides) -> "runner_mod.RoomRunner":
         agent_id="dalgos",
         mention_id="<@42>",
         log_path=stubs.dir / "receipts.jsonl",
+        session_path=stubs.dir / "codex-session.json",
         gate_timeout=10.0,
         wake_timeout=10.0,
     )
@@ -496,6 +503,27 @@ class TestWakePromptContextSafety(unittest.TestCase):
         )
 
 
+class TestCodexSessionState(unittest.TestCase):
+    def test_rejects_noncanonical_state_shapes(self):
+        invalid_states = (
+            {"version": True, "thread_id": "019f4914-a9c7-7090-bec3-0e78fa9b84e1"},
+            {"version": 1.0, "thread_id": "019f4914-a9c7-7090-bec3-0e78fa9b84e1"},
+            {"version": 1, "thread_id": "not-a-uuid"},
+            {
+                "version": 1,
+                "thread_id": "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+                "created_at": {"unexpected": "object"},
+            },
+        )
+        for state in invalid_states:
+            with self.subTest(state=state):
+                with tempfile.TemporaryDirectory() as td:
+                    path = pathlib.Path(td) / "session.json"
+                    path.write_text(json.dumps(state), encoding="utf-8")
+                    with self.assertRaises(runner_mod.CodexSessionStateError):
+                        runner_mod.load_codex_session(path)
+
+
 class TestVerdictRouting(unittest.TestCase):
     def setUp(self):
         self.stubs = _StubBinDir()
@@ -519,8 +547,10 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertEqual(argv[0], "exec")
         self.assertIn("--skip-git-repo-check", argv)
         self.assertIn("--full-auto", argv)  # default when no extra args are set
+        self.assertIn("--json", argv)
         prompt = argv[-1]
         self.assertIn("verdict: SPEAK", prompt)
+        self.assertIn("participating in this Discord room as dalgos", prompt)
         self.assertIn("operator addressed the agent", prompt)
         self.assertIn("dalgos, status?", prompt)
         self.assertIn("channel_id: c1", prompt)
@@ -534,7 +564,99 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertEqual(receipts[-1]["verdict"], "SPEAK")
         self.assertEqual(receipts[-1]["wake_exit"], 0)
         self.assertEqual(receipts[-1]["history_len"], 1)
+        self.assertEqual(
+            receipts[-1]["codex_session_id"],
+            "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+        )
         self.assertIn("confidences", receipts[-1])
+
+    def test_persistent_session_survives_runner_restart_and_resumes(self):
+        runner = _make_runner(self.stubs)
+        self.assertEqual(
+            runner.handle_notification(_event(message_id="m1", content="first wake")),
+            "wake-ok",
+        )
+        first_argv = self.stubs.codex_argv()
+        self.assertEqual(first_argv[0], "exec")
+        self.assertNotIn("resume", first_argv)
+
+        state_path = runner.config.session_path
+        state = runner_mod.load_codex_session(state_path)
+        assert state is not None
+        self.assertEqual(
+            state["thread_id"], "019f4914-a9c7-7090-bec3-0e78fa9b84e1"
+        )
+        self.assertEqual(stat.S_IMODE(state_path.stat().st_mode), 0o600)
+
+        restarted = _make_runner(self.stubs)
+        self.assertEqual(
+            restarted.handle_notification(_event(message_id="m2", content="after restart")),
+            "wake-ok",
+        )
+        resumed_argv = self.stubs.codex_argv()
+        self.assertEqual(resumed_argv[:2], ["exec", "resume"])
+        self.assertIn(state["thread_id"], resumed_argv)
+        self.assertEqual(runner_mod.load_codex_session(state_path)["created_at"], state["created_at"])
+
+    def test_corrupt_persistent_session_fails_closed_before_codex(self):
+        runner = _make_runner(self.stubs)
+        runner.config.session_path.write_text("not-json")
+
+        action = runner.handle_notification(_event())
+
+        self.assertEqual(action, "wake-error")
+        self.assertFalse(self.stubs.codex_called())
+        self.assertIn("cannot read Codex session state", _receipts(runner)[-1]["error"])
+
+    def test_success_without_thread_id_fails_closed(self):
+        self.stubs.codex_thread_id.write_text("")
+        runner = _make_runner(self.stubs)
+
+        action = runner.handle_notification(_event())
+
+        self.assertEqual(action, "wake-error")
+        self.assertTrue(self.stubs.codex_called())
+        self.assertFalse(runner.config.session_path.exists())
+        self.assertIn("without reporting a thread.started id", _receipts(runner)[-1]["error"])
+
+    def test_successful_resume_without_thread_id_fails_closed(self):
+        runner = _make_runner(self.stubs)
+        self.assertEqual(runner.handle_notification(_event(message_id="m1")), "wake-ok")
+        expected = runner_mod.load_codex_session(runner.config.session_path)["thread_id"]
+        self.stubs.codex_thread_id.write_text("")
+
+        action = runner.handle_notification(_event(message_id="m2"))
+
+        self.assertEqual(action, "wake-error")
+        self.assertEqual(
+            runner_mod.load_codex_session(runner.config.session_path)["thread_id"],
+            expected,
+        )
+        self.assertIn("without reporting a thread.started id", _receipts(runner)[-1]["error"])
+
+    def test_resume_thread_mismatch_fails_without_replacing_state(self):
+        runner = _make_runner(self.stubs)
+        self.assertEqual(runner.handle_notification(_event(message_id="m1")), "wake-ok")
+        expected = runner_mod.load_codex_session(runner.config.session_path)["thread_id"]
+        self.stubs.codex_thread_id.write_text("019f4914-a9c7-7090-bec3-0e78fa9b84e2")
+
+        action = runner.handle_notification(_event(message_id="m2"))
+
+        self.assertEqual(action, "wake-error")
+        self.assertEqual(
+            runner_mod.load_codex_session(runner.config.session_path)["thread_id"],
+            expected,
+        )
+        self.assertIn("unexpected thread", _receipts(runner)[-1]["error"])
+
+    def test_fresh_session_mode_never_resumes_or_writes_state(self):
+        runner = _make_runner(self.stubs, session_mode="fresh")
+        self.assertEqual(runner.handle_notification(_event(message_id="m1")), "wake-ok")
+        self.assertEqual(runner.handle_notification(_event(message_id="m2")), "wake-ok")
+
+        self.assertEqual(self.stubs.codex_argv()[0], "exec")
+        self.assertNotIn("resume", self.stubs.codex_argv())
+        self.assertFalse(runner.config.session_path.exists())
 
     def test_extra_codex_args_replace_sandbox_flags(self):
         # codex rejects --full-auto combined with the approvals-bypass flag
@@ -643,7 +765,7 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertIn("content: Please review the latest head.", prompt)
 
     def test_gate_payload_carries_agent_aliases(self):
-        self.stubs.set_gate(_directive("PASS"))
+        self.stubs.set_gate(_directive("SPEAK"))
         runner = _make_runner(
             self.stubs,
             # dupes of agent_id/mention_id must be dropped, order preserved
@@ -660,6 +782,10 @@ class TestVerdictRouting(unittest.TestCase):
                 "aliases": ["Vigil", "Codex", "1496355876234199040"],
             },
         )
+        prompt = self.stubs.codex_argv()[-1]
+        self.assertIn("participating in this Discord room as dalgos", prompt)
+        self.assertIn("Room aliases: Vigil, Codex, 1496355876234199040", prompt)
+        self.assertNotIn("Room aliases: Vigil, Codex, dalgos", prompt)
 
 
 class TestGateFailurePolicy(unittest.TestCase):
@@ -1144,6 +1270,8 @@ class TestConfigFromEnv(unittest.TestCase):
             "NUNCHI_RUNNER_MODEL": "deepseek/deepseek-v4-flash",
             "NUNCHI_RUNNER_PINNED_RULES": "Stay quiet unless needed.",
             "NUNCHI_RUNNER_STATE": "/tmp/vigil-state.json",
+            "NUNCHI_RUNNER_SESSION_MODE": "fresh",
+            "NUNCHI_RUNNER_SESSION_STATE": "/tmp/vigil-session.json",
         }
         cfg = runner_mod.RunnerConfig.from_env(environ=env)
         self.assertEqual(cfg.channels, frozenset({"c1", "c2"}))
@@ -1161,6 +1289,8 @@ class TestConfigFromEnv(unittest.TestCase):
         self.assertEqual(cfg.model, "deepseek/deepseek-v4-flash")
         self.assertEqual(cfg.pinned_rules, "Stay quiet unless needed.")
         self.assertEqual(cfg.state_path, pathlib.Path("/tmp/vigil-state.json"))
+        self.assertEqual(cfg.session_mode, "fresh")
+        self.assertEqual(cfg.session_path, pathlib.Path("/tmp/vigil-session.json"))
 
     def test_aliases_env_parsed_ordered_deduped(self):
         # Order preserved, whitespace stripped, blanks and repeats dropped.
@@ -1199,6 +1329,8 @@ class TestConfigFromEnv(unittest.TestCase):
                       "-c",
                       "sandbox_workspace_write.network_access=true",
                     ]
+                    session_mode = "persistent"
+                    session_path = "/tmp/vigil-session.json"
                     wake_timeout = 42
                     gate_timeout = 5
                     log_path = "/tmp/vigil-receipts.jsonl"
@@ -1233,6 +1365,8 @@ class TestConfigFromEnv(unittest.TestCase):
         self.assertEqual(cfg.wake_timeout, 42.0)
         self.assertEqual(cfg.gate_timeout, 5.0)
         self.assertEqual(cfg.log_path, pathlib.Path("/tmp/vigil-receipts.jsonl"))
+        self.assertEqual(cfg.session_mode, "persistent")
+        self.assertEqual(cfg.session_path, pathlib.Path("/tmp/vigil-session.json"))
 
     def test_env_overrides_config_file(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1267,6 +1401,17 @@ class TestConfigFromEnv(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cfg_path = pathlib.Path(td) / "bad.toml"
             cfg_path.write_text("[runner]\nfail_policy = \"sideways\"\n")
+
+            with self.assertRaises(runner_mod.ConfigError):
+                runner_mod.RunnerConfig.from_sources(
+                    argv=["--config", str(cfg_path)],
+                    environ={},
+                )
+
+    def test_invalid_session_mode_is_config_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = pathlib.Path(td) / "bad.toml"
+            cfg_path.write_text('[runner]\nsession_mode = "sometimes"\n')
 
             with self.assertRaises(runner_mod.ConfigError):
                 runner_mod.RunnerConfig.from_sources(

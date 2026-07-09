@@ -69,6 +69,8 @@ NUNCHI_CHANNEL_BIN            Path or name of the nunchi-channel binary
 NUNCHI_RUNNER_GATE_TIMEOUT    Gate subprocess timeout in seconds (default: 30).
 NUNCHI_RUNNER_CODEX_BIN       Codex binary for wakes (default: ``codex``).
 NUNCHI_RUNNER_CODEX_ARGS      Extra args for ``codex exec``, shell-split.
+NUNCHI_RUNNER_SESSION_MODE    ``persistent`` (default) | ``fresh``.
+NUNCHI_RUNNER_SESSION_STATE   Persistent Codex room-session JSON path.
 NUNCHI_RUNNER_WAKE_TIMEOUT    Wake subprocess timeout in seconds (default: 300).
 NUNCHI_RUNNER_FAIL_POLICY     ``closed`` (default) | ``open`` — see above.
 NUNCHI_RUNNER_LOG             Receipt JSONL path
@@ -97,6 +99,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import argparse
 import tomllib
@@ -108,6 +111,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+from uuid import UUID
 
 from .codex_runtime_state import (
     RuntimeStateError,
@@ -133,6 +137,7 @@ _BACKOFF_INITIAL = 1.0
 _BACKOFF_CAP = 60.0
 _SEEN_MESSAGE_IDS_MAX = 1000
 _DISCORD_MENTION_RE = re.compile(r"<@!?(\d+)>")
+_CODEX_SESSION_VERSION = 1
 
 # Shape guidance per admitted verdict (mirrors RUN_SHAPE in
 # src/nunchi/adapters/channel.py — guidance only, never composed prose).
@@ -188,6 +193,132 @@ class ConfigError(ValueError):
     """Raised for invalid runner configuration."""
 
 
+class CodexSessionStateError(RuntimeError):
+    """Raised when persistent Codex room-session state is unusable."""
+
+
+def _valid_thread_id(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return str(UUID(value.strip()))
+    except ValueError:
+        return None
+
+
+def load_codex_session(path: Path) -> dict[str, Any] | None:
+    """Read and validate persistent Codex room-session state."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CodexSessionStateError(
+            f"cannot read Codex session state {path}: {exc}"
+        ) from exc
+    if (
+        not isinstance(raw, dict)
+        or type(raw.get("version")) is not int
+        or raw.get("version") != _CODEX_SESSION_VERSION
+    ):
+        raise CodexSessionStateError(
+            "Codex session state has an unsupported shape or version"
+        )
+    thread_id = _valid_thread_id(raw.get("thread_id"))
+    if thread_id is None:
+        raise CodexSessionStateError("Codex session state has an invalid thread_id")
+    for field_name in ("created_at", "updated_at"):
+        if raw.get(field_name) is not None and not isinstance(
+            raw.get(field_name), str
+        ):
+            raise CodexSessionStateError(
+                f"Codex session state has an invalid {field_name}"
+            )
+    return {
+        "version": _CODEX_SESSION_VERSION,
+        "thread_id": thread_id,
+        "created_at": raw.get("created_at"),
+        "updated_at": raw.get("updated_at"),
+    }
+
+
+def save_codex_session(
+    path: Path,
+    thread_id: str,
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Atomically persist a Codex room-session id with mode 0600."""
+    normalized = _valid_thread_id(thread_id)
+    if normalized is None:
+        raise CodexSessionStateError("cannot save an invalid Codex thread_id")
+    now = datetime.now(timezone.utc).isoformat()
+    state = {
+        "version": _CODEX_SESSION_VERSION,
+        "thread_id": normalized,
+        "created_at": created_at or now,
+        "updated_at": now,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=".codex-room-session-",
+            suffix=".tmp",
+        )
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, path)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise
+    except OSError as exc:
+        raise CodexSessionStateError(
+            f"cannot save Codex session state {path}: {exc}"
+        ) from exc
+    return state
+
+
+def reset_codex_session(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise CodexSessionStateError(
+            f"cannot reset Codex session state {path}: {exc}"
+        ) from exc
+
+
+def _thread_id_from_codex_jsonl(output: str | bytes | None) -> str | None:
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    if not output:
+        return None
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "thread.started":
+            continue
+        return _valid_thread_id(event.get("thread_id"))
+    return None
+
+
 _CONFIG_KEYS = frozenset(
     {
         "transport_url",
@@ -201,6 +332,8 @@ _CONFIG_KEYS = frozenset(
         "gate_timeout",
         "codex_bin",
         "codex_args",
+        "session_mode",
+        "session_path",
         "wake_timeout",
         "fail_policy",
         "log_path",
@@ -324,6 +457,10 @@ class RunnerConfig:
     gate_timeout: float = _DEFAULT_GATE_TIMEOUT
     codex_bin: str = "codex"
     codex_extra_args: tuple[str, ...] = ()
+    session_mode: str = "persistent"  # persistent | fresh
+    session_path: Path = field(
+        default_factory=lambda: Path.home() / ".nunchi" / "codex-room-session.json"
+    )
     wake_timeout: float = _DEFAULT_WAKE_TIMEOUT
     fail_policy: str = "closed"  # closed | open
     log_path: Path = field(
@@ -378,6 +515,8 @@ class RunnerConfig:
             "NUNCHI_RUNNER_GATE_TIMEOUT": "gate_timeout",
             "NUNCHI_RUNNER_CODEX_BIN": "codex_bin",
             "NUNCHI_RUNNER_CODEX_ARGS": "codex_args",
+            "NUNCHI_RUNNER_SESSION_MODE": "session_mode",
+            "NUNCHI_RUNNER_SESSION_STATE": "session_path",
             "NUNCHI_RUNNER_WAKE_TIMEOUT": "wake_timeout",
             "NUNCHI_RUNNER_FAIL_POLICY": "fail_policy",
             "NUNCHI_RUNNER_LOG": "log_path",
@@ -408,6 +547,11 @@ class RunnerConfig:
             name="verbosity",
             choices=frozenset({"minimal", "normal", "debug"}),
         )
+        session_mode = _as_choice(
+            data.get("session_mode", "persistent"),
+            name="session_mode",
+            choices=frozenset({"fresh", "persistent"}),
+        )
 
         return cls(
             transport_url=str(data.get("transport_url", _DEFAULT_TRANSPORT_URL)),
@@ -431,6 +575,15 @@ class RunnerConfig:
             ),
             codex_bin=str(data.get("codex_bin", "codex")),
             codex_extra_args=_parse_args(data.get("codex_args"), name="codex_args"),
+            session_mode=session_mode,
+            session_path=Path(
+                str(
+                    data.get(
+                        "session_path",
+                        Path.home() / ".nunchi" / "codex-room-session.json",
+                    )
+                )
+            ).expanduser(),
             wake_timeout=_as_float(
                 data.get("wake_timeout", _DEFAULT_WAKE_TIMEOUT),
                 name="wake_timeout",
@@ -706,6 +859,8 @@ def build_wake_prompt(
     shape = _WAKE_SHAPE.get(verdict, _WAKE_SHAPE["SPEAK"])
     channel_id = trigger.get("channel_id", "")
     message_id = trigger.get("message_id", "")
+    agent_id = trigger.get("agent_id", "agent")
+    agent_aliases = trigger.get("agent_aliases") or []
     admission_content = trigger.get("admission_content") or trigger.get("content", "")
     nunchi_context = {
         "trigger": {
@@ -721,7 +876,13 @@ def build_wake_prompt(
     lines = [
         f"[nunchi] Admitted room turn — verdict: {verdict}"
         + (" (DEGRADED: gate unavailable, fail-open)" if degraded else ""),
+        f"You are participating in this Discord room as {_prompt_text(agent_id)}.",
     ]
+    if agent_aliases:
+        lines.append(
+            "Room aliases: "
+            + ", ".join(_prompt_text(alias) for alias in agent_aliases)
+        )
     if reasons:
         lines.append("Gate reasons:")
         lines.extend(f"- {_prompt_text(r)}" for r in reasons)
@@ -932,6 +1093,7 @@ class RoomRunner:
         action: str,
         history_len: int,
         wake_exit: int | None = None,
+        codex_session_id: str | None = None,
         reasons: list[str] | None = None,
         error: str | None = None,
         verbosity: str | None = None,
@@ -959,6 +1121,8 @@ class RoomRunner:
                     record["reasons"] = reasons[:3]
             if wake_exit is not None:
                 record["wake_exit"] = wake_exit
+            if codex_session_id is not None:
+                record["codex_session_id"] = codex_session_id
             if error:
                 record["error"] = error
             if detail == "debug":
@@ -1018,20 +1182,79 @@ class RoomRunner:
 
     # -- wake --------------------------------------------------------------
 
-    def _wake_codex(self, prompt: str) -> tuple[int | None, str | None]:
-        """Run one serialized ``codex exec`` wake; return (exit_code, error)."""
+    def _wake_codex(
+        self,
+        prompt: str,
+    ) -> tuple[int | None, str | None, str | None]:
+        """Wake Codex and return ``(exit_code, error, thread_id)``.
+
+        Persistent mode creates one dedicated room thread on its first wake and
+        resumes that same thread thereafter. Session-state errors fail closed:
+        silently replacing a damaged thread id would fracture Vigil's context.
+        """
         # Sandbox/approval flags live entirely in codex_extra_args: codex
         # rejects combinations (--full-auto conflicts with the bypass flag,
         # live-observed), and headless MCP tool calls are auto-declined
         # under --full-auto, so the operator must pick the policy explicitly.
         extra = self.config.codex_extra_args or ("--full-auto",)
-        cmd = [
-            self.config.codex_bin,
-            "exec",
-            "--skip-git-repo-check",
-            *extra,
-            prompt,
-        ]
+        if "--json" not in extra:
+            extra = (*extra, "--json")
+
+        state: dict[str, Any] | None = None
+        expected_thread_id: str | None = None
+        if self.config.session_mode == "persistent":
+            try:
+                state = load_codex_session(self.config.session_path)
+            except CodexSessionStateError as exc:
+                return None, str(exc), None
+            if state is not None:
+                expected_thread_id = state["thread_id"]
+
+        if expected_thread_id is None:
+            cmd = [
+                self.config.codex_bin,
+                "exec",
+                "--skip-git-repo-check",
+                *extra,
+                prompt,
+            ]
+        else:
+            cmd = [
+                self.config.codex_bin,
+                "exec",
+                "resume",
+                "--skip-git-repo-check",
+                *extra,
+                expected_thread_id,
+                prompt,
+            ]
+
+        def record_session(
+            output: str | bytes | None,
+        ) -> tuple[str | None, bool, str | None]:
+            observed_thread_id = _thread_id_from_codex_jsonl(output)
+            if self.config.session_mode != "persistent":
+                return observed_thread_id, observed_thread_id is not None, None
+            if observed_thread_id is None:
+                return expected_thread_id, False, None
+            if (
+                expected_thread_id is not None
+                and observed_thread_id != expected_thread_id
+            ):
+                return expected_thread_id, True, (
+                    "codex resumed an unexpected thread "
+                    f"({observed_thread_id}; expected {expected_thread_id})"
+                )
+            try:
+                saved = save_codex_session(
+                    self.config.session_path,
+                    observed_thread_id,
+                    created_at=state.get("created_at") if state else None,
+                )
+            except CodexSessionStateError as exc:
+                return observed_thread_id, True, str(exc)
+            return saved["thread_id"], True, None
+
         try:
             result = subprocess.run(
                 cmd,
@@ -1039,14 +1262,32 @@ class RoomRunner:
                 text=True,
                 timeout=self.config.wake_timeout,
             )
-        except subprocess.TimeoutExpired:
-            return None, f"codex wake timed out after {self.config.wake_timeout}s"
+        except subprocess.TimeoutExpired as exc:
+            thread_id, _, state_error = record_session(exc.stdout)
+            error = f"codex wake timed out after {self.config.wake_timeout}s"
+            if state_error:
+                error = f"{error}; {state_error}"
+            return None, error, thread_id
         except OSError as exc:
-            return None, f"failed to run codex: {exc}"
+            return None, f"failed to run codex: {exc}", expected_thread_id
+
+        thread_id, thread_id_observed, state_error = record_session(result.stdout)
+        if state_error is not None:
+            return result.returncode, state_error, thread_id
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()
-            return result.returncode, stderr[-500:] or f"codex exited {result.returncode}"
-        return result.returncode, None
+            return (
+                result.returncode,
+                stderr[-500:] or f"codex exited {result.returncode}",
+                thread_id,
+            )
+        if self.config.session_mode == "persistent" and not thread_id_observed:
+            return (
+                result.returncode,
+                "codex wake succeeded without reporting a thread.started id",
+                None,
+            )
+        return result.returncode, None, thread_id
 
     # -- per-event entry ----------------------------------------------------
 
@@ -1167,6 +1408,8 @@ class RoomRunner:
         trigger_view = {
             "channel_id": channel_id,
             "message_id": message["message_id"],
+            "agent_id": self.config.agent_id,
+            "agent_aliases": aliases,
             "author": message["author"],
             "author_kind": message["author_kind"],
             "content": message["content"],
@@ -1250,7 +1493,7 @@ class RoomRunner:
         payload: dict | None = None,
     ) -> str:
         prompt = build_wake_prompt(directive, trigger_view, history, degraded=degraded)
-        wake_exit, wake_error = self._wake_codex(prompt)
+        wake_exit, wake_error, codex_session_id = self._wake_codex(prompt)
         action = "wake-ok" if wake_error is None else "wake-error"
         self._write_receipt(
             params,
@@ -1259,6 +1502,7 @@ class RoomRunner:
             action=action,
             history_len=history_len,
             wake_exit=wake_exit,
+            codex_session_id=codex_session_id,
             reasons=directive.get("reasons") or [],
             error=wake_error,
             verbosity=verbosity,

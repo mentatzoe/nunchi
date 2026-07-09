@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It gates every notification before `codex exec`, backfills configured channel
   history at startup and newly observed/hot-added channels before their first
   live gate, suppresses `PASS` without a frontier wake, and records receipts.
+- Admitted room wakes now create and then resume one dedicated Codex task using
+  an atomically persisted thread id. Session mode/path are configurable;
+  malformed state fails closed, receipts expose the observed task id, and the
+  configuration app reports or resets the persistent session.
 - Added Codex `UserPromptSubmit` and outbound `PreToolUse` hooks. Supported room
   sends are re-gated immediately before the tool call; missing/current-context,
   malformed-send, duplicate-send, direct Discord command, `PASS`,
