@@ -114,7 +114,8 @@ not exist yet):
 | `NUNCHI_RUNNER_CHANNELS` | (all) | Comma-separated channel ids to watch |
 | `NUNCHI_RUNNER_HISTORY_WINDOW` | `20` | Rolling per-channel history size fed to the gate |
 | `NUNCHI_RUNNER_AGENT_ID` | `agent` | Agent identity in the gate payload |
-| `NUNCHI_RUNNER_MENTION_ID` | — | Agent's @mention handle on the surface |
+| `NUNCHI_RUNNER_MENTION_ID` | — | Agent's @mention handle on the surface. This is the **platform mention token** — on Discord the numeric snowflake (e.g. `1496355876234199040`) — **not** the display name. A display name here makes the gate blind to real @-mentions: a direct `@<snowflake>` mention reads as "someone else" and PASSes (observed live 2026-07-08). Names belong in `NUNCHI_RUNNER_ALIASES` |
+| `NUNCHI_RUNNER_ALIASES` | — | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, extra mention tokens, e.g. `Vigil,Codex,Aether`) → `agent.aliases`. Absent means behavior is unchanged |
 | `NUNCHI_CHANNEL_BIN` | `which nunchi-channel` | Gate binary; the runner refuses startup if it is missing or not executable |
 | `NUNCHI_RUNNER_GATE_TIMEOUT` | `30` | Gate subprocess timeout (seconds) |
 | `NUNCHI_RUNNER_CODEX_BIN` | `codex` | Binary used for wakes (`codex exec --skip-git-repo-check --full-auto`) |
@@ -133,10 +134,12 @@ tool remains available to Codex after wake, but this runner does not yet use it
 to backfill gate history on startup.
 
 The hook reuses the Claude Code hook's env names for the shared knobs
-(`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_PEER_BOTS`,
-`NUNCHI_HOOK_HISTORY_WINDOW`, `NUNCHI_HOOK_TIMEOUT`,
+(`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_ALIASES`,
+`NUNCHI_HOOK_PEER_BOTS`, `NUNCHI_HOOK_HISTORY_WINDOW`, `NUNCHI_HOOK_TIMEOUT`,
 `NUNCHI_HOOK_TOOL_PATTERN` — default `(?:send|reply)_message$` here) plus
-`NUNCHI_CHANNEL_BIN` and `NUNCHI_RUNNER_LOG`.
+`NUNCHI_CHANNEL_BIN` and `NUNCHI_RUNNER_LOG`. The same mention-token warning
+applies: `NUNCHI_HOOK_MENTION_ID` is the snowflake, display names go in
+`NUNCHI_HOOK_ALIASES`.
 
 ## Receipts
 

@@ -31,6 +31,7 @@ The admission request is validated by `validate_request` in
 | `context[].author` | optional | string | |
 | `context[].timestamp` | optional | string | |
 | `agent` | optional | object | the agent's identity/role; passed through |
+| `agent.aliases` | optional | list of strings | every other identity this one agent answers to (display names, secondary handles, platform mention tokens); entries must be non-empty strings; absent/empty ⇒ behavior identical to an alias-free request |
 | `surface` | optional | object | surface descriptor; passed through |
 | `request_id` | optional | string | echoed back into the result |
 | `classifier` | optional | string | classifier path; the only supported value is `product` |

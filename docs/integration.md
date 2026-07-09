@@ -135,6 +135,7 @@ result = gate(
     ],
     agent_id="dalgos",
     agent_mention_id="<this-agent's-@mention-id>",   # so addressing can tell it's not you
+    agent_aliases=["Dalgos", "Codex"],               # every other name this agent answers to
     pinned_rules=None,                                # optional channel governance text
     fail_policy="open",                              # open->SPEAK | closed->PASS | raise
 )
@@ -170,8 +171,8 @@ echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
 
 The payload shape: `trigger` (`content` required; `message_id`, `author`,
 `author_kind`, `timestamp` optional), `history` (list of the same shape, oldest
-first), `agent` (`id` required; `role`, `mention_id` optional), and optional
-`surface`, `pinned_rules`, `fail_policy`.
+first), `agent` (`id` required; `role`, `mention_id`, `aliases` optional), and
+optional `surface`, `pinned_rules`, `fail_policy`.
 
 ### Choosing
 
@@ -204,6 +205,16 @@ it. To map that surface onto a Nunchi request:
 - **agent.mention_id** ← this agent's platform @mention handle, so the addressing
   rule can tell whether an `<@id>` targets this agent or someone else. (Omitting
   it was a real bug once — without it, mentions aimed elsewhere leak to SPEAK.)
+  This is the **platform mention token** — on Discord the numeric snowflake —
+  **not** the display name. A display name here was a second real bug
+  (2026-07-08): the gate went blind to real @-mentions and PASSed a direct
+  `@<snowflake>` question. Names belong in `agent.aliases`.
+- **agent.aliases** ← every *other* identity this one agent answers to: display
+  names ("Vigil"), secondary handles ("Codex"), profile names ("Aether"),
+  additional mention tokens. One bot commonly carries several at once; a message
+  targeting any of them is addressed to this agent, and a message authored under
+  one of them is its own (self-echo suppression). Optional — absent, behavior is
+  exactly as before the field existed.
 - **pinned_rules** ← optional. pilot-bot keeps channel norms in a
   `pinned-rules.md` the agent reads as standing instruction; with Nunchi you
   can instead pass that text as `pinned_rules` so the verdict is channel-aware

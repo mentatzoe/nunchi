@@ -88,6 +88,7 @@ nunchi:
   channels: ""              # see below — REQUIRED unless "*"
   agent_id: agent           # see below — operators MUST override this
   # mention_id: ""
+  # aliases: []
   # binary: ""
   # model: ""
   # senders: all
@@ -106,7 +107,8 @@ nunchi:
 | `platforms` | str or list | `"discord"` | Platform name(s) to gate.  Use `"*"` to gate all platforms regardless of name.  Comma-separated string or YAML list are both accepted. |
 | `channels` | str, list, or map | *(none)* | Chat / channel IDs to gate.  See [Per-channel configuration](#per-channel-configuration) for the map form.  **Required unless `"*"`.** Without at least one channel ID (or `"*"`), the gate is a no-op for every event. |
 | `agent_id` | str | `"agent"` | The bot's display name as it appears in `[Name [bot]]` history lines.  **Operators must set this to the bot's actual display name** — the default `"agent"` is intentionally generic and will produce incorrect self/peer classification. |
-| `mention_id` | str | *(absent)* | Discord mention snowflake (e.g. `"1496355876234199040"`).  Included in the payload so the classifier can detect direct @-mentions.  Omit if not needed. |
+| `mention_id` | str | *(absent)* | Discord mention snowflake (e.g. `"1496355876234199040"`).  Included in the payload so the classifier can detect direct @-mentions.  This is the **platform mention token** (the numeric snowflake), **not** the display name: a display name here makes the gate blind to real @-mentions — a direct `@<snowflake>` mention reads as "someone else" and PASSes (observed live 2026-07-08).  Display names belong in `aliases`.  Omit if not needed. |
+| `aliases` | list or CSV | *(absent)* | Additional identities this one agent answers to beyond `agent_id`/`mention_id`: display names, nicknames, secondary handles ("Codex"), profile names ("Aether"), extra mention tokens.  Sent as `agent.aliases` so addressing recognizes the full bundle.  Deduped against `agent_id`/`mention_id`.  Can be overridden per channel in the map form (a bot may carry a different display identity per channel).  Not runtime-overridable — like `agent_id`/`mention_id`, identity must stay stable within a session. |
 | `binary` | str | auto-detected | Path to the `nunchi-channel` executable.  Defaults to `shutil.which("nunchi-channel")` falling back to `/usr/local/bin/nunchi-channel`. |
 | `model` | str | *(absent)* | When set, `NUNCHI_CLASSIFIER_MODEL=<model>` is exported into the subprocess environment, overriding any inherited value.  Can be overridden per channel in the map form. |
 | `senders` | str | `"all"` | Sender policy.  See [Sender policy](#sender-policy). |
@@ -188,6 +190,7 @@ Per-channel keys that can be overridden in the map form:
 | `pinned_rules` | global `pinned_rules` |
 | `pinned_rules_file` | global `pinned_rules_file` |
 | `fail_open` | global `fail_open` (default `true`) |
+| `aliases` | global `aliases` |
 
 All other keys (`binary`, `timeout_seconds`, `bypass_commands`, `log_path`,
 `agent_id`, `mention_id`, `platforms`) are global-only and apply uniformly
@@ -373,6 +376,7 @@ The following keys are **config.yaml-only** and cannot be changed at runtime:
 | `log_path` | Prevents redirecting receipts to an attacker-controlled path. |
 | `agent_id` | Changing the bot identity at runtime would corrupt history parsing. |
 | `mention_id` | Same: identity must stay stable within a session. |
+| `aliases` | Same: the identity bundle is operator config, not chat-settable. (Per-channel values in config.yaml's map form are fine; runtime state is not.) |
 | `state_path` | Prevents the state file from redirecting itself. |
 
 `state.py`'s `filter_overridable()` enforces this whitelist at ingestion time.
@@ -639,7 +643,7 @@ using the same lookup order the plugin applies at gate time:
 `pinned_rules` (inline governance text) is now in the security whitelist
 alongside `enabled`, `senders`, `allow_from`, `verbosity`, `fail_open`,
 `model`, and `pinned_rules_file`.  `binary`, `timeout_seconds`, `log_path`,
-`agent_id`, `mention_id`, and `state_path` remain config.yaml-only.
+`agent_id`, `mention_id`, `aliases`, and `state_path` remain config.yaml-only.
 
 **pinned_rules precedence**
 
