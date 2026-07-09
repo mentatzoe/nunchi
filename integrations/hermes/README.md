@@ -191,6 +191,7 @@ Per-channel keys that can be overridden in the map form:
 | `pinned_rules_file` | global `pinned_rules_file` |
 | `fail_open` | global `fail_open` (default `true`) |
 | `aliases` | global `aliases` |
+| `quiet_gateway_chatter` | global `quiet_gateway_chatter` (default `true`) — see [Quiet gateway chatter](#quiet-gateway-chatter-shared-room-presence) |
 
 All other keys (`binary`, `timeout_seconds`, `bypass_commands`, `log_path`,
 `agent_id`, `mention_id`, `platforms`) are global-only and apply uniformly
@@ -248,6 +249,96 @@ always log all available fields regardless of verbosity level.
 | `minimal` | `ts`, `platform`, `channel_ids`, `message_id`, `verdict`, `silent`, `action`, `elapsed_ms` |
 | `normal` *(default)* | Everything in `minimal`, plus: `trigger_author`, `trigger_author_kind`, `history_len`, `classifier_model`, `reasons` (up to 3), `confidences` (full dict from the directive, omitted when absent) |
 | `debug` | Everything in `normal`, plus: `payload` (complete JSON sent to `nunchi-channel`) and `directive` (complete JSON returned) |
+
+---
+
+## Quiet gateway chatter (shared-room presence)
+
+In a shared room, Hermes' own scaffolding — "still working" bubbles, tool
+progress, compaction notices, per-turn credit spend — is noise that competes
+with the agent's actual replies.  One operator key, **`quiet_gateway_chatter`**
+(bool, default `true`, per-channel, **runtime-overridable**), suppresses that
+scaffolding in nunchi-owned channels so only the agent's intentional replies
+land.
+
+The admission gate decides *whether the agent replies*; quiet-room decides
+*whether the gateway's scaffolding is visible*.  They are orthogonal.
+
+### What is suppressed (and what is NOT)
+
+Quiet-room suppresses **only per-turn agent telemetry** — the four emitters
+below.  It deliberately does **NOT** touch gateway **lifecycle** notices
+(♻️ Gateway online, update-available, goal-status) or credit **WARNINGS**
+(⚠ Credits low, ✕/✓ Credit access) — those signal real operational/account
+state and always stay visible.  Final assistant replies and unrelated
+notices/status always deliver.
+
+| Emitter (suppressed) | Patched Hermes symbol (greppable) |
+|----------------------|-----------------------------------|
+| busy-ACK bubble (⏩ Steered / ⏳ Queued / ⚡ Interrupting) | `GatewayRunner._handle_active_session_busy_message` (transiently swaps the adapter's `_send_with_retry` inside the handler) |
+| tool-progress / interim display receipts | `gateway.display_config.resolve_display_setting` |
+| compression / status chatter (📦 Preflight compression / 🗜️ Compacting context) | `gateway.run._send_or_update_status_coro` |
+| per-turn credit notice (• Grant spent) | `GatewayRunner._deliver_platform_notice` |
+
+These are portable monkeypatches applied at plugin load — no Hermes core patch
+required.  Each is **idempotent** (no double-wrap on reload) and **fail-safe**:
+if a target is missing on your Hermes build, that patch no-ops, the emitter
+stays **visible**, and the register-time summary reports it `INERT` (below).
+
+### How to turn it off (and back on) — live, no restart
+
+`quiet_gateway_chatter` is in the runtime-override whitelist
+(`state.OVERRIDABLE_KEYS`), so you can flip it without editing config.yaml or
+restarting Hermes.  The chatter returns on the very next event.
+
+```
+/nunchi chatter visible <channel-id | global>   # scaffolding ON again
+/nunchi chatter quiet   <channel-id | global>   # suppressed again
+```
+
+Or set it in the Nunchi dashboard tab, or statically in config.yaml:
+
+```yaml
+nunchi:
+  quiet_gateway_chatter: false        # global default OFF
+  channels:
+    "1518384310321811456":
+      quiet_gateway_chatter: true      # ...but quiet in this room
+```
+
+`/nunchi status` shows the effective value per channel with its provenance
+badge (`[channel-override]` / `[global-override]`).
+
+### How to see it working (the patch is not invisible)
+
+At plugin load the gate emits **one INFO summary** naming exactly what was
+patched, which emitters are active vs inert, and the suppression boundary:
+
+```
+nunchi-gate quiet-room: installed emission suppression for quiet channels
+(key=quiet_gateway_chatter, per-channel + runtime-overridable) — ACTIVE:
+[busy_ack (GatewayRunner._handle_active_session_busy_message), ...]; INERT on
+this Hermes (emitter stays VISIBLE): [...]; suppresses ONLY per-turn agent
+telemetry (busy-ACK, tool-progress, compression/status, grant-spent); gateway
+LIFECYCLE notices (♻️ Gateway online, update-available, goal-status) and credit
+WARNINGS (⚠ Credits, ✕/✓ Credit access) are never suppressed.
+```
+
+Every suppression is also logged per-event, so it is always auditable — grep
+the Hermes logs:
+
+```bash
+grep "nunchi-gate suppressed" hermes.log
+# nunchi-gate suppressed gateway chatter platform=discord chat=<id>          (busy-ACK,  INFO)
+# nunchi-gate suppressed gateway status chatter platform=discord chat=<id>   (status,    INFO)
+# nunchi-gate suppressed credit/grant notice platform=discord chat=<id>      (grant,     INFO)
+# nunchi-gate suppressed gateway display setting platform=discord chat=<id>  (tool-prog, DEBUG)
+```
+
+The three discrete message-drops log at **INFO**; tool-progress is resolved per
+display-setting lookup (high frequency) so its per-event line is **DEBUG** —
+the INFO summary still announces it.  To silence quiet-room entirely, flip
+`quiet_gateway_chatter` to `visible` — do not rely on log levels.
 
 ---
 
@@ -458,6 +549,18 @@ override.  Valid values: `all`, `humans`, `allowlist`.
 
 Sets the log verbosity override.  When no channel is given, sets the global
 override.  Valid values: `minimal`, `normal`, `debug`.
+
+#### `chatter`
+
+```
+/nunchi chatter <quiet | visible> [channel-id | global]
+```
+
+Flips `quiet_gateway_chatter` at runtime (no restart).  `visible` turns the
+gateway scaffolding back ON in a nunchi room; `quiet` suppresses it again.
+When no channel is given, sets the global override.  See
+[Quiet gateway chatter](#quiet-gateway-chatter-shared-room-presence) for what
+is (and is not) suppressed.
 
 #### `reset`
 

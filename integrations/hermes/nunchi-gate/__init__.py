@@ -697,22 +697,40 @@ def _nunchi_quiet_display_override(platform_key: str, setting: str, channel_id: 
     resolved = _effective_surface_config(str(platform_key or ""), {str(channel_id)})
     if resolved is None or not _quiet_gateway_chatter_enabled(resolved):
         return None
-    return _QUIET_DISPLAY_OVERRIDES[setting]
+    override = _QUIET_DISPLAY_OVERRIDES[setting]
+    # This path is consulted per display-setting resolution (high frequency), so
+    # the per-suppression audit line is DEBUG — unlike the discrete message-drop
+    # emitters (busy-ACK / status / notice) which log at INFO.  The one-time
+    # register() summary announces tool-progress quieting at INFO.
+    logger.debug(
+        "nunchi-gate suppressed gateway display setting platform=%s chat=%s setting=%s -> %r",
+        platform_key,
+        channel_id,
+        setting,
+        override,
+    )
+    return override
 
 
-def _patch_display_resolver(display_config_module: Any | None = None) -> None:
+def _patch_display_resolver(display_config_module: Any | None = None) -> bool:
     """Monkeypatch Hermes' display resolver for nunchi-owned channels.
 
     This keeps the fix portable with the plugin: no Hermes core patch is
     required for users who install nunchi-gate into their profile.
+
+    Returns True when the target is present (freshly wrapped or already
+    wrapped), False when the target is missing on this Hermes (fail-safe
+    no-op — tool-progress stays VISIBLE and register() reports it inert).
     """
     try:
         module = display_config_module or importlib.import_module("gateway.display_config")
         original = getattr(module, "resolve_display_setting", None)
     except Exception:
-        return
-    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
-        return
+        return False
+    if not callable(original):
+        return False
+    if getattr(original, "_nunchi_quiet_wrapped", False):
+        return True  # idempotent — already installed
 
     def _resolve_display_setting(user_config, platform_key, setting, fallback=None, *, channel_id=None):
         override = _nunchi_quiet_display_override(platform_key, setting, channel_id)
@@ -723,6 +741,7 @@ def _patch_display_resolver(display_config_module: Any | None = None) -> None:
     _resolve_display_setting._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
     _resolve_display_setting._nunchi_original = original  # type: ignore[attr-defined]
     setattr(module, "resolve_display_setting", _resolve_display_setting)
+    return True
 
 
 def _is_gateway_chatter_message(content: Any) -> bool:
@@ -741,13 +760,17 @@ def _event_quiets_gateway_chatter(event: Any) -> bool:
     return _source_quiets_gateway_chatter(getattr(event, "source", None))
 
 
-def _patch_busy_ack_handler(runner_cls: Any | None = None) -> None:
+def _patch_busy_ack_handler(runner_cls: Any | None = None) -> bool:
     """Suppress Hermes busy acknowledgements in nunchi-owned channels.
 
     The busy path sends directly via ``adapter._send_with_retry`` before the
     normal final-response path, so ``pre_gateway_dispatch`` cannot intercept it.
     We wrap only that handler and only drop known Hermes busy-ack strings; all
     other sends, including final responses, still call the original adapter.
+
+    Returns True when the target is present (freshly wrapped or already
+    wrapped), False when the target is missing on this Hermes (fail-safe
+    no-op — busy-ACK bubbles stay VISIBLE and register() reports it inert).
     """
     try:
         if runner_cls is None:
@@ -755,9 +778,11 @@ def _patch_busy_ack_handler(runner_cls: Any | None = None) -> None:
             runner_cls = getattr(run_mod, "GatewayRunner", None)
         original = getattr(runner_cls, "_handle_active_session_busy_message", None)
     except Exception:
-        return
-    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
-        return
+        return False
+    if not callable(original):
+        return False
+    if getattr(original, "_nunchi_quiet_wrapped", False):
+        return True  # idempotent — already installed
 
     async def _handle_active_session_busy_message(self, event, session_key):
         if not _event_quiets_gateway_chatter(event):
@@ -795,9 +820,10 @@ def _patch_busy_ack_handler(runner_cls: Any | None = None) -> None:
     _handle_active_session_busy_message._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
     _handle_active_session_busy_message._nunchi_original = original  # type: ignore[attr-defined]
     setattr(runner_cls, "_handle_active_session_busy_message", _handle_active_session_busy_message)
+    return True
 
 
-def _patch_status_sender(run_module: Any | None = None) -> None:
+def _patch_status_sender(run_module: Any | None = None) -> bool:
     """Suppress Hermes status/lifecycle chatter in nunchi-owned quiet channels.
 
     Context-compression notices ("📦 Preflight compression", "🗜️ Compacting
@@ -811,14 +837,21 @@ def _patch_status_sender(run_module: Any | None = None) -> None:
     Async-correct (the target is a coroutine; suppression returns ``None``
     without awaiting the original), idempotent (``_nunchi_quiet_wrapped`` mark),
     and fail-safe (a Hermes without the target → no-op, never raise).
+
+    Returns True when the target is present (freshly wrapped or already
+    wrapped), False when the target is missing on this Hermes (fail-safe
+    no-op — compression/status chatter stays VISIBLE and register() reports it
+    inert).
     """
     try:
         module = run_module or importlib.import_module("gateway.run")
         original = getattr(module, "_send_or_update_status_coro", None)
     except Exception:
-        return
-    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
-        return
+        return False
+    if not callable(original):
+        return False
+    if getattr(original, "_nunchi_quiet_wrapped", False):
+        return True  # idempotent — already installed
 
     async def _send_or_update_status_coro(adapter, chat_id, status_key, content, metadata):
         chat_text = str(chat_id or "").strip()
@@ -841,6 +874,7 @@ def _patch_status_sender(run_module: Any | None = None) -> None:
     _send_or_update_status_coro._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
     _send_or_update_status_coro._nunchi_original = original  # type: ignore[attr-defined]
     setattr(module, "_send_or_update_status_coro", _send_or_update_status_coro)
+    return True
 
 
 def _is_credit_grant_notice(line: Any, key: Any = None) -> bool:
@@ -895,7 +929,7 @@ def _notice_content(args: tuple, kwargs: dict) -> Any:
     return None
 
 
-def _patch_notice_handler(runner_cls: Any | None = None) -> None:
+def _patch_notice_handler(runner_cls: Any | None = None) -> bool:
     """Suppress the per-turn credit/grant notice in nunchi-owned quiet channels.
 
     Wraps ``GatewayRunner._deliver_platform_notice`` (async).  Only the narrow
@@ -905,6 +939,11 @@ def _patch_notice_handler(runner_cls: Any | None = None) -> None:
     ``None`` without awaiting the original — the caller awaits the wrapper and
     ``_deliver_platform_notice`` is a ``-> None`` coroutine, so ``None`` is the
     correct suppressed result and nothing is left un-awaited.
+
+    Returns True when the target is present (freshly wrapped or already
+    wrapped), False when the target is missing on this Hermes (fail-safe
+    no-op — the grant-spent notice stays VISIBLE and register() reports it
+    inert).
     """
     try:
         if runner_cls is None:
@@ -912,9 +951,11 @@ def _patch_notice_handler(runner_cls: Any | None = None) -> None:
             runner_cls = getattr(run_mod, "GatewayRunner", None)
         original = getattr(runner_cls, "_deliver_platform_notice", None)
     except Exception:
-        return
-    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
-        return
+        return False
+    if not callable(original):
+        return False
+    if getattr(original, "_nunchi_quiet_wrapped", False):
+        return True  # idempotent — already installed
 
     async def _deliver_platform_notice(self, *args, **kwargs):
         content = _notice_content(args, kwargs)
@@ -933,6 +974,7 @@ def _patch_notice_handler(runner_cls: Any | None = None) -> None:
     _deliver_platform_notice._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
     _deliver_platform_notice._nunchi_original = original  # type: ignore[attr-defined]
     setattr(runner_cls, "_deliver_platform_notice", _deliver_platform_notice)
+    return True
 
 
 def _parse_channel_context(event: Any, agent_id: str) -> list[dict[str, Any]]:
@@ -1621,15 +1663,72 @@ def _nunchi_command(raw_args: str) -> str:
         return f"nunchi: error: {exc}"
 
 
+# Emitter name -> (the exact Hermes symbol we patch, the patcher).  Named so an
+# operator can grep the register-time summary line straight back to the method,
+# and so a future Hermes refactor's blast radius is greppable in one place.
+_QUIET_EMITTER_PATCHES: tuple[tuple[str, str, Any], ...] = (
+    ("tool_progress", "gateway.display_config.resolve_display_setting", _patch_display_resolver),
+    ("status_chatter", "gateway.run._send_or_update_status_coro", _patch_status_sender),
+    ("busy_ack", "GatewayRunner._handle_active_session_busy_message", _patch_busy_ack_handler),
+    ("grant_spent_notice", "GatewayRunner._deliver_platform_notice", _patch_notice_handler),
+)
+
+
+def _install_quiet_room_patches() -> dict[str, bool]:
+    """Install the four quiet-room emission patches and emit ONE INFO summary.
+
+    Visibility contract (Zoe): a plugin-level monkeypatch must be portable but
+    NOT invisible.  This emits one clear INFO line naming exactly which emitters
+    are ACTIVE (suppressed for quiet channels) and which are INERT (target
+    missing on this Hermes → that emitter stays VISIBLE), each tagged with the
+    exact patched Hermes symbol so the mechanism is greppable, not magic.  The
+    line also restates the suppression boundary.  Never raises.
+
+    Returns a ``{emitter: installed?}`` map (used by tests / callers).
+    """
+    active: list[str] = []
+    inert: list[str] = []
+    results: dict[str, bool] = {}
+    for name, target, patcher in _QUIET_EMITTER_PATCHES:
+        try:
+            ok = bool(patcher())
+        except Exception:
+            ok = False
+        results[name] = ok
+        (active if ok else inert).append(f"{name} ({target})")
+
+    boundary = (
+        "suppresses ONLY per-turn agent telemetry (busy-ACK, tool-progress, "
+        "compression/status, grant-spent); gateway LIFECYCLE notices "
+        "(♻️ Gateway online, update-available, goal-status) and credit WARNINGS "
+        "(⚠ Credits, ✕/✓ Credit access) are never suppressed"
+    )
+    if inert:
+        logger.info(
+            "nunchi-gate quiet-room: installed emission suppression for quiet "
+            "channels (key=quiet_gateway_chatter, per-channel + runtime-overridable) "
+            "— ACTIVE: [%s]; INERT on this Hermes (emitter stays VISIBLE): [%s]; %s.",
+            ", ".join(active) or "none",
+            ", ".join(inert),
+            boundary,
+        )
+    else:
+        logger.info(
+            "nunchi-gate quiet-room: installed emission suppression for quiet "
+            "channels (key=quiet_gateway_chatter, per-channel + runtime-overridable) "
+            "— ACTIVE: [%s]; %s.",
+            ", ".join(active),
+            boundary,
+        )
+    return results
+
+
 def register(ctx):
     # Portable quiet-room monkeypatches: each is idempotent and fails safe on a
-    # Hermes that lacks the target (log/no-op, gateway stays verbose).  Four
-    # emitters, one operator key (quiet_gateway_chatter): tool-progress display,
-    # busy-ACK send, "• Grant spent" notice, and compression/status chatter.
-    _patch_display_resolver()
-    _patch_status_sender()
-    _patch_busy_ack_handler()
-    _patch_notice_handler()
+    # Hermes that lacks the target (no-op, gateway stays verbose).  One INFO
+    # summary names exactly what was patched and which emitters are inert, so
+    # the mechanism is auditable — see _install_quiet_room_patches.
+    _install_quiet_room_patches()
     ctx.register_hook("pre_gateway_dispatch", _gate_event)
     register_cmd = getattr(ctx, "register_command", None)
     if callable(register_cmd):

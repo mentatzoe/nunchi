@@ -586,7 +586,71 @@ class TestFailSafePatchTargets(unittest.TestCase):
     def test_display_resolver_patch_noop_without_module(self):
         plugin = _load_plugin()
         # No display_config module object -> import fails -> no-op, no raise.
-        plugin._patch_display_resolver(display_config_module=None)
+        self.assertFalse(plugin._patch_display_resolver(display_config_module=None))
+
+
+class TestRegisterVisibility(unittest.TestCase):
+    """The monkeypatch must be portable but NOT invisible: register() emits one
+    INFO summary naming every emitter, its exact patched Hermes symbol, and the
+    suppression boundary — so an operator can see and grep what was altered."""
+
+    _EMITTERS = ("busy_ack", "tool_progress", "status_chatter", "grant_spent_notice")
+    _TARGETS = (
+        "gateway.display_config.resolve_display_setting",
+        "gateway.run._send_or_update_status_coro",
+        "GatewayRunner._handle_active_session_busy_message",
+        "GatewayRunner._deliver_platform_notice",
+    )
+
+    def test_install_summary_names_every_emitter_and_exact_target(self):
+        plugin = _load_plugin()
+        with self.assertLogs(plugin.logger, level="INFO") as cm:
+            results = plugin._install_quiet_room_patches()
+        blob = "\n".join(cm.output)
+
+        # One clear summary line.
+        self.assertIn("installed emission suppression", blob)
+        self.assertIn("quiet_gateway_chatter", blob)
+        # Every emitter named, each tagged with its greppable Hermes symbol.
+        for emitter in self._EMITTERS:
+            self.assertIn(emitter, blob)
+        for target in self._TARGETS:
+            self.assertIn(target, blob)
+        # The boundary is stated explicitly: lifecycle notices + credit
+        # warnings are preserved.
+        self.assertIn("never suppressed", blob)
+        self.assertIn("LIFECYCLE", blob)
+        self.assertIn("WARNINGS", blob)
+        # Results report install state for all four emitters (bools).
+        self.assertEqual(set(results), set(self._EMITTERS))
+        for v in results.values():
+            self.assertIsInstance(v, bool)
+
+    def test_install_summary_reports_inert_targets_when_missing(self):
+        """Offline (no gateway.* modules) every target is missing → the summary
+        must flag them INERT so the operator knows those emitters stay visible."""
+        plugin = _load_plugin()
+        with self.assertLogs(plugin.logger, level="INFO") as cm:
+            results = plugin._install_quiet_room_patches()
+        blob = "\n".join(cm.output)
+        self.assertIn("INERT", blob)
+        self.assertIn("stays VISIBLE", blob)
+        self.assertTrue(all(v is False for v in results.values()), results)
+
+    def test_register_emits_the_install_summary(self):
+        plugin = _load_plugin()
+
+        class FakeCtx:
+            def register_hook(self, name, fn):
+                pass
+
+            def register_command(self, *a, **k):
+                pass
+
+        with self.assertLogs(plugin.logger, level="INFO") as cm:
+            plugin.register(FakeCtx())
+        blob = "\n".join(cm.output)
+        self.assertIn("installed emission suppression", blob)
 
 
 if __name__ == "__main__":
