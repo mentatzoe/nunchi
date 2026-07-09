@@ -54,6 +54,7 @@ class TestFilterOverridable(unittest.TestCase):
             "model": "test-model",
             "pinned_rules": "No off-topic promotion.",
             "pinned_rules_file": "/tmp/rules.md",
+            "quiet_gateway_chatter": False,
         })
         self.assertEqual(set(result.keys()), set(self.m.OVERRIDABLE_KEYS))
 
