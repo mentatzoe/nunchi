@@ -10,7 +10,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from .codex_room_runner import RunnerConfig
+from .codex_room_runner import (
+    CodexSessionStateError,
+    RunnerConfig,
+    load_codex_session,
+    reset_codex_session,
+)
 from .codex_runtime_state import (
     RuntimeStateError,
     apply_patch,
@@ -74,6 +79,29 @@ class ConfigAppService:
             return {"value": self.config.model, "source": "runner-baseline"}
         return {"value": None, "source": None}
 
+    def _session_health(self) -> dict[str, Any]:
+        health: dict[str, Any] = {
+            "mode": self.config.session_mode,
+            "active": False,
+            "created_at": None,
+            "updated_at": None,
+            "error": None,
+        }
+        if self.config.session_mode != "persistent":
+            return health
+        try:
+            state = load_codex_session(self.config.session_path)
+        except CodexSessionStateError as exc:
+            health["error"] = str(exc)
+            return health
+        if state is not None:
+            health.update(
+                active=True,
+                created_at=state.get("created_at"),
+                updated_at=state.get("updated_at"),
+            )
+        return health
+
     def snapshot(self) -> dict[str, Any]:
         state = load_state(self.state_path)
         channel_ids = configured_channel_ids(self.config.channels, state)
@@ -101,6 +129,7 @@ class ConfigAppService:
                 "transport_url": self.config.transport_url,
                 "gate_binary": _binary_status(self.config.channel_bin),
                 "codex_binary": _binary_status(self.config.codex_bin),
+                "codex_session": self._session_health(),
                 "last_receipt_at": last_receipt.get("ts") if last_receipt else None,
                 "last_receipt_action": last_receipt.get("action") if last_receipt else None,
             },
@@ -129,6 +158,10 @@ class ConfigAppService:
             "receipts": tail_receipts(self.config.log_path, limit=limit),
             "limit": max(1, min(int(limit), 500)),
         }
+
+    def reset_session(self) -> dict[str, Any]:
+        reset_codex_session(self.config.session_path)
+        return {"ok": True, "snapshot": self.snapshot()}
 
 
 def load_ui_html() -> str:
@@ -229,6 +262,25 @@ def build_mcp_server(service: ConfigAppService | None = None) -> Any:
         result = backend.update(patch)
         message = "Saved Nunchi Codex configuration." if result["ok"] else result["error"]
         return _tool_result(types, result, message)
+
+    @server.tool(
+        name="reset_nunchi_session",
+        title="Start a new Vigil session",
+        description=(
+            "Clear the dedicated persistent Codex room session so the next admitted "
+            "wake starts a new task."
+        ),
+        annotations=types.ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        meta={"ui": {"visibility": ["model", "app"]}},
+    )
+    def reset_nunchi_session():
+        result = backend.reset_session()
+        return _tool_result(types, result, "Cleared the persistent Vigil session.")
 
     @server.tool(
         name="get_nunchi_receipts",

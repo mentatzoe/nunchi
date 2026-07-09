@@ -17,7 +17,7 @@ from nunchi.integrations.codex_config_app import (
     default_config_argv,
     load_ui_html,
 )
-from nunchi.integrations.codex_room_runner import RunnerConfig
+from nunchi.integrations.codex_room_runner import RunnerConfig, save_codex_session
 from tests.hook_sandbox import sandbox_env
 
 
@@ -30,6 +30,7 @@ def _service(root: pathlib.Path) -> ConfigAppService:
             codex_bin="/bin/sh",
             state_path=root / "state.json",
             log_path=root / "receipts.jsonl",
+            session_path=root / "session.json",
             agent_id="vigil",
             mention_id="1494822530643398827",
         ),
@@ -120,6 +121,38 @@ class TestConfigAppService(unittest.TestCase):
             ["new", "old"],
         )
 
+    def test_snapshot_and_reset_expose_persistent_session_health(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            service = _service(root)
+            self.assertFalse(service.snapshot()["health"]["codex_session"]["active"])
+            save_codex_session(
+                root / "session.json",
+                "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+            )
+
+            health = service.snapshot()["health"]["codex_session"]
+            self.assertTrue(health["active"])
+            self.assertIsNotNone(health["updated_at"])
+            self.assertNotIn("thread_id", health)
+            result = service.reset_session()
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["snapshot"]["health"]["codex_session"]["active"])
+
+    def test_corrupt_session_is_reported_and_can_be_reset(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            service = _service(root)
+            (root / "session.json").write_text("bad-json", encoding="utf-8")
+
+            health = service.snapshot()["health"]["codex_session"]
+            self.assertFalse(health["active"])
+            self.assertIn("cannot read Codex session state", health["error"])
+            service.reset_session()
+
+            self.assertIsNone(service.snapshot()["health"]["codex_session"]["error"])
+
 
 class TestConfigUiAsset(unittest.TestCase):
     def test_ui_contains_settings_receipts_and_host_tool_calls(self):
@@ -136,6 +169,7 @@ class TestConfigUiAsset(unittest.TestCase):
             "pending add",
             "get_nunchi_config",
             "update_nunchi_config",
+            "reset_nunchi_session",
             "get_nunchi_receipts",
             'method: "tools/call"',
         ):
@@ -167,6 +201,7 @@ class TestMcpAppsContract(unittest.TestCase):
                 "open_nunchi_config",
                 "get_nunchi_config",
                 "update_nunchi_config",
+                "reset_nunchi_session",
                 "get_nunchi_receipts",
             },
         )
@@ -175,6 +210,7 @@ class TestMcpAppsContract(unittest.TestCase):
         self.assertEqual(open_meta["openai/outputTemplate"], TEMPLATE_URI)
         self.assertTrue(tools["open_nunchi_config"].annotations.readOnlyHint)
         self.assertFalse(tools["update_nunchi_config"].annotations.readOnlyHint)
+        self.assertTrue(tools["reset_nunchi_session"].annotations.destructiveHint)
         self.assertEqual(str(resources[0].uri), TEMPLATE_URI)
         self.assertEqual(content[0].mime_type, "text/html;profile=mcp-app")
         self.assertIn("Nunchi", content[0].content)
@@ -189,6 +225,7 @@ class TestMcpAppsContract(unittest.TestCase):
                 {
                     "NUNCHI_RUNNER_STATE": str(root / "state.json"),
                     "NUNCHI_RUNNER_LOG": str(root / "receipts.jsonl"),
+                    "NUNCHI_RUNNER_SESSION_STATE": str(root / "session.json"),
                     "NUNCHI_CHANNEL_BIN": "/bin/sh",
                     "NUNCHI_RUNNER_CODEX_BIN": "/bin/sh",
                     "NUNCHI_RUNNER_CHANNELS": "1522258711047831653",
@@ -221,7 +258,7 @@ class TestMcpAppsContract(unittest.TestCase):
 
             tools, opened, updated, resource = asyncio.run(round_trip())
 
-        self.assertEqual(len(tools.tools), 4)
+        self.assertEqual(len(tools.tools), 5)
         self.assertEqual(opened.structuredContent["api_version"], 1)
         self.assertTrue(updated.structuredContent["ok"])
         effective = updated.structuredContent["snapshot"]["effective"]

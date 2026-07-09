@@ -382,8 +382,11 @@ The Codex integration has four Codex-side pieces in
 [`integrations/codex/`](../integrations/codex/README.md):
 
 - `nunchi-codex-room-runner` consumes the shared Discord-MCP transport's SSE
-  notifications, runs `nunchi-channel`, and wakes `codex exec` only for
-  `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex. For
+  notifications without polling, runs `nunchi-channel`, and wakes Codex only
+  for `ACK`/`ASK`/`SPEAK`. Its first admitted wake creates a dedicated Codex
+  room task and later wakes resume the persisted task. `PASS` writes a receipt
+  and does not wake Codex. Events are not injected into an unrelated open
+  desktop task. For
   configured channels, it backfills gate history on transport startup through
   the transport's `read_history` MCP tool; hot-added and watch-all channels
   backfill immediately before their first observed live event. Discord
@@ -401,8 +404,9 @@ The Codex integration has four Codex-side pieces in
   whose durable receipt cannot be locked and written.
 - `nunchi-codex-config-app` serves a task-embedded MCP Apps panel for atomic
   hot global/per-channel presence overrides, channel add/disable, model and
-  pinned-rule changes, health, and newest-first receipts. The runner and both
-  hooks read the same state on each event/invocation. Codex does not currently
+  pinned-rule changes, persistent-session health/reset, and newest-first
+  receipts. The runner and both hooks read the same state on each
+  event/invocation. Codex does not currently
   expose a documented persistent third-party dashboard-tab slot, so this is
   functional operator parity in a different container from Hermes.
 - The repo-installable Codex plugin bundle at
