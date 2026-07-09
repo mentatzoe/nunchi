@@ -29,6 +29,14 @@ Optional env vars:
     NUNCHI_DISCORD_LOG          JSONL receipt log path
                                 (default: ~/.nunchi/discord-gate.jsonl)
     NUNCHI_DISCORD_AGENT_ID     Agent identity (default: bot_<username>)
+    NUNCHI_DISCORD_ALIASES      Comma-separated additional identities this agent
+                                answers to (display names, nicknames, secondary
+                                handles, mention snowflakes). Sent as
+                                agent.aliases so addressing recognizes the full
+                                bundle. NOTE: a Discord mention token is the
+                                numeric snowflake, NOT the display name — put
+                                names here, never in a mention-id knob.
+                                Optional; absent means behavior is unchanged.
     NUNCHI_DISCORD_HISTORY      History window per channel (default: 20)
     NUNCHI_DISCORD_BACKSTOP_MAX_SENDS
                                 Send backstop (amplification-loops guard, default
@@ -64,7 +72,7 @@ from typing import Callable
 
 from ._backstop import backstop_from_env
 from ._responder import _demo_responder
-from .channel import ChannelGateResult, gate as channel_gate
+from .channel import ChannelGateResult, gate as channel_gate, parse_alias_csv
 
 logger = logging.getLogger("nunchi.adapters.discord")
 
@@ -272,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
 
     log_path = Path(os.environ.get("NUNCHI_DISCORD_LOG", _DEFAULT_LOG_FILE)).expanduser()
 
+    # Additional identities this one agent answers to (agent.aliases).
+    aliases = parse_alias_csv(os.environ.get("NUNCHI_DISCORD_ALIASES"))
+
     max_events_raw = os.environ.get("NUNCHI_DISCORD_MAX_EVENTS", "")
     max_events: int | None = int(max_events_raw) if max_events_raw.strip().isdigit() else None
 
@@ -457,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
                     trigger_record,
                     history_snapshot,
                     agent_id=self._agent_id,
+                    agent_aliases=aliases or None,
                     fail_policy="open",
                 )
             except Exception as exc:  # noqa: BLE001

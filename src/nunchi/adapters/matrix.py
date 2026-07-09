@@ -30,6 +30,14 @@ Optional env vars:
     NUNCHI_MATRIX_LOG         Path for per-event JSONL receipts
                               (default: ~/.nunchi/matrix-gate.jsonl)
     NUNCHI_MATRIX_AGENT_ID    Agent identity (default: bot_<localpart-of-user-id>)
+    NUNCHI_MATRIX_ALIASES     Comma-separated additional identities this agent
+                              answers to (display names, nicknames, secondary
+                              handles, platform mention tokens). Sent as
+                              agent.aliases so addressing recognizes the full
+                              bundle. NOTE: a mention token is the platform's
+                              structured id, NOT the display name — put names
+                              here, never in a mention-id knob. Optional;
+                              absent means behavior is unchanged.
     NUNCHI_MATRIX_PEER_BOTS   Comma-separated Matrix user IDs (or @prefix prefixes)
                               treated as peer_bot, not human
     NUNCHI_MATRIX_HISTORY     Number of recent messages to include in gate context
@@ -74,7 +82,7 @@ from typing import Any, Callable
 
 from ._backstop import SendBackstop, backstop_from_env
 from ._responder import _demo_responder
-from .channel import ChannelGateResult, gate as channel_gate
+from .channel import ChannelGateResult, gate as channel_gate, parse_alias_csv
 
 logger = logging.getLogger("nunchi.adapters.matrix")
 
@@ -358,11 +366,13 @@ class MatrixSyncLoop:
         pinned_rules: str | None = None,
         sync_timeout_ms: int = _DEFAULT_SYNC_TIMEOUT_MS,
         backstop: SendBackstop | None = None,
+        aliases: list[str] | None = None,
     ) -> None:
         self.homeserver = homeserver
         self.token = token
         self.room_ids = set(room_ids)
         self.agent_id = agent_id
+        self.aliases = list(aliases or [])
         self.own_user_id = own_user_id
         self.peer_bot_specs = peer_bot_specs
         self.history_len = history_len
@@ -492,6 +502,7 @@ class MatrixSyncLoop:
                 trigger_record,
                 history_snapshot,
                 agent_id=self.agent_id,
+                agent_aliases=self.aliases or None,
                 pinned_rules=self.pinned_rules,
                 fail_policy=self.fail_policy,  # type: ignore[arg-type]
             )
@@ -793,6 +804,7 @@ def _build_loop_from_env(dry_run: bool = False) -> MatrixSyncLoop:
         responder=responder,
         dry_run=dry_run,
         backstop=backstop_from_env("NUNCHI_MATRIX"),
+        aliases=parse_alias_csv(os.environ.get("NUNCHI_MATRIX_ALIASES")),
     )
 
 

@@ -1,0 +1,14 @@
+{
+  "id": "a-mention-other-alias-in-passing",
+  "title": "Mention of another participant; the agent's alias appears only in passing prose",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "live failure class 2026-07-08: bare occurrences of the agent's name in prose triggered wakes even though the message was structurally addressed to someone else",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "seeing its own alias ('Vigil') anywhere in the text, the agent treats a message @-mentioning another participant as its turn and butts in",
+  "invariant": "an alias in passing prose is a reference, not an address; the structured @mention names the addressee",
+  "rationale": "The @mention targets a different participant's snowflake; 'Vigil' is only credited for earlier work. In live runs the deterministic fast-path resolves this without a model call (the mentioned id matches none of the agent's identities; prose never counts); the fixture pins the ground truth for model-scored runs too."
+}

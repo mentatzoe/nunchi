@@ -1,0 +1,20 @@
+{
+  "request_id": "fixture-a-display-name-address",
+  "source_shape": "addressing",
+  "trigger": {
+    "id": "msg-addr-2",
+    "author": "zoe",
+    "content": "Vigil, can you take a look at the deploy logs from tonight's run?",
+    "timestamp": "2026-07-08T22:16:00.000Z"
+  },
+  "context": [],
+  "agent": {
+    "id": "vigil",
+    "role": "participant",
+    "mention_id": "1496355876234199040",
+    "aliases": ["Vigil", "Codex", "Aether"]
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

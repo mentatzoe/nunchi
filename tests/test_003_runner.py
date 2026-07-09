@@ -101,10 +101,11 @@ class LoaderTests(unittest.TestCase):
         contract = loader.discover_fixtures(FIXTURES_ROOT, source="contract")
         injection = loader.discover_fixtures(FIXTURES_ROOT, source="injection")
         tool_chrome = loader.discover_fixtures(FIXTURES_ROOT, source="tool-chrome")
+        addressing = loader.discover_fixtures(FIXTURES_ROOT, source="addressing")
         all_ = loader.discover_fixtures(FIXTURES_ROOT)
         self.assertEqual(
             len(multica) + len(discord) + len(contract) + len(injection)
-            + len(tool_chrome),
+            + len(tool_chrome) + len(addressing),
             len(all_),
         )
         self.assertTrue(all(f.source_shape == "multica" for f in multica))
@@ -112,12 +113,16 @@ class LoaderTests(unittest.TestCase):
         self.assertTrue(all(f.source_shape == "contract" for f in contract))
         self.assertTrue(all(f.source_shape == "injection" for f in injection))
         self.assertTrue(all(f.source_shape == "tool-chrome" for f in tool_chrome))
+        self.assertTrue(all(f.source_shape == "addressing" for f in addressing))
         # The adversarial injection eval pack ships at least 10 i-* fixtures.
         self.assertGreaterEqual(len(injection), 10)
         self.assertTrue(all(f.id.startswith("i-") for f in injection))
         # The peer-tool-chrome pool ships at least 5 t-* fixtures.
         self.assertGreaterEqual(len(tool_chrome), 5)
         self.assertTrue(all(f.id.startswith("t-") for f in tool_chrome))
+        # The multi-identity addressing pool ships at least 6 a-* fixtures.
+        self.assertGreaterEqual(len(addressing), 6)
+        self.assertTrue(all(f.id.startswith("a-") for f in addressing))
 
     def _write_fixture_pair(self, root: Path, *, meta_extra: dict, context=None):
         envelope = {
@@ -336,7 +341,7 @@ class RunnerEndToEndTests(unittest.TestCase):
         all_ids = {json.loads(l)["id"] for l in all_lines}
 
         union = set()
-        for source in ("multica", "discord", "contract", "injection", "tool-chrome"):
+        for source in ("multica", "discord", "contract", "injection", "tool-chrome", "addressing"):
             with self.subTest(source=source):
                 _, out = _run_main_capturing_stdout([
                     "--adapter", "in-process",
@@ -486,6 +491,43 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         flipped = self._run_pool("tool-chrome", "PASS")
         self.assertEqual(flipped["t-chrome-skill-view-trigger"], "pass")
         self.assertEqual(flipped["t-human-ask-after-chrome"], "fail")
+
+
+    def test_addressing_fixtures_load_and_run(self):
+        """Multi-identity addressing pool (a-*): every fixture runs end-to-end
+        and scores from its own metadata. Alias-addressed fixtures expect
+        SPEAK; the different-bot / alias-in-passing / self-echo fixtures
+        expect PASS, so an injected SPEAK must score fail on them."""
+        results = self._run_pool("addressing", "SPEAK")
+        # Addressed via the alias bundle: injected SPEAK passes.
+        self.assertEqual(results["a-mention-snowflake-direct"], "pass")
+        self.assertEqual(results["a-display-name-address"], "pass")
+        self.assertEqual(results["a-secondary-alias-address"], "pass")
+        # Not this agent's turn despite a rich alias bundle: SPEAK scores fail.
+        self.assertEqual(results["a-other-bot-name-address"], "fail")
+        self.assertEqual(results["a-mention-other-alias-in-passing"], "fail")
+        self.assertEqual(results["a-self-echo-alias-author"], "fail")
+        # ...and injecting PASS flips both directions.
+        flipped = self._run_pool("addressing", "PASS")
+        self.assertEqual(flipped["a-other-bot-name-address"], "pass")
+        self.assertEqual(flipped["a-mention-snowflake-direct"], "fail")
+
+    def test_addressing_pass_fixtures_resolve_via_fastpath_without_a_provider(self):
+        """The two structurally-certain a-* fixtures resolve deterministically:
+        with no provider env at all (no key, no model, no injection), the
+        fast-path returns their expected PASS without any model call."""
+        from nunchi.core import evaluate as core_evaluate
+
+        by_id = {
+            f.id: f
+            for f in loader.discover_fixtures(FIXTURES_ROOT, source="addressing")
+        }
+        for fixture_id in ("a-self-echo-alias-author", "a-mention-other-alias-in-passing"):
+            with self.subTest(fixture=fixture_id):
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    result = core_evaluate(by_id[fixture_id].envelope)
+                self.assertEqual(result["verdict"], "PASS")
+                self.assertEqual(result["classifier_provider"], "fastpath")
 
 
 class InvariantDispatchTests(unittest.TestCase):

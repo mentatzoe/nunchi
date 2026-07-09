@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `agent.aliases`: the gate knows every name one bot carries
+
+One agent on a chat surface carries several identities at once — its
+configured `agent_id`, its platform mention token (a Discord snowflake), a
+display name ("Vigil"), secondary handles ("Codex"), profile names
+("Aether"). Two live failures on 2026-07-08 came from the gate knowing only
+one of them: a runner whose `mention_id` held the *display name* PASSed a
+direct `@<snowflake>` mention ("mentions other participants only"), while
+bare occurrences of the name in prose triggered wakes. The envelope now
+carries the full bundle. Everything below is **additive-optional**: absent
+or empty aliases, behavior — including the serialized classifier request —
+is byte-for-byte identical to before (golden-request test pins this).
+
+- **Envelope: optional `agent.aliases`** (list of non-empty strings),
+  validated by `validate_request` (non-string/blank entries rejected),
+  passed through to the classifier with the rest of the `agent` object.
+  Documented in `src/nunchi/schema.py` and `docs/STABILITY.md`.
+- **Deterministic fast-path**: aliases join the addressing identifier set —
+  the "mention aimed at ANOTHER agent → PASS" short-circuit no longer fires
+  when the mentioned token is one of OUR aliases — and the self-echo rule
+  recognizes triggers/context authored under an alias. `mention_id` still
+  does NOT join the self-echo author set (unchanged no-alias behavior; list
+  it in `aliases` to opt in).
+- **Classifier prompt** now states the agent may be addressed by any of its
+  `id`, `mention_id`, or `aliases`, and that a message authored under one of
+  those identities is the agent's own.
+- **Channel adapter**: `agent_aliases` parameter on `build_request()` /
+  `gate()`, `agent.aliases` passthrough in the CLI payload, alias-aware
+  `self` role inference for history lines, and a shared `parse_alias_csv`
+  helper for env knobs. Alias lists are deduped against
+  `agent_id`/`mention_id`, order-preserving.
+- **Surface knobs** (each documented in its config docstring/README, all
+  stating loudly that `mention_id` is the platform snowflake/token, NOT the
+  display name — names belong in aliases):
+  - Claude Code hooks (PreToolUse + UserPromptSubmit) and the Codex
+    UserPromptSubmit hook: `NUNCHI_HOOK_ALIASES` (comma-separated);
+  - Codex room runner: `NUNCHI_RUNNER_ALIASES`;
+  - Hermes plugin: `aliases:` config key (CSV or list), global and
+    per-channel in the map form of `channels`; excluded from runtime state
+    overrides like the other identity keys;
+  - standalone adapters: `NUNCHI_MATRIX_ALIASES`, `NUNCHI_TELEGRAM_ALIASES`,
+    `NUNCHI_DISCORD_ALIASES`.
+- **003 corpus: new `addressing` fixture pool (`a-*`)** under
+  `specs/003-classifier-test-suite/contracts/fixtures/addressing/` — six
+  envelope+meta pairs distilled from the live failures: direct
+  `@<snowflake>` mention with the snowflake in aliases (SPEAK), display-name
+  address (SPEAK), secondary-alias address "Codex" (SPEAK), a different
+  bot's name (PASS), self-echo relayed under a profile-name alias (PASS,
+  deterministic fast-path), and a mention of another participant with our
+  alias only in passing prose (PASS, deterministic fast-path). Loader,
+  runner (`--source addressing`), and runner self-tests discover the pool
+  the same way as the injection and tool-chrome classes.
+- **Merged `feat/codex-plugin` into this branch** (Codex room runner +
+  pre-LLM prompt gate hook, previously unmerged) so the alias knob could
+  land on the Codex surface too; its hook tests were also brought under
+  `tests/hook_sandbox.sandbox_env`, matching main's receipt-log hygiene
+  enforcement.
+- Scope note: alias matching is identity plumbing, not fuzzy matching — the
+  fast-path still compares only structured tokens and exact author strings;
+  prose name-spotting remains the classifier's judgment. The SPEAK
+  expectations in the new fixtures are model judgment (evidence:
+  `predicted`), not fast-path guarantees.
+
 ### Fixed — fail-policy wiring, empty-send guard, peer-tool-chrome fixtures
 
 - **Hermes plugin: `fail_open` now reaches the nunchi-channel binary as the

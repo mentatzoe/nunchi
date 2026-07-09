@@ -84,6 +84,7 @@ def _make_loop(
     responder=None,
     dry_run=False,
     history_len=10,
+    aliases=None,
 ) -> MatrixSyncLoop:
     return MatrixSyncLoop(
         homeserver="https://matrix.example.com",
@@ -97,6 +98,7 @@ def _make_loop(
         log_path=tmp_path / "log.jsonl",
         responder=responder,
         dry_run=dry_run,
+        aliases=aliases,
     )
 
 
@@ -962,6 +964,66 @@ class TestSendBackstopWiring(unittest.TestCase):
 
         self.assertEqual(loop._backstop.max_sends, 2)
         self.assertEqual(loop._backstop.window_seconds, 3.5)
+
+
+# --------------------------------------------------------------------------- #
+# agent.aliases wiring
+# --------------------------------------------------------------------------- #
+
+class TestAliasWiring(unittest.TestCase):
+    """NUNCHI_MATRIX_ALIASES -> loop.aliases -> channel_gate(agent_aliases=...)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+
+    def _gate_kwargs(self, loop) -> dict:
+        captured = {}
+
+        def _fake_gate(trigger, history, **kw):
+            captured.update(kw)
+            return ChannelGateResult(
+                verdict="PASS", silent=True, run_shape="Stay silent.",
+                reasons=("test",), confidences={}, context_checked=(),
+                request_id=None, classifier_model=None,
+            )
+
+        with patch("nunchi.adapters.matrix.channel_gate", side_effect=_fake_gate):
+            loop._initial_sync_done = True
+            loop._gate_and_respond(
+                room_id="!room1:example.com",
+                trigger_record={"content": "hi", "author": "@u:x", "author_kind": "human", "message_id": "$a1"},
+                history_snapshot=[],
+            )
+        return captured
+
+    def test_loop_aliases_passed_to_gate(self):
+        loop = _make_loop(tmp_path=self.tmp, aliases=["Vigil", "Codex"])
+        kwargs = self._gate_kwargs(loop)
+        self.assertEqual(kwargs.get("agent_aliases"), ["Vigil", "Codex"])
+
+    def test_no_aliases_passes_none_to_gate(self):
+        # Backward compat: an alias-free loop calls the gate exactly as before.
+        loop = _make_loop(tmp_path=self.tmp)
+        kwargs = self._gate_kwargs(loop)
+        self.assertIsNone(kwargs.get("agent_aliases"))
+
+    def test_aliases_env_knob_parsed_into_loop(self):
+        from nunchi.adapters.matrix import _build_loop_from_env
+
+        env = {
+            "NUNCHI_MATRIX_HOMESERVER": "https://matrix.example.com",
+            "NUNCHI_MATRIX_TOKEN": "tok",
+            "NUNCHI_MATRIX_ROOMS": "!room1:example.com",
+            "NUNCHI_MATRIX_STATE": str(self.tmp / "state.json"),
+            "NUNCHI_MATRIX_LOG": str(self.tmp / "log.jsonl"),
+            "NUNCHI_MATRIX_ALIASES": " Vigil, Codex ,, Vigil ",
+        }
+        with patch.dict(os.environ, env):
+            with patch("nunchi.adapters.matrix._whoami", return_value="@bot:example.com"):
+                loop = _build_loop_from_env()
+
+        self.assertEqual(loop.aliases, ["Vigil", "Codex"])
 
 
 # --------------------------------------------------------------------------- #

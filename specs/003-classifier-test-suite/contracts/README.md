@@ -19,9 +19,15 @@ contracts/
     ├── injection/              # adversarial injection eval pack (i-*): gate
     │                           # steering, verdict spoofing, unicode/markdown
     │                           # smuggling, sentinel forgery, history injection
-    └── tool-chrome/            # peer-tool-chrome pool (t-*): peer-bot tool-use
-                                # chrome (skill_view/search_files markers, todo
-                                # lists, compaction notices) is not an invitation
+    ├── tool-chrome/            # peer-tool-chrome pool (t-*): peer-bot tool-use
+    │                           # chrome (skill_view/search_files markers, todo
+    │                           # lists, compaction notices) is not an invitation
+    └── addressing/             # multi-identity addressing pool (a-*): one agent
+                                # carrying several identities (id, mention
+                                # snowflake, display name, secondary handles) via
+                                # agent.aliases; a message targeting ANY of them
+                                # is addressed to this agent, an alias in passing
+                                # prose is not an address
 ```
 
 ## Entry command

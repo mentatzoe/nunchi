@@ -71,6 +71,53 @@ class SchemaTests(unittest.TestCase):
                 "trigger": {"content": "Please acknowledge this."},
             })
 
+    def test_agent_aliases_accepted_and_passed_through(self):
+        request = validate_request({
+            "trigger": {"content": "Vigil, can you look at this?"},
+            "agent": {"id": "vigil", "mention_id": "111", "aliases": ["Vigil", "Codex", "Aether"]},
+        })
+
+        self.assertEqual(request.agent["aliases"], ["Vigil", "Codex", "Aether"])
+
+    def test_agent_without_aliases_passes_through_unchanged(self):
+        # Additive-optional: an alias-free agent object is exactly what was supplied.
+        request = validate_request({
+            "trigger": {"content": "Vigil, can you look at this?"},
+            "agent": {"id": "vigil", "mention_id": "111"},
+        })
+
+        self.assertEqual(request.agent, {"id": "vigil", "mention_id": "111"})
+        self.assertNotIn("aliases", request.agent)
+
+    def test_agent_aliases_must_be_a_list(self):
+        with self.assertRaises(ValidationError):
+            validate_request({
+                "trigger": {"content": "ping"},
+                "agent": {"id": "vigil", "aliases": "Vigil,Codex"},
+            })
+
+    def test_agent_aliases_non_string_entry_is_validation_error(self):
+        with self.assertRaises(ValidationError):
+            validate_request({
+                "trigger": {"content": "ping"},
+                "agent": {"id": "vigil", "aliases": ["Vigil", 42]},
+            })
+
+    def test_agent_aliases_blank_entry_is_validation_error(self):
+        with self.assertRaises(ValidationError):
+            validate_request({
+                "trigger": {"content": "ping"},
+                "agent": {"id": "vigil", "aliases": ["Vigil", "   "]},
+            })
+
+    def test_agent_aliases_empty_list_is_accepted(self):
+        request = validate_request({
+            "trigger": {"content": "ping"},
+            "agent": {"id": "vigil", "aliases": []},
+        })
+
+        self.assertEqual(request.agent["aliases"], [])
+
     def test_result_without_classifier_is_validation_error(self):
         with patch.dict("os.environ", fixture_case("speak", "SPEAK"), clear=True):
             result = evaluate(load_fixture("speak"), classifier="product")

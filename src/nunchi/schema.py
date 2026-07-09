@@ -1,4 +1,18 @@
-"""Validation helpers for Nunchi admission requests and results."""
+"""Validation helpers for Nunchi admission requests and results.
+
+The ``agent`` object is passed through to the classifier as supplied, with one
+validated optional field:
+
+``agent.aliases`` (optional, list of strings)
+    Every other name or identity this one agent answers to on the surface,
+    beyond ``agent.id`` and ``agent.mention_id``: display names ("Vigil"),
+    secondary handles ("Codex"), profile names ("Aether"), and platform
+    mention tokens (a Discord snowflake). One bot commonly carries several of
+    these at once; addressing judgments (both the deterministic fast-path and
+    the classifier) treat all of them as "this agent". Entries must be
+    non-empty strings. Absent or empty, behavior is exactly the same as
+    before the field existed — it is additive-optional per docs/STABILITY.md.
+"""
 
 from collections.abc import Mapping
 from numbers import Real
@@ -38,6 +52,24 @@ def _required_non_empty_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"{name} must be a non-empty string")
     return value
+
+
+def _validate_agent_aliases(agent: dict[str, Any]) -> None:
+    """Validate the optional ``agent.aliases`` list (see module docstring).
+
+    Absent (or ``None``) is fine — the field is additive-optional. When
+    supplied it must be a list whose entries are all non-empty strings;
+    non-string or blank entries are rejected rather than silently dropped so
+    a misconfigured surface fails loudly instead of losing an identity.
+    """
+    aliases = agent.get("aliases")
+    if aliases is None:
+        return
+    if not isinstance(aliases, list):
+        raise ValidationError("agent.aliases must be a list of strings when supplied")
+    for index, alias in enumerate(aliases):
+        if not isinstance(alias, str) or not alias.strip():
+            raise ValidationError(f"agent.aliases[{index}] must be a non-empty string")
 
 
 def validate_request(raw):
@@ -80,6 +112,7 @@ def validate_request(raw):
     agent = data.get("agent")
     if agent is not None:
         agent = dict(_require_mapping(agent, "agent"))
+        _validate_agent_aliases(agent)
 
     surface = data.get("surface")
     if surface is not None:

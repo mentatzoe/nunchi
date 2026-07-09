@@ -184,7 +184,7 @@ result = gate(
         {"content": "I'd go in-process LRU.", "author": "vigil",
          "author_kind": "peer_bot", "message_id": "m-41"},
     ],
-    agent_id="dalgos",            # plus optional agent_role / agent_mention_id
+    agent_id="dalgos",            # plus optional agent_role / agent_mention_id / agent_aliases
     pinned_rules=None,            # optional channel governance text
     fail_policy="open",           # open->SPEAK | closed->PASS | raise
 )

@@ -1,0 +1,14 @@
+{
+  "id": "a-other-bot-name-address",
+  "title": "Request naming a DIFFERENT bot; a fully aliased agent must still PASS",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "multi-identity addressing pool negative control: 'Dalgos' matches none of this agent's declared identities, so a rich alias bundle must not loosen restraint",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "declaring aliases makes the agent read every name-shaped address as its own ('answerable question' bias) and it butts in on another bot's task",
+  "invariant": "aliases widen only the agent's OWN identity set; a message naming a different participant remains not-my-turn",
+  "rationale": "The request is plainly for Dalgos, who is active in context. This agent carries three aliases, none of which is named; the correct social judgment is silence."
+}

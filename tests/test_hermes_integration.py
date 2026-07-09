@@ -113,6 +113,36 @@ class TestPayloadBuilding(unittest.TestCase):
         payload = self.p._build_payload(_event("hi", user_name="Station", is_bot=True), _base_cfg())
         self.assertEqual(payload["trigger"]["author_kind"], "peer_bot")
 
+    def test_aliases_list_config_lands_in_payload(self) -> None:
+        cfg = _base_cfg(mention_id="1496355876234199040", aliases=["Vigil", "Codex", "Aether"])
+        payload = self.p._build_payload(_event("ping"), cfg)
+        self.assertEqual(
+            payload["agent"],
+            {
+                "id": "aleph",
+                "mention_id": "1496355876234199040",
+                "aliases": ["Vigil", "Codex", "Aether"],
+            },
+        )
+
+    def test_aliases_csv_config_cleaned_and_deduped(self) -> None:
+        # CSV form; dupes of agent_id/mention_id and blanks must be dropped.
+        cfg = _base_cfg(
+            mention_id="1496355876234199040",
+            aliases=" Vigil, Codex ,aleph,1496355876234199040,, Vigil ",
+        )
+        payload = self.p._build_payload(_event("ping"), cfg)
+        self.assertEqual(payload["agent"]["aliases"], ["Vigil", "Codex"])
+
+    def test_no_aliases_config_keeps_agent_shape_unchanged(self) -> None:
+        # Additive-optional: alias-free configs produce the pre-alias payload.
+        cfg = _base_cfg(mention_id="1496355876234199040")
+        payload = self.p._build_payload(_event("ping"), cfg)
+        self.assertEqual(
+            payload["agent"], {"id": "aleph", "mention_id": "1496355876234199040"}
+        )
+        self.assertNotIn("aliases", payload["agent"])
+
 
 class TestChannelContextParsing(unittest.TestCase):
     """_parse_channel_context history building."""
@@ -645,6 +675,25 @@ class TestResolveChannelConfig(unittest.TestCase):
         result = self.p.resolve_channel_config(cfg, {"chan1"})
         self.assertIsNotNone(result)
         self.assertEqual(result["model"], "per-chan-model")
+
+    def test_map_per_channel_aliases_override_global_and_reach_payload(self) -> None:
+        # A bot may carry a different display identity per channel (see the
+        # channel-scoped display overrides core patch); per-channel aliases win.
+        cfg = _base_cfg(
+            aliases=["GlobalName"],
+            channels={"chan1": {"aliases": ["ChannelName", "Codex"]}},
+        )
+        result = self.p.resolve_channel_config(cfg, {"chan1"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["aliases"], ["ChannelName", "Codex"])
+        payload = self.p._build_payload(_event("ping"), result)
+        self.assertEqual(payload["agent"]["aliases"], ["ChannelName", "Codex"])
+
+    def test_map_per_channel_inherits_global_aliases_when_absent(self) -> None:
+        cfg = _base_cfg(aliases=["GlobalName"], channels={"chan1": {"senders": "humans"}})
+        result = self.p.resolve_channel_config(cfg, {"chan1"})
+        self.assertIsNotNone(result)
+        self.assertEqual(result["aliases"], ["GlobalName"])
 
     def test_map_per_channel_fail_open_overrides_global(self) -> None:
         cfg = _base_cfg(fail_open=True, channels={"chan1": {"fail_open": False}})

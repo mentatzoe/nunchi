@@ -1,0 +1,28 @@
+{
+  "request_id": "fixture-a-other-bot-name-address",
+  "source_shape": "addressing",
+  "trigger": {
+    "id": "msg-addr-4",
+    "author": "zoe",
+    "content": "Dalgos, can you kick off the nightly backup once the deploy settles?",
+    "timestamp": "2026-07-08T22:20:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-addr-4-ctx-1",
+      "type": "peer",
+      "author": "dalgos",
+      "content": "Deploy is through staging; watching the canary now.",
+      "timestamp": "2026-07-08T22:19:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "vigil",
+    "role": "participant",
+    "mention_id": "1496355876234199040",
+    "aliases": ["Vigil", "Codex", "Aether"]
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

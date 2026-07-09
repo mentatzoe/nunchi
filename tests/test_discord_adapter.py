@@ -510,6 +510,34 @@ class TestEmptySendGuard(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 
+class TestAliasWiring(unittest.TestCase):
+    """NUNCHI_DISCORD_ALIASES -> agent.aliases wiring.
+
+    The gate call lives inside main()'s discord.Client subclass, which cannot
+    run offline (discord.py + a live event loop). Following the repo's
+    source-inspection precedent (BoundaryEnforcementTests), these tests pin
+    the wiring at source level: the env knob is parsed with the shared
+    parse_alias_csv helper and handed to channel_gate as agent_aliases.
+    """
+
+    _SOURCE = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "src" / "nunchi" / "adapters" / "discord.py"
+    ).read_text()
+
+    def test_env_knob_parsed_with_shared_helper(self):
+        self.assertIn(
+            'parse_alias_csv(os.environ.get("NUNCHI_DISCORD_ALIASES"))', self._SOURCE
+        )
+
+    def test_gate_call_passes_agent_aliases(self):
+        self.assertIn("agent_aliases=aliases or None", self._SOURCE)
+
+    def test_docstring_documents_the_knob(self):
+        import nunchi.adapters.discord as d
+        self.assertIn("NUNCHI_DISCORD_ALIASES", d.__doc__ or "")
+
+
 @unittest.skipUnless(DISCORD_AVAILABLE, "discord.py not installed")
 class TestDiscordImports(unittest.TestCase):
     """Smoke tests for discord.py-dependent adapter code."""

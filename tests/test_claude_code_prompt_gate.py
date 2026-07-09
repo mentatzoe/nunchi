@@ -903,5 +903,72 @@ class TestBlockOutputContract(unittest.TestCase):
         self.assertEqual(out.strip(), "")
 
 
+class TestAgentAliases(unittest.TestCase):
+    """NUNCHI_HOOK_ALIASES lands in the gate payload as agent.aliases."""
+
+    def _capture_agent(self, extra_env: dict) -> dict:
+        """Run the hook with a payload-capturing stub; return payload['agent']."""
+        side_file = tempfile.mktemp(suffix=".payload.json")
+        stub_code = textwrap.dedent(f"""\
+            #!/usr/bin/env python3
+            import sys, json
+            payload = json.loads(sys.stdin.read())
+            with open({repr(side_file)}, "w") as f:
+                json.dump(payload, f)
+            print(json.dumps({{
+                "verdict": "SPEAK", "silent": False,
+                "run_shape": "speak", "reasons": ["test"],
+                "confidences": {{}}, "context_checked": [],
+                "request_id": None, "classifier_model": None, "degraded": False,
+            }}))
+            sys.exit(0)
+        """)
+        fd, stub_path = tempfile.mkstemp(suffix=".py")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(stub_code)
+        wrapper_fd, wrapper_path = tempfile.mkstemp(suffix=".sh")
+        with os.fdopen(wrapper_fd, "w") as fh:
+            fh.write(f"#!/bin/sh\n{sys.executable} {stub_path} \"$@\"\n")
+        os.chmod(wrapper_path, 0o755)
+
+        prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hey")
+        _run_hook(
+            _hook_input(prompt=prompt),
+            env_overrides={
+                "NUNCHI_CHANNEL_BIN": wrapper_path,
+                "NUNCHI_HOOK_LOG": "/dev/null",
+                **extra_env,
+            },
+        )
+        os.unlink(stub_path)
+        os.unlink(wrapper_path)
+
+        payload_path = pathlib.Path(side_file)
+        if not payload_path.exists():
+            self.fail("Stub was not invoked; no payload captured")
+        payload = json.loads(payload_path.read_text())
+        payload_path.unlink()
+        return payload["agent"]
+
+    def test_aliases_env_lands_in_payload_cleaned_and_deduped(self):
+        agent = self._capture_agent({
+            "NUNCHI_HOOK_AGENT_ID": "vigil",
+            "NUNCHI_HOOK_MENTION_ID": "111",
+            # dupes of agent_id/mention_id and blanks must be dropped
+            "NUNCHI_HOOK_ALIASES": " Vigil, Codex ,vigil,111,, Vigil ",
+        })
+        self.assertEqual(
+            agent, {"id": "vigil", "mention_id": "111", "aliases": ["Vigil", "Codex"]}
+        )
+
+    def test_no_aliases_env_keeps_agent_shape_unchanged(self):
+        agent = self._capture_agent({
+            "NUNCHI_HOOK_AGENT_ID": "vigil",
+            "NUNCHI_HOOK_MENTION_ID": "111",
+            "NUNCHI_HOOK_ALIASES": "",
+        })
+        self.assertEqual(agent, {"id": "vigil", "mention_id": "111"})
+
+
 if __name__ == "__main__":
     unittest.main()

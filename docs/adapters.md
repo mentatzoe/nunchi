@@ -14,6 +14,7 @@ custom responder.
 | `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | beta |
 | Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | beta |
+| Codex runner + hook | Codex CLI via shared Discord-MCP transport | stdlib | code-only |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
 \* *beta* for the Matrix, Telegram, and Discord adapters means: full offline
@@ -78,6 +79,7 @@ and exit (useful for cron or testing).
 | `NUNCHI_MATRIX_STATE` | no | `~/.nunchi/matrix-sync.json` | Since-token persistence |
 | `NUNCHI_MATRIX_LOG` | no | `~/.nunchi/matrix-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_MATRIX_AGENT_ID` | no | `bot_<localpart>` | Agent identity label |
+| `NUNCHI_MATRIX_ALIASES` | no | *(none)* | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, mention tokens) → `agent.aliases`. A mention token is the platform's structured id, **not** the display name — names go here. |
 | `NUNCHI_MATRIX_PEER_BOTS` | no | `` | Comma-separated user IDs (or `@prefix*` globs) treated as `peer_bot` |
 | `NUNCHI_MATRIX_HISTORY` | no | `20` | Recent messages fed to the gate as context |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the built-in demo responder |
@@ -206,6 +208,7 @@ Use `--dry-run` to gate without sending, or `--once` to process one
 | `NUNCHI_TELEGRAM_STATE` | no | `~/.nunchi/telegram-sync.json` | Offset persistence |
 | `NUNCHI_TELEGRAM_LOG` | no | `~/.nunchi/telegram-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_TELEGRAM_AGENT_ID` | no | `bot_<username>` | Agent identity label |
+| `NUNCHI_TELEGRAM_ALIASES` | no | *(none)* | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, mention tokens) → `agent.aliases`. A mention token is the platform's structured id, **not** the display name — names go here. |
 | `NUNCHI_TELEGRAM_HISTORY` | no | `20` | Recent messages fed to the gate |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the demo responder |
 | `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
@@ -279,6 +282,7 @@ nunchi-discord
 | `NUNCHI_DISCORD_MAX_EVENTS` | no | *(unlimited)* | Stop after N gated events (useful for bounded integration tests) |
 | `NUNCHI_DISCORD_LOG` | no | `~/.nunchi/discord-gate.jsonl` | JSONL receipt log |
 | `NUNCHI_DISCORD_AGENT_ID` | no | `bot_<username>` | Agent identity label |
+| `NUNCHI_DISCORD_ALIASES` | no | *(none)* | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, mention snowflakes) → `agent.aliases`. A Discord mention token is the numeric **snowflake**, not the display name — names go here. |
 | `NUNCHI_DISCORD_HISTORY` | no | `20` | Recent messages per channel for context |
 | `NUNCHI_RESPONDER_MODEL` | no | `NUNCHI_CLASSIFIER_MODEL` | LLM for the demo responder |
 | `NUNCHI_CLASSIFIER_BASE_URL` | no | OpenRouter | OpenAI-compatible API base URL |
@@ -365,6 +369,27 @@ own plugin checkout — the upstream fix is still pending, so peer-hearing is
 not available out of the box.
 
 Full setup and configuration: [`integrations/claude-code/README.md`](../integrations/claude-code/README.md)
+
+---
+
+## Codex runner + hook
+
+The Codex integration has two Codex-side pieces in
+[`integrations/codex/`](../integrations/codex/README.md):
+
+- `nunchi_room_runner.py` consumes the shared Discord-MCP transport's SSE
+  notifications, runs `nunchi-channel`, and wakes `codex exec` only for
+  `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex.
+- `nunchi_prompt_gate_codex.py` is a defense-in-depth `UserPromptSubmit` hook
+  for channel-tagged prompts in interactive Codex sessions. It blocks `PASS`
+  and fail-opens for operator or malformed prompts.
+
+Status is **code-only** in this branch: offline unit tests cover the runner and
+hook, but live Discord room participation requires the separate shared
+`nunchi-mcp-discord` transport, credentials, and a live smoke. Outbound
+`send_message` / `reply_message` calls are not gated by a Codex hook here; the
+Codex path relies on the transport-side send backstop when that transport build
+is present.
 
 ---
 

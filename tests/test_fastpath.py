@@ -100,6 +100,82 @@ class FastPathShortCircuitTests(unittest.TestCase):
                 evaluate(request)
 
 
+class FastPathAliasTests(unittest.TestCase):
+    """agent.aliases joins the identity bundle for both fast-path rules.
+
+    Tonight's live failure class: a runner whose configured mention_id was
+    the display name ("vigil") PASSed a direct <@snowflake> mention because
+    the snowflake matched none of its known identities. With the snowflake
+    (or any other identity) listed in aliases, the mention-aimed-elsewhere
+    short-circuit must NOT fire.
+    """
+
+    ALIAS_SNOWFLAKE = "222222222222222222"
+
+    def _agent(self, aliases):
+        return {"id": AGENT_ID, "mention_id": AGENT_MENTION_ID, "aliases": aliases}
+
+    def test_mention_of_our_alias_snowflake_does_not_shortcut(self):
+        # The mention token is one of OUR aliases -> addressed to us -> must
+        # escalate to the classifier (which raises offline), never PASS.
+        request = _request(
+            trigger={"id": "t-alias-mention", "content": f"hey <@{self.ALIAS_SNOWFLAKE}> please review"},
+            agent=self._agent(["Vigil", self.ALIAS_SNOWFLAKE]),
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            with self.assertRaises(ValidationError):
+                evaluate(request)
+
+    def test_mention_elsewhere_still_passes_with_aliases_present(self):
+        # Aliases present but the mentioned id is foreign -> short-circuit intact.
+        request = _request(
+            trigger={"id": "t-foreign", "content": "hey <@999> can you take this?"},
+            agent=self._agent(["Vigil", self.ALIAS_SNOWFLAKE]),
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            result = evaluate(request)
+
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["classifier_provider"], "fastpath")
+
+    def test_self_echo_by_alias_author_passes_via_fastpath(self):
+        # A relay may report the author under the agent's display/profile name.
+        request = _request(
+            trigger={"id": "t-alias-self", "author": "Aether", "content": "Posting my status update."},
+            agent=self._agent(["Aether"]),
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            result = evaluate(request)
+
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["classifier_provider"], "fastpath")
+        self.assertEqual(result["context_checked"], ["trigger:t-alias-self"])
+
+    def test_self_echo_by_alias_context_content_match_passes_via_fastpath(self):
+        request = _request(
+            trigger={"id": "t-alias-echo", "author": "discord-relay", "content": "Build is green on main."},
+            context=[{"id": "ctx-alias-mine", "author": "Aether", "content": "Build is green on main."}],
+            agent=self._agent(["Aether"]),
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            result = evaluate(request)
+
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["classifier_provider"], "fastpath")
+        self.assertEqual(result["context_checked"], ["trigger:t-alias-echo", "context:ctx-alias-mine"])
+
+    def test_author_matching_mention_id_without_aliases_still_escalates(self):
+        # Backward-compat guard: without aliases, self-echo compares the author
+        # against agent.id ALONE (mention_id never joined that set); behavior
+        # must stay identical to pre-alias releases.
+        request = _request(
+            trigger={"id": "t-mention-author", "author": AGENT_MENTION_ID, "content": "status update"},
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            with self.assertRaises(ValidationError):
+                evaluate(request)
+
+
 class FastPathDisabledTests(unittest.TestCase):
     def test_test_result_injection_bypasses_fastpath(self):
         # A would-be fast-path envelope (mention elsewhere) MUST yield the injected

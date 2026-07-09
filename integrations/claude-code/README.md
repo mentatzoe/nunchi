@@ -100,7 +100,8 @@ process.
 |---|---|---|
 | `NUNCHI_HOOK_TOOL_PATTERN` | `__reply$` | Regex matched against `tool_name`. Must also have `chat_id` + `text` in `tool_input`. |
 | `NUNCHI_HOOK_AGENT_ID` | `agent` | Agent identifier sent in the nunchi payload. |
-| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. |
+| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. This is the **platform mention token** — on Discord the numeric snowflake (e.g. `1496355876234199040`) — **not** the display name. A display name here makes the gate blind to real @-mentions (observed live 2026-07-08); names belong in `NUNCHI_HOOK_ALIASES`. |
+| `NUNCHI_HOOK_ALIASES` | _(unset)_ | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, extra mention tokens, e.g. `Vigil,Codex,Aether`) → `agent.aliases`. Absent means behavior is unchanged. |
 | `NUNCHI_HOOK_PEER_BOTS` | _(empty)_ | Comma-separated usernames treated as `peer_bot` (all others are `human`). |
 | `NUNCHI_HOOK_HISTORY_WINDOW` | `25` | Max transcript events included as history before the trigger (most recent N). |
 | `NUNCHI_HOOK_FAIL_POLICY` | `open` | Gate error handling: `open` → allow, `closed` → deny. |
@@ -248,7 +249,8 @@ No stdout output; exit 0.
 | Variable | Default | Description |
 |---|---|---|
 | `NUNCHI_HOOK_AGENT_ID` | `agent` | Agent identifier in the nunchi payload. |
-| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. |
+| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle for the agent. This is the **platform mention token** — on Discord the numeric snowflake (e.g. `1496355876234199040`) — **not** the display name. A display name here makes the gate blind to real @-mentions (observed live 2026-07-08); names belong in `NUNCHI_HOOK_ALIASES`. |
+| `NUNCHI_HOOK_ALIASES` | _(unset)_ | Comma-separated additional identities this agent answers to (display names, nicknames, secondary handles, extra mention tokens, e.g. `Vigil,Codex,Aether`) → `agent.aliases`. Absent means behavior is unchanged. |
 | `NUNCHI_HOOK_PEER_BOTS` | _(empty)_ | Comma-separated usernames treated as `peer_bot`. |
 | `NUNCHI_HOOK_HISTORY_WINDOW` | `25` | Max transcript events included as history (most recent N). |
 | `NUNCHI_HOOK_TOOL_PATTERN` | `__reply$` | Regex identifying outbound self-sends in the transcript. |
