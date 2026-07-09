@@ -82,6 +82,21 @@ class TestCodexPluginBundle(unittest.TestCase):
             ["read_history", "send_message", "reply_message"],
         )
 
+        config_server = servers["nunchi-config"]
+        self.assertEqual(config_server["command"], "nunchi-codex-config-app")
+        self.assertIs(config_server["enabled"], True)
+        self.assertIs(config_server["required"], False)
+        self.assertEqual(config_server["default_tools_approval_mode"], "prompt")
+        self.assertEqual(
+            config_server["enabled_tools"],
+            [
+                "open_nunchi_config",
+                "get_nunchi_config",
+                "update_nunchi_config",
+                "get_nunchi_receipts",
+            ],
+        )
+
     def test_repo_marketplace_exposes_plugin(self):
         marketplace = _read_json(_MARKETPLACE)
         entries = {plugin["name"]: plugin for plugin in marketplace["plugins"]}

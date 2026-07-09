@@ -31,6 +31,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .codex_runtime_state import (
+    RuntimeStateError,
+    default_state_path,
+    load_state,
+    resolve_channel_policy,
+)
+
 _AGENT_ID = os.environ.get("NUNCHI_HOOK_AGENT_ID", "agent")
 _MENTION_ID = os.environ.get("NUNCHI_HOOK_MENTION_ID")
 _FAIL_POLICY = os.environ.get("NUNCHI_HOOK_FAIL_POLICY", "closed").strip().lower()
@@ -83,6 +90,18 @@ def _parse_aliases(raw: str | None) -> list[str]:
 
 
 _ALIASES = _parse_aliases(os.environ.get("NUNCHI_HOOK_ALIASES"))
+_STATE_PATH = default_state_path(os.environ)
+_BASELINE_POLICY = {
+    "enabled": True,
+    "senders": os.environ.get("NUNCHI_HOOK_SENDERS", "all"),
+    "allow_from": _parse_aliases(os.environ.get("NUNCHI_HOOK_ALLOW_FROM")),
+    "verbosity": os.environ.get("NUNCHI_HOOK_VERBOSITY", "normal"),
+    "model": (
+        os.environ.get("NUNCHI_HOOK_MODEL")
+        or os.environ.get("NUNCHI_CLASSIFIER_MODEL")
+    ),
+    "pinned_rules": os.environ.get("NUNCHI_HOOK_PINNED_RULES"),
+}
 
 
 def _agent_payload() -> dict:
@@ -334,6 +353,9 @@ def _write_receipt(
     elapsed_ms: float,
     reasons: list[str] | None = None,
     error: str | None = None,
+    verbosity: str = "normal",
+    payload: dict | None = None,
+    directive: dict | None = None,
 ) -> None:
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -345,28 +367,42 @@ def _write_receipt(
             "trigger_message_id": trigger.get("message_id") if trigger else None,
             "verdict": verdict,
             "action": action,
-            "history_len": history_len,
-            "elapsed_ms": round(elapsed_ms, 1),
-            "reasons": (reasons or [])[:3],
         }
+        if verbosity in {"normal", "debug"}:
+            record["history_len"] = history_len
+            record["elapsed_ms"] = round(elapsed_ms, 1)
+            record["reasons"] = (reasons or [])[:3]
         if error:
             record["error"] = error
+        if verbosity == "debug":
+            if payload is not None:
+                record["payload"] = payload
+            if directive is not None:
+                record["directive"] = directive
         with open(_LOG_PATH, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
     except OSError:
         pass
 
 
-def _call_gate(payload: dict) -> tuple[dict | None, str | None]:
+def _call_gate(
+    payload: dict,
+    *,
+    model: str | None = None,
+) -> tuple[dict | None, str | None]:
     if not _CHANNEL_BIN:
         return None, "nunchi-channel not found; check NUNCHI_CHANNEL_BIN or install nunchi"
     try:
+        gate_env = os.environ.copy()
+        if model:
+            gate_env["NUNCHI_CLASSIFIER_MODEL"] = model
         result = subprocess.run(
             [_CHANNEL_BIN],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=_TIMEOUT,
+            env=gate_env,
         )
     except subprocess.TimeoutExpired:
         return None, f"nunchi-channel timed out after {_TIMEOUT}s"
@@ -400,6 +436,9 @@ def _deny_and_log(
     verdict: str | None = None,
     reasons: list[str] | None = None,
     error: str | None = None,
+    verbosity: str = "normal",
+    payload: dict | None = None,
+    directive: dict | None = None,
 ) -> None:
     _write_receipt(
         session_id=session_id,
@@ -411,6 +450,9 @@ def _deny_and_log(
         elapsed_ms=(time.monotonic() - t0) * 1000,
         reasons=reasons,
         error=error,
+        verbosity=verbosity,
+        payload=payload,
+        directive=directive,
     )
     print(_deny_output(reason))
     sys.exit(0)
@@ -467,6 +509,49 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
 
     trigger = payload["trigger"]
     history_len = len(payload["history"])
+    try:
+        policy = resolve_channel_policy(
+            _BASELINE_POLICY,
+            load_state(_STATE_PATH),
+            channel_id,
+            (),
+        )
+    except RuntimeStateError as exc:
+        state_error = str(exc)
+        _deny_and_log(
+            session_id=session_id,
+            channel_id=channel_id,
+            trigger=trigger,
+            history_len=history_len,
+            action="deny-state-error",
+            reason=(
+                f"nunchi runtime state error: {state_error}. Do not send this "
+                "message; stay silent this turn."
+            ),
+            t0=t0,
+            error=state_error,
+            payload=payload,
+        )
+    if policy is None:
+        _deny_and_log(
+            session_id=session_id,
+            channel_id=channel_id,
+            trigger=trigger,
+            history_len=history_len,
+            action="deny-disabled",
+            reason=(
+                "nunchi gate: room presence is disabled for this channel. "
+                "Do not send this message; stay silent this turn."
+            ),
+            t0=t0,
+            verdict="PASS",
+            reasons=["room presence is disabled for this channel"],
+            payload=payload,
+        )
+    verbosity = str(policy.get("verbosity") or "normal")
+    if policy.get("pinned_rules"):
+        payload["pinned_rules"] = policy["pinned_rules"]
+
     if _has_prior_allowed_send_receipt(
         session_id=session_id,
         channel_id=channel_id,
@@ -483,9 +568,11 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
                 "message. Do not send another message for the same turn."
             ),
             t0=t0,
+            verbosity=verbosity,
+            payload=payload,
         )
 
-    directive, gate_error = _call_gate(payload)
+    directive, gate_error = _call_gate(payload, model=policy.get("model"))
     if gate_error is not None:
         if _FAIL_POLICY == "open":
             _write_receipt(
@@ -497,6 +584,8 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
                 action="allow-gate-error",
                 elapsed_ms=(time.monotonic() - t0) * 1000,
                 error=gate_error,
+                verbosity=verbosity,
+                payload=payload,
             )
             print(_allow_output())
             sys.exit(0)
@@ -512,6 +601,8 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
             ),
             t0=t0,
             error=gate_error,
+            verbosity=verbosity,
+            payload=payload,
         )
 
     verdict = str(directive.get("verdict"))
@@ -531,6 +622,9 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
             ),
             reasons=reasons,
             t0=t0,
+            verbosity=verbosity,
+            payload=payload,
+            directive=directive,
         )
 
     _write_receipt(
@@ -542,6 +636,9 @@ def _run_gate(session_id: str, transcript_path: str, candidate: dict) -> None:
         action=f"allow-{verdict.lower()}",
         elapsed_ms=(time.monotonic() - t0) * 1000,
         reasons=reasons,
+        verbosity=verbosity,
+        payload=payload,
+        directive=directive,
     )
     print(_allow_output())
     sys.exit(0)

@@ -3,24 +3,27 @@
 Nunchi admission gating for Codex CLI on a Discord room, via the shared
 `nunchi-mcp-discord` transport server.
 
-Current branch status: this branch contains the Codex-side runner, inbound
-UserPromptSubmit hook, outbound PreToolUse send gate, configurable runner
-TOML/env loading, startup history backfill for configured channels, a
-repo-installable Codex plugin bundle at
-[`nunchi-codex/`](./nunchi-codex/), offline tests, and one committed Vigil
-live-smoke evidence file. Sustained live Discord participation still requires
-the shared `nunchi-mcp-discord` transport, Discord credentials, the installed
-Codex plugin, and the long-running room runner.
+Current implementation status: the Codex surface includes the room runner,
+inbound UserPromptSubmit hook, outbound PreToolUse send gate, configurable
+TOML/env baseline, atomic hot runtime state, startup history backfill, and an
+MCP Apps configuration/receipt panel. The repo-installable plugin bundle lives
+at [`nunchi-codex/`](./nunchi-codex/). Offline tests cover all four components,
+the app protocol, and the plugin shape; one committed Vigil live-smoke evidence
+file proves one room wake and outbound allow. It does not prove sustained
+operations. Sustained participation still requires the shared
+`nunchi-mcp-discord` transport, Discord credentials, the installed plugin, and
+the long-running room runner.
 
 Codex is **pull-only** as an MCP client: it can call the transport's tools,
 but it never reacts to server notifications on its own. So this integration
-has three pieces:
+has four pieces:
 
 | Piece | What it is |
 | --- | --- |
 | `nunchi-codex-room-runner` (`nunchi_room_runner.py`) | The agent's **ear**. A long-running process that consumes the transport's SSE notification stream, runs every room message through `nunchi-channel`, and wakes Codex (`codex exec`) only for admitted turns (SPEAK / ACK / ASK). PASS = receipt only, zero frontier tokens. |
 | `nunchi-codex-prompt-gate` (`nunchi_prompt_gate_codex.py`) | Defense-in-depth **UserPromptSubmit hook** for interactive Codex sessions. Gates only prompts carrying a `<channel source=...>` tag; blocks on PASS; fail-open on gate errors (an operator typing must never be silenced by a gate outage). |
 | `nunchi-codex-send-gate` (`nunchi_send_gate_codex.py`) | **PreToolUse hook** for outbound room sends. Re-checks supported `send_message`/`reply_message` MCP tool calls against Nunchi immediately before the tool runs. Matching sends without current runner-provided Nunchi room context are denied, as is a second room send for the same admitted context. |
+| `nunchi-codex-config-app` | An **MCP Apps operator panel** for hot global/per-channel presence settings, health, and recent gate receipts. It writes the same state read by the runner and both hooks. |
 
 The gate decides **admission, never composition**. On an admitted turn Codex
 composes (or declines to compose) the reply itself and sends it through the
@@ -62,20 +65,29 @@ The plugin bundles:
   `PreToolUse` runs `nunchi-codex-send-gate`.
 - `.mcp.json`: a `nunchi-discord` streamable-HTTP MCP server at
   `http://127.0.0.1:3993/mcp`, limited to `read_history`, `send_message`,
-  and `reply_message`.
+  and `reply_message`; plus the local stdio `nunchi-config` app server with
+  configuration and receipt tools.
 
-The hook commands are installed console scripts. The plugin deliberately does
-not point hooks at checkout-specific `.py` files; absolute checkout paths are
-brittle across branches and were the class of failure seen in the July 9 hook
-screenshot.
+The hook and app commands are installed console scripts. The plugin deliberately
+does not point hooks at checkout-specific `.py` files; absolute checkout paths
+are brittle across branches and were the class of failure seen in the July 9
+hook screenshot.
+
+Codex currently embeds plugin UI as an MCP App in a task; it does not expose a
+documented third-party persistent dashboard-tab slot equivalent to Hermes. The
+operator capabilities are present, but the container is different: invoke
+`open_nunchi_config` (or ask Codex to "Open the Nunchi configuration panel")
+to render the panel in the current task.
 
 ## Setup
 
-1. Install Nunchi from this checkout so Codex can find the hook and runner
-   console scripts, and so the shared MCP transport can import its SDK:
+1. Install Nunchi from this checkout so Codex can find the hook, runner, and
+   app console scripts, and so the shared MCP transport can import its SDK.
+   The non-editable install is the operator default; use `-e` only for local
+   development:
 
    ```sh
-   python3 -m pip install -e ".[discord,mcp-discord]"
+   python3 -m pip install ".[discord,mcp-discord]"
    ```
 
 2. Add this repo as a Codex plugin marketplace and install the plugin:
@@ -87,6 +99,16 @@ screenshot.
 
    Restart Codex after install. Review and trust the bundled hooks in `/hooks`
    before relying on them; changed hook definitions require re-review.
+
+   Codex installs a cached copy of the plugin, not a symlink to this checkout.
+   To update after pulling a newer revision, refresh both halves and restart
+   Codex:
+
+   ```sh
+   python3 -m pip install --upgrade ".[discord,mcp-discord]"
+   codex plugin remove nunchi-codex@local-repo
+   codex plugin add nunchi-codex@local-repo
+   ```
 
 3. Run the shared transport server:
 
@@ -144,10 +166,15 @@ screenshot.
    [runner]
    transport_url = "http://127.0.0.1:3993/mcp"
    channels = ["123456789012345678"]
+   state_path = "~/.nunchi/codex-room.state.json"
    self_id = "1494822530643398827"
    agent_id = "vigil"
    mention_id = "1494822530643398827"
    aliases = ["Vigil", "Codex"]
+   enabled = true
+   senders = "all"
+   verbosity = "normal"
+   model = "deepseek/deepseek-v4-flash"
    fail_policy = "closed"
    codex_args = [
      "--dangerously-bypass-approvals-and-sandbox",
@@ -156,10 +183,34 @@ screenshot.
    ]
    ```
 
+   The configuration app auto-discovers `~/.nunchi/codex-runner.toml`, so this
+   conventional path keeps its baseline/effective display aligned with the
+   runner. For another path, set `NUNCHI_RUNNER_CONFIG` before starting both
+   Codex and the runner (or pass the same `--config` path to each command).
+
    To keep it alive across reboots, wrap that command in a systemd user
    service (`systemd-run --user --unit=nunchi-room-runner ...`) or a launchd
    agent (`launchctl submit -l nunchi-room-runner -- ...`) — one line, no
    unit files required.
+
+## Configuration panel and hot state
+
+The panel can change `enabled`, `senders`, `allow_from`, `verbosity`, `model`,
+and `pinned_rules` globally or for one channel. It can hot-add a channel with
+`enabled = true`, disable an existing channel as a circuit breaker, reset one
+channel, reset all runtime overrides, and inspect newest-first receipts.
+
+Changes are written atomically to `NUNCHI_RUNNER_STATE` (default
+`~/.nunchi/codex-room.state.json`, mode `0600`) and are read again for every
+runner event and every hook invocation. Runtime state layers over the TOML/env
+baseline; a per-channel override layers over the global override. `null`
+removes one override and an empty global/channel scope resets that scope.
+
+Identity, Discord credentials, executable paths, transport URL, and log/state
+paths are intentionally not editable from the app. They remain operator-owned
+baseline configuration. If an existing state file is malformed, unattended
+room wakes and sends fail closed with a receipt; an untagged prompt typed by the
+local operator remains allowed.
 
 ## Vigil live smoke helper
 
@@ -221,6 +272,13 @@ message bodies.
 | `NUNCHI_RUNNER_WAKE_TIMEOUT` | `300` | Wake subprocess timeout (seconds) |
 | `NUNCHI_RUNNER_FAIL_POLICY` | `closed` | `closed`: gate error → no wake, loud receipt. `open`: degraded SPEAK-shaped wake |
 | `NUNCHI_RUNNER_LOG` | `~/.nunchi/codex-runner-receipts.jsonl` | Receipt JSONL (shared with the hook; hook records carry `"direction": "hook-inbound"`) |
+| `NUNCHI_RUNNER_STATE` | `~/.nunchi/codex-room.state.json` | Atomic hot state shared by runner, hooks, and configuration app (`NUNCHI_CODEX_STATE` is also accepted when no runner-specific value is set) |
+| `NUNCHI_RUNNER_ENABLED` | `true` | Baseline room presence; runtime global/channel state may override it |
+| `NUNCHI_RUNNER_SENDERS` | `all` | Baseline sender policy: `all`, `humans`, or `allowlist` |
+| `NUNCHI_RUNNER_ALLOW_FROM` | — | Comma-separated names or IDs used when `senders=allowlist` |
+| `NUNCHI_RUNNER_VERBOSITY` | `normal` | Receipt detail: `minimal`, `normal`, or `debug`; message content appears only inside debug payloads |
+| `NUNCHI_RUNNER_MODEL` | `NUNCHI_CLASSIFIER_MODEL` | Baseline classifier model; runtime state can override without restarting the runner |
+| `NUNCHI_RUNNER_PINNED_RULES` | — | Baseline room-governance text sent to the admission gate |
 
 Wakes are serialized: the runner is single-threaded, so a wake blocks the
 consume loop and triggers arriving mid-wake queue in the stream (the
@@ -248,12 +306,15 @@ operator safety. The same mention-token warning applies:
 Runner receipts write one JSONL line per event: `ts`, `channel`, `message_id`, `author`,
 `verdict`, `confidences` (when the gate returned them), `action`
 (`pass-suppressed` | `wake-ok` | `wake-error` | `no-wake-gate-error` |
-`skipped-self` | `skipped-channel` | `skipped-empty`), `wake_exit` when a
-wake ran, `history_len`. Never message content, tokens, or keys.
+`no-wake-state-error` | `skipped-self` | `skipped-channel` |
+`skipped-sender-policy` | `skipped-duplicate` | `skipped-empty`), `wake_exit` when a
+wake ran, `history_len`. `minimal` and `normal` omit message content; `debug`
+adds the gate payload/directive and can therefore include room content. API
+tokens and keys are never written intentionally.
 
 Hook receipts share the same file. Inbound prompt records use
 `"direction": "hook-inbound"` with `block-pass`, `allow-speak`, `allow-ack`,
 `allow-ask`, or `allow-gate-error`. Outbound send records use
 `"direction": "hook-outbound"` with `deny-untriggered`, `deny-pass`,
-`allow-speak`, `allow-ack`, `allow-ask`, `deny-gate-error`, or
-`allow-gate-error`.
+`deny-disabled`, `deny-state-error`, `deny-already-sent`, `allow-speak`,
+`allow-ack`, `allow-ask`, `deny-gate-error`, or `allow-gate-error`.

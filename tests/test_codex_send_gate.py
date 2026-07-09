@@ -78,6 +78,7 @@ class _GateStub:
     def __init__(self, directive: dict | str, exit_code: int = 0) -> None:
         self.dir = pathlib.Path(tempfile.mkdtemp(prefix="nunchi-codex-send-hook-"))
         self.stdin_path = self.dir / "gate_stdin.json"
+        self.model_path = self.dir / "gate_model.txt"
         self.receipts = self.dir / "receipts.jsonl"
         directive_path = self.dir / "directive.json"
         directive_path.write_text(
@@ -87,6 +88,7 @@ class _GateStub:
         self.path.write_text(
             "#!/bin/sh\n"
             f'cat > "{self.stdin_path}"\n'
+            f'printf "%s" "${{NUNCHI_CLASSIFIER_MODEL:-}}" > "{self.model_path}"\n'
             f'if [ "{exit_code}" != "0" ]; then echo "stub gate error" >&2; exit {exit_code}; fi\n'
             f'cat "{directive_path}"\n'
         )
@@ -392,6 +394,61 @@ class TestOutboundGate(unittest.TestCase):
         self.assertIn("already sent", _deny_reason(out))
         self.assertFalse(stub.called())
         self.assertEqual(stub.receipt_lines()[-1]["action"], "deny-already-sent")
+
+
+class TestHotRuntimePolicy(unittest.TestCase):
+    def _run_with_state(self, state: dict, stub: _GateStub):
+        state_path = stub.dir / "runtime-state.json"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        transcript = _write_transcript([_codex_user_entry(_runner_context_prompt())])
+        try:
+            return _run_hook(
+                _hook_input(transcript_path=transcript),
+                env_overrides=stub.env({"NUNCHI_RUNNER_STATE": str(state_path)}),
+            )
+        finally:
+            os.unlink(transcript)
+
+    def test_disabled_channel_denies_without_gate_call(self):
+        stub = _GateStub(_directive("SPEAK"))
+        rc, out, err = self._run_with_state(
+            {
+                "version": 1,
+                "channels": {"1522258711047831653": {"enabled": False}},
+            },
+            stub,
+        )
+
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("disabled", _deny_reason(out))
+        self.assertFalse(stub.called())
+        self.assertEqual(stub.receipt_lines()[-1]["action"], "deny-disabled")
+
+    def test_runtime_model_and_pinned_rules_reach_outbound_gate(self):
+        stub = _GateStub(_directive("SPEAK"))
+        rc, out, err = self._run_with_state(
+            {
+                "version": 1,
+                "channels": {
+                    "1522258711047831653": {
+                        "model": "deepseek/deepseek-v4-flash",
+                        "pinned_rules": "Wait for a useful opening.",
+                    }
+                },
+            },
+            stub,
+        )
+
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(
+            json.loads(out)["hookSpecificOutput"]["permissionDecision"],
+            "allow",
+        )
+        self.assertEqual(
+            stub.model_path.read_text(encoding="utf-8"),
+            "deepseek/deepseek-v4-flash",
+        )
+        self.assertEqual(stub.payload()["pinned_rules"], "Wait for a useful opening.")
 
 
 if __name__ == "__main__":

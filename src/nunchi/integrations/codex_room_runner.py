@@ -73,8 +73,18 @@ NUNCHI_RUNNER_WAKE_TIMEOUT    Wake subprocess timeout in seconds (default: 300).
 NUNCHI_RUNNER_FAIL_POLICY     ``closed`` (default) | ``open`` — see above.
 NUNCHI_RUNNER_LOG             Receipt JSONL path
                               (default: ``~/.nunchi/codex-runner-receipts.jsonl``).
+NUNCHI_RUNNER_STATE           Hot runtime-state JSON path used by the Codex
+                              configuration app (default:
+                              ``~/.nunchi/codex-room.state.json``).
+NUNCHI_RUNNER_ENABLED         Baseline room gate toggle (default: true).
+NUNCHI_RUNNER_SENDERS         ``all`` (default) | ``humans`` | ``allowlist``.
+NUNCHI_RUNNER_ALLOW_FROM      Names/ids used when senders=allowlist.
+NUNCHI_RUNNER_VERBOSITY       Receipt detail: minimal | normal | debug.
+NUNCHI_RUNNER_MODEL           Optional classifier model override.
+NUNCHI_RUNNER_PINNED_RULES    Optional room-governance text.
 
-Receipts never contain tokens, keys, or message content.
+Receipts never contain tokens or keys. Message content is recorded only when
+receipt detail is explicitly set to ``debug``.
 """
 
 from __future__ import annotations
@@ -97,6 +107,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+from .codex_runtime_state import (
+    RuntimeStateError,
+    configured_channel_ids,
+    default_state_path,
+    load_state,
+    resolve_channel_policy,
+    sender_is_admitted,
+)
 
 logger = logging.getLogger("nunchi.integrations.codex.room_runner")
 
@@ -162,6 +181,13 @@ _CONFIG_KEYS = frozenset(
         "wake_timeout",
         "fail_policy",
         "log_path",
+        "state_path",
+        "enabled",
+        "senders",
+        "allow_from",
+        "verbosity",
+        "model",
+        "pinned_rules",
     }
 )
 
@@ -222,6 +248,24 @@ def _as_float(value: Any, *, name: str) -> float:
     return parsed
 
 
+def _as_bool(value: Any, *, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"{name} must be a boolean")
+
+
+def _as_choice(value: Any, *, name: str, choices: frozenset[str]) -> str:
+    parsed = str(value).strip().lower()
+    if parsed not in choices:
+        raise ConfigError(f"{name} must be one of: {', '.join(sorted(choices))}")
+    return parsed
+
+
 def _load_config_file(path: str | os.PathLike[str] | None) -> dict[str, Any]:
     if not path:
         return {}
@@ -262,6 +306,23 @@ class RunnerConfig:
     log_path: Path = field(
         default_factory=lambda: Path.home() / ".nunchi" / "codex-runner-receipts.jsonl"
     )
+    state_path: Path | None = None
+    enabled: bool = True
+    senders: str = "all"
+    allow_from: tuple[str, ...] = ()
+    verbosity: str = "normal"
+    model: str | None = None
+    pinned_rules: str | None = None
+
+    def runtime_baseline(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "senders": self.senders,
+            "allow_from": list(self.allow_from),
+            "verbosity": self.verbosity,
+            "model": self.model,
+            "pinned_rules": self.pinned_rules,
+        }
 
     @classmethod
     def from_env(cls, environ=os.environ) -> "RunnerConfig":
@@ -297,14 +358,33 @@ class RunnerConfig:
             "NUNCHI_RUNNER_WAKE_TIMEOUT": "wake_timeout",
             "NUNCHI_RUNNER_FAIL_POLICY": "fail_policy",
             "NUNCHI_RUNNER_LOG": "log_path",
+            "NUNCHI_RUNNER_STATE": "state_path",
+            "NUNCHI_RUNNER_ENABLED": "enabled",
+            "NUNCHI_RUNNER_SENDERS": "senders",
+            "NUNCHI_RUNNER_ALLOW_FROM": "allow_from",
+            "NUNCHI_RUNNER_VERBOSITY": "verbosity",
+            "NUNCHI_RUNNER_MODEL": "model",
+            "NUNCHI_RUNNER_PINNED_RULES": "pinned_rules",
         }
         for env_key, cfg_key in env_map.items():
             if env_key in environ:
                 data[cfg_key] = environ[env_key]
+        if "model" not in data and environ.get("NUNCHI_CLASSIFIER_MODEL"):
+            data["model"] = environ["NUNCHI_CLASSIFIER_MODEL"]
 
         fail_policy = str(data.get("fail_policy", "closed")).strip().lower()
         if fail_policy not in {"closed", "open"}:
             raise ConfigError("fail_policy must be 'closed' or 'open'")
+        senders = _as_choice(
+            data.get("senders", "all"),
+            name="senders",
+            choices=frozenset({"all", "humans", "allowlist"}),
+        )
+        verbosity = _as_choice(
+            data.get("verbosity", "normal"),
+            name="verbosity",
+            choices=frozenset({"minimal", "normal", "debug"}),
+        )
 
         return cls(
             transport_url=str(data.get("transport_url", _DEFAULT_TRANSPORT_URL)),
@@ -341,6 +421,17 @@ class RunnerConfig:
                     )
                 )
             ).expanduser(),
+            state_path=Path(
+                str(data.get("state_path") or default_state_path(environ))
+            ).expanduser(),
+            enabled=_as_bool(data.get("enabled", True), name="enabled"),
+            senders=senders,
+            allow_from=_parse_string_list(data.get("allow_from"), name="allow_from"),
+            verbosity=verbosity,
+            model=str(data["model"]).strip() if data.get("model") else None,
+            pinned_rules=(
+                str(data["pinned_rules"]).strip() if data.get("pinned_rules") else None
+            ),
         )
 
 
@@ -502,9 +593,23 @@ class TransportClient:
         with self._post(body, with_session=True) as resp:
             raw = resp.read()
         try:
-            doc = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        except UnicodeDecodeError as exc:
             raise RuntimeError(f"transport returned invalid JSON for {name}") from exc
+        try:
+            doc = json.loads(text)
+        except json.JSONDecodeError as exc:
+            doc = None
+            for data in iter_sse_data(text.splitlines(keepends=True)):
+                try:
+                    candidate = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict) and candidate.get("id") == request_id:
+                    doc = candidate
+                    break
+            if doc is None:
+                raise RuntimeError(f"transport returned invalid JSON for {name}") from exc
         if not isinstance(doc, dict):
             raise RuntimeError(f"transport returned malformed response for {name}")
         if doc.get("error"):
@@ -642,6 +747,24 @@ class RoomRunner:
         self._seen_message_ids: deque[str] = deque(maxlen=_SEEN_MESSAGE_IDS_MAX)
         self._seen_message_id_set: set[str] = set()
 
+    # -- hot runtime policy -----------------------------------------------
+
+    def _runtime_state(self) -> dict[str, Any]:
+        if self.config.state_path is None:
+            return {"version": 1}
+        return load_state(self.config.state_path)
+
+    def _channel_policy(self, channel_id: str) -> dict[str, Any] | None:
+        return resolve_channel_policy(
+            self.config.runtime_baseline(),
+            self._runtime_state(),
+            channel_id,
+            self.config.channels,
+        )
+
+    def configured_channels(self) -> tuple[str, ...]:
+        return configured_channel_ids(self.config.channels, self._runtime_state())
+
     # -- history -----------------------------------------------------------
 
     def _channel_history(self, channel_id: str) -> deque[dict]:
@@ -705,26 +828,38 @@ class RoomRunner:
         wake_exit: int | None = None,
         reasons: list[str] | None = None,
         error: str | None = None,
+        verbosity: str | None = None,
+        payload: dict | None = None,
+        directive: dict | None = None,
     ) -> None:
         try:
             self.config.log_path.parent.mkdir(parents=True, exist_ok=True)
+            detail = verbosity or self.config.verbosity
             record: dict = {
                 "ts": datetime.now(timezone.utc).isoformat(),
+                "component": "codex-room-runner",
+                "direction": "room-inbound",
                 "channel": params.get("channel_id"),
                 "message_id": params.get("message_id"),
-                "author": params.get("author_name") or params.get("author_id"),
                 "verdict": verdict,
                 "action": action,
-                "history_len": history_len,
             }
-            if confidences:
-                record["confidences"] = confidences
+            if detail in {"normal", "debug"}:
+                record["author"] = params.get("author_name") or params.get("author_id")
+                record["history_len"] = history_len
+                if confidences:
+                    record["confidences"] = confidences
+                if reasons:
+                    record["reasons"] = reasons[:3]
             if wake_exit is not None:
                 record["wake_exit"] = wake_exit
-            if reasons:
-                record["reasons"] = reasons[:3]
             if error:
                 record["error"] = error
+            if detail == "debug":
+                if payload is not None:
+                    record["payload"] = payload
+                if directive is not None:
+                    record["directive"] = directive
             with open(self.config.log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record) + "\n")
         except OSError:
@@ -732,19 +867,28 @@ class RoomRunner:
 
     # -- gate --------------------------------------------------------------
 
-    def _call_gate(self, payload: dict) -> tuple[dict | None, str | None]:
+    def _call_gate(
+        self,
+        payload: dict,
+        *,
+        model: str | None = None,
+    ) -> tuple[dict | None, str | None]:
         """Run nunchi-channel; return (directive, error). Exactly one is set."""
         bin_path = self.config.channel_bin
         binary_error = _gate_binary_error(bin_path)
         if binary_error is not None:
             return None, binary_error
         try:
+            gate_env = os.environ.copy()
+            if model:
+                gate_env["NUNCHI_CLASSIFIER_MODEL"] = model
             result = subprocess.run(
                 [bin_path],
                 input=json.dumps(payload),
                 capture_output=True,
                 text=True,
                 timeout=self.config.gate_timeout,
+                env=gate_env,
             )
         except subprocess.TimeoutExpired:
             return None, f"nunchi-channel timed out after {self.config.gate_timeout}s"
@@ -805,11 +949,27 @@ class RoomRunner:
         channel_id = str(params.get("channel_id") or "")
         author_id = str(params.get("author_id") or "")
 
-        if self.config.channels and channel_id not in self.config.channels:
+        try:
+            policy = self._channel_policy(channel_id)
+        except RuntimeStateError as exc:
+            error = str(exc)
+            logger.error("runtime state error (fail-closed, no wake): %s", error)
+            self._write_receipt(
+                params,
+                verdict=None,
+                confidences=None,
+                action="no-wake-state-error",
+                history_len=0,
+                error=error,
+            )
+            return "no-wake-state-error"
+
+        if policy is None:
             self._write_receipt(
                 params, verdict=None, confidences=None, action="skipped-channel", history_len=0
             )
             return "skipped-channel"
+        verbosity = str(policy.get("verbosity") or self.config.verbosity)
 
         history = self._channel_history(channel_id)
         message_id = str(params.get("message_id") or "")
@@ -820,6 +980,7 @@ class RoomRunner:
                 confidences=None,
                 action="skipped-duplicate",
                 history_len=len(history),
+                verbosity=verbosity,
             )
             return "skipped-duplicate"
 
@@ -834,6 +995,7 @@ class RoomRunner:
                 confidences=None,
                 action="skipped-self",
                 history_len=len(history),
+                verbosity=verbosity,
             )
             return "skipped-self"
 
@@ -849,8 +1011,21 @@ class RoomRunner:
                 confidences=None,
                 action="skipped-empty",
                 history_len=len(history),
+                verbosity=verbosity,
             )
             return "skipped-empty"
+
+        if not sender_is_admitted(policy, params):
+            history.append(message)
+            self._write_receipt(
+                params,
+                verdict=None,
+                confidences=None,
+                action="skipped-sender-policy",
+                history_len=len(history),
+                verbosity=verbosity,
+            )
+            return "skipped-sender-policy"
 
         agent: dict = {"id": self.config.agent_id}
         if self.config.mention_id:
@@ -868,11 +1043,13 @@ class RoomRunner:
             "surface": {"type": "channel", "channel_id": channel_id},
             "fail_policy": "raise",
         }
+        if policy.get("pinned_rules"):
+            payload["pinned_rules"] = policy["pinned_rules"]
         history_len = len(history)
         history_snapshot = list(history)
         history.append(message)  # part of room context for the next trigger
 
-        directive, gate_error = self._call_gate(payload)
+        directive, gate_error = self._call_gate(payload, model=policy.get("model"))
 
         trigger_view = {
             "channel_id": channel_id,
@@ -894,6 +1071,8 @@ class RoomRunner:
                     action="no-wake-gate-error",
                     history_len=history_len,
                     error=gate_error,
+                    verbosity=verbosity,
+                    payload=payload,
                 )
                 return "no-wake-gate-error"
             logger.warning("gate error (fail-open, degraded wake): %s", gate_error)
@@ -902,7 +1081,14 @@ class RoomRunner:
                 "reasons": [f"admission gate unavailable; fail-open -> SPEAK ({gate_error})"],
             }
             return self._route_wake(
-                params, directive, trigger_view, history_snapshot, history_len, degraded=True
+                params,
+                directive,
+                trigger_view,
+                history_snapshot,
+                history_len,
+                degraded=True,
+                verbosity=verbosity,
+                payload=payload,
             )
 
         verdict = directive.get("verdict", "")
@@ -914,10 +1100,21 @@ class RoomRunner:
                 action="pass-suppressed",
                 history_len=history_len,
                 reasons=directive.get("reasons") or [],
+                verbosity=verbosity,
+                payload=payload,
+                directive=directive,
             )
             return "pass-suppressed"
 
-        return self._route_wake(params, directive, trigger_view, history_snapshot, history_len)
+        return self._route_wake(
+            params,
+            directive,
+            trigger_view,
+            history_snapshot,
+            history_len,
+            verbosity=verbosity,
+            payload=payload,
+        )
 
     def _route_wake(
         self,
@@ -928,6 +1125,8 @@ class RoomRunner:
         history_len: int,
         *,
         degraded: bool = False,
+        verbosity: str | None = None,
+        payload: dict | None = None,
     ) -> str:
         prompt = build_wake_prompt(directive, trigger_view, history, degraded=degraded)
         wake_exit, wake_error = self._wake_codex(prompt)
@@ -941,6 +1140,9 @@ class RoomRunner:
             wake_exit=wake_exit,
             reasons=directive.get("reasons") or [],
             error=wake_error,
+            verbosity=verbosity,
+            payload=payload,
+            directive=directive,
         )
         return action
 
@@ -952,11 +1154,16 @@ class RoomRunner:
 
 def backfill_history(client: TransportClient, runner: RoomRunner, config: RunnerConfig) -> None:
     """Seed configured channel histories from the transport before streaming."""
-    if not config.channels:
+    try:
+        channels = runner.configured_channels()
+    except RuntimeStateError as exc:
+        logger.warning("history backfill skipped: invalid runtime state: %s", exc)
+        return
+    if not channels:
         logger.info("history backfill skipped: no finite channel list configured")
         return
     limit = max(1, min(config.history_window, 100))
-    for channel_id in sorted(config.channels):
+    for channel_id in channels:
         try:
             result = client.call_tool(
                 "read_history", {"channel_id": channel_id, "limit": limit}

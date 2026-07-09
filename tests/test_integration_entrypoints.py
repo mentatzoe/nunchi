@@ -17,6 +17,7 @@ class TestPackageModules(unittest.TestCase):
             "nunchi.integrations.codex_prompt_gate",
             "nunchi.integrations.codex_send_gate",
             "nunchi.integrations.codex_room_runner",
+            "nunchi.integrations.codex_config_app",
         ]
         for name in modules:
             with self.subTest(name=name):
@@ -39,6 +40,10 @@ class TestConsoleScripts(unittest.TestCase):
         self.assertEqual(
             scripts["nunchi-codex-room-runner"],
             "nunchi.integrations.codex_room_runner:main",
+        )
+        self.assertEqual(
+            scripts["nunchi-codex-config-app"],
+            "nunchi.integrations.codex_config_app:main",
         )
 
 

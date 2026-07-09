@@ -12,6 +12,21 @@
         "send_message",
         "reply_message"
       ]
+    },
+    "nunchi-config": {
+      "command": "nunchi-codex-config-app",
+      "args": [],
+      "enabled": true,
+      "required": false,
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 30,
+      "default_tools_approval_mode": "prompt",
+      "enabled_tools": [
+        "open_nunchi_config",
+        "get_nunchi_config",
+        "update_nunchi_config",
+        "get_nunchi_receipts"
+      ]
     }
   }
 }

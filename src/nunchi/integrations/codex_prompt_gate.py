@@ -18,10 +18,11 @@ prompts intentionally carry no channel tag (they were already gated), so
 this hook never double-gates them; it is the second layer for other bridges
 that paste channel-tagged messages into interactive Codex sessions.
 
-This hook is permanently fail-OPEN — the opposite of the room runner. Any
-configuration error, missing binary, gate timeout, or unparseable output
-allows the prompt through and records the failure in the receipt log. A
-broken gate must never silence an operator typing at their own terminal.
+Operator prompts without a channel tag are permanently fail-open and cannot
+be blocked by Nunchi. Once a prompt is explicitly tagged as room traffic,
+invalid hot runtime state blocks it; gate-process errors remain fail-open and
+are recorded. This keeps local operator input available without turning a
+corrupt room policy into an unattended wake path.
 
 VERDICT POLARITY (inbound gate):
     PASS               → block the prompt (suppress before the LLM runs).
@@ -60,6 +61,8 @@ NUNCHI_RUNNER_LOG          Receipt JSONL path, shared with the room runner
                            Records from this hook carry ``"direction": "hook-inbound"``.
 NUNCHI_CHANNEL_BIN         Path or name of the nunchi-channel binary
                            (default: located via ``shutil.which("nunchi-channel")``).
+NUNCHI_RUNNER_STATE        Shared hot runtime-state path used by the runner,
+                           hooks, and configuration app.
 """
 
 from __future__ import annotations
@@ -73,6 +76,14 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .codex_runtime_state import (
+    RuntimeStateError,
+    default_state_path,
+    load_state,
+    resolve_channel_policy,
+    sender_is_admitted,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -121,6 +132,18 @@ _LOG_PATH = Path(
 _CHANNEL_BIN: str | None = os.environ.get("NUNCHI_CHANNEL_BIN") or shutil.which(
     "nunchi-channel"
 )
+_STATE_PATH = default_state_path(os.environ)
+_BASELINE_POLICY = {
+    "enabled": True,
+    "senders": os.environ.get("NUNCHI_HOOK_SENDERS", "all"),
+    "allow_from": _parse_aliases(os.environ.get("NUNCHI_HOOK_ALLOW_FROM")),
+    "verbosity": os.environ.get("NUNCHI_HOOK_VERBOSITY", "normal"),
+    "model": (
+        os.environ.get("NUNCHI_HOOK_MODEL")
+        or os.environ.get("NUNCHI_CLASSIFIER_MODEL")
+    ),
+    "pinned_rules": os.environ.get("NUNCHI_HOOK_PINNED_RULES"),
+}
 
 # Regex to locate a <channel ...>...</channel> block anywhere in text.
 _CHANNEL_TAG_RE = re.compile(
@@ -314,6 +337,10 @@ def _write_receipt(
     elapsed_ms: float,
     reasons: list[str],
     error: str | None,
+    *,
+    verbosity: str = "normal",
+    payload: dict | None = None,
+    directive: dict | None = None,
 ) -> None:
     """Append one JSON line to the shared runner receipts log.
 
@@ -322,21 +349,27 @@ def _write_receipt(
     """
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        record = {
+        record: dict = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "direction": "hook-inbound",
             "session_id": session_id,
             "channel": chat_id,
             "message_id": trigger_event["message_id"] if trigger_event else None,
-            "author": trigger_event["author"] if trigger_event else None,
-            "history_len": history_len,
             "verdict": verdict,
             "action": action,
-            "elapsed_ms": round(elapsed_ms, 1),
-            "reasons": reasons[:3],
         }
+        if verbosity in {"normal", "debug"}:
+            record["author"] = trigger_event["author"] if trigger_event else None
+            record["history_len"] = history_len
+            record["elapsed_ms"] = round(elapsed_ms, 1)
+            record["reasons"] = reasons[:3]
         if error:
             record["error"] = error
+        if verbosity == "debug":
+            if payload is not None:
+                record["payload"] = payload
+            if directive is not None:
+                record["directive"] = directive
         with open(_LOG_PATH, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
     except OSError:
@@ -351,7 +384,8 @@ def _write_receipt(
 def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
     """Evaluate the inbound prompt and write block output or exit silently.
 
-    Always exits with code 0. All errors are fail-open: allow + log.
+    Always exits with code 0. Untagged operator input is always allowed;
+    room-state errors block, while gate-process errors allow and log.
     """
     t0 = time.monotonic()
 
@@ -367,6 +401,66 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
         "message_id": tag["message_id"],
         "content": tag["body"],
     }
+
+    try:
+        policy = resolve_channel_policy(
+            _BASELINE_POLICY,
+            load_state(_STATE_PATH),
+            chat_id,
+            (),
+        )
+    except RuntimeStateError as exc:
+        reason = f"nunchi runtime state error: {exc}"
+        _write_receipt(
+            session_id,
+            chat_id,
+            trigger_event,
+            0,
+            None,
+            "block-state-error",
+            (time.monotonic() - t0) * 1000,
+            [],
+            reason,
+        )
+        print(_block_output(reason))
+        sys.exit(0)
+
+    if policy is None:
+        _write_receipt(
+            session_id,
+            chat_id,
+            trigger_event,
+            0,
+            "PASS",
+            "block-disabled",
+            (time.monotonic() - t0) * 1000,
+            ["room presence is disabled for this channel"],
+            None,
+        )
+        print(_block_output("nunchi gate: room presence is disabled for this channel."))
+        sys.exit(0)
+
+    sender_params = {
+        "author_id": tag["user"],
+        "author_name": tag["user"],
+        "author_is_bot": trigger_event["author_kind"] == "peer_bot",
+    }
+    verbosity = str(policy.get("verbosity") or "normal")
+    if not sender_is_admitted(policy, sender_params):
+        _write_receipt(
+            session_id,
+            chat_id,
+            trigger_event,
+            0,
+            "PASS",
+            "block-sender-policy",
+            (time.monotonic() - t0) * 1000,
+            ["sender is outside the configured room policy"],
+            None,
+            verbosity=verbosity,
+        )
+        print(_block_output("nunchi gate: sender is outside the configured room policy."))
+        sys.exit(0)
 
     # Best-effort history from the rollout (the current prompt is not in it yet).
     history_events: list[dict] = []
@@ -384,6 +478,7 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
             elapsed_ms=(time.monotonic() - t0) * 1000,
             reasons=[],
             error=error_msg,
+            verbosity=verbosity,
         )
         sys.exit(0)
 
@@ -391,14 +486,20 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
         _fail_open("nunchi-channel not found; check NUNCHI_CHANNEL_BIN or install nunchi")
 
     payload = _build_nunchi_payload(trigger_event, history_events)
+    if policy.get("pinned_rules"):
+        payload["pinned_rules"] = policy["pinned_rules"]
 
     try:
+        gate_env = os.environ.copy()
+        if policy.get("model"):
+            gate_env["NUNCHI_CLASSIFIER_MODEL"] = str(policy["model"])
         result = subprocess.run(
             [_CHANNEL_BIN],
             input=json.dumps(payload),
             capture_output=True,
             text=True,
             timeout=_TIMEOUT,
+            env=gate_env,
         )
     except subprocess.TimeoutExpired:
         _fail_open(f"nunchi-channel timed out after {_TIMEOUT}s")
@@ -440,6 +541,9 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
             elapsed_ms=elapsed_ms,
             reasons=reasons,
             error=None,
+            verbosity=verbosity,
+            payload=payload,
+            directive=directive,
         )
         print(_block_output(f"nunchi gate: PASS — {first_reason}."))
         sys.exit(0)
@@ -455,6 +559,9 @@ def _run_gate(session_id: str, prompt: str, transcript_path: str) -> None:
         elapsed_ms=elapsed_ms,
         reasons=reasons,
         error=None,
+        verbosity=verbosity,
+        payload=payload,
+        directive=directive,
     )
     sys.exit(0)
 

@@ -1,7 +1,7 @@
 {
   "name": "nunchi-codex",
-  "version": "0.1.0",
-  "description": "Gate Codex Discord room presence through Nunchi admission checks.",
+  "version": "0.1.0+codex.20260709185803",
+  "description": "Gate and configure Codex Discord room presence through Nunchi admission checks.",
   "author": {
     "name": "Nunchi contributors",
     "url": "https://github.com/mentatzoe/nunchi"
@@ -19,16 +19,18 @@
   "interface": {
     "displayName": "Nunchi Codex",
     "shortDescription": "Gate Discord room wakes and sends through Nunchi.",
-    "longDescription": "Nunchi Codex bundles Codex lifecycle hooks and the local Nunchi Discord MCP server config so Codex can join the shared room through the same admission gate and outbound send guard used by the other agents.",
+    "longDescription": "Nunchi Codex bundles lifecycle hooks, a local Discord MCP transport, and an interactive runtime configuration and receipt panel so Codex can join a shared room through the Nunchi admission gate and outbound send guard.",
     "developerName": "Nunchi contributors",
     "category": "Developer Tools",
     "capabilities": [
       "Interactive",
+      "Configure",
       "Read",
       "Write"
     ],
     "websiteURL": "https://github.com/mentatzoe/nunchi",
     "defaultPrompt": [
+      "Open the Nunchi configuration panel.",
       "Join the Nunchi room presence loop."
     ]
   },

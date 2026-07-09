@@ -20,6 +20,8 @@ import textwrap
 import unittest
 from unittest import mock
 
+from nunchi.integrations import codex_runtime_state as runtime_state
+
 _RUNNER_PATH = (
     pathlib.Path(__file__).resolve().parent.parent
     / "integrations"
@@ -87,6 +89,7 @@ class _StubBinDir:
         self.gate_stdin = self.dir / "gate_stdin.json"
         self.gate_directive = self.dir / "directive.json"
         self.gate_exit_file = self.dir / "gate_exit"
+        self.gate_model = self.dir / "gate_model.txt"
         self.codex_args = self.dir / "codex_args.txt"
         self.codex_exit_file = self.dir / "codex_exit"
 
@@ -94,6 +97,7 @@ class _StubBinDir:
         self.gate_bin.write_text(
             "#!/bin/sh\n"
             f'cat > "{self.gate_stdin}"\n'
+            f'printf "%s" "${{NUNCHI_CLASSIFIER_MODEL:-}}" > "{self.gate_model}"\n'
             f'code=$(cat "{self.gate_exit_file}")\n'
             'if [ "$code" != "0" ]; then echo "stub gate error" >&2; exit "$code"; fi\n'
             f'cat "{self.gate_directive}"\n'
@@ -267,8 +271,9 @@ class _FakeUrlopen:
 
 
 class _FakeToolUrlopen:
-    def __init__(self, tool_payload: dict) -> None:
+    def __init__(self, tool_payload: dict, *, sse: bool = False) -> None:
         self.tool_payload = tool_payload
+        self.sse = sse
         self.requests: list[tuple[str, dict | None, dict[str, str]]] = []
 
     def __call__(self, req, timeout=None):
@@ -285,7 +290,10 @@ class _FakeToolUrlopen:
                 ]
             },
         }
-        return _FakeHttpResponse(body=json.dumps(payload).encode())
+        response = json.dumps(payload)
+        if self.sse:
+            response = f"event: message\ndata: {response}\n\n"
+        return _FakeHttpResponse(body=response.encode())
 
 
 class TestHandshakeAndStream(unittest.TestCase):
@@ -378,6 +386,19 @@ class TestToolCalls(unittest.TestCase):
             body["params"]["arguments"],
             {"channel_id": "1522258711047831653", "limit": 10},
         )
+
+    def test_call_tool_unwraps_streamable_http_sse_response(self):
+        messages = [_event(content="live transport shape")]
+        urlopen = _FakeToolUrlopen({"messages": messages}, sse=True)
+        client = runner_mod.TransportClient("http://transport.test/mcp/")
+        client.session_id = _SESSION_ID
+
+        with mock.patch.object(runner_mod.urllib.request, "urlopen", urlopen):
+            result = client.call_tool(
+                "read_history", {"channel_id": "1522258711047831653", "limit": 10}
+            )
+
+        self.assertEqual(result, {"messages": messages})
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +812,95 @@ class TestSkips(unittest.TestCase):
         self.assertEqual(receipts[-1]["action"], "skipped-duplicate")
 
 
+class TestHotRuntimePolicy(unittest.TestCase):
+    def setUp(self):
+        self.stubs = _StubBinDir()
+        self.stubs.set_gate(_directive("PASS"))
+        self.state_path = self.stubs.dir / "runtime-state.json"
+
+    def save(self, state: dict) -> None:
+        runtime_state.save_state(self.state_path, state, updated_by="test")
+
+    def test_state_can_hot_add_and_disable_channels(self):
+        self.save({"channels": {"c9": {"enabled": True}}})
+        runner = _make_runner(
+            self.stubs,
+            channels=frozenset({"c1"}),
+            state_path=self.state_path,
+        )
+        self.assertEqual(
+            runner.handle_notification(_event(channel_id="c9", message_id="hot-add")),
+            "pass-suppressed",
+        )
+
+        self.save({"channels": {"c1": {"enabled": False}}})
+        self.stubs.gate_stdin.unlink()
+        self.assertEqual(
+            runner.handle_notification(_event(channel_id="c1", message_id="disabled")),
+            "skipped-channel",
+        )
+        self.assertFalse(self.stubs.gate_called())
+
+    def test_sender_policy_changes_without_restarting_runner(self):
+        self.save({"global": {"senders": "humans"}})
+        runner = _make_runner(self.stubs, state_path=self.state_path)
+        self.assertEqual(
+            runner.handle_notification(_event(message_id="human")),
+            "pass-suppressed",
+        )
+
+        self.save({"global": {"senders": "allowlist", "allow_from": ["someone-else"]}})
+        self.stubs.gate_stdin.unlink()
+        self.assertEqual(
+            runner.handle_notification(_event(message_id="not-allowed")),
+            "skipped-sender-policy",
+        )
+        self.assertFalse(self.stubs.gate_called())
+
+    def test_model_and_pinned_rules_reach_gate_call(self):
+        self.save(
+            {
+                "channels": {
+                    "c1": {
+                        "model": "deepseek/deepseek-v4-flash",
+                        "pinned_rules": "Only speak when directly useful.",
+                    }
+                }
+            }
+        )
+        runner = _make_runner(self.stubs, state_path=self.state_path)
+        runner.handle_notification(_event())
+
+        self.assertEqual(
+            self.stubs.gate_model.read_text(encoding="utf-8"),
+            "deepseek/deepseek-v4-flash",
+        )
+        self.assertEqual(
+            self.stubs.gate_payload()["pinned_rules"],
+            "Only speak when directly useful.",
+        )
+
+    def test_malformed_existing_state_fails_closed(self):
+        self.state_path.write_text("not-json", encoding="utf-8")
+        runner = _make_runner(self.stubs, state_path=self.state_path)
+        action = runner.handle_notification(_event())
+
+        self.assertEqual(action, "no-wake-state-error")
+        self.assertFalse(self.stubs.gate_called())
+        self.assertFalse(self.stubs.codex_called())
+        self.assertEqual(_receipts(runner)[-1]["action"], "no-wake-state-error")
+
+    def test_debug_receipts_include_payload_but_normal_receipts_do_not(self):
+        self.save({"global": {"verbosity": "debug"}})
+        runner = _make_runner(self.stubs, state_path=self.state_path)
+        runner.handle_notification(_event(message_id="debug"))
+        self.assertEqual(_receipts(runner)[-1]["payload"]["trigger"]["content"], "hello there")
+
+        self.save({"global": {"verbosity": "normal"}})
+        runner.handle_notification(_event(message_id="normal"))
+        self.assertNotIn("payload", _receipts(runner)[-1])
+
+
 # ---------------------------------------------------------------------------
 # Config parsing
 # ---------------------------------------------------------------------------
@@ -806,6 +916,10 @@ class TestConfigFromEnv(unittest.TestCase):
         self.assertEqual(cfg.wake_timeout, 300.0)
         self.assertEqual(cfg.channels, frozenset())
         self.assertEqual(cfg.aliases, ())
+        self.assertTrue(cfg.enabled)
+        self.assertEqual(cfg.senders, "all")
+        self.assertEqual(cfg.verbosity, "normal")
+        self.assertEqual(cfg.state_path.name, "codex-room.state.json")
 
     def test_overrides_and_shell_split_args(self):
         env = {
@@ -816,6 +930,13 @@ class TestConfigFromEnv(unittest.TestCase):
             "NUNCHI_RUNNER_CODEX_ARGS": "-c model_reasoning_effort=xhigh --json",
             "NUNCHI_RUNNER_SELF_ID": "42",
             "NUNCHI_CHANNEL_BIN": "/opt/bin/nunchi-channel",
+            "NUNCHI_RUNNER_ENABLED": "false",
+            "NUNCHI_RUNNER_SENDERS": "allowlist",
+            "NUNCHI_RUNNER_ALLOW_FROM": "decisionparalysis,362",
+            "NUNCHI_RUNNER_VERBOSITY": "debug",
+            "NUNCHI_RUNNER_MODEL": "deepseek/deepseek-v4-flash",
+            "NUNCHI_RUNNER_PINNED_RULES": "Stay quiet unless needed.",
+            "NUNCHI_RUNNER_STATE": "/tmp/vigil-state.json",
         }
         cfg = runner_mod.RunnerConfig.from_env(environ=env)
         self.assertEqual(cfg.channels, frozenset({"c1", "c2"}))
@@ -826,6 +947,13 @@ class TestConfigFromEnv(unittest.TestCase):
         )
         self.assertEqual(cfg.self_id, "42")
         self.assertEqual(cfg.channel_bin, "/opt/bin/nunchi-channel")
+        self.assertFalse(cfg.enabled)
+        self.assertEqual(cfg.senders, "allowlist")
+        self.assertEqual(cfg.allow_from, ("decisionparalysis", "362"))
+        self.assertEqual(cfg.verbosity, "debug")
+        self.assertEqual(cfg.model, "deepseek/deepseek-v4-flash")
+        self.assertEqual(cfg.pinned_rules, "Stay quiet unless needed.")
+        self.assertEqual(cfg.state_path, pathlib.Path("/tmp/vigil-state.json"))
 
     def test_aliases_env_parsed_ordered_deduped(self):
         # Order preserved, whitespace stripped, blanks and repeats dropped.
@@ -938,6 +1066,25 @@ class TestConfigFromEnv(unittest.TestCase):
                     argv=["--config", str(cfg_path)],
                     environ={},
                 )
+
+    def test_invalid_hot_policy_baseline_is_config_error(self):
+        for key, value in (
+            ("enabled", "maybe"),
+            ("senders", "sometimes"),
+            ("verbosity", "everything"),
+        ):
+            with self.subTest(key=key):
+                with tempfile.TemporaryDirectory() as td:
+                    cfg_path = pathlib.Path(td) / "bad.toml"
+                    cfg_path.write_text(
+                        f'[runner]\n{key} = "{value}"\n',
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(runner_mod.ConfigError):
+                        runner_mod.RunnerConfig.from_sources(
+                            argv=["--config", str(cfg_path)],
+                            environ={},
+                        )
 
 
 class TestStartupValidation(unittest.TestCase):
