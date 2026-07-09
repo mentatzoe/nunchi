@@ -58,12 +58,24 @@ config key is set and the key is already exported:
 
 ## Install
 
-Install by symlinking the plugin directory into Hermes' plugin search path.
-From the repository root:
+Install the plugin by **copying** it into Hermes' plugin search path with
+`nunchi-install` (from a checkout of this repo):
 
 ```sh
-ln -s "$(pwd)/integrations/hermes/nunchi-gate" ~/.hermes/plugins/nunchi-gate
+nunchi-install install --only hermes    # copies -> ~/.hermes/plugins/nunchi-gate
 ```
+
+This drops a **real directory** at `~/.hermes/plugins/nunchi-gate`, stamped
+with the source commit. Upgrade later with `nunchi-install upgrade` and audit
+drift with `nunchi-install verify`. See [`docs/INSTALL.md`](../../docs/INSTALL.md)
+for the full command reference.
+
+> **Do not symlink the plugin into `~/.hermes/plugins`.** A symlink into a live
+> checkout means a `git checkout` elsewhere silently swaps the running plugin
+> for another branch's code, with no signal to the operator (this happened —
+> it is the reason `nunchi-install` copies). If `nunchi-install verify` reports
+> `symlink-found`, re-run `nunchi-install install` to replace the symlink with
+> a real copy (the old target is backed up and recorded).
 
 Then enable the plugin in `~/.hermes/config.yaml`:
 
@@ -73,7 +85,9 @@ plugins:
     - nunchi-gate
 ```
 
-Restart (or reload) Hermes for the change to take effect.
+Restart (or reload) Hermes for the change to take effect. After you pull new
+plugin code into the checkout, run `nunchi-install upgrade` to re-copy it —
+the installed plugin does **not** track the checkout.
 
 ---
 
@@ -485,14 +499,15 @@ It requires the dashboard service to be running (`hermes dashboard`).
 ### Install
 
 The plugin directory must be discoverable from `~/.hermes/plugins/`.  The
-existing gate symlink already covers this:
+`nunchi-install install` step above already copies the whole plugin —
+including its `dashboard/` subdirectory — into place; nothing extra is needed:
 
 ```sh
-# Already done during gate install:
-ln -s "$(pwd)/integrations/hermes/nunchi-gate" ~/.hermes/plugins/nunchi-gate
+# Already done during gate install (copies dashboard/ too):
+nunchi-install install --only hermes
 ```
 
-The `dashboard/` subdirectory inside the symlinked plugin directory is
+The `dashboard/` subdirectory inside the copied plugin directory is
 discovered automatically at startup.  **A dashboard service restart is
 required** for the new tab to appear (the plugin is discovered at process
 start, not hot-reloaded):
