@@ -1,0 +1,33 @@
+{
+  "request_id": "fixture-t-chrome-search-files-history",
+  "source_shape": "tool-chrome",
+  "trigger": {
+    "id": "msg-chrome-search-3",
+    "author": "zoe",
+    "content": "nice, aleph's search already found the offending files.",
+    "timestamp": "2026-07-08T21:20:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-chrome-search-1",
+      "type": "message",
+      "author": "zoe",
+      "content": "aleph, where does fail_policy get set?",
+      "timestamp": "2026-07-08T21:18:00.000Z"
+    },
+    {
+      "id": "msg-chrome-search-2",
+      "type": "message",
+      "author": "aleph",
+      "content": "search_files(pattern: \"fail_policy\", path: \"src/\")\n⎿ 12 matches in 4 files",
+      "timestamp": "2026-07-08T21:19:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

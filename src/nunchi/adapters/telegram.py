@@ -454,6 +454,16 @@ class TelegramPollLoop:
             self._receipt(chat_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms)
             return
 
+        # Empty-send guard: never post empty/whitespace-only text to the chat.
+        if not reply_text.strip():
+            logger.info(
+                "Responder returned empty text; suppressing send msg=%s chat=%s",
+                trigger_record.get("message_id"),
+                chat_id,
+            )
+            self._receipt(chat_id, trigger_record, len(history_snapshot), result, "empty-suppressed", elapsed_ms)
+            return
+
         # Send backstop: sliding-window cap on sends per chat (default ON).
         # A tripped cap suppresses the send — it never queues.
         wait = self._backstop.try_acquire(str(chat_id))

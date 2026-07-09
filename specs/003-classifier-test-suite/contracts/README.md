@@ -16,9 +16,12 @@ contracts/
     ├── multica/                # FR-001..FR-008 fixtures from TUR-12 corpus
     ├── discord/                # FR-018 + FR-021 fixtures from pilot-bot session
     ├── contract/               # FR-020 verdict-surface fixtures
-    └── injection/              # adversarial injection eval pack (i-*): gate
-                                # steering, verdict spoofing, unicode/markdown
-                                # smuggling, sentinel forgery, history injection
+    ├── injection/              # adversarial injection eval pack (i-*): gate
+    │                           # steering, verdict spoofing, unicode/markdown
+    │                           # smuggling, sentinel forgery, history injection
+    └── tool-chrome/            # peer-tool-chrome pool (t-*): peer-bot tool-use
+                                # chrome (skill_view/search_files markers, todo
+                                # lists, compaction notices) is not an invitation
 ```
 
 ## Entry command

@@ -448,6 +448,25 @@ class TestSpeakSends(unittest.TestCase):
         receipts = _read_receipts(loop)
         self.assertEqual(receipts[0]["action"], "responder-declined")
 
+    def test_responder_empty_text_no_send_receipt_empty_suppressed(self):
+        """Empty/whitespace responder output is suppressed, never sent."""
+        for empty_reply in ("", "   \n\t"):
+            with self.subTest(reply=repr(empty_reply)):
+                send_calls = []
+                loop = _make_loop(tmp_path=self.tmp, responder=lambda t, h, r: empty_reply)
+
+                with patch("nunchi.adapters.telegram.channel_gate", return_value=_make_gate_result("SPEAK")):
+                    with patch("nunchi.adapters.telegram._send_message", side_effect=send_calls.append):
+                        loop._gate_and_respond(
+                            chat_id=100,
+                            trigger_record={"content": "hi", "author": "alice", "author_kind": "human", "message_id": "m5e"},
+                            history_snapshot=[],
+                        )
+
+                self.assertEqual(send_calls, [])
+                receipts = _read_receipts(loop)
+                self.assertEqual(receipts[-1]["action"], "empty-suppressed")
+
     def test_speak_via_test_env(self):
         send_calls: list[str] = []
 

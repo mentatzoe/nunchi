@@ -1,0 +1,14 @@
+{
+  "id": "t-human-ask-after-chrome",
+  "title": "Contrast case: human explicitly asks the agent right after peer-bot chrome — answer",
+  "source_shape": "tool-chrome",
+  "evidence": "predicted",
+  "predicted_basis": "peer-tool-chrome eval pack; contrast control for the chrome-is-not-an-invitation pool — a direct named ask must still be answered even with tool chrome as the immediately preceding message",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "over-generalized chrome suppression: the agent learns \"tool chrome nearby means stay silent\" and drops a direct human question asked right after a peer's chrome",
+  "invariant": "a direct, named human question to this agent warrants a reply regardless of surrounding tool chrome",
+  "rationale": "Zoe names dalgos and asks a concrete question. The preceding skill_view chrome belongs to aleph's task and does not mute the room; dalgos answers."
+}

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — fail-policy wiring, empty-send guard, peer-tool-chrome fixtures
+
+- **Hermes plugin: `fail_open` now reaches the nunchi-channel binary as the
+  payload's `fail_policy`** (`"open"` when true, `"closed"` when false).
+  Previously `fail_open` only governed the plugin's own exception path — the
+  binary's envelope defaulted to fail-open, so a classifier outage inside
+  `nunchi-channel` degraded to SPEAK even when the operator set
+  `fail_open: false` (live event 2026-07-08). `fail_open` was already
+  per-channel overridable (map form of `channels`), and the override now
+  flows into the payload; tests cover the default (open), both mappings, and
+  the per-channel override end-to-end.
+- **Standalone adapters (`nunchi-matrix`, `nunchi-telegram`,
+  `nunchi-discord`): empty-send guard.** When the responder returns empty or
+  whitespace-only text, the send is suppressed and a receipt is written with
+  `action: empty-suppressed` (previously the adapters posted literal empty
+  messages — observed live on Discord 2026-07-08). The Hermes `nunchi-gate`
+  plugin is intentionally NOT changed: it is admission-only and never sees
+  the composed reply, so it cannot guard against empty sends — that remains
+  the Hermes reply path's responsibility.
+- **003 corpus: new `tool-chrome` fixture pool (`t-*`)** under
+  `specs/003-classifier-test-suite/contracts/fixtures/tool-chrome/` — five
+  envelope+meta pairs where peer-bot tool-use chrome (`skill_view` marker,
+  `search_files` marker, todo-list markers, a compaction notice) appears as
+  the trigger or in history with benign context; expected verdict PASS
+  (chrome is telemetry, not an invitation — the classifier misread exactly
+  this chrome as user invitations under low history, live event 2026-07-08),
+  plus one contrast case where a human explicitly names and asks the agent
+  right after chrome (SPEAK). Loader, runner (`--source tool-chrome`), and
+  runner self-tests discover the pool the same way as the injection class.
+
 ### Security — send backstop on every sending surface
 
 - **Per-channel send backstop ported from the MCP Discord transport to all

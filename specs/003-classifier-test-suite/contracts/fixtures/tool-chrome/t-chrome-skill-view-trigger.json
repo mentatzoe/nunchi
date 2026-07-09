@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-t-chrome-skill-view-trigger",
+  "source_shape": "tool-chrome",
+  "trigger": {
+    "id": "msg-chrome-skill-2",
+    "author": "aleph",
+    "content": "skill_view(skill: \"speckit-plan\")\n⎿ Loaded 412 lines from .claude/skills/speckit-plan/SKILL.md",
+    "timestamp": "2026-07-08T21:14:30.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-chrome-skill-1",
+      "type": "message",
+      "author": "zoe",
+      "content": "aleph, can you pick up the receipts-log cleanup next?",
+      "timestamp": "2026-07-08T21:14:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

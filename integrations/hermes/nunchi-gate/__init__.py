@@ -115,6 +115,11 @@ Config block (in Hermes config.yaml):
 
       # fail_open (bool, default true) — when true, classifier errors allow the
       # Hermes reply through.  Set to false for strict gating.
+      # Governs BOTH failure surfaces: the plugin's own exception path (a
+      # crashed/missing nunchi-channel binary) AND the binary's internal
+      # classifier errors — the resolved value is forwarded in the payload as
+      # `fail_policy` ("open" when true, "closed" when false), overriding the
+      # binary's own fail-open envelope default.
       # Can be overridden per channel in the map form of `channels`.
       fail_open: true
 
@@ -565,6 +570,13 @@ def _build_payload(event: Any, cfg: dict[str, Any], history: list | None = None)
     payload: dict[str, Any] = {"trigger": trigger, "agent": agent}
     if history:
         payload["history"] = history
+
+    # Forward the resolved fail_open as the envelope's fail_policy.  Without
+    # this the nunchi-channel binary applies its own fail-open default, so a
+    # classifier outage inside the binary degraded to SPEAK even under
+    # fail_open: false (live event 2026-07-08).
+    fail_open = _coerce_bool(cfg.get("fail_open"), default=True)
+    payload["fail_policy"] = "open" if fail_open else "closed"
 
     # pinned_rules takes precedence over pinned_rules_file when both are set.
     pinned = str(cfg.get("pinned_rules") or "").strip()

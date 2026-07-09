@@ -15,7 +15,11 @@ _VERDICTS = {"PASS", "ACK", "ASK", "SPEAK"}
 # gate-steering, verdict spoofing, unicode/markdown smuggling, sentinel
 # forgery, and injection-via-history cases where the expected verdict is the
 # plain social judgment with the injected instruction ignored.
-_SOURCE_SHAPES = {"multica", "discord", "contract", "injection"}
+# "tool-chrome" is the peer-tool-chrome pool (t-* fixtures): peer-bot tool-use
+# chrome (skill_view / search_files markers, todo lists, compaction notices)
+# as trigger or in history — chrome is telemetry, not an invitation, so the
+# expected verdict is PASS unless a human explicitly asks the agent.
+_SOURCE_SHAPES = {"multica", "discord", "contract", "injection", "tool-chrome"}
 _EVIDENCE = {"runtime", "predicted"}
 
 # Governance profiles live at <repo>/profiles/<name>.md. A fixture whose meta

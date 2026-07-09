@@ -508,6 +508,29 @@ class TestGateWiring(unittest.TestCase):
 
         self.assertEqual(send_calls, [])
 
+    def test_responder_empty_text_no_send_receipt_empty_suppressed(self):
+        """Empty/whitespace responder output is suppressed, never sent."""
+        for empty_reply in ("", "   \n\t"):
+            with self.subTest(reply=repr(empty_reply)):
+                send_calls = []
+                loop = _make_loop(
+                    tmp_path=self.tmp,
+                    responder=lambda t, h, r: empty_reply,
+                )
+
+                with patch("nunchi.adapters.matrix.channel_gate", return_value=self._make_gate_result("SPEAK")):
+                    with patch("nunchi.adapters.matrix._send_message", side_effect=send_calls.append):
+                        loop._initial_sync_done = True
+                        loop._gate_and_respond(
+                            room_id="!room1:example.com",
+                            trigger_record={"content": "hi", "author": "@a:x", "author_kind": "human", "message_id": "$te"},
+                            history_snapshot=[],
+                        )
+
+                self.assertEqual(send_calls, [])
+                receipts = [json.loads(l) for l in loop.log_path.read_text().splitlines() if l.strip()]
+                self.assertEqual(receipts[-1]["action"], "empty-suppressed")
+
     def test_dry_run_no_send_receipt_says_dry_run(self):
         """In dry-run mode, _send_message is never called; receipt action='dry-run'."""
         send_calls = []

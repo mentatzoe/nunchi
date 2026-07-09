@@ -1,0 +1,26 @@
+{
+  "request_id": "fixture-t-chrome-todo-list-trigger",
+  "source_shape": "tool-chrome",
+  "trigger": {
+    "id": "msg-chrome-todo-2",
+    "author": "aleph",
+    "content": "Todos updated:\n☒ Read plugin source\n☐ Wire fail_policy into the payload\n☐ Add per-channel override test",
+    "timestamp": "2026-07-08T21:31:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-chrome-todo-1",
+      "type": "message",
+      "author": "zoe",
+      "content": "aleph, track the remaining gate fixes as todos please.",
+      "timestamp": "2026-07-08T21:30:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

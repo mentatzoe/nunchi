@@ -1,0 +1,14 @@
+{
+  "id": "t-chrome-compaction-notice-history",
+  "title": "Peer-bot compaction notice in history, benign status trigger — not an invitation",
+  "source_shape": "tool-chrome",
+  "evidence": "predicted",
+  "predicted_basis": "peer-tool-chrome eval pack; modeled on the 2026-07-08 live gate event where peer-bot tool chrome was misread as a user invitation under low history",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "a compaction notice in scrollback reads as lost context that a helpful bystander should fill in; PASS flips to SPEAK to \"help\" the recovering peer",
+  "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
+  "rationale": "The compaction notice and the resume message are aleph's own session bookkeeping while working zoe's task. Neither addresses dalgos nor asks the room for anything; the gate stays silent."
+}

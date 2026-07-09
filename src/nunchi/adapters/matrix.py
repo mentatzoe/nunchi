@@ -554,6 +554,16 @@ class MatrixSyncLoop:
             self._receipt(room_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms)
             return
 
+        # Empty-send guard: never post empty/whitespace-only text to the room.
+        if not reply_text.strip():
+            logger.info(
+                "Responder returned empty text; suppressing send event=%s room=%s",
+                trigger_record.get("message_id"),
+                room_id,
+            )
+            self._receipt(room_id, trigger_record, len(history_snapshot), result, "empty-suppressed", elapsed_ms)
+            return
+
         # Send backstop: sliding-window cap on sends per room (default ON).
         # A tripped cap suppresses the send — it never queues.
         wait = self._backstop.try_acquire(room_id)

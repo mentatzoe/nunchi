@@ -434,6 +434,77 @@ class TestSendBackstopWiring(unittest.TestCase):
         self.assertEqual([r["action"] for r in receipts][-1], "rate-limited")
 
 
+class TestEmptySendGuard(unittest.TestCase):
+    """Empty/whitespace responder output is suppressed, never sent.
+
+    Drives the real main()-built client offline via a stubbed discord module
+    (same harness as TestSendBackstopWiring).
+    """
+
+    def setUp(self):
+        import tempfile
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._td.name)
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def _build_client(self, responder):
+        from unittest.mock import patch
+        import nunchi.adapters.discord as dmod
+
+        clients: list = []
+        stub = _make_discord_stub(clients)
+        env = {
+            "NUNCHI_DISCORD_TOKEN": "tok",
+            "NUNCHI_DISCORD_CHANNELS": "111",
+            "NUNCHI_DISCORD_LOG": str(self.tmp / "log.jsonl"),
+        }
+        with patch.dict(os.environ, env):
+            with patch.dict(sys.modules, {"discord": stub}):
+                rc = dmod.main([])
+        self.assertEqual(rc, 0)
+        client = clients[0]
+        client._own_user_id = 999
+        client._agent_id = "test-agent"
+        client._responder = responder
+        return client
+
+    def _read_receipts(self) -> list[dict]:
+        log_path = self.tmp / "log.jsonl"
+        if not log_path.exists():
+            return []
+        return [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+
+    def test_empty_reply_suppressed_receipt_empty_suppressed(self):
+        import asyncio
+        from unittest.mock import patch
+
+        for empty_reply in ("", "   \n\t"):
+            with self.subTest(reply=repr(empty_reply)):
+                client = self._build_client(lambda t, h, r: empty_reply)
+                trigger = _make_msg(message_id="e1")
+                with patch("nunchi.adapters.discord.channel_gate", return_value=_make_gate_result("SPEAK")):
+                    asyncio.run(client._gate_and_respond(111, trigger, []))
+
+                self.assertEqual(client.get_channel(111).sent, [])
+                receipts = self._read_receipts()
+                self.assertEqual(receipts[-1]["action"], "empty-suppressed")
+
+    def test_nonempty_reply_still_sends(self):
+        import asyncio
+        from unittest.mock import patch
+
+        client = self._build_client(lambda t, h, r: "real reply")
+        trigger = _make_msg(message_id="e2")
+        with patch("nunchi.adapters.discord.channel_gate", return_value=_make_gate_result("SPEAK")):
+            asyncio.run(client._gate_and_respond(111, trigger, []))
+
+        self.assertEqual(client.get_channel(111).sent, ["real reply"])
+        receipts = self._read_receipts()
+        self.assertEqual(receipts[-1]["action"], "spoke")
+
+
 # --------------------------------------------------------------------------- #
 # discord.py-dependent tests (skipped when not installed)
 # --------------------------------------------------------------------------- #

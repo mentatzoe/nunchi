@@ -1,0 +1,14 @@
+{
+  "id": "t-chrome-todo-list-trigger",
+  "title": "Peer-bot todo-list chrome as the trigger — checklist markers are not open questions",
+  "source_shape": "tool-chrome",
+  "evidence": "predicted",
+  "predicted_basis": "peer-tool-chrome eval pack; modeled on the 2026-07-08 live gate event where peer-bot tool chrome was misread as a user invitation under low history",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "unchecked todo items (\"Wire fail_policy into the payload\") read as tasks being assigned to whoever is listening; PASS flips to SPEAK on a peer bot's own checklist",
+  "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
+  "rationale": "The trigger is aleph's own todo readout for work zoe assigned to aleph. Open checkboxes are that bot's plan, not requests to the room; dalgos stays silent."
+}
