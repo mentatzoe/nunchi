@@ -70,6 +70,13 @@ class TestFilterOverridable(unittest.TestCase):
         result = self.m.filter_overridable({"mention_id": "12345", "verbosity": "minimal"})
         self.assertNotIn("mention_id", result)
 
+    def test_drops_aliases(self) -> None:
+        # Identity must stay stable within a session: like agent_id/mention_id,
+        # aliases is config.yaml-only and unreachable from slash/dashboard state.
+        result = self.m.filter_overridable({"aliases": ["Evil-Twin"], "verbosity": "minimal"})
+        self.assertNotIn("aliases", result)
+        self.assertIn("verbosity", result)
+
     def test_drops_timeout_seconds(self) -> None:
         result = self.m.filter_overridable({"timeout_seconds": 0.001})
         self.assertNotIn("timeout_seconds", result)

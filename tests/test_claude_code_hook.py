@@ -443,7 +443,9 @@ class TestSelfSendExtraction(unittest.TestCase):
 class TestTriggerAndHistoryAssembly(unittest.TestCase):
     """Trigger = most recent inbound; history = up to 10 events before it."""
 
-    def _run_and_get_payload(self, lines: list[dict], chat_id: str) -> dict | None:
+    def _run_and_get_payload(
+        self, lines: list[dict], chat_id: str, extra_env: dict | None = None
+    ) -> dict | None:
         """Run the hook with a captured stub that prints the payload it received."""
         tpath = _make_transcript(lines)
         side_file = tempfile.mktemp(suffix=".payload.json")
@@ -474,7 +476,10 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
         os.chmod(wrapper_path, 0o755)
 
         inp = _hook_input(chat_id=chat_id, transcript_path=tpath)
-        _run_hook(inp, env_overrides={"NUNCHI_CHANNEL_BIN": wrapper_path})
+        _run_hook(
+            inp,
+            env_overrides={"NUNCHI_CHANNEL_BIN": wrapper_path, **(extra_env or {})},
+        )
 
         os.unlink(tpath)
         os.unlink(stub_path)
@@ -536,6 +541,39 @@ class TestTriggerAndHistoryAssembly(unittest.TestCase):
         self.assertIsNotNone(payload)
         self.assertEqual(payload["trigger"]["message_id"], "m1")
         self.assertEqual(len(payload["history"]), 0)
+
+    def test_aliases_env_lands_in_payload_cleaned_and_deduped(self):
+        """NUNCHI_HOOK_ALIASES becomes agent.aliases in the gate payload."""
+        lines = [_user_channel_entry(chat_id="c1", message_id="m1", user="zoe", body="hi")]
+        payload = self._run_and_get_payload(
+            lines,
+            "c1",
+            extra_env={
+                "NUNCHI_HOOK_AGENT_ID": "vigil",
+                "NUNCHI_HOOK_MENTION_ID": "111",
+                # dupes of agent_id/mention_id and blanks must be dropped
+                "NUNCHI_HOOK_ALIASES": " Vigil, Codex ,vigil,111,, Vigil ",
+            },
+        )
+        self.assertIsNotNone(payload)
+        self.assertEqual(
+            payload["agent"],
+            {"id": "vigil", "mention_id": "111", "aliases": ["Vigil", "Codex"]},
+        )
+
+    def test_no_aliases_env_keeps_agent_shape_unchanged(self):
+        lines = [_user_channel_entry(chat_id="c1", message_id="m1", user="zoe", body="hi")]
+        payload = self._run_and_get_payload(
+            lines,
+            "c1",
+            extra_env={
+                "NUNCHI_HOOK_AGENT_ID": "vigil",
+                "NUNCHI_HOOK_MENTION_ID": "111",
+                "NUNCHI_HOOK_ALIASES": "",
+            },
+        )
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["agent"], {"id": "vigil", "mention_id": "111"})
 
     def test_history_capped_at_default_window(self):
         """History is capped at NUNCHI_HOOK_HISTORY_WINDOW (default 25) before the trigger."""

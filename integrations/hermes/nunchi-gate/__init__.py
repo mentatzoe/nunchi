@@ -32,7 +32,7 @@ Config block (in Hermes config.yaml):
       #   Map form (new): channel-id -> per-channel config dict.
       #   Per-channel keys fall back to the matching global key when absent.
       #   Allowed per-channel keys: enabled, senders, allow_from, verbosity,
-      #   model, pinned_rules, pinned_rules_file, fail_open.
+      #   model, pinned_rules, pinned_rules_file, fail_open, aliases.
       #   Use "*" as a key for a map-form wildcard (matches any channel).
       #     channels:
       #       "1518384310321811456":
@@ -50,8 +50,24 @@ Config block (in Hermes config.yaml):
       agent_id: my-bot
 
       # mention_id (str, optional) — Discord mention snowflake included in the
-      # payload so the classifier can detect direct @-mentions.
+      # payload so the classifier can detect direct @-mentions.  This is the
+      # PLATFORM mention token (the numeric snowflake), NOT the display name:
+      # a display name here makes the gate blind to real @-mentions — a direct
+      # @<snowflake> mention reads as "someone else" and PASSes (observed live
+      # 2026-07-08).  Display names belong in `aliases`.
       # mention_id: "1496355876234199040"
+
+      # aliases (str CSV or list, optional) — additional identities this one
+      # agent answers to beyond agent_id/mention_id: display names, nicknames,
+      # secondary handles, profile names, extra mention tokens.  Sent as
+      # agent.aliases in the payload so addressing recognizes the full bundle
+      # (e.g. a bot whose agent_id is "vigil" may also be addressed as
+      # "Vigil", "Codex", or "Aether").  Can be overridden per channel in the
+      # map form of `channels` (a bot may carry a different display identity
+      # per channel — see the channel-scoped display overrides core patch).
+      # Absent means behavior is unchanged.  Not runtime-overridable (identity
+      # must stay stable within a session, like agent_id/mention_id).
+      # aliases: [Vigil, Codex, Aether]
 
       # binary (str, optional) — path to the nunchi-channel executable.
       # Defaults to shutil.which("nunchi-channel") or /usr/local/bin/nunchi-channel.
@@ -208,7 +224,7 @@ _HISTORY_MAX_TOTAL = 20_000  # ~1000 channels x 20 entries each
 # All other keys (binary, timeout_seconds, bypass_commands, log_path, …) are
 # global-only and are never overridden at the per-channel level.
 _PER_CHANNEL_KEYS: frozenset[str] = frozenset(
-    {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open"}
+    {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open", "aliases"}
 )
 
 # ---------------------------------------------------------------------------
@@ -464,9 +480,9 @@ def resolve_channel_config(cfg: dict[str, Any], channel_ids: set[str]) -> dict[s
     ``"*"`` key if present.  Returns ``None`` when no entry matches or the
     matched entry has ``enabled: false``.  Otherwise merges per-channel keys
     (``enabled``, ``senders``, ``allow_from``, ``verbosity``, ``model``,
-    ``pinned_rules``, ``pinned_rules_file``, ``fail_open``) on top of the
-    global config and returns the merged dict.  Global keys absent from the
-    per-channel entry are inherited unchanged.
+    ``pinned_rules``, ``pinned_rules_file``, ``fail_open``, ``aliases``) on
+    top of the global config and returns the merged dict.  Global keys absent
+    from the per-channel entry are inherited unchanged.
     """
     channels_raw = cfg.get("channels") or cfg.get("channel_ids")
 
@@ -566,6 +582,16 @@ def _build_payload(event: Any, cfg: dict[str, Any], history: list | None = None)
     mention_id = str(cfg.get("mention_id") or "").strip()
     if mention_id:
         agent["mention_id"] = mention_id
+    # aliases: every other identity this one agent answers to (display names,
+    # nicknames, secondary handles, extra mention tokens).  Deduped against
+    # agent_id/mention_id, order preserved.  Absent/empty -> key omitted, so
+    # alias-free configs produce exactly the pre-alias payload.
+    aliases: list[str] = []
+    for alias in _coerce_list(cfg.get("aliases")):
+        if alias not in aliases and alias != agent_id and alias != mention_id:
+            aliases.append(alias)
+    if aliases:
+        agent["aliases"] = aliases
 
     payload: dict[str, Any] = {"trigger": trigger, "agent": agent}
     if history:
@@ -1114,9 +1140,9 @@ def _nunchi_command(raw_args: str) -> str:
        consumed via ``filter_overridable`` / ``merge_effective``, so only
        ``OVERRIDABLE_KEYS`` (see ``state.py``) ever take effect.  Operator-
        only keys — ``binary``, ``log_path``, ``state_path``, ``agent_id``,
-       ``mention_id``, ``timeout_seconds`` — are unreachable from any slash
-       input.  The slash surface itself can write only ``enabled``,
-       ``senders``, and ``verbosity``.
+       ``mention_id``, ``aliases``, ``timeout_seconds`` — are unreachable
+       from any slash input.  The slash surface itself can write only
+       ``enabled``, ``senders``, and ``verbosity``.
     2. Pinned target: state is written only to the ``state_path`` resolved
        from config.yaml; since ``state_path`` is not overridable, no chat or
        UI input can redirect where state lands.

@@ -49,7 +49,21 @@ NUNCHI_RUNNER_SELF_ID         Discord user id of the runner's own bot; matching
 NUNCHI_RUNNER_CHANNELS        Comma-separated channel ids to watch (empty = all).
 NUNCHI_RUNNER_HISTORY_WINDOW  Rolling per-channel history size (default: 20).
 NUNCHI_RUNNER_AGENT_ID        Agent identifier in the nunchi payload (default: ``agent``).
-NUNCHI_RUNNER_MENTION_ID      Optional @mention handle for the agent.
+NUNCHI_RUNNER_MENTION_ID      Optional @mention handle for the agent. This is
+                              the PLATFORM mention token — on Discord the
+                              numeric snowflake (e.g. ``1496355876234199040``)
+                              — NOT the display name. A display name here makes
+                              the gate blind to real @-mentions: a direct
+                              ``@<snowflake>`` mention reads as "someone else"
+                              and PASSes (observed live 2026-07-08). Names
+                              belong in NUNCHI_RUNNER_ALIASES.
+NUNCHI_RUNNER_ALIASES         Comma-separated additional identities this agent
+                              answers to: display names, nicknames, secondary
+                              handles, extra mention tokens (e.g.
+                              ``Vigil,Codex,Aether``). Sent as
+                              ``agent.aliases`` so addressing recognizes the
+                              full bundle. Optional; absent means behavior is
+                              unchanged.
 NUNCHI_CHANNEL_BIN            Path or name of the nunchi-channel binary
                               (default: located via ``shutil.which("nunchi-channel")``).
 NUNCHI_RUNNER_GATE_TIMEOUT    Gate subprocess timeout in seconds (default: 30).
@@ -118,6 +132,7 @@ class RunnerConfig:
     history_window: int = _DEFAULT_HISTORY_WINDOW
     agent_id: str = "agent"
     mention_id: str | None = None
+    aliases: tuple[str, ...] = ()
     channel_bin: str | None = None
     gate_timeout: float = _DEFAULT_GATE_TIMEOUT
     codex_bin: str = "codex"
@@ -135,6 +150,11 @@ class RunnerConfig:
             for c in (environ.get("NUNCHI_RUNNER_CHANNELS", "") or "").split(",")
             if c.strip()
         )
+        aliases: list[str] = []
+        for part in (environ.get("NUNCHI_RUNNER_ALIASES", "") or "").split(","):
+            text = part.strip()
+            if text and text not in aliases:
+                aliases.append(text)
         return cls(
             transport_url=environ.get("NUNCHI_TRANSPORT_URL", _DEFAULT_TRANSPORT_URL),
             self_id=environ.get("NUNCHI_RUNNER_SELF_ID") or None,
@@ -144,6 +164,7 @@ class RunnerConfig:
             ),
             agent_id=environ.get("NUNCHI_RUNNER_AGENT_ID", "agent"),
             mention_id=environ.get("NUNCHI_RUNNER_MENTION_ID") or None,
+            aliases=tuple(aliases),
             channel_bin=environ.get("NUNCHI_CHANNEL_BIN") or shutil.which("nunchi-channel"),
             gate_timeout=float(environ.get("NUNCHI_RUNNER_GATE_TIMEOUT", str(_DEFAULT_GATE_TIMEOUT))),
             codex_bin=environ.get("NUNCHI_RUNNER_CODEX_BIN", "codex"),
@@ -551,6 +572,12 @@ class RoomRunner:
         agent: dict = {"id": self.config.agent_id}
         if self.config.mention_id:
             agent["mention_id"] = self.config.mention_id
+        aliases = [
+            a for a in self.config.aliases
+            if a != self.config.agent_id and a != self.config.mention_id
+        ]
+        if aliases:
+            agent["aliases"] = aliases
         payload = {
             "trigger": message,
             "history": list(history),

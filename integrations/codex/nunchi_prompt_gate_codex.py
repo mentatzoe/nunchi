@@ -35,7 +35,18 @@ the trigger alone.
 Environment variables
 ---------------------
 NUNCHI_HOOK_AGENT_ID       Agent identifier in the nunchi payload (default: ``agent``).
-NUNCHI_HOOK_MENTION_ID     Optional @mention handle for the agent.
+NUNCHI_HOOK_MENTION_ID     Optional @mention handle for the agent. This is the
+                           PLATFORM mention token — on Discord the numeric
+                           snowflake (e.g. ``1496355876234199040``) — NOT the
+                           display name. A display name here makes the gate
+                           blind to real @-mentions; names belong in
+                           NUNCHI_HOOK_ALIASES.
+NUNCHI_HOOK_ALIASES        Comma-separated additional identities this agent
+                           answers to: display names, nicknames, secondary
+                           handles, extra mention tokens (e.g.
+                           ``Vigil,Codex,Aether``). Sent as ``agent.aliases``
+                           so addressing recognizes the full bundle. Optional;
+                           absent means behavior is unchanged.
 NUNCHI_HOOK_PEER_BOTS      Comma-separated bot usernames; matched users get
                            ``author_kind`` ``peer_bot`` (default: all → ``human``).
 NUNCHI_HOOK_HISTORY_WINDOW Transcript events to include as history (default: 25).
@@ -69,6 +80,23 @@ from pathlib import Path
 
 _AGENT_ID = os.environ.get("NUNCHI_HOOK_AGENT_ID", "agent")
 _MENTION_ID = os.environ.get("NUNCHI_HOOK_MENTION_ID")
+
+
+def _parse_aliases(raw: str | None) -> list[str]:
+    """Split a comma-separated alias string; strip, drop blanks, dedupe in order."""
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in raw.split(","):
+        text = part.strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+_ALIASES: list[str] = _parse_aliases(os.environ.get("NUNCHI_HOOK_ALIASES"))
 _PEER_BOTS: frozenset[str] = frozenset(
     b.strip()
     for b in (os.environ.get("NUNCHI_HOOK_PEER_BOTS", "") or "").split(",")
@@ -240,6 +268,9 @@ def _build_nunchi_payload(trigger_event: dict, history_events: list[dict]) -> di
     agent: dict = {"id": _AGENT_ID}
     if _MENTION_ID:
         agent["mention_id"] = _MENTION_ID
+    aliases = [a for a in _ALIASES if a != _AGENT_ID and a != _MENTION_ID]
+    if aliases:
+        agent["aliases"] = aliases
 
     return {
         "trigger": _to_msg(trigger_event),

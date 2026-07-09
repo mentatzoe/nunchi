@@ -440,5 +440,39 @@ class TestPayloadAndHistory(unittest.TestCase):
         self.assertEqual(stub.payload()["history"], [])
 
 
+class TestAgentAliases(unittest.TestCase):
+    """NUNCHI_HOOK_ALIASES lands in the payload as agent.aliases."""
+
+    def test_aliases_env_lands_in_payload_cleaned_and_deduped(self):
+        stub = _GateStub(_directive("SPEAK"))
+        _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={
+                **stub.env(),
+                "NUNCHI_HOOK_AGENT_ID": "vigil",
+                "NUNCHI_HOOK_MENTION_ID": "111",
+                # dupes of agent_id/mention_id and blanks must be dropped
+                "NUNCHI_HOOK_ALIASES": " Vigil, Codex ,vigil,111,, Vigil ",
+            },
+        )
+        self.assertEqual(
+            stub.payload()["agent"],
+            {"id": "vigil", "mention_id": "111", "aliases": ["Vigil", "Codex"]},
+        )
+
+    def test_no_aliases_env_keeps_agent_shape_unchanged(self):
+        stub = _GateStub(_directive("SPEAK"))
+        _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={
+                **stub.env(),
+                "NUNCHI_HOOK_AGENT_ID": "vigil",
+                "NUNCHI_HOOK_MENTION_ID": "111",
+                "NUNCHI_HOOK_ALIASES": "",
+            },
+        )
+        self.assertEqual(stub.payload()["agent"], {"id": "vigil", "mention_id": "111"})
+
+
 if __name__ == "__main__":
     unittest.main()

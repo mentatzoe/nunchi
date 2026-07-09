@@ -20,6 +20,14 @@ Optional env vars:
     NUNCHI_TELEGRAM_LOG      JSONL receipt log path
                              (default: ~/.nunchi/telegram-gate.jsonl)
     NUNCHI_TELEGRAM_AGENT_ID Agent identity (default: bot_<username>)
+    NUNCHI_TELEGRAM_ALIASES  Comma-separated additional identities this agent
+                             answers to (display names, nicknames, secondary
+                             handles, platform mention tokens). Sent as
+                             agent.aliases so addressing recognizes the full
+                             bundle. NOTE: a mention token is the platform's
+                             structured id, NOT the display name — put names
+                             here, never in a mention-id knob. Optional;
+                             absent means behavior is unchanged.
     NUNCHI_TELEGRAM_HISTORY  Number of recent messages in gate context
                              (default: 20)
     NUNCHI_TELEGRAM_BACKSTOP_MAX_SENDS
@@ -60,7 +68,7 @@ from typing import Callable
 
 from ._backstop import SendBackstop, backstop_from_env
 from ._responder import _demo_responder
-from .channel import ChannelGateResult, gate as channel_gate
+from .channel import ChannelGateResult, gate as channel_gate, parse_alias_csv
 
 logger = logging.getLogger("nunchi.adapters.telegram")
 
@@ -268,10 +276,12 @@ class TelegramPollLoop:
         pinned_rules: str | None = None,
         poll_timeout: int = _DEFAULT_POLL_TIMEOUT,
         backstop: SendBackstop | None = None,
+        aliases: list[str] | None = None,
     ) -> None:
         self.token = token
         self.chat_ids = frozenset(chat_ids)
         self.agent_id = agent_id
+        self.aliases = list(aliases or [])
         self.own_user_id = own_user_id
         self.own_username = own_username
         self.history_len = history_len
@@ -396,6 +406,7 @@ class TelegramPollLoop:
                 trigger_record,
                 history_snapshot,
                 agent_id=self.agent_id,
+                agent_aliases=self.aliases or None,
                 pinned_rules=self.pinned_rules,
                 fail_policy=self.fail_policy,  # type: ignore[arg-type]
             )
@@ -683,6 +694,7 @@ def _build_loop_from_env(dry_run: bool = False) -> TelegramPollLoop:
         responder=responder,
         dry_run=dry_run,
         backstop=backstop_from_env("NUNCHI_TELEGRAM"),
+        aliases=parse_alias_csv(os.environ.get("NUNCHI_TELEGRAM_ALIASES")),
     )
 
 

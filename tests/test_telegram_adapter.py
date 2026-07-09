@@ -81,6 +81,7 @@ def _make_loop(
     responder=None,
     dry_run=False,
     history_len=10,
+    aliases=None,
 ) -> TelegramPollLoop:
     return TelegramPollLoop(
         token="TEST_TOKEN",
@@ -93,6 +94,7 @@ def _make_loop(
         log_path=tmp_path / "log.jsonl",
         responder=responder,
         dry_run=dry_run,
+        aliases=aliases,
     )
 
 
@@ -844,6 +846,65 @@ class TestSendBackstopWiring(unittest.TestCase):
 
         self.assertEqual(loop._backstop.max_sends, 2)
         self.assertEqual(loop._backstop.window_seconds, 3.5)
+
+
+class TestAliasWiring(unittest.TestCase):
+    """NUNCHI_TELEGRAM_ALIASES -> loop.aliases -> channel_gate(agent_aliases=...)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+
+    def _gate_kwargs(self, loop) -> dict:
+        captured = {}
+
+        def _fake_gate(trigger, history, **kw):
+            captured.update(kw)
+            return _make_gate_result("PASS")
+
+        with patch("nunchi.adapters.telegram.channel_gate", side_effect=_fake_gate):
+            loop._gate_and_respond(
+                chat_id=100,
+                trigger_record={
+                    "content": "hi",
+                    "author": "alice",
+                    "author_kind": "human",
+                    "message_id": "a1",
+                    "timestamp": "1700000000",
+                },
+                history_snapshot=[],
+            )
+        return captured
+
+    def test_loop_aliases_passed_to_gate(self):
+        loop = _make_loop(tmp_path=self.tmp, aliases=["Vigil", "Codex"])
+        kwargs = self._gate_kwargs(loop)
+        self.assertEqual(kwargs.get("agent_aliases"), ["Vigil", "Codex"])
+
+    def test_no_aliases_passes_none_to_gate(self):
+        # Backward compat: an alias-free loop calls the gate exactly as before.
+        loop = _make_loop(tmp_path=self.tmp)
+        kwargs = self._gate_kwargs(loop)
+        self.assertIsNone(kwargs.get("agent_aliases"))
+
+    def test_aliases_env_knob_parsed_into_loop(self):
+        from nunchi.adapters.telegram import _build_loop_from_env
+
+        env = {
+            "NUNCHI_TELEGRAM_TOKEN": "tok",
+            "NUNCHI_TELEGRAM_CHATS": "100",
+            "NUNCHI_TELEGRAM_STATE": str(self.tmp / "state.json"),
+            "NUNCHI_TELEGRAM_LOG": str(self.tmp / "log.jsonl"),
+            "NUNCHI_TELEGRAM_ALIASES": " Vigil, Codex ,, Vigil ",
+        }
+        with patch.dict(os.environ, env):
+            with patch(
+                "nunchi.adapters.telegram._get_me",
+                return_value={"id": 999, "username": "testbot"},
+            ):
+                loop = _build_loop_from_env()
+
+        self.assertEqual(loop.aliases, ["Vigil", "Codex"])
 
 
 if __name__ == "__main__":

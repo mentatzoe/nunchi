@@ -435,9 +435,29 @@ class TestVerdictRouting(unittest.TestCase):
         self.assertEqual(payload["trigger"]["content"], "hello there")
         self.assertEqual(payload["trigger"]["author"], "vigil")
         self.assertEqual(payload["trigger"]["author_kind"], "peer_bot")
+        # No aliases configured -> agent shape is exactly the pre-alias contract.
         self.assertEqual(payload["agent"], {"id": "dalgos", "mention_id": "<@42>"})
         self.assertEqual(payload["fail_policy"], "raise")
         self.assertEqual(payload["history"], [])
+
+    def test_gate_payload_carries_agent_aliases(self):
+        self.stubs.set_gate(_directive("PASS"))
+        runner = _make_runner(
+            self.stubs,
+            # dupes of agent_id/mention_id must be dropped, order preserved
+            aliases=("Vigil", "Codex", "dalgos", "<@42>", "1496355876234199040"),
+        )
+        runner.handle_notification(_event())
+
+        payload = self.stubs.gate_payload()
+        self.assertEqual(
+            payload["agent"],
+            {
+                "id": "dalgos",
+                "mention_id": "<@42>",
+                "aliases": ["Vigil", "Codex", "1496355876234199040"],
+            },
+        )
 
 
 class TestGateFailurePolicy(unittest.TestCase):
@@ -606,6 +626,7 @@ class TestConfigFromEnv(unittest.TestCase):
         self.assertEqual(cfg.codex_bin, "codex")
         self.assertEqual(cfg.wake_timeout, 300.0)
         self.assertEqual(cfg.channels, frozenset())
+        self.assertEqual(cfg.aliases, ())
 
     def test_overrides_and_shell_split_args(self):
         env = {
@@ -626,6 +647,19 @@ class TestConfigFromEnv(unittest.TestCase):
         )
         self.assertEqual(cfg.self_id, "42")
         self.assertEqual(cfg.channel_bin, "/opt/bin/nunchi-channel")
+
+    def test_aliases_env_parsed_ordered_deduped(self):
+        # Order preserved, whitespace stripped, blanks and repeats dropped.
+        env = {"NUNCHI_RUNNER_ALIASES": " Vigil, Codex ,, Vigil , 1496355876234199040 "}
+        cfg = runner_mod.RunnerConfig.from_env(environ=env)
+        self.assertEqual(cfg.aliases, ("Vigil", "Codex", "1496355876234199040"))
+
+    def test_aliases_env_absent_or_empty_is_empty_tuple(self):
+        self.assertEqual(runner_mod.RunnerConfig.from_env(environ={}).aliases, ())
+        self.assertEqual(
+            runner_mod.RunnerConfig.from_env(environ={"NUNCHI_RUNNER_ALIASES": ""}).aliases,
+            (),
+        )
 
 
 class TestStartupValidation(unittest.TestCase):

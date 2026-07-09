@@ -63,8 +63,9 @@ def filter_overridable(d: dict[str, Any]) -> dict[str, Any]:
     """Return a shallow copy of *d* containing only ``OVERRIDABLE_KEYS``.
 
     Keys absent from ``OVERRIDABLE_KEYS`` — including ``binary``,
-    ``timeout_seconds``, ``log_path``, ``agent_id``, ``mention_id``, and
-    ``state_path`` — are silently dropped.  This enforces the security
+    ``timeout_seconds``, ``log_path``, ``agent_id``, ``mention_id``,
+    ``aliases``, and ``state_path`` — are silently dropped.  This enforces
+    the security
     whitelist at the point of ingestion so both the slash command and the
     dashboard API inherit it without duplicating the check.
     """
