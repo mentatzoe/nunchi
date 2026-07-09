@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both live events and history, while preserving ordinary content and excluding
   button labels. This prevents visible embed-only reviews or approval notices
   from being misclassified as empty room events.
+- Preserved Discord mention and reply metadata across live/history transport
+  shapes. The Codex runner now restores available referenced messages and uses
+  structured mention ids for admission and outbound re-gating without changing
+  the prose displayed to Codex.
 
 ### Added — `nunchi-install`: copy-based installer for operator artifacts
 

@@ -386,7 +386,10 @@ The Codex integration has four Codex-side pieces in
   `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex. For
   configured channels, it backfills gate history on transport startup through
   the transport's `read_history` MCP tool; hot-added and watch-all channels
-  backfill immediately before their first observed live event.
+  backfill immediately before their first observed live event. Discord
+  mention/reply metadata is retained for admission, including referenced self
+  messages that the self-dropping transport would otherwise omit from live
+  history.
 - `nunchi-codex-prompt-gate` is a defense-in-depth `UserPromptSubmit` hook
   for channel-tagged prompts in interactive Codex sessions. It blocks `PASS`
   and fail-opens for operator or malformed prompts.
