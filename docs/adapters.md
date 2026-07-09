@@ -14,17 +14,17 @@ custom responder.
 | `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | live-run; evidence owed |
 | Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | offline-tested; live evidence incomplete |
-| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | single live-smoke evidenced |
+| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | bounded live-smokes evidenced |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
 Status labels in this table are evidence tiers, not the release-alpha/beta
 validation gates. `code-only` means implementation exists in the repo, but no
 committed live-server evidence supports a readiness claim yet. `offline-tested`
-means the relevant repo tests pass; it is not a live-readiness claim. `single
-live-smoke evidenced` means one committed live-room run supports the narrow
-smoke claim; it is not a sustained operations claim. For Codex, that live
-evidence covers the room wake/outbound path; the configuration app currently
-has offline MCP protocol and responsive interaction evidence only.
+means the relevant repo tests pass; it is not a live-readiness claim. `bounded
+live-smokes evidenced` means committed live-room runs support the narrow
+wake/outbound and two-turn persistent-session claims; it is not a sustained
+operations claim. The configuration app has offline MCP protocol and responsive
+interaction evidence plus a live read of the resulting session health state.
 
 The platform adapters (`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`)
 landed after the published 0.2.0 PyPI release and are currently installable
@@ -414,15 +414,18 @@ The Codex integration has four Codex-side pieces in
   packages those hooks, a local streamable-HTTP MCP config for the shared
   `nunchi-discord` transport, and the local stdio configuration app.
 
-Status is **single live-smoke evidenced** in this branch: unit tests cover the
+Status is **bounded live-smokes evidenced**: unit tests cover the
 runner, inbound hook, outbound send hook, hot state, configuration app protocol,
 package entry points, config loading, history backfill, and plugin bundle shape,
-and
+while
 [`integrations/codex/evidence/2026-07-09-vigil-live-smoke.md`](../integrations/codex/evidence/2026-07-09-vigil-live-smoke.md)
-records one live-room wake and outbound hook allow. Sustained live Discord room
-participation still requires the shared `nunchi-mcp-discord` transport,
-credentials, installed/trusted Codex plugin hooks, and the long-running room
-runner.
+records one live-room wake and outbound hook allow, and
+[`integrations/codex/evidence/2026-07-09-vigil-persistent-session.md`](../integrations/codex/evidence/2026-07-09-vigil-persistent-session.md)
+records two admitted wakes on the same persisted Codex task plus one delivered
+response. These remain bounded smokes, not sustained-operations evidence.
+Sustained participation still requires the shared `nunchi-mcp-discord`
+transport, credentials, installed/trusted Codex plugin hooks, and long-running
+room runner.
 
 ---
 

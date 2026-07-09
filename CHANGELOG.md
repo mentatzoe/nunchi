@@ -31,9 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator functions in Codex's embedded app container.
 - Added the repo-local `nunchi-codex@local-repo` marketplace plugin, package
   entry points, copy-safe hook commands, offline unit/protocol tests, and a
-  committed single-run Vigil smoke evidence record. The live record supports
-  only that narrow wake/outbound smoke, not sustained operations; the app has
-  offline protocol and responsive interaction evidence in this change.
+  committed bounded Vigil smoke evidence record. A second record verifies two
+  admitted live turns resumed the same persisted Codex task and one response
+  reached Discord. These support only narrow smoke claims, not sustained
+  operations; the app also has offline protocol and responsive interaction
+  evidence.
 - Normalized Discord rich-only peer messages into tagged, bounded text for
   both live events and history, while preserving ordinary content and excluding
   button labels. This prevents visible embed-only reviews or approval notices
