@@ -57,7 +57,9 @@ tool registration, session tracking, notification push, uvicorn lifecycle.
 
 - Notification `notifications/discord/message`, params:
   `guild_id (str|null), channel_id (str), message_id (str), author_id (str),
-  author_name (str), author_is_bot (bool), content (str), timestamp (str|null)`.
+  author_name (str), author_is_bot (bool), content (str), timestamp (str|null),
+  mentioned_user_ids (list[str]), reply_to_message_id/author_id/author_name/
+  content (str|null), reply_to_author_is_bot (bool|null)`.
   Snowflakes are strings (53-bit JSON consumers). Pushed on the session's
   standalone SSE stream (no related request).
 - Tools: `send_message(channel_id, content)`,
@@ -81,6 +83,7 @@ tool registration, session tracking, notification push, uvicorn lifecycle.
 | Transport backstop exceeded | Tool call fails immediately with `retry in Ns` — never queued, never sent. |
 | Discord 401/403 on send | Non-retryable: tool error on the first response. |
 | Empty `content` with rich message data | Normalize conversational embed fields, Components V2 text displays, attachment descriptions/names, stickers, and polls into tagged, bounded text. Exclude interaction chrome such as button labels. Live notifications and history use the same normalizer. |
+| Reply or mention exists only in Discord metadata | Preserve mention ids and referenced message/author/content fields in both notification and history shapes. Do not mutate ordinary `content`. |
 | Empty `content` on MESSAGE_CREATE with no rich data | Signature of a missing MESSAGE_CONTENT intent: loud WARNING with the portal remediation step; the notification is still delivered with `content: ""` (documented, tested — no silent garbage). |
 | SIGTERM / SIGINT | Uvicorn graceful shutdown -> lifespan drain: stop pumping, wait for in-flight sends (default 10s), close gateway with 1000, exit. |
 

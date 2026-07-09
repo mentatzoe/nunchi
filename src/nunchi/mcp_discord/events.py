@@ -19,6 +19,12 @@ Notification contract (any MCP harness can consume this):
         author_is_bot  bool
         content        str
         timestamp      str | None   (ISO 8601, as sent by Discord)
+        mentioned_user_ids     list[str]
+        reply_to_message_id    str | None
+        reply_to_author_id     str | None
+        reply_to_author_name   str | None
+        reply_to_author_is_bot bool | None
+        reply_to_content       str | None
 
 Snowflake IDs are strings to survive JSON consumers with 53-bit numbers.
 """
@@ -116,6 +122,58 @@ def message_text(data: dict) -> str:
     return rendered
 
 
+def message_addressing(data: dict) -> dict[str, Any]:
+    """Normalize Discord mentions and reply context without changing content."""
+    mentioned_user_ids: list[str] = []
+    seen: set[str] = set()
+    for mention in data.get("mentions") or []:
+        if not isinstance(mention, dict):
+            continue
+        user_id = str(mention.get("id") or "").strip()
+        if user_id.isdigit() and user_id not in seen:
+            seen.add(user_id)
+            mentioned_user_ids.append(user_id)
+
+    reference = data.get("message_reference") or {}
+    if not isinstance(reference, dict):
+        reference = {}
+    referenced = data.get("referenced_message")
+    if not isinstance(referenced, dict):
+        referenced = None
+    referenced_author = referenced.get("author") if referenced else None
+    if not isinstance(referenced_author, dict):
+        referenced_author = None
+
+    reply_to_message_id = reference.get("message_id")
+    if reply_to_message_id is None and referenced is not None:
+        reply_to_message_id = referenced.get("id")
+
+    reply_author_id = (
+        str(referenced_author.get("id") or "").strip()
+        if referenced_author is not None
+        else ""
+    )
+    reply_author_name = (
+        str(referenced_author.get("username") or "").strip()
+        if referenced_author is not None
+        else ""
+    )
+    return {
+        "mentioned_user_ids": mentioned_user_ids,
+        "reply_to_message_id": (
+            str(reply_to_message_id) if reply_to_message_id is not None else None
+        ),
+        "reply_to_author_id": reply_author_id or None,
+        "reply_to_author_name": reply_author_name or None,
+        "reply_to_author_is_bot": (
+            bool(referenced_author.get("bot", False))
+            if referenced_author is not None
+            else None
+        ),
+        "reply_to_content": message_text(referenced) if referenced is not None else None,
+    }
+
+
 @dataclass(frozen=True)
 class MessageEvent:
     """One inbound Discord message, normalized for the MCP surface."""
@@ -128,12 +186,19 @@ class MessageEvent:
     author_is_bot: bool
     content: str
     timestamp: str | None
+    mentioned_user_ids: tuple[str, ...]
+    reply_to_message_id: str | None
+    reply_to_author_id: str | None
+    reply_to_author_name: str | None
+    reply_to_author_is_bot: bool | None
+    reply_to_content: str | None
 
 
 def message_event_from_create(data: dict) -> MessageEvent:
     """Normalize a MESSAGE_CREATE dispatch payload."""
     author = data.get("author") or {}
     guild_id = data.get("guild_id")
+    addressing = message_addressing(data)
     return MessageEvent(
         guild_id=str(guild_id) if guild_id is not None else None,
         channel_id=str(data.get("channel_id", "")),
@@ -143,6 +208,12 @@ def message_event_from_create(data: dict) -> MessageEvent:
         author_is_bot=bool(author.get("bot", False)),
         content=message_text(data),
         timestamp=data.get("timestamp"),
+        mentioned_user_ids=tuple(addressing["mentioned_user_ids"]),
+        reply_to_message_id=addressing["reply_to_message_id"],
+        reply_to_author_id=addressing["reply_to_author_id"],
+        reply_to_author_name=addressing["reply_to_author_name"],
+        reply_to_author_is_bot=addressing["reply_to_author_is_bot"],
+        reply_to_content=addressing["reply_to_content"],
     )
 
 
@@ -195,4 +266,10 @@ def notification_params(event: MessageEvent) -> dict:
         "author_is_bot": event.author_is_bot,
         "content": event.content,
         "timestamp": event.timestamp,
+        "mentioned_user_ids": list(event.mentioned_user_ids),
+        "reply_to_message_id": event.reply_to_message_id,
+        "reply_to_author_id": event.reply_to_author_id,
+        "reply_to_author_name": event.reply_to_author_name,
+        "reply_to_author_is_bot": event.reply_to_author_is_bot,
+        "reply_to_content": event.reply_to_content,
     }

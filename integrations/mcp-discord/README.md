@@ -60,7 +60,13 @@ Every non-self message (human or bot) arrives as an unsolicited notification:
     "author_name": "peer-bot",
     "author_is_bot": true,
     "content": "ping",
-    "timestamp": "2026-07-06T10:00:00.000000+00:00"
+    "timestamp": "2026-07-06T10:00:00.000000+00:00",
+    "mentioned_user_ids": [],
+    "reply_to_message_id": null,
+    "reply_to_author_id": null,
+    "reply_to_author_name": null,
+    "reply_to_author_is_bot": null,
+    "reply_to_content": null
   }
 }
 ```
@@ -71,6 +77,14 @@ fallback from conversational embed fields, Components V2 text displays,
 attachment descriptions or names, stickers, and polls. Button labels are not
 treated as speech. Live notifications and `read_history` use the same
 normalization so admission sees the same message after a reconnect.
+
+Discord's structured addressing is preserved separately from prose:
+`mentioned_user_ids` carries mention snowflakes, and reply messages carry the
+referenced message/author/content fields when Discord supplies them. This is
+important because a Discord reply can target a participant without placing an
+`<@id>` token in `content`. Referenced rich-only content uses the same bounded
+normalizer. Missing or deleted references remain `null` rather than being
+invented.
 
 Tools: `send_message(channel_id, content)`,
 `reply_message(channel_id, message_id, content)`,

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
-from .events import message_text
+from .events import message_addressing, message_text
 from .ratelimit import SendBackstop
 from .rest import DiscordRestError
 
@@ -108,7 +108,7 @@ def shape_message(msg: dict) -> dict:
     """Normalize an API message object to the notification field names."""
     author = msg.get("author") or {}
     guild_id = msg.get("guild_id")
-    return {
+    shaped = {
         "guild_id": str(guild_id) if guild_id is not None else None,
         "channel_id": str(msg.get("channel_id", "")),
         "message_id": str(msg.get("id", "")),
@@ -118,6 +118,8 @@ def shape_message(msg: dict) -> dict:
         "content": message_text(msg),
         "timestamp": msg.get("timestamp"),
     }
+    shaped.update(message_addressing(msg))
+    return shaped
 
 
 def _snowflake(value: object) -> str | None:

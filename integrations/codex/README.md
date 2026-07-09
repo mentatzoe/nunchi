@@ -290,11 +290,16 @@ transport's `read_history` tool (newest-first from Discord, reversed to
 oldest-first before gating). Plain Discord content is preserved; rich-only
 peer messages are converted by the transport into tagged, bounded text from
 their visible conversational fields. Live notifications and history use the
-same conversion. A channel added through hot state is backfilled, excluding
-the current trigger, immediately before its first live event is gated. If
-`NUNCHI_RUNNER_CHANNELS` / `channels` is empty (`watch all`), startup backfill
-is skipped because there is no finite channel list to fetch; each observed
-channel is instead backfilled on its first event.
+same conversion. Discord mention/reply metadata is retained separately from
+prose. For admission only, the runner materializes those structured mention
+ids as Discord mention tokens and restores an available referenced message to
+history; the wake prompt still displays the original prose, while its hidden
+context preserves the enriched content for outbound re-gating. A channel
+added through hot state is backfilled, excluding the current trigger,
+immediately before its first live event is gated. If `NUNCHI_RUNNER_CHANNELS`
+/ `channels` is empty (`watch all`), startup backfill is skipped because there
+is no finite channel list to fetch; each observed channel is instead
+backfilled on its first event.
 
 The hook reuses the Claude Code hook's env names for the shared knobs
 (`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_ALIASES`,

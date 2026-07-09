@@ -92,6 +92,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -131,6 +132,7 @@ _STREAM_READ_TIMEOUT = 900.0  # idle SSE read; expiry just triggers a clean reco
 _BACKOFF_INITIAL = 1.0
 _BACKOFF_CAP = 60.0
 _SEEN_MESSAGE_IDS_MAX = 1000
+_DISCORD_MENTION_RE = re.compile(r"<@!?(\d+)>")
 
 # Shape guidance per admitted verdict (mirrors RUN_SHAPE in
 # src/nunchi/adapters/channel.py — guidance only, never composed prose).
@@ -154,6 +156,27 @@ def _context_tag_json(value: dict) -> str:
 def _prompt_text(value: Any) -> str:
     """Render untrusted room text without creating control-looking tags."""
     return str(value).replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+def _discord_admission_content(params: dict, content: str) -> str:
+    """Add structured Discord addressing tokens only to admission content."""
+    addressed_ids: list[str] = []
+    seen: set[str] = set()
+    raw_mentions = params.get("mentioned_user_ids")
+    candidates = list(raw_mentions) if isinstance(raw_mentions, (list, tuple)) else []
+    if params.get("reply_to_author_id") is not None:
+        candidates.append(params["reply_to_author_id"])
+    existing = set(_DISCORD_MENTION_RE.findall(content))
+    for value in candidates:
+        user_id = str(value or "").strip()
+        if not user_id.isdigit() or user_id in seen or user_id in existing:
+            continue
+        seen.add(user_id)
+        addressed_ids.append(user_id)
+    if not addressed_ids:
+        return content
+    tokens = " ".join(f"<@{user_id}>" for user_id in addressed_ids)
+    return f"[Discord addressing metadata: {tokens}]\n{content}"
 
 
 # ---------------------------------------------------------------------------
@@ -683,9 +706,10 @@ def build_wake_prompt(
     shape = _WAKE_SHAPE.get(verdict, _WAKE_SHAPE["SPEAK"])
     channel_id = trigger.get("channel_id", "")
     message_id = trigger.get("message_id", "")
+    admission_content = trigger.get("admission_content") or trigger.get("content", "")
     nunchi_context = {
         "trigger": {
-            "content": trigger.get("content", ""),
+            "content": admission_content,
             "author": trigger.get("author", ""),
             "author_kind": trigger.get("author_kind", "human"),
             "message_id": message_id,
@@ -708,8 +732,16 @@ def build_wake_prompt(
         f"  message_id: {_prompt_text(message_id)}",
         f"  author: {_prompt_text(trigger.get('author', ''))}",
         f"  content: {_prompt_text(trigger.get('content', ''))}",
-        "",
     ]
+    if trigger.get("reply_to_message_id"):
+        lines += [
+            "",
+            "Discord reply context:",
+            f"  message_id: {_prompt_text(trigger.get('reply_to_message_id', ''))}",
+            f"  author: {_prompt_text(trigger.get('reply_to_author', ''))}",
+            f"  content: {_prompt_text(trigger.get('reply_to_content', ''))}",
+        ]
+    lines.append("")
     if history:
         lines.append(f"Recent channel history (oldest first, {len(history)} messages):")
         lines.extend(
@@ -808,6 +840,54 @@ class RoomRunner:
             "message_id": params.get("message_id") or "",
             "timestamp": params.get("timestamp"),
         }
+
+    def _self_identity_values(self) -> set[str]:
+        values = {
+            str(value).strip().casefold()
+            for value in (
+                self.config.self_id,
+                self.config.agent_id,
+                self.config.mention_id,
+                *self.config.aliases,
+            )
+            if value is not None and str(value).strip()
+        }
+        for value in tuple(values):
+            values.update(
+                match.casefold() for match in _DISCORD_MENTION_RE.findall(value)
+            )
+        return values
+
+    def _reply_context_message(self, params: dict) -> dict | None:
+        content = params.get("reply_to_content")
+        message_id = str(params.get("reply_to_message_id") or "")
+        if not isinstance(content, str) or not content.strip() or not message_id:
+            return None
+        author_id = str(params.get("reply_to_author_id") or "")
+        author_name = str(params.get("reply_to_author_name") or "")
+        identities = self._self_identity_values()
+        if author_id.casefold() in identities or author_name.casefold() in identities:
+            author_kind = "self"
+        elif params.get("reply_to_author_is_bot"):
+            author_kind = "peer_bot"
+        else:
+            author_kind = "human"
+        return {
+            "content": content,
+            "author": author_name or author_id or "unknown",
+            "author_kind": author_kind,
+            "message_id": message_id,
+            "timestamp": None,
+        }
+
+    def _append_reply_context(self, history: deque[dict], params: dict) -> None:
+        reply = self._reply_context_message(params)
+        if reply is None:
+            return
+        reply_id = reply["message_id"]
+        if any(str(item.get("message_id") or "") == reply_id for item in history):
+            return
+        history.append(reply)
 
     def seed_history(self, channel_id: str, messages_newest_first: list[dict]) -> None:
         """Seed rolling history from transport ``read_history`` output.
@@ -1041,6 +1121,8 @@ class RoomRunner:
             )
             return "skipped-empty"
 
+        self._append_reply_context(history, params)
+
         if not sender_is_admitted(policy, params):
             history.append(message)
             self._write_receipt(
@@ -1062,8 +1144,13 @@ class RoomRunner:
         ]
         if aliases:
             agent["aliases"] = aliases
+        admission_message = dict(message)
+        admission_message["content"] = _discord_admission_content(
+            params,
+            message["content"],
+        )
         payload = {
-            "trigger": message,
+            "trigger": admission_message,
             "history": list(history),
             "agent": agent,
             "surface": {"type": "channel", "channel_id": channel_id},
@@ -1083,6 +1170,14 @@ class RoomRunner:
             "author": message["author"],
             "author_kind": message["author_kind"],
             "content": message["content"],
+            "admission_content": admission_message["content"],
+            "reply_to_message_id": params.get("reply_to_message_id"),
+            "reply_to_author": (
+                params.get("reply_to_author_name")
+                or params.get("reply_to_author_id")
+                or ""
+            ),
+            "reply_to_content": params.get("reply_to_content") or "",
         }
 
         if gate_error is not None:

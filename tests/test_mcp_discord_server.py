@@ -226,6 +226,34 @@ class TestContentBehavior(unittest.TestCase):
         self.assertEqual(len(content), 6000)
         self.assertTrue(content.endswith("..."))
 
+    def test_reply_mentions_and_referenced_message_are_preserved(self):
+        data = _create_data(
+            content="review complete",
+            mentions=[
+                {"id": "999"},
+                {"id": "999"},
+                {"id": "888"},
+                {"id": "not-a-snowflake"},
+            ],
+            message_reference={"message_id": "reply-target"},
+            referenced_message={
+                "id": "reply-target",
+                "content": "please review",
+                "author": {"id": "999", "username": "Vigil", "bot": True},
+            },
+        )
+
+        event = filter_message_create(data, "123")
+        params = notification_params(event)
+
+        self.assertEqual(params["content"], "review complete")
+        self.assertEqual(params["mentioned_user_ids"], ["999", "888"])
+        self.assertEqual(params["reply_to_message_id"], "reply-target")
+        self.assertEqual(params["reply_to_author_id"], "999")
+        self.assertEqual(params["reply_to_author_name"], "Vigil")
+        self.assertTrue(params["reply_to_author_is_bot"])
+        self.assertEqual(params["reply_to_content"], "please review")
+
 
 # --------------------------------------------------------------------------- #
 # Notification contract: delivery to a mock MCP client
@@ -261,6 +289,12 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
                     "author_is_bot": True,
                     "content": "ping",
                     "timestamp": "2026-07-06T10:00:00.000000+00:00",
+                    "mentioned_user_ids": [],
+                    "reply_to_message_id": None,
+                    "reply_to_author_id": None,
+                    "reply_to_author_name": None,
+                    "reply_to_author_is_bot": None,
+                    "reply_to_content": None,
                 }
             ],
         )
@@ -484,6 +518,24 @@ class TestToolExecutor(unittest.TestCase):
         self.assertEqual(
             shaped["content"], "[Discord rich message]\nApproval required"
         )
+
+    def test_read_history_preserves_reply_addressing(self):
+        shaped = shape_message(
+            _api_message(
+                mentions=[{"id": "999"}],
+                message_reference={"message_id": "41"},
+                referenced_message={
+                    "id": "41",
+                    "content": "prior message",
+                    "author": {"id": "999", "username": "Vigil", "bot": True},
+                },
+            )
+        )
+
+        self.assertEqual(shaped["mentioned_user_ids"], ["999"])
+        self.assertEqual(shaped["reply_to_message_id"], "41")
+        self.assertEqual(shaped["reply_to_author_id"], "999")
+        self.assertEqual(shaped["reply_to_content"], "prior message")
 
     def test_non_numeric_channel_id_rejected(self):
         executor, rest = self._executor()
