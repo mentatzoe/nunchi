@@ -168,12 +168,48 @@ reload the Claude Code session for `settings.json` changes to take effect.
 ### The wrappers are fail-open
 
 Each wrapper (`nunchi-pretool-reply.sh`, `nunchi-user-prompt-submit.sh`)
-sources an optional operator env file (`~/.claude/nunchi-gate.env`), then runs
-the Python hook. **Any** failure — a missing hook file, no `python3`, a hook
-error — exits `0`, so a missing or broken gate can never block Claude Code.
-Put your `NUNCHI_HOOK_*` and classifier environment variables in
-`~/.claude/nunchi-gate.env` (it is sourced if present; the installer never
-overwrites it).
+sources its operator env file(s) (see below), then runs the Python hook.
+**Any** failure — a missing hook file, no `python3`, a hook error — exits `0`,
+so a missing or broken gate can never block Claude Code.
+
+### Hook configuration lives in operator env files (the sturdy path)
+
+Your agent's identity is **not** baked into the wrappers — the installer
+rewrites the wrappers on every `upgrade`, so anything inline there would be
+lost. Instead each wrapper sources operator-owned env files that the installer
+**writes the wrappers to reference but never creates or overwrites**. Your
+config therefore survives every upgrade.
+
+Two layers, sourced in order (a later file's exports win):
+
+| File | Sourced by | Purpose |
+|------|-----------|---------|
+| `~/.claude/nunchi-gate.env` | both wrappers | shared identity (`NUNCHI_HOOK_*`), classifier env |
+| `~/.claude/nunchi-pretool-reply.env` | outbound reply wrapper only | per-direction overrides for the outbound gate |
+| `~/.claude/nunchi-user-prompt-submit.env` | inbound wrapper only | per-direction overrides for the inbound gate |
+
+Put shared identity — `NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_ALIASES`,
+`NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_PEER_BOTS`, `NUNCHI_CHANNEL_BIN`, and any
+classifier credentials — in `nunchi-gate.env`. Use a per-hook override only for
+a value that must **differ between the inbound and outbound gates**.
+
+The canonical override is the **peer roster**. On the outbound path the gate
+tags each author in the recent context as `peer_bot` or `human` and feeds that
+to the classifier: tagging a bot `human` biases toward SPEAK when it is present,
+tagging it `peer_bot` biases toward restraint. Keeping a bot out of the
+*outbound* roster (so it reads as `human` to your reply gate) counters
+over-suppression on turns genuinely addressed to you, while the *inbound* gate
+keeps the full roster so peer chatter still reads as peer chatter. Set the full
+roster in `nunchi-gate.env` and narrow it in `nunchi-pretool-reply.env`.
+
+Copy the annotated examples to get started (the installer never touches your
+live files, so copying by hand is the intended flow):
+
+```sh
+cp integrations/claude-code/nunchi-gate.env.example ~/.claude/nunchi-gate.env
+cp integrations/claude-code/nunchi-pretool-reply.env.example ~/.claude/nunchi-pretool-reply.env
+# then edit both for your agent's identity and roster
+```
 
 ## Version stamps
 

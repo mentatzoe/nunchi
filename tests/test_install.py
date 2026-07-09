@@ -449,7 +449,7 @@ class WrapperContentTest(_TmpTest):
         hooks = self.tmp / ".claude" / "hooks"
         hook_path = hooks / install.CLAUDE_HOOK_FILES[0]
         env_file = self.tmp / ".claude" / "nunchi-gate.env"
-        content = render_wrapper("nunchi-pretool-reply.sh", hook_path, env_file)
+        content = render_wrapper("nunchi-pretool-reply.sh", hook_path, [env_file])
 
         self.assertIn("#!/bin/sh", content)
         self.assertIn("|| exit 0", content, "wrapper must fail open")
@@ -459,11 +459,35 @@ class WrapperContentTest(_TmpTest):
         self.assertIn(str(hook_path), content, "wrapper must point at the stable hook path")
         self.assertNotIn("integrations", content, "wrapper must not reference a repo checkout")
 
+    def test_wrapper_sources_env_files_in_order(self) -> None:
+        # Shared identity is sourced before the per-hook override so the
+        # override's exports win (e.g. a narrower outbound peer roster).
+        hooks = self.tmp / ".claude" / "hooks"
+        hook_path = hooks / install.CLAUDE_HOOK_FILES[0]
+        shared = self.tmp / ".claude" / "nunchi-gate.env"
+        override = self.tmp / ".claude" / "nunchi-pretool-reply.env"
+        content = render_wrapper("nunchi-pretool-reply.sh", hook_path, [shared, override])
+
+        self.assertLess(
+            content.index(str(shared)),
+            content.index(str(override)),
+            "shared env must be sourced before the per-hook override",
+        )
+        # Each env file is guarded so a missing file never breaks the gate.
+        self.assertIn(f'[ -f "{override}" ] && . "{override}"', content)
+
     def test_installed_wrapper_points_at_installed_hook(self) -> None:
         _installer(self.tmp).install(groups=["claude"])
         hooks = self.tmp / ".claude" / "hooks"
         wrapper = (hooks / "nunchi-pretool-reply.sh").read_text(encoding="utf-8")
         self.assertIn(str(hooks / install.CLAUDE_HOOK_FILES[0]), wrapper)
+
+    def test_installed_wrapper_sources_shared_and_override_env(self) -> None:
+        _installer(self.tmp).install(groups=["claude"])
+        claude = self.tmp / ".claude"
+        wrapper = (claude / "hooks" / "nunchi-pretool-reply.sh").read_text(encoding="utf-8")
+        self.assertIn(str(claude / "nunchi-gate.env"), wrapper)
+        self.assertIn(str(claude / "nunchi-pretool-reply.env"), wrapper)
 
 
 class NeverTouchesRealHomeTest(_TmpTest):

@@ -216,26 +216,34 @@ def build_claude_settings_snippet(
     return json.dumps(snippet, indent=2)
 
 
-def render_wrapper(wrapper_name: str, hook_path: Path, env_file: Path) -> str:
+def render_wrapper(
+    wrapper_name: str, hook_path: Path, env_files: Sequence[Path]
+) -> str:
     """Render a fail-open POSIX-sh wrapper for one Claude Code hook.
 
-    The wrapper sources an optional operator env file, then runs the Python
-    hook. ANY failure — missing hook file, no ``python3``, hook error — exits
-    ``0`` so a missing or broken gate can never block Claude Code.
+    The wrapper sources each operator env file in *env_files* order — a shared
+    identity file first, then an optional per-hook override — before running the
+    Python hook. Each file is sourced only if present, and a later file's
+    exports win, so the outbound gate can narrow a shared default (e.g. its peer
+    roster) without a separate wrapper. ANY failure — missing hook file, no
+    ``python3``, hook error — exits ``0`` so a missing or broken gate can never
+    block Claude Code.
     """
+    source_lines = "".join(
+        f'[ -f "{env_file}" ] && . "{env_file}"\n' for env_file in env_files
+    )
     return (
         "#!/bin/sh\n"
         f"# {wrapper_name} — fail-open wrapper for the Nunchi Claude Code gate.\n"
         "# Installed and managed by `nunchi-install`. Do not edit by hand;\n"
         "# re-run `nunchi-install upgrade` to refresh it.\n"
         "#\n"
-        "# Sources the operator env file (if present), then runs the Python\n"
+        "# Sources the operator env file(s) (if present), then runs the Python\n"
         "# hook. ANY failure — missing hook, no python3, hook error — exits 0\n"
         "# so a broken gate never blocks Claude Code.\n"
         "set -u\n"
         f'HOOK="{hook_path}"\n'
-        f'ENV_FILE="{env_file}"\n'
-        '[ -f "$ENV_FILE" ] && . "$ENV_FILE"\n'
+        f"{source_lines}"
         "command -v python3 >/dev/null 2>&1 || exit 0\n"
         '[ -f "$HOOK" ] || exit 0\n'
         'python3 "$HOOK" "$@" || exit 0\n'
@@ -649,13 +657,20 @@ class Installer:
             self._copy_file(self.claude_src / name, dest)
             installed_files.append(name)
 
-        # Fail-open wrappers pointing at the stable hook paths.
-        env_file = self.claude_home / "nunchi-gate.env"
+        # Fail-open wrappers pointing at the stable hook paths. Each sources a
+        # shared identity file first, then an optional per-hook override
+        # (``nunchi-<wrapper-stem>.env``) — e.g. the outbound reply gate narrows
+        # its peer roster there. Both env files are operator-owned; the
+        # installer writes the wrappers but never the env files (see INSTALL.md).
+        shared_env = self.claude_home / "nunchi-gate.env"
         for wrapper_name, hook_name in CLAUDE_WRAPPERS.items():
             dest = hooks_dir / wrapper_name
             if dest.is_symlink() or dest.exists():
                 self._backup(dest, kind="symlink.bak" if dest.is_symlink() else "bak")
-            content = render_wrapper(wrapper_name, hooks_dir / hook_name, env_file)
+            override_env = self.claude_home / f"{Path(wrapper_name).stem}.env"
+            content = render_wrapper(
+                wrapper_name, hooks_dir / hook_name, [shared_env, override_env]
+            )
             self._write_text(dest, content, executable=True)
             installed_files.append(wrapper_name)
 
