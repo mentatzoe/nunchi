@@ -1,0 +1,14 @@
+{
+  "id": "a-self-echo-alias-author",
+  "title": "Self-echo relayed under the agent's profile name (an alias)",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "live failure class 2026-07-08: the agent's own posts come back through the relay attributed to its display/profile name, not its configured id, and triggered wakes; with the name in agent.aliases the echo is self-caused",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "the agent replies to its own relayed status line (author 'Aether' does not match agent id 'vigil'), feeding a self-amplification loop",
+  "invariant": "a trigger authored by ANY identity in the agent's bundle is self-caused; no visible turn",
+  "rationale": "The trigger is this agent's own completion report, attributed by the relay to its profile name. In live runs the deterministic fast-path resolves this without a model call (author is in the alias set); the fixture pins the semantic ground truth for model-scored runs too."
+}

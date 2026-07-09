@@ -19,7 +19,13 @@ _VERDICTS = {"PASS", "ACK", "ASK", "SPEAK"}
 # chrome (skill_view / search_files markers, todo lists, compaction notices)
 # as trigger or in history — chrome is telemetry, not an invitation, so the
 # expected verdict is PASS unless a human explicitly asks the agent.
-_SOURCE_SHAPES = {"multica", "discord", "contract", "injection", "tool-chrome"}
+# "addressing" is the multi-identity addressing pool (a-* fixtures): one agent
+# carrying several identities at once (agent id, platform mention snowflake,
+# display name, secondary handles) declared via agent.aliases. The expected
+# verdict treats a message targeting ANY of those identities as addressed to
+# this agent, and a message targeting someone else as not-my-turn even when an
+# alias appears in passing prose.
+_SOURCE_SHAPES = {"multica", "discord", "contract", "injection", "tool-chrome", "addressing"}
 _EVIDENCE = {"runtime", "predicted"}
 
 # Governance profiles live at <repo>/profiles/<name>.md. A fixture whose meta

@@ -1,0 +1,14 @@
+{
+  "id": "a-display-name-address",
+  "title": "Prose address by display name (an alias of the agent)",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "multi-identity addressing pool: the display name 'Vigil' is declared in agent.aliases; a direct request naming it is a direct request at this agent",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "the gate only knows the configured agent id and mention token, so a name-addressed request reads as aimed at an unknown third party and PASSes",
+  "invariant": "a message naming ANY identity in the agent's bundle (id, mention_id, aliases) is addressed to this agent",
+  "rationale": "The operator addresses the bot by its room display name, not its id or mention token. With the name declared as an alias, this is a plain direct request warranting one substantive turn."
+}

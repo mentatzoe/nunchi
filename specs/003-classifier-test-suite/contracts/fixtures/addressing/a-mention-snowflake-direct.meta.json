@@ -1,0 +1,14 @@
+{
+  "id": "a-mention-snowflake-direct",
+  "title": "Direct @<snowflake> mention where the snowflake is one of the agent's aliases",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "live failure 2026-07-08: a runner whose mention_id held the display name PASSed a direct @<snowflake> mention ('mentions other participants only'); with the snowflake declared in agent.aliases the mention targets this agent",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "the mention token matches none of the agent's declared identities, so the gate reads a direct question at this agent as addressed to someone else and PASSes",
+  "invariant": "a structured @mention of ANY identity in the agent's bundle (id, mention_id, aliases) is addressed to this agent",
+  "rationale": "One bot carries several identities; here the platform mention snowflake is carried via aliases. A direct operator question at that snowflake warrants a substantive turn. Conservative note: the deterministic fast-path only guarantees escalation (no false PASS shortcut); the SPEAK itself is the model's judgment."
+}

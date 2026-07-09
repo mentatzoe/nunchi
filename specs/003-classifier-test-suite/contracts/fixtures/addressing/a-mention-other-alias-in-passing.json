@@ -1,0 +1,28 @@
+{
+  "request_id": "fixture-a-mention-other-alias-in-passing",
+  "source_shape": "addressing",
+  "trigger": {
+    "id": "msg-addr-6",
+    "author": "zoe",
+    "content": "<@999888777000111222> can you review the retry PR? Vigil already flagged the failing test earlier.",
+    "timestamp": "2026-07-08T22:24:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-addr-6-ctx-1",
+      "type": "self",
+      "author": "vigil",
+      "content": "Heads up: test_retry_backoff is failing on main after the retry PR.",
+      "timestamp": "2026-07-08T22:10:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "vigil",
+    "role": "participant",
+    "mention_id": "1496355876234199040",
+    "aliases": ["Vigil", "Codex", "Aether"]
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

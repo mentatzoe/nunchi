@@ -1,0 +1,14 @@
+{
+  "id": "a-secondary-alias-address",
+  "title": "Address by secondary alias ('Codex') — the harness nickname, not the display name",
+  "source_shape": "addressing",
+  "evidence": "predicted",
+  "predicted_basis": "multi-identity addressing pool: operators address one bot by whichever of its names is salient (here the harness it runs on); 'Codex' is declared in agent.aliases",
+  "expected": {
+    "verdict": "SPEAK",
+    "surface_contract": null
+  },
+  "failure_mode": "a request addressed to a secondary identity reads as aimed at some other participant and PASSes, so the agent never answers a question about its own in-flight work",
+  "invariant": "a message naming ANY identity in the agent's bundle (id, mention_id, aliases) is addressed to this agent",
+  "rationale": "The operator asks 'Codex' for status on work this agent itself announced in context. With the secondary handle declared as an alias, this is a direct status question at this agent."
+}
