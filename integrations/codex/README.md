@@ -8,9 +8,12 @@ inbound UserPromptSubmit hook, outbound PreToolUse send gate, configurable
 TOML/env baseline, atomic hot runtime state, startup history backfill, and an
 MCP Apps configuration/receipt panel. The repo-installable plugin bundle lives
 at [`nunchi-codex/`](./nunchi-codex/). Offline tests cover all four components,
-the app protocol, and the plugin shape; one committed Vigil live-smoke evidence
-file proves one room wake and outbound allow. It does not prove sustained
-operations. Sustained participation still requires the shared
+the app protocol, and the plugin shape. Committed Vigil evidence records
+[one room wake/outbound smoke](./evidence/2026-07-09-vigil-live-smoke.md) and
+[one two-turn continuity smoke](./evidence/2026-07-09-vigil-persistent-session.md)
+where both admitted wakes report the same persisted Codex task id and the
+second send reaches Discord. These do not prove sustained operations. Sustained
+participation still requires the shared
 `nunchi-mcp-discord` transport, Discord credentials, the installed plugin, and
 the long-running room runner.
 

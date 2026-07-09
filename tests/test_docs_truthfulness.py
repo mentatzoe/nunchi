@@ -138,7 +138,7 @@ class AdapterStatusClaimDisciplineTest(unittest.TestCase):
             "Codex runner + hooks | Codex CLI via shared Discord-MCP transport | stdlib | offline-tested; live smoke owed",
             combined,
         )
-        self.assertIn("single live-smoke evidenced", combined)
+        self.assertIn("bounded live-smokes evidenced", combined)
 
 
 if __name__ == "__main__":  # pragma: no cover

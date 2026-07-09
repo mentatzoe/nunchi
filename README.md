@@ -268,15 +268,15 @@ deployment already understands.
 | `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
 | Hermes plugin | Hermes gateway | stdlib | live-run; evidence owed |
 | Claude Code hook | Claude Code PreToolUse | stdlib | offline-tested; live evidence incomplete |
-| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | single live-smoke evidenced |
+| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | bounded live-smokes evidenced |
 
 Status labels are evidence tiers, not release-alpha/beta gates. `code-only`
 means implementation exists in the repo, but no committed live-server evidence
-supports a readiness claim yet. `single live-smoke evidenced` means one
-committed live-room run supports the narrow smoke claim; it is not a sustained
-operations claim. The Codex live smoke covers its wake/outbound path; the
-configuration app currently has offline MCP protocol and responsive interaction
-evidence only.
+supports a readiness claim yet. `bounded live-smokes evidenced` means committed
+live-room runs support the narrow wake/outbound and two-turn persistent-session
+claims; it is not a sustained operations claim. The configuration app has
+offline MCP protocol and responsive interaction evidence plus a live read of
+the resulting persistent-session health state.
 
 `nunchi-matrix` is the reference integration — one command, zero extra
 dependencies, unencrypted Matrix rooms only (encrypted rooms are skipped with a
