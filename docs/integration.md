@@ -248,9 +248,27 @@ pip install .                       # from a checkout
 pip install "git+https://github.com/mentatzoe/nunchi.git"
 ```
 
-This installs the `nunchi` and `nunchi-channel` console scripts. Without
-installing, you can run from a checkout with `PYTHONPATH=src python3 -m
-nunchi.adapters`.
+This installs the `nunchi`, `nunchi-channel`, and `nunchi-install` console
+scripts. Without installing, you can run from a checkout with `PYTHONPATH=src
+python3 -m nunchi.adapters`.
+
+### Installing the operator artifacts (Hermes plugin, Claude Code hooks)
+
+The Hermes gateway plugin and the Claude Code hook scripts are **operator
+artifacts** that live outside the `nunchi` package, in stable locations under
+`~/.hermes` and `~/.claude`. Install them by **copying** (never symlinking)
+with `nunchi-install`, run from a checkout:
+
+```sh
+nunchi-install install      # copy plugin + hooks into ~/.hermes and ~/.claude
+nunchi-install verify       # report installed-vs-repo drift per artifact
+nunchi-install upgrade      # re-copy only what changed (after pulling new code)
+```
+
+Copying — not symlinking — is deliberate: a symlink into a live checkout lets a
+`git checkout` on another branch silently swap the running plugin. See
+[`INSTALL.md`](INSTALL.md) for the full command reference, the `settings.json`
+hook-registration snippet, and the incident this fixes.
 
 Provider configuration is **operator-only**, read from the environment (never
 from the request payload — see the README security note):
