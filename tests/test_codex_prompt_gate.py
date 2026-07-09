@@ -19,6 +19,8 @@ import sys
 import tempfile
 import unittest
 
+from tests.hook_sandbox import sandbox_env
+
 _HOOK = (
     pathlib.Path(__file__).resolve().parent.parent
     / "integrations"
@@ -32,8 +34,12 @@ _HOOK = (
 
 
 def _run_hook(hook_input, *, env_overrides: dict | None = None) -> tuple[int, str, str]:
-    """Run the hook with hook_input (dict or raw str) on stdin."""
-    env = {**os.environ, **(env_overrides or {})}
+    """Run the hook with hook_input (dict or raw str) on stdin.
+
+    The env is always sandboxed (HOME + NUNCHI_HOOK_LOG pinned to a temp dir)
+    so no receipt can ever fall through to the operator's real log file.
+    """
+    env = sandbox_env(env_overrides)
     stdin = hook_input if isinstance(hook_input, str) else json.dumps(hook_input)
     result = subprocess.run(
         [sys.executable, str(_HOOK)],
