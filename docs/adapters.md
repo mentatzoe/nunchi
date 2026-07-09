@@ -9,18 +9,20 @@ custom responder.
 | Adapter | Surface | Install weight | Status |
 |---|---|---|---|
 | `nunchi-channel` | Any (subprocess / in-process) | stdlib | stable |
-| `nunchi-matrix` | Matrix (unencrypted rooms) | stdlib | beta\* |
-| `nunchi-telegram` | Telegram | stdlib | beta\* |
-| `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
-| Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | beta |
-| Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | beta |
-| Codex runner + hook | Codex CLI via shared Discord-MCP transport | stdlib | code-only |
+| `nunchi-matrix` | Matrix (unencrypted rooms) | stdlib | code-only |
+| `nunchi-telegram` | Telegram | stdlib | code-only |
+| `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
+| Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | live-run; evidence owed |
+| Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | offline-tested; live evidence incomplete |
+| Codex runner + hooks | Codex CLI via shared Discord-MCP transport | stdlib | single live-smoke evidenced |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
-\* *beta* for the Matrix, Telegram, and Discord adapters means: full offline
-test coverage, but they have **not yet been run against a live
-Matrix/Telegram/Discord server**. Expect first-run rough edges and please
-report them.
+Status labels in this table are evidence tiers, not the release-alpha/beta
+validation gates. `code-only` means implementation exists in the repo, but no
+committed live-server evidence supports a readiness claim yet. `offline-tested`
+means the relevant repo tests pass; it is not a live-readiness claim. `single
+live-smoke evidenced` means one committed live-room run supports the narrow
+smoke claim; it is not a sustained operations claim.
 
 The platform adapters (`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`)
 landed after the published 0.2.0 PyPI release and are currently installable
@@ -372,24 +374,37 @@ Full setup and configuration: [`integrations/claude-code/README.md`](../integrat
 
 ---
 
-## Codex runner + hook
+## Codex runner + hooks
 
-The Codex integration has two Codex-side pieces in
+The Codex integration has three Codex-side pieces in
 [`integrations/codex/`](../integrations/codex/README.md):
 
-- `nunchi_room_runner.py` consumes the shared Discord-MCP transport's SSE
+- `nunchi-codex-room-runner` consumes the shared Discord-MCP transport's SSE
   notifications, runs `nunchi-channel`, and wakes `codex exec` only for
-  `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex.
-- `nunchi_prompt_gate_codex.py` is a defense-in-depth `UserPromptSubmit` hook
+  `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex. For
+  configured channels, it backfills gate history on transport startup through
+  the transport's `read_history` MCP tool.
+- `nunchi-codex-prompt-gate` is a defense-in-depth `UserPromptSubmit` hook
   for channel-tagged prompts in interactive Codex sessions. It blocks `PASS`
   and fail-opens for operator or malformed prompts.
+- `nunchi-codex-send-gate` is a `PreToolUse` hook for supported outbound
+  `send_message` / `reply_message` MCP calls. It re-checks Nunchi immediately
+  before the send tool runs; `PASS` denies the tool call, and matching sends
+  without current runner-provided Nunchi room context are denied. A second
+  room send for the same admitted context is denied before another gate call.
+- The repo-installable Codex plugin bundle at
+  [`integrations/codex/nunchi-codex/`](../integrations/codex/nunchi-codex/)
+  packages those hooks plus a local streamable-HTTP MCP config for the shared
+  `nunchi-discord` transport.
 
-Status is **code-only** in this branch: offline unit tests cover the runner and
-hook, but live Discord room participation requires the separate shared
-`nunchi-mcp-discord` transport, credentials, and a live smoke. Outbound
-`send_message` / `reply_message` calls are not gated by a Codex hook here; the
-Codex path relies on the transport-side send backstop when that transport build
-is present.
+Status is **single live-smoke evidenced** in this branch: unit tests cover the
+runner, inbound hook, outbound send hook, package entry points, config loading,
+history backfill, and plugin bundle shape, and
+[`integrations/codex/evidence/2026-07-09-vigil-live-smoke.md`](../integrations/codex/evidence/2026-07-09-vigil-live-smoke.md)
+records one live-room wake and outbound hook allow. Sustained live Discord room
+participation still requires the shared `nunchi-mcp-discord` transport,
+credentials, installed/trusted Codex plugin hooks, and the long-running room
+runner.
 
 ---
 

@@ -52,6 +52,9 @@ nunchi-matrix = "nunchi.adapters.matrix:main"
 nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
+nunchi-codex-prompt-gate = "nunchi.integrations.codex_prompt_gate:main"
+nunchi-codex-send-gate = "nunchi.integrations.codex_send_gate:main"
+nunchi-codex-room-runner = "nunchi.integrations.codex_room_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

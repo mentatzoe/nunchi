@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "nunchi-discord": {
+      "url": "http://127.0.0.1:3993/mcp",
+      "enabled": true,
+      "required": false,
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 60,
+      "default_tools_approval_mode": "prompt",
+      "enabled_tools": [
+        "read_history",
+        "send_message",
+        "reply_message"
+      ]
+    }
+  }
+}

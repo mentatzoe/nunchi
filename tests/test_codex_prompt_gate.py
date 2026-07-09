@@ -272,6 +272,20 @@ class TestAllowVerdicts(unittest.TestCase):
 
 
 class TestFailOpen(unittest.TestCase):
+    def test_invalid_numeric_env_does_not_crash_hook(self):
+        stub = _GateStub(_directive("SPEAK"))
+        rc, out, _ = _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={
+                **stub.env(),
+                "NUNCHI_HOOK_HISTORY_WINDOW": "not-an-int",
+                "NUNCHI_HOOK_TIMEOUT": "also-not-an-int",
+            },
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        self.assertTrue(stub.called())
+
     def test_gate_nonzero_exit_allows(self):
         stub = _GateStub(_directive("PASS"), exit_code=3)
         rc, out, _ = _run_hook(

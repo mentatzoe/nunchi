@@ -53,7 +53,8 @@ _DASHBOARD_JS = (
 def _iter_served_assets() -> list[pathlib.Path]:
     assets: list[pathlib.Path] = []
     for path in _REPO_ROOT.rglob("*"):
-        if any(part in _SKIP_DIRS for part in path.parts):
+        rel_parts = path.relative_to(_REPO_ROOT).parts
+        if any(part in _SKIP_DIRS for part in rel_parts):
             continue
         if path.is_file() and path.suffix.lower() in _ASSET_SUFFIXES:
             assets.append(path)
