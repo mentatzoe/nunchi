@@ -602,6 +602,15 @@
     } else {
       enabledSelectVal = "";
     }
+    // quiet_gateway_chatter — boolean toggle, same shape as `enabled`.
+    var quietChatterSelectVal;
+    if (pendingCh.quiet_gateway_chatter !== undefined) {
+      quietChatterSelectVal = pendingCh.quiet_gateway_chatter === null ? "" : String(pendingCh.quiet_gateway_chatter !== false);
+    } else if (Object.prototype.hasOwnProperty.call(chOv, "quiet_gateway_chatter")) {
+      quietChatterSelectVal = String(chOv.quiet_gateway_chatter !== false);
+    } else {
+      quietChatterSelectVal = "";
+    }
 
     var sendersEff = pendingCh.senders !== undefined
       ? (pendingCh.senders === null ? (eff.senders || "all") : (pendingCh.senders || "all"))
@@ -689,6 +698,23 @@
                   value: enabledSelectVal,
                   onValueChange: function (v) {
                     handleChange("enabled", v === "" ? null : (v === "true"));
+                  },
+                },
+                  h(SDKSelectOption, { value: "" }, "(inherit)"),
+                  h(SDKSelectOption, { value: "true" }, "true"),
+                  h(SDKSelectOption, { value: "false" }, "false")
+                ),
+              }),
+
+              h(FieldRow, {
+                id: chIdForLabel + "-quiet_gateway_chatter", label: "quiet gateway chatter",
+                badge: makeProvBadge("quiet_gateway_chatter", chOv, globalOv, pendingCh, null),
+                help: "When true, keeps Hermes per-turn chatter (steer/queue busy-ACKs, tool progress, compression status, the • Grant spent notice) out of this shared room. Final replies, credit warnings, and lifecycle notices still show. Takes effect live — no restart.",
+                control: h(SDKSelect, {
+                  id: chIdForLabel + "-quiet_gateway_chatter",
+                  value: quietChatterSelectVal,
+                  onValueChange: function (v) {
+                    handleChange("quiet_gateway_chatter", v === "" ? null : (v === "true"));
                   },
                 },
                   h(SDKSelectOption, { value: "" }, "(inherit)"),
@@ -1434,7 +1460,7 @@
           chCfg = baselineChs[cid] || {};
         }
         var baselineVal = key in chCfg ? chCfg[key] : baseline[key];
-        var coerced = key === "enabled" ? value === "true" : value;
+        var coerced = (key === "enabled" || key === "quiet_gateway_chatter") ? value === "true" : value;
         if (Array.isArray(coerced)) {
           ch[key] = coerced;
         } else {
