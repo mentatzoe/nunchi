@@ -706,6 +706,22 @@ class TestRollingHistory(unittest.TestCase):
             ["my prior send", "peer bot line", "newest"],
         )
 
+    def test_reconnect_backfill_replaces_the_previous_snapshot(self):
+        runner = _make_runner(self.stubs, history_window=5)
+        runner.seed_history(
+            "c1",
+            [_event(message_id="old", content="stale snapshot")],
+        )
+        runner.seed_history(
+            "c1",
+            [_event(message_id="new", content="fresh snapshot")],
+        )
+
+        self.assertEqual(
+            [message["message_id"] for message in runner._channel_history("c1")],
+            ["new"],
+        )
+
     def test_backfill_reads_each_configured_channel(self):
         class FakeClient:
             def __init__(self) -> None:
@@ -743,6 +759,96 @@ class TestRollingHistory(unittest.TestCase):
             list(runner._channel_history("1522258711047831653"))[0]["content"],
             "history for 1522258711047831653",
         )
+
+    def test_backfill_does_not_read_disabled_channels(self):
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def call_tool(self, name: str, arguments: dict) -> dict:
+                self.calls.append((name, arguments))
+                return {"messages": []}
+
+        state_path = self.stubs.dir / "runtime-state.json"
+        runtime_state.save_state(
+            state_path,
+            {"channels": {"c2": {"enabled": False}}},
+            updated_by="test",
+        )
+        runner = _make_runner(
+            self.stubs,
+            channels=frozenset({"c1", "c2"}),
+            state_path=state_path,
+        )
+        client = FakeClient()
+
+        runner_mod.backfill_history(client, runner, runner.config)
+
+        self.assertEqual(
+            client.calls,
+            [("read_history", {"channel_id": "c1", "limit": 20})],
+        )
+
+    def test_hot_added_channel_backfills_before_its_first_live_event(self):
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def call_tool(self, name: str, arguments: dict) -> dict:
+                self.calls.append((name, arguments))
+                return {
+                    "messages": [
+                        _event(
+                            channel_id="c9",
+                            message_id="prior-c9",
+                            content="context before hot add",
+                        )
+                    ]
+                }
+
+        state_path = self.stubs.dir / "runtime-state.json"
+        runtime_state.save_state(
+            state_path,
+            {"channels": {"c9": {"enabled": True}}},
+            updated_by="test",
+        )
+        runner = _make_runner(
+            self.stubs,
+            channels=frozenset({"c1"}),
+            state_path=state_path,
+            history_window=7,
+        )
+        client = FakeClient()
+        current = _event(channel_id="c9", message_id="current-c9", content="new trigger")
+
+        backfilled = runner_mod.backfill_history_for_event(
+            client, runner, runner.config, current
+        )
+        runner.handle_notification(current)
+
+        self.assertTrue(backfilled)
+        self.assertEqual(
+            client.calls,
+            [
+                (
+                    "read_history",
+                    {"channel_id": "c9", "limit": 7, "before": "current-c9"},
+                )
+            ],
+        )
+        self.assertEqual(
+            [message["content"] for message in self.stubs.gate_payload()["history"]],
+            ["context before hot add"],
+        )
+        self.assertFalse(
+            runner_mod.backfill_history_for_event(
+                client,
+                runner,
+                runner.config,
+                _event(channel_id="c9", message_id="next-c9"),
+            )
+        )
+        self.assertEqual(len(client.calls), 1)
 
 
 # ---------------------------------------------------------------------------

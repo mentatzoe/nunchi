@@ -385,15 +385,17 @@ The Codex integration has four Codex-side pieces in
   notifications, runs `nunchi-channel`, and wakes `codex exec` only for
   `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex. For
   configured channels, it backfills gate history on transport startup through
-  the transport's `read_history` MCP tool.
+  the transport's `read_history` MCP tool; hot-added and watch-all channels
+  backfill immediately before their first observed live event.
 - `nunchi-codex-prompt-gate` is a defense-in-depth `UserPromptSubmit` hook
   for channel-tagged prompts in interactive Codex sessions. It blocks `PASS`
   and fail-opens for operator or malformed prompts.
 - `nunchi-codex-send-gate` is a `PreToolUse` hook for supported outbound
   `send_message` / `reply_message` MCP calls. It re-checks Nunchi immediately
-  before the send tool runs; `PASS` denies the tool call, and matching sends
-  without current runner-provided Nunchi room context are denied. A second
-  room send for the same admitted context is denied before another gate call.
+  before the send tool runs; `PASS` denies the tool call. Matching sends with
+  malformed or missing current runner-provided Nunchi room context are denied,
+  as are repeated or concurrent sends for one admitted context and allows
+  whose durable receipt cannot be locked and written.
 - `nunchi-codex-config-app` serves a task-embedded MCP Apps panel for atomic
   hot global/per-channel presence overrides, channel add/disable, model and
   pinned-rule changes, health, and newest-first receipts. The runner and both

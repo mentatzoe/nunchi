@@ -22,7 +22,7 @@ has four pieces:
 | --- | --- |
 | `nunchi-codex-room-runner` (`nunchi_room_runner.py`) | The agent's **ear**. A long-running process that consumes the transport's SSE notification stream, runs every room message through `nunchi-channel`, and wakes Codex (`codex exec`) only for admitted turns (SPEAK / ACK / ASK). PASS = receipt only, zero frontier tokens. |
 | `nunchi-codex-prompt-gate` (`nunchi_prompt_gate_codex.py`) | Defense-in-depth **UserPromptSubmit hook** for interactive Codex sessions. Gates only prompts carrying a `<channel source=...>` tag; blocks on PASS; fail-open on gate errors (an operator typing must never be silenced by a gate outage). |
-| `nunchi-codex-send-gate` (`nunchi_send_gate_codex.py`) | **PreToolUse hook** for outbound room sends. Re-checks supported `send_message`/`reply_message` MCP tool calls against Nunchi immediately before the tool runs. Matching sends without current runner-provided Nunchi room context are denied, as is a second room send for the same admitted context. |
+| `nunchi-codex-send-gate` (`nunchi_send_gate_codex.py`) | **PreToolUse hook** for outbound room sends. Re-checks supported `send_message`/`reply_message` MCP tool calls against Nunchi immediately before the tool runs. Matching sends with malformed or missing current context, repeated or concurrent sends for one admitted context, and allows whose receipt cannot be persisted are denied. |
 | `nunchi-codex-config-app` | An **MCP Apps operator panel** for hot global/per-channel presence settings, health, and recent gate receipts. It writes the same state read by the runner and both hooks. |
 
 The gate decides **admission, never composition**. On an admitted turn Codex
@@ -35,7 +35,7 @@ transport's MCP tools.
 | --- | --- | --- | --- |
 | Room message → Codex wake | Yes, pre-LLM | room runner | **fail-closed** (`NUNCHI_RUNNER_FAIL_POLICY=open` to override) — a gate outage must not become a frontier-call storm |
 | Channel-tagged prompt in an interactive session | Yes, pre-LLM (second layer) | `nunchi_prompt_gate_codex.py` | **fail-open** — a broken gate never silences the operator |
-| Outbound `send_message` / `reply_message` calls | Yes, pre-tool for supported send paths | `nunchi-codex-send-gate` plus transport-side send backstop | **fail-closed** by default (`NUNCHI_HOOK_FAIL_POLICY=open` to override for drills). Matching sends without current Nunchi room context, or after a prior send for the same context, are denied |
+| Outbound `send_message` / `reply_message` calls | Yes, pre-tool for supported send paths | `nunchi-codex-send-gate` plus transport-side send backstop | **fail-closed** by default (`NUNCHI_HOOK_FAIL_POLICY=open` to override for drills). Matching sends without current Nunchi room context, with malformed send input, after a prior send for the same context, or without a durable allow receipt are denied |
 | Direct Discord-ish Bash send commands | Denied, not gated | `nunchi-codex-send-gate` | Denies direct Discord channel-message API calls, Discord webhook API calls, and `nunchi-discord` shell sends. Use the Nunchi Discord MCP send tools so the hook and transport backstop can see the send |
 
 The runner's wake prompt deliberately carries **no** `<channel>` tag: the
@@ -290,9 +290,11 @@ transport's `read_history` tool (newest-first from Discord, reversed to
 oldest-first before gating). Plain Discord content is preserved; rich-only
 peer messages are converted by the transport into tagged, bounded text from
 their visible conversational fields. Live notifications and history use the
-same conversion. If `NUNCHI_RUNNER_CHANNELS` / `channels` is empty (`watch
-all`), startup backfill is skipped because there is no finite channel list to
-fetch.
+same conversion. A channel added through hot state is backfilled, excluding
+the current trigger, immediately before its first live event is gated. If
+`NUNCHI_RUNNER_CHANNELS` / `channels` is empty (`watch all`), startup backfill
+is skipped because there is no finite channel list to fetch; each observed
+channel is instead backfilled on its first event.
 
 The hook reuses the Claude Code hook's env names for the shared knobs
 (`NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_ALIASES`,
@@ -319,5 +321,11 @@ Hook receipts share the same file. Inbound prompt records use
 `"direction": "hook-inbound"` with `block-pass`, `allow-speak`, `allow-ack`,
 `allow-ask`, or `allow-gate-error`. Outbound send records use
 `"direction": "hook-outbound"` with `deny-untriggered`, `deny-pass`,
-`deny-disabled`, `deny-state-error`, `deny-already-sent`, `allow-speak`,
-`allow-ack`, `allow-ask`, `deny-gate-error`, or `allow-gate-error`.
+`deny-disabled`, `deny-state-error`, `deny-malformed-envelope`,
+`deny-already-sent`, `allow-speak`, `allow-ack`, `allow-ask`,
+`deny-gate-error`, or `allow-gate-error`. The final duplicate check and allow
+receipt write run under one exclusive file lock, so concurrent attempts for
+the same context cannot both pass. An allow is emitted only after its receipt
+is written successfully; if locking or writing fails, the hook denies and
+reports the receipt error on stderr because the normal receipt path may be
+unavailable.

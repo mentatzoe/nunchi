@@ -744,6 +744,7 @@ class RoomRunner:
     def __init__(self, config: RunnerConfig) -> None:
         self.config = config
         self._history: dict[str, deque[dict]] = {}
+        self._history_seeded: set[str] = set()
         self._seen_message_ids: deque[str] = deque(maxlen=_SEEN_MESSAGE_IDS_MAX)
         self._seen_message_id_set: set[str] = set()
 
@@ -763,7 +764,20 @@ class RoomRunner:
         )
 
     def configured_channels(self) -> tuple[str, ...]:
-        return configured_channel_ids(self.config.channels, self._runtime_state())
+        state = self._runtime_state()
+        channel_ids = configured_channel_ids(self.config.channels, state)
+        baseline = self.config.runtime_baseline()
+        return tuple(
+            channel_id
+            for channel_id in channel_ids
+            if resolve_channel_policy(
+                baseline,
+                state,
+                channel_id,
+                self.config.channels,
+            )
+            is not None
+        )
 
     # -- history -----------------------------------------------------------
 
@@ -799,9 +813,11 @@ class RoomRunner:
         """Seed rolling history from transport ``read_history`` output.
 
         The Discord REST/MCP history tool returns newest first. The runner's
-        gate payload history is oldest first, so reverse before appending.
+        gate payload history is oldest first, so replace the channel snapshot
+        and reverse before appending.
         """
         history = self._channel_history(channel_id)
+        history.clear()
         for params in reversed(messages_newest_first):
             content = params.get("content") or ""
             if not str(content).strip():
@@ -814,6 +830,16 @@ class RoomRunner:
             else:
                 author_kind = "human"
             history.append(self._to_message(params, author_kind))
+        self._history_seeded.add(channel_id)
+
+    def history_is_seeded(self, channel_id: str) -> bool:
+        return channel_id in self._history_seeded
+
+    def channel_needs_history(self, channel_id: str) -> bool:
+        return (
+            not self.history_is_seeded(channel_id)
+            and self._channel_policy(channel_id) is not None
+        )
 
     # -- receipts ----------------------------------------------------------
 
@@ -1152,6 +1178,47 @@ class RoomRunner:
 # ---------------------------------------------------------------------------
 
 
+def backfill_channel_history(
+    client: TransportClient,
+    runner: RoomRunner,
+    config: RunnerConfig,
+    channel_id: str,
+    *,
+    before: str | None = None,
+) -> bool:
+    """Replace one channel's snapshot from Discord history."""
+    limit = max(1, min(config.history_window, 100))
+    arguments = {"channel_id": channel_id, "limit": limit}
+    if before:
+        arguments["before"] = before
+    try:
+        result = client.call_tool("read_history", arguments)
+    except (RuntimeError, urllib.error.URLError, OSError) as exc:
+        logger.warning("history backfill failed for channel %s: %s", channel_id, exc)
+        return False
+    messages = result.get("messages")
+    if not isinstance(messages, list):
+        logger.warning(
+            "history backfill returned malformed result for channel %s",
+            channel_id,
+        )
+        return False
+    normalized = [m for m in messages if isinstance(m, dict)]
+    if before:
+        normalized = [
+            message
+            for message in normalized
+            if str(message.get("message_id") or "") != before
+        ]
+    runner.seed_history(channel_id, normalized)
+    logger.info(
+        "history backfilled for channel %s (%d message(s))",
+        channel_id,
+        len(normalized),
+    )
+    return True
+
+
 def backfill_history(client: TransportClient, runner: RoomRunner, config: RunnerConfig) -> None:
     """Seed configured channel histories from the transport before streaming."""
     try:
@@ -1162,21 +1229,34 @@ def backfill_history(client: TransportClient, runner: RoomRunner, config: Runner
     if not channels:
         logger.info("history backfill skipped: no finite channel list configured")
         return
-    limit = max(1, min(config.history_window, 100))
     for channel_id in channels:
-        try:
-            result = client.call_tool(
-                "read_history", {"channel_id": channel_id, "limit": limit}
-            )
-        except (RuntimeError, urllib.error.URLError, OSError) as exc:
-            logger.warning("history backfill failed for channel %s: %s", channel_id, exc)
-            continue
-        messages = result.get("messages")
-        if not isinstance(messages, list):
-            logger.warning("history backfill returned malformed result for channel %s", channel_id)
-            continue
-        runner.seed_history(channel_id, [m for m in messages if isinstance(m, dict)])
-        logger.info("history backfilled for channel %s (%d message(s))", channel_id, len(messages))
+        backfill_channel_history(client, runner, config, channel_id)
+
+
+def backfill_history_for_event(
+    client: TransportClient,
+    runner: RoomRunner,
+    config: RunnerConfig,
+    params: dict,
+) -> bool:
+    """Backfill a newly watched channel immediately before its first event."""
+    channel_id = str(params.get("channel_id") or "")
+    message_id = str(params.get("message_id") or "")
+    if not channel_id or not message_id:
+        return False
+    try:
+        needs_history = runner.channel_needs_history(channel_id)
+    except RuntimeStateError:
+        return False
+    if not needs_history:
+        return False
+    return backfill_channel_history(
+        client,
+        runner,
+        config,
+        channel_id,
+        before=message_id,
+    )
 
 
 def run_forever(config: RunnerConfig) -> None:
@@ -1190,6 +1270,7 @@ def run_forever(config: RunnerConfig) -> None:
             backfill_history(client, runner, config)
             for params in client.stream_events():
                 backoff = _BACKOFF_INITIAL  # healthy stream resets the clock
+                backfill_history_for_event(client, runner, config, params)
                 runner.handle_notification(params)
             logger.info("SSE stream ended; reconnecting in %.0fs", backoff)
         except (urllib.error.URLError, OSError, RuntimeError, TimeoutError) as exc:

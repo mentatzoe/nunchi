@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a long-running Codex room runner for the shared Discord MCP transport.
   It gates every notification before `codex exec`, backfills configured channel
-  history, suppresses `PASS` without a frontier wake, and records receipts.
+  history at startup and newly observed/hot-added channels before their first
+  live gate, suppresses `PASS` without a frontier wake, and records receipts.
 - Added Codex `UserPromptSubmit` and outbound `PreToolUse` hooks. Supported room
   sends are re-gated immediately before the tool call; missing/current-context,
-  duplicate-send, direct Discord command, `PASS`, disabled-state, corrupt-state,
-  and closed-policy gate-error paths deny the send.
+  malformed-send, duplicate-send, direct Discord command, `PASS`,
+  disabled-state, corrupt-state, receipt-write, and closed-policy gate-error
+  paths deny the send.
 - Added atomic hot runtime state shared by the runner and both hooks, with
   global/per-channel presence, sender/allowlist, receipt detail, classifier
   model, pinned-rule, channel-add, and channel-disable controls.

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from tests.hook_sandbox import sandbox_env
 
@@ -75,7 +76,12 @@ def _directive(verdict: str, reasons: list[str] | None = None) -> dict:
 
 
 class _GateStub:
-    def __init__(self, directive: dict | str, exit_code: int = 0) -> None:
+    def __init__(
+        self,
+        directive: dict | str,
+        exit_code: int = 0,
+        delay_seconds: float = 0,
+    ) -> None:
         self.dir = pathlib.Path(tempfile.mkdtemp(prefix="nunchi-codex-send-hook-"))
         self.stdin_path = self.dir / "gate_stdin.json"
         self.model_path = self.dir / "gate_model.txt"
@@ -89,6 +95,7 @@ class _GateStub:
             "#!/bin/sh\n"
             f'cat > "{self.stdin_path}"\n'
             f'printf "%s" "${{NUNCHI_CLASSIFIER_MODEL:-}}" > "{self.model_path}"\n'
+            f'sleep "{delay_seconds}"\n'
             f'if [ "{exit_code}" != "0" ]; then echo "stub gate error" >&2; exit {exit_code}; fi\n'
             f'cat "{directive_path}"\n'
         )
@@ -244,6 +251,60 @@ class TestToolFiltering(unittest.TestCase):
         self.assertFalse(stub.called())
         self.assertEqual(stub.receipt_lines()[0]["action"], "deny-untriggered")
 
+    def test_context_without_trigger_message_id_is_denied(self):
+        stub = _GateStub(_directive("SPEAK"))
+        transcript = _write_transcript(
+            [_codex_user_entry(_runner_context_prompt(message_id=""))]
+        )
+
+        rc, out, _ = _run_hook(
+            _hook_input(transcript_path=transcript),
+            env_overrides=stub.env(),
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("stable message_id", _deny_reason(out))
+        self.assertFalse(stub.called())
+        self.assertEqual(stub.receipt_lines()[0]["action"], "deny-context-error")
+
+    def test_matching_send_with_malformed_tool_input_is_denied(self):
+        stub = _GateStub(_directive("SPEAK"))
+
+        rc, out, _ = _run_hook(
+            _hook_input(tool_input={"channel_id": "1522258711047831653"}),
+            env_overrides=stub.env(),
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("missing channel or content", _deny_reason(out))
+        self.assertFalse(stub.called())
+        self.assertEqual(
+            stub.receipt_lines()[0]["action"], "deny-malformed-envelope"
+        )
+
+    def test_malformed_json_identifying_send_is_denied(self):
+        stub = _GateStub(_directive("SPEAK"))
+        raw = '{"tool_name":"mcp__nunchi_discord__send_message","tool_input":'
+
+        rc, out, _ = _run_hook(raw, env_overrides=stub.env())
+
+        self.assertEqual(rc, 0)
+        self.assertIn("malformed PreToolUse", _deny_reason(out))
+        self.assertFalse(stub.called())
+        self.assertEqual(
+            stub.receipt_lines()[0]["action"], "deny-malformed-envelope"
+        )
+
+    def test_malformed_json_for_unrelated_tool_is_ignored(self):
+        stub = _GateStub(_directive("SPEAK"))
+        raw = '{"tool_name":"Read","tool_input":'
+
+        rc, out, err = _run_hook(raw, env_overrides=stub.env())
+
+        self.assertEqual((rc, out, err), (0, "", ""))
+        self.assertFalse(stub.called())
+        self.assertEqual(stub.receipt_lines(), [])
+
     def test_stale_context_from_older_user_turn_is_not_reused(self):
         stub = _GateStub(_directive("SPEAK"))
         transcript = _write_transcript(
@@ -380,6 +441,21 @@ class TestOutboundGate(unittest.TestCase):
         self.assertEqual(parsed["hookSpecificOutput"]["permissionDecision"], "allow")
         self.assertEqual(stub.receipt_lines()[0]["action"], "allow-gate-error")
 
+    def test_allow_is_denied_when_receipt_cannot_be_persisted(self):
+        stub = _GateStub(_directive("SPEAK", ["addressed Vigil"]))
+        stub.receipts.mkdir()
+        transcript = _write_transcript([_codex_user_entry(_runner_context_prompt())])
+
+        rc, out, err = _run_hook(
+            _hook_input(transcript_path=transcript),
+            env_overrides=stub.env(),
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("receipt could not be persisted", _deny_reason(out))
+        self.assertIn("outbound receipt error", err)
+        self.assertTrue(stub.called())
+
     def test_second_send_for_same_room_context_is_denied_without_gate_call(self):
         stub = _GateStub(_directive("SPEAK"))
         stub.receipts.write_text(json.dumps(_prior_allow_receipt()) + "\n")
@@ -394,6 +470,28 @@ class TestOutboundGate(unittest.TestCase):
         self.assertIn("already sent", _deny_reason(out))
         self.assertFalse(stub.called())
         self.assertEqual(stub.receipt_lines()[-1]["action"], "deny-already-sent")
+
+    def test_concurrent_sends_for_same_context_allow_exactly_one(self):
+        stub = _GateStub(_directive("SPEAK"), delay_seconds=0.2)
+        transcript = _write_transcript([_codex_user_entry(_runner_context_prompt())])
+
+        def run_once():
+            return _run_hook(
+                _hook_input(transcript_path=transcript),
+                env_overrides=stub.env(),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: run_once(), range(2)))
+
+        decisions = [
+            json.loads(stdout)["hookSpecificOutput"]["permissionDecision"]
+            for _, stdout, _ in results
+        ]
+        self.assertEqual(sorted(decisions), ["allow", "deny"])
+        actions = [receipt["action"] for receipt in stub.receipt_lines()]
+        self.assertEqual(actions.count("allow-speak"), 1)
+        self.assertEqual(actions.count("deny-already-sent"), 1)
 
 
 class TestHotRuntimePolicy(unittest.TestCase):
