@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nunchi-codex-prompt-gate",
+            "timeout": 60,
+            "statusMessage": "Checking Nunchi prompt admission"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "nunchi-codex-send-gate",
+            "timeout": 60,
+            "statusMessage": "Checking Nunchi room send"
+          }
+        ]
+      }
+    ]
+  }
+}

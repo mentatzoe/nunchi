@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Codex/Vigil room integration and operator surface
+
+- Added a long-running Codex room runner for the shared Discord MCP transport.
+  It gates every notification before `codex exec`, backfills configured channel
+  history at startup and newly observed/hot-added channels before their first
+  live gate, suppresses `PASS` without a frontier wake, and records receipts.
+- Added Codex `UserPromptSubmit` and outbound `PreToolUse` hooks. Supported room
+  sends are re-gated immediately before the tool call; missing/current-context,
+  malformed-send, duplicate-send, direct Discord command, `PASS`,
+  disabled-state, corrupt-state, receipt-write, and closed-policy gate-error
+  paths deny the send.
+- Added atomic hot runtime state shared by the runner and both hooks, with
+  global/per-channel presence, sender/allowlist, receipt detail, classifier
+  model, pinned-rule, channel-add, and channel-disable controls.
+- Added a local MCP Apps configuration server and responsive task-embedded panel
+  for those controls, health, and newest-first receipts. Codex has no documented
+  persistent third-party dashboard-tab slot, so this provides the Hermes
+  operator functions in Codex's embedded app container.
+- Added the repo-local `nunchi-codex@local-repo` marketplace plugin, package
+  entry points, copy-safe hook commands, offline unit/protocol tests, and a
+  committed single-run Vigil smoke evidence record. The live record supports
+  only that narrow wake/outbound smoke, not sustained operations; the app has
+  offline protocol and responsive interaction evidence in this change.
+- Normalized Discord rich-only peer messages into tagged, bounded text for
+  both live events and history, while preserving ordinary content and excluding
+  button labels. This prevents visible embed-only reviews or approval notices
+  from being misclassified as empty room events.
+
 ### Added — `nunchi-install`: copy-based installer for operator artifacts
 
 A new `nunchi-install` console script (backed by the stdlib-only

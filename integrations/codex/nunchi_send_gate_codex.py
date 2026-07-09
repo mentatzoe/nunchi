@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility wrapper for the packaged Codex room runner."""
+"""Compatibility wrapper for the packaged Codex outbound send gate."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ _SRC = Path(__file__).resolve().parents[2] / "src"
 if _SRC.exists():
     sys.path.insert(0, str(_SRC))
 
-from nunchi.integrations import codex_room_runner as _impl  # noqa: E402
+from nunchi.integrations import codex_send_gate as _impl  # noqa: E402
 
 globals().update(
     {
@@ -32,4 +32,4 @@ main = _impl.main
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

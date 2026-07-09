@@ -11,11 +11,10 @@ This module enforces the fix at three levels:
 1. Static scan (ENTIRE ``tests/`` tree, not selected files):
    a. No test may resolve home-anchored paths (``Path.home()`` /
       ``expanduser()``).
-   b. Any test module that references the receipt-writing hook scripts
-      (``nunchi_gate_hook.py`` / ``nunchi_prompt_gate.py``) must not build a
-      subprocess environment from the bare parent environment; it must go
-      through ``tests.hook_sandbox.sandbox_env`` which pins ``HOME`` and
-      ``NUNCHI_HOOK_LOG`` into a temp dir.
+   b. Any test module that references receipt-writing hook scripts
+      (Claude or Codex) must not build a subprocess environment from the bare
+      parent environment; it must go through ``tests.hook_sandbox.sandbox_env``
+      which pins ``HOME`` and hook logs into a temp dir.
 2. Detector self-tests proving the scanners actually catch the forbidden
    patterns (an enforcement test that cannot fail is worse than none).
 3. Runtime canary: running a hook subprocess through the sandbox with
@@ -53,7 +52,7 @@ _HOME_PATTERNS = (
 )
 
 # Rule 2: hook-running test modules must not inherit the bare parent env.
-_HOOK_SCRIPT_MARKERS = ("nunchi_gate_hook", "nunchi_prompt_gate")
+_HOOK_SCRIPT_MARKERS = ("nunchi_gate_hook", "nunchi_prompt_gate", "nunchi_send_gate")
 _BARE_ENV_PATTERNS = (
     "**os.environ",
     "os.environ.copy",

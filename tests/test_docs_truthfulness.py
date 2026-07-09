@@ -20,6 +20,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ADAPTERS_MD = _REPO_ROOT / "docs" / "adapters.md"
+_README_MD = _REPO_ROOT / "README.md"
 _HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 
 # (module name, env var, adapters.md env-table row key)
@@ -109,6 +110,35 @@ class HermesHistoryWindowDocumentedTest(unittest.TestCase):
             mod._DEFAULT_HISTORY_WINDOW,
             "documented history_window default does not match _DEFAULT_HISTORY_WINDOW",
         )
+
+
+class AdapterStatusClaimDisciplineTest(unittest.TestCase):
+    """Adapter status language must stay evidence-tiered, not beta-gate-shaped."""
+
+    def test_adapter_docs_do_not_define_beta_as_test_coverage(self) -> None:
+        combined = "\n".join(
+            [
+                _README_MD.read_text(encoding="utf-8"),
+                _ADAPTERS_MD.read_text(encoding="utf-8"),
+            ]
+        )
+        forbidden = (
+            "beta*",
+            "beta\\*",
+            "beta for the Matrix",
+            "full offline test coverage",
+            "Expect first-run rough edges",
+        )
+        for phrase in forbidden:
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, combined)
+        self.assertIn("Status labels are evidence tiers", combined)
+        self.assertIn("Status labels in this table are evidence tiers", combined)
+        self.assertNotIn(
+            "Codex runner + hooks | Codex CLI via shared Discord-MCP transport | stdlib | offline-tested; live smoke owed",
+            combined,
+        )
+        self.assertIn("single live-smoke evidenced", combined)
 
 
 if __name__ == "__main__":  # pragma: no cover

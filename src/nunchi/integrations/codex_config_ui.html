@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nunchi Codex</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f5;
+      --surface: #ffffff;
+      --surface-2: #f0f1ef;
+      --text: #171918;
+      --muted: #656b68;
+      --border: #d8dcda;
+      --accent: #0b6e4f;
+      --accent-text: #ffffff;
+      --danger: #a33a32;
+      --warning: #96610a;
+      --info: #166a8f;
+      --pass: #6b7280;
+      --ack: #0f766e;
+      --ask: #9a6700;
+      --speak: #1d4ed8;
+      --radius: 6px;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151716;
+        --surface: #1d201e;
+        --surface-2: #252926;
+        --text: #f3f5f4;
+        --muted: #a4aaa7;
+        --border: #3a403d;
+        --accent: #4fb88e;
+        --accent-text: #102219;
+        --danger: #ef8278;
+        --warning: #e6b55c;
+        --info: #66b4d5;
+        --pass: #a2a8b0;
+        --ack: #5eead4;
+        --ask: #f2c66d;
+        --speak: #82aaff;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    button, input, select, textarea { font: inherit; letter-spacing: 0; }
+    button, select, input, textarea { border-radius: var(--radius); }
+    button { min-height: 34px; cursor: pointer; }
+    button:disabled { cursor: default; opacity: 0.5; }
+    .app { max-width: 980px; margin: 0 auto; min-height: 100vh; }
+    .topbar {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 14px 18px; background: color-mix(in srgb, var(--bg) 92%, transparent);
+      border-bottom: 1px solid var(--border); backdrop-filter: blur(12px);
+    }
+    .brand { min-width: 150px; flex: 1; }
+    h1 { margin: 0; font-size: 18px; line-height: 1.2; font-weight: 700; }
+    .subtitle { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .status-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .badge {
+      display: inline-flex; align-items: center; min-height: 22px;
+      padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px;
+      color: var(--muted); background: var(--surface); font-size: 11px; font-weight: 650;
+    }
+    .badge.ok { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+    .badge.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+    .badge.warn { color: var(--warning); }
+    .actions { display: flex; gap: 7px; align-items: center; }
+    .button {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      padding: 6px 11px; font-weight: 650;
+    }
+    .button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    .button.danger { color: var(--danger); }
+    .tabs { display: flex; gap: 18px; padding: 0 18px; border-bottom: 1px solid var(--border); }
+    .tab {
+      border: 0; border-radius: 0; background: transparent; color: var(--muted);
+      padding: 12px 1px 10px; min-height: 42px; border-bottom: 2px solid transparent;
+      font-weight: 650;
+    }
+    .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+    main { padding: 18px; }
+    .notice {
+      margin-bottom: 14px; padding: 9px 11px; border-radius: var(--radius);
+      border: 1px solid var(--border); background: var(--surface); font-size: 12px;
+    }
+    .notice.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+    .notice.warning { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+    .notice.success { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+    .section { padding: 4px 0 20px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .section:last-child { border-bottom: 0; }
+    .section-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    h2 { margin: 0; font-size: 14px; line-height: 1.3; }
+    .section-head .meta { margin-left: auto; color: var(--muted); font-size: 11px; }
+    .form-grid { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 12px 18px; }
+    .field-label { font-size: 12px; font-weight: 650; padding-top: 8px; }
+    .field-label small { display: block; color: var(--muted); font-weight: 400; margin-top: 3px; line-height: 1.35; }
+    .control { min-width: 0; }
+    input[type="text"], select, textarea {
+      width: 100%; border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); padding: 7px 9px; outline: none;
+    }
+    input[type="text"], select { min-height: 36px; }
+    textarea { min-height: 76px; resize: vertical; line-height: 1.4; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent); }
+    .provenance { color: var(--muted); font-size: 10px; margin-top: 4px; }
+    .channel-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .channel-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+    .channel-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .channel-id { min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 650; }
+    .channel-head .badge { margin-left: auto; }
+    .clear-channel { min-height: 28px; padding: 3px 7px; font-size: 11px; }
+    .channel-body { padding: 12px; }
+    .channel-body .form-grid { grid-template-columns: 118px minmax(0, 1fr); gap: 9px 10px; }
+    .channel-body .field-label { padding-top: 7px; }
+    details.rules { grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 9px; }
+    details.rules summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 650; }
+    details.rules textarea { margin-top: 8px; }
+    .add-channel-head { margin-top: 16px; }
+    .add-channel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; max-width: 500px; }
+    .empty { color: var(--muted); padding: 18px 0; font-size: 12px; }
+    .receipt-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .receipt-toolbar select { width: auto; min-width: 98px; }
+    .receipt-list { display: flex; flex-direction: column; gap: 7px; }
+    .receipt { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .receipt summary { display: grid; grid-template-columns: 72px minmax(120px, 1fr) minmax(120px, 1fr) auto; gap: 9px; align-items: center; padding: 9px 11px; cursor: pointer; }
+    .verdict { font-size: 11px; font-weight: 750; }
+    .verdict.PASS { color: var(--pass); }
+    .verdict.ACK { color: var(--ack); }
+    .verdict.ASK { color: var(--ask); }
+    .verdict.SPEAK { color: var(--speak); }
+    .receipt .action { font-weight: 650; overflow-wrap: anywhere; }
+    .receipt .channel { color: var(--muted); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .receipt time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .receipt pre { margin: 0; padding: 10px 11px; border-top: 1px solid var(--border); background: var(--surface-2); overflow: auto; font-size: 10px; line-height: 1.45; }
+    .loading { display: grid; place-items: center; min-height: 260px; color: var(--muted); }
+    .hidden { display: none !important; }
+    @media (max-width: 720px) {
+      .topbar { padding: 12px; }
+      .actions { width: 100%; }
+      .actions .button { flex: 1; }
+      .tabs { padding: 0 12px; }
+      main { padding: 14px 12px; }
+      .form-grid, .channel-body .form-grid { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+      .field-label { padding-top: 4px; }
+      .channel-list { grid-template-columns: minmax(0, 1fr); }
+      details.rules { grid-column: 1; }
+      .receipt summary { grid-template-columns: 62px minmax(0, 1fr) auto; }
+      .receipt .channel { grid-column: 2 / -1; }
+    }
+    @media (max-width: 390px) {
+      .status-row { width: 100%; }
+      .add-channel { grid-template-columns: minmax(0, 1fr); }
+      .receipt summary { grid-template-columns: 58px minmax(0, 1fr); }
+      .receipt time { grid-column: 1 / -1; }
+      .receipt .channel { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Nunchi</h1>
+        <div class="subtitle">Codex room presence</div>
+      </div>
+      <div class="status-row" id="health"></div>
+      <div class="actions">
+        <button class="button" id="refresh" type="button">Refresh</button>
+        <button class="button danger" id="reset" type="button">Reset</button>
+        <button class="button primary" id="save" type="button" disabled>Save</button>
+      </div>
+    </header>
+    <nav class="tabs" aria-label="Nunchi views">
+      <button class="tab" id="settings-tab" role="tab" aria-selected="true" type="button">Settings</button>
+      <button class="tab" id="receipts-tab" role="tab" aria-selected="false" type="button">Receipts</button>
+    </nav>
+    <main>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <div class="loading" id="loading">Loading Nunchi state...</div>
+      <section id="settings" role="tabpanel"></section>
+      <section id="receipts" role="tabpanel" class="hidden"></section>
+    </main>
+  </div>
+  <script>
+    (function () {
+      "use strict";
+
+      var snapshot = null;
+      var pending = {};
+      var receipts = [];
+      var currentTab = "settings";
+      var rpcId = 1;
+      var rpcPending = new Map();
+      var pollTimer = null;
+      var pollPaused = false;
+      var pollSeconds = 5;
+      var resetArmed = false;
+      var resetTimer = null;
+
+      var loadingEl = document.getElementById("loading");
+      var settingsEl = document.getElementById("settings");
+      var receiptsEl = document.getElementById("receipts");
+      var noticeEl = document.getElementById("notice");
+      var saveButton = document.getElementById("save");
+      var resetButton = document.getElementById("reset");
+
+      function append(parent, child) {
+        if (child == null) return;
+        if (Array.isArray(child)) {
+          child.forEach(function (item) { append(parent, item); });
+        } else if (typeof child === "string" || typeof child === "number") {
+          parent.appendChild(document.createTextNode(String(child)));
+        } else {
+          parent.appendChild(child);
+        }
+      }
+
+      function node(tag, attrs, children) {
+        var element = document.createElement(tag);
+        Object.keys(attrs || {}).forEach(function (key) {
+          var value = attrs[key];
+          if (value == null) return;
+          if (key === "className") element.className = String(value);
+          else if (key === "value") element.value = String(value);
+          else if (key === "selected" || key === "disabled") element[key] = Boolean(value);
+          else if (value !== false) element.setAttribute(key, value === true ? "" : String(value));
+        });
+        append(element, children);
+        return element;
+      }
+
+      function clone(value) { return JSON.parse(JSON.stringify(value)); }
+      function hasOwn(object, key) { return Object.prototype.hasOwnProperty.call(object || {}, key); }
+      function stateOverrides() { return (snapshot && snapshot.overrides) || {}; }
+      function scopePending(scope, channelId) {
+        if (scope === "global") return (pending.global || {});
+        return ((pending.channels || {})[channelId] || {});
+      }
+      function scopeStored(scope, channelId) {
+        var stored = stateOverrides();
+        if (scope === "global") return stored.global || {};
+        return (stored.channels || {})[channelId] || {};
+      }
+      function overrideValue(scope, channelId, key) {
+        var draft = scopePending(scope, channelId);
+        if (hasOwn(draft, key)) return draft[key];
+        var stored = scopeStored(scope, channelId);
+        return hasOwn(stored, key) ? stored[key] : null;
+      }
+      function sourceLabel(scope, channelId, key) {
+        if (hasOwn(scopePending(scope, channelId), key)) return "pending";
+        if (hasOwn(scopeStored(scope, channelId), key)) return "runtime override";
+        if (scope === "channel" && hasOwn(scopeStored("global", null), key)) return "global override";
+        return "runner baseline";
+      }
+      function setPending(scope, channelId, key, value, shouldRender) {
+        var target;
+        if (scope === "global") {
+          pending.global = pending.global || {};
+          target = pending.global;
+        } else {
+          pending.channels = pending.channels || {};
+          pending.channels[channelId] = pending.channels[channelId] || {};
+          target = pending.channels[channelId];
+        }
+        target[key] = value;
+        if (key === "senders" && value !== "allowlist") target.allow_from = null;
+        saveButton.disabled = false;
+        if (shouldRender !== false) renderSettings();
+      }
+      function clearChannel(channelId) {
+        pending.channels = pending.channels || {};
+        pending.channels[channelId] = {};
+        saveButton.disabled = false;
+        renderSettings();
+      }
+
+      function toolStructured(result) {
+        if (!result) return null;
+        return result.structuredContent || (result.result && result.result.structuredContent) || result;
+      }
+
+      function callTool(name, args) {
+        if (window.openai && typeof window.openai.callTool === "function") {
+          return window.openai.callTool(name, args || {});
+        }
+        return new Promise(function (resolve, reject) {
+          var id = rpcId++;
+          rpcPending.set(id, { resolve: resolve, reject: reject });
+          window.parent.postMessage({
+            jsonrpc: "2.0", id: id, method: "tools/call",
+            params: { name: name, arguments: args || {} }
+          }, "*");
+          window.setTimeout(function () {
+            if (!rpcPending.has(id)) return;
+            rpcPending.delete(id);
+            reject(new Error("Host tool call timed out"));
+          }, 20000);
+        });
+      }
+
+      window.addEventListener("message", function (event) {
+        if (event.source !== window.parent) return;
+        var message = event.data;
+        if (!message || message.jsonrpc !== "2.0") return;
+        if (message.id && rpcPending.has(message.id)) {
+          var callbacks = rpcPending.get(message.id);
+          rpcPending.delete(message.id);
+          if (message.error) callbacks.reject(new Error(message.error.message || "Tool call failed"));
+          else callbacks.resolve(message.result);
+          return;
+        }
+        if (message.method === "ui/notifications/tool-result") {
+          var data = toolStructured(message.params);
+          if (data && data.api_version) acceptSnapshot(data);
+        }
+      }, { passive: true });
+
+      window.addEventListener("openai:set_globals", function (event) {
+        var data = event.detail && event.detail.globals && event.detail.globals.toolOutput;
+        if (data && data.api_version) acceptSnapshot(data);
+      }, { passive: true });
+
+      function showNotice(message, kind) {
+        noticeEl.replaceChildren();
+        if (message) append(noticeEl, node("div", { className: "notice " + (kind || "") }, message));
+      }
+      function acceptSnapshot(data) {
+        snapshot = data;
+        pending = {};
+        disarmReset();
+        loadingEl.classList.add("hidden");
+        saveButton.disabled = true;
+        showNotice("", "");
+        renderHealth();
+        renderSettings();
+      }
+
+      function renderHealth() {
+        var health = (snapshot && snapshot.health) || {};
+        var gate = health.gate_binary || {};
+        var codex = health.codex_binary || {};
+        var healthEl = document.getElementById("health");
+        healthEl.replaceChildren(
+          node("span", { className: "badge " + (gate.available ? "ok" : "bad") }, "Gate " + (gate.available ? "ready" : "missing")),
+          node("span", { className: "badge " + (codex.available ? "ok" : "bad") }, "Codex " + (codex.available ? "ready" : "missing"))
+        );
+        if (health.last_receipt_action) append(healthEl, node("span", { className: "badge" }, health.last_receipt_action));
+      }
+
+      function choiceOptions(values, current, inherit) {
+        var options = [];
+        if (inherit) options.push(node("option", { value: "", selected: current == null }, "(inherit)"));
+        values.forEach(function (value) {
+          options.push(node("option", { value: value, selected: String(current) === String(value) }, value));
+        });
+        return options;
+      }
+
+      function selectControl(scope, channelId, key, options, accessibleLabel) {
+        var attrs = { "data-scope": scope, "data-key": key, "aria-label": accessibleLabel };
+        if (channelId) attrs["data-channel"] = channelId;
+        return node("select", attrs, options);
+      }
+
+      function textControl(scope, channelId, key, value, accessibleLabel, multiline) {
+        var attrs = {
+          "data-scope": scope,
+          "data-key": key,
+          "aria-label": accessibleLabel,
+          value: value || "",
+          placeholder: "inherit"
+        };
+        if (channelId) attrs["data-channel"] = channelId;
+        if (multiline) return node("textarea", attrs);
+        attrs.type = "text";
+        return node("input", attrs);
+      }
+
+      function field(label, detail, control, source) {
+        return [
+          node("div", { className: "field-label" }, [
+            label,
+            detail ? node("small", {}, detail) : null
+          ]),
+          node("div", { className: "control" }, [
+            control,
+            source ? node("div", { className: "provenance" }, source) : null
+          ])
+        ];
+      }
+
+      function globalSection() {
+        var enabled = overrideValue("global", null, "enabled");
+        var senders = overrideValue("global", null, "senders");
+        var verbosity = overrideValue("global", null, "verbosity");
+        var model = overrideValue("global", null, "model");
+        var rules = overrideValue("global", null, "pinned_rules");
+        var allow = overrideValue("global", null, "allow_from") || [];
+        var form = node("div", { className: "form-grid" });
+        append(form, field(
+          "Presence",
+          "All configured channels",
+          selectControl("global", null, "enabled", [
+            node("option", { value: "", selected: enabled == null }, "(inherit)"),
+            node("option", { value: "true", selected: enabled === true }, "enabled"),
+            node("option", { value: "false", selected: enabled === false }, "disabled")
+          ], "Global presence"),
+          sourceLabel("global", null, "enabled")
+        ));
+        append(form, field(
+          "Senders",
+          "Messages considered for admission",
+          selectControl("global", null, "senders", choiceOptions(["all", "humans", "allowlist"], senders, true), "Global senders"),
+          sourceLabel("global", null, "senders")
+        ));
+        if (senders === "allowlist") {
+          append(form, field(
+            "Allow from",
+            "Names or IDs, one per line",
+            textControl("global", null, "allow_from", allow.join("\n"), "Global sender allowlist", true),
+            sourceLabel("global", null, "allow_from")
+          ));
+        }
+        append(form, field(
+          "Receipt detail",
+          "Telemetry recorded to JSONL",
+          selectControl("global", null, "verbosity", choiceOptions(["minimal", "normal", "debug"], verbosity, true), "Global receipt detail"),
+          sourceLabel("global", null, "verbosity")
+        ));
+        append(form, field(
+          "Classifier model",
+          "Blank inherits runner or environment",
+          textControl("global", null, "model", model, "Global classifier model", false),
+          sourceLabel("global", null, "model")
+        ));
+        append(form, field(
+          "Room governance",
+          "Pinned admission rules",
+          textControl("global", null, "pinned_rules", rules, "Global room governance", true),
+          sourceLabel("global", null, "pinned_rules")
+        ));
+        return node("section", { className: "section" }, [
+          node("div", { className: "section-head" }, [
+            node("h2", {}, "Global overrides"),
+            node("span", { className: "meta" }, "model: " + ((snapshot.resolved_model || {}).value || "default"))
+          ]),
+          form
+        ]);
+      }
+
+      function allChannelIds() {
+        var ids = new Set();
+        Object.keys((snapshot && snapshot.effective) || {}).forEach(function (id) { ids.add(id); });
+        Object.keys((stateOverrides().channels) || {}).forEach(function (id) { ids.add(id); });
+        Object.keys((pending.channels) || {}).forEach(function (id) { ids.add(id); });
+        return Array.from(ids).sort();
+      }
+
+      function effectiveValue(channelId, key) {
+        var pendingScope = scopePending("channel", channelId);
+        if (hasOwn(pendingScope, key)) return pendingScope[key];
+        var base = ((snapshot.effective || {})[channelId] || {});
+        return base[key];
+      }
+
+      function channelCard(channelId) {
+        var effective = (snapshot.effective || {})[channelId];
+        var hasDraft = hasOwn((pending.channels || {}), channelId);
+        var cleared = hasDraft && Object.keys(pending.channels[channelId]).length === 0;
+        var enabled = overrideValue("channel", channelId, "enabled");
+        var senders = overrideValue("channel", channelId, "senders");
+        var verbosity = overrideValue("channel", channelId, "verbosity");
+        var model = overrideValue("channel", channelId, "model");
+        var rules = overrideValue("channel", channelId, "pinned_rules");
+        var allow = overrideValue("channel", channelId, "allow_from") || [];
+        var effectiveSenders = effectiveValue(channelId, "senders") || "all";
+        var effectiveEnabled = effectiveValue(channelId, "enabled") === true;
+        var status = cleared ? "pending clear" : (!effective && hasDraft ? "pending add" : (effectiveEnabled ? "enabled" : "disabled"));
+        var tone = cleared || (!effective && hasDraft) ? "warn" : (effectiveEnabled ? "ok" : "bad");
+        var form = node("div", { className: "form-grid" });
+        append(form, field(
+          "Presence",
+          "",
+          selectControl("channel", channelId, "enabled", [
+            node("option", { value: "", selected: enabled == null }, "(inherit)"),
+            node("option", { value: "true", selected: enabled === true }, "enabled"),
+            node("option", { value: "false", selected: enabled === false }, "disabled")
+          ], "Presence for channel " + channelId),
+          sourceLabel("channel", channelId, "enabled")
+        ));
+        append(form, field(
+          "Senders",
+          "",
+          selectControl("channel", channelId, "senders", choiceOptions(["all", "humans", "allowlist"], senders, true), "Senders for channel " + channelId),
+          sourceLabel("channel", channelId, "senders")
+        ));
+        if (effectiveSenders === "allowlist" || senders === "allowlist") {
+          append(form, field(
+            "Allow from",
+            "One per line",
+            textControl("channel", channelId, "allow_from", allow.join("\n"), "Sender allowlist for channel " + channelId, true),
+            sourceLabel("channel", channelId, "allow_from")
+          ));
+        }
+        append(form, field(
+          "Receipt detail",
+          "",
+          selectControl("channel", channelId, "verbosity", choiceOptions(["minimal", "normal", "debug"], verbosity, true), "Receipt detail for channel " + channelId),
+          sourceLabel("channel", channelId, "verbosity")
+        ));
+        append(form, field(
+          "Model",
+          "",
+          textControl("channel", channelId, "model", model, "Model for channel " + channelId, false),
+          sourceLabel("channel", channelId, "model")
+        ));
+        append(form, node("details", { className: "rules" }, [
+          node("summary", {}, "Room governance"),
+          textControl("channel", channelId, "pinned_rules", rules, "Room governance for channel " + channelId, true),
+          node("div", { className: "provenance" }, sourceLabel("channel", channelId, "pinned_rules"))
+        ]));
+        return node("article", { className: "channel-card" }, [
+          node("header", { className: "channel-head" }, [
+            node("div", { className: "channel-id" }, channelId),
+            node("span", { className: "badge " + tone }, status),
+            node("button", { className: "button clear-channel", type: "button", "data-clear-channel": channelId }, "Clear")
+          ]),
+          node("div", { className: "channel-body" }, form)
+        ]);
+      }
+
+      function bindControls() {
+        settingsEl.querySelectorAll("[data-key]").forEach(function (control) {
+          function stage(shouldRender) {
+            var key = control.dataset.key;
+            var value = control.value;
+            if (key === "enabled") value = value === "" ? null : value === "true";
+            else if (key === "allow_from") value = value.split(/[\n,]+/).map(function (item) { return item.trim(); }).filter(Boolean);
+            else value = value.trim() || null;
+            setPending(control.dataset.scope, control.dataset.channel || null, key, value, shouldRender);
+          }
+          if (control.tagName === "SELECT") control.addEventListener("change", function () { stage(true); });
+          else control.addEventListener("input", function () { stage(false); });
+        });
+        settingsEl.querySelectorAll("[data-clear-channel]").forEach(function (button) {
+          button.addEventListener("click", function () { clearChannel(button.dataset.clearChannel); });
+        });
+        var add = document.getElementById("add-channel");
+        var input = document.getElementById("new-channel-id");
+        add.addEventListener("click", function () {
+          var id = input.value.trim();
+          if (!id || /\s/.test(id)) { showNotice("Channel ID must be non-empty and contain no spaces.", "error"); return; }
+          setPending("channel", id, "enabled", true);
+        });
+      }
+
+      function renderSettings() {
+        if (!snapshot) return;
+        var ids = allChannelIds();
+        var channelList = node("div", { className: "channel-list" });
+        if (ids.length) ids.forEach(function (id) { append(channelList, channelCard(id)); });
+        else append(channelList, node("div", { className: "empty" }, "No finite channel overrides."));
+        var channelSection = node("section", { className: "section" }, [
+          node("div", { className: "section-head" }, [
+            node("h2", {}, "Channels"),
+            node("span", { className: "meta" }, ids.length + " configured")
+          ]),
+          channelList,
+          node("div", { className: "section-head add-channel-head" }, node("h2", {}, "Add channel")),
+          node("div", { className: "add-channel" }, [
+            node("input", { id: "new-channel-id", type: "text", inputmode: "numeric", "aria-label": "Discord channel ID", placeholder: "Discord channel ID" }),
+            node("button", { className: "button", id: "add-channel", type: "button" }, "Add")
+          ])
+        ]);
+        settingsEl.replaceChildren(globalSection(), channelSection);
+        bindControls();
+      }
+
+      function formatTime(value) {
+        if (!value) return "unknown";
+        var date = new Date(value);
+        return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      }
+      function renderReceipts() {
+        var toolbar = node("div", { className: "receipt-toolbar" }, [
+          node("button", { className: "button", id: "receipt-refresh", type: "button" }, "Refresh"),
+          node("button", { className: "button", id: "receipt-pause", type: "button" }, pollPaused ? "Resume" : "Pause"),
+          node("select", { id: "receipt-interval", "aria-label": "Refresh interval" }, [5, 15, 30].map(function (seconds) {
+            return node("option", { value: seconds, selected: pollSeconds === seconds }, seconds + " sec");
+          })),
+          node("span", { className: "badge" }, receipts.length + " receipts")
+        ]);
+        var list = node("div", { className: "receipt-list" });
+        if (!receipts.length) append(list, node("div", { className: "empty" }, "No receipts found."));
+        receipts.forEach(function (receipt) {
+          var verdict = receipt.verdict || "-";
+          var verdictTone = { PASS: true, ACK: true, ASK: true, SPEAK: true }[verdict] ? " " + verdict : "";
+          append(list, node("details", { className: "receipt" }, [
+            node("summary", {}, [
+              node("span", { className: "verdict" + verdictTone }, verdict),
+              node("span", { className: "action" }, receipt.action || "unknown"),
+              node("span", { className: "channel" }, receipt.channel || "-"),
+              node("time", { datetime: receipt.ts || "" }, formatTime(receipt.ts))
+            ]),
+            node("pre", {}, JSON.stringify(receipt, null, 2))
+          ]));
+        });
+        receiptsEl.replaceChildren(toolbar, list);
+        document.getElementById("receipt-refresh").addEventListener("click", loadReceipts);
+        document.getElementById("receipt-pause").addEventListener("click", function () { pollPaused = !pollPaused; renderReceipts(); schedulePoll(); });
+        document.getElementById("receipt-interval").addEventListener("change", function (event) { pollSeconds = Number(event.target.value); schedulePoll(); });
+      }
+
+      function schedulePoll() {
+        if (pollTimer) window.clearTimeout(pollTimer);
+        if (pollPaused || currentTab !== "receipts") return;
+        pollTimer = window.setTimeout(function () { loadReceipts().finally(schedulePoll); }, pollSeconds * 1000);
+      }
+      function loadReceipts() {
+        return callTool("get_nunchi_receipts", { limit: 100 }).then(function (result) {
+          var data = toolStructured(result) || {};
+          receipts = data.receipts || [];
+          renderReceipts();
+        }).catch(function (error) { showNotice(error.message, "error"); });
+      }
+      function refresh() {
+        showNotice("", "");
+        return callTool("get_nunchi_config", {}).then(function (result) {
+          var data = toolStructured(result);
+          if (!data || !data.api_version) throw new Error("Configuration tool returned an invalid response");
+          acceptSnapshot(data);
+        }).catch(function (error) { showNotice(error.message, "error"); });
+      }
+      function save() {
+        if (saveButton.disabled) return;
+        saveButton.disabled = true;
+        callTool("update_nunchi_config", { patch: clone(pending) }).then(function (result) {
+          var data = toolStructured(result) || {};
+          if (!data.ok) throw new Error(data.error || "Configuration was not saved");
+          acceptSnapshot(data.snapshot);
+          showNotice("Configuration saved.", "success");
+        }).catch(function (error) { saveButton.disabled = false; showNotice(error.message, "error"); });
+      }
+      function disarmReset() {
+        resetArmed = false;
+        resetButton.textContent = "Reset";
+        if (resetTimer) window.clearTimeout(resetTimer);
+        resetTimer = null;
+      }
+      function resetAll() {
+        if (!resetArmed) {
+          resetArmed = true;
+          resetButton.textContent = "Confirm reset";
+          showNotice("Confirm reset to remove all runtime overrides and restore runner defaults.", "warning");
+          resetTimer = window.setTimeout(function () { disarmReset(); showNotice("", ""); }, 8000);
+          return;
+        }
+        disarmReset();
+        callTool("update_nunchi_config", { patch: { global: {}, channels: {} } }).then(function (result) {
+          var data = toolStructured(result) || {};
+          if (!data.ok) throw new Error(data.error || "Configuration was not reset");
+          acceptSnapshot(data.snapshot);
+          showNotice("Runtime overrides reset.", "success");
+        }).catch(function (error) { showNotice(error.message, "error"); });
+      }
+      function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById("settings-tab").setAttribute("aria-selected", String(tab === "settings"));
+        document.getElementById("receipts-tab").setAttribute("aria-selected", String(tab === "receipts"));
+        settingsEl.classList.toggle("hidden", tab !== "settings");
+        receiptsEl.classList.toggle("hidden", tab !== "receipts");
+        if (tab === "receipts") loadReceipts().finally(schedulePoll); else schedulePoll();
+      }
+
+      document.getElementById("refresh").addEventListener("click", refresh);
+      document.getElementById("save").addEventListener("click", save);
+      document.getElementById("reset").addEventListener("click", resetAll);
+      document.getElementById("settings-tab").addEventListener("click", function () { switchTab("settings"); });
+      document.getElementById("receipts-tab").addEventListener("click", function () { switchTab("receipts"); });
+
+      var initial = window.openai && window.openai.toolOutput;
+      if (initial && initial.api_version) acceptSnapshot(initial);
+      else refresh();
+    })();
+  </script>
+</body>
+</html>

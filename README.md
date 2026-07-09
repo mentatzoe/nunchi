@@ -44,12 +44,22 @@ pip install "git+https://github.com/mentatzoe/nunchi.git"   # source: core + ada
 uvx --from "git+https://github.com/mentatzoe/nunchi.git" nunchi --help
 ```
 
-A source install provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`, and
-`nunchi-telegram` console scripts. `nunchi-discord` additionally needs the
-`[discord]` extra — also source-only for now:
-`pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git"`. See
+A source install provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`,
+`nunchi-telegram`, `nunchi-codex-room-runner`, `nunchi-codex-prompt-gate`, and
+`nunchi-codex-send-gate` console scripts. The `[mcp-discord]` extra also installs
+`nunchi-mcp-discord` and the `nunchi-codex-config-app` MCP Apps server;
+`nunchi-discord` needs `[discord]`. These extras are source-only for now:
+`pip install "nunchi[discord,mcp-discord] @ git+https://github.com/mentatzoe/nunchi.git"`. See
 [`CHANGELOG.md`](CHANGELOG.md) for releases and [`docs/STABILITY.md`](docs/STABILITY.md)
 for the versioning / verdict-surface stability contract.
+
+The repo also exposes the Codex plugin bundle through
+[`/.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json). A local
+Codex install can add this checkout as a marketplace and install
+`nunchi-codex@local-repo`; see
+[`integrations/codex/README.md`](integrations/codex/README.md) for the room
+runner setup, cached-copy update flow, hook trust steps, and task-embedded
+configuration/receipt panel.
 
 ## Quickstart
 
@@ -253,14 +263,20 @@ deployment already understands.
 | Adapter | Surface | Install weight | Status |
 |---|---|---|---|
 | `nunchi-channel` | Any (subprocess) | stdlib | stable |
-| `nunchi-matrix` | Matrix | stdlib | beta\* |
-| `nunchi-telegram` | Telegram | stdlib | beta\* |
-| `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
-| Hermes plugin | Hermes gateway | stdlib | beta |
-| Claude Code hook | Claude Code PreToolUse | stdlib | beta |
+| `nunchi-matrix` | Matrix | stdlib | code-only |
+| `nunchi-telegram` | Telegram | stdlib | code-only |
+| `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
+| Hermes plugin | Hermes gateway | stdlib | live-run; evidence owed |
+| Claude Code hook | Claude Code PreToolUse | stdlib | offline-tested; live evidence incomplete |
+| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | single live-smoke evidenced |
 
-\* full offline test coverage, but not yet run against a live
-Matrix/Telegram/Discord server.
+Status labels are evidence tiers, not release-alpha/beta gates. `code-only`
+means implementation exists in the repo, but no committed live-server evidence
+supports a readiness claim yet. `single live-smoke evidenced` means one
+committed live-room run supports the narrow smoke claim; it is not a sustained
+operations claim. The Codex live smoke covers its wake/outbound path; the
+configuration app currently has offline MCP protocol and responsive interaction
+evidence only.
 
 `nunchi-matrix` is the reference integration — one command, zero extra
 dependencies, unencrypted Matrix rooms only (encrypted rooms are skipped with a

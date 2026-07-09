@@ -4,6 +4,7 @@
 !.env.example
 .venv/
 venv/
+.tmp/
 
 # Python
 __pycache__/

@@ -105,6 +105,7 @@ class _GateStub:
     def __init__(self, directive: dict | str, exit_code: int = 0) -> None:
         self.dir = pathlib.Path(tempfile.mkdtemp(prefix="nunchi-codex-hook-test-"))
         self.stdin_path = self.dir / "gate_stdin.json"
+        self.model_path = self.dir / "gate_model.txt"
         self.receipts = self.dir / "receipts.jsonl"
         directive_path = self.dir / "directive.json"
         directive_path.write_text(
@@ -114,6 +115,7 @@ class _GateStub:
         self.path.write_text(
             "#!/bin/sh\n"
             f'cat > "{self.stdin_path}"\n'
+            f'printf "%s" "${{NUNCHI_CLASSIFIER_MODEL:-}}" > "{self.model_path}"\n'
             f'if [ "{exit_code}" != "0" ]; then echo "stub gate error" >&2; exit {exit_code}; fi\n'
             f'cat "{directive_path}"\n'
         )
@@ -272,6 +274,20 @@ class TestAllowVerdicts(unittest.TestCase):
 
 
 class TestFailOpen(unittest.TestCase):
+    def test_invalid_numeric_env_does_not_crash_hook(self):
+        stub = _GateStub(_directive("SPEAK"))
+        rc, out, _ = _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={
+                **stub.env(),
+                "NUNCHI_HOOK_HISTORY_WINDOW": "not-an-int",
+                "NUNCHI_HOOK_TIMEOUT": "also-not-an-int",
+            },
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        self.assertTrue(stub.called())
+
     def test_gate_nonzero_exit_allows(self):
         stub = _GateStub(_directive("PASS"), exit_code=3)
         rc, out, _ = _run_hook(
@@ -438,6 +454,68 @@ class TestPayloadAndHistory(unittest.TestCase):
         )
         self.assertEqual(rc, 0)
         self.assertEqual(stub.payload()["history"], [])
+
+
+class TestHotRuntimePolicy(unittest.TestCase):
+    def test_disabled_channel_blocks_without_gate_call(self):
+        stub = _GateStub(_directive("SPEAK"))
+        state_path = stub.dir / "runtime-state.json"
+        state_path.write_text(
+            json.dumps({"version": 1, "channels": {"c1": {"enabled": False}}}),
+            encoding="utf-8",
+        )
+        rc, out, err = _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={**stub.env(), "NUNCHI_RUNNER_STATE": str(state_path)},
+        )
+
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out)["decision"], "block")
+        self.assertFalse(stub.called())
+        self.assertEqual(stub.receipt_lines()[-1]["action"], "block-disabled")
+
+    def test_runtime_model_and_pinned_rules_reach_gate(self):
+        stub = _GateStub(_directive("SPEAK"))
+        state_path = stub.dir / "runtime-state.json"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "channels": {
+                        "c1": {
+                            "model": "deepseek/deepseek-v4-flash",
+                            "pinned_rules": "Wait for a useful opening.",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc, out, err = _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={**stub.env(), "NUNCHI_RUNNER_STATE": str(state_path)},
+        )
+
+        self.assertEqual((rc, out, err), (0, "", ""))
+        self.assertEqual(
+            stub.model_path.read_text(encoding="utf-8"),
+            "deepseek/deepseek-v4-flash",
+        )
+        self.assertEqual(stub.payload()["pinned_rules"], "Wait for a useful opening.")
+
+    def test_malformed_runtime_state_blocks_channel_prompt(self):
+        stub = _GateStub(_directive("SPEAK"))
+        state_path = stub.dir / "runtime-state.json"
+        state_path.write_text("not-json", encoding="utf-8")
+        rc, out, err = _run_hook(
+            _hook_input(prompt=_channel_prompt()),
+            env_overrides={**stub.env(), "NUNCHI_RUNNER_STATE": str(state_path)},
+        )
+
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out)["decision"], "block")
+        self.assertFalse(stub.called())
+        self.assertEqual(stub.receipt_lines()[-1]["action"], "block-state-error")
 
 
 class TestAgentAliases(unittest.TestCase):
