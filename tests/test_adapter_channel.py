@@ -94,6 +94,74 @@ class BuildRequestTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             build_request({"content": "   ", "id": "t"}, [], agent_id="d")
 
+    def test_agent_aliases_threaded_into_envelope(self):
+        # One bot carries several identities (display name, secondary handle,
+        # mention snowflake); the envelope must carry the full bundle.
+        req = build_request(
+            {"content": "Vigil, take a look", "id": "t-1"}, [],
+            agent_id="vigil", agent_mention_id="111",
+            agent_aliases=["Vigil", "Codex", "222222222222222222"],
+        )
+        self.assertEqual(
+            req["agent"],
+            {"id": "vigil", "mention_id": "111",
+             "aliases": ["Vigil", "Codex", "222222222222222222"]},
+        )
+
+    def test_agent_aliases_deduped_against_id_and_mention_id(self):
+        req = build_request(
+            {"content": "ping", "id": "t-1"}, [],
+            agent_id="vigil", agent_mention_id="111",
+            agent_aliases=["vigil", "111", "Vigil", "Vigil", "  ", "Codex"],
+        )
+        self.assertEqual(req["agent"]["aliases"], ["Vigil", "Codex"])
+
+    def test_no_aliases_envelope_identical_to_pre_alias_shape(self):
+        # Backward compat: the alias knob absent (or empty) must produce
+        # exactly the request the adapter built before aliases existed.
+        baseline = build_request(
+            {"content": "hi <@123>", "id": "t-1"}, [],
+            agent_id="dalgos", agent_mention_id="999",
+        )
+        for absent in (None, []):
+            with self.subTest(agent_aliases=absent):
+                req = build_request(
+                    {"content": "hi <@123>", "id": "t-1"}, [],
+                    agent_id="dalgos", agent_mention_id="999", agent_aliases=absent,
+                )
+                self.assertEqual(req, baseline)
+        self.assertEqual(baseline["agent"], {"id": "dalgos", "mention_id": "999"})
+        self.assertNotIn("aliases", baseline["agent"])
+
+    def test_non_string_alias_rejected(self):
+        with self.assertRaises(ValidationError):
+            build_request(
+                {"content": "ping", "id": "t-1"}, [],
+                agent_id="vigil", agent_aliases=["Vigil", 42],
+            )
+        with self.assertRaises(ValidationError):
+            build_request(
+                {"content": "ping", "id": "t-1"}, [],
+                agent_id="vigil", agent_aliases="Vigil,Codex",
+            )
+
+    def test_self_role_inferred_when_author_matches_alias(self):
+        # A relay may report the agent's own line under its display name.
+        req = build_request(
+            {"content": "ping", "id": "t-1"},
+            [{"content": "my earlier turn", "author": "Aether", "id": "h-1"}],
+            agent_id="vigil", agent_aliases=["Aether"],
+        )
+        self.assertEqual(req["context"][0]["type"], "self")
+
+    def test_parse_alias_csv_cleans_and_dedupes(self):
+        self.assertEqual(
+            channel.parse_alias_csv(" Vigil, Codex ,,Vigil , 222 "),
+            ["Vigil", "Codex", "222"],
+        )
+        self.assertEqual(channel.parse_alias_csv(None), [])
+        self.assertEqual(channel.parse_alias_csv(""), [])
+
 
 class GateRoutingTests(unittest.TestCase):
     def test_pass_is_silent_transport_neutral(self):
@@ -253,6 +321,32 @@ class CliTests(unittest.TestCase):
         code, _, err = self._run({"trigger": {"content": "x", "id": "t"}})
         self.assertEqual(code, 2)
         self.assertIn("agent.id", err)
+
+    def test_cli_agent_aliases_reach_the_core_request(self):
+        captured = {}
+
+        def _capture(request):
+            captured.update(request)
+            return _stub("SPEAK")(request)
+
+        payload = {
+            "trigger": {"content": "Codex, status?", "id": "t-1"},
+            "agent": {"id": "vigil", "mention_id": "111", "aliases": ["Vigil", "Codex"]},
+        }
+        with mock.patch("nunchi.adapters.channel.evaluate", _capture):
+            code, out, _ = self._run(payload)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["verdict"], "SPEAK")
+        self.assertEqual(captured["agent"]["aliases"], ["Vigil", "Codex"])
+
+    def test_cli_invalid_aliases_is_error(self):
+        payload = {
+            "trigger": {"content": "x", "id": "t"},
+            "agent": {"id": "vigil", "aliases": "Vigil,Codex"},
+        }
+        code, _, err = self._run(payload)
+        self.assertEqual(code, 2)
+        self.assertIn("aliases", err)
 
 
 class BoundaryEnforcementTests(unittest.TestCase):

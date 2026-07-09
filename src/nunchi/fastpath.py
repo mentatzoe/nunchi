@@ -32,11 +32,29 @@ _MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
 _PASS_CONFIDENCES = {"PASS": 1.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}
 
 
-def _agent_identifiers(agent: dict[str, Any] | None) -> set[str]:
-    """Return the structured ids that address this agent (id + mention_id).
+def _agent_aliases(agent: dict[str, Any] | None) -> set[str]:
+    """Return the agent's validated ``aliases`` entries as a set.
 
-    Non-string or empty values are ignored. An empty set means we cannot
-    determine addressing and therefore must not short-circuit.
+    ``validate_request`` has already rejected non-string/blank entries, but a
+    defensive isinstance check keeps this safe for direct callers too.
+    """
+    if not isinstance(agent, dict):
+        return set()
+    aliases = agent.get("aliases")
+    if not isinstance(aliases, list):
+        return set()
+    return {alias for alias in aliases if isinstance(alias, str) and alias.strip()}
+
+
+def _agent_identifiers(agent: dict[str, Any] | None) -> set[str]:
+    """Return the structured ids that address this agent (id + mention_id + aliases).
+
+    One agent may carry several identities at once — its ``id``, its platform
+    ``mention_id`` (an @mention token such as a Discord snowflake), and any
+    ``aliases`` (display names, secondary handles, other mention tokens). All
+    of them count as "this agent" for addressing. Non-string or empty values
+    are ignored. An empty set means we cannot determine addressing and
+    therefore must not short-circuit.
     """
     if not isinstance(agent, dict):
         return set()
@@ -45,6 +63,7 @@ def _agent_identifiers(agent: dict[str, Any] | None) -> set[str]:
         value = agent.get(key)
         if isinstance(value, str) and value.strip():
             identifiers.add(value)
+    identifiers.update(_agent_aliases(agent))
     return identifiers
 
 
@@ -72,9 +91,11 @@ def _mention_elsewhere_result(request: AdmissionRequest) -> dict[str, Any] | Non
     """PASS when the trigger explicitly @mentions others but not this agent.
 
     Certainty conditions (all required):
-      - the agent's structured ids are known (id/mention_id present),
+      - the agent's structured ids are known (id/mention_id/aliases present),
       - the trigger content contains one or more explicit ``<@id>`` tokens,
-      - none of those mentioned ids is this agent's id/mention_id.
+      - none of those mentioned ids is this agent's id/mention_id or one of
+        its aliases (an agent that lists its mention snowflake in ``aliases``
+        is addressed by that token, so the short-circuit must not fire).
 
     If there are no mentions at all, this is NOT a short-circuit: the message may
     be room-addressed, which only the classifier can judge.
@@ -101,11 +122,17 @@ def _self_caused_result(request: AdmissionRequest) -> dict[str, Any] | None:
     """PASS when the trigger is this agent's own message echoed back.
 
     Two structured signals, either sufficient:
-      - the trigger's author is exactly this agent's id, or
+      - the trigger's author is exactly this agent's id (or one of its
+        declared ``aliases`` — a relay may report the author under the
+        agent's display or profile name rather than its configured id), or
       - the trigger content exactly equals (after strip) the content of some
-        context item authored by this agent's id.
+        context item authored by this agent's id or one of its aliases.
 
     Requires a known agent id; no fuzzy comparison is performed.
+    ``mention_id`` deliberately does NOT join the self-identity set here:
+    without aliases this path must behave exactly as it always has (author
+    compared against ``id`` alone). An operator who wants the mention token
+    recognized as a self author lists it in ``aliases``.
     """
     agent = request.agent
     if not isinstance(agent, dict):
@@ -113,8 +140,9 @@ def _self_caused_result(request: AdmissionRequest) -> dict[str, Any] | None:
     agent_id = agent.get("id")
     if not isinstance(agent_id, str) or not agent_id.strip():
         return None
+    self_identities = {agent_id} | _agent_aliases(agent)
 
-    if request.trigger.author is not None and request.trigger.author == agent_id:
+    if request.trigger.author is not None and request.trigger.author in self_identities:
         return _pass_result(
             request,
             context_checked=[request.trigger.reference],
@@ -123,7 +151,7 @@ def _self_caused_result(request: AdmissionRequest) -> dict[str, Any] | None:
 
     trigger_text = request.trigger.content.strip()
     for item in request.context:
-        if item.author == agent_id and item.content.strip() == trigger_text:
+        if item.author in self_identities and item.content.strip() == trigger_text:
             return _pass_result(
                 request,
                 context_checked=[request.trigger.reference, item.reference],

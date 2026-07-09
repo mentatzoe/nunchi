@@ -119,6 +119,54 @@ class ChannelGateResult:
         return self.silent_token(SILENT_PASS_SENTINEL)
 
 
+def parse_alias_csv(raw: str | None) -> list[str]:
+    """Parse a comma-separated alias string into a cleaned, deduped list.
+
+    Shared by the platform adapters' ``NUNCHI_<PLATFORM>_ALIASES`` environment
+    variables. Entries are stripped; blanks are dropped; order is preserved
+    with first occurrence winning. Returns ``[]`` for ``None``/empty input so
+    the absent-aliases path stays byte-identical to pre-alias behavior.
+    """
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in raw.split(","):
+        text = part.strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def _clean_aliases(
+    aliases: list[str] | tuple[str, ...] | None,
+    *,
+    exclude: set[str],
+) -> list[str]:
+    """Normalize an alias list for the envelope: validated, deduped, ordered.
+
+    Non-string entries are rejected loudly (a misconfigured surface must not
+    silently lose an identity). Entries duplicating ``exclude`` (the agent's
+    ``id``/``mention_id``, already identities in their own right) or earlier
+    aliases are dropped.
+    """
+    if not aliases:
+        return []
+    if not isinstance(aliases, (list, tuple)):
+        raise ValidationError("agent aliases must be a list of strings")
+    out: list[str] = []
+    seen: set[str] = set(exclude)
+    for alias in aliases:
+        if not isinstance(alias, str):
+            raise ValidationError("agent aliases must be a list of strings")
+        text = alias.strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
 def _coerce_message(value: Any, name: str) -> ChannelMessage:
     if isinstance(value, ChannelMessage):
         return value
@@ -143,22 +191,32 @@ def build_request(
     agent_id: str,
     agent_role: str | None = None,
     agent_mention_id: str | None = None,
+    agent_aliases: list[str] | None = None,
     surface: dict[str, Any] | None = None,
     pinned_rules: str | None = None,
 ) -> dict[str, Any]:
     """Map channel-local inputs to a Nunchi admission request envelope.
 
     Transcript lines become ordered context items tagged with the speaker's
-    normalized role (operator/peer/self); a line authored by ``agent_id`` is
-    tagged ``self`` so the classifier can apply Self-caused / Duplicate
-    suppression. ``agent_mention_id`` (the agent's @mention handle on the
-    surface) is threaded into the envelope so the addressing rule can tell
-    whether an @mention targets this agent. Optional ``pinned_rules`` (the
-    channel's governance text) is supplied as a context item so the verdict is
-    channel-aware.
+    normalized role (operator/peer/self); a line authored by ``agent_id`` (or
+    one of ``agent_aliases``) is tagged ``self`` so the classifier can apply
+    Self-caused / Duplicate suppression. ``agent_mention_id`` (the agent's
+    @mention handle on the surface — the platform token, e.g. a Discord
+    snowflake, NOT the display name) is threaded into the envelope so the
+    addressing rule can tell whether an @mention targets this agent.
+    ``agent_aliases`` lists every other name this one agent answers to —
+    display names, nicknames, secondary handles, additional mention tokens —
+    so addressing recognizes the full identity bundle. Optional
+    ``pinned_rules`` (the channel's governance text) is supplied as a context
+    item so the verdict is channel-aware.
     """
     trig = _coerce_message(trigger, "trigger")
     history = history or []
+    aliases = _clean_aliases(
+        agent_aliases,
+        exclude={text for text in (agent_id, agent_mention_id) if text},
+    )
+    self_identities = {agent_id, *aliases}
 
     context: list[dict[str, Any]] = []
     if pinned_rules and pinned_rules.strip():
@@ -173,7 +231,7 @@ def build_request(
     for index, raw in enumerate(history, start=1):
         msg = _coerce_message(raw, f"history[{index}]")
         role = _normalize_role(msg.author_kind)
-        if role is None and msg.author is not None and msg.author == agent_id:
+        if role is None and msg.author is not None and msg.author in self_identities:
             role = "self"
         context.append(
             {
@@ -190,6 +248,8 @@ def build_request(
         agent["role"] = agent_role
     if agent_mention_id:
         agent["mention_id"] = agent_mention_id
+    if aliases:
+        agent["aliases"] = aliases
 
     request: dict[str, Any] = {
         "trigger": {
@@ -214,6 +274,7 @@ def gate(
     agent_id: str,
     agent_role: str | None = None,
     agent_mention_id: str | None = None,
+    agent_aliases: list[str] | None = None,
     surface: dict[str, Any] | None = None,
     pinned_rules: str | None = None,
     fail_policy: FailPolicy = "open",
@@ -240,6 +301,7 @@ def gate(
         agent_id=agent_id,
         agent_role=agent_role,
         agent_mention_id=agent_mention_id,
+        agent_aliases=agent_aliases,
         surface=surface,
         pinned_rules=pinned_rules,
     )
@@ -383,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             agent_id=agent_id,
             agent_role=agent.get("role") if isinstance(agent, dict) else None,
             agent_mention_id=agent.get("mention_id") if isinstance(agent, dict) else None,
+            agent_aliases=agent.get("aliases") if isinstance(agent, dict) else None,
             surface=payload.get("surface"),
             pinned_rules=payload.get("pinned_rules"),
             fail_policy=payload.get("fail_policy", "open"),

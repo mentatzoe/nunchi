@@ -1,11 +1,18 @@
+import json
 import unittest
 from unittest.mock import patch
 
 from tests.provider_helpers import fixture_case, provider_env
 from tests.test_core import load_fixture
 from nunchi import evaluate
-from nunchi.classifiers import SUPPORTED_CLASSIFIERS, get_classifier
+from nunchi.classifiers import (
+    SUPPORTED_CLASSIFIERS,
+    _provider_envelope,
+    _system_prompt,
+    get_classifier,
+)
 from nunchi.errors import ValidationError
+from nunchi.schema import validate_request
 
 
 class ClassifierTests(unittest.TestCase):
@@ -108,6 +115,63 @@ class ClassifierTests(unittest.TestCase):
     def test_unsupported_classifier_fails_without_fallback(self):
         with self.assertRaises(ValidationError):
             evaluate(load_fixture("speak"), classifier="does-not-exist")
+
+
+class ProviderEnvelopeAliasTests(unittest.TestCase):
+    """agent.aliases flows to the provider; absent aliases stay byte-identical."""
+
+    _RAW_REQUEST = {
+        "request_id": "req-golden",
+        "trigger": {
+            "id": "t1",
+            "author": "zoe",
+            "content": "Vigil, can you take a look?",
+            "timestamp": "2026-07-08T10:00:00Z",
+        },
+        "context": [
+            {
+                "id": "c1",
+                "type": "peer",
+                "author": "dalgos",
+                "content": "I'm on the deploy.",
+                "timestamp": "2026-07-08T09:59:00Z",
+            }
+        ],
+        "agent": {"id": "vigil", "mention_id": "111", "role": "participant"},
+        "surface": {"type": "discord-channel"},
+    }
+
+    # The exact serialized provider envelope (the user-message content the
+    # OpenAI-compatible client sends) for the alias-free request above, as
+    # produced BEFORE agent.aliases existed. Backward-compat contract: with no
+    # aliases supplied, the classifier request must stay byte-for-byte
+    # identical to this golden.
+    _GOLDEN = (
+        '{"agent": {"id": "vigil", "mention_id": "111", "role": "participant"}, '
+        '"allowed_context_references": ["context:c1", "trigger:t1"], '
+        '"context": [{"author": "dalgos", "content": "I\'m on the deploy.", '
+        '"reference": "context:c1", "timestamp": "2026-07-08T09:59:00Z", "type": "peer"}], '
+        '"request_id": "req-golden", "surface": {"type": "discord-channel"}, '
+        '"trigger": {"author": "zoe", "content": "Vigil, can you take a look?", '
+        '"reference": "trigger:t1", "timestamp": "2026-07-08T10:00:00Z"}}'
+    )
+
+    def test_no_aliases_provider_envelope_matches_golden_byte_for_byte(self):
+        request = validate_request(dict(self._RAW_REQUEST))
+        serialized = json.dumps(_provider_envelope(request), sort_keys=True)
+        self.assertEqual(serialized, self._GOLDEN)
+
+    def test_aliases_are_carried_into_the_provider_envelope(self):
+        raw = dict(self._RAW_REQUEST)
+        raw["agent"] = {**raw["agent"], "aliases": ["Vigil", "Codex", "222222222222222222"]}
+        request = validate_request(raw)
+        envelope = _provider_envelope(request)
+        self.assertEqual(envelope["agent"]["aliases"], ["Vigil", "Codex", "222222222222222222"])
+
+    def test_system_prompt_explains_aliases_as_addressable_identities(self):
+        prompt = _system_prompt()
+        self.assertIn("`aliases`", prompt)
+        self.assertIn("several", prompt)  # one agent may carry several identities
 
 
 class ClassifierConfigProvenanceTests(unittest.TestCase):
