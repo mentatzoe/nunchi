@@ -192,7 +192,7 @@
   function HelpText(props) {
     var base = {
       fontSize: "11px",
-      color: "var(--color-text-tertiary)",
+      color: "var(--color-text-tertiary, var(--color-text-secondary))",
       margin: "2px 0 0 0",
       lineHeight: "1.45",
     };
@@ -220,7 +220,7 @@
         style: {
           fontSize: "10px",
           fontWeight: "600",
-          color: "var(--color-text-tertiary)",
+          color: "var(--color-text-tertiary, var(--color-text-secondary))",
           letterSpacing: "0.1em",
           textTransform: "uppercase",
           whiteSpace: "nowrap",
@@ -416,7 +416,7 @@
       h("p", {
         style: {
           fontSize: "11px",
-          color: "var(--color-text-tertiary)",
+          color: "var(--color-text-tertiary, var(--color-text-secondary))",
           margin: 0,
           lineHeight: "1.5",
         },
@@ -653,7 +653,7 @@
               : null,
             h("code", {
               style: {
-                fontSize: "11px", color: "var(--color-text-tertiary)",
+                fontSize: "11px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                 fontFamily: "var(--theme-font-mono)",
                 background: "color-mix(in srgb, var(--midground-base) 8%, transparent)",
                 borderRadius: "3px", padding: "1px 4px",
@@ -823,7 +823,7 @@
       },
       h("span", {
         style: {
-          fontSize: "10px", color: "var(--color-text-tertiary)",
+          fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
           fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase",
         },
       }, props.label),
@@ -885,11 +885,11 @@
             display: "inline-block",
             transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
             transition: "transform 0.15s ease",
-            fontSize: "8px", color: "var(--color-text-tertiary)", flexShrink: 0,
+            fontSize: "8px", color: "var(--color-text-tertiary, var(--color-text-secondary))", flexShrink: 0,
           },
         }, "►"),
         h("span", {
-          style: { color: "var(--color-text-tertiary)", minWidth: "80px", flexShrink: 0 },
+          style: { color: "var(--color-text-tertiary, var(--color-text-secondary))", minWidth: "80px", flexShrink: 0 },
         }, r.ts ? formatReceiptTs(r.ts) : ""),
         h(SDKBadge, { tone: verdictTone(displayVerdict) },
           displayVerdict === "PASS" ? "PASS (suppressed)" : displayVerdict),
@@ -899,7 +899,7 @@
           : null,
         h("span", {
           style: {
-            marginLeft: "auto", color: "var(--color-text-tertiary)",
+            marginLeft: "auto", color: "var(--color-text-tertiary, var(--color-text-secondary))",
             fontFamily: "var(--theme-font-mono)", fontSize: "10px",
           },
         }, channelIdList.join(", "))
@@ -925,7 +925,7 @@
                   key: k,
                   style: {
                     fontWeight: isWinner ? "700" : "400",
-                    color: isWinner ? "var(--color-text-primary)" : "var(--color-text-tertiary)",
+                    color: isWinner ? "var(--color-text-primary)" : "var(--color-text-tertiary, var(--color-text-secondary))",
                   },
                 }, k + " " + (confs[k] !== undefined ? Number(confs[k]).toFixed(2) : "0.00"));
               })
@@ -996,7 +996,7 @@
             ? h("div", { style: { marginBottom: "6px" } },
                 h("div", {
                   style: {
-                    fontSize: "10px", color: "var(--color-text-tertiary)",
+                    fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                     fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase",
                     marginBottom: "4px",
                   },
@@ -1019,7 +1019,7 @@
             ? h("div", { style: { marginBottom: "8px" } },
                 h("div", {
                   style: {
-                    fontSize: "10px", color: "var(--color-text-tertiary)",
+                    fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                     fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase",
                     marginBottom: "4px",
                   },
@@ -1073,7 +1073,7 @@
             ? h("div", { style: { marginTop: "8px" } },
                 h("div", {
                   style: {
-                    fontSize: "10px", color: "var(--color-text-tertiary)",
+                    fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                     fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase",
                     marginBottom: "6px",
                   },
@@ -1082,7 +1082,7 @@
                 r.payload.trigger && r.payload.trigger.content != null
                   ? h("div", { style: { marginBottom: "6px" } },
                       h("div", {
-                        style: { fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "2px" },
+                        style: { fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))", marginBottom: "2px" },
                       }, "trigger content"),
                       h("pre", {
                         style: {
@@ -1100,7 +1100,7 @@
                 r.payload.history && r.payload.history.length > 0
                   ? h("div", { style: { marginBottom: "6px" } },
                       h("div", {
-                        style: { fontSize: "10px", color: "var(--color-text-tertiary)", marginBottom: "2px" },
+                        style: { fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))", marginBottom: "2px" },
                       }, "history (" + r.payload.history.length + " entries)"),
                       h("div", {
                         style: {
@@ -1134,7 +1134,7 @@
             ? h("div", { style: { marginTop: "8px" } },
                 h("div", {
                   style: {
-                    fontSize: "10px", color: "var(--color-text-tertiary)",
+                    fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                     fontWeight: "600", letterSpacing: "0.05em", textTransform: "uppercase",
                     marginBottom: "6px",
                   },
@@ -1153,7 +1153,7 @@
           !r.payload && !r.directive
             ? h("p", {
                 style: {
-                  fontSize: "10px", color: "var(--color-text-tertiary)",
+                  fontSize: "10px", color: "var(--color-text-tertiary, var(--color-text-secondary))",
                   fontStyle: "italic", margin: "6px 0 0 0",
                 },
               }, "Message content is only recorded at debug verbosity.")
@@ -1169,6 +1169,10 @@
           background: "color-mix(in srgb, var(--midground-base) 4%, transparent)",
           border: "1px solid color-mix(in srgb, var(--midground-base) 8%, transparent)",
           overflow: "hidden",
+          // Keep full height inside the flex-column scroll container; without
+          // this, many receipts get squished to fit maxHeight (unreadable
+          // slivers) and the container never overflows, so it can't scroll.
+          flexShrink: 0,
         },
       },
       // Disclosure button — full width, left-aligned, button semantics.
@@ -1284,13 +1288,13 @@
         },
           h(SDKBadge, { tone: "destructive" }, "PASS (suppressed)"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } }, "= no message"),
-          h("span", { style: { color: "var(--color-text-tertiary)" } }, "·"),
+          h("span", { style: { color: "var(--color-text-tertiary, var(--color-text-secondary))" } }, "·"),
           h(SDKBadge, { tone: "secondary" }, "ACK"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } }, "= brief presence signal"),
-          h("span", { style: { color: "var(--color-text-tertiary)" } }, "·"),
+          h("span", { style: { color: "var(--color-text-tertiary, var(--color-text-secondary))" } }, "·"),
           h(SDKBadge, { tone: "warning" }, "ASK"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } }, "= one clarifying question"),
-          h("span", { style: { color: "var(--color-text-tertiary)" } }, "·"),
+          h("span", { style: { color: "var(--color-text-tertiary, var(--color-text-secondary))" } }, "·"),
           h(SDKBadge, { tone: "success" }, "SPEAK"),
           h("span", { style: { fontSize: "11px", color: "var(--color-text-secondary)" } }, "= full turn")
         ),
@@ -1298,7 +1302,7 @@
         err
           ? h("p", { style: { color: "var(--color-destructive)", fontSize: "12px", margin: 0 } }, err)
           : receipts.length === 0
-          ? h("p", { style: { color: "var(--color-text-tertiary)", fontSize: "12px", margin: 0 } },
+          ? h("p", { style: { color: "var(--color-text-tertiary, var(--color-text-secondary))", fontSize: "12px", margin: 0 } },
               "No receipts yet.")
           : h("div", {
               style: {
@@ -1353,7 +1357,7 @@
       }),
       h(SectionDivider, { label: "Channels" }),
       allCids.length === 0
-        ? h("p", { style: { fontSize: "12px", color: "var(--color-text-tertiary)", margin: 0 } },
+        ? h("p", { style: { fontSize: "12px", color: "var(--color-text-tertiary, var(--color-text-secondary))", margin: 0 } },
             "No channels configured.")
         : allCids.map(function (cid) {
             var eff = effective[cid] !== undefined ? effective[cid] : null;
@@ -1622,7 +1626,7 @@
           },
         }, "Nunchi Gate"),
         loading
-          ? h("span", { style: { fontSize: "12px", color: "var(--color-text-tertiary)" } }, "Loading…")
+          ? h("span", { style: { fontSize: "12px", color: "var(--color-text-tertiary, var(--color-text-secondary))" } }, "Loading…")
           : null,
         status
           ? h("span", {
