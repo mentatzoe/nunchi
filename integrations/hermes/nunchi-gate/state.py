@@ -52,6 +52,7 @@ OVERRIDABLE_KEYS: frozenset[str] = frozenset(
         "model",
         "pinned_rules",
         "pinned_rules_file",
+        "quiet_gateway_chatter",
     }
 )
 

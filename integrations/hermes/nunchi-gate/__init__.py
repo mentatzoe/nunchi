@@ -32,7 +32,7 @@ Config block (in Hermes config.yaml):
       #   Map form (new): channel-id -> per-channel config dict.
       #   Per-channel keys fall back to the matching global key when absent.
       #   Allowed per-channel keys: enabled, senders, allow_from, verbosity,
-      #   model, pinned_rules, pinned_rules_file, fail_open.
+      #   model, pinned_rules, pinned_rules_file, fail_open, quiet_gateway_chatter.
       #   Use "*" as a key for a map-form wildcard (matches any channel).
       #     channels:
       #       "1518384310321811456":
@@ -110,6 +110,13 @@ Config block (in Hermes config.yaml):
       # start with "/" (slash commands).
       bypass_commands: true
 
+      # quiet_gateway_chatter (bool, default true) — for channels owned by
+      # nunchi, keep Hermes-internal progress/steering chatter off the shared
+      # surface. Final assistant responses still deliver normally. Set false
+      # globally or per channel when an operator deliberately wants visible
+      # progress receipts in a nunchi room.
+      quiet_gateway_chatter: true
+
       # log_path (str, default ~/.hermes/logs/nunchi-gate.jsonl) — append-only
       # JSONL file recording every gated message.  Set to "" or false to disable.
       log_path: ~/.hermes/logs/nunchi-gate.jsonl
@@ -123,6 +130,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -141,6 +149,30 @@ _DEFAULT_LOG_PATH = "~/.hermes/logs/nunchi-gate.jsonl"
 _DEFAULT_STATE_PATH = "~/.hermes/nunchi-gate.state.json"
 _DEFAULT_TIMEOUT_SECONDS = 30
 _SPEAK_VERDICTS = {"SPEAK", "ASK", "ACK"}
+
+# Gateway display/progress messages that are useful local telemetry but wrong
+# social output in shared nunchi channels. The nunchi plugin owns these defaults
+# so operators do not have to remember separate Hermes display knobs.
+_QUIET_DISPLAY_OVERRIDES: dict[str, Any] = {
+    "tool_progress": "off",
+    "interim_assistant_messages": False,
+    "long_running_notifications": False,
+    "busy_ack_detail": False,
+}
+
+_BUSY_ACK_PREFIXES = (
+    "⏩ Steered into current run",
+    "⏳ Queued for the next turn",
+    "⏳ Subagent working",
+    "⚡ Interrupting current task",
+)
+
+_STATUS_CHATTER_PREFIXES = (
+    "📦 Preflight compression",
+    "🗜️ Compacting context",
+)
+
+_GATEWAY_CHATTER_PREFIXES = _BUSY_ACK_PREFIXES + _STATUS_CHATTER_PREFIXES
 
 # ---------------------------------------------------------------------------
 # Sibling module loader: state.py lives next to __init__.py.  We load it via
@@ -170,7 +202,7 @@ _PINNED_RULES_CACHE: dict[str, tuple[float, str]] = {}
 # All other keys (binary, timeout_seconds, bypass_commands, log_path, …) are
 # global-only and are never overridden at the per-channel level.
 _PER_CHANNEL_KEYS: frozenset[str] = frozenset(
-    {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open"}
+    {"enabled", "senders", "allow_from", "verbosity", "model", "pinned_rules", "pinned_rules_file", "fail_open", "quiet_gateway_chatter"}
 )
 
 
@@ -320,7 +352,8 @@ def resolve_channel_config(cfg: dict[str, Any], channel_ids: set[str]) -> dict[s
     ``"*"`` key if present.  Returns ``None`` when no entry matches or the
     matched entry has ``enabled: false``.  Otherwise merges per-channel keys
     (``enabled``, ``senders``, ``allow_from``, ``verbosity``, ``model``,
-    ``pinned_rules``, ``pinned_rules_file``, ``fail_open``) on top of the
+    ``pinned_rules``, ``pinned_rules_file``, ``fail_open``,
+    ``quiet_gateway_chatter``) on top of the
     global config and returns the merged dict.  Global keys absent from the
     per-channel entry are inherited unchanged.
     """
@@ -364,6 +397,223 @@ def resolve_channel_config(cfg: dict[str, Any], channel_ids: set[str]) -> dict[s
     if "*" in channels or (channel_ids & channels):
         return cfg
     return None
+
+
+def _load_runtime_state(base_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort load of nunchi runtime state overrides."""
+    if _state is None:
+        return {}
+    state_path = Path(str(base_cfg.get("state_path") or _DEFAULT_STATE_PATH)).expanduser()
+    try:
+        data = _state.load_state(state_path)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _effective_surface_config(platform_key: str, channel_ids: set[str]) -> dict[str, Any] | None:
+    """Resolve nunchi config for gateway surface-level UX shims.
+
+    This intentionally mirrors the gate's config layering without requiring a
+    message body or classifier call. It is used for Hermes gateway display
+    quieting: if a surface is a nunchi-owned shared channel, progress/steering
+    receipts are controlled by nunchi's config surface.
+    """
+    base_cfg = _nunchi_config()
+    if not isinstance(base_cfg, dict):
+        return None
+
+    state_data = _load_runtime_state(base_cfg)
+    cfg = base_cfg
+    if _state is not None and state_data:
+        g = _state.filter_overridable(state_data.get("global") or {})
+        if g:
+            cfg = {**base_cfg, **g}
+
+    if not _coerce_bool(cfg.get("enabled"), default=False):
+        return None
+
+    platform = str(platform_key or "").strip()
+    platforms = set(_coerce_list(cfg.get("platforms") or "discord"))
+    if platforms and "*" not in platforms and platform not in platforms:
+        return None
+
+    clean_channel_ids = {str(cid).strip() for cid in channel_ids if str(cid).strip()}
+    if not clean_channel_ids:
+        return None
+
+    if _state is not None:
+        resolved = _state.merge_effective(
+            base_cfg,
+            state_data,
+            clean_channel_ids,
+            _resolve_channel_config=resolve_channel_config,
+        )
+    else:
+        resolved = resolve_channel_config(cfg, clean_channel_ids)
+
+    if resolved is None:
+        return None
+    if not _coerce_bool(resolved.get("enabled"), default=False):
+        return None
+    return resolved
+
+
+def _quiet_gateway_chatter_enabled(cfg: dict[str, Any]) -> bool:
+    """Return whether nunchi should suppress Hermes progress chatter.
+
+    Default is true for nunchi-owned channels: using nunchi means the operator
+    wants room-behaviour choices to be recognized in one place, not recalled as
+    a separate Hermes display-config checklist.
+    """
+    return _coerce_bool(cfg.get("quiet_gateway_chatter"), default=True)
+
+
+def _nunchi_quiet_display_override(platform_key: str, setting: str, channel_id: Any = None) -> Any | None:
+    """Return a display override for nunchi shared channels, or ``None``.
+
+    ``None`` means "let Hermes display_config decide". Non-None values are the
+    nunchi-owned quiet defaults for progress/status surfaces.
+    """
+    if setting not in _QUIET_DISPLAY_OVERRIDES:
+        return None
+    if channel_id is None:
+        return None
+    resolved = _effective_surface_config(str(platform_key or ""), {str(channel_id)})
+    if resolved is None or not _quiet_gateway_chatter_enabled(resolved):
+        return None
+    return _QUIET_DISPLAY_OVERRIDES[setting]
+
+
+def _patch_display_resolver(display_config_module: Any | None = None) -> None:
+    """Monkeypatch Hermes' display resolver for nunchi-owned channels.
+
+    This keeps the fix portable with the plugin: no Hermes core patch is
+    required for users who install nunchi-gate into their profile.
+    """
+    try:
+        module = display_config_module or importlib.import_module("gateway.display_config")
+        original = getattr(module, "resolve_display_setting", None)
+    except Exception:
+        return
+    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
+        return
+
+    def _resolve_display_setting(user_config, platform_key, setting, fallback=None, *, channel_id=None):
+        override = _nunchi_quiet_display_override(platform_key, setting, channel_id)
+        if override is not None:
+            return override
+        return original(user_config, platform_key, setting, fallback, channel_id=channel_id)
+
+    _resolve_display_setting._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
+    _resolve_display_setting._nunchi_original = original  # type: ignore[attr-defined]
+    setattr(module, "resolve_display_setting", _resolve_display_setting)
+
+
+def _is_gateway_chatter_message(content: Any) -> bool:
+    text = str(content or "").strip()
+    return any(text.startswith(prefix) for prefix in _GATEWAY_CHATTER_PREFIXES)
+
+
+def _event_quiets_gateway_chatter(event: Any) -> bool:
+    source = getattr(event, "source", None)
+    platform = _platform_name(source)
+    resolved = _effective_surface_config(platform, _channel_ids(source))
+    return bool(resolved is not None and _quiet_gateway_chatter_enabled(resolved))
+
+
+def _patch_status_sender(run_module: Any | None = None) -> None:
+    """Suppress Hermes status/lifecycle chatter in nunchi-owned channels.
+
+    Context-compression notices are emitted through the gateway status path,
+    which bypasses the display resolver and the busy-ack handler. Wrapping the
+    status sender keeps the policy plugin-local while preserving final replies.
+    """
+    try:
+        module = run_module or importlib.import_module("gateway.run")
+        original = getattr(module, "_send_or_update_status_coro", None)
+    except Exception:
+        return
+    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
+        return
+
+    async def _send_or_update_status_coro(adapter, chat_id, status_key, content, metadata):
+        platform = _platform_name(adapter)
+        chat_text = str(chat_id or "").strip()
+        if chat_text:
+            resolved = _effective_surface_config(platform, {chat_text})
+            if resolved is not None and _quiet_gateway_chatter_enabled(resolved) and _is_gateway_chatter_message(content):
+                logger.info(
+                    "nunchi-gate suppressed gateway status chatter platform=%s chat=%s status=%s",
+                    platform,
+                    chat_text,
+                    status_key,
+                )
+                return None
+        result = original(adapter, chat_id, status_key, content, metadata)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    _send_or_update_status_coro._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
+    _send_or_update_status_coro._nunchi_original = original  # type: ignore[attr-defined]
+    setattr(module, "_send_or_update_status_coro", _send_or_update_status_coro)
+
+
+def _patch_busy_ack_handler(runner_cls: Any | None = None) -> None:
+    """Suppress Hermes busy acknowledgements in nunchi-owned channels.
+
+    The busy path sends directly via ``adapter._send_with_retry`` before the
+    normal final-response path, so ``pre_gateway_dispatch`` cannot intercept it.
+    We wrap only that handler and only drop known Hermes busy-ack strings; all
+    other sends, including final responses, still call the original adapter.
+    """
+    try:
+        if runner_cls is None:
+            run_mod = importlib.import_module("gateway.run")
+            runner_cls = getattr(run_mod, "GatewayRunner", None)
+        original = getattr(runner_cls, "_handle_active_session_busy_message", None)
+    except Exception:
+        return
+    if not callable(original) or getattr(original, "_nunchi_quiet_wrapped", False):
+        return
+
+    async def _handle_active_session_busy_message(self, event, session_key):
+        if not _event_quiets_gateway_chatter(event):
+            return await original(self, event, session_key)
+
+        source = getattr(event, "source", None)
+        adapter = getattr(self, "adapters", {}).get(getattr(source, "platform", None))
+        send_with_retry = getattr(adapter, "_send_with_retry", None)
+        if not callable(send_with_retry):
+            return await original(self, event, session_key)
+
+        async def _quiet_send_with_retry(*args, **kwargs):
+            content = kwargs.get("content")
+            if content is None and len(args) >= 2:
+                content = args[1]
+            if _is_gateway_chatter_message(content):
+                logger.info(
+                    "nunchi-gate suppressed gateway chatter platform=%s chat=%s",
+                    _platform_name(source),
+                    getattr(source, "chat_id", None),
+                )
+                return None
+            result = send_with_retry(*args, **kwargs)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        setattr(adapter, "_send_with_retry", _quiet_send_with_retry)
+        try:
+            return await original(self, event, session_key)
+        finally:
+            if getattr(adapter, "_send_with_retry", None) is _quiet_send_with_retry:
+                setattr(adapter, "_send_with_retry", send_with_retry)
+
+    _handle_active_session_busy_message._nunchi_quiet_wrapped = True  # type: ignore[attr-defined]
+    _handle_active_session_busy_message._nunchi_original = original  # type: ignore[attr-defined]
+    setattr(runner_cls, "_handle_active_session_busy_message", _handle_active_session_busy_message)
 
 
 def _parse_channel_context(event: Any, agent_id: str) -> list[dict[str, Any]]:
@@ -676,6 +926,7 @@ def _gate_event(event: Any, gateway: Any = None, session_store: Any = None, **_:
 
 _VALID_SENDERS = {"all", "humans", "allowlist"}
 _VALID_VERBOSITY = {"minimal", "normal", "debug"}
+_VALID_CHATTER = {"quiet": True, "visible": False, "on": True, "off": False, "true": True, "false": False}
 
 _NUNCHI_USAGE = (
     "Usage: /nunchi <subcommand>\n"
@@ -684,6 +935,7 @@ _NUNCHI_USAGE = (
     "  disable <channel-id | global>\n"
     "  senders <all | humans | allowlist> [channel-id | global]\n"
     "  verbosity <minimal | normal | debug> [channel-id | global]\n"
+    "  chatter <quiet | visible> [channel-id | global]\n"
     "  reset   [channel-id | global]\n"
     "\n"
     "Channel IDs must be given explicitly (e.g. '1518384310321811456').\n"
@@ -760,10 +1012,10 @@ def _cmd_status(cfg: dict[str, Any], state_path: Path) -> str:
                 continue
             intro_tag = "  [state-introduced]" if is_state_introduced else ""
             lines.append(f"\n  [{cid}]{intro_tag}")
-            for key in ("enabled", "senders", "verbosity", "fail_open", "model"):
+            for key in ("enabled", "senders", "verbosity", "quiet_gateway_chatter", "fail_open", "model"):
                 val = eff.get(key)
-                if val is not None or key in ("enabled", "senders", "verbosity", "fail_open"):
-                    lines.append(f"    {key:<12} {_provenance(key, val, ch_ov, global_overrides)}")
+                if val is not None or key in ("enabled", "senders", "verbosity", "quiet_gateway_chatter", "fail_open"):
+                    lines.append(f"    {key:<22} {_provenance(key, val, ch_ov, global_overrides)}")
 
     updated_at = state_data.get("updated_at")
     if updated_at:
@@ -845,6 +1097,27 @@ def _cmd_verbosity(rest: list[str], cfg: dict[str, Any], state_path: Path) -> st
     return f"nunchi: verbosity set to {value!r} ({scope})"
 
 
+def _cmd_chatter(rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
+    if not rest:
+        return f"nunchi: 'chatter' requires a value (quiet|visible)\n\n{_NUNCHI_USAGE}"
+    value = rest[0].lower()
+    if value not in _VALID_CHATTER:
+        return (
+            f"nunchi: invalid chatter value {value!r}; "
+            "must be one of: quiet, visible"
+        )
+    if _state is None:
+        return "nunchi-gate: state module not available"
+    target = rest[1] if len(rest) > 1 else "global"
+    quiet = _VALID_CHATTER[value]
+    state_data = _state.load_state(state_path)
+    new_state = _apply_override(state_data, target, "quiet_gateway_chatter", quiet)
+    _state.save_state(state_path, new_state, updated_by="slash")
+    scope = "global override" if target == "global" else f"channel {target}"
+    surfaced = "quiet" if quiet else "visible"
+    return f"nunchi: gateway chatter set to {surfaced!r} ({scope})"
+
+
 def _cmd_reset(rest: list[str], cfg: dict[str, Any], state_path: Path) -> str:
     if _state is None:
         return "nunchi-gate: state module not available"
@@ -885,8 +1158,12 @@ def _nunchi_command(raw_args: str) -> str:
         channel is given.
 
     verbosity <minimal|normal|debug> [channel-id|global]
-        Set the log verbosity.  Defaults to the global override when no
+        Set the gate log verbosity.  Defaults to the global override when no
         channel is given.
+
+    chatter <quiet|visible> [channel-id|global]
+        Control whether Hermes progress/steering chatter is visible in nunchi
+        channels.  Defaults to quiet.  Final responses are not affected.
 
     reset [channel-id|global]
         With a channel ID: clear that channel's overrides.
@@ -916,6 +1193,8 @@ def _nunchi_command(raw_args: str) -> str:
             return _cmd_senders(rest, cfg, state_path)
         if sub == "verbosity":
             return _cmd_verbosity(rest, cfg, state_path)
+        if sub == "chatter":
+            return _cmd_chatter(rest, cfg, state_path)
         if sub == "reset":
             return _cmd_reset(rest, cfg, state_path)
         return f"nunchi: unknown subcommand {sub!r}\n\n{_NUNCHI_USAGE}"
@@ -925,6 +1204,9 @@ def _nunchi_command(raw_args: str) -> str:
 
 
 def register(ctx):
+    _patch_display_resolver()
+    _patch_status_sender()
+    _patch_busy_ack_handler()
     ctx.register_hook("pre_gateway_dispatch", _gate_event)
     register_cmd = getattr(ctx, "register_command", None)
     if callable(register_cmd):
@@ -936,6 +1218,7 @@ def register(ctx):
                 "status | enable|disable <channel|global> | "
                 "senders <all|humans|allowlist> [channel] | "
                 "verbosity <minimal|normal|debug> [channel] | "
+                "chatter <quiet|visible> [channel] | "
                 "reset [channel]"
             ),
         )
