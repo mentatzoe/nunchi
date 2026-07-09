@@ -188,10 +188,10 @@ to render the panel in the current task.
    runner. For another path, set `NUNCHI_RUNNER_CONFIG` before starting both
    Codex and the runner (or pass the same `--config` path to each command).
 
-   To keep it alive across reboots, wrap that command in a systemd user
-   service (`systemd-run --user --unit=nunchi-room-runner ...`) or a launchd
-   agent (`launchctl submit -l nunchi-room-runner -- ...`) — one line, no
-   unit files required.
+   To keep it alive across reboots, install a systemd user unit on Linux or a
+   `~/Library/LaunchAgents` plist on macOS for both the transport and runner.
+   `launchctl submit` is useful for a session-only smoke, but is not a
+   reboot-persistent installation.
 
 ## Configuration panel and hot state
 
