@@ -29,6 +29,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only that narrow wake/outbound smoke, not sustained operations; the app has
   offline protocol and responsive interaction evidence in this change.
 
+### Added — `nunchi-install`: copy-based installer for operator artifacts
+
+A new `nunchi-install` console script (backed by the stdlib-only
+`src/nunchi/install.py`) installs Nunchi's operator artifacts into stable
+locations by **copying**, never symlinking. This fixes a real incident: the
+Hermes plugin had been **symlinked** into `~/.hermes/plugins` from a live git
+checkout, so a `git checkout` on another branch silently swapped the running
+plugin for stale code; separately, the Claude Code hooks were registered by
+floating checkout paths (`/Volumes/...`) that broke when the path moved.
+
+- **Three artifact groups → stable destinations.** The Hermes plugin
+  (`integrations/hermes/nunchi-gate/`, excluding `__pycache__`/`docs/`/`tests`,
+  keeping the runtime `.py`, `plugin.yaml`, and `dashboard/`) is copied to
+  `$HERMES_HOME/plugins/nunchi-gate/` (default `~/.hermes`) as a **real
+  directory**. The Claude Code hooks (`nunchi_gate_hook.py`,
+  `nunchi_prompt_gate.py`) are copied to `~/.claude/hooks/`, alongside two
+  **fail-open** shell wrappers (`nunchi-pretool-reply.sh`,
+  `nunchi-user-prompt-submit.sh`) that source an optional env file and run the
+  hook with `|| exit 0` so a missing/broken gate never blocks Claude Code. The
+  `nunchi-channel` CLI is checked on `PATH` (never installed; prints `pip`
+  guidance if absent).
+- **Symlink replacement (the core fix).** A symlinked destination is detected,
+  its target recorded in the version marker, backed up (preserved as a link),
+  and replaced with a real copy. `uninstall` restores the backed-up symlink.
+- **Version stamping + safe upgrade.** Each destination gets a
+  `.nunchi-install.json` marker recording the source commit (`git rev-parse
+  HEAD`, falling back to a `VERSION` file or `"unknown"`), source path,
+  timestamp, and file list. `upgrade` re-copies only when the source commit
+  differs (or the destination is missing/symlinked), backing up the old copy
+  first; `--force` overrides. `verify` reports per-artifact drift as
+  `in-sync` / `stale` / `not-installed` / `symlink-found`.
+- **Commands + flags.** `install`, `upgrade`, `verify`, `uninstall`, and
+  `print-claude-settings` (prints the `settings.json` hook registration
+  pointing at the stable wrapper paths — the operator's file is never
+  auto-edited). Global `--dry-run` (plans without touching disk),
+  `--prefix` / `--hermes-home` / `--claude-home` / `--repo-root` overrides, and
+  `--only` group selection; flags work before or after the subcommand.
+- **Determinism.** The wall clock and source-commit resolver are injectable, so
+  the 45 new offline `unittest` cases (`tests/test_install.py`) confine every
+  write to temp dirs — never the operator's real `~/.hermes` / `~/.claude` —
+  and pin marker timestamps and backup names.
+- **Docs.** New [`docs/INSTALL.md`](docs/INSTALL.md) (install/upgrade/verify/
+  uninstall, the `settings.json` snippet, and the "why we copy, not symlink"
+  note); `docs/integration.md` and `integrations/hermes/README.md` now point at
+  `nunchi-install` and warn against symlinking the plugin.
+
 ### Added — `agent.aliases`: the gate knows every name one bot carries
 
 One agent on a chat surface carries several identities at once — its
