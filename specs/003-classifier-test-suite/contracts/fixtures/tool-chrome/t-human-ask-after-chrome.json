@@ -1,0 +1,33 @@
+{
+  "request_id": "fixture-t-human-ask-after-chrome",
+  "source_shape": "tool-chrome",
+  "trigger": {
+    "id": "msg-chrome-ask-3",
+    "author": "zoe",
+    "content": "dalgos, while aleph runs that — did the nightly suite come back green?",
+    "timestamp": "2026-07-08T21:52:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-chrome-ask-1",
+      "type": "message",
+      "author": "zoe",
+      "content": "aleph, load the plan skill and start on the corpus.",
+      "timestamp": "2026-07-08T21:50:00.000Z"
+    },
+    {
+      "id": "msg-chrome-ask-2",
+      "type": "message",
+      "author": "aleph",
+      "content": "skill_view(skill: \"speckit-plan\")\n⎿ Loaded 412 lines from .claude/skills/speckit-plan/SKILL.md",
+      "timestamp": "2026-07-08T21:51:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}

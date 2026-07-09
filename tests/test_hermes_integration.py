@@ -671,6 +671,71 @@ class TestResolveChannelConfig(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Fail-policy wiring: fail_open must reach the nunchi-channel payload
+# ---------------------------------------------------------------------------
+
+class TestFailPolicyWiring(unittest.TestCase):
+    """The resolved fail_open governs the payload's fail_policy field.
+
+    Without this mapping the nunchi-channel binary falls back to its own
+    envelope default (fail-open -> SPEAK), so a classifier outage inside the
+    binary degraded to SPEAK even when the operator set fail_open: false
+    (live event 2026-07-08).
+    """
+
+    def setUp(self) -> None:
+        self.p = _load_plugin()
+
+    def test_default_fail_policy_is_open(self) -> None:
+        cfg = _base_cfg()
+        del cfg["fail_open"]  # unset in config: default stays fail-open
+        payload = self.p._build_payload(_event("ping"), cfg)
+        self.assertEqual(payload["fail_policy"], "open")
+
+    def test_fail_open_true_maps_to_open(self) -> None:
+        payload = self.p._build_payload(_event("ping"), _base_cfg(fail_open=True))
+        self.assertEqual(payload["fail_policy"], "open")
+
+    def test_fail_open_false_maps_to_closed(self) -> None:
+        payload = self.p._build_payload(_event("ping"), _base_cfg(fail_open=False))
+        self.assertEqual(payload["fail_policy"], "closed")
+
+    def test_per_channel_fail_open_override_reaches_payload(self) -> None:
+        """Map-form fail_open: false on the channel wins over global true."""
+        cfg = _base_cfg(
+            fail_open=True,
+            channels={"1518384310321811456": {"fail_open": False}},
+        )
+        captured: dict = {}
+
+        def capture_run(payload: dict, run_cfg: dict) -> dict:
+            captured["payload"] = payload
+            return {"verdict": "SPEAK", "silent": False}
+
+        with unittest.mock.patch.object(self.p, "_nunchi_config", return_value=cfg):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", capture_run):
+                self.p._gate_event(_event("aleph?"))
+
+        self.assertEqual(captured["payload"]["fail_policy"], "closed")
+
+    def test_global_fail_open_reaches_payload_end_to_end(self) -> None:
+        """Legacy (non-map) config: global fail_open false lands in the payload."""
+        captured: dict = {}
+
+        def capture_run(payload: dict, run_cfg: dict) -> dict:
+            captured["payload"] = payload
+            return {"verdict": "SPEAK", "silent": False}
+
+        with unittest.mock.patch.object(
+            self.p, "_nunchi_config", return_value=_base_cfg(fail_open=False)
+        ):
+            with unittest.mock.patch.object(self.p, "_run_nunchi", capture_run):
+                self.p._gate_event(_event("aleph?"))
+
+        self.assertEqual(captured["payload"]["fail_policy"], "closed")
+
+
+# ---------------------------------------------------------------------------
 # Feature 2: Sender policy
 # ---------------------------------------------------------------------------
 

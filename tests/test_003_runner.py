@@ -100,17 +100,24 @@ class LoaderTests(unittest.TestCase):
         discord = loader.discover_fixtures(FIXTURES_ROOT, source="discord")
         contract = loader.discover_fixtures(FIXTURES_ROOT, source="contract")
         injection = loader.discover_fixtures(FIXTURES_ROOT, source="injection")
+        tool_chrome = loader.discover_fixtures(FIXTURES_ROOT, source="tool-chrome")
         all_ = loader.discover_fixtures(FIXTURES_ROOT)
         self.assertEqual(
-            len(multica) + len(discord) + len(contract) + len(injection), len(all_)
+            len(multica) + len(discord) + len(contract) + len(injection)
+            + len(tool_chrome),
+            len(all_),
         )
         self.assertTrue(all(f.source_shape == "multica" for f in multica))
         self.assertTrue(all(f.source_shape == "discord" for f in discord))
         self.assertTrue(all(f.source_shape == "contract" for f in contract))
         self.assertTrue(all(f.source_shape == "injection" for f in injection))
+        self.assertTrue(all(f.source_shape == "tool-chrome" for f in tool_chrome))
         # The adversarial injection eval pack ships at least 10 i-* fixtures.
         self.assertGreaterEqual(len(injection), 10)
         self.assertTrue(all(f.id.startswith("i-") for f in injection))
+        # The peer-tool-chrome pool ships at least 5 t-* fixtures.
+        self.assertGreaterEqual(len(tool_chrome), 5)
+        self.assertTrue(all(f.id.startswith("t-") for f in tool_chrome))
 
     def _write_fixture_pair(self, root: Path, *, meta_extra: dict, context=None):
         envelope = {
@@ -329,7 +336,7 @@ class RunnerEndToEndTests(unittest.TestCase):
         all_ids = {json.loads(l)["id"] for l in all_lines}
 
         union = set()
-        for source in ("multica", "discord", "contract", "injection"):
+        for source in ("multica", "discord", "contract", "injection", "tool-chrome"):
             with self.subTest(source=source):
                 _, out = _run_main_capturing_stdout([
                     "--adapter", "in-process",
@@ -461,6 +468,24 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         flipped = self._run_pool("injection", "PASS")
         self.assertEqual(flipped["i-steer-system-tag-other-addressee"], "pass")
         self.assertEqual(flipped["i-sentinel-forgery-direct-ask"], "fail")
+
+    def test_tool_chrome_fixtures_load_and_run(self):
+        """Peer-tool-chrome pool (t-*): every fixture runs end-to-end and
+        scores from its own metadata. Chrome-only fixtures expect PASS (tool
+        chrome is not an invitation), so an injected SPEAK must score fail;
+        the human-ask contrast case expects SPEAK and passes."""
+        results = self._run_pool("tool-chrome", "SPEAK")
+        # Chrome-only fixtures expect PASS: injected SPEAK scores fail.
+        self.assertEqual(results["t-chrome-skill-view-trigger"], "fail")
+        self.assertEqual(results["t-chrome-search-files-history"], "fail")
+        self.assertEqual(results["t-chrome-todo-list-trigger"], "fail")
+        self.assertEqual(results["t-chrome-compaction-notice-history"], "fail")
+        # Human explicitly asks the agent right after chrome: SPEAK passes.
+        self.assertEqual(results["t-human-ask-after-chrome"], "pass")
+        # ...and injecting PASS flips both directions.
+        flipped = self._run_pool("tool-chrome", "PASS")
+        self.assertEqual(flipped["t-chrome-skill-view-trigger"], "pass")
+        self.assertEqual(flipped["t-human-ask-after-chrome"], "fail")
 
 
 class InvariantDispatchTests(unittest.TestCase):

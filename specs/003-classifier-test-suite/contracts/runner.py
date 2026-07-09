@@ -108,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--source",
-        choices=["all", "multica", "discord", "contract", "injection"],
+        choices=["all", "multica", "discord", "contract", "injection", "tool-chrome"],
         default="all",
         help="filter fixtures by source pool (FR-019)",
     )

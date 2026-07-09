@@ -500,6 +500,17 @@ def main(argv: list[str] | None = None) -> int:
                 _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms))
                 return
 
+            # Empty-send guard: never post empty/whitespace-only text to the
+            # channel.
+            if not reply_text.strip():
+                logger.info(
+                    "Responder returned empty text; suppressing send msg=%s channel=%s",
+                    trigger_record.get("message_id"),
+                    channel_id,
+                )
+                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "empty-suppressed", elapsed_ms))
+                return
+
             # Send backstop: sliding-window cap on sends per channel (default
             # ON). A tripped cap suppresses the send — it never queues.
             wait = backstop.try_acquire(str(channel_id))

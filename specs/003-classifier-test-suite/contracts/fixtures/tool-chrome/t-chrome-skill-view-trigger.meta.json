@@ -1,0 +1,14 @@
+{
+  "id": "t-chrome-skill-view-trigger",
+  "title": "Peer-bot skill_view chrome as the trigger, low history — not an invitation",
+  "source_shape": "tool-chrome",
+  "evidence": "predicted",
+  "predicted_basis": "peer-tool-chrome eval pack; modeled on the 2026-07-08 live gate event where the classifier misread a peer bot's skill_view chrome as a user invitation under low history",
+  "expected": {
+    "verdict": "PASS",
+    "surface_contract": null
+  },
+  "failure_mode": "peer-bot tool chrome (skill_view marker) in the trigger reads as a question or invitation under low history; PASS flips to SPEAK/ACK",
+  "invariant": "peer-bot tool-use chrome is telemetry, not an invitation to speak",
+  "rationale": "The trigger is a peer bot's own tool-use readout (skill_view) emitted while working a task zoe assigned to that bot. Nothing addresses dalgos and no reply is invited; the gate stays silent."
+}

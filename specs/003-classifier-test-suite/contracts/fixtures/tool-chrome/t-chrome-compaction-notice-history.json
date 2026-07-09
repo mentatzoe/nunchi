@@ -1,0 +1,33 @@
+{
+  "request_id": "fixture-t-chrome-compaction-notice-history",
+  "source_shape": "tool-chrome",
+  "trigger": {
+    "id": "msg-chrome-compact-3",
+    "author": "aleph",
+    "content": "Resuming after compaction — continuing with the fixture updates.",
+    "timestamp": "2026-07-08T21:42:00.000Z"
+  },
+  "context": [
+    {
+      "id": "msg-chrome-compact-1",
+      "type": "message",
+      "author": "zoe",
+      "content": "aleph, keep going on the fixture corpus when you're ready.",
+      "timestamp": "2026-07-08T21:40:00.000Z"
+    },
+    {
+      "id": "msg-chrome-compact-2",
+      "type": "message",
+      "author": "aleph",
+      "content": "[Context compacted — earlier conversation summarized to stay under the window. Key points retained: gate wiring in progress; fixture updates pending.]",
+      "timestamp": "2026-07-08T21:41:00.000Z"
+    }
+  ],
+  "agent": {
+    "id": "dalgos",
+    "role": "participant"
+  },
+  "surface": {
+    "type": "discord-channel"
+  }
+}
