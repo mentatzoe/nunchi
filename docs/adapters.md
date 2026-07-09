@@ -14,6 +14,7 @@ custom responder.
 | `nunchi-discord` | Discord | source install, `[discord]` extra | beta\* |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | beta |
 | Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | beta |
+| Codex runner + hook | Codex CLI via shared Discord-MCP transport | stdlib | code-only |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
 \* *beta* for the Matrix, Telegram, and Discord adapters means: full offline
@@ -365,6 +366,27 @@ own plugin checkout — the upstream fix is still pending, so peer-hearing is
 not available out of the box.
 
 Full setup and configuration: [`integrations/claude-code/README.md`](../integrations/claude-code/README.md)
+
+---
+
+## Codex runner + hook
+
+The Codex integration has two Codex-side pieces in
+[`integrations/codex/`](../integrations/codex/README.md):
+
+- `nunchi_room_runner.py` consumes the shared Discord-MCP transport's SSE
+  notifications, runs `nunchi-channel`, and wakes `codex exec` only for
+  `ACK`/`ASK`/`SPEAK`. `PASS` writes a receipt and does not wake Codex.
+- `nunchi_prompt_gate_codex.py` is a defense-in-depth `UserPromptSubmit` hook
+  for channel-tagged prompts in interactive Codex sessions. It blocks `PASS`
+  and fail-opens for operator or malformed prompts.
+
+Status is **code-only** in this branch: offline unit tests cover the runner and
+hook, but live Discord room participation requires the separate shared
+`nunchi-mcp-discord` transport, credentials, and a live smoke. Outbound
+`send_message` / `reply_message` calls are not gated by a Codex hook here; the
+Codex path relies on the transport-side send backstop when that transport build
+is present.
 
 ---
 
