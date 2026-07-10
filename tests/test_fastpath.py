@@ -63,7 +63,7 @@ class FastPathShortCircuitTests(unittest.TestCase):
                 ),
             },
             agent={"id": "station", "mention_id": AGENT_MENTION_ID,
-                   "aliases": ["Station", "Fable", "Claude", "Claude Code"]},
+                   "aliases": ["Station", "Fable"]},
         )
         with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
             with self.assertRaises(ValidationError):
