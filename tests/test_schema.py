@@ -154,6 +154,15 @@ class ConfidenceDomainTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     validate_result(self._result(conf))
 
+    def test_huge_int_confidence_gets_named_error_not_overflow(self):
+        """Aleph's post-approval note: a ~1000-digit integer confidence must
+        raise the named ValidationError, not OverflowError."""
+        from nunchi.schema import validate_result
+        from nunchi.errors import ValidationError
+        with self.assertRaises(ValidationError):
+            validate_result(self._result(
+                {"PASS": 10 ** 1000, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}))
+
     def test_boundary_values_accepted(self):
         from nunchi.schema import validate_result
         validate_result(self._result({"PASS": 1.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}))

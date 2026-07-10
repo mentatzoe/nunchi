@@ -234,7 +234,11 @@ def _confidence_malformation(conf) -> str | None:
         value = conf[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return f"confidence {key} is {type(value).__name__}, expected number"
-        if not math.isfinite(float(value)):
+        try:
+            value_f = float(value)
+        except OverflowError:
+            return f"confidence {key} overflows the confidence scale"
+        if not math.isfinite(value_f):
             return f"confidence {key} is not finite"
         if not (0.0 <= float(value) <= 1.0):
             # The DEFER margin only has meaning on the stated scale (round-4:

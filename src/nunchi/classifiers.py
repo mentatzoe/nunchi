@@ -495,10 +495,11 @@ def _decision_from_provider_result(
     #
     # DELIBERATE TRADE-OFF: this also downgrades legitimate empty-context PASSes
     # (e.g. a trigger addressed to another agent, which warrants PASS with no
-    # context consulted). That is why it is OPT-IN and DEFAULT OFF: it pairs with
-    # the deterministic addressing fast-path that resolves "not my turn" before
-    # the model is ever consulted, so the only PASSes that reach this guard are
-    # the model's own judgement calls. Enable it on surfaces where unverified
+    # context consulted). That is why it is OPT-IN and DEFAULT OFF. (It once
+    # paired with a deterministic addressing fast-path that pre-resolved "not
+    # my turn" cases; that layer was removed 2026-07-10, so with this enabled
+    # EVERY empty-context PASS — including correct other-addressed ones — is
+    # downgraded to ASK.) Enable it only on surfaces where unverified
     # completion claims must be challenged rather than silently trusted.
     if require_pass_corroboration and verdict == "PASS":
         # Room governance is not conversational evidence: a pinned-rules item

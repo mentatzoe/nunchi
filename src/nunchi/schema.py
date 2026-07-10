@@ -174,7 +174,12 @@ def validate_result(raw):
         # value — is not on the stated scale, and every downstream margin
         # comparison silently loses its meaning. The shared boundary enforces
         # the same rule the hook applies, so core and adapters cannot disagree.
-        value_f = float(value)
+        try:
+            value_f = float(value)
+        except OverflowError:
+            # A ~1000-digit int overflows float conversion; that is still an
+            # off-scale confidence, and it gets the named error, not a crash.
+            raise ValidationError(f"result.confidences.{key} must be within [0, 1]")
         if value_f != value_f or not (0.0 <= value_f <= 1.0):
             raise ValidationError(f"result.confidences.{key} must be within [0, 1]")
 
