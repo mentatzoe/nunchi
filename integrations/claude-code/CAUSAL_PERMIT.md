@@ -82,6 +82,10 @@ for its evaluation plan.
   unless `NUNCHI_DEFER` is set. DEFER is *abstention*, not model routing: an
   uncertain PASS returns the turn to the participant's own judgment, with no
   second classifier in the live path (`DEFER_EVAL.md`).
-- **Full suite is not clean-green here** — targeted suites (causal/defer/install/
-  hooks) pass, but a clean-env full run has ~4 pre-existing baseline failures
-  reproducible on `main` (not introduced by this branch).
+- **Full suite status (re-verified 2026-07-10)** — on this machine (Python 3.14,
+  classifier API env scrubbed) both `main` (957 tests, 8 skipped) and this branch
+  (983 tests, 8 skipped, 1 expected failure — the retry-causality gap above) run
+  fully green. An earlier note of "~4 baseline failures" did **not** reproduce
+  here and appears to have been transient/env-specific; it is retracted rather
+  than left standing. CI's offline 3.11–3.13 matrix remains the authoritative
+  gate — I have not personally run that matrix.
