@@ -638,6 +638,56 @@ class RetiredArtifactCleanupTest(_TmpTest):
         self.assertEqual(report["stale_settings_entries"], ["nunchi-pretool-reply"])
 
 
+class HermesIntegrityParityTest(_TmpTest):
+    """Round-3: installer integrity was fixed only for Claude; Hermes kept
+    marker-only verification. Same contract, same convergence."""
+
+    def test_deleted_plugin_file_verify_upgrade_verify_converges(self) -> None:
+        inst = _installer(self.tmp)
+        inst.install(groups=["hermes"])
+        target = self.tmp / ".hermes" / "plugins" / "nunchi-gate" / "resolve.py"
+        target.unlink()
+
+        first = inst.verify(groups=["hermes"])["artifacts"]["hermes"]
+        self.assertEqual(first["status"], install.STATUS_STALE)
+        self.assertIn("resolve.py", first["missing_or_invalid"])
+
+        result = inst.upgrade(groups=["hermes"])["artifacts"]["hermes"]
+        self.assertNotEqual(result["action"], "skip",
+                            "upgrade must repair a missing plugin file")
+        self.assertTrue(target.is_file())
+
+        second = inst.verify(groups=["hermes"])["artifacts"]["hermes"]
+        self.assertEqual(second["status"], install.STATUS_IN_SYNC)
+
+    def test_altered_plugin_file_detected_and_repaired(self) -> None:
+        inst = _installer(self.tmp)
+        inst.install(groups=["hermes"])
+        target = self.tmp / ".hermes" / "plugins" / "nunchi-gate" / "resolve.py"
+        target.write_text("# tampered\n", encoding="utf-8")
+
+        report = inst.verify(groups=["hermes"])["artifacts"]["hermes"]
+        self.assertEqual(report["status"], install.STATUS_STALE)
+        self.assertIn("resolve.py", report["content_drift"])
+
+        inst.upgrade(groups=["hermes"])
+        source = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "resolve.py"
+        self.assertEqual(target.read_bytes(), source.read_bytes())
+
+    def test_symlinked_plugins_dir_escaping_root_is_rejected(self) -> None:
+        outside = Path(tempfile.mkdtemp(prefix="nunchi-hermes-outside-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        hermes = self.tmp / ".hermes"
+        hermes.mkdir(parents=True)
+        (hermes / "plugins").symlink_to(outside)
+
+        inst = _installer(self.tmp)
+        with self.assertRaises(install.InstallError):
+            inst._install_hermes()
+        self.assertEqual(list(outside.iterdir()), [],
+                         "no plugin write may land outside the configured root")
+
+
 class SymlinkConfinementTest(_TmpTest):
     """A symlinked destination ancestor must not let writes escape the
     configured root (round-2 finding #5)."""

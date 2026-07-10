@@ -8,10 +8,12 @@ validated optional field:
     beyond ``agent.id`` and ``agent.mention_id``: display names ("Vigil"),
     secondary handles ("Codex"), profile names ("Aether"), and platform
     mention tokens (a Discord snowflake). One bot commonly carries several of
-    these at once; addressing judgments (both the deterministic fast-path and
-    the classifier) treat all of them as "this agent". Entries must be
-    non-empty strings. Absent or empty, behavior is exactly the same as
-    before the field existed — it is additive-optional per docs/STABILITY.md.
+    these at once; the classifier treats all of them as addressing evidence
+    for "this agent" (there is no deterministic fast-path since 2026-07-10 —
+    aliases are never proof of authorship, only of who a message may be for).
+    Entries must be non-empty strings. Absent or empty, behavior is exactly
+    the same as before the field existed — additive-optional per
+    docs/STABILITY.md.
 """
 
 from collections.abc import Mapping

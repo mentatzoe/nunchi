@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — round-3 review: terminal fail-open, exact destructive PASS, installer parity
+
+- **Declared fail-open is terminal.** A mistyped `transcript_path` used to
+  write `allow-input-error` and then keep judging (the receipt said allow, the
+  gate blocked). Input errors now stop processing.
+- **A destructive PASS must be complete and exactly typed:** `silent` present
+  and boolean, `reasons` a non-empty list of non-empty strings, confidences
+  exactly the four verdict keys (extras are evidence malformation → DEFER when
+  enabled). Defaults no longer forge the destructive form; admits stay lenient
+  because they destroy nothing.
+- **The outer guard is actually outer:** fallible config (`NUNCHI_HOOK_TIMEOUT`,
+  `NUNCHI_HOOK_TOOL_PATTERN`) parses safely instead of crashing at import, and
+  any exception escaping the guarded main — decoder recursion included — exits
+  0 with a receipted `allow-hook-error`.
+- **Attribute tokens require both boundaries** (`chat_id="c1"junk` no longer
+  binds) and duplicate required attributes reject the envelope as ambiguous.
+- **Hermes installer parity:** the plugin tree now gets the same
+  file-inventory + content-drift verification, upgrade-repairs, and
+  `_ensure_confined` ancestor check as the Claude path;
+  `verify → upgrade → verify` converges for deleted and tampered plugin files,
+  and a symlinked `plugins/` escaping `$HERMES_HOME` is rejected before writes.
+- **Docs and prompt tell the current contract:** aliases are addressing
+  evidence, never authorship — corrected in `docs/integration.md`,
+  `src/nunchi/schema.py`, the unreleased changelog entries, and the classifier
+  prompt itself (which had asserted name-equality authorship as fact).
+
 ### Removed — the deterministic pre-classifier layer, entirely
 
 - **The fastpath module is gone** (round-2 review + room baseline: suppression
@@ -71,7 +97,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targeting.* Foreign-mention messages now always get semantic adjudication.
   Self-caused echo remains the sole short-circuit (structurally certain).
   Fixture `a-mention-other-alias-in-passing` keeps its PASS ground truth but is
-  now model-scored; the live canary is pinned in `tests/test_fastpath.py`.
+  now model-scored. (The live canary was pinned in `tests/test_fastpath.py`
+  until the whole deterministic layer was removed — see the entry above; the
+  canary's ground truth lives on in the fixture corpus.)
 
 ### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
 
@@ -199,15 +227,16 @@ is byte-for-byte identical to before (golden-request test pins this).
   validated by `validate_request` (non-string/blank entries rejected),
   passed through to the classifier with the rest of the `agent` object.
   Documented in `src/nunchi/schema.py` and `docs/STABILITY.md`.
-- **Deterministic fast-path**: aliases join the addressing identifier set —
-  the "mention aimed at ANOTHER agent → PASS" short-circuit no longer fires
-  when the mentioned token is one of OUR aliases — and the self-echo rule
-  recognizes triggers/context authored under an alias. `mention_id` still
-  does NOT join the self-echo author set (unchanged no-alias behavior; list
-  it in `aliases` to opt in).
+- **Aliases are addressing evidence for the classifier only.** (This entry
+  originally extended the deterministic fast-path's identifier sets; that
+  entire layer was later removed in this same unreleased cycle — see the
+  removal entries above. Aliases establish who a message may be FOR; they are
+  never proof of authorship.)
 - **Classifier prompt** now states the agent may be addressed by any of its
-  `id`, `mention_id`, or `aliases`, and that a message authored under one of
-  those identities is the agent's own.
+  `id`, `mention_id`, or `aliases`. (An earlier revision also told the
+  classifier a message authored under an alias "is the agent's own" — that
+  authorship claim is retracted per the round-3 review: name-equality is not
+  authorship.)
 - **Channel adapter**: `agent_aliases` parameter on `build_request()` /
   `gate()`, `agent.aliases` passthrough in the CLI payload, alias-aware
   `self` role inference for history lines, and a shared `parse_alias_csv`
@@ -229,7 +258,8 @@ is byte-for-byte identical to before (golden-request test pins this).
   envelope+meta pairs distilled from the live failures: direct
   `@<snowflake>` mention with the snowflake in aliases (SPEAK), display-name
   address (SPEAK), secondary-alias address "Codex" (SPEAK), a different
-  bot's name (PASS), self-echo relayed under a profile-name alias (PASS,
+  bot's name (PASS), a relay echo under a profile-name alias (model-scored
+  since the deterministic layer's removal,
   deterministic fast-path), and a mention of another participant with our
   alias only in passing prose (PASS, deterministic fast-path). Loader,
   runner (`--source addressing`), and runner self-tests discover the pool

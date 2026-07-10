@@ -115,7 +115,20 @@ def _parse_history_window() -> int:
 
 
 _HISTORY_WINDOW = _parse_history_window()
-_TIMEOUT = int(os.environ.get("NUNCHI_HOOK_TIMEOUT", "30"))
+
+
+def _parse_timeout() -> int:
+    """Safe numeric config (round-3: NUNCHI_HOOK_TIMEOUT=not-an-int crashed at
+    import, before any guard existed)."""
+    raw = os.environ.get("NUNCHI_HOOK_TIMEOUT", "30")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 30
+    return value if value > 0 else 30
+
+
+_TIMEOUT = _parse_timeout()
 _LOG_PATH = Path(
     os.environ.get(
         "NUNCHI_HOOK_LOG",
@@ -137,14 +150,24 @@ _CHANNEL_TAG_RE = re.compile(
     r"<channel\s+([^>]+)>\s*(.*)\s*</channel>",
     re.DOTALL,
 )
-# Regex to parse one complete key="value" / key='value' attribute token. The
-# leading boundary (start or whitespace) is load-bearing: without it,
-# not-chat_id="c1" parses as chat_id="c1" and a spoofed envelope binds
-# (round-2 finding).
-_ATTR_RE = re.compile(r'(?:^|\s)(\w+)=["\']([^"\']*)["\']')
+# Regex to parse one complete key="value" / key='value' attribute token. BOTH
+# boundaries are load-bearing: without the leading one, not-chat_id="c1"
+# parses as chat_id (round-2); without the trailing one, chat_id="c1"junk
+# still binds (round-3). A token must end at whitespace or end-of-attrs.
+_ATTR_RE = re.compile(r'(?:^|\s)(\w+)=["\']([^"\']*)["\'](?=\s|$)')
 
-# Tool pattern for identifying outbound self-sends in the transcript.
-_TOOL_RE = re.compile(os.environ.get("NUNCHI_HOOK_TOOL_PATTERN", "__reply$"))
+# Tool pattern for identifying outbound self-sends in the transcript. Safe
+# compile (round-3: NUNCHI_HOOK_TOOL_PATTERN='[' crashed at import): a broken
+# operator pattern falls back to the default rather than killing the hook.
+def _parse_tool_pattern() -> re.Pattern:
+    raw = os.environ.get("NUNCHI_HOOK_TOOL_PATTERN", "__reply$")
+    try:
+        return re.compile(raw)
+    except re.error:
+        return re.compile("__reply$")
+
+
+_TOOL_RE = _parse_tool_pattern()
 
 # DEFER: abstain on an uncertain PASS instead of silencing. Default ON — the
 # abstention IS the design, not an experiment; the env var is a kill switch.
@@ -193,6 +216,9 @@ def _confidence_malformation(conf) -> str | None:
     missing = [k for k in _ALL_VERDICTS if k not in conf]
     if missing:
         return f"confidences incomplete (missing {', '.join(missing)})"
+    extras = sorted(set(conf) - set(_ALL_VERDICTS))
+    if extras:
+        return f"confidences contain unexpected keys ({', '.join(extras)})"
     for key in _ALL_VERDICTS:
         value = conf[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -216,9 +242,19 @@ def _uncertain_pass(conf: dict, margin: float) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _parse_attrs(attr_string: str) -> dict[str, str]:
-    """Parse all key="value" / key='value' pairs from a tag attribute string."""
-    return {k: v for k, v in _ATTR_RE.findall(attr_string)}
+def _parse_attrs(attr_string: str) -> tuple[dict[str, str], list[str]]:
+    """Parse complete key="value" tokens; return (attrs, duplicated_keys).
+
+    A duplicated attribute is ambiguity, not data — two chat_ids means the
+    envelope cannot be trusted to bind (round-3: prefer rejecting duplicates).
+    """
+    attrs: dict[str, str] = {}
+    duplicates: list[str] = []
+    for key, value in _ATTR_RE.findall(attr_string):
+        if key in attrs and key not in duplicates:
+            duplicates.append(key)
+        attrs[key] = value
+    return attrs, duplicates
 
 
 def _extract_channel_tag(text: str) -> dict | None:
@@ -226,8 +262,9 @@ def _extract_channel_tag(text: str) -> dict | None:
     m = _CHANNEL_TAG_RE.search(text)
     if not m:
         return None
-    attrs = _parse_attrs(m.group(1))
+    attrs, duplicates = _parse_attrs(m.group(1))
     return {
+        "duplicate_attrs": [d for d in duplicates if d in ("chat_id", "message_id", "user")],
         # Values are stripped so a whitespace-only identifier reads as missing
         # (round-2 finding: blank ids were accepted as bound envelopes).
         "chat_id": attrs.get("chat_id", "").strip(),
@@ -477,7 +514,7 @@ def _run_gate(
     # BOUND judgment — judging it anyway would attach a verdict to nothing.
     # Fail open with telemetry instead (the prompt passes, unlabelled).
     missing = [k for k in ("chat_id", "message_id", "user") if not tag[k]]
-    if missing:
+    if missing or tag["duplicate_attrs"]:
         _write_receipt(
             session_id=session_id,
             chat_id=chat_id,
@@ -488,7 +525,11 @@ def _run_gate(
             action="allow-envelope-error",
             elapsed_ms=(time.monotonic() - t0) * 1000,
             reasons=[],
-            error=f"channel envelope missing required attributes: {', '.join(missing)}",
+            error=(
+                f"channel envelope missing required attributes: {', '.join(missing)}"
+                if missing
+                else f"channel envelope has duplicate attributes: {', '.join(tag['duplicate_attrs'])}"
+            ),
         )
         sys.exit(0)
 
@@ -632,11 +673,16 @@ def _run_gate(
     verdict: str = directive.get("verdict", "")
     if verdict not in ("PASS", "ACK", "ASK", "SPEAK"):
         _malformed(f"unknown verdict {verdict!r}")
-    # `silent` must be an actual boolean that agrees with the verdict. bool()
-    # coercion is forbidden here: bool("false") is True, which forged blocks
-    # out of string-typed flags (review finding, 2026-07-10). Absence is not
-    # contradiction — it defaults to agreeing.
-    silent_raw = directive.get("silent", verdict == "PASS")
+    # A DESTRUCTIVE PASS must be a complete, exactly-typed directive: silent
+    # present and boolean, reasons a non-empty list of non-empty strings
+    # (round-3 contract — destruction requires the full form, defaults forge
+    # it). Admits stay lenient: they destroy nothing.
+    if verdict == "PASS":
+        if "silent" not in directive:
+            _malformed("silent missing (required for a destructive PASS)")
+        if "reasons" not in directive:
+            _malformed("reasons missing (required for a destructive PASS)")
+    silent_raw = directive.get("silent", False)
     if not isinstance(silent_raw, bool):
         _malformed(f"silent is {type(silent_raw).__name__}, expected boolean")
     silent: bool = silent_raw
@@ -645,6 +691,12 @@ def _run_gate(
     reasons_raw = directive.get("reasons", [])
     if not isinstance(reasons_raw, list):
         _malformed(f"reasons is {type(reasons_raw).__name__}, expected list")
+    if verdict == "PASS":
+        if not reasons_raw:
+            _malformed("reasons is empty (a destructive PASS must say why)")
+        bad = [r for r in reasons_raw if not isinstance(r, str) or not r.strip()]
+        if bad:
+            _malformed("reasons must be non-empty strings for a destructive PASS")
     reasons: list[str] = [str(r) for r in reasons_raw]
 
     # Decision provenance for every gate-judged receipt (the eval arm joins on
@@ -798,7 +850,7 @@ def _input_error_receipt(session_id: str, detail: str) -> None:
     )
 
 
-def main() -> None:
+def _main_guarded() -> None:
     raw = sys.stdin.read()
     try:
         hook_input = json.loads(raw)
@@ -812,8 +864,10 @@ def main() -> None:
     session_id = hook_input.get("session_id", "")
     if not isinstance(session_id, str):
         session_id = ""
-    # Present-but-mistyped fields fail open WITH telemetry (round-2 finding:
-    # prompt=null crashed with exit 1 and no receipt).
+    # Present-but-mistyped fields fail open WITH telemetry — and TERMINALLY.
+    # Round-3 finding: a mistyped transcript_path wrote allow-input-error and
+    # then kept judging, so the receipt said "allow" while the gate blocked.
+    # Once input is declared malformed, processing stops.
     prompt = hook_input.get("prompt", "")
     if not isinstance(prompt, str):
         _input_error_receipt(session_id, f"prompt is {type(prompt).__name__}, expected string")
@@ -823,16 +877,27 @@ def main() -> None:
         _input_error_receipt(
             session_id, f"transcript_path is {type(transcript_path).__name__}, expected string"
         )
-        transcript_path = ""
+        sys.exit(0)
 
+    _run_gate(session_id, prompt, transcript_path)
+
+
+def main() -> None:
+    # The OUTER guard — everything after argv is inside it, including stdin
+    # decode (a deeply nested JSON value raises RecursionError inside
+    # json.loads; round-3 finding: that escaped the old guard with exit 1 and
+    # no receipt). The contract "always exit 0, receipted where possible" is
+    # enforced here mechanically.
     try:
-        _run_gate(session_id, prompt, transcript_path)
+        _main_guarded()
     except SystemExit:
         raise
-    except Exception as exc:  # the documented contract: ALWAYS exit 0, receipted
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            sys.exit(0)
         try:
             _write_receipt(
-                session_id=session_id,
+                session_id="",
                 chat_id="",
                 trigger_event=None,
                 history_len=0,
@@ -843,7 +908,7 @@ def main() -> None:
                 reasons=[],
                 error=f"unhandled hook error ({type(exc).__name__}): {exc}",
             )
-        except Exception:
+        except BaseException:
             pass
         sys.exit(0)
 

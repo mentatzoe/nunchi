@@ -211,10 +211,12 @@ it. To map that surface onto a Nunchi request:
   `@<snowflake>` question. Names belong in `agent.aliases`.
 - **agent.aliases** ← every *other* identity this one agent answers to: display
   names ("Vigil"), secondary handles ("Codex"), profile names ("Aether"),
-  additional mention tokens. One bot commonly carries several at once; a message
-  targeting any of them is addressed to this agent, and a message authored under
-  one of them is its own (self-echo suppression). Optional — absent, behavior is
-  exactly as before the field existed.
+  additional mention tokens. One bot commonly carries several at once; the
+  classifier weighs all of them as addressing evidence. Aliases establish who a
+  message may be FOR — never authorship: name-equality is not proof a message
+  is the agent's own (2026-07-10 — the deterministic self-echo rule that
+  treated it that way was removed). Optional — absent, behavior is exactly as
+  before the field existed.
 - **pinned_rules** ← optional. pilot-bot keeps channel norms in a
   `pinned-rules.md` the agent reads as standing instruction; with Nunchi you
   can instead pass that text as `pinned_rules` so the verdict is channel-aware

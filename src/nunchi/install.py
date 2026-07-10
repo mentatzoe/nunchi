@@ -512,16 +512,57 @@ class Installer:
 
     # -- hermes -------------------------------------------------------------
 
+    def _hermes_expected_files(self) -> list[str]:
+        """The relative file set _copy_tree would install — same walk, same
+        exclusions — so verification checks the SAME inventory the installer
+        claims (round-3 finding: Hermes used marker-only verification)."""
+        src = self.hermes_src
+        expected: list[str] = []
+        for root, dirs, files in os.walk(src):
+            dirs[:] = sorted(d for d in dirs if d not in HERMES_EXCLUDE_DIRS)
+            rel_root = os.path.relpath(root, src)
+            for name in sorted(files):
+                if name.endswith(".pyc") or name == MARKER_NAME:
+                    continue
+                expected.append(os.path.normpath(os.path.join(rel_root, name)))
+        expected.sort()
+        return expected
+
+    def _hermes_tree_problems(self) -> tuple[list[str], list[str]]:
+        """(missing_or_invalid, content_drift) for the installed Hermes tree."""
+        missing: list[str] = []
+        drifted: list[str] = []
+        src, dest = self.hermes_src, self.hermes_dest
+        for rel in self._hermes_expected_files():
+            installed = dest / rel
+            if installed.is_symlink() or not installed.is_file():
+                missing.append(rel)
+                continue
+            try:
+                if installed.read_bytes() != (src / rel).read_bytes():
+                    drifted.append(rel)
+            except OSError:
+                missing.append(rel)
+        return missing, drifted
+
     def _install_hermes(self, *, upgrade: bool = False, force: bool = False) -> dict[str, Any]:
         src = self.hermes_src
         dest = self.hermes_dest
         if not src.is_dir():
             raise InstallError(f"Hermes plugin source not found: {src}")
+        # Same confinement contract as the Claude path (round-3: a symlinked
+        # $HERMES_HOME/plugins wrote the whole plugin outside the root).
+        self._ensure_confined(dest.parent, self.hermes_home, "hermes plugin")
 
         is_symlink = dest.is_symlink()
         marker = None if is_symlink else self._read_marker(dest)
 
-        if upgrade and not force:
+        needs_repair = False
+        if dest.exists() and not is_symlink:
+            missing, drifted = self._hermes_tree_problems()
+            needs_repair = bool(missing or drifted)
+
+        if upgrade and not force and not needs_repair:
             decision = self._upgrade_decision(dest_exists=dest.exists(), is_symlink=is_symlink, marker=marker)
             if decision == "skip":
                 self._act("skip", dest, note=f"in-sync at {self._commit()}")
@@ -574,7 +615,17 @@ class Installer:
             return {**base, "status": STATUS_STALE, "detail": "present but unmanaged (no install marker)"}
         installed = marker.get("source_commit", "unknown")
         status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
-        return {**base, "status": status, "installed_commit": installed}
+        result = {**base, "status": status, "installed_commit": installed}
+        missing, drifted = self._hermes_tree_problems()
+        if missing:
+            result["status"] = STATUS_STALE
+            result["missing_or_invalid"] = missing
+            result["missing_detail"] = "managed plugin files absent or not regular files; run upgrade to repair"
+        if drifted:
+            result["status"] = STATUS_STALE
+            result["content_drift"] = drifted
+            result["drift_detail"] = "installed plugin bytes differ from this repo's source; run upgrade"
+        return result
 
     def _uninstall_hermes(self) -> dict[str, Any]:
         dest = self.hermes_dest

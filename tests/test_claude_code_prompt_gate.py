@@ -349,7 +349,9 @@ class TestPassVerdictBlocksPrompt(unittest.TestCase):
         self.assertIn("bot chatter ratio too high", reason)
         self.assertNotIn("second reason", reason)
 
-    def test_pass_with_no_reasons_uses_fallback(self):
+    def test_pass_with_no_reasons_is_malformed(self):
+        """Round-3: a destructive PASS must say why — the old fallback text
+        path let an unexplained suppression through as a hard block."""
         directive = dict(_make_pass_directive())
         directive["reasons"] = []
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
@@ -359,10 +361,8 @@ class TestPassVerdictBlocksPrompt(unittest.TestCase):
         rc, out, err = _run_hook(inp, env_overrides=env)
         os.unlink(stub_path)
 
-        parsed = json.loads(out)
-        self.assertEqual(parsed["decision"], "block")
-        # Fallback reason text must still be present
-        self.assertIn("PASS", parsed["reason"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "", "unexplained destruction fails open")
 
 
 
@@ -959,14 +959,40 @@ class TestMalformedDirectiveShape(unittest.TestCase):
         self.assertEqual(receipt["action"], "allow-gate-error")
         self.assertIn("expected list", receipt["error"])
 
-    def test_absent_silent_defaults_to_agreeing(self):
-        """Absence is not contradiction: PASS without a silent flag still blocks."""
+    def test_absent_silent_on_pass_is_malformed(self):
+        """Round-3 contract: a DESTRUCTIVE PASS must be complete — silent must
+        be present and boolean; defaults would forge the destructive form."""
         rc, out, receipt = self._run_directive_json(
             '{"verdict": "PASS", "reasons": ["quiet"], '
             '"confidences": {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}}'
         )
-        self.assertEqual(json.loads(out).get("decision"), "block")
-        self.assertEqual(receipt["action"], "block-pass")
+        self.assertEqual(out.strip(), "", "incomplete destructive directive fails open")
+        self.assertEqual(receipt["action"], "allow-gate-error")
+        self.assertIn("silent missing", receipt["error"])
+
+    def test_absent_silent_on_admit_stays_lenient(self):
+        """Admits destroy nothing; absence still defaults to agreeing there."""
+        rc, out, receipt = self._run_directive_json(
+            '{"verdict": "SPEAK", "reasons": ["hi"], "confidences": {}}'
+        )
+        self.assertIn("additionalContext", out)
+        self.assertEqual(receipt["action"], "allow-speak")
+
+    def test_empty_reasons_on_pass_is_malformed(self):
+        rc, out, receipt = self._run_directive_json(
+            '{"verdict": "PASS", "silent": true, "reasons": [], '
+            '"confidences": {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}}'
+        )
+        self.assertEqual(receipt["action"], "allow-gate-error")
+        self.assertIn("empty", receipt["error"])
+
+    def test_non_string_reason_items_on_pass_are_malformed(self):
+        rc, out, receipt = self._run_directive_json(
+            '{"verdict": "PASS", "silent": true, "reasons": [7], '
+            '"confidences": {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}}'
+        )
+        self.assertEqual(receipt["action"], "allow-gate-error")
+        self.assertIn("non-empty strings", receipt["error"])
 
 
 class TestChannelEnvelopeIntegrity(unittest.TestCase):
@@ -1051,6 +1077,24 @@ class TestChannelEnvelopeIntegrity(unittest.TestCase):
         self.assertEqual(receipt["action"], "allow-envelope-error",
                          "prefix-spoofed attributes must read as missing, not bound")
 
+    def test_trailing_junk_after_quote_does_not_bind(self):
+        """chat_id="c1"junk must not parse as a bound attribute (round-3: the
+        tokenizer had a leading boundary but no trailing one)."""
+        prompt = ('<channel chat_id="c1"junk message_id="m1"junk user="zoe"junk'
+                  ' ts="t">hello</channel>')
+        rc, out, receipt = self._run_with_missing_attr(prompt)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        self.assertEqual(receipt["action"], "allow-envelope-error")
+
+    def test_duplicate_required_attribute_is_rejected(self):
+        """Two chat_ids is ambiguity, not data — the envelope cannot bind."""
+        prompt = ('<channel source="d" chat_id="c1" chat_id="c2" message_id="m1"'
+                  ' user="zoe" ts="t">hello</channel>')
+        rc, out, receipt = self._run_with_missing_attr(prompt)
+        self.assertEqual(receipt["action"], "allow-envelope-error")
+        self.assertIn("duplicate", receipt["error"])
+
     def test_whitespace_only_ids_read_as_missing(self):
         prompt = ('<channel source="discord" chat_id="  " message_id="m1" user="zoe"'
                   ' ts="t">hello</channel>')
@@ -1098,6 +1142,67 @@ class TestHookInputHardening(unittest.TestCase):
         os.unlink(transcript)
         self.assertEqual(rc, 0, f"a [] transcript row must not crash: {err}")
         self.assertIn("additionalContext", out)
+
+    def test_mistyped_transcript_path_is_terminal(self):
+        """Round-3 #1: allow-input-error must STOP processing — the old code
+        receipted 'allow' and then kept judging, producing a block."""
+        prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
+        stub_path, stub_env = _gate_stub_env(_make_pass_directive())
+        lfd, log_path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(lfd)
+        stub_env["NUNCHI_HOOK_LOG"] = log_path
+        rc, out, err = _run_hook(
+            {"session_id": "s", "prompt": prompt, "transcript_path": 42,
+             "hook_event_name": "UserPromptSubmit", "cwd": "/tmp"},
+            env_overrides=stub_env)
+        os.unlink(stub_path)
+        lines = [json.loads(ln) for ln in pathlib.Path(log_path).read_text().splitlines() if ln.strip()]
+        os.unlink(log_path)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "", "declared fail-open must not then block")
+        self.assertEqual([r["action"] for r in lines], ["allow-input-error"],
+                         "exactly one receipt; the gate must not run after input error")
+
+    def test_bad_timeout_and_tool_pattern_env_do_not_crash(self):
+        """Round-3 #3: config parsed before main() crashed with exit 1 and no
+        receipt; fallible config now parses safely."""
+        prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
+        stub_path, env = _gate_stub_env(_make_speak_directive())
+        env["NUNCHI_HOOK_LOG"] = "/dev/null"
+        env["NUNCHI_HOOK_TIMEOUT"] = "not-an-int"
+        env["NUNCHI_HOOK_TOOL_PATTERN"] = "["
+        rc, out, err = _run_hook(_hook_input(prompt=prompt), env_overrides=env)
+        os.unlink(stub_path)
+        self.assertEqual(rc, 0, f"bad config env must not crash: {err}")
+        self.assertIn("additionalContext", out)
+
+    def test_outer_guard_catches_any_escape_with_receipt(self):
+        """Round-3 #3: a RecursionError inside json.loads escaped the old
+        guard (exit 1, no receipt). The decoder trigger is Python-version-
+        dependent (3.14 parses deep JSON iteratively), so this probes the
+        GUARD itself: any exception escaping _main_guarded — decoder
+        recursion included — must exit 0 with a receipted allow-hook-error."""
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("hook_under_guard_test", _HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        lfd, log_path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(lfd)
+        with mock.patch.object(module, "_LOG_PATH", pathlib.Path(log_path)), \
+             mock.patch.object(module, "_main_guarded",
+                               side_effect=RecursionError("maximum recursion depth exceeded")):
+            with self.assertRaises(SystemExit) as ctx:
+                module.main()
+        lines = [json.loads(ln) for ln in pathlib.Path(log_path).read_text().splitlines() if ln.strip()]
+        os.unlink(log_path)
+        self.assertEqual(ctx.exception.code, 0,
+                         "the guard must convert any escape into exit 0")
+        self.assertTrue(lines and lines[-1]["action"] == "allow-hook-error",
+                        f"the guard must receipt the failure; got {lines}")
+        self.assertIn("RecursionError", lines[-1]["error"])
 
     def test_invalid_history_window_env_does_not_crash_import(self):
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
