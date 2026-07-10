@@ -74,6 +74,7 @@ class OpenAICompatibleAdmissionClient:
         timeout: float,
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -81,9 +82,13 @@ class OpenAICompatibleAdmissionClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
+        # Operator-only reasoning-effort control for reasoning-capable models
+        # (e.g. deepseek-v4-flash). "none" disables reasoning; low/medium/high
+        # tune depth vs latency. Unset -> no reasoning field (provider default).
+        self.reasoning_effort = reasoning_effort
 
     def classify(self, request: AdmissionRequest) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
             "response_format": {"type": "json_object"},
@@ -92,6 +97,12 @@ class OpenAICompatibleAdmissionClient:
                 {"role": "user", "content": json.dumps(_provider_envelope(request), sort_keys=True)},
             ],
         }
+        if self.reasoning_effort:
+            payload["reasoning"] = (
+                {"enabled": False}
+                if self.reasoning_effort == "none"
+                else {"effort": self.reasoning_effort}
+            )
         body = json.dumps(payload).encode("utf-8")
         http_request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
@@ -196,6 +207,13 @@ class ProductAdmissionClassifier:
             or DEFAULT_BASE_URL
         )
         timeout = _timeout_config(self.config)
+        # Operator-only (env, never classifier_config): a request must not be
+        # able to inflate provider cost/latency by demanding deeper reasoning.
+        reasoning_effort = (os.environ.get("NUNCHI_CLASSIFIER_REASONING_EFFORT") or "").strip().lower() or None
+        if reasoning_effort and reasoning_effort not in {"none", "low", "medium", "high"}:
+            raise ValidationError(
+                "NUNCHI_CLASSIFIER_REASONING_EFFORT must be one of none, low, medium, high"
+            )
         self.client = OpenAICompatibleAdmissionClient(
             base_url=base_url,
             api_key=api_key,
@@ -203,6 +221,7 @@ class ProductAdmissionClassifier:
             timeout=timeout,
             max_retries=_max_retries_config(self.config),
             retry_base_delay=_retry_base_delay_config(self.config),
+            reasoning_effort=reasoning_effort,
         )
 
     def classify(self, request: AdmissionRequest) -> ClassifierDecision:
@@ -285,16 +304,27 @@ def _system_prompt() -> str:
         "`author` and `type` — `operator` (a human this agent serves), `peer` (another participant), "
         "`self` (a message this agent wrote earlier), or `pinned-rules` (this room's own governance "
         "text).\n\n"
-        "Answer the question a person answers instinctively before speaking in any group conversation: "
-        "reading who is talking, what has already been said, and who I am in this room — is it my turn? "
-        "Judge as a socially competent participant in this agent's position would:\n"
-        "- A message plainly directed at another participant — it names them, or @mentions an id that is "
-        "not this agent's `id`, `mention_id`, or one of its `aliases` — and not at this agent or the room "
-        "at large, is not this agent's turn.\n"
-        "- Repeating what this agent or anyone else has already said adds nothing.\n"
-        "- A question or request aimed at this agent deserves a response.\n"
-        "- Both silence and speaking are ordinary outcomes in a healthy room. Neither is the default; the "
-        "conversation decides.\n\n"
+        "Nunchi is the art of reading a room — sensing, from who is here and what has passed between "
+        "them, the attuned thing to do. That is as often a timely contribution or a light acknowledgment "
+        "as it is holding back. You are not a gatekeeper asking permission to speak; you are a present "
+        "participant sensing whether you have something that would serve this moment.\n\n"
+        "Reading who is here, what has been said, what is alive right now, and who this agent is, ask: do "
+        "I have something that would add to this moment for these people — a real contribution, an answer "
+        "someone is owed, or a brief signal that says \"I'm here\"? Judge as a socially graceful "
+        "participant in this agent's position would:\n"
+        "- Anything addressed to this agent — a question, a request, an @mention of its `id`, `mention_id`, "
+        "or one of its `aliases` — is owed a response.\n"
+        "- A genuinely new thought, a different angle, a needed correction, or a warm acknowledgment IS "
+        "contribution — even on a topic others have already touched. Only mechanical repetition of what "
+        "has already been said adds nothing.\n"
+        "- In a room of several capable participants, do not assume someone else will take it; a room "
+        "where everyone defers falls silent. If you have something to add, lean toward offering it — fully "
+        "(SPEAK), or lightly (ACK) when a nod is enough.\n"
+        "- A message plainly aimed at another participant — it names them, or @mentions an id that is not "
+        "this agent's `id`, `mention_id`, or `aliases` — and not at this agent or the room, is not this "
+        "agent's to answer.\n"
+        "- Presence and restraint are both ordinary and both valued: hold back when you would only be "
+        "crowding or intruding; show up when the moment would be poorer for your silence.\n\n"
         "If a `pinned-rules` item is present, it is this room's governance and takes precedence over "
         "plain social sense: a room may set a stricter or looser bar for taking a turn, and you apply the "
         "room's bar.\n\n"

@@ -219,18 +219,62 @@ class ProviderClassifierTests(unittest.TestCase):
         system_prompt = payload["messages"][0]["content"]
         self.assertIn('"reasons":["short reason"]', system_prompt)
         self.assertIn("reasons MUST be a non-empty JSON array of strings", system_prompt)
-        # Social core: the prompt poses the read-the-room question and the
-        # envelope vocabulary; room doctrine arrives via pinned-rules, not here.
-        self.assertIn("socially competent participant", system_prompt)
+        # Social core: the prompt frames the read-the-room decision as an
+        # attunement/contribution question ("do I have something that would add
+        # to this moment?"), not a permission-to-speak gate, plus the envelope
+        # vocabulary; room doctrine arrives via pinned-rules, not here.
+        self.assertIn("socially graceful participant", system_prompt)
+        self.assertIn("reading a room", system_prompt)
+        self.assertIn("add to this moment", system_prompt)
         self.assertIn("mention_id", system_prompt)
         self.assertIn("pinned-rules", system_prompt)
         self.assertIn("room's governance", system_prompt)
-        self.assertIn("is it my turn", system_prompt)
         # De-doctrination guard: pilot-channel governance must never be baked
         # back into the substrate prompt (it belongs in a pinned-rules profile).
         self.assertNotIn("net-new value", system_prompt)
         self.assertNotIn("ACK is rare", system_prompt)
         self.assertNotIn("UNVERIFIED RESOLUTION", system_prompt)
+
+    def test_reasoning_effort_env_controls_provider_payload(self):
+        provider_result = {
+            "verdict": "SPEAK",
+            "confidences": {"PASS": 0.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 1.0},
+            "context_checked": [],
+            "reasons": ["ok"],
+        }
+        completion = {"choices": [{"message": {"content": json.dumps(provider_result)}}]}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return json.dumps(completion).encode("utf-8")
+
+        base = {"NUNCHI_CLASSIFIER_MODEL": "m", "OPENROUTER_API_KEY": "k"}
+
+        def payload_for(effort):
+            env = dict(base)
+            if effort is not None:
+                env["NUNCHI_CLASSIFIER_REASONING_EFFORT"] = effort
+            with patch.dict("os.environ", env, clear=True):
+                with patch("urllib.request.urlopen", return_value=FakeResponse()) as opened:
+                    evaluate(load_fixture("speak"))
+            return json.loads(opened.call_args.args[0].data.decode("utf-8"))
+
+        # Unset -> no reasoning field: default provider behaviour is unchanged.
+        self.assertNotIn("reasoning", payload_for(None))
+        # Levels pass through; "none" disables reasoning for a fast, shallow call.
+        self.assertEqual(payload_for("low")["reasoning"], {"effort": "low"})
+        self.assertEqual(payload_for("medium")["reasoning"], {"effort": "medium"})
+        self.assertEqual(payload_for("none")["reasoning"], {"enabled": False})
+        # Operator-only knob: a bad value is rejected loudly, not silently ignored.
+        with patch.dict("os.environ", {**base, "NUNCHI_CLASSIFIER_REASONING_EFFORT": "deep"}, clear=True):
+            with self.assertRaises(ValidationError):
+                evaluate(load_fixture("speak"))
 
     def test_product_normalises_near_miss_context_references(self):
         # Providers occasionally emit "trigger" for "trigger:<id>" or a bare id
