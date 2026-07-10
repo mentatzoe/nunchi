@@ -107,15 +107,6 @@ class DeferOnUncertainPass(unittest.TestCase):
         parsed = json.loads(out)
         self.assertEqual(parsed.get("decision"), "block")
 
-    def test_missing_confidences_read_as_confident(self):
-        """A degraded classifier (no confidences) must not widen what gets
-        through: PASS without confidences blocks as before."""
-        directive = _uncertain_pass_directive()
-        del directive["confidences"]
-        rc, out = self._run(directive)
-        parsed = json.loads(out)
-        self.assertEqual(parsed.get("decision"), "block")
-
     def _last_receipt(self, directive: dict, extra_env: dict | None = None) -> dict:
         fd, log_path = tempfile.mkstemp(suffix=".jsonl")
         os.close(fd)
@@ -165,17 +156,33 @@ class DeferOnUncertainPass(unittest.TestCase):
         rc, out = self._run(d)
         self.assertNotIn("decision", json.loads(out))
 
-    def test_partial_confidence_map_blocks(self):
-        """A map missing a verdict key is malformed evidence, not uncertainty."""
+    def test_partial_confidence_map_defers_with_malformation_receipted(self):
+        """Broken evidence cannot justify hard suppression (review contract):
+        a PASS whose map is missing keys ABSTAINS, and the receipt names why."""
         d = _uncertain_pass_directive()
         d["confidences"] = {"PASS": 0.45, "SPEAK": 0.40}  # ACK/ASK missing
-        rc, out = self._run(d)
-        self.assertEqual(json.loads(out).get("decision"), "block")
+        rec = self._last_receipt(d)
+        self.assertEqual(rec["action"], "defer-malformed-confidence")
+        self.assertIn("incomplete", rec["confidence_malformation"])
 
-    def test_non_finite_confidence_blocks(self):
+    def test_non_finite_confidence_defers_not_blocks(self):
         d = _uncertain_pass_directive()
         d["confidences"] = {"PASS": float("nan"), "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.4}
         rc, out = self._run(d)
+        parsed = json.loads(out)
+        self.assertNotIn("decision", parsed,
+                         "non-finite evidence must abstain, not hard-block")
+        self.assertIn("unusable", parsed["hookSpecificOutput"]["additionalContext"])
+
+    def test_missing_confidences_defer_when_on_block_when_off(self):
+        """Absent map: DEFER on (default) abstains with receipt; the explicit
+        kill switch keeps its hard meaning — every PASS blocks."""
+        d = _uncertain_pass_directive()
+        del d["confidences"]
+        rec = self._last_receipt(d)
+        self.assertEqual(rec["action"], "defer-malformed-confidence")
+        self.assertEqual(rec["confidence_malformation"], "confidences missing")
+        rc, out = self._run(d, {"NUNCHI_DEFER": "off"})
         self.assertEqual(json.loads(out).get("decision"), "block")
 
     def test_degenerate_margins_fall_back_to_default(self):

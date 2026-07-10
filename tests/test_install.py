@@ -155,7 +155,7 @@ class InstallFreshTest(_TmpTest):
     def test_cli_check_reported(self) -> None:
         # nunchi-channel is present in this dev/CI env (installed package).
         report = _installer(self.tmp).install(groups=["cli"])
-        self.assertIn(report["artifacts"]["cli"]["status"], (install.STATUS_IN_SYNC, install.STATUS_NOT_INSTALLED))
+        self.assertIn(report["artifacts"]["cli"]["status"], (install.STATUS_PRESENT_UNVERIFIED, install.STATUS_NOT_INSTALLED))
 
 
 class ExclusionTest(_TmpTest):
@@ -414,7 +414,11 @@ class CliCheckTest(_TmpTest):
         os.chmod(fake, 0o755)
         with patch.dict(os.environ, {"PATH": str(bindir)}):
             report = _installer(self.tmp).verify(groups=["cli"])
-        self.assertEqual(report["artifacts"]["cli"]["status"], install.STATUS_IN_SYNC)
+        self.assertEqual(
+            report["artifacts"]["cli"]["status"], install.STATUS_PRESENT_UNVERIFIED,
+            "presence is not provenance: any executable named nunchi-channel "
+            "must never report in-sync (round-2 finding)")
+        self.assertIn("provenance", report["artifacts"]["cli"]["guidance"])
         self.assertEqual(report["artifacts"]["cli"]["resolved"], str(fake))
 
     def test_cli_missing_gives_pip_guidance(self) -> None:
@@ -568,6 +572,100 @@ class RetiredArtifactCleanupTest(_TmpTest):
         inst.install(groups=["claude"])
         result = inst.upgrade(groups=["claude"])["artifacts"]["claude"]
         self.assertEqual(result["action"], "skip")
+
+    def test_deleted_wrapper_verify_upgrade_verify_converges(self) -> None:
+        """Round-2: deleting the wrapper left verify saying in-sync and upgrade
+        skipping. Now: verify reports the missing artifact, upgrade repairs it,
+        second verify is clean."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        wrapper = self.tmp / ".claude" / "hooks" / "nunchi-user-prompt-submit.sh"
+        wrapper.unlink()
+
+        first = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(first["status"], install.STATUS_STALE)
+        self.assertIn("nunchi-user-prompt-submit.sh", first["missing_or_invalid"])
+
+        result = inst.upgrade(groups=["claude"])["artifacts"]["claude"]
+        self.assertNotEqual(result["action"], "skip",
+                            "upgrade must repair a missing managed artifact")
+        self.assertTrue(wrapper.is_file())
+
+        second = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(second["status"], install.STATUS_IN_SYNC)
+
+    def test_content_drift_detected_and_repaired(self) -> None:
+        """Installed bytes are the truth, not the marker: hand-edited hook →
+        verify stale with the file named; upgrade restores source bytes."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        hook = self.tmp / ".claude" / "hooks" / install.CLAUDE_HOOK_FILES[0]
+        hook.write_text("# tampered\n", encoding="utf-8")
+
+        report = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(report["status"], install.STATUS_STALE)
+        self.assertIn(install.CLAUDE_HOOK_FILES[0], report["content_drift"])
+
+        inst.upgrade(groups=["claude"])
+        source = _REPO_ROOT / "integrations" / "claude-code" / install.CLAUDE_HOOK_FILES[0]
+        self.assertEqual(hook.read_bytes(), source.read_bytes())
+
+    def test_broken_symlink_retired_leftover_is_visible(self) -> None:
+        """.exists() is False for a broken symlink; verify must still see a
+        retired-name symlink as a leftover (round-2 finding)."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        hooks = self.tmp / ".claude" / "hooks"
+        (hooks / "nunchi_gate_hook.py").symlink_to(self.tmp / "nowhere-real")
+
+        report = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(report["status"], install.STATUS_STALE)
+        self.assertIn("nunchi_gate_hook.py", report["retired_leftovers"])
+
+    def test_settings_only_stale_registration_not_reported_as_clean_not_installed(self) -> None:
+        """Nothing installed, but settings.json still registers the retired
+        gate: the stale-settings scan must run before the not-installed return
+        (round-2 finding)."""
+        claude = self.tmp / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "settings.json").write_text(
+            '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", '
+            '"command": "/old/checkout/nunchi-pretool-reply.sh"}]}]}}\n',
+            encoding="utf-8",
+        )
+        report = _installer(self.tmp).verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(report["status"], install.STATUS_STALE)
+        self.assertEqual(report["stale_settings_entries"], ["nunchi-pretool-reply"])
+
+
+class SymlinkConfinementTest(_TmpTest):
+    """A symlinked destination ancestor must not let writes escape the
+    configured root (round-2 finding #5)."""
+
+    def test_symlinked_hooks_dir_escaping_root_is_rejected_before_writes(self) -> None:
+        outside = Path(tempfile.mkdtemp(prefix="nunchi-outside-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        claude = self.tmp / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "hooks").symlink_to(outside)
+
+        inst = _installer(self.tmp)
+        with self.assertRaises(install.InstallError):
+            inst._install_claude()
+        self.assertEqual(list(outside.iterdir()), [],
+                         "no write may land outside the configured root")
+
+    def test_symlinked_hooks_dir_inside_root_is_allowed(self) -> None:
+        """Resolution-based: a symlink whose target stays inside the root is
+        legitimate operator topology, not an escape."""
+        claude = self.tmp / ".claude"
+        real = claude / "real-hooks"
+        real.mkdir(parents=True)
+        (claude / "hooks").symlink_to(real)
+
+        result = _installer(self.tmp)._install_claude()
+        self.assertEqual(result["status"], "installed")
+        self.assertTrue((real / install.CLAUDE_HOOK_FILES[0]).is_file())
 
     def test_verify_flags_stale_settings_entry_read_only(self) -> None:
         """A settings.json still registering the retired gate (e.g. an old

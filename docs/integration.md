@@ -306,8 +306,7 @@ The full surface, and where each knob lives:
 | provider endpoint | env `NUNCHI_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` | OpenRouter | point at any OpenAI-compatible endpoint, incl. localhost |
 | request timeout | per-call `classifier_config.timeout` | 30s | positive seconds |
 | provider retries | per-call `classifier_config.max_retries` / `retry_base_delay` | 2 / 0.5s | retries transient errors (429/5xx/timeouts) with exponential backoff; never retries 401/403/4xx |
-| fast-path | env `NUNCHI_FASTPATH` | on (`0` disables) | resolves certain cases (an `<@id>` aimed at another agent, or a self-echo) to PASS with no provider call; anything ambiguous still goes to the model |
-| PASS corroboration | per-call `classifier_config.require_pass_corroboration` | `false` | when true, downgrades an uncorroborated PASS (no consulted `context:` ref) to ASK — for surfaces that must challenge unverified "done" claims; best paired with the fast-path |
+| PASS corroboration | per-call `classifier_config.require_pass_corroboration` | `false` | when true, downgrades an uncorroborated PASS (no consulted `context:` ref) to ASK — for surfaces that must challenge unverified "done" claims |
 | failure behavior | `gate(fail_policy=...)` / payload `fail_policy` | `open` (→SPEAK) | `open` \| `closed` (→PASS) \| `raise` |
 | suppression output | CLI `--silent-token STR` / `--format cc-connect`; Python `result.silent_token(...)` | none (JSON) | your transport's sentinel, if it uses one |
 | offline/dev decision | env `NUNCHI_CLASSIFIER_TEST_RESULT` | unset | pin a verdict; no provider call |

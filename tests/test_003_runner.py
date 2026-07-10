@@ -512,12 +512,14 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         self.assertEqual(flipped["a-other-bot-name-address"], "pass")
         self.assertEqual(flipped["a-mention-snowflake-direct"], "fail")
 
-    def test_addressing_pass_fixtures_resolve_via_fastpath_without_a_provider(self):
-        """Only the structurally-certain fixture resolves deterministically:
-        self-echo. The mention-in-passing fixture used to sit here too — the
-        mention-elsewhere short-circuit was removed 2026-07-10 (referential
-        mention is not proof of exclusive targeting), so that fixture is now
-        model-scored and must NOT resolve without a provider."""
+    def test_no_fixture_resolves_without_a_provider(self):
+        """NOTHING resolves deterministically any more. The deterministic layer
+        was removed entirely 2026-07-10: the current envelope carries no
+        transport-bound identity, so no suppression is mechanically provable —
+        neither foreign mentions (referential ≠ floor assignment) nor
+        "self-echo" by name/text equality (a human repeating the same words is
+        not the agent's echo). Every admission requires the classifier; with no
+        provider env, evaluation must raise rather than mint a verdict."""
         from nunchi.core import evaluate as core_evaluate
         from nunchi.errors import ValidationError
 
@@ -525,14 +527,11 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
             f.id: f
             for f in loader.discover_fixtures(FIXTURES_ROOT, source="addressing")
         }
-        with mock.patch.dict(os.environ, {}, clear=True):
-            result = core_evaluate(by_id["a-self-echo-alias-author"].envelope)
-        self.assertEqual(result["verdict"], "PASS")
-        self.assertEqual(result["classifier_provider"], "fastpath")
-
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ValidationError):
-                core_evaluate(by_id["a-mention-other-alias-in-passing"].envelope)
+        for fixture_id in ("a-self-echo-alias-author", "a-mention-other-alias-in-passing"):
+            with self.subTest(fixture=fixture_id):
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    with self.assertRaises(ValidationError):
+                        core_evaluate(by_id[fixture_id].envelope)
 
 
 class InvariantDispatchTests(unittest.TestCase):

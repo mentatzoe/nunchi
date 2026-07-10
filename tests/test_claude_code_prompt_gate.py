@@ -939,6 +939,26 @@ class TestMalformedDirectiveShape(unittest.TestCase):
         self.assertEqual(receipt["action"], "allow-gate-error")
         self.assertIn("contradicts", receipt["error"])
 
+    def test_string_silent_is_malformed_not_coerced(self):
+        """bool("false") is True — string flags must be rejected, not coerced
+        into forged blocks (round-2 finding)."""
+        rc, out, receipt = self._run_directive_json(
+            '{"verdict": "PASS", "silent": "false", "reasons": ["r"], '
+            '"confidences": {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}}'
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        self.assertEqual(receipt["action"], "allow-gate-error")
+        self.assertIn("expected boolean", receipt["error"])
+
+    def test_non_list_reasons_is_malformed(self):
+        rc, out, receipt = self._run_directive_json(
+            '{"verdict": "PASS", "silent": true, "reasons": "not-list", '
+            '"confidences": {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}}'
+        )
+        self.assertEqual(receipt["action"], "allow-gate-error")
+        self.assertIn("expected list", receipt["error"])
+
     def test_absent_silent_defaults_to_agreeing(self):
         """Absence is not contradiction: PASS without a silent flag still blocks."""
         rc, out, receipt = self._run_directive_json(
@@ -1019,6 +1039,75 @@ class TestChannelEnvelopeIntegrity(unittest.TestCase):
         rc, out, receipt = self._run_with_missing_attr(prompt)
         self.assertEqual(receipt["action"], "allow-envelope-error")
         self.assertIn("user", receipt["error"])
+
+    def test_spoofed_attribute_prefixes_do_not_bind(self):
+        """not-chat_id="c1" must not parse as chat_id (round-2: prefix-spoofed
+        envelopes were accepted as bound and hard-blocked)."""
+        prompt = ('<channel not-chat_id="c1" not-message_id="m1" not-user="zoe"'
+                  ' ts="t">hello</channel>')
+        rc, out, receipt = self._run_with_missing_attr(prompt)
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "")
+        self.assertEqual(receipt["action"], "allow-envelope-error",
+                         "prefix-spoofed attributes must read as missing, not bound")
+
+    def test_whitespace_only_ids_read_as_missing(self):
+        prompt = ('<channel source="discord" chat_id="  " message_id="m1" user="zoe"'
+                  ' ts="t">hello</channel>')
+        rc, out, receipt = self._run_with_missing_attr(prompt)
+        self.assertEqual(receipt["action"], "allow-envelope-error")
+        self.assertIn("chat_id", receipt["error"])
+
+
+class TestHookInputHardening(unittest.TestCase):
+    """Present-but-mistyped hook input fails open with telemetry, never exit 1
+    (round-2: prompt=null and a [] transcript row crashed with no receipt)."""
+
+    def _run_raw(self, hook_input: dict, extra_env: dict | None = None):
+        lfd, log_path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(lfd)
+        env = {"NUNCHI_CHANNEL_BIN": "/nonexistent", "NUNCHI_HOOK_LOG": log_path}
+        if extra_env:
+            env.update(extra_env)
+        rc, out, err = _run_hook(hook_input, env_overrides=env)
+        lines = [ln for ln in pathlib.Path(log_path).read_text().splitlines() if ln.strip()]
+        os.unlink(log_path)
+        return rc, out, err, (json.loads(lines[-1]) if lines else None)
+
+    def test_null_prompt_fails_open_with_receipt(self):
+        rc, out, err, receipt = self._run_raw(
+            {"session_id": "s", "prompt": None, "transcript_path": "",
+             "hook_event_name": "UserPromptSubmit", "cwd": "/tmp"})
+        self.assertEqual(rc, 0, f"null prompt must not crash: {err}")
+        self.assertEqual(out.strip(), "")
+        self.assertEqual(receipt["action"], "allow-input-error")
+        self.assertIn("prompt", receipt["error"])
+
+    def test_list_transcript_row_is_skipped_not_crash(self):
+        fd, transcript = tempfile.mkstemp(suffix=".jsonl")
+        with os.fdopen(fd, "w") as fh:
+            fh.write("[]\n")
+            fh.write(json.dumps(_user_channel_transcript_entry(
+                chat_id="c1", message_id="m0", user="alice", body="earlier")) + "\n")
+        prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
+        stub_path, env = _gate_stub_env(_make_speak_directive())
+        env["NUNCHI_HOOK_LOG"] = "/dev/null"
+        rc, out, err = _run_hook(
+            _hook_input(prompt=prompt, transcript_path=transcript), env_overrides=env)
+        os.unlink(stub_path)
+        os.unlink(transcript)
+        self.assertEqual(rc, 0, f"a [] transcript row must not crash: {err}")
+        self.assertIn("additionalContext", out)
+
+    def test_invalid_history_window_env_does_not_crash_import(self):
+        prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="hi")
+        stub_path, env = _gate_stub_env(_make_speak_directive())
+        env["NUNCHI_HOOK_LOG"] = "/dev/null"
+        env["NUNCHI_HOOK_HISTORY_WINDOW"] = "not-a-number"
+        rc, out, err = _run_hook(_hook_input(prompt=prompt), env_overrides=env)
+        os.unlink(stub_path)
+        self.assertEqual(rc, 0, f"bad window env must not crash import: {err}")
+        self.assertIn("additionalContext", out)
 
 
 class TestBlockOutputContract(unittest.TestCase):

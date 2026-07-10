@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed — fastpath mention-elsewhere short-circuit (core, all adapters)
+### Removed — the deterministic pre-classifier layer, entirely
+
+- **The fastpath module is gone** (round-2 review + room baseline: suppression
+  may be deterministic only where mechanically provable, and the current
+  envelope carries no transport-bound identity, so nothing qualifies). The
+  mention-elsewhere rule fell in round 2's precursor; round 2 proved the
+  self-echo rule equally unsound — author-name equality accepted a human whose
+  display name matched an alias as "self", and text equality accepted a human
+  repeating "Thanks." as the agent's own echo, both minting PASS 1.0 with no
+  model call and sailing past DEFER. Every admission is now classifier-judged.
+  Deterministic short-circuits may return only when the message contract
+  carries an adapter-asserted runtime binding (schema-v2). `NUNCHI_FASTPATH`
+  env knob removed with the layer.
+
+### Fixed — Claude Code gate: strict directive typing, envelope integrity, crash paths
+
+- **Hard suppression now requires a complete, finite, correctly typed
+  confidence vector.** A PASS whose confidences are missing, partial, mistyped,
+  or non-finite ABSTAINS (`defer-malformed-confidence`, malformation receipted)
+  instead of hard-blocking — broken evidence is not confidence. The explicit
+  `NUNCHI_DEFER=off` kill switch keeps its hard meaning. `silent` must be a
+  real boolean (`"false"` no longer coerces into a forged block) and `reasons`
+  a real list; both fail open with a receipted `allow-gate-error` otherwise.
+- **Envelope integrity:** attribute parsing requires complete tokens
+  (`not-chat_id="c1"` no longer binds as `chat_id`); whitespace-only
+  identifiers read as missing (`allow-envelope-error`).
+- **The "always exit 0, fail open, receipt errors" contract is now mechanical:**
+  `prompt: null` and mistyped top-level fields fail open with a receipted
+  `allow-input-error`; a non-object transcript row is skipped; a malformed
+  `NUNCHI_HOOK_HISTORY_WINDOW` falls back to its default; any unhandled hook
+  exception exits 0 with a receipted `allow-hook-error`.
+
+### Fixed — installer: verification integrity and confinement
+
+- `verify` no longer certifies broken or mixed deployments: every managed file
+  must exist as a regular file (a deleted wrapper is reported and `upgrade`
+  repairs it), installed bytes are compared against source (content drift
+  reported), retired-name broken symlinks are visible, and the stale-settings
+  scan runs even when nothing is installed. `verify → upgrade → verify`
+  converges for all of these.
+- The CLI check reports `present-unverified` — presence is not provenance; the
+  shared `nunchi-channel` is a separate deploy surface (documented in
+  docs/INSTALL.md with the refresh step).
+- Destination ancestors that resolve outside the configured root are rejected
+  before any write (symlinked `hooks/` escaping `--prefix` was reproducible);
+  symlinks that stay inside the root remain legitimate operator topology.
+
+### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
+
+### Removed — fastpath mention-elsewhere short-circuit (the precursor, in detail)
 
 - **A foreign `<@id>` mention no longer produces a deterministic PASS.** The
   rule conflated referential mention ("another agent appears in the story")

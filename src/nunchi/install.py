@@ -5,10 +5,11 @@ locations*, decoupled from any git checkout:
 
 1. The Hermes gateway plugin (``integrations/hermes/nunchi-gate/``) →
    ``$HERMES_HOME/plugins/nunchi-gate/`` (default ``~/.hermes``).
-2. The Claude Code hook scripts
-   (``integrations/claude-code/nunchi_gate_hook.py`` and
-   ``nunchi_prompt_gate.py``) → ``~/.claude/hooks/``, plus fail-open shell
-   wrappers that Claude Code's ``settings.json`` points at.
+2. The Claude Code wake-gate hook
+   (``integrations/claude-code/nunchi_prompt_gate.py``) → ``~/.claude/hooks/``,
+   plus its fail-open shell wrapper that Claude Code's ``settings.json``
+   points at. (The former send-time hook is retired; install/upgrade actively
+   remove its artifacts.)
 3. The ``nunchi-channel`` CLI, which both of the above shell out to (checked
    for presence on ``PATH``; never installed here).
 
@@ -105,6 +106,7 @@ STATUS_IN_SYNC = "in-sync"
 STATUS_STALE = "stale"
 STATUS_NOT_INSTALLED = "not-installed"
 STATUS_SYMLINK_FOUND = "symlink-found"
+STATUS_PRESENT_UNVERIFIED = "present-unverified"
 
 # Exit codes.
 EXIT_OK = 0
@@ -622,8 +624,30 @@ class Installer:
                 return str(path)
         return None
 
+    def _ensure_confined(self, dest_dir: Path, root: Path, label: str) -> None:
+        """Reject destination ancestors that escape the configured root.
+
+        A symlinked ancestor (e.g. ``<home>/hooks`` → elsewhere) silently
+        redirected writes outside the configured prefix (round-2 finding —
+        the same escape class as the HERMES_HOME precedence bug, in symlink
+        clothing). Resolution-based: a symlink whose target stays inside the
+        root is legitimate operator topology; one that leaves it is an error.
+        """
+        try:
+            resolved_dest = dest_dir.resolve()
+            resolved_root = root.resolve()
+        except OSError as exc:
+            raise InstallError(f"{label}: cannot resolve destination: {exc}")
+        if not (resolved_dest == resolved_root or resolved_root in resolved_dest.parents):
+            raise InstallError(
+                f"{label}: destination {dest_dir} resolves to {resolved_dest}, "
+                f"outside the configured root {resolved_root}; refusing to write "
+                "through a symlinked ancestor that escapes confinement"
+            )
+
     def _install_claude(self, *, upgrade: bool = False, force: bool = False) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
+        self._ensure_confined(hooks_dir, self.claude_home, "claude-code hooks")
         for name in CLAUDE_HOOK_FILES:
             if not (self.claude_src / name).is_file():
                 raise InstallError(f"Claude Code hook source not found: {self.claude_src / name}")
@@ -631,17 +655,23 @@ class Installer:
         symlink = self._claude_has_symlink()
         marker = self._read_marker(hooks_dir)
 
-        # Retired leftovers make an install stale regardless of the marker
-        # commit: `verify` reports them and tells the operator to run upgrade,
-        # so upgrade must never early-skip past the cleanup (Aleph's
-        # verify→upgrade→verify finding, 2026-07-10).
+        # Retired leftovers, missing managed files, or content drift make an
+        # install broken regardless of the marker commit: `verify` reports
+        # them and tells the operator to run upgrade, so upgrade must never
+        # early-skip past the repair (round-1 and round-2 findings — the
+        # verify→upgrade→verify loop has to converge).
         retired_leftovers = [
             name
             for name in CLAUDE_RETIRED_FILES
             if (hooks_dir / name).is_symlink() or (hooks_dir / name).exists()
         ]
+        needs_repair = bool(
+            retired_leftovers
+            or self._claude_missing_or_invalid()
+            or self._claude_content_drift()
+        )
 
-        if upgrade and not force and not retired_leftovers:
+        if upgrade and not force and not needs_repair:
             decision = self._upgrade_decision(
                 dest_exists=any(p.exists() for p in self._claude_installed_paths()),
                 is_symlink=symlink is not None,
@@ -716,42 +746,102 @@ class Installer:
             )
         return result
 
+    def _claude_missing_or_invalid(self) -> list[str]:
+        """Managed files that are absent or not regular files. A deployment
+        with ANY managed artifact missing is broken, whatever the marker says
+        (round-2 finding: a deleted wrapper still verified in-sync)."""
+        problems: list[str] = []
+        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS):
+            path = self.claude_hooks_dir / name
+            if path.is_symlink() or not path.is_file():
+                problems.append(name)
+        return problems
+
+    def _claude_content_drift(self) -> list[str]:
+        """Managed files whose installed bytes no longer match what this repo
+        would install — hooks compared against source, wrappers against a
+        fresh render. Content is the truth; the marker only records intent."""
+        drifted: list[str] = []
+        hooks_dir = self.claude_hooks_dir
+        shared_env = self.claude_home / "nunchi-gate.env"
+        for name in CLAUDE_HOOK_FILES:
+            installed, source = hooks_dir / name, self.claude_src / name
+            try:
+                if installed.read_bytes() != source.read_bytes():
+                    drifted.append(name)
+            except OSError:
+                continue  # absence is _claude_missing_or_invalid's finding
+        for wrapper_name, hook_name in CLAUDE_WRAPPERS.items():
+            installed = hooks_dir / wrapper_name
+            override_env = self.claude_home / f"{Path(wrapper_name).stem}.env"
+            expected = render_wrapper(
+                wrapper_name, hooks_dir / hook_name, [shared_env, override_env]
+            )
+            try:
+                if installed.read_text(encoding="utf-8") != expected:
+                    drifted.append(wrapper_name)
+            except OSError:
+                continue
+        return drifted
+
     def _verify_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
         base = {"dest": str(hooks_dir), "repo_commit": self._commit()}
-        symlink = self._claude_has_symlink()
-        if symlink is not None:
-            return {**base, "status": STATUS_SYMLINK_FOUND, "symlink_path": symlink}
-        present = [p for p in self._claude_installed_paths() if p.exists()]
-        if not present:
-            return {**base, "status": STATUS_NOT_INSTALLED}
-        marker = self._read_marker(hooks_dir)
-        if marker is None:
-            return {**base, "status": STATUS_STALE, "detail": "present but unmanaged (no install marker)"}
-        installed = marker.get("source_commit", "unknown")
-        status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
-        result = {**base, "status": status, "installed_commit": installed}
+
+        # The read-only checks that must run REGARDLESS of install state:
+        # retired leftovers (including broken symlinks — .exists() is false for
+        # those) and stale settings registrations. Round-2 finding: a
+        # settings.json holding only an old PreToolUse entry reported
+        # not-installed before these scans ever ran.
+        extras: dict[str, Any] = {}
         leftovers = [
-            name for name in CLAUDE_RETIRED_FILES if (hooks_dir / name).exists()
+            name
+            for name in CLAUDE_RETIRED_FILES
+            if (hooks_dir / name).is_symlink() or (hooks_dir / name).exists()
         ]
         if leftovers:
-            result["status"] = STATUS_STALE
-            result["retired_leftovers"] = leftovers
-            result["detail"] = (
+            extras["retired_leftovers"] = leftovers
+            extras["detail"] = (
                 "retired send-time gate artifacts still installed; "
                 "run upgrade to remove them"
             )
-        # READ-ONLY migration check: settings.json is operator-owned (never
-        # written here), but verify can still SEE a stale registration of the
-        # retired send-time gate — including old absolute checkout paths the
-        # file-level cleanup cannot reach.
         stale_settings = self._claude_settings_mentions_retired()
         if stale_settings:
-            result["status"] = STATUS_STALE
-            result["stale_settings_entries"] = stale_settings
-            result["settings_detail"] = (
+            extras["stale_settings_entries"] = stale_settings
+            extras["settings_detail"] = (
                 "settings.json still registers the retired send-time gate; "
                 "delete its PreToolUse entry by hand (see docs/INSTALL.md)"
+            )
+
+        symlink = self._claude_has_symlink()
+        if symlink is not None:
+            return {**base, **extras, "status": STATUS_SYMLINK_FOUND, "symlink_path": symlink}
+        present = [p for p in self._claude_installed_paths() if p.exists()]
+        if not present:
+            status = STATUS_STALE if extras else STATUS_NOT_INSTALLED
+            return {**base, **extras, "status": status}
+        marker = self._read_marker(hooks_dir)
+        if marker is None:
+            return {**base, **extras, "status": STATUS_STALE,
+                    "detail": "present but unmanaged (no install marker)"}
+        installed = marker.get("source_commit", "unknown")
+        status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
+        result = {**base, "status": status, "installed_commit": installed, **extras}
+        if extras:
+            result["status"] = STATUS_STALE
+        missing = self._claude_missing_or_invalid()
+        if missing:
+            result["status"] = STATUS_STALE
+            result["missing_or_invalid"] = missing
+            result["missing_detail"] = (
+                "managed artifacts absent or not regular files; run upgrade to repair"
+            )
+        drifted = self._claude_content_drift()
+        if drifted:
+            result["status"] = STATUS_STALE
+            result["content_drift"] = drifted
+            result["drift_detail"] = (
+                "installed bytes differ from this repo's source; run upgrade"
             )
         return result
 
@@ -783,12 +873,27 @@ class Installer:
     def _check_cli(self) -> dict[str, Any]:
         path = shutil.which("nunchi-channel")
         if path:
-            self._act("check", "nunchi-channel", note=f"found: {path}")
-            return {"status": STATUS_IN_SYNC, "resolved": path}
+            # HONESTY (round-2 finding): any executable with this name used to
+            # report in-sync. This installer cannot establish the binary's
+            # provenance or version — the shared CLI is installed separately
+            # (pip / uv tool) and can lag the repo even when every hook file is
+            # current. That drift class caused a real deploy gap on 2026-07-10.
+            guidance = (
+                "presence confirmed, provenance NOT verified. If core behavior "
+                "changed in this repo, refresh the shared CLI explicitly (e.g. "
+                "`uv tool install --force --from <repo checkout> nunchi` or "
+                "`pip install --upgrade <repo checkout>`); see docs/INSTALL.md."
+            )
+            self._act("check", "nunchi-channel", note=f"found: {path} (unverified)")
+            return {
+                "status": STATUS_PRESENT_UNVERIFIED,
+                "resolved": path,
+                "guidance": guidance,
+            }
         guidance = (
             "nunchi-channel not found on PATH. Install the package to provide it: "
             "`pip install nunchi` (or `pip install .` from a checkout). Both the "
-            "Hermes plugin and the Claude Code hooks shell out to nunchi-channel."
+            "Hermes plugin and the Claude Code wake gate shell out to nunchi-channel."
         )
         self._act("check", "nunchi-channel", note="MISSING")
         self._emit("  " + guidance)

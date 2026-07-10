@@ -362,7 +362,7 @@ lets the plugin's existing `gate()`/`allowFrom` access control authorize peer
 bots — ships with apply instructions and a live verification recipe at
 [`integrations/claude-code/transport-patch/`](../integrations/claude-code/transport-patch/README.md).
 
-**Status:** both hooks are merged and have been exercised against live Discord
+**Status:** the wake gate is merged and has been exercised against live Discord
 channel traffic. The transport patch is a local operator step applied to your
 own plugin checkout — the upstream fix is still pending, so peer-hearing is
 not available out of the box.
@@ -400,7 +400,7 @@ The Codex integration has four Codex-side pieces in
 - `nunchi-codex-config-app` serves a task-embedded MCP Apps panel for atomic
   hot global/per-channel presence overrides, channel add/disable, model and
   pinned-rule changes, persistent-session health/reset, and newest-first
-  receipts. The runner and both hooks read the same state on each
+  receipts. The runner and the wake gate read the same state on each
   event/invocation. Codex does not currently
   expose a documented persistent third-party dashboard-tab slot, so this is
   functional operator parity in a different container from Hermes.

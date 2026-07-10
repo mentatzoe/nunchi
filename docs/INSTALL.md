@@ -193,6 +193,30 @@ cp integrations/claude-code/nunchi-gate.env.example ~/.claude/nunchi-gate.env
 # then edit for your agent's identity and roster
 ```
 
+## The shared CLI is a separate deploy surface
+
+`nunchi-install` copies **hook artifacts**. The `nunchi-channel` CLI the hooks
+shell out to is installed separately (pip / `uv tool`) and can lag this repo
+even when every hook file is current — that exact gap shipped a stale core for
+half a day on 2026-07-10 (hooks at the new commit, CLI still carrying removed
+behavior). `nunchi-install verify` therefore reports the CLI as
+`present-unverified`: it can confirm presence, never provenance.
+
+After any change to `src/nunchi/` (classifier, adapters, fastpath removal),
+refresh the shared CLI explicitly:
+
+```sh
+uv tool install --force --from /path/to/turnaware nunchi   # uv-managed
+# or: pip install --upgrade /path/to/turnaware
+```
+
+Then prove the running binary, not the install command: replay a known case
+through the wrapper and check the receipt (`classifier_model`, behavior), or
+run `nunchi-channel` directly on a fixture. An env var pointing
+`NUNCHI_CHANNEL_BIN` at a pilot shim or old copy silently overrides all of
+this — if a replay shows behavior the new code cannot produce, hunt the
+override first.
+
 ## Version stamps
 
 Each destination gets a `.nunchi-install.json` marker recording the source

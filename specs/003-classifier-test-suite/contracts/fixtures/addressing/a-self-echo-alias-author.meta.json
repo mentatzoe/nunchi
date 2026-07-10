@@ -10,5 +10,5 @@
   },
   "failure_mode": "the agent replies to its own relayed status line (author 'Aether' does not match agent id 'vigil'), feeding a self-amplification loop",
   "invariant": "a trigger authored by ANY identity in the agent's bundle is self-caused; no visible turn",
-  "rationale": "The trigger is this agent's own completion report, attributed by the relay to its profile name. In live runs the deterministic fast-path resolves this without a model call (author is in the alias set); the fixture pins the semantic ground truth for model-scored runs too."
+  "rationale": "The trigger is this agent's own completion report, attributed by the relay to its profile name. The deterministic self-echo short-circuit was removed 2026-07-10: author name-equality and text-equality do not mechanically prove self-causation (review finding \u2014 a human repeating the agent's words, or sharing its display name, minted PASS 1.0 with no model). Ground truth stays PASS, model-scored, until the message contract carries an adapter-asserted runtime identity (schema-v2)."
 }

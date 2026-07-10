@@ -103,7 +103,18 @@ _PEER_BOTS: frozenset[str] = frozenset(
     for b in (os.environ.get("NUNCHI_HOOK_PEER_BOTS", "") or "").split(",")
     if b.strip()
 )
-_HISTORY_WINDOW = int(os.environ.get("NUNCHI_HOOK_HISTORY_WINDOW", "25"))
+def _parse_history_window() -> int:
+    """Safe numeric config: a malformed NUNCHI_HOOK_HISTORY_WINDOW must not
+    crash the hook at import (round-2 finding); fall back to the default."""
+    raw = os.environ.get("NUNCHI_HOOK_HISTORY_WINDOW", "25")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 25
+    return value if value >= 0 else 25
+
+
+_HISTORY_WINDOW = _parse_history_window()
 _TIMEOUT = int(os.environ.get("NUNCHI_HOOK_TIMEOUT", "30"))
 _LOG_PATH = Path(
     os.environ.get(
@@ -126,8 +137,11 @@ _CHANNEL_TAG_RE = re.compile(
     r"<channel\s+([^>]+)>\s*(.*)\s*</channel>",
     re.DOTALL,
 )
-# Regex to parse one key="value" or key='value' attribute.
-_ATTR_RE = re.compile(r'(\w+)=["\']([^"\']*)["\']')
+# Regex to parse one complete key="value" / key='value' attribute token. The
+# leading boundary (start or whitespace) is load-bearing: without it,
+# not-chat_id="c1" parses as chat_id="c1" and a spoofed envelope binds
+# (round-2 finding).
+_ATTR_RE = re.compile(r'(?:^|\s)(\w+)=["\']([^"\']*)["\']')
 
 # Tool pattern for identifying outbound self-sends in the transcript.
 _TOOL_RE = re.compile(os.environ.get("NUNCHI_HOOK_TOOL_PATTERN", "__reply$"))
@@ -160,34 +174,42 @@ def _defer_margin() -> float:
 
 
 _ALT_VERDICTS = ("SPEAK", "ACK", "ASK")
+_ALL_VERDICTS = ("PASS", *_ALT_VERDICTS)
 
 
-def _uncertain_pass(directive: dict, margin: float) -> bool:
-    """True when the gate is about to silence an *ambiguous* bid: verdict PASS,
-    but some alternative verdict's confidence is within *margin* of PASS's
-    (inclusive — "within" includes the exact boundary).
+def _confidence_malformation(conf) -> str | None:
+    """Why this confidence map cannot justify a HARD suppression, or ``None``.
 
-    The confidence map must be COMPLETE (all four verdicts present) and every
-    value a finite float; a partial or malformed map reads as confident, so a
-    degraded classifier can never widen what gets through."""
-    if directive.get("verdict") != "PASS":
-        return False
-    conf = directive.get("confidences")
+    Hard suppression requires a complete, finite, correctly typed confidence
+    vector (review contract, 2026-07-10). A missing, partial, mistyped, or
+    non-finite map is broken *evidence* — not proof of confidence, and not
+    proof of uncertainty either. The caller decides what broken evidence means
+    (with DEFER on: abstain to the participant; with DEFER off: the operator
+    chose hard mode)."""
+    if conf is None:
+        return "confidences missing"
     if not isinstance(conf, dict):
-        return False
-    values: dict[str, float] = {}
-    for key in ("PASS", *_ALT_VERDICTS):
-        if key not in conf:
-            return False  # partial map: not evidence of uncertainty
-        try:
-            v = float(conf[key])
-        except (TypeError, ValueError):
-            return False
-        if not math.isfinite(v):
-            return False
-        values[key] = v
-    best_alt = max(values[k] for k in _ALT_VERDICTS)
-    return (values["PASS"] - best_alt) <= margin
+        return f"confidences is {type(conf).__name__}, expected object"
+    missing = [k for k in _ALL_VERDICTS if k not in conf]
+    if missing:
+        return f"confidences incomplete (missing {', '.join(missing)})"
+    for key in _ALL_VERDICTS:
+        value = conf[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"confidence {key} is {type(value).__name__}, expected number"
+        if not math.isfinite(float(value)):
+            return f"confidence {key} is not finite"
+    return None
+
+
+def _uncertain_pass(conf: dict, margin: float) -> bool:
+    """True when a VALIDATED confidence vector shows an ambiguous PASS: some
+    alternative verdict sits within *margin* of PASS (inclusive — "within"
+    includes the exact boundary). Callers must have cleared
+    ``_confidence_malformation`` first; this function only compares numbers."""
+    pass_c = float(conf["PASS"])
+    best_alt = max(float(conf[k]) for k in _ALT_VERDICTS)
+    return (pass_c - best_alt) <= margin
 
 # ---------------------------------------------------------------------------
 # Channel tag parsing
@@ -206,10 +228,12 @@ def _extract_channel_tag(text: str) -> dict | None:
         return None
     attrs = _parse_attrs(m.group(1))
     return {
-        "chat_id": attrs.get("chat_id", ""),
-        "message_id": attrs.get("message_id", ""),
-        "user": attrs.get("user", ""),
-        "ts": attrs.get("ts", ""),
+        # Values are stripped so a whitespace-only identifier reads as missing
+        # (round-2 finding: blank ids were accepted as bound envelopes).
+        "chat_id": attrs.get("chat_id", "").strip(),
+        "message_id": attrs.get("message_id", "").strip(),
+        "user": attrs.get("user", "").strip(),
+        "ts": attrs.get("ts", "").strip(),
         "body": m.group(2).strip(),
     }
 
@@ -256,6 +280,8 @@ def _parse_transcript_history(transcript_path: str, chat_id: str) -> list[dict]:
                     obj = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(obj, dict):
+                    continue  # a JSONL row like [] is noise, not a crash
 
                 entry_type = obj.get("type")
 
@@ -606,11 +632,20 @@ def _run_gate(
     verdict: str = directive.get("verdict", "")
     if verdict not in ("PASS", "ACK", "ASK", "SPEAK"):
         _malformed(f"unknown verdict {verdict!r}")
-    silent: bool = bool(directive.get("silent", verdict == "PASS"))
+    # `silent` must be an actual boolean that agrees with the verdict. bool()
+    # coercion is forbidden here: bool("false") is True, which forged blocks
+    # out of string-typed flags (review finding, 2026-07-10). Absence is not
+    # contradiction — it defaults to agreeing.
+    silent_raw = directive.get("silent", verdict == "PASS")
+    if not isinstance(silent_raw, bool):
+        _malformed(f"silent is {type(silent_raw).__name__}, expected boolean")
+    silent: bool = silent_raw
     if silent != (verdict == "PASS"):
         _malformed(f"silent={silent!r} contradicts verdict {verdict!r}")
-    reasons_raw = directive.get("reasons")
-    reasons: list[str] = [str(r) for r in reasons_raw] if isinstance(reasons_raw, list) else []
+    reasons_raw = directive.get("reasons", [])
+    if not isinstance(reasons_raw, list):
+        _malformed(f"reasons is {type(reasons_raw).__name__}, expected list")
+    reasons: list[str] = [str(r) for r in reasons_raw]
 
     # Decision provenance for every gate-judged receipt (the eval arm joins on
     # these; a defer receipt without its numbers cannot be swept).
@@ -628,9 +663,48 @@ def _run_gate(
         # judge. On an *uncertain* PASS it abstains — the turn goes to the
         # agent's own model with the hesitation noted, and the agent may still
         # choose silence. No second classifier; the "bigger model" is the agent.
+        #
+        # Hard suppression requires a complete, finite, correctly typed
+        # confidence vector. Broken evidence is not confidence: with DEFER on
+        # (default) a PASS whose confidences are missing/partial/non-finite
+        # ABSTAINS with the malformation receipted. NUNCHI_DEFER=off is the
+        # operator's explicit hard mode and keeps its meaning: every PASS
+        # blocks.
         margin = _defer_margin()
-        if _DEFER_ENABLED and _uncertain_pass(directive, margin):
-            conf = directive.get("confidences") or {}
+        conf_raw = directive.get("confidences")
+        malformation = _confidence_malformation(conf_raw)
+        if _DEFER_ENABLED and malformation is not None:
+            _write_receipt(
+                session_id=session_id,
+                chat_id=chat_id,
+                trigger_event=trigger_event,
+                history_len=len(history_events),
+                verdict=verdict,
+                silent=silent,
+                action="defer-malformed-confidence",
+                elapsed_ms=elapsed_ms,
+                reasons=reasons,
+                error=None,
+                extra={
+                    **provenance,
+                    "confidences": conf_raw if isinstance(conf_raw, dict) else None,
+                    "confidence_malformation": malformation,
+                    "defer_margin": margin,
+                    "defer_enabled": True,
+                },
+            )
+            note = (
+                f"nunchi: the gate returned PASS on message "
+                f"{trigger_event['message_id']} from {trigger_event['author']}, "
+                f"but its confidence evidence is unusable ({malformation}). "
+                "Suppression requires evidence, so the gate abstains. Read the "
+                "room with your own judgment — replying and staying silent are "
+                "both fine outcomes; if you stay silent, simply send nothing "
+                "this turn."
+            )
+            print(_context_output(note))
+            sys.exit(0)
+        if _DEFER_ENABLED and malformation is None and _uncertain_pass(conf_raw, margin):
             _write_receipt(
                 session_id=session_id,
                 chat_id=chat_id,
@@ -644,7 +718,7 @@ def _run_gate(
                 error=None,
                 extra={
                     **provenance,
-                    "confidences": conf,
+                    "confidences": conf_raw,
                     "defer_margin": margin,
                     "defer_enabled": True,
                 },
@@ -652,7 +726,7 @@ def _run_gate(
             note = (
                 f"nunchi: the gate leaned PASS on message "
                 f"{trigger_event['message_id']} from {trigger_event['author']} "
-                f"but not confidently (confidences: {json.dumps(conf)}). It "
+                f"but not confidently (confidences: {json.dumps(conf_raw)}). It "
                 "abstains rather than silence you. Read the room with your own "
                 "judgment — replying and staying silent are both fine outcomes; "
                 "if you stay silent, simply send nothing this turn."
@@ -709,6 +783,21 @@ def _run_gate(
     sys.exit(0)
 
 
+def _input_error_receipt(session_id: str, detail: str) -> None:
+    _write_receipt(
+        session_id=session_id,
+        chat_id="",
+        trigger_event=None,
+        history_len=0,
+        verdict=None,
+        silent=None,
+        action="allow-input-error",
+        elapsed_ms=0.0,
+        reasons=[],
+        error=detail,
+    )
+
+
 def main() -> None:
     raw = sys.stdin.read()
     try:
@@ -720,11 +809,43 @@ def main() -> None:
     if not isinstance(hook_input, dict):
         sys.exit(0)
 
-    session_id: str = hook_input.get("session_id", "")
-    prompt: str = hook_input.get("prompt", "")
-    transcript_path: str = hook_input.get("transcript_path", "")
+    session_id = hook_input.get("session_id", "")
+    if not isinstance(session_id, str):
+        session_id = ""
+    # Present-but-mistyped fields fail open WITH telemetry (round-2 finding:
+    # prompt=null crashed with exit 1 and no receipt).
+    prompt = hook_input.get("prompt", "")
+    if not isinstance(prompt, str):
+        _input_error_receipt(session_id, f"prompt is {type(prompt).__name__}, expected string")
+        sys.exit(0)
+    transcript_path = hook_input.get("transcript_path", "")
+    if not isinstance(transcript_path, str):
+        _input_error_receipt(
+            session_id, f"transcript_path is {type(transcript_path).__name__}, expected string"
+        )
+        transcript_path = ""
 
-    _run_gate(session_id, prompt, transcript_path)
+    try:
+        _run_gate(session_id, prompt, transcript_path)
+    except SystemExit:
+        raise
+    except Exception as exc:  # the documented contract: ALWAYS exit 0, receipted
+        try:
+            _write_receipt(
+                session_id=session_id,
+                chat_id="",
+                trigger_event=None,
+                history_len=0,
+                verdict=None,
+                silent=None,
+                action="allow-hook-error",
+                elapsed_ms=0.0,
+                reasons=[],
+                error=f"unhandled hook error ({type(exc).__name__}): {exc}",
+            )
+        except Exception:
+            pass
+        sys.exit(0)
 
 
 if __name__ == "__main__":

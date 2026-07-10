@@ -37,7 +37,12 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Directories never scanned: VCS internals, caches, other worktrees, vendored
 # runtime state.
-_SKIP_DIRS = {".git", "__pycache__", ".worktrees", ".specify", "node_modules"}
+_SKIP_DIRS = {
+    ".git", "__pycache__", ".worktrees", ".specify", "node_modules",
+    # Build artifacts are copies of tracked source; scanning them makes the
+    # test fail after an ordinary `python -m build` (round-2 finding).
+    "build", "dist", ".eggs",
+}
 
 _TEXT_SUFFIXES = {".py", ".md", ".sh", ".example", ".toml", ".yaml", ".yml", ".json", ".txt"}
 
@@ -79,7 +84,7 @@ def _iter_files() -> list[pathlib.Path]:
         if not path.is_file() or path.suffix not in _TEXT_SUFFIXES:
             continue
         rel_parts = path.relative_to(_REPO_ROOT).parts
-        if any(part in _SKIP_DIRS for part in rel_parts):
+        if any(part in _SKIP_DIRS or part.endswith(".egg-info") for part in rel_parts):
             continue
         out.append(path)
     return sorted(out)
