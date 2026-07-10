@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
+
+- **Retired the Claude Code send-time (`PreToolUse`) gate** (`nunchi_gate_hook.py`
+  and its `nunchi-pretool-reply.sh` wrapper). It re-judged an already-admitted
+  turn against the newest transcript line, so a peer message landing while the
+  agent composed stole the causal role and the composed reply died as a false
+  PASS. Nunchi now makes its single admission judgment at wake
+  (`UserPromptSubmit`) and gets out of the way; no permit/ledger side state is
+  needed because nothing has to be kept consistent across two judgments.
+  `tests/test_no_second_judgment.py` scans the whole project to keep both the
+  retired hook and the ledger shape removed.
+- **DEFER (gate abstention) added to the wake gate, default on.** On an
+  *uncertain* PASS (best alternative verdict within `NUNCHI_DEFER_MARGIN`,
+  default 0.25) the gate declines to silence: the prompt goes through with the
+  gate's hesitation noted in-band, and the agent's own model decides — replying
+  and staying silent both stay open. `NUNCHI_DEFER=off` restores hard PASS.
+  Abstentions are receipted as `defer-uncertain-pass` for offline evaluation.
+- **Admissions travel in-band.** SPEAK/ACK/ASK now add a short
+  `additionalContext` note naming the message the turn answers, anchoring
+  composition to its origin without side state.
+- `nunchi-install` upgrade/uninstall now actively remove the retired hook files
+  (with backups), `verify` flags leftovers as stale, and the printed
+  `settings.json` snippet is `UserPromptSubmit`-only (delete any old
+  `PreToolUse` entry by hand — settings remain operator-owned).
+
 ### Added — Codex/Vigil room integration and operator surface
 
 - Added a long-running Codex room runner for the shared Discord MCP transport.

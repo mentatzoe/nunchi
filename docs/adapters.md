@@ -13,7 +13,7 @@ custom responder.
 | `nunchi-telegram` | Telegram | stdlib | code-only |
 | `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
 | Hermes plugin | Hermes gateway (Discord, Slack, …) | stdlib | live-run; evidence owed |
-| Claude Code hooks | Claude Code UserPromptSubmit + PreToolUse | stdlib | offline-tested; live evidence incomplete |
+| Claude Code gate | Claude Code UserPromptSubmit (one judgment, at wake) | stdlib | offline-tested; live evidence incomplete |
 | Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | bounded live-smokes evidenced |
 | cc-connect preset | cc-connect (via `--format cc-connect`) | stdlib | stable |
 
@@ -328,34 +328,29 @@ Full setup and configuration: [`integrations/hermes/README.md`](../integrations/
 
 ## Claude Code hooks
 
-Two complementary hooks under `integrations/claude-code/` put the nunchi gate
-on both sides of a Claude Code session that participates in a chat channel:
+One hook under `integrations/claude-code/` — `nunchi_prompt_gate.py`, a
+`UserPromptSubmit` hook — makes nunchi's single judgment for a Claude Code
+session that participates in a chat channel, at wake time:
 
-| Direction | Hook | Claude Code event | On PASS |
-|---|---|---|---|
-| Inbound — channel message arrives | `nunchi_prompt_gate.py` | `UserPromptSubmit` | prompt blocked before any LLM inference runs |
-| Outbound — agent attempts a reply | `nunchi_gate_hook.py` | `PreToolUse` | reply-tool call denied; the model is instructed to stay silent |
+| Gate decision | Effect |
+|---|---|
+| PASS (confident) | prompt blocked before any LLM inference runs |
+| PASS (uncertain) | DEFER — the gate abstains; the agent wakes with the hesitation noted and its own model decides (silence stays a fine outcome) |
+| SPEAK / ACK / ASK | admitted; an in-band note anchors the turn to the message it answers |
 
-**Inbound (`nunchi_prompt_gate.py`, UserPromptSubmit — merged 2026-07-08).**
-Gates channel-sourced prompts *before they reach the LLM*. The hook
-self-selects on the `<channel ...>` tag that channel transports put in the
-prompt, builds a per-channel history window from the session transcript, and
-calls `nunchi-channel`. A PASS suppresses the prompt for the cost of one
-lightweight gate call instead of a full frontier-model turn. Operator prompts
-(no channel tag) always pass through ungated, and the inbound path is
-permanently fail-open — a broken gate cannot silence the operator.
+The hook self-selects on the `<channel ...>` tag that channel transports put
+in the prompt, builds a per-channel history window from the session
+transcript, and calls `nunchi-channel`. A confident PASS suppresses the
+prompt for the cost of one lightweight gate call instead of a full
+frontier-model turn. Operator prompts (no channel tag) always pass through
+ungated, and the path is permanently fail-open — a broken gate cannot silence
+the operator.
 
-**Outbound (`nunchi_gate_hook.py`, PreToolUse).** Gates reply-tool
-invocations (matcher such as `mcp__plugin_discord_discord__reply`) against the
-most recent inbound trigger for that channel. On PASS it emits a `deny`
-permission decision, converting voluntary instruction-following into a hard
-gate at the tooling layer. Fail policy is configurable (`open`/`closed`).
-
-The hooks are designed to run together: inbound saves the model turn, outbound
-backstops whatever slips through. They share configuration
-(`NUNCHI_CHANNEL_BIN`, agent identity, `NUNCHI_HOOK_HISTORY_WINDOW` — default
-25 for both) and append to the same JSONL receipts log, distinguished by a
-`direction` field.
+There is deliberately no send-time re-judgment: an earlier `PreToolUse` hook
+re-judged composed replies against the newest transcript line and produced
+false PASSes when peer messages landed mid-composition. It was retired
+2026-07-10 (`tests/test_no_second_judgment.py` keeps it retired); once a turn
+is admitted, the send rides on the agent's own judgment.
 
 **Known transport gap: the official Discord plugin is bot-deaf.** The upstream
 Claude Code Discord plugin (`anthropics/claude-plugins-official`) drops every

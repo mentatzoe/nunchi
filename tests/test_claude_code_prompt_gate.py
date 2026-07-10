@@ -365,8 +365,19 @@ class TestPassVerdictBlocksPrompt(unittest.TestCase):
         self.assertIn("PASS", parsed["reason"])
 
 
+
+def _parse_admit_context(out: str) -> str:
+    """An admit emits UserPromptSubmit additionalContext (never a block)."""
+    parsed = json.loads(out)
+    assert "decision" not in parsed, f"admit must not block: {parsed}"
+    hso = parsed["hookSpecificOutput"]
+    assert hso["hookEventName"] == "UserPromptSubmit"
+    return hso["additionalContext"]
+
+
 class TestAllowVerdicts(unittest.TestCase):
-    """SPEAK, ACK, ASK verdicts → allow (exit 0, no stdout)."""
+    """SPEAK, ACK, ASK -> admit: exit 0 and an in-band admission note that
+    anchors the turn to the message it answers (no block decision)."""
 
     def test_speak_allows(self):
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="help me")
@@ -377,7 +388,10 @@ class TestAllowVerdicts(unittest.TestCase):
         os.unlink(stub_path)
 
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "")
+        note = _parse_admit_context(out)
+        self.assertIn("SPEAK", note)
+        self.assertIn("m1", note, "the admission must name the message this turn answers")
+        self.assertIn("zoe", note)
 
     def test_ack_allows(self):
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="ack me")
@@ -388,7 +402,7 @@ class TestAllowVerdicts(unittest.TestCase):
         os.unlink(stub_path)
 
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "")
+        self.assertIn("ACK", _parse_admit_context(out))
 
     def test_ask_allows(self):
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="clarify?")
@@ -399,7 +413,7 @@ class TestAllowVerdicts(unittest.TestCase):
         os.unlink(stub_path)
 
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "")
+        self.assertIn("ASK", _parse_admit_context(out))
 
 
 class TestMalformedStdinFailsOpen(unittest.TestCase):
@@ -802,9 +816,10 @@ class TestChannelTagParsing(unittest.TestCase):
         env["NUNCHI_HOOK_LOG"] = "/dev/null"
         rc, out, err = _run_hook(inp, env_overrides=env)
         os.unlink(stub_path)
-        # Should have gated (SPEAK → allow, no output), not bypassed as non-channel
+        # Should have gated (SPEAK -> admit with admission note), not bypassed
+        # as non-channel (a bypass would produce empty stdout).
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "")
+        self.assertIn("m1", _parse_admit_context(out))
 
     def test_attribute_order_variant(self):
         """Attributes in any order are parsed correctly."""
@@ -890,8 +905,9 @@ class TestBlockOutputContract(unittest.TestCase):
         self.assertIsInstance(parsed["reason"], str)
         self.assertGreater(len(parsed["reason"]), 0)
 
-    def test_allow_produces_no_output(self):
-        """Allow must produce empty stdout (no hookSpecificOutput, no decision JSON)."""
+    def test_admit_never_emits_a_block_decision(self):
+        """An admit emits only additionalContext — never a decision/reason pair
+        (the block contract must be unreachable from the admit path)."""
         prompt = _channel_prompt(chat_id="c1", message_id="m1", user="zoe", body="help")
         stub_path, env = _gate_stub_env(_make_speak_directive())
         inp = _hook_input(prompt=prompt)
@@ -900,7 +916,10 @@ class TestBlockOutputContract(unittest.TestCase):
         os.unlink(stub_path)
 
         self.assertEqual(rc, 0)
-        self.assertEqual(out.strip(), "")
+        note = _parse_admit_context(out)
+        self.assertIn("SPEAK", note)
+        self.assertIn("m1", note, "the admission must name the message this turn answers")
+        self.assertIn("zoe", note)
 
 
 class TestAgentAliases(unittest.TestCase):

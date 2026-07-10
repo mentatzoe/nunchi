@@ -69,18 +69,27 @@ MARKER_VERSION = 1
 #: and the ``dashboard/`` tab assets — is the *running plugin* and is copied.
 HERMES_EXCLUDE_DIRS = frozenset({"__pycache__", "docs", "tests"})
 
-#: The two Claude Code hook scripts copied into ``~/.claude/hooks/``.
-CLAUDE_HOOK_FILES = ("nunchi_gate_hook.py", "nunchi_prompt_gate.py")
+#: The Claude Code hook script copied into ``~/.claude/hooks/``. Nunchi makes
+#: ONE judgment per turn, at wake time (``UserPromptSubmit``); there is no
+#: send-time re-judgment.
+CLAUDE_HOOK_FILES = ("nunchi_prompt_gate.py",)
 
 #: Fail-open shell wrappers written next to the hooks, mapped to the hook they
 #: invoke. ``settings.json`` registers *these*, never a repo path.
 CLAUDE_WRAPPERS = {
-    "nunchi-pretool-reply.sh": "nunchi_gate_hook.py",
     "nunchi-user-prompt-submit.sh": "nunchi_prompt_gate.py",
 }
 
-#: Default Discord reply-tool matcher used in the printed settings snippet.
-DEFAULT_REPLY_MATCHER = "mcp__plugin_discord_discord__reply"
+#: Artifacts earlier versions installed that no longer exist: the send-time
+#: (``PreToolUse``) gate. It re-judged an already-admitted turn against the
+#: newest transcript line, silencing composed replies (the false-PASS bug).
+#: Install/upgrade/uninstall actively remove these so a live machine cannot
+#: keep running the retired gate. Operators must also drop the ``PreToolUse``
+#: entry from ``settings.json`` (see the printed snippet / INSTALL.md).
+CLAUDE_RETIRED_FILES = (
+    "nunchi_gate_hook.py",
+    "nunchi-pretool-reply.sh",
+)
 
 #: Default hook timeout (seconds) in the printed settings snippet.
 DEFAULT_HOOK_TIMEOUT = 35
@@ -177,12 +186,15 @@ def resolve_source_commit(repo_root: Path) -> str:
 def build_claude_settings_snippet(
     claude_home: Path,
     *,
-    matcher: str = DEFAULT_REPLY_MATCHER,
     timeout: int = DEFAULT_HOOK_TIMEOUT,
 ) -> str:
     """Return the ``settings.json`` hook registration the operator should use.
 
-    The commands point at the **stable wrapper paths** under
+    One hook: the wake-time gate (``UserPromptSubmit``). If an earlier install
+    added a ``PreToolUse`` entry pointing at ``nunchi-pretool-reply.sh``,
+    remove it — that send-time gate is retired.
+
+    The command points at the **stable wrapper path** under
     ``<claude_home>/hooks/`` — never at a repo checkout.
     """
     hooks_dir = Path(claude_home) / "hooks"
@@ -197,18 +209,6 @@ def build_claude_settings_snippet(
                             "timeout": timeout,
                         }
                     ]
-                }
-            ],
-            "PreToolUse": [
-                {
-                    "matcher": matcher,
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": str(hooks_dir / "nunchi-pretool-reply.sh"),
-                            "timeout": timeout,
-                        }
-                    ],
                 }
             ],
         }
@@ -649,6 +649,17 @@ class Installer:
         self._mkdir(hooks_dir)
         installed_files: list[str] = []
 
+        # Retire artifacts from earlier versions (the send-time gate). _backup
+        # MOVES the file aside, so the backup is the removal — otherwise an
+        # upgraded machine keeps running the retired re-judgment path this
+        # version deleted.
+        retired: list[str] = []
+        for name in CLAUDE_RETIRED_FILES:
+            dest = hooks_dir / name
+            if dest.is_symlink() or dest.exists():
+                self._backup(dest, kind="symlink.bak" if dest.is_symlink() else "bak")
+                retired.append(name)
+
         # Hook scripts: back up any existing copy (incl. a symlink) then copy.
         for name in CLAUDE_HOOK_FILES:
             dest = hooks_dir / name
@@ -659,8 +670,7 @@ class Installer:
 
         # Fail-open wrappers pointing at the stable hook paths. Each sources a
         # shared identity file first, then an optional per-hook override
-        # (``nunchi-<wrapper-stem>.env``) — e.g. the outbound reply gate narrows
-        # its peer roster there. Both env files are operator-owned; the
+        # (``nunchi-<wrapper-stem>.env``). Both env files are operator-owned; the
         # installer writes the wrappers but never the env files (see INSTALL.md).
         shared_env = self.claude_home / "nunchi-gate.env"
         for wrapper_name, hook_name in CLAUDE_WRAPPERS.items():
@@ -680,7 +690,7 @@ class Installer:
             source_path=self.claude_src,
             files=installed_files,
         )
-        return {
+        result = {
             "action": "upgrade" if upgrade else "install",
             "status": "installed",
             "dest": str(hooks_dir),
@@ -688,6 +698,13 @@ class Installer:
             "files": installed_files,
             "settings_snippet": build_claude_settings_snippet(self.claude_home),
         }
+        if retired:
+            result["retired"] = retired
+            result["settings_note"] = (
+                "Retired send-time gate removed. If settings.json still has a "
+                "PreToolUse entry for nunchi-pretool-reply.sh, delete it."
+            )
+        return result
 
     def _verify_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
@@ -703,12 +720,23 @@ class Installer:
             return {**base, "status": STATUS_STALE, "detail": "present but unmanaged (no install marker)"}
         installed = marker.get("source_commit", "unknown")
         status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
-        return {**base, "status": status, "installed_commit": installed}
+        result = {**base, "status": status, "installed_commit": installed}
+        leftovers = [
+            name for name in CLAUDE_RETIRED_FILES if (hooks_dir / name).exists()
+        ]
+        if leftovers:
+            result["status"] = STATUS_STALE
+            result["retired_leftovers"] = leftovers
+            result["detail"] = (
+                "retired send-time gate artifacts still installed; "
+                "run upgrade to remove them"
+            )
+        return result
 
     def _uninstall_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
         removed: list[str] = []
-        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS, MARKER_NAME):
+        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS, *CLAUDE_RETIRED_FILES, MARKER_NAME):
             path = hooks_dir / name
             if path.is_symlink() or path.exists():
                 self._remove_file(path)
@@ -849,10 +877,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add_group_arg(
         sub.add_parser("uninstall", parents=[common], help="remove installed copies; restore a backed-up symlink")
     )
-    ps = sub.add_parser(
+    sub.add_parser(
         "print-claude-settings", parents=[common], help="print the settings.json hook registration snippet"
     )
-    ps.add_argument("--matcher", default=DEFAULT_REPLY_MATCHER, help="PreToolUse tool matcher")
 
     return parser
 
@@ -883,7 +910,7 @@ def main(argv: Sequence[str] | None = None, *, out: io.TextIOBase | None = None)
 
     try:
         if args.command == "print-claude-settings":
-            stream.write(build_claude_settings_snippet(claude_home, matcher=args.matcher) + "\n")
+            stream.write(build_claude_settings_snippet(claude_home) + "\n")
             return EXIT_OK
 
         groups = getattr(args, "only", None)

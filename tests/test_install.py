@@ -431,17 +431,17 @@ class SettingsSnippetTest(_TmpTest):
     def test_snippet_points_at_stable_wrapper_paths_not_repo(self) -> None:
         snippet = build_claude_settings_snippet(self.tmp / ".claude")
         data = json.loads(snippet)
-        pre = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         ups = data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
-        self.assertTrue(pre.endswith("/.claude/hooks/nunchi-pretool-reply.sh"))
         self.assertTrue(ups.endswith("/.claude/hooks/nunchi-user-prompt-submit.sh"))
-        self.assertNotIn("integrations", pre, "snippet must not point at a repo checkout")
-        self.assertNotIn("integrations", ups)
+        self.assertNotIn("integrations", ups, "snippet must not point at a repo checkout")
 
-    def test_snippet_matcher_override(self) -> None:
-        snippet = build_claude_settings_snippet(self.tmp / ".claude", matcher=".*__reply$")
+    def test_snippet_has_no_retired_send_time_gate(self) -> None:
+        """One judgment per turn: the snippet must never re-suggest the retired
+        PreToolUse (send-time) gate."""
+        snippet = build_claude_settings_snippet(self.tmp / ".claude")
         data = json.loads(snippet)
-        self.assertEqual(data["hooks"]["PreToolUse"][0]["matcher"], ".*__reply$")
+        self.assertNotIn("PreToolUse", data["hooks"])
+        self.assertNotIn("nunchi-pretool-reply", snippet)
 
 
 class WrapperContentTest(_TmpTest):
@@ -449,7 +449,7 @@ class WrapperContentTest(_TmpTest):
         hooks = self.tmp / ".claude" / "hooks"
         hook_path = hooks / install.CLAUDE_HOOK_FILES[0]
         env_file = self.tmp / ".claude" / "nunchi-gate.env"
-        content = render_wrapper("nunchi-pretool-reply.sh", hook_path, [env_file])
+        content = render_wrapper("nunchi-user-prompt-submit.sh", hook_path, [env_file])
 
         self.assertIn("#!/bin/sh", content)
         self.assertIn("|| exit 0", content, "wrapper must fail open")
@@ -461,12 +461,12 @@ class WrapperContentTest(_TmpTest):
 
     def test_wrapper_sources_env_files_in_order(self) -> None:
         # Shared identity is sourced before the per-hook override so the
-        # override's exports win (e.g. a narrower outbound peer roster).
+        # override's exports win (e.g. a narrower per-hook roster).
         hooks = self.tmp / ".claude" / "hooks"
         hook_path = hooks / install.CLAUDE_HOOK_FILES[0]
         shared = self.tmp / ".claude" / "nunchi-gate.env"
-        override = self.tmp / ".claude" / "nunchi-pretool-reply.env"
-        content = render_wrapper("nunchi-pretool-reply.sh", hook_path, [shared, override])
+        override = self.tmp / ".claude" / "nunchi-user-prompt-submit.env"
+        content = render_wrapper("nunchi-user-prompt-submit.sh", hook_path, [shared, override])
 
         self.assertLess(
             content.index(str(shared)),
@@ -479,15 +479,64 @@ class WrapperContentTest(_TmpTest):
     def test_installed_wrapper_points_at_installed_hook(self) -> None:
         _installer(self.tmp).install(groups=["claude"])
         hooks = self.tmp / ".claude" / "hooks"
-        wrapper = (hooks / "nunchi-pretool-reply.sh").read_text(encoding="utf-8")
+        wrapper = (hooks / "nunchi-user-prompt-submit.sh").read_text(encoding="utf-8")
         self.assertIn(str(hooks / install.CLAUDE_HOOK_FILES[0]), wrapper)
 
     def test_installed_wrapper_sources_shared_and_override_env(self) -> None:
         _installer(self.tmp).install(groups=["claude"])
         claude = self.tmp / ".claude"
-        wrapper = (claude / "hooks" / "nunchi-pretool-reply.sh").read_text(encoding="utf-8")
+        wrapper = (claude / "hooks" / "nunchi-user-prompt-submit.sh").read_text(encoding="utf-8")
         self.assertIn(str(claude / "nunchi-gate.env"), wrapper)
-        self.assertIn(str(claude / "nunchi-pretool-reply.env"), wrapper)
+        self.assertIn(str(claude / "nunchi-user-prompt-submit.env"), wrapper)
+
+
+class RetiredArtifactCleanupTest(_TmpTest):
+    """Upgrading over an old two-gate install must remove the retired send-time
+    gate — otherwise the machine keeps running the re-judgment path this
+    version deleted (the false-PASS bug would silently stay live)."""
+
+    def _seed_old_install(self) -> Path:
+        hooks = self.tmp / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / "nunchi_gate_hook.py").write_text("# retired send-time gate\n", encoding="utf-8")
+        (hooks / "nunchi-pretool-reply.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        return hooks
+
+    def test_install_removes_retired_send_time_gate(self) -> None:
+        hooks = self._seed_old_install()
+        result = _installer(self.tmp).install(groups=["claude"])
+        claude = result["artifacts"]["claude"]
+        self.assertFalse((hooks / "nunchi_gate_hook.py").exists())
+        self.assertFalse((hooks / "nunchi-pretool-reply.sh").exists())
+        self.assertEqual(
+            sorted(claude["retired"]), ["nunchi-pretool-reply.sh", "nunchi_gate_hook.py"]
+        )
+        self.assertIn("PreToolUse", claude["settings_note"])
+        # Removed, not destroyed: a timestamped backup of each retired file exists.
+        for stem in ("nunchi_gate_hook.py", "nunchi-pretool-reply.sh"):
+            self.assertTrue(
+                list(hooks.glob(f"{stem}.bak.*")),
+                f"expected a backup of retired {stem}",
+            )
+
+    def test_verify_flags_retired_leftovers_as_stale(self) -> None:
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        hooks = self.tmp / ".claude" / "hooks"
+        (hooks / "nunchi_gate_hook.py").write_text("# ghost\n", encoding="utf-8")
+        report = inst.verify(groups=["claude"])
+        claude = report["artifacts"]["claude"]
+        self.assertEqual(claude["status"], install.STATUS_STALE)
+        self.assertEqual(claude["retired_leftovers"], ["nunchi_gate_hook.py"])
+
+    def test_uninstall_also_removes_retired_files(self) -> None:
+        hooks = self._seed_old_install()
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        (hooks / "nunchi_gate_hook.py").write_text("# ghost again\n", encoding="utf-8")
+        inst.uninstall(groups=["claude"])
+        self.assertFalse((hooks / "nunchi_gate_hook.py").exists())
+        self.assertFalse((hooks / "nunchi-user-prompt-submit.sh").exists())
 
 
 class NeverTouchesRealHomeTest(_TmpTest):
@@ -560,14 +609,15 @@ class CliMainTest(_TmpTest):
     def test_install_prints_settings_snippet(self) -> None:
         _code, out = self._run(["--prefix", str(self.tmp), "install"])
         self.assertIn("settings.json", out)
-        self.assertIn("nunchi-pretool-reply.sh", out)
+        self.assertIn("nunchi-user-prompt-submit.sh", out)
         self.assertIn("NOT applied for you", out)
 
     def test_print_claude_settings_command(self) -> None:
         code, out = self._run(["--claude-home", str(self.tmp / ".claude"), "print-claude-settings"])
         self.assertEqual(code, 0)
         data = json.loads(out)
-        self.assertIn("PreToolUse", data["hooks"])
+        self.assertIn("UserPromptSubmit", data["hooks"])
+        self.assertNotIn("PreToolUse", data["hooks"])
 
     def test_verify_via_main(self) -> None:
         self._run(["--prefix", str(self.tmp), "install"])
@@ -581,7 +631,7 @@ class CliMainTest(_TmpTest):
         code, _ = self._run(["--hermes-home", str(h), "--claude-home", str(c), "install"])
         self.assertEqual(code, 0)
         self.assertTrue((h / "plugins" / "nunchi-gate").is_dir())
-        self.assertTrue((c / "hooks" / "nunchi-pretool-reply.sh").is_file())
+        self.assertTrue((c / "hooks" / "nunchi-user-prompt-submit.sh").is_file())
 
     def test_missing_source_reports_error(self) -> None:
         empty_repo = self.tmp / "empty-repo"

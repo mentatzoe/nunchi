@@ -52,15 +52,14 @@ _HOME_PATTERNS = (
 )
 
 # Rule 2: hook-running test modules must not inherit the bare parent env.
-_HOOK_SCRIPT_MARKERS = ("nunchi_gate_hook", "nunchi_prompt_gate", "nunchi_send_gate")
+_GATE = _REPO_ROOT / "integrations" / "claude-code" / "nunchi_prompt_gate.py"
+_HOOK_SCRIPT_MARKERS = ("nunchi_prompt_gate", "nunchi_send_gate")
 _BARE_ENV_PATTERNS = (
     "**os.environ",
     "os.environ.copy",
     "dict(os.environ)",
     "os.environ.items(",
 )
-
-_HOOK = _REPO_ROOT / "integrations" / "claude-code" / "nunchi_gate_hook.py"
 
 
 def _iter_test_sources() -> list[pathlib.Path]:
@@ -145,7 +144,7 @@ class TestHookRunnersUseSandbox(unittest.TestCase):
 
     def test_detector_catches_bare_env_pattern(self):
         bad = (
-            "HOOK = 'nunchi_gate_hook.py'\n"
+            "HOOK = 'nunchi_prompt_gate.py'\n"
             "env = {**os.environ, 'X': '1'}\n"
         )
         self.assertTrue(_scan_for_bare_env("sample.py", bad))
@@ -191,8 +190,8 @@ class TestRuntimeCanary(unittest.TestCase):
     operator's live log)."""
 
     def test_receipt_fallthrough_lands_in_sandbox_home(self):
-        # Empty transcript → "allow-untriggered" receipt (a write path that
-        # needs no gate binary).
+        # Channel-tagged prompt + missing gate binary → "allow-gate-error"
+        # receipt (a write path that needs no gate binary).
         fd, transcript = tempfile.mkstemp(suffix=".jsonl")
         os.close(fd)
         env = sandbox_env({"NUNCHI_CHANNEL_BIN": "/nonexistent"})
@@ -201,14 +200,17 @@ class TestRuntimeCanary(unittest.TestCase):
         hook_input = {
             "session_id": "sess-canary",
             "transcript_path": transcript,
-            "hook_event_name": "PreToolUse",
-            "tool_name": "mcp__plugin_discord_discord__reply",
-            "tool_input": {"chat_id": "enforcement-canary", "text": "hi"},
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": (
+                '<channel source="discord" chat_id="enforcement-canary" '
+                'message_id="m1" user="alice" ts="2026-01-01T00:00:00Z">\n'
+                "hi\n</channel>"
+            ),
             "cwd": "/tmp",
         }
         try:
             result = subprocess.run(
-                [sys.executable, str(_HOOK)],
+                [sys.executable, str(_GATE)],
                 input=json.dumps(hook_input),
                 capture_output=True,
                 text=True,

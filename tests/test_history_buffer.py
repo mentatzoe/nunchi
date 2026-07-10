@@ -1,4 +1,4 @@
-"""Tests for hermes rolling history buffer, hook window, and adapter defaults.
+"""Tests for hermes rolling history buffer and adapter defaults.
 
 All tests are stdlib-only (no pytest). Run from the worktree root with:
     python3 -m unittest tests.test_history_buffer
@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import textwrap
@@ -19,11 +18,8 @@ import unittest
 import unittest.mock
 from types import SimpleNamespace
 
-from tests.hook_sandbox import sandbox_env
-
 _WORKTREE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _PLUGIN_PATH = _WORKTREE_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
-_HOOK_PATH = _WORKTREE_ROOT / "integrations" / "claude-code" / "nunchi_gate_hook.py"
 
 sys.path.insert(0, str(_WORKTREE_ROOT / "src"))
 
@@ -399,141 +395,6 @@ class TestRollingBufferMemorySafety(unittest.TestCase):
             self.assertLessEqual(total, 52, f"Too many entries: {total}")
         finally:
             self.p._HISTORY_MAX_TOTAL = original_max
-
-
-# ===========================================================================
-# Section 2: Hook window env-var tests
-# ===========================================================================
-
-class TestHookHistoryWindowEnvVar(unittest.TestCase):
-    """NUNCHI_HOOK_HISTORY_WINDOW controls how many transcript entries are used."""
-
-    def _run_hook(self, hook_input: dict, env_overrides: dict | None = None) -> tuple[int, str, str]:
-        # Sandboxed env: HOME + NUNCHI_HOOK_LOG pinned to a temp dir so hook
-        # receipts can never fall through to the operator's real log file.
-        env = sandbox_env(env_overrides)
-        result = subprocess.run(
-            [sys.executable, str(_HOOK_PATH)],
-            input=__import__("json").dumps(hook_input),
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        return result.returncode, result.stdout, result.stderr
-
-    def _make_transcript(self, lines: list[dict]) -> str:
-        import json, tempfile
-        fd, path = tempfile.mkstemp(suffix=".jsonl")
-        with os.fdopen(fd, "w") as fh:
-            for obj in lines:
-                fh.write(json.dumps(obj) + "\n")
-        return path
-
-    def _make_gate_stub_env(self, directive: dict) -> tuple[str, dict]:
-        import json, tempfile, textwrap
-        json_literal = json.dumps(json.dumps(directive))
-        stub_code = textwrap.dedent(f"""\
-            #!/usr/bin/env python3
-            import sys
-            sys.stdin.read()
-            print({json_literal})
-            sys.exit(0)
-        """)
-        fd, stub = tempfile.mkstemp(suffix=".py")
-        with os.fdopen(fd, "w") as fh:
-            fh.write(stub_code)
-        wr_fd, wrapper = tempfile.mkstemp(suffix=".sh")
-        with os.fdopen(wr_fd, "w") as fh:
-            fh.write(f"#!/bin/sh\n{sys.executable} {stub} \"$@\"\n")
-        os.chmod(wrapper, 0o755)
-        return wrapper, {"NUNCHI_CHANNEL_BIN": wrapper}
-
-    def _user_entry(self, chat_id: str, msg_id: str, user: str, body: str) -> dict:
-        tag = (
-            f'<channel source="discord" chat_id="{chat_id}" message_id="{msg_id}"'
-            f' user="{user}" ts="2026-01-01T00:00:00Z">\n{body}\n</channel>'
-        )
-        return {"type": "user", "message": {"role": "user", "content": tag}}
-
-    def _hook_input(self, transcript_path: str, chat_id: str = "c1") -> dict:
-        return {
-            "session_id": "sess-1",
-            "transcript_path": transcript_path,
-            "hook_event_name": "PreToolUse",
-            "tool_name": "mcp__plugin_discord_discord__reply",
-            "tool_input": {"chat_id": chat_id, "text": "hello"},
-            "cwd": "/tmp",
-            "permission_mode": "default",
-        }
-
-    def test_default_window_is_25(self) -> None:
-        """Without env override, NUNCHI_HOOK_HISTORY_WINDOW defaults to 25."""
-        import importlib.util, types
-        spec = importlib.util.spec_from_file_location("hook_under_test", _HOOK_PATH)
-        assert spec and spec.loader
-        mod = importlib.util.module_from_spec(spec)
-        # Run with no env override; the module reads _MAX_HISTORY at import time.
-        env_backup = os.environ.pop("NUNCHI_HOOK_HISTORY_WINDOW", None)
-        try:
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            self.assertEqual(mod._MAX_HISTORY, 25)
-        finally:
-            if env_backup is not None:
-                os.environ["NUNCHI_HOOK_HISTORY_WINDOW"] = env_backup
-
-    def test_env_var_overrides_window(self) -> None:
-        """NUNCHI_HOOK_HISTORY_WINDOW env var controls the window size."""
-        # Build a transcript with 30 inbound messages on chat c1.
-        lines = [
-            self._user_entry("c1", f"m{i}", "alice", f"history message {i}")
-            for i in range(30)
-        ]
-        # The 31st is the "trigger" (most recent inbound).
-        lines.append(self._user_entry("c1", "m31", "alice", "trigger message"))
-        transcript = self._make_transcript(lines)
-        directive = {
-            "verdict": "SPEAK", "silent": False,
-            "run_shape": "Produce one normal participant turn.",
-            "reasons": ["direct address"], "confidences": {},
-            "context_checked": [], "request_id": None,
-            "classifier_model": "stub", "degraded": False,
-        }
-        stub, stub_env = self._make_gate_stub_env(directive)
-
-        payloads_received = []
-
-        try:
-            # Run hook with window=5; only 5 history entries should be sent.
-            rc, stdout, stderr = self._run_hook(
-                self._hook_input(transcript),
-                env_overrides={**stub_env, "NUNCHI_HOOK_HISTORY_WINDOW": "5"},
-            )
-            # Hook should allow (exit 0, print allow JSON).
-            self.assertEqual(rc, 0, f"stderr: {stderr}")
-        finally:
-            os.unlink(transcript)
-
-    def test_env_var_backward_compat_absent(self) -> None:
-        """When NUNCHI_HOOK_HISTORY_WINDOW is absent, hook runs with default 25."""
-        env = sandbox_env()
-        env.pop("NUNCHI_HOOK_HISTORY_WINDOW", None)
-        lines = [self._user_entry("c1", "m1", "alice", "only msg")]
-        lines.append(self._user_entry("c1", "m2", "alice", "trigger"))
-        transcript = self._make_transcript(lines)
-        directive = {
-            "verdict": "SPEAK", "silent": False,
-            "run_shape": "Produce one normal participant turn.",
-            "reasons": ["ok"], "confidences": {},
-            "context_checked": [], "request_id": None,
-            "classifier_model": "stub", "degraded": False,
-        }
-        stub, stub_env = self._make_gate_stub_env(directive)
-        try:
-            env.update(stub_env)
-            rc, _, _ = self._run_hook(self._hook_input(transcript), env_overrides=env)
-            self.assertEqual(rc, 0)
-        finally:
-            os.unlink(transcript)
 
 
 # ===========================================================================

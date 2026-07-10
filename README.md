@@ -267,7 +267,7 @@ deployment already understands.
 | `nunchi-telegram` | Telegram | stdlib | code-only |
 | `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
 | Hermes plugin | Hermes gateway | stdlib | live-run; evidence owed |
-| Claude Code hook | Claude Code PreToolUse | stdlib | offline-tested; live evidence incomplete |
+| Claude Code gate | Claude Code UserPromptSubmit (one judgment, at wake) | stdlib | offline-tested; live evidence incomplete |
 | Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | bounded live-smokes evidenced |
 
 Status labels are evidence tiers, not release-alpha/beta gates. `code-only`

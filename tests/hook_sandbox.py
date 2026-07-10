@@ -1,7 +1,7 @@
 """Sandboxed subprocess environment for hook-script tests.
 
-The Claude Code hook scripts (``nunchi_gate_hook.py`` /
-``nunchi_prompt_gate.py``) resolve their receipt log from
+The Claude Code hook script (``nunchi_prompt_gate.py``) resolves its
+receipt log from
 ``NUNCHI_HOOK_LOG`` with a home-anchored default
 (``~/.claude/nunchi-gate-receipts.jsonl``). Tests that ran those scripts
 with the bare parent environment polluted the OPERATOR'S LIVE receipt log

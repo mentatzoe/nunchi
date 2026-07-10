@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Claude Code UserPromptSubmit hook: gate inbound channel messages pre-LLM.
+"""Claude Code UserPromptSubmit hook: nunchi's ONE judgment per turn, at wake.
 
 Reads the UserPromptSubmit JSON envelope from stdin; when the submitted
 prompt contains a ``<channel ...>`` tag (indicating a Discord/channel-sourced
 message), parses the session transcript to build a nunchi-channel payload,
-calls the gate binary, and outputs a block decision or exits silently.
+calls the gate binary, and decides admission. This is the only judgment the
+turn gets — there is no send-time re-judgment (a retired second hook used to
+re-judge composed replies against the newest transcript line and silenced them
+by mistake; nunchi now judges once, here, and then gets out of the way).
 
 Prompts WITHOUT a channel tag are the operator typing at the terminal and are
 ALWAYS allowed through immediately — zero gate calls, no receipt.
@@ -14,9 +17,15 @@ gate timeout, or unparseable output allows the prompt through and records the
 failure in the receipt log.  A broken gate must never silence the operator or
 wedge the session.
 
-VERDICT POLARITY (inbound gate — note this is the inverse of the outbound hook):
-    PASS        → block the prompt (not this agent's turn; suppress before LLM).
-    SPEAK / ACK / ASK → allow the prompt through.
+DECISIONS:
+    PASS (confident)  → block the prompt (not this agent's turn; suppress pre-LLM).
+    PASS (uncertain)  → DEFER: the gate abstains and hands the turn to the
+                        agent's own model with its hesitation noted. The agent
+                        may reply or choose silence — a small fast gate may only
+                        silence what it can confidently judge.
+    SPEAK / ACK / ASK → admit: allow the prompt through, noting in-band which
+                        message this turn answers (the admission travels with
+                        the turn; no side state).
 
 Environment variables
 ---------------------
@@ -43,6 +52,13 @@ NUNCHI_HOOK_LOG            Path for per-call receipt log
                            (default: ``~/.claude/nunchi-gate-receipts.jsonl``).
 NUNCHI_CHANNEL_BIN         Path or name of the nunchi-channel binary
                            (default: located via ``shutil.which("nunchi-channel")``).
+NUNCHI_DEFER               Kill switch for DEFER. Default ON (abstain on an
+                           uncertain PASS); set to ``off``/``0``/``false``/``no``
+                           to make every PASS block regardless of confidence.
+NUNCHI_DEFER_MARGIN        A PASS is "uncertain" when the best alternative
+                           verdict's confidence is within this margin of it
+                           (default: 0.25; uncalibrated placeholder — see
+                           DEFER_EVAL.md).
 """
 
 from __future__ import annotations
@@ -107,6 +123,40 @@ _ATTR_RE = re.compile(r'(\w+)=["\']([^"\']*)["\']')
 
 # Tool pattern for identifying outbound self-sends in the transcript.
 _TOOL_RE = re.compile(os.environ.get("NUNCHI_HOOK_TOOL_PATTERN", "__reply$"))
+
+# DEFER: abstain on an uncertain PASS instead of silencing. Default ON — the
+# abstention IS the design, not an experiment; the env var is a kill switch.
+_DEFER_ENABLED = (os.environ.get("NUNCHI_DEFER") or "").strip().lower() not in {
+    "off", "0", "false", "no",
+}
+
+
+def _defer_margin() -> float:
+    try:
+        return float(os.environ.get("NUNCHI_DEFER_MARGIN") or 0.25)
+    except ValueError:
+        return 0.25
+
+
+_ALT_VERDICTS = ("SPEAK", "ACK", "ASK")
+
+
+def _uncertain_pass(directive: dict, margin: float) -> bool:
+    """True when the gate is about to silence an *ambiguous* bid: verdict PASS,
+    but some alternative verdict's confidence is within *margin* of PASS's.
+    Missing/malformed confidences read as confident — the gate then blocks as
+    before, so a degraded classifier can never widen what gets through."""
+    if directive.get("verdict") != "PASS":
+        return False
+    conf = directive.get("confidences")
+    if not isinstance(conf, dict):
+        return False
+    try:
+        pass_c = float(conf.get("PASS", 0.0))
+        best_alt = max(float(conf.get(k, 0.0)) for k in _ALT_VERDICTS)
+    except (TypeError, ValueError):
+        return False
+    return (pass_c - best_alt) < margin
 
 # ---------------------------------------------------------------------------
 # Channel tag parsing
@@ -274,7 +324,22 @@ def _block_output(reason: str) -> str:
     return json.dumps({"decision": "block", "reason": reason})
 
 
-# Allow → exit 0 with no stdout output.
+def _context_output(context: str) -> str:
+    """Allow the prompt through with a short nunchi note added to the turn's
+    context. The note carries admission facts only (verdict, origin, the gate's
+    hesitation) — never reply prose; what to say, and whether to say anything,
+    stays the agent's."""
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": context,
+            }
+        }
+    )
+
+
+# Plain allow (operator prompts) → exit 0 with no stdout output.
 
 # ---------------------------------------------------------------------------
 # Receipt logging
@@ -295,8 +360,8 @@ def _write_receipt(
 ) -> None:
     """Append one JSON line to the receipts log.
 
-    Always sets ``"direction": "inbound"`` to distinguish these records from
-    outbound (PreToolUse) receipts written to the same log file.
+    Always sets ``"direction": "inbound"`` — kept for log-format continuity
+    with records written before the send-time hook was retired.
     """
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -463,8 +528,36 @@ def _run_gate(
     silent: bool = directive.get("silent", False)
     reasons: list[str] = directive.get("reasons") or []
 
-    # PASS (or silent=true) → block the prompt before the LLM runs.
+    # PASS (or silent=true) → the gate wants to silence this turn.
     if verdict == "PASS" or silent:
+        # DEFER: a small fast gate may only silence what it can confidently
+        # judge. On an *uncertain* PASS it abstains — the turn goes to the
+        # agent's own model with the hesitation noted, and the agent may still
+        # choose silence. No second classifier; the "bigger model" is the agent.
+        if _DEFER_ENABLED and _uncertain_pass(directive, _defer_margin()):
+            conf = directive.get("confidences") or {}
+            _write_receipt(
+                session_id=session_id,
+                chat_id=chat_id,
+                trigger_event=trigger_event,
+                history_len=len(history_events),
+                verdict=verdict,
+                silent=silent,
+                action="defer-uncertain-pass",
+                elapsed_ms=elapsed_ms,
+                reasons=reasons,
+                error=None,
+            )
+            note = (
+                "nunchi: the gate leaned PASS on this message but not confidently "
+                f"(confidences: {json.dumps(conf)}). It abstains rather than "
+                "silence you. Read the room with your own judgment — replying and "
+                "staying silent are both fine outcomes; if you stay silent, simply "
+                "send nothing this turn."
+            )
+            print(_context_output(note))
+            sys.exit(0)
+
         first_reason = (reasons[0] if reasons else "not this agent's turn").rstrip(".")
         block_reason = f"nunchi gate: PASS — {first_reason}."
         _write_receipt(
@@ -482,7 +575,9 @@ def _run_gate(
         print(_block_output(block_reason))
         sys.exit(0)
 
-    # SPEAK / ACK / ASK → allow through (no stdout).
+    # SPEAK / ACK / ASK → admit. The admission note travels with the turn so
+    # the composition stays anchored to the message it answers, even if later
+    # room lines land while the agent is composing.
     _write_receipt(
         session_id=session_id,
         chat_id=chat_id,
@@ -495,6 +590,13 @@ def _run_gate(
         reasons=reasons,
         error=None,
     )
+    note = (
+        f"nunchi: admitted ({verdict}) — this turn answers message "
+        f"{trigger_event['message_id'] or '?'} from {trigger_event['author'] or '?'}. "
+        "The gate judged only that a turn is open; what you say, and whether you "
+        "say anything at all, is yours."
+    )
+    print(_context_output(note))
     sys.exit(0)
 
 
