@@ -62,16 +62,26 @@ for its evaluation plan.
 
 ## Honest soft spots (not solved)
 
-- **Concurrent distinct admits** (A and C both admitted, overlapping replies):
-  newest-wins binds the current composition correctly, but a reply still in
-  flight for A binds to C. Needs a correlation token threaded through
-  composition; this does not do that.
+- **Concurrent same-key admits** (A and C admitted for the same session+chat,
+  overlapping replies): resolution is last-*write*-wins on the rename, **not**
+  newest-by-timestamp, so a concurrent *older* admit that renames last would win.
+  Characterized by `test_same_key_is_last_write_wins_not_newest_timestamp`.
+  Closing it needs one file per admission selected by an immutable sequence, not
+  per-key overwrite.
+- **Retry causality is unsupported** — the permit is one-shot (consumed on the
+  first outbound decision), so a transport *retry* of that same send falls back to
+  legacy newest-inbound binding. Made legible as an `expectedFailure`
+  (`test_retry_after_consume_rebinds_origin_UNSUPPORTED`) so "documented" cannot
+  read as "solved"; closing it needs a retry correlation token distinct from the
+  one-shot permit.
 - **No `PostToolUse` delivery-confirmed fulfilment** — consume is on the
   *decision*, not a recorded Discord receipt. Vigil's durable send-intent +
   receipt finalize is the robustness upgrade, deferred.
 - **DEFER is v1 mechanism, uncalibrated** — the uncertainty threshold's value
   (does it improve room behaviour?) is unproven pending the eval arm; disabled
-  unless `NUNCHI_DEFER_MODEL` is set.
+  unless `NUNCHI_DEFER` is set. DEFER is *abstention*, not model routing: an
+  uncertain PASS returns the turn to the participant's own judgment, with no
+  second classifier in the live path (`DEFER_EVAL.md`).
 - **Full suite is not clean-green here** — targeted suites (causal/defer/install/
   hooks) pass, but a clean-env full run has ~4 pre-existing baseline failures
   reproducible on `main` (not introduced by this branch).

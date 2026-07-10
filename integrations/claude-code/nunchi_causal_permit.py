@@ -22,10 +22,15 @@ queue / obligation ledger:
 
 **Storage is one file per (session, chat) key** (``<dir>/<sha>.json``), not a
 shared JSON map. Concurrent admits for *different* keys write to *different*
-files and cannot clobber each other; same-key writes resolve by atomic rename
-(newest wins). This removes the lost-permit race a shared read-modify-write map
-would have. Whether an origin is still *worth* answering is the classifier's
-call, not this module's — a drifted thread is a correct ``PASS``.
+files and cannot clobber each other — this removes the cross-key lost-permit
+race a shared read-modify-write map would have. **Same-key** newest-wins holds
+for *sequential* admits (the normal case: the inbound gate fires once per
+message); two *truly concurrent* same-key admits still race on the rename and
+last-writer-wins, which is not guaranteed to be newest. That is a known,
+tested limitation (see the conformance test); closing it needs one file per
+admission selected by an immutable sequence, not per-key overwrite. Whether an
+origin is still *worth* answering is the classifier's call, not this module's —
+a drifted thread is a correct ``PASS``.
 """
 from __future__ import annotations
 

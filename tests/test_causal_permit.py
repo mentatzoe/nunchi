@@ -81,6 +81,17 @@ class PermitStoreTests(unittest.TestCase):
         self.assertEqual(
             permit.read_permit("s2", "c2", directory=self.dir, now=101.0)["origin_message_id"], "B")
 
+    def test_same_key_is_last_write_wins_not_newest_timestamp(self):
+        # KNOWN LIMITATION (Vigil): per-key files stop cross-key clobber, but
+        # same-key resolution is last-WRITE-wins (rename order), NOT
+        # newest-by-timestamp. A truly concurrent *older* admit that renames last
+        # would win. Closing it needs one file per admission + sequence-select.
+        self._write("s1", "c1", "C", now=200.0)  # newer by timestamp
+        self._write("s1", "c1", "A", now=100.0)  # older, but written last
+        p = permit.read_permit("s1", "c1", directory=self.dir, now=300.0, ttl=1000.0)
+        self.assertEqual(p["origin_message_id"], "A",
+                         "same-key resolution is last-write-wins, not newest-timestamp — the known race")
+
 
 def _capturing_gate(directive: dict) -> tuple[str, str]:
     """A nunchi-channel stub that records the payload it receives, then emits
@@ -175,6 +186,55 @@ class FixtureZero(unittest.TestCase):
         second = self._run(transcript, pp)
         self.assertEqual(second["trigger"]["message_id"], "B",
                          "a second, unrelated decision falls to legacy — no retargeting lease")
+
+    def _receipt_for(self, permit_path):
+        """Run the hook with a redirected receipt log; return the last record."""
+        wrapper, _capture = _capturing_gate(_make_speak_directive())
+        log_fd, log_path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(log_fd)
+        _run_hook(
+            _hook_input(chat_id="c1", text="I'm good, Zoe.",
+                        transcript_path=self._transcript_A_then_B(), session_id="sess-abc"),
+            env_overrides={"NUNCHI_CHANNEL_BIN": wrapper,
+                           "NUNCHI_PERMIT_DIR": str(permit_path),
+                           "NUNCHI_HOOK_LOG": log_path},
+        )
+        lines = [ln for ln in pathlib.Path(log_path).read_text().splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def test_receipt_records_causal_binding_provenance(self):
+        """The receipt must make the binding legible to the eval arm: a
+        permit-bound decision records bound_via=causal-permit and permit_consumed."""
+        pp = pathlib.Path(tempfile.mkdtemp())
+        permit.write_permit("sess-abc", "c1", "A", directory=pp, now=time.time())
+        rec = self._receipt_for(pp)
+        self.assertEqual(rec["bound_via"], "causal-permit")
+        self.assertTrue(rec["permit_consumed"])
+        self.assertEqual(rec["trigger_message_id"], "A")
+
+    def test_receipt_records_legacy_binding_provenance(self):
+        """No permit → the receipt records bound_via=legacy-scan, not consumed."""
+        rec = self._receipt_for(pathlib.Path(tempfile.mkdtemp()))  # empty: no permit
+        self.assertEqual(rec["bound_via"], "legacy-scan")
+        self.assertFalse(rec["permit_consumed"])
+        self.assertEqual(rec["trigger_message_id"], "B")
+
+    @unittest.expectedFailure
+    def test_retry_after_consume_rebinds_origin_UNSUPPORTED(self):
+        """UNSUPPORTED, made legible (Vigil): the causal contract is *not* carried
+        through a transport retry. The permit is one-shot — consumed on the first
+        outbound decision — so if Claude Code retries that same send, the retry has
+        no permit and falls to legacy newest-inbound (binds B). This asserts the
+        turn's *intended* origin A and is marked expectedFailure so the gap reads
+        as a known limitation, not a solved case. Closing it needs a retry
+        correlation token distinct from the one-shot permit."""
+        pp = pathlib.Path(tempfile.mkdtemp())
+        permit.write_permit("sess-abc", "c1", "A", directory=pp, now=time.time())
+        transcript = self._transcript_A_then_B()
+        self._run(transcript, pp)              # first decision consumes the permit
+        retry = self._run(transcript, pp)      # a retry of the *same* send
+        self.assertEqual(retry["trigger"]["message_id"], "A",
+                         "retry causality is unsupported — this is expected to fail")
 
 
 if __name__ == "__main__":

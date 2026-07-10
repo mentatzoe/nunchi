@@ -309,8 +309,14 @@ def _write_receipt(
     elapsed_ms: float,
     reasons: list[str],
     error: str | None,
+    extra: dict | None = None,
 ) -> None:
-    """Append one JSON line to the receipts log."""
+    """Append one JSON line to the receipts log.
+
+    ``extra`` carries decision provenance the eval arm reads back — how the
+    trigger was bound (``bound_via``, ``permit_consumed``) and whether DEFER
+    abstained (``defer``). Telemetry only; a missing key is not an error.
+    """
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         record = {
@@ -326,6 +332,8 @@ def _write_receipt(
             "elapsed_ms": round(elapsed_ms, 1),
             "reasons": reasons[:3],
         }
+        if extra:
+            record.update(extra)
         if error:
             record["error"] = error
         with open(_LOG_PATH, "a", encoding="utf-8") as fh:
@@ -546,31 +554,18 @@ def _run_gate(
         print(out)
         sys.exit(0)
 
-    # DEFER v1 (host-side routing): if the cheap gate is about to suppress an
-    # *ambiguous* bid, escalate the same envelope once to a stronger model and
-    # use its verdict. Fail-open on frontier failure — never a forced PASS.
-    # Disabled unless NUNCHI_DEFER_MODEL is set; absent module → cheap stands.
+    # DEFER v1 (gate abstention, not model routing): if the cheap gate is about
+    # to suppress an *ambiguous* bid, abstain — do not veto the reply the
+    # participant already composed. No live model call, no second classifier;
+    # the participant's own judgment stands. Disabled unless NUNCHI_DEFER;
+    # absent module → the cheap directive stands.
+    _defer_meta: dict = {}
     try:
         from nunchi_defer import resolve as _defer_resolve
 
-        def _escalate(frontier_model: str) -> dict:
-            env = os.environ.copy()
-            env["NUNCHI_CLASSIFIER_MODEL"] = frontier_model
-            r = subprocess.run(
-                [_CHANNEL_BIN],
-                input=json.dumps(payload),
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT,
-                env=env,
-            )
-            if r.returncode != 0:
-                raise RuntimeError((r.stderr or "").strip() or f"exit {r.returncode}")
-            return json.loads(r.stdout)
-
-        directive, _defer_meta = _defer_resolve(directive, _escalate)
+        directive, _defer_meta = _defer_resolve(directive)
     except Exception:
-        pass  # DEFER module absent / failed import → the cheap directive stands
+        pass
 
     verdict: str = directive.get("verdict", "")
     silent: bool = directive.get("silent", False)
@@ -589,6 +584,18 @@ def _run_gate(
         action = f"allow-{verdict.lower()}"
         out = _allow_output()
 
+    receipt_extra: dict = {
+        "bound_via": bound_via,
+        "permit_consumed": bound_via == "causal-permit",
+    }
+    if _defer_meta.get("defer_triggered"):
+        # Record the abstention so the offline evaluator (DEFER_EVAL.md) can review
+        # what the cheap gate would have suppressed.
+        receipt_extra["defer"] = {
+            "resolution": _defer_meta.get("resolution"),
+            "cheap_verdict": _defer_meta.get("cheap_verdict"),
+            "cheap_confidences": _defer_meta.get("cheap_confidences"),
+        }
     _write_receipt(
         session_id=session_id,
         chat_id=chat_id,
@@ -600,6 +607,7 @@ def _run_gate(
         elapsed_ms=elapsed_ms,
         reasons=reasons,
         error=None,
+        extra=receipt_extra,
     )
     # One-shot: consume the causal permit on this first outbound decision so an
     # unrelated later send in the same session/chat cannot inherit it. (A
