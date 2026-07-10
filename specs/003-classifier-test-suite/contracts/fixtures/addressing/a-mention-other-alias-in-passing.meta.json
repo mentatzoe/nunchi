@@ -9,6 +9,6 @@
     "surface_contract": null
   },
   "failure_mode": "seeing its own alias ('Vigil') anywhere in the text, the agent treats a message @-mentioning another participant as its turn and butts in",
-  "invariant": "an alias in passing prose is a reference, not an address; the structured @mention names the addressee",
-  "rationale": "The @mention targets a different participant's snowflake; 'Vigil' is only credited for earlier work. In live runs the deterministic fast-path resolves this without a model call (the mentioned id matches none of the agent's identities; prose never counts); the fixture pins the ground truth for model-scored runs too."
+  "invariant": "an alias in passing prose is a reference, not an address \u2014 and a structured @mention of another participant is likewise referential evidence, not proof of exclusive targeting; whose turn it is stays a semantic judgment",
+  "rationale": "The @mention targets a different participant's snowflake; 'Vigil' is only credited for earlier work. Expected ground truth stays PASS \u2014 but as a MODEL-scored judgment. The deterministic fast-path no longer short-circuits foreign mentions (removed 2026-07-10: a live false PASS proved a foreign mention cannot prove the floor went elsewhere \u2014 the operator's direct correction of an agent was hard-PASSed at 1.0 with no model call). This fixture and the 2026-07-08 over-wake class it pins are the two sides the classifier must now hold together: name-in-prose must not force a wake, and mention-of-another must not force silence."
 }

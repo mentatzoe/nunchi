@@ -513,21 +513,26 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         self.assertEqual(flipped["a-mention-snowflake-direct"], "fail")
 
     def test_addressing_pass_fixtures_resolve_via_fastpath_without_a_provider(self):
-        """The two structurally-certain a-* fixtures resolve deterministically:
-        with no provider env at all (no key, no model, no injection), the
-        fast-path returns their expected PASS without any model call."""
+        """Only the structurally-certain fixture resolves deterministically:
+        self-echo. The mention-in-passing fixture used to sit here too — the
+        mention-elsewhere short-circuit was removed 2026-07-10 (referential
+        mention is not proof of exclusive targeting), so that fixture is now
+        model-scored and must NOT resolve without a provider."""
         from nunchi.core import evaluate as core_evaluate
+        from nunchi.errors import ValidationError
 
         by_id = {
             f.id: f
             for f in loader.discover_fixtures(FIXTURES_ROOT, source="addressing")
         }
-        for fixture_id in ("a-self-echo-alias-author", "a-mention-other-alias-in-passing"):
-            with self.subTest(fixture=fixture_id):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    result = core_evaluate(by_id[fixture_id].envelope)
-                self.assertEqual(result["verdict"], "PASS")
-                self.assertEqual(result["classifier_provider"], "fastpath")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            result = core_evaluate(by_id["a-self-echo-alias-author"].envelope)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["classifier_provider"], "fastpath")
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValidationError):
+                core_evaluate(by_id["a-mention-other-alias-in-passing"].envelope)
 
 
 class InvariantDispatchTests(unittest.TestCase):

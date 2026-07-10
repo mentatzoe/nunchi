@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — fastpath mention-elsewhere short-circuit (core, all adapters)
+
+- **A foreign `<@id>` mention no longer produces a deterministic PASS.** The
+  rule conflated referential mention ("another agent appears in the story")
+  with floor assignment ("the message is for them"). Live false PASS,
+  2026-07-10: the operator replied to an agent's own message, correcting it by
+  name, while @mentioning a peer who featured in the anecdote — the fast path
+  stamped `PASS 1.0`, `classifier_model: null`, and no model ever read it.
+  Because a fastpath PASS carries full confidence, it also sailed past DEFER —
+  deterministic overconfidence sat above the uncertainty lane. Room-agreed
+  contract (Aleph/Aether/Vigil/Station): *a deterministic rule may hard-PASS
+  only what it can prove; a foreign mention proves reference, not exclusive
+  targeting.* Foreign-mention messages now always get semantic adjudication.
+  Self-caused echo remains the sole short-circuit (structurally certain).
+  Fixture `a-mention-other-alias-in-passing` keeps its PASS ground truth but is
+  now model-scored; the live canary is pinned in `tests/test_fastpath.py`.
+
 ### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
 
 - **Retired the Claude Code send-time (`PreToolUse`) gate** (`nunchi_gate_hook.py`

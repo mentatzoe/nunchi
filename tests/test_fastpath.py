@@ -35,19 +35,39 @@ def _request(*, trigger, context=None, agent=None, request_id="req-fastpath"):
 
 
 class FastPathShortCircuitTests(unittest.TestCase):
-    def test_mention_to_another_id_passes_via_fastpath(self):
+    def test_mention_to_another_id_escalates_referential_not_exclusive(self):
+        """A foreign @mention is evidence of REFERENCE, not proof the floor went
+        elsewhere (room contract, 2026-07-10). The old rule hard-PASSed here at
+        1.0 without any model reading the message; now it must escalate."""
         request = _request(trigger={"id": "t-elsewhere", "content": "hey <@999> can you take this?"})
         with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
-            result = evaluate(request)
+            with self.assertRaises(ValidationError):
+                evaluate(request)
 
-        self.assertEqual(result["verdict"], "PASS")
-        self.assertEqual(result["classifier"], "product")
-        self.assertEqual(result["classifier_provider"], "fastpath")
-        self.assertNotIn("classifier_model", result)
-        self.assertEqual(result["confidences"], {"PASS": 1.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0})
-        self.assertEqual(result["context_checked"], ["trigger:t-elsewhere"])
-        self.assertTrue(result["reasons"])
-        self.assertEqual(result["request_id"], "req-fastpath")
+    def test_live_canary_operator_correction_with_referential_mention_escalates(self):
+        """FIXTURE: the 2026-07-10 false PASS. The operator replied to THIS
+        agent's message, correcting it by name ("Station"), while referentially
+        @mentioning a peer who featured in the anecdote. The mention-elsewhere
+        rule stamped PASS 1.0 / no model — DEFER never got a say because the
+        deterministic path manufactured full confidence. Semantic adjudication
+        is mandatory here."""
+        request = _request(
+            trigger={
+                "id": "t-canary",
+                "author": "zoe",
+                "content": (
+                    "No, in all fairness, Station is just Station for now, but I "
+                    "referred to the underlying agent / model family… The bot I "
+                    "added the discord nickname as Claude is Dalgos which is why "
+                    "it got very confusing when <@999> was using it to smoke test, LOL"
+                ),
+            },
+            agent={"id": "station", "mention_id": AGENT_MENTION_ID,
+                   "aliases": ["Station", "Fable", "Claude", "Claude Code"]},
+        )
+        with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
+            with self.assertRaises(ValidationError):
+                evaluate(request)
 
     def test_self_echo_by_author_passes_via_fastpath(self):
         request = _request(
@@ -101,14 +121,10 @@ class FastPathShortCircuitTests(unittest.TestCase):
 
 
 class FastPathAliasTests(unittest.TestCase):
-    """agent.aliases joins the identity bundle for both fast-path rules.
-
-    Tonight's live failure class: a runner whose configured mention_id was
-    the display name ("vigil") PASSed a direct <@snowflake> mention because
-    the snowflake matched none of its known identities. With the snowflake
-    (or any other identity) listed in aliases, the mention-aimed-elsewhere
-    short-circuit must NOT fire.
-    """
+    """agent.aliases joins the identity bundle for the self-echo rule, and a
+    foreign mention never short-circuits regardless of alias configuration
+    (the mention-elsewhere rule was removed 2026-07-10 — referential mention
+    is not proof of exclusive targeting)."""
 
     ALIAS_SNOWFLAKE = "222222222222222222"
 
@@ -126,17 +142,16 @@ class FastPathAliasTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 evaluate(request)
 
-    def test_mention_elsewhere_still_passes_with_aliases_present(self):
-        # Aliases present but the mentioned id is foreign -> short-circuit intact.
+    def test_mention_elsewhere_escalates_even_with_aliases_present(self):
+        # A foreign mention with aliases configured is still only referential
+        # evidence -> escalate to the classifier; never a deterministic PASS.
         request = _request(
             trigger={"id": "t-foreign", "content": "hey <@999> can you take this?"},
             agent=self._agent(["Vigil", self.ALIAS_SNOWFLAKE]),
         )
         with patch.dict("os.environ", _OFFLINE_ENV, clear=True):
-            result = evaluate(request)
-
-        self.assertEqual(result["verdict"], "PASS")
-        self.assertEqual(result["classifier_provider"], "fastpath")
+            with self.assertRaises(ValidationError):
+                evaluate(request)
 
     def test_self_echo_by_alias_author_passes_via_fastpath(self):
         # A relay may report the author under the agent's display/profile name.

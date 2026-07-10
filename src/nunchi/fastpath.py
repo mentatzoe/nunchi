@@ -6,29 +6,38 @@ cut per-turn provider cost/latency for the unambiguous "not this agent's turn"
 cases, while escalating everything else to the LLM classifier untouched.
 
 Hard constraint: this short-circuit uses ONLY structured, deterministic signals
-(explicit ``<@id>`` mention tokens, author identity, exact content equality). It
-performs NO substring or keyword matching against natural-language content — the
-substring/keyword traps are exactly what the product classifier exists to catch,
-so the fast-path must never reintroduce them. When any precondition is missing or
-the situation is at all ambiguous, it returns ``None`` to escalate.
+(author identity, exact content equality). It performs NO substring or keyword
+matching against natural-language content — the substring/keyword traps are
+exactly what the product classifier exists to catch, so the fast-path must
+never reintroduce them. When any precondition is missing or the situation is at
+all ambiguous, it returns ``None`` to escalate.
+
+The bar for a short-circuit (room-agreed, 2026-07-10): a deterministic rule may
+hard-PASS only when it can PROVE the turn is not this agent's. A foreign
+``<@id>`` mention token cannot meet that bar — it is evidence that another
+participant appears in the message, not proof the floor went to them. The live
+canary: the operator replied to this agent's own message, correcting it, while
+referentially @mentioning a peer who featured in the anecdote — and the old
+mention-elsewhere rule stamped ``PASS 1.0`` without any model ever reading it.
+Referential mention ≠ floor assignment; that distinction is semantic, so it
+belongs to the classifier. The only remaining short-circuit is self-caused
+echo, where exclusivity is structural: an agent's own message needs no reply
+from itself, whoever it mentions.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .models import AdmissionRequest
 
 FASTPATH_PROVIDER = "fastpath"
 
-# Discord-style explicit mention tokens: <@123>, <@!123> (nickname form). Only a
-# fully structured token counts — bare numbers or names in prose never match, so
-# this can never collapse into substring/keyword guessing.
-_MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
-
 # A short-circuit always lands on PASS: the fast-path only ever decides "not this
 # agent's turn", never an affirmative SPEAK/ACK/ASK (those require judgement).
+# A fast-path PASS carries confidence 1.0, which sits above the DEFER margin by
+# construction — so it must only ever be minted where certainty is REAL, or it
+# manufactures exactly the overconfident silence DEFER exists to prevent.
 _PASS_CONFIDENCES = {"PASS": 1.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}
 
 
@@ -44,27 +53,6 @@ def _agent_aliases(agent: dict[str, Any] | None) -> set[str]:
     if not isinstance(aliases, list):
         return set()
     return {alias for alias in aliases if isinstance(alias, str) and alias.strip()}
-
-
-def _agent_identifiers(agent: dict[str, Any] | None) -> set[str]:
-    """Return the structured ids that address this agent (id + mention_id + aliases).
-
-    One agent may carry several identities at once — its ``id``, its platform
-    ``mention_id`` (an @mention token such as a Discord snowflake), and any
-    ``aliases`` (display names, secondary handles, other mention tokens). All
-    of them count as "this agent" for addressing. Non-string or empty values
-    are ignored. An empty set means we cannot determine addressing and
-    therefore must not short-circuit.
-    """
-    if not isinstance(agent, dict):
-        return set()
-    identifiers: set[str] = set()
-    for key in ("id", "mention_id"):
-        value = agent.get(key)
-        if isinstance(value, str) and value.strip():
-            identifiers.add(value)
-    identifiers.update(_agent_aliases(agent))
-    return identifiers
 
 
 def _pass_result(request: AdmissionRequest, *, context_checked: list[str], reason: str) -> dict[str, Any]:
@@ -85,37 +73,6 @@ def _pass_result(request: AdmissionRequest, *, context_checked: list[str], reaso
     if request.request_id is not None:
         payload["request_id"] = request.request_id
     return payload
-
-
-def _mention_elsewhere_result(request: AdmissionRequest) -> dict[str, Any] | None:
-    """PASS when the trigger explicitly @mentions others but not this agent.
-
-    Certainty conditions (all required):
-      - the agent's structured ids are known (id/mention_id/aliases present),
-      - the trigger content contains one or more explicit ``<@id>`` tokens,
-      - none of those mentioned ids is this agent's id/mention_id or one of
-        its aliases (an agent that lists its mention snowflake in ``aliases``
-        is addressed by that token, so the short-circuit must not fire).
-
-    If there are no mentions at all, this is NOT a short-circuit: the message may
-    be room-addressed, which only the classifier can judge.
-    """
-    agent_ids = _agent_identifiers(request.agent)
-    if not agent_ids:
-        return None
-
-    mentioned = set(_MENTION_PATTERN.findall(request.trigger.content))
-    if not mentioned:
-        return None
-
-    if agent_ids.intersection(mentioned):
-        return None
-
-    return _pass_result(
-        request,
-        context_checked=[request.trigger.reference],
-        reason="Trigger @mentions other participants only; this agent is not addressed.",
-    )
 
 
 def _self_caused_result(request: AdmissionRequest) -> dict[str, Any] | None:
@@ -165,8 +122,10 @@ def fast_verdict(request: AdmissionRequest) -> dict[str, Any] | None:
     """Resolve only certain cases without an LLM call; else return None.
 
     Returns a schema-valid PASS result dict for a deterministic short-circuit, or
-    ``None`` to escalate to the provider classifier. Self-caused echo is checked
-    before mention addressing because an echoed self-message is unambiguous
-    regardless of who else it mentions.
+    ``None`` to escalate to the provider classifier. The sole short-circuit is
+    self-caused echo. The former mention-elsewhere rule was removed 2026-07-10:
+    a foreign @mention is referential evidence, not proof of exclusive
+    targeting, and it hard-PASSed the operator's direct correction of this
+    agent at confidence 1.0 without semantic review (see module docstring).
     """
-    return _self_caused_result(request) or _mention_elsewhere_result(request)
+    return _self_caused_result(request)
