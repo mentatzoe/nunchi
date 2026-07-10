@@ -272,6 +272,10 @@ def _build_nunchi_payload(
             "author": ev["author"],
             "author_kind": ev["author_kind"],
             "message_id": ev["message_id"],
+            # Timestamps carry chronology so the classifier can tell a
+            # post-origin tail line from pre-origin lead-in — the difference
+            # between "answer the invitation" and "necro a drifted thread".
+            "timestamp": ev.get("ts", ""),
         }
 
     agent: dict = {"id": _AGENT_ID}
@@ -351,12 +355,33 @@ def _run_gate(
     # Parse transcript for events on this chat_id
     events = _parse_transcript(transcript_path, chat_id)
 
-    # Find the most recent inbound event
+    # --- Causal binding -----------------------------------------------------
+    # Bind the send to the message this reply was composed FOR — the origin the
+    # inbound gate recorded at admit time — instead of reverse-scanning for the
+    # newest inbound line. Otherwise a peer message that lands during
+    # composition steals the causal role and the already-composed reply dies as
+    # a false PASS (the "how's everyone" bug, 2026-07-10). Fail-safe: if the
+    # permit module or record is absent, fall back to the legacy newest scan.
     trigger_idx: int | None = None
-    for i in range(len(events) - 1, -1, -1):
-        if events[i]["kind"] == "inbound":
-            trigger_idx = i
-            break
+    bound_via = "legacy-scan"
+    try:
+        from nunchi_causal_permit import read_permit
+
+        permit = read_permit(session_id, chat_id)
+    except Exception:
+        permit = None
+    if permit is not None:
+        origin_mid = permit.get("origin_message_id")
+        for i, ev in enumerate(events):
+            if ev["kind"] == "inbound" and ev["message_id"] == origin_mid:
+                trigger_idx = i
+                bound_via = "causal-permit"
+                break
+    if trigger_idx is None:
+        for i in range(len(events) - 1, -1, -1):
+            if events[i]["kind"] == "inbound":
+                trigger_idx = i
+                break
 
     elapsed_ms = (time.monotonic() - t0) * 1000
 
@@ -378,7 +403,14 @@ def _run_gate(
         sys.exit(0)
 
     trigger_event = events[trigger_idx]
-    history_events = events[max(0, trigger_idx - _MAX_HISTORY) : trigger_idx]
+    # History spans BOTH sides of the causal boundary so the classifier can
+    # judge whether the origin is still live: the pre-origin lead-in AND the
+    # post-origin tail (peer lines that arrived after the origin). Timestamps
+    # carry the ordering. A thread that drifted or was already answered is then
+    # a correct PASS; its silence leaves the origin open.
+    pre = events[max(0, trigger_idx - _MAX_HISTORY) : trigger_idx]
+    post = events[trigger_idx + 1 : trigger_idx + 1 + _MAX_HISTORY]
+    history_events = pre + post
 
     # Build payload and call nunchi-channel
     payload = _build_nunchi_payload(trigger_event, history_events)

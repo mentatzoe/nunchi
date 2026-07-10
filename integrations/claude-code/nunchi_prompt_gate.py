@@ -495,6 +495,24 @@ def _run_gate(
         reasons=reasons,
         error=None,
     )
+    # Record the causal origin, *before composition*: this admitted message is
+    # what the upcoming reply will be composed FOR. The outbound gate binds its
+    # send to this permit instead of reverse-scanning the newest inbound line,
+    # so a peer message arriving mid-composition can't steal the trigger and
+    # kill the reply as a false PASS. Best-effort; a write failure only drops
+    # the outbound gate back to legacy binding, never blocks the admit.
+    try:
+        from nunchi_causal_permit import write_permit
+
+        write_permit(
+            session_id,
+            chat_id,
+            trigger_event["message_id"],
+            trigger_event.get("author", ""),
+            trigger_event.get("ts", ""),
+        )
+    except Exception:
+        pass
     sys.exit(0)
 
 
