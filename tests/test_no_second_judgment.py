@@ -11,6 +11,13 @@ Removal means removal: this test scans the ENTIRE project — source, tests,
 docs, examples — and fails if the retired artifacts or the ledger shape creep
 back in. A narrowly-scoped enforcement test would be worse than none.
 
+Honest limitation (Aleph): this is a NAME-level guard. It keeps the retired
+filenames and the ledger vocabulary out and asserts the installer never
+re-registers a PreToolUse entry — it cannot detect a *renamed* second judge or
+literally count classifier invocations per turn. That property is enforced by
+review of the settings surface (the installer snippet is the only registration
+path this repo ships) rather than by grep.
+
 Allowed exceptions, each one deliberate:
   * this file (it names the patterns as literals);
   * ``CHANGELOG.md`` (immutable release history may mention removed things);

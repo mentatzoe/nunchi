@@ -116,17 +116,85 @@ class DeferOnUncertainPass(unittest.TestCase):
         parsed = json.loads(out)
         self.assertEqual(parsed.get("decision"), "block")
 
-    def test_defer_is_recorded_for_the_eval_arm(self):
-        """Each abstention is a receipt row (action=defer-uncertain-pass) so the
-        offline evaluator can label what the gate would have silenced."""
+    def _last_receipt(self, directive: dict, extra_env: dict | None = None) -> dict:
         fd, log_path = tempfile.mkstemp(suffix=".jsonl")
         os.close(fd)
-        rc, out = self._run(_uncertain_pass_directive(), {"NUNCHI_HOOK_LOG": log_path})
+        env = {"NUNCHI_HOOK_LOG": log_path}
+        if extra_env:
+            env.update(extra_env)
+        self._run(directive, env)
         lines = [ln for ln in pathlib.Path(log_path).read_text().splitlines() if ln.strip()]
         os.unlink(log_path)
-        rec = json.loads(lines[-1])
+        return json.loads(lines[-1])
+
+    def test_defer_is_recorded_for_the_eval_arm(self):
+        """Each abstention is a receipt row carrying everything the offline
+        margin sweep needs: the full confidence vector, the effective margin,
+        DEFER state, and the classifier identity. A defer receipt without its
+        numbers cannot be swept (Aleph's blocking finding #1)."""
+        rec = self._last_receipt(_uncertain_pass_directive())
         self.assertEqual(rec["action"], "defer-uncertain-pass")
         self.assertEqual(rec["verdict"], "PASS")
+        self.assertEqual(
+            rec["confidences"],
+            {"PASS": 0.45, "ACK": 0.05, "ASK": 0.10, "SPEAK": 0.40},
+            "the COMPLETE confidence vector must be receipted",
+        )
+        self.assertEqual(rec["defer_margin"], 0.25)
+        self.assertTrue(rec["defer_enabled"])
+        self.assertEqual(rec["request_id"], "req-defer")
+        self.assertEqual(rec["classifier_model"], "stub")
+        self.assertTrue(rec.get("envelope_sha256"),
+                        "the envelope fingerprint ties the receipt to what was judged")
+
+    def test_block_receipt_also_carries_confidences(self):
+        """Hard blocks carry the same numbers, so smaller-than-deployed margins
+        can be swept over observed blocks. (Larger margins still need a
+        participant replay — the model never woke; see DEFER_EVAL.md.)"""
+        rec = self._last_receipt(_confident_pass_directive())
+        self.assertEqual(rec["action"], "block-pass")
+        self.assertIn("confidences", rec)
+        self.assertIn("defer_margin", rec)
+        self.assertEqual(rec["request_id"], "req-conf")
+
+    def test_exact_boundary_defers_inclusive(self):
+        """Docs say "within this margin" — inclusive. PASS 0.50 vs SPEAK 0.25
+        at margin 0.25 sits exactly on the boundary and must defer."""
+        d = _uncertain_pass_directive()
+        d["confidences"] = {"PASS": 0.50, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.25}
+        rc, out = self._run(d)
+        self.assertNotIn("decision", json.loads(out))
+
+    def test_partial_confidence_map_blocks(self):
+        """A map missing a verdict key is malformed evidence, not uncertainty."""
+        d = _uncertain_pass_directive()
+        d["confidences"] = {"PASS": 0.45, "SPEAK": 0.40}  # ACK/ASK missing
+        rc, out = self._run(d)
+        self.assertEqual(json.loads(out).get("decision"), "block")
+
+    def test_non_finite_confidence_blocks(self):
+        d = _uncertain_pass_directive()
+        d["confidences"] = {"PASS": float("nan"), "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.4}
+        rc, out = self._run(d)
+        self.assertEqual(json.loads(out).get("decision"), "block")
+
+    def test_degenerate_margins_fall_back_to_default(self):
+        """inf (defer-everything), nan and negatives (defer-nothing) are
+        operator error → default 0.25 applies, so this uncertain PASS defers."""
+        for bad in ("inf", "nan", "-1", "2.0"):
+            with self.subTest(margin=bad):
+                rc, out = self._run(_uncertain_pass_directive(),
+                                    {"NUNCHI_DEFER_MARGIN": bad})
+                self.assertNotIn("decision", json.loads(out),
+                                 f"margin {bad!r} must fall back to the sane default")
+
+    def test_defer_note_carries_the_same_anchor_as_admits(self):
+        """The path most dependent on the agent's judgment gets the same
+        message/author anchor an ordinary admission carries."""
+        rc, out = self._run(_uncertain_pass_directive())
+        note = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("mA", note)
+        self.assertIn("zoe", note)
 
     def test_uncertain_non_pass_is_untouched(self):
         """Uncertainty only matters when the gate would SILENCE: a wobbly SPEAK

@@ -135,7 +135,7 @@ changes to be picked up.
 | `NUNCHI_HOOK_LOG` | `~/.claude/nunchi-gate-receipts.jsonl` | Per-call receipt log (JSONL). |
 | `NUNCHI_CHANNEL_BIN` | `shutil.which("nunchi-channel")` | Path to the nunchi-channel binary. |
 | `NUNCHI_DEFER` | _(on)_ | Kill switch. Set `off`/`0`/`false`/`no` to make every PASS block regardless of confidence. |
-| `NUNCHI_DEFER_MARGIN` | `0.25` | A PASS is *uncertain* when the best alternative verdict is within this margin. Placeholder pending calibration (see `DEFER_EVAL.md`). |
+| `NUNCHI_DEFER_MARGIN` | `0.25` | A PASS is *uncertain* when the best alternative verdict is within this margin (inclusive). Values outside [0, 1] or non-finite fall back to the default. Placeholder pending calibration (see `DEFER_EVAL.md`). |
 
 ## Receipts log format
 
@@ -165,7 +165,8 @@ conversation surface):
   agent's own judgment (these rows are the offline eval corpus — see
   `DEFER_EVAL.md`)
 - `allow-<verdict>` — admitted (e.g. `allow-speak`)
-- `allow-gate-error` — gate failed; fail-open applied (always)
+- `allow-gate-error` — gate failed or returned a malformed directive; fail-open applied (always)
+- `allow-envelope-error` — channel tag missing required attributes; passed through unjudged (no bound verdict exists to attach)
 
 (`direction: inbound` is kept for continuity with logs written before the
 send-time hook was retired.)

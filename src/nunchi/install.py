@@ -631,7 +631,17 @@ class Installer:
         symlink = self._claude_has_symlink()
         marker = self._read_marker(hooks_dir)
 
-        if upgrade and not force:
+        # Retired leftovers make an install stale regardless of the marker
+        # commit: `verify` reports them and tells the operator to run upgrade,
+        # so upgrade must never early-skip past the cleanup (Aleph's
+        # verify→upgrade→verify finding, 2026-07-10).
+        retired_leftovers = [
+            name
+            for name in CLAUDE_RETIRED_FILES
+            if (hooks_dir / name).is_symlink() or (hooks_dir / name).exists()
+        ]
+
+        if upgrade and not force and not retired_leftovers:
             decision = self._upgrade_decision(
                 dest_exists=any(p.exists() for p in self._claude_installed_paths()),
                 is_symlink=symlink is not None,
@@ -731,7 +741,29 @@ class Installer:
                 "retired send-time gate artifacts still installed; "
                 "run upgrade to remove them"
             )
+        # READ-ONLY migration check: settings.json is operator-owned (never
+        # written here), but verify can still SEE a stale registration of the
+        # retired send-time gate — including old absolute checkout paths the
+        # file-level cleanup cannot reach.
+        stale_settings = self._claude_settings_mentions_retired()
+        if stale_settings:
+            result["status"] = STATUS_STALE
+            result["stale_settings_entries"] = stale_settings
+            result["settings_detail"] = (
+                "settings.json still registers the retired send-time gate; "
+                "delete its PreToolUse entry by hand (see docs/INSTALL.md)"
+            )
         return result
+
+    def _claude_settings_mentions_retired(self) -> list[str]:
+        """Retired-gate command strings still present in settings.json (read-only)."""
+        settings_path = self.claude_home / "settings.json"
+        try:
+            text = settings_path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        markers = ("nunchi-pretool-reply", "nunchi_gate_hook")
+        return [m for m in markers if m in text]
 
     def _uninstall_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
@@ -810,12 +842,16 @@ def _resolve_home(
     prefix_subdir: str,
     default: str,
 ) -> Path:
+    """Explicit CLI intent outranks ambient environment: ``--hermes-home`` >
+    ``--prefix`` > inherited env var > default. An inherited ``HERMES_HOME``
+    beating an explicit ``--prefix`` let test/review runs escape their
+    sandbox into the live Hermes profile (Aleph's finding, 2026-07-10)."""
     if explicit:
         return Path(explicit).expanduser()
-    if env_var and os.environ.get(env_var):
-        return Path(os.environ[env_var]).expanduser()
     if prefix is not None:
         return prefix / prefix_subdir
+    if env_var and os.environ.get(env_var):
+        return Path(os.environ[env_var]).expanduser()
     return Path(default).expanduser()
 
 

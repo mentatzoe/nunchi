@@ -63,7 +63,9 @@ NUNCHI_DEFER_MARGIN        A PASS is "uncertain" when the best alternative
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -114,8 +116,14 @@ _CHANNEL_BIN: str | None = os.environ.get("NUNCHI_CHANNEL_BIN") or shutil.which(
 )
 
 # Regex to locate a <channel ...>...</channel> block anywhere in text.
+# GREEDY body match — the judged content runs to the LAST closing delimiter.
+# A message whose body contains a literal "</channel>" must not truncate the
+# judged trigger at that first occurrence: the sole admission judge has to see
+# everything the participant model will see (Aleph's envelope-integrity
+# finding, 2026-07-10). Over-matching trailing text is the safe direction;
+# under-matching lets content ride in unjudged.
 _CHANNEL_TAG_RE = re.compile(
-    r"<channel\s+([^>]+)>\s*(.*?)\s*</channel>",
+    r"<channel\s+([^>]+)>\s*(.*)\s*</channel>",
     re.DOTALL,
 )
 # Regex to parse one key="value" or key='value' attribute.
@@ -131,11 +139,24 @@ _DEFER_ENABLED = (os.environ.get("NUNCHI_DEFER") or "").strip().lower() not in {
 }
 
 
+_DEFER_MARGIN_DEFAULT = 0.25
+
+
 def _defer_margin() -> float:
+    """Effective margin, clamped to sane bounds. A margin outside [0, 1] or a
+    non-finite value (inf defers everything; nan disables DEFER by comparing
+    false) is operator error — fall back to the default rather than silently
+    running a degenerate gate."""
+    raw = os.environ.get("NUNCHI_DEFER_MARGIN")
+    if raw is None or not raw.strip():
+        return _DEFER_MARGIN_DEFAULT
     try:
-        return float(os.environ.get("NUNCHI_DEFER_MARGIN") or 0.25)
+        value = float(raw)
     except ValueError:
-        return 0.25
+        return _DEFER_MARGIN_DEFAULT
+    if not math.isfinite(value) or not (0.0 <= value <= 1.0):
+        return _DEFER_MARGIN_DEFAULT
+    return value
 
 
 _ALT_VERDICTS = ("SPEAK", "ACK", "ASK")
@@ -143,20 +164,30 @@ _ALT_VERDICTS = ("SPEAK", "ACK", "ASK")
 
 def _uncertain_pass(directive: dict, margin: float) -> bool:
     """True when the gate is about to silence an *ambiguous* bid: verdict PASS,
-    but some alternative verdict's confidence is within *margin* of PASS's.
-    Missing/malformed confidences read as confident — the gate then blocks as
-    before, so a degraded classifier can never widen what gets through."""
+    but some alternative verdict's confidence is within *margin* of PASS's
+    (inclusive — "within" includes the exact boundary).
+
+    The confidence map must be COMPLETE (all four verdicts present) and every
+    value a finite float; a partial or malformed map reads as confident, so a
+    degraded classifier can never widen what gets through."""
     if directive.get("verdict") != "PASS":
         return False
     conf = directive.get("confidences")
     if not isinstance(conf, dict):
         return False
-    try:
-        pass_c = float(conf.get("PASS", 0.0))
-        best_alt = max(float(conf.get(k, 0.0)) for k in _ALT_VERDICTS)
-    except (TypeError, ValueError):
-        return False
-    return (pass_c - best_alt) < margin
+    values: dict[str, float] = {}
+    for key in ("PASS", *_ALT_VERDICTS):
+        if key not in conf:
+            return False  # partial map: not evidence of uncertainty
+        try:
+            v = float(conf[key])
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(v):
+            return False
+        values[key] = v
+    best_alt = max(values[k] for k in _ALT_VERDICTS)
+    return (values["PASS"] - best_alt) <= margin
 
 # ---------------------------------------------------------------------------
 # Channel tag parsing
@@ -357,11 +388,15 @@ def _write_receipt(
     elapsed_ms: float,
     reasons: list[str],
     error: str | None,
+    extra: dict | None = None,
 ) -> None:
     """Append one JSON line to the receipts log.
 
     Always sets ``"direction": "inbound"`` — kept for log-format continuity
-    with records written before the send-time hook was retired.
+    with records written before the send-time hook was retired. ``extra``
+    carries decision provenance the offline eval arm reads back (the DEFER
+    confidence vector, effective margin, classifier identity, envelope
+    fingerprint); a receipt without it is still valid telemetry.
     """
     try:
         _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -379,6 +414,8 @@ def _write_receipt(
             "elapsed_ms": round(elapsed_ms, 1),
             "reasons": reasons[:3],
         }
+        if extra:
+            record.update(extra)
         if error:
             record["error"] = error
         with open(_LOG_PATH, "a", encoding="utf-8") as fh:
@@ -409,6 +446,26 @@ def _run_gate(
         sys.exit(0)
 
     chat_id = tag["chat_id"]
+
+    # A channel envelope missing its identifying attributes cannot produce a
+    # BOUND judgment — judging it anyway would attach a verdict to nothing.
+    # Fail open with telemetry instead (the prompt passes, unlabelled).
+    missing = [k for k in ("chat_id", "message_id", "user") if not tag[k]]
+    if missing:
+        _write_receipt(
+            session_id=session_id,
+            chat_id=chat_id,
+            trigger_event=None,
+            history_len=0,
+            verdict=None,
+            silent=None,
+            action="allow-envelope-error",
+            elapsed_ms=(time.monotonic() - t0) * 1000,
+            reasons=[],
+            error=f"channel envelope missing required attributes: {', '.join(missing)}",
+        )
+        sys.exit(0)
+
     trigger_event = {
         "kind": "inbound",
         "author": tag["user"],
@@ -524,17 +581,55 @@ def _run_gate(
         )
         sys.exit(0)
 
-    verdict: str = directive.get("verdict", "")
-    silent: bool = directive.get("silent", False)
-    reasons: list[str] = directive.get("reasons") or []
+    # Validate the directive SHAPE before trusting any field (parity with the
+    # Codex hook). Valid JSON is not a valid directive: a list crashes .get(),
+    # an empty object "admits" nothing-in-particular, and a contradictory
+    # silent flag would forge a PASS out of a SPEAK. All malformed shapes fail
+    # open with a receipt — never a crash, never a fabricated verdict.
+    def _malformed(detail: str) -> None:
+        _write_receipt(
+            session_id=session_id,
+            chat_id=chat_id,
+            trigger_event=trigger_event,
+            history_len=len(history_events),
+            verdict=None,
+            silent=None,
+            action="allow-gate-error",
+            elapsed_ms=elapsed_ms,
+            reasons=[],
+            error=f"nunchi-channel returned a malformed directive: {detail}",
+        )
+        sys.exit(0)
 
-    # PASS (or silent=true) → the gate wants to silence this turn.
-    if verdict == "PASS" or silent:
+    if not isinstance(directive, dict):
+        _malformed(f"expected an object, got {type(directive).__name__}")
+    verdict: str = directive.get("verdict", "")
+    if verdict not in ("PASS", "ACK", "ASK", "SPEAK"):
+        _malformed(f"unknown verdict {verdict!r}")
+    silent: bool = bool(directive.get("silent", verdict == "PASS"))
+    if silent != (verdict == "PASS"):
+        _malformed(f"silent={silent!r} contradicts verdict {verdict!r}")
+    reasons_raw = directive.get("reasons")
+    reasons: list[str] = [str(r) for r in reasons_raw] if isinstance(reasons_raw, list) else []
+
+    # Decision provenance for every gate-judged receipt (the eval arm joins on
+    # these; a defer receipt without its numbers cannot be swept).
+    provenance: dict = {
+        "request_id": directive.get("request_id"),
+        "classifier_model": directive.get("classifier_model"),
+        "envelope_sha256": hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16],
+    }
+
+    # PASS → the gate wants to silence this turn.
+    if verdict == "PASS":
         # DEFER: a small fast gate may only silence what it can confidently
         # judge. On an *uncertain* PASS it abstains — the turn goes to the
         # agent's own model with the hesitation noted, and the agent may still
         # choose silence. No second classifier; the "bigger model" is the agent.
-        if _DEFER_ENABLED and _uncertain_pass(directive, _defer_margin()):
+        margin = _defer_margin()
+        if _DEFER_ENABLED and _uncertain_pass(directive, margin):
             conf = directive.get("confidences") or {}
             _write_receipt(
                 session_id=session_id,
@@ -547,13 +642,20 @@ def _run_gate(
                 elapsed_ms=elapsed_ms,
                 reasons=reasons,
                 error=None,
+                extra={
+                    **provenance,
+                    "confidences": conf,
+                    "defer_margin": margin,
+                    "defer_enabled": True,
+                },
             )
             note = (
-                "nunchi: the gate leaned PASS on this message but not confidently "
-                f"(confidences: {json.dumps(conf)}). It abstains rather than "
-                "silence you. Read the room with your own judgment — replying and "
-                "staying silent are both fine outcomes; if you stay silent, simply "
-                "send nothing this turn."
+                f"nunchi: the gate leaned PASS on message "
+                f"{trigger_event['message_id']} from {trigger_event['author']} "
+                f"but not confidently (confidences: {json.dumps(conf)}). It "
+                "abstains rather than silence you. Read the room with your own "
+                "judgment — replying and staying silent are both fine outcomes; "
+                "if you stay silent, simply send nothing this turn."
             )
             print(_context_output(note))
             sys.exit(0)
@@ -571,6 +673,12 @@ def _run_gate(
             elapsed_ms=elapsed_ms,
             reasons=reasons,
             error=None,
+            extra={
+                **provenance,
+                "confidences": directive.get("confidences") or {},
+                "defer_margin": _defer_margin(),
+                "defer_enabled": _DEFER_ENABLED,
+            },
         )
         print(_block_output(block_reason))
         sys.exit(0)
@@ -589,10 +697,11 @@ def _run_gate(
         elapsed_ms=elapsed_ms,
         reasons=reasons,
         error=None,
+        extra=provenance,
     )
     note = (
         f"nunchi: admitted ({verdict}) — this turn answers message "
-        f"{trigger_event['message_id'] or '?'} from {trigger_event['author'] or '?'}. "
+        f"{trigger_event['message_id']} from {trigger_event['author']}. "
         "The gate judged only that a turn is open; what you say, and whether you "
         "say anything at all, is yours."
     )

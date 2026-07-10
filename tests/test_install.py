@@ -538,6 +538,55 @@ class RetiredArtifactCleanupTest(_TmpTest):
         self.assertFalse((hooks / "nunchi_gate_hook.py").exists())
         self.assertFalse((hooks / "nunchi-user-prompt-submit.sh").exists())
 
+    def test_verify_upgrade_verify_converges(self) -> None:
+        """Aleph's loop: verify says stale (leftovers) → upgrade must NOT
+        early-skip on an in-sync marker — after it runs, verify is clean."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        hooks = self.tmp / ".claude" / "hooks"
+        # Marker is in-sync, but a retired ghost reappears (partial migration).
+        (hooks / "nunchi_gate_hook.py").write_text("# ghost\n", encoding="utf-8")
+
+        first = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(first["status"], install.STATUS_STALE)
+        self.assertEqual(first["retired_leftovers"], ["nunchi_gate_hook.py"])
+
+        result = inst.upgrade(groups=["claude"])["artifacts"]["claude"]
+        self.assertNotEqual(
+            result["action"], "skip",
+            "upgrade must not skip past retired leftovers verify just flagged",
+        )
+        self.assertFalse((hooks / "nunchi_gate_hook.py").exists())
+
+        second = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(second["status"], install.STATUS_IN_SYNC)
+        self.assertNotIn("retired_leftovers", second)
+
+    def test_upgrade_still_skips_when_clean_and_in_sync(self) -> None:
+        """The early-skip fast path survives for genuinely clean installs."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        result = inst.upgrade(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(result["action"], "skip")
+
+    def test_verify_flags_stale_settings_entry_read_only(self) -> None:
+        """A settings.json still registering the retired gate (e.g. an old
+        absolute checkout path) is reported — without ever writing settings."""
+        inst = _installer(self.tmp)
+        inst.install(groups=["claude"])
+        settings = self.tmp / ".claude" / "settings.json"
+        settings.write_text(
+            '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", '
+            '"command": "/old/checkout/integrations/claude-code/nunchi_gate_hook.py"}]}]}}\n',
+            encoding="utf-8",
+        )
+        before = settings.read_text(encoding="utf-8")
+        report = inst.verify(groups=["claude"])["artifacts"]["claude"]
+        self.assertEqual(report["status"], install.STATUS_STALE)
+        self.assertEqual(report["stale_settings_entries"], ["nunchi_gate_hook"])
+        self.assertEqual(settings.read_text(encoding="utf-8"), before,
+                         "verify must never modify operator-owned settings.json")
+
 
 class NeverTouchesRealHomeTest(_TmpTest):
     def test_homes_are_confined_to_temp(self) -> None:
@@ -581,12 +630,56 @@ class ResolveSourceCommitTest(_TmpTest):
 
 
 class CliMainTest(_TmpTest):
-    def _run(self, argv):
-        import io
+    def _run(self, argv, extra_env: dict | None = None):
+        """Run the CLI main with a sandboxed environment.
 
+        HOME is pinned into the temp dir and HERMES_HOME is cleared so an
+        operator's live profile can never be touched by a test run — an
+        inherited HERMES_HOME once outranked --prefix and let a review run
+        write backups into the ACTIVE Hermes plugin (2026-07-10).
+        """
+        import io
+        from unittest.mock import patch
+
+        env = {"HOME": str(self.tmp / "sandbox-home")}
+        if extra_env:
+            env.update(extra_env)
         buf = io.StringIO()
-        code = install.main(argv, out=buf)
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("HERMES_HOME", None)
+            if extra_env and "HERMES_HOME" in extra_env:
+                os.environ["HERMES_HOME"] = extra_env["HERMES_HOME"]
+            code = install.main(argv, out=buf)
         return code, buf.getvalue()
+
+    def test_prefix_outranks_inherited_hermes_home(self) -> None:
+        """--prefix confines every write even when HERMES_HOME points at a
+        (simulated) live profile."""
+        simulated_live = self.tmp / "simulated-live-hermes"
+        simulated_live.mkdir()
+        code, _ = self._run(
+            ["--prefix", str(self.tmp / "sandbox"), "install"],
+            extra_env={"HERMES_HOME": str(simulated_live)},
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            list(simulated_live.rglob("*")), [],
+            "an inherited HERMES_HOME must not receive writes when --prefix is explicit",
+        )
+        self.assertTrue(
+            (self.tmp / "sandbox" / ".hermes" / "plugins" / "nunchi-gate").is_dir()
+        )
+
+    def test_env_hermes_home_still_used_without_prefix(self) -> None:
+        """Without --prefix, an explicit HERMES_HOME env remains the operator's
+        chosen target (documented behavior, unchanged)."""
+        env_home = self.tmp / "env-hermes"
+        code, _ = self._run(
+            ["--claude-home", str(self.tmp / ".claude"), "install", "--only", "hermes"],
+            extra_env={"HERMES_HOME": str(env_home)},
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue((env_home / "plugins" / "nunchi-gate").is_dir())
 
     def test_install_via_main_creates_real_dir(self) -> None:
         code, _ = self._run(["--prefix", str(self.tmp), "install"])

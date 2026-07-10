@@ -108,7 +108,6 @@ Prints just the `settings.json` hook registration snippet (see below).
 
 ```sh
 nunchi-install print-claude-settings
-nunchi-install print-claude-settings --matcher '.*__reply$'
 ```
 
 ## Global flags

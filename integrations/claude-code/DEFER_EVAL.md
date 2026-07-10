@@ -62,3 +62,12 @@ Sweep `NUNCHI_DEFER_MARGIN` over the labelled corpus; pick the point that
 maximizes correct-surface while bounding over-SPEAK. Until that run is
 committed as evidence, **0.25 is a placeholder, not a calibrated value** — say
 so anywhere the margin is quoted.
+
+**Sweep asymmetry (Aleph):** receipts only support sweeping margins **smaller**
+than the deployed one — those cases were deferred, so the participant outcome
+exists. For margins **larger** than deployed, the historically hard-blocked
+model never woke: there is no sent/chose-silence counterfactual to join, and
+evaluating those candidates requires *replaying* the participant decision over
+the recorded envelope, not merely joining room logs. Both block and defer
+receipts now carry the full confidence vector + effective margin so either arm
+has its numbers.
