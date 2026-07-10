@@ -6,7 +6,7 @@ locations**, decoupled from any git checkout:
 | Artifact | Source (in the repo) | Installed to |
 |----------|----------------------|--------------|
 | Hermes gateway plugin | `integrations/hermes/nunchi-gate/` | `$HERMES_HOME/plugins/nunchi-gate/` (default `~/.hermes`) |
-| Claude Code hooks | `integrations/claude-code/nunchi_gate_hook.py`, `nunchi_prompt_gate.py` | `~/.claude/hooks/` (+ two shell wrappers) |
+| Claude Code hook | `integrations/claude-code/nunchi_prompt_gate.py` | `~/.claude/hooks/` (+ its shell wrapper) |
 | `nunchi-channel` CLI | the `nunchi` package | your `PATH` (via `pip install nunchi`) |
 
 `nunchi-install` installs the first two groups by **copying** — never
@@ -108,7 +108,6 @@ Prints just the `settings.json` hook registration snippet (see below).
 
 ```sh
 nunchi-install print-claude-settings
-nunchi-install print-claude-settings --matcher '.*__reply$'
 ```
 
 ## Global flags
@@ -145,18 +144,6 @@ wrapper paths**, never a repo checkout:
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "mcp__plugin_discord_discord__reply",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/nunchi-pretool-reply.sh",
-            "timeout": 35
-          }
-        ]
-      }
     ]
   }
 }
@@ -165,10 +152,16 @@ wrapper paths**, never a repo checkout:
 (The printed snippet uses your resolved absolute `~/.claude` path.) Restart or
 reload the Claude Code session for `settings.json` changes to take effect.
 
-### The wrappers are fail-open
+**Upgrading from the two-hook layout:** nunchi retired its send-time
+(`PreToolUse`) gate — one judgment per turn, at wake. `nunchi-install
+upgrade` removes the retired hook files (with backups) and `verify` flags any
+leftovers, but `settings.json` is operator-owned: delete the `PreToolUse`
+entry pointing at `nunchi-pretool-reply.sh` yourself.
 
-Each wrapper (`nunchi-pretool-reply.sh`, `nunchi-user-prompt-submit.sh`)
-sources its operator env file(s) (see below), then runs the Python hook.
+### The wrapper is fail-open
+
+The wrapper (`nunchi-user-prompt-submit.sh`) sources its operator env file(s)
+(see below), then runs the Python hook.
 **Any** failure — a missing hook file, no `python3`, a hook error — exits `0`,
 so a missing or broken gate can never block Claude Code.
 
@@ -184,32 +177,45 @@ Two layers, sourced in order (a later file's exports win):
 
 | File | Sourced by | Purpose |
 |------|-----------|---------|
-| `~/.claude/nunchi-gate.env` | both wrappers | shared identity (`NUNCHI_HOOK_*`), classifier env |
-| `~/.claude/nunchi-pretool-reply.env` | outbound reply wrapper only | per-direction overrides for the outbound gate |
-| `~/.claude/nunchi-user-prompt-submit.env` | inbound wrapper only | per-direction overrides for the inbound gate |
+| `~/.claude/nunchi-gate.env` | the wrapper | shared identity (`NUNCHI_HOOK_*`), classifier env |
+| `~/.claude/nunchi-user-prompt-submit.env` | the wrapper, after the shared file | hook-scoped overrides |
 
-Put shared identity — `NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_ALIASES`,
+Put identity — `NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_ALIASES`,
 `NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_PEER_BOTS`, `NUNCHI_CHANNEL_BIN`, and any
-classifier credentials — in `nunchi-gate.env`. Use a per-hook override only for
-a value that must **differ between the inbound and outbound gates**.
+classifier credentials — in `nunchi-gate.env`. DEFER knobs (`NUNCHI_DEFER`,
+`NUNCHI_DEFER_MARGIN`) are operator-only and live here too.
 
-The canonical override is the **peer roster**. On the outbound path the gate
-tags each author in the recent context as `peer_bot` or `human` and feeds that
-to the classifier: tagging a bot `human` biases toward SPEAK when it is present,
-tagging it `peer_bot` biases toward restraint. Keeping a bot out of the
-*outbound* roster (so it reads as `human` to your reply gate) counters
-over-suppression on turns genuinely addressed to you, while the *inbound* gate
-keeps the full roster so peer chatter still reads as peer chatter. Set the full
-roster in `nunchi-gate.env` and narrow it in `nunchi-pretool-reply.env`.
-
-Copy the annotated examples to get started (the installer never touches your
+Copy the annotated example to get started (the installer never touches your
 live files, so copying by hand is the intended flow):
 
 ```sh
 cp integrations/claude-code/nunchi-gate.env.example ~/.claude/nunchi-gate.env
-cp integrations/claude-code/nunchi-pretool-reply.env.example ~/.claude/nunchi-pretool-reply.env
-# then edit both for your agent's identity and roster
+# then edit for your agent's identity and roster
 ```
+
+## The shared CLI is a separate deploy surface
+
+`nunchi-install` copies **hook artifacts**. The `nunchi-channel` CLI the hooks
+shell out to is installed separately (pip / `uv tool`) and can lag this repo
+even when every hook file is current — that exact gap shipped a stale core for
+half a day on 2026-07-10 (hooks at the new commit, CLI still carrying removed
+behavior). `nunchi-install verify` therefore reports the CLI as
+`present-unverified`: it can confirm presence, never provenance.
+
+After any change to `src/nunchi/` (classifier, adapters, fastpath removal),
+refresh the shared CLI explicitly:
+
+```sh
+uv tool install --force --from /path/to/turnaware nunchi   # uv-managed
+# or: pip install --upgrade /path/to/turnaware
+```
+
+Then prove the running binary, not the install command: replay a known case
+through the wrapper and check the receipt (`classifier_model`, behavior), or
+run `nunchi-channel` directly on a fixture. An env var pointing
+`NUNCHI_CHANNEL_BIN` at a pilot shim or old copy silently overrides all of
+this — if a replay shows behavior the new code cannot produce, hunt the
+override first.
 
 ## Version stamps
 

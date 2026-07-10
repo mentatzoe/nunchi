@@ -5,10 +5,11 @@ locations*, decoupled from any git checkout:
 
 1. The Hermes gateway plugin (``integrations/hermes/nunchi-gate/``) →
    ``$HERMES_HOME/plugins/nunchi-gate/`` (default ``~/.hermes``).
-2. The Claude Code hook scripts
-   (``integrations/claude-code/nunchi_gate_hook.py`` and
-   ``nunchi_prompt_gate.py``) → ``~/.claude/hooks/``, plus fail-open shell
-   wrappers that Claude Code's ``settings.json`` points at.
+2. The Claude Code wake-gate hook
+   (``integrations/claude-code/nunchi_prompt_gate.py``) → ``~/.claude/hooks/``,
+   plus its fail-open shell wrapper that Claude Code's ``settings.json``
+   points at. (The former send-time hook is retired; install/upgrade actively
+   remove its artifacts.)
 3. The ``nunchi-channel`` CLI, which both of the above shell out to (checked
    for presence on ``PATH``; never installed here).
 
@@ -69,18 +70,27 @@ MARKER_VERSION = 1
 #: and the ``dashboard/`` tab assets — is the *running plugin* and is copied.
 HERMES_EXCLUDE_DIRS = frozenset({"__pycache__", "docs", "tests"})
 
-#: The two Claude Code hook scripts copied into ``~/.claude/hooks/``.
-CLAUDE_HOOK_FILES = ("nunchi_gate_hook.py", "nunchi_prompt_gate.py")
+#: The Claude Code hook script copied into ``~/.claude/hooks/``. Nunchi makes
+#: ONE judgment per turn, at wake time (``UserPromptSubmit``); there is no
+#: send-time re-judgment.
+CLAUDE_HOOK_FILES = ("nunchi_prompt_gate.py",)
 
 #: Fail-open shell wrappers written next to the hooks, mapped to the hook they
 #: invoke. ``settings.json`` registers *these*, never a repo path.
 CLAUDE_WRAPPERS = {
-    "nunchi-pretool-reply.sh": "nunchi_gate_hook.py",
     "nunchi-user-prompt-submit.sh": "nunchi_prompt_gate.py",
 }
 
-#: Default Discord reply-tool matcher used in the printed settings snippet.
-DEFAULT_REPLY_MATCHER = "mcp__plugin_discord_discord__reply"
+#: Artifacts earlier versions installed that no longer exist: the send-time
+#: (``PreToolUse``) gate. It re-judged an already-admitted turn against the
+#: newest transcript line, silencing composed replies (the false-PASS bug).
+#: Install/upgrade/uninstall actively remove these so a live machine cannot
+#: keep running the retired gate. Operators must also drop the ``PreToolUse``
+#: entry from ``settings.json`` (see the printed snippet / INSTALL.md).
+CLAUDE_RETIRED_FILES = (
+    "nunchi_gate_hook.py",
+    "nunchi-pretool-reply.sh",
+)
 
 #: Default hook timeout (seconds) in the printed settings snippet.
 DEFAULT_HOOK_TIMEOUT = 35
@@ -96,6 +106,7 @@ STATUS_IN_SYNC = "in-sync"
 STATUS_STALE = "stale"
 STATUS_NOT_INSTALLED = "not-installed"
 STATUS_SYMLINK_FOUND = "symlink-found"
+STATUS_PRESENT_UNVERIFIED = "present-unverified"
 
 # Exit codes.
 EXIT_OK = 0
@@ -177,12 +188,15 @@ def resolve_source_commit(repo_root: Path) -> str:
 def build_claude_settings_snippet(
     claude_home: Path,
     *,
-    matcher: str = DEFAULT_REPLY_MATCHER,
     timeout: int = DEFAULT_HOOK_TIMEOUT,
 ) -> str:
     """Return the ``settings.json`` hook registration the operator should use.
 
-    The commands point at the **stable wrapper paths** under
+    One hook: the wake-time gate (``UserPromptSubmit``). If an earlier install
+    added a ``PreToolUse`` entry pointing at ``nunchi-pretool-reply.sh``,
+    remove it — that send-time gate is retired.
+
+    The command points at the **stable wrapper path** under
     ``<claude_home>/hooks/`` — never at a repo checkout.
     """
     hooks_dir = Path(claude_home) / "hooks"
@@ -197,18 +211,6 @@ def build_claude_settings_snippet(
                             "timeout": timeout,
                         }
                     ]
-                }
-            ],
-            "PreToolUse": [
-                {
-                    "matcher": matcher,
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": str(hooks_dir / "nunchi-pretool-reply.sh"),
-                            "timeout": timeout,
-                        }
-                    ],
                 }
             ],
         }
@@ -510,16 +512,57 @@ class Installer:
 
     # -- hermes -------------------------------------------------------------
 
+    def _hermes_expected_files(self) -> list[str]:
+        """The relative file set _copy_tree would install — same walk, same
+        exclusions — so verification checks the SAME inventory the installer
+        claims (round-3 finding: Hermes used marker-only verification)."""
+        src = self.hermes_src
+        expected: list[str] = []
+        for root, dirs, files in os.walk(src):
+            dirs[:] = sorted(d for d in dirs if d not in HERMES_EXCLUDE_DIRS)
+            rel_root = os.path.relpath(root, src)
+            for name in sorted(files):
+                if name.endswith(".pyc") or name == MARKER_NAME:
+                    continue
+                expected.append(os.path.normpath(os.path.join(rel_root, name)))
+        expected.sort()
+        return expected
+
+    def _hermes_tree_problems(self) -> tuple[list[str], list[str]]:
+        """(missing_or_invalid, content_drift) for the installed Hermes tree."""
+        missing: list[str] = []
+        drifted: list[str] = []
+        src, dest = self.hermes_src, self.hermes_dest
+        for rel in self._hermes_expected_files():
+            installed = dest / rel
+            if installed.is_symlink() or not installed.is_file():
+                missing.append(rel)
+                continue
+            try:
+                if installed.read_bytes() != (src / rel).read_bytes():
+                    drifted.append(rel)
+            except OSError:
+                missing.append(rel)
+        return missing, drifted
+
     def _install_hermes(self, *, upgrade: bool = False, force: bool = False) -> dict[str, Any]:
         src = self.hermes_src
         dest = self.hermes_dest
         if not src.is_dir():
             raise InstallError(f"Hermes plugin source not found: {src}")
+        # Same confinement contract as the Claude path (round-3: a symlinked
+        # $HERMES_HOME/plugins wrote the whole plugin outside the root).
+        self._ensure_confined(dest.parent, self.hermes_home, "hermes plugin")
 
         is_symlink = dest.is_symlink()
         marker = None if is_symlink else self._read_marker(dest)
 
-        if upgrade and not force:
+        needs_repair = False
+        if dest.exists() and not is_symlink:
+            missing, drifted = self._hermes_tree_problems()
+            needs_repair = bool(missing or drifted)
+
+        if upgrade and not force and not needs_repair:
             decision = self._upgrade_decision(dest_exists=dest.exists(), is_symlink=is_symlink, marker=marker)
             if decision == "skip":
                 self._act("skip", dest, note=f"in-sync at {self._commit()}")
@@ -572,10 +615,23 @@ class Installer:
             return {**base, "status": STATUS_STALE, "detail": "present but unmanaged (no install marker)"}
         installed = marker.get("source_commit", "unknown")
         status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
-        return {**base, "status": status, "installed_commit": installed}
+        result = {**base, "status": status, "installed_commit": installed}
+        missing, drifted = self._hermes_tree_problems()
+        if missing:
+            result["status"] = STATUS_STALE
+            result["missing_or_invalid"] = missing
+            result["missing_detail"] = "managed plugin files absent or not regular files; run upgrade to repair"
+        if drifted:
+            result["status"] = STATUS_STALE
+            result["content_drift"] = drifted
+            result["drift_detail"] = "installed plugin bytes differ from this repo's source; run upgrade"
+        return result
 
     def _uninstall_hermes(self) -> dict[str, Any]:
         dest = self.hermes_dest
+        # Confinement covers DESTRUCTIVE writes too (round-4: uninstall through
+        # a symlinked plugins/ recursively deleted an external directory).
+        self._ensure_confined(dest.parent, self.hermes_home, "hermes plugin (uninstall)")
         if dest.is_symlink():
             self._act("skip", dest, note="destination is a symlink, not a nunchi-install copy")
             return {"action": "skip", "dest": str(dest), "detail": "symlink, left untouched"}
@@ -622,8 +678,30 @@ class Installer:
                 return str(path)
         return None
 
+    def _ensure_confined(self, dest_dir: Path, root: Path, label: str) -> None:
+        """Reject destination ancestors that escape the configured root.
+
+        A symlinked ancestor (e.g. ``<home>/hooks`` → elsewhere) silently
+        redirected writes outside the configured prefix (round-2 finding —
+        the same escape class as the HERMES_HOME precedence bug, in symlink
+        clothing). Resolution-based: a symlink whose target stays inside the
+        root is legitimate operator topology; one that leaves it is an error.
+        """
+        try:
+            resolved_dest = dest_dir.resolve()
+            resolved_root = root.resolve()
+        except OSError as exc:
+            raise InstallError(f"{label}: cannot resolve destination: {exc}")
+        if not (resolved_dest == resolved_root or resolved_root in resolved_dest.parents):
+            raise InstallError(
+                f"{label}: destination {dest_dir} resolves to {resolved_dest}, "
+                f"outside the configured root {resolved_root}; refusing to write "
+                "through a symlinked ancestor that escapes confinement"
+            )
+
     def _install_claude(self, *, upgrade: bool = False, force: bool = False) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
+        self._ensure_confined(hooks_dir, self.claude_home, "claude-code hooks")
         for name in CLAUDE_HOOK_FILES:
             if not (self.claude_src / name).is_file():
                 raise InstallError(f"Claude Code hook source not found: {self.claude_src / name}")
@@ -631,7 +709,23 @@ class Installer:
         symlink = self._claude_has_symlink()
         marker = self._read_marker(hooks_dir)
 
-        if upgrade and not force:
+        # Retired leftovers, missing managed files, or content drift make an
+        # install broken regardless of the marker commit: `verify` reports
+        # them and tells the operator to run upgrade, so upgrade must never
+        # early-skip past the repair (round-1 and round-2 findings — the
+        # verify→upgrade→verify loop has to converge).
+        retired_leftovers = [
+            name
+            for name in CLAUDE_RETIRED_FILES
+            if (hooks_dir / name).is_symlink() or (hooks_dir / name).exists()
+        ]
+        needs_repair = bool(
+            retired_leftovers
+            or self._claude_missing_or_invalid()
+            or self._claude_content_drift()
+        )
+
+        if upgrade and not force and not needs_repair:
             decision = self._upgrade_decision(
                 dest_exists=any(p.exists() for p in self._claude_installed_paths()),
                 is_symlink=symlink is not None,
@@ -649,6 +743,17 @@ class Installer:
         self._mkdir(hooks_dir)
         installed_files: list[str] = []
 
+        # Retire artifacts from earlier versions (the send-time gate). _backup
+        # MOVES the file aside, so the backup is the removal — otherwise an
+        # upgraded machine keeps running the retired re-judgment path this
+        # version deleted.
+        retired: list[str] = []
+        for name in CLAUDE_RETIRED_FILES:
+            dest = hooks_dir / name
+            if dest.is_symlink() or dest.exists():
+                self._backup(dest, kind="symlink.bak" if dest.is_symlink() else "bak")
+                retired.append(name)
+
         # Hook scripts: back up any existing copy (incl. a symlink) then copy.
         for name in CLAUDE_HOOK_FILES:
             dest = hooks_dir / name
@@ -659,8 +764,7 @@ class Installer:
 
         # Fail-open wrappers pointing at the stable hook paths. Each sources a
         # shared identity file first, then an optional per-hook override
-        # (``nunchi-<wrapper-stem>.env``) — e.g. the outbound reply gate narrows
-        # its peer roster there. Both env files are operator-owned; the
+        # (``nunchi-<wrapper-stem>.env``). Both env files are operator-owned; the
         # installer writes the wrappers but never the env files (see INSTALL.md).
         shared_env = self.claude_home / "nunchi-gate.env"
         for wrapper_name, hook_name in CLAUDE_WRAPPERS.items():
@@ -680,7 +784,7 @@ class Installer:
             source_path=self.claude_src,
             files=installed_files,
         )
-        return {
+        result = {
             "action": "upgrade" if upgrade else "install",
             "status": "installed",
             "dest": str(hooks_dir),
@@ -688,27 +792,128 @@ class Installer:
             "files": installed_files,
             "settings_snippet": build_claude_settings_snippet(self.claude_home),
         }
+        if retired:
+            result["retired"] = retired
+            result["settings_note"] = (
+                "Retired send-time gate removed. If settings.json still has a "
+                "PreToolUse entry for nunchi-pretool-reply.sh, delete it."
+            )
+        return result
+
+    def _claude_missing_or_invalid(self) -> list[str]:
+        """Managed files that are absent or not regular files. A deployment
+        with ANY managed artifact missing is broken, whatever the marker says
+        (round-2 finding: a deleted wrapper still verified in-sync)."""
+        problems: list[str] = []
+        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS):
+            path = self.claude_hooks_dir / name
+            if path.is_symlink() or not path.is_file():
+                problems.append(name)
+        return problems
+
+    def _claude_content_drift(self) -> list[str]:
+        """Managed files whose installed bytes no longer match what this repo
+        would install — hooks compared against source, wrappers against a
+        fresh render. Content is the truth; the marker only records intent."""
+        drifted: list[str] = []
+        hooks_dir = self.claude_hooks_dir
+        shared_env = self.claude_home / "nunchi-gate.env"
+        for name in CLAUDE_HOOK_FILES:
+            installed, source = hooks_dir / name, self.claude_src / name
+            try:
+                if installed.read_bytes() != source.read_bytes():
+                    drifted.append(name)
+            except OSError:
+                continue  # absence is _claude_missing_or_invalid's finding
+        for wrapper_name, hook_name in CLAUDE_WRAPPERS.items():
+            installed = hooks_dir / wrapper_name
+            override_env = self.claude_home / f"{Path(wrapper_name).stem}.env"
+            expected = render_wrapper(
+                wrapper_name, hooks_dir / hook_name, [shared_env, override_env]
+            )
+            try:
+                if installed.read_text(encoding="utf-8") != expected:
+                    drifted.append(wrapper_name)
+            except OSError:
+                continue
+        return drifted
 
     def _verify_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
         base = {"dest": str(hooks_dir), "repo_commit": self._commit()}
+
+        # The read-only checks that must run REGARDLESS of install state:
+        # retired leftovers (including broken symlinks — .exists() is false for
+        # those) and stale settings registrations. Round-2 finding: a
+        # settings.json holding only an old PreToolUse entry reported
+        # not-installed before these scans ever ran.
+        extras: dict[str, Any] = {}
+        leftovers = [
+            name
+            for name in CLAUDE_RETIRED_FILES
+            if (hooks_dir / name).is_symlink() or (hooks_dir / name).exists()
+        ]
+        if leftovers:
+            extras["retired_leftovers"] = leftovers
+            extras["detail"] = (
+                "retired send-time gate artifacts still installed; "
+                "run upgrade to remove them"
+            )
+        stale_settings = self._claude_settings_mentions_retired()
+        if stale_settings:
+            extras["stale_settings_entries"] = stale_settings
+            extras["settings_detail"] = (
+                "settings.json still registers the retired send-time gate; "
+                "delete its PreToolUse entry by hand (see docs/INSTALL.md)"
+            )
+
         symlink = self._claude_has_symlink()
         if symlink is not None:
-            return {**base, "status": STATUS_SYMLINK_FOUND, "symlink_path": symlink}
+            return {**base, **extras, "status": STATUS_SYMLINK_FOUND, "symlink_path": symlink}
         present = [p for p in self._claude_installed_paths() if p.exists()]
         if not present:
-            return {**base, "status": STATUS_NOT_INSTALLED}
+            status = STATUS_STALE if extras else STATUS_NOT_INSTALLED
+            return {**base, **extras, "status": status}
         marker = self._read_marker(hooks_dir)
         if marker is None:
-            return {**base, "status": STATUS_STALE, "detail": "present but unmanaged (no install marker)"}
+            return {**base, **extras, "status": STATUS_STALE,
+                    "detail": "present but unmanaged (no install marker)"}
         installed = marker.get("source_commit", "unknown")
         status = STATUS_IN_SYNC if installed == self._commit() else STATUS_STALE
-        return {**base, "status": status, "installed_commit": installed}
+        result = {**base, "status": status, "installed_commit": installed, **extras}
+        if extras:
+            result["status"] = STATUS_STALE
+        missing = self._claude_missing_or_invalid()
+        if missing:
+            result["status"] = STATUS_STALE
+            result["missing_or_invalid"] = missing
+            result["missing_detail"] = (
+                "managed artifacts absent or not regular files; run upgrade to repair"
+            )
+        drifted = self._claude_content_drift()
+        if drifted:
+            result["status"] = STATUS_STALE
+            result["content_drift"] = drifted
+            result["drift_detail"] = (
+                "installed bytes differ from this repo's source; run upgrade"
+            )
+        return result
+
+    def _claude_settings_mentions_retired(self) -> list[str]:
+        """Retired-gate command strings still present in settings.json (read-only)."""
+        settings_path = self.claude_home / "settings.json"
+        try:
+            text = settings_path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        markers = ("nunchi-pretool-reply", "nunchi_gate_hook")
+        return [m for m in markers if m in text]
 
     def _uninstall_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
+        self._ensure_confined(hooks_dir, self.claude_home, "claude-code hooks (uninstall)")
         removed: list[str] = []
-        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS, MARKER_NAME):
+        for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS, *CLAUDE_RETIRED_FILES, MARKER_NAME):
             path = hooks_dir / name
             if path.is_symlink() or path.exists():
                 self._remove_file(path)
@@ -723,12 +928,27 @@ class Installer:
     def _check_cli(self) -> dict[str, Any]:
         path = shutil.which("nunchi-channel")
         if path:
-            self._act("check", "nunchi-channel", note=f"found: {path}")
-            return {"status": STATUS_IN_SYNC, "resolved": path}
+            # HONESTY (round-2 finding): any executable with this name used to
+            # report in-sync. This installer cannot establish the binary's
+            # provenance or version — the shared CLI is installed separately
+            # (pip / uv tool) and can lag the repo even when every hook file is
+            # current. That drift class caused a real deploy gap on 2026-07-10.
+            guidance = (
+                "presence confirmed, provenance NOT verified. If core behavior "
+                "changed in this repo, refresh the shared CLI explicitly (e.g. "
+                "`uv tool install --force --from <repo checkout> nunchi` or "
+                "`pip install --upgrade <repo checkout>`); see docs/INSTALL.md."
+            )
+            self._act("check", "nunchi-channel", note=f"found: {path} (unverified)")
+            return {
+                "status": STATUS_PRESENT_UNVERIFIED,
+                "resolved": path,
+                "guidance": guidance,
+            }
         guidance = (
             "nunchi-channel not found on PATH. Install the package to provide it: "
             "`pip install nunchi` (or `pip install .` from a checkout). Both the "
-            "Hermes plugin and the Claude Code hooks shell out to nunchi-channel."
+            "Hermes plugin and the Claude Code wake gate shell out to nunchi-channel."
         )
         self._act("check", "nunchi-channel", note="MISSING")
         self._emit("  " + guidance)
@@ -782,12 +1002,16 @@ def _resolve_home(
     prefix_subdir: str,
     default: str,
 ) -> Path:
+    """Explicit CLI intent outranks ambient environment: ``--hermes-home`` >
+    ``--prefix`` > inherited env var > default. An inherited ``HERMES_HOME``
+    beating an explicit ``--prefix`` let test/review runs escape their
+    sandbox into the live Hermes profile (Aleph's finding, 2026-07-10)."""
     if explicit:
         return Path(explicit).expanduser()
-    if env_var and os.environ.get(env_var):
-        return Path(os.environ[env_var]).expanduser()
     if prefix is not None:
         return prefix / prefix_subdir
+    if env_var and os.environ.get(env_var):
+        return Path(os.environ[env_var]).expanduser()
     return Path(default).expanduser()
 
 
@@ -849,10 +1073,9 @@ def _build_parser() -> argparse.ArgumentParser:
     add_group_arg(
         sub.add_parser("uninstall", parents=[common], help="remove installed copies; restore a backed-up symlink")
     )
-    ps = sub.add_parser(
+    sub.add_parser(
         "print-claude-settings", parents=[common], help="print the settings.json hook registration snippet"
     )
-    ps.add_argument("--matcher", default=DEFAULT_REPLY_MATCHER, help="PreToolUse tool matcher")
 
     return parser
 
@@ -883,7 +1106,7 @@ def main(argv: Sequence[str] | None = None, *, out: io.TextIOBase | None = None)
 
     try:
         if args.command == "print-claude-settings":
-            stream.write(build_claude_settings_snippet(claude_home, matcher=args.matcher) + "\n")
+            stream.write(build_claude_settings_snippet(claude_home) + "\n")
             return EXIT_OK
 
         groups = getattr(args, "only", None)

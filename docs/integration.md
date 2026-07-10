@@ -211,10 +211,12 @@ it. To map that surface onto a Nunchi request:
   `@<snowflake>` question. Names belong in `agent.aliases`.
 - **agent.aliases** ← every *other* identity this one agent answers to: display
   names ("Vigil"), secondary handles ("Codex"), profile names ("Aether"),
-  additional mention tokens. One bot commonly carries several at once; a message
-  targeting any of them is addressed to this agent, and a message authored under
-  one of them is its own (self-echo suppression). Optional — absent, behavior is
-  exactly as before the field existed.
+  additional mention tokens. One bot commonly carries several at once; the
+  classifier weighs all of them as addressing evidence. Aliases establish who a
+  message may be FOR — never authorship: name-equality is not proof a message
+  is the agent's own (2026-07-10 — the deterministic self-echo rule that
+  treated it that way was removed). Optional — absent, behavior is exactly as
+  before the field existed.
 - **pinned_rules** ← optional. pilot-bot keeps channel norms in a
   `pinned-rules.md` the agent reads as standing instruction; with Nunchi you
   can instead pass that text as `pinned_rules` so the verdict is channel-aware
@@ -306,8 +308,7 @@ The full surface, and where each knob lives:
 | provider endpoint | env `NUNCHI_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` | OpenRouter | point at any OpenAI-compatible endpoint, incl. localhost |
 | request timeout | per-call `classifier_config.timeout` | 30s | positive seconds |
 | provider retries | per-call `classifier_config.max_retries` / `retry_base_delay` | 2 / 0.5s | retries transient errors (429/5xx/timeouts) with exponential backoff; never retries 401/403/4xx |
-| fast-path | env `NUNCHI_FASTPATH` | on (`0` disables) | resolves certain cases (an `<@id>` aimed at another agent, or a self-echo) to PASS with no provider call; anything ambiguous still goes to the model |
-| PASS corroboration | per-call `classifier_config.require_pass_corroboration` | `false` | when true, downgrades an uncorroborated PASS (no consulted `context:` ref) to ASK — for surfaces that must challenge unverified "done" claims; best paired with the fast-path |
+| PASS corroboration | per-call `classifier_config.require_pass_corroboration` | `false` | when true, downgrades an uncorroborated PASS (no consulted `context:` ref) to ASK — for surfaces that must challenge unverified "done" claims |
 | failure behavior | `gate(fail_policy=...)` / payload `fail_policy` | `open` (→SPEAK) | `open` \| `closed` (→PASS) \| `raise` |
 | suppression output | CLI `--silent-token STR` / `--format cc-connect`; Python `result.silent_token(...)` | none (JSON) | your transport's sentinel, if it uses one |
 | offline/dev decision | env `NUNCHI_CLASSIFIER_TEST_RESULT` | unset | pin a verdict; no provider call |

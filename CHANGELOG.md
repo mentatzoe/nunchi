@@ -7,6 +7,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — round-4 review: confidence domain, uninstall confinement
+
+- **Confidences must be on the stated [0, 1] scale**, enforced identically at
+  the hook (`defer-malformed-confidence` when DEFER is on) and the shared
+  schema boundary (`ValidationError`), so core and adapters cannot disagree.
+  `{"PASS": 9.0, ...}` and negative vectors previously passed the exactness
+  check and hard-blocked — off-scale evidence has no defined margin meaning.
+- **Confinement covers destructive writes:** both uninstall paths now call the
+  ancestor check before mutating; uninstalling through a symlinked
+  `plugins/`/`hooks/` that escapes the configured root is rejected instead of
+  recursively deleting external directories. Aleph's repros are the
+  regression tests.
+- **Residue swept to the current contract:** remaining unreleased-changelog
+  lines and the two addressing fixture metas no longer assert the
+  deterministic fast-path or alias-authorship-as-fact; the hook's module
+  docstring now states the two fail-open contracts explicitly (runtime
+  failures receipted; malformed config knobs fall back silently to documented
+  defaults, verifiable from receipts' effective values).
+
+### Fixed — round-3 review: terminal fail-open, exact destructive PASS, installer parity
+
+- **Declared fail-open is terminal.** A mistyped `transcript_path` used to
+  write `allow-input-error` and then keep judging (the receipt said allow, the
+  gate blocked). Input errors now stop processing.
+- **A destructive PASS must be complete and exactly typed:** `silent` present
+  and boolean, `reasons` a non-empty list of non-empty strings, confidences
+  exactly the four verdict keys (extras are evidence malformation → DEFER when
+  enabled). Defaults no longer forge the destructive form; admits stay lenient
+  because they destroy nothing.
+- **The outer guard is actually outer:** fallible config (`NUNCHI_HOOK_TIMEOUT`,
+  `NUNCHI_HOOK_TOOL_PATTERN`) parses safely instead of crashing at import, and
+  any exception escaping the guarded main — decoder recursion included — exits
+  0 with a receipted `allow-hook-error`.
+- **Attribute tokens require both boundaries** (`chat_id="c1"junk` no longer
+  binds) and duplicate required attributes reject the envelope as ambiguous.
+- **Hermes installer parity:** the plugin tree now gets the same
+  file-inventory + content-drift verification, upgrade-repairs, and
+  `_ensure_confined` ancestor check as the Claude path;
+  `verify → upgrade → verify` converges for deleted and tampered plugin files,
+  and a symlinked `plugins/` escaping `$HERMES_HOME` is rejected before writes.
+- **Docs and prompt tell the current contract:** aliases are addressing
+  evidence, never authorship — corrected in `docs/integration.md`,
+  `src/nunchi/schema.py`, the unreleased changelog entries, and the classifier
+  prompt itself (which had asserted name-equality authorship as fact).
+
+### Removed — the deterministic pre-classifier layer, entirely
+
+- **The fastpath module is gone** (round-2 review + room baseline: suppression
+  may be deterministic only where mechanically provable, and the current
+  envelope carries no transport-bound identity, so nothing qualifies). The
+  mention-elsewhere rule fell in round 2's precursor; round 2 proved the
+  self-echo rule equally unsound — author-name equality accepted a human whose
+  display name matched an alias as "self", and text equality accepted a human
+  repeating "Thanks." as the agent's own echo, both minting PASS 1.0 with no
+  model call and sailing past DEFER. Every admission is now classifier-judged.
+  Deterministic short-circuits may return only when the message contract
+  carries an adapter-asserted runtime binding (schema-v2). `NUNCHI_FASTPATH`
+  env knob removed with the layer.
+
+### Fixed — Claude Code gate: strict directive typing, envelope integrity, crash paths
+
+- **Hard suppression now requires a complete, finite, correctly typed
+  confidence vector.** A PASS whose confidences are missing, partial, mistyped,
+  or non-finite ABSTAINS (`defer-malformed-confidence`, malformation receipted)
+  instead of hard-blocking — broken evidence is not confidence. The explicit
+  `NUNCHI_DEFER=off` kill switch keeps its hard meaning. `silent` must be a
+  real boolean (`"false"` no longer coerces into a forged block) and `reasons`
+  a real list; both fail open with a receipted `allow-gate-error` otherwise.
+- **Envelope integrity:** attribute parsing requires complete tokens
+  (`not-chat_id="c1"` no longer binds as `chat_id`); whitespace-only
+  identifiers read as missing (`allow-envelope-error`).
+- **The "always exit 0, fail open, receipt errors" contract is now mechanical:**
+  `prompt: null` and mistyped top-level fields fail open with a receipted
+  `allow-input-error`; a non-object transcript row is skipped; a malformed
+  `NUNCHI_HOOK_HISTORY_WINDOW` falls back to its default; any unhandled hook
+  exception exits 0 with a receipted `allow-hook-error`.
+
+### Fixed — installer: verification integrity and confinement
+
+- `verify` no longer certifies broken or mixed deployments: every managed file
+  must exist as a regular file (a deleted wrapper is reported and `upgrade`
+  repairs it), installed bytes are compared against source (content drift
+  reported), retired-name broken symlinks are visible, and the stale-settings
+  scan runs even when nothing is installed. `verify → upgrade → verify`
+  converges for all of these.
+- The CLI check reports `present-unverified` — presence is not provenance; the
+  shared `nunchi-channel` is a separate deploy surface (documented in
+  docs/INSTALL.md with the refresh step).
+- Destination ancestors that resolve outside the configured root are rejected
+  before any write (symlinked `hooks/` escaping `--prefix` was reproducible);
+  symlinks that stay inside the root remain legitimate operator topology.
+
+### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
+
+### Removed — fastpath mention-elsewhere short-circuit (the precursor, in detail)
+
+- **A foreign `<@id>` mention no longer produces a deterministic PASS.** The
+  rule conflated referential mention ("another agent appears in the story")
+  with floor assignment ("the message is for them"). Live false PASS,
+  2026-07-10: the operator replied to an agent's own message, correcting it by
+  name, while @mentioning a peer who featured in the anecdote — the fast path
+  stamped `PASS 1.0`, `classifier_model: null`, and no model ever read it.
+  Because a fastpath PASS carries full confidence, it also sailed past DEFER —
+  deterministic overconfidence sat above the uncertainty lane. Room-agreed
+  contract (Aleph/Aether/Vigil/Station): *a deterministic rule may hard-PASS
+  only what it can prove; a foreign mention proves reference, not exclusive
+  targeting.* Foreign-mention messages now always get semantic adjudication.
+  (Self-caused echo briefly remained as a short-circuit; the entry above
+  removes the whole deterministic layer — name/text equality is not proof.)
+  Fixture `a-mention-other-alias-in-passing` keeps its PASS ground truth but is
+  now model-scored. (The live canary was pinned in `tests/test_fastpath.py`
+  until the whole deterministic layer was removed — see the entry above; the
+  canary's ground truth lives on in the fixture corpus.)
+
+### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
+
+- **Retired the Claude Code send-time (`PreToolUse`) gate** (`nunchi_gate_hook.py`
+  and its `nunchi-pretool-reply.sh` wrapper). It re-judged an already-admitted
+  turn against the newest transcript line, so a peer message landing while the
+  agent composed stole the causal role and the composed reply died as a false
+  PASS. Nunchi now makes its single admission judgment at wake
+  (`UserPromptSubmit`) and gets out of the way; no permit/ledger side state is
+  needed because nothing has to be kept consistent across two judgments.
+  `tests/test_no_second_judgment.py` scans the whole project to keep both the
+  retired hook and the ledger shape removed.
+- **DEFER (gate abstention) added to the wake gate, default on.** On an
+  *uncertain* PASS (best alternative verdict within `NUNCHI_DEFER_MARGIN`,
+  default 0.25) the gate declines to silence: the prompt goes through with the
+  gate's hesitation noted in-band, and the agent's own model decides — replying
+  and staying silent both stay open. `NUNCHI_DEFER=off` restores hard PASS.
+  Abstentions are receipted as `defer-uncertain-pass` for offline evaluation.
+- **Admissions travel in-band.** SPEAK/ACK/ASK now add a short
+  `additionalContext` note naming the message the turn answers, anchoring
+  composition to its origin without side state.
+- `nunchi-install` upgrade/uninstall now actively remove the retired hook files
+  (with backups), `verify` flags leftovers as stale, and the printed
+  `settings.json` snippet is `UserPromptSubmit`-only (delete any old
+  `PreToolUse` entry by hand — settings remain operator-owned).
+
 ### Added — Codex/Vigil room integration and operator surface
 
 - Added a long-running Codex room runner for the shared Discord MCP transport.
@@ -108,15 +247,16 @@ is byte-for-byte identical to before (golden-request test pins this).
   validated by `validate_request` (non-string/blank entries rejected),
   passed through to the classifier with the rest of the `agent` object.
   Documented in `src/nunchi/schema.py` and `docs/STABILITY.md`.
-- **Deterministic fast-path**: aliases join the addressing identifier set —
-  the "mention aimed at ANOTHER agent → PASS" short-circuit no longer fires
-  when the mentioned token is one of OUR aliases — and the self-echo rule
-  recognizes triggers/context authored under an alias. `mention_id` still
-  does NOT join the self-echo author set (unchanged no-alias behavior; list
-  it in `aliases` to opt in).
+- **Aliases are addressing evidence for the classifier only.** (This entry
+  originally extended the deterministic fast-path's identifier sets; that
+  entire layer was later removed in this same unreleased cycle — see the
+  removal entries above. Aliases establish who a message may be FOR; they are
+  never proof of authorship.)
 - **Classifier prompt** now states the agent may be addressed by any of its
-  `id`, `mention_id`, or `aliases`, and that a message authored under one of
-  those identities is the agent's own.
+  `id`, `mention_id`, or `aliases`. (An earlier revision also told the
+  classifier a message authored under an alias "is the agent's own" — that
+  authorship claim is retracted per the round-3 review: name-equality is not
+  authorship.)
 - **Channel adapter**: `agent_aliases` parameter on `build_request()` /
   `gate()`, `agent.aliases` passthrough in the CLI payload, alias-aware
   `self` role inference for history lines, and a shared `parse_alias_csv`
@@ -125,7 +265,8 @@ is byte-for-byte identical to before (golden-request test pins this).
 - **Surface knobs** (each documented in its config docstring/README, all
   stating loudly that `mention_id` is the platform snowflake/token, NOT the
   display name — names belong in aliases):
-  - Claude Code hooks (PreToolUse + UserPromptSubmit) and the Codex
+  - the Claude Code wake gate (UserPromptSubmit; its PreToolUse sibling was
+    later retired — see above) and the Codex
     UserPromptSubmit hook: `NUNCHI_HOOK_ALIASES` (comma-separated);
   - Codex room runner: `NUNCHI_RUNNER_ALIASES`;
   - Hermes plugin: `aliases:` config key (CSV or list), global and
@@ -138,9 +279,10 @@ is byte-for-byte identical to before (golden-request test pins this).
   envelope+meta pairs distilled from the live failures: direct
   `@<snowflake>` mention with the snowflake in aliases (SPEAK), display-name
   address (SPEAK), secondary-alias address "Codex" (SPEAK), a different
-  bot's name (PASS), self-echo relayed under a profile-name alias (PASS,
-  deterministic fast-path), and a mention of another participant with our
-  alias only in passing prose (PASS, deterministic fast-path). Loader,
+  bot's name (PASS), a relay echo under a profile-name alias, and a mention
+  of another participant with our alias only in passing prose (both PASS —
+  originally deterministic-fast-path cases, model-scored since the layer's
+  removal). Loader,
   runner (`--source addressing`), and runner self-tests discover the pool
   the same way as the injection and tool-chrome classes.
 - **Merged `feat/codex-plugin` into this branch** (Codex room runner +
@@ -148,9 +290,10 @@ is byte-for-byte identical to before (golden-request test pins this).
   land on the Codex surface too; its hook tests were also brought under
   `tests/hook_sandbox.sandbox_env`, matching main's receipt-log hygiene
   enforcement.
-- Scope note: alias matching is identity plumbing, not fuzzy matching — the
-  fast-path still compares only structured tokens and exact author strings;
-  prose name-spotting remains the classifier's judgment. The SPEAK
+- Scope note: alias matching is identity plumbing, not fuzzy matching —
+  (historical: the then-extant fast-path compared only structured tokens; the
+  layer is now removed and ALL addressing judgment, prose or structured, is
+  the classifier's). The SPEAK
   expectations in the new fixtures are model judgment (evidence:
   `predicted`), not fast-path guarantees.
 

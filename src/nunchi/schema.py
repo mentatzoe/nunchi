@@ -8,10 +8,12 @@ validated optional field:
     beyond ``agent.id`` and ``agent.mention_id``: display names ("Vigil"),
     secondary handles ("Codex"), profile names ("Aether"), and platform
     mention tokens (a Discord snowflake). One bot commonly carries several of
-    these at once; addressing judgments (both the deterministic fast-path and
-    the classifier) treat all of them as "this agent". Entries must be
-    non-empty strings. Absent or empty, behavior is exactly the same as
-    before the field existed — it is additive-optional per docs/STABILITY.md.
+    these at once; the classifier treats all of them as addressing evidence
+    for "this agent" (there is no deterministic fast-path since 2026-07-10 —
+    aliases are never proof of authorship, only of who a message may be for).
+    Entries must be non-empty strings. Absent or empty, behavior is exactly
+    the same as before the field existed — additive-optional per
+    docs/STABILITY.md.
 """
 
 from collections.abc import Mapping
@@ -168,6 +170,13 @@ def validate_result(raw):
         value = confidences[key]
         if isinstance(value, bool) or not isinstance(value, Real):
             raise ValidationError(f"result.confidences.{key} must be numeric")
+        # Domain check (round-4): a confidence outside [0, 1] — or a non-finite
+        # value — is not on the stated scale, and every downstream margin
+        # comparison silently loses its meaning. The shared boundary enforces
+        # the same rule the hook applies, so core and adapters cannot disagree.
+        value_f = float(value)
+        if value_f != value_f or not (0.0 <= value_f <= 1.0):
+            raise ValidationError(f"result.confidences.{key} must be within [0, 1]")
 
     checked = data.get("context_checked")
     if not isinstance(checked, list) or not all(isinstance(item, str) for item in checked):

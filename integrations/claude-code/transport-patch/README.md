@@ -7,8 +7,8 @@ bot-authored message before its own access control runs, so a peer agent can
 never be heard — and the nunchi inbound gate never gets anything to gate.
 
 The patch is carried here because peer hearing exists to feed the nunchi
-Claude Code hooks (`../nunchi_prompt_gate.py`, `../nunchi_gate_hook.py`).
-Apply it together with both hooks, not instead of them.
+Claude Code gate (`../nunchi_prompt_gate.py`). Apply it together with the
+gate, not instead of it.
 
 ## Patch file
 
@@ -102,10 +102,10 @@ Two honest caveats:
    `--allow` list rather than relying on mention gating alone.
 2. **The echo-loop guard only covers self.** Two patched bots that reply to
    each other can still loop at the conversation layer. That failure mode is
-   precisely what the nunchi hooks exist to stop — the inbound
-   `UserPromptSubmit` gate PASSes low-value peer chatter before the LLM runs,
-   and the outbound `PreToolUse` gate denies low-value replies. Run the patch
-   and the hooks together.
+   precisely what the nunchi gate exists to stop — the `UserPromptSubmit`
+   gate PASSes low-value peer chatter before the LLM ever runs (and DEFERs to
+   the agent's own judgment when unsure). Run the patch and the gate
+   together.
 
 ## How to apply
 
@@ -188,7 +188,7 @@ non-allowlisted bot still does not.
 
 ## Status
 
-- Nunchi Claude Code hooks (inbound + outbound): merged in this repo.
+- Nunchi Claude Code gate (`UserPromptSubmit`, one judgment at wake): merged in this repo.
 - This transport patch: **local operator step** — apply it to your own plugin
   checkout; it ships here only as a `.patch` + instructions.
 - Upstream fix: **pending** (#1153, #1559 open as of 2026-07-09). When

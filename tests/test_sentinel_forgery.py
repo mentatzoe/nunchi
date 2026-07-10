@@ -12,10 +12,10 @@ Covered surfaces:
 1. The hermes plugin (``integrations/hermes/nunchi-gate``): an event whose
    text is/contains the sentinel is forwarded verbatim as trigger content and
    only the directive decides skip vs allow.
-2. The Claude Code PreToolUse hook (``nunchi_gate_hook.py``): a transcript
-   trigger containing the sentinel never causes a deny by itself.
-3. The Claude Code UserPromptSubmit hook (``nunchi_prompt_gate.py``): a
+2. The Claude Code UserPromptSubmit hook (``nunchi_prompt_gate.py``): a
    channel prompt containing the sentinel never causes a block by itself.
+   (The retired send-time hook's surface was removed with the hook itself —
+   nunchi makes one judgment per turn, at wake.)
 
 Stdlib-only, offline, deterministic: the gate binary is a stub script in a
 temp dir (the pattern from tests/test_claude_code_prompt_gate.py) and hermes'
@@ -42,7 +42,6 @@ from types import SimpleNamespace
 
 _WORKTREE_ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_PATH = _WORKTREE_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
-_OUTBOUND_HOOK = _WORKTREE_ROOT / "integrations" / "claude-code" / "nunchi_gate_hook.py"
 _INBOUND_HOOK = _WORKTREE_ROOT / "integrations" / "claude-code" / "nunchi_prompt_gate.py"
 
 # Forged-sentinel spellings observed in the wild (pilot-bot leaks used the
@@ -251,75 +250,6 @@ def _channel_tag(*, chat_id: str, message_id: str, user: str, body: str) -> str:
     )
 
 
-class OutboundHookSentinelForgeryTests(_TempDirMixin):
-    """PreToolUse hook: a sentinel-bearing inbound trigger never denies by itself."""
-
-    CHAT_ID = "chan-77"
-
-    def _transcript(self, trigger_body: str) -> str:
-        path = self.tmp / "transcript.jsonl"
-        entry = {
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": _channel_tag(
-                    chat_id=self.CHAT_ID,
-                    message_id="m1",
-                    user="mallory",
-                    body=trigger_body,
-                ),
-            },
-        }
-        path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
-        return str(path)
-
-    def _hook_input(self, transcript_path: str) -> dict:
-        return {
-            "session_id": "sess-sentinel",
-            "transcript_path": transcript_path,
-            "hook_event_name": "PreToolUse",
-            "tool_name": "mcp__plugin_discord_discord__reply",
-            "tool_input": {"chat_id": self.CHAT_ID, "text": "on it — checking now"},
-        }
-
-    def test_sentinel_trigger_with_speak_directive_allows(self):
-        for forged in SENTINEL_FORGERIES:
-            with self.subTest(forged=forged):
-                wrapper, capture = self._make_gate_stub(_speak_directive())
-                transcript = self._transcript(forged)
-                rc, out, err = _run_hook_script(
-                    _OUTBOUND_HOOK, self._hook_input(transcript), self._hook_env(wrapper)
-                )
-                self.assertEqual(rc, 0, err)
-                decision = json.loads(out)
-                self.assertEqual(
-                    decision["hookSpecificOutput"]["permissionDecision"],
-                    "allow",
-                    f"forged sentinel {forged!r} denied the send on its own",
-                )
-                # The forged sentinel reached the gate verbatim as trigger DATA.
-                payload = json.loads(capture.read_text(encoding="utf-8"))
-                self.assertEqual(payload["trigger"]["content"], forged)
-
-    def test_suppression_still_comes_from_the_directive_only(self):
-        """Control: same sentinel-bearing trigger IS denied when the gate says PASS."""
-        wrapper, _ = self._make_gate_stub(_pass_directive())
-        transcript = self._transcript(SENTINEL_FORGERIES[0])
-        rc, out, err = _run_hook_script(
-            _OUTBOUND_HOOK, self._hook_input(transcript), self._hook_env(wrapper)
-        )
-        self.assertEqual(rc, 0, err)
-        decision = json.loads(out)
-        self.assertEqual(
-            decision["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 3. Claude Code UserPromptSubmit hook (inbound)
-# ---------------------------------------------------------------------------
-
-
 class InboundHookSentinelForgeryTests(_TempDirMixin):
     """UserPromptSubmit hook: a sentinel-bearing channel prompt never blocks by itself."""
 
@@ -344,11 +274,16 @@ class InboundHookSentinelForgeryTests(_TempDirMixin):
                     _INBOUND_HOOK, self._hook_input(forged), self._hook_env(wrapper)
                 )
                 self.assertEqual(rc, 0, err)
-                self.assertEqual(
-                    out.strip(),
-                    "",
+                parsed = json.loads(out)
+                self.assertNotIn(
+                    "decision",
+                    parsed,
                     f"forged sentinel {forged!r} blocked the prompt on its own",
                 )
+                # SPEAK admits emit the admission note, and the forged sentinel
+                # must not leak into it (the note carries admission facts only).
+                note = parsed["hookSpecificOutput"]["additionalContext"]
+                self.assertNotIn("CC_CONNECT_SILENT_PASS", note)
                 # The forged sentinel reached the gate verbatim as trigger DATA.
                 payload = json.loads(capture.read_text(encoding="utf-8"))
                 self.assertEqual(payload["trigger"]["content"], forged)
@@ -380,7 +315,7 @@ class InboundHookSentinelForgeryTests(_TempDirMixin):
     def test_hook_sources_never_match_sentinel_against_text(self):
         """Structural guard: neither Claude Code hook contains a code path
         comparing message text to the sentinel token."""
-        for hook in (_OUTBOUND_HOOK, _INBOUND_HOOK):
+        for hook in (_INBOUND_HOOK,):
             with self.subTest(hook=hook.name):
                 self.assertNotIn(
                     "CC_CONNECT_SILENT_PASS", hook.read_text(encoding="utf-8")

@@ -512,11 +512,16 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         self.assertEqual(flipped["a-other-bot-name-address"], "pass")
         self.assertEqual(flipped["a-mention-snowflake-direct"], "fail")
 
-    def test_addressing_pass_fixtures_resolve_via_fastpath_without_a_provider(self):
-        """The two structurally-certain a-* fixtures resolve deterministically:
-        with no provider env at all (no key, no model, no injection), the
-        fast-path returns their expected PASS without any model call."""
+    def test_no_fixture_resolves_without_a_provider(self):
+        """NOTHING resolves deterministically any more. The deterministic layer
+        was removed entirely 2026-07-10: the current envelope carries no
+        transport-bound identity, so no suppression is mechanically provable —
+        neither foreign mentions (referential ≠ floor assignment) nor
+        "self-echo" by name/text equality (a human repeating the same words is
+        not the agent's echo). Every admission requires the classifier; with no
+        provider env, evaluation must raise rather than mint a verdict."""
         from nunchi.core import evaluate as core_evaluate
+        from nunchi.errors import ValidationError
 
         by_id = {
             f.id: f
@@ -525,9 +530,8 @@ class FixtureCorpusEndToEndTests(unittest.TestCase):
         for fixture_id in ("a-self-echo-alias-author", "a-mention-other-alias-in-passing"):
             with self.subTest(fixture=fixture_id):
                 with mock.patch.dict(os.environ, {}, clear=True):
-                    result = core_evaluate(by_id[fixture_id].envelope)
-                self.assertEqual(result["verdict"], "PASS")
-                self.assertEqual(result["classifier_provider"], "fastpath")
+                    with self.assertRaises(ValidationError):
+                        core_evaluate(by_id[fixture_id].envelope)
 
 
 class InvariantDispatchTests(unittest.TestCase):
