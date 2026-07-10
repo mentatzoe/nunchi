@@ -37,38 +37,49 @@ class PermitStoreTests(unittest.TestCase):
     record — not a durable service queue."""
 
     def setUp(self) -> None:
-        self.path = pathlib.Path(tempfile.mkdtemp()) / "permits.json"
+        self.dir = pathlib.Path(tempfile.mkdtemp())
 
     def _write(self, session, chat, mid, now):
-        permit.write_permit(session, chat, mid, "author", "ts", path=self.path, now=now)
+        permit.write_permit(session, chat, mid, "author", "ts", directory=self.dir, now=now)
 
     def test_write_then_read_within_ttl(self):
         self._write("s1", "c1", "A", now=100.0)
-        p = permit.read_permit("s1", "c1", path=self.path, now=150.0, ttl=300.0)
+        p = permit.read_permit("s1", "c1", directory=self.dir, now=150.0, ttl=300.0)
         self.assertIsNotNone(p)
         self.assertEqual(p["origin_message_id"], "A")
 
     def test_never_crosses_session_boundary(self):
         self._write("s1", "c1", "A", now=100.0)
-        self.assertIsNone(permit.read_permit("s2", "c1", path=self.path, now=101.0, ttl=300.0))
+        self.assertIsNone(permit.read_permit("s2", "c1", directory=self.dir, now=101.0, ttl=300.0))
 
     def test_expires_past_ttl_no_necro(self):
         self._write("s1", "c1", "A", now=100.0)
-        self.assertIsNone(permit.read_permit("s1", "c1", path=self.path, now=100.0 + 301, ttl=300.0))
+        self.assertIsNone(permit.read_permit("s1", "c1", directory=self.dir, now=100.0 + 301, ttl=300.0))
 
     def test_newest_admit_supersedes_not_fifo(self):
         self._write("s1", "c1", "A", now=100.0)
         self._write("s1", "c1", "C", now=110.0)  # a later admit in the same turn/chat
-        p = permit.read_permit("s1", "c1", path=self.path, now=120.0, ttl=300.0)
+        p = permit.read_permit("s1", "c1", directory=self.dir, now=120.0, ttl=300.0)
         self.assertEqual(p["origin_message_id"], "C")
 
     def test_clear_closes_it(self):
         self._write("s1", "c1", "A", now=100.0)
-        permit.clear_permit("s1", "c1", path=self.path)
-        self.assertIsNone(permit.read_permit("s1", "c1", path=self.path, now=101.0, ttl=300.0))
+        permit.clear_permit("s1", "c1", directory=self.dir)
+        self.assertIsNone(permit.read_permit("s1", "c1", directory=self.dir, now=101.0, ttl=300.0))
 
     def test_missing_file_is_none_not_crash(self):
-        self.assertIsNone(permit.read_permit("s1", "c1", path=self.path, now=1.0))
+        self.assertIsNone(permit.read_permit("s1", "c1", directory=self.dir, now=1.0))
+
+    def test_distinct_keys_coexist_no_clobber(self):
+        # A shared read-modify-write map loses one permit when two writers start
+        # from the same store (Aleph's two-writer repro). Per-(session,chat)
+        # files cannot clobber unrelated records.
+        self._write("s1", "c1", "A", now=100.0)
+        self._write("s2", "c2", "B", now=100.0)
+        self.assertEqual(
+            permit.read_permit("s1", "c1", directory=self.dir, now=101.0)["origin_message_id"], "A")
+        self.assertEqual(
+            permit.read_permit("s2", "c2", directory=self.dir, now=101.0)["origin_message_id"], "B")
 
 
 def _capturing_gate(directive: dict) -> tuple[str, str]:
@@ -117,16 +128,16 @@ class FixtureZero(unittest.TestCase):
             _hook_input(chat_id="c1", text="I'm good, Zoe.",
                         transcript_path=transcript, session_id="sess-abc"),
             env_overrides={"NUNCHI_CHANNEL_BIN": wrapper,
-                           "NUNCHI_PERMIT_PATH": str(permit_path)},
+                           "NUNCHI_PERMIT_DIR": str(permit_path)},
         )
         return json.loads(pathlib.Path(capture).read_text())
 
     def test_binds_to_origin_A_not_newest_peer_B(self):
         """FIXTURE ZERO: with a permit for A, the outbound gate judges A, not B,
         and the classifier still sees B as the post-origin tail."""
-        pp = pathlib.Path(tempfile.mkdtemp()) / "permits.json"
+        pp = pathlib.Path(tempfile.mkdtemp())
         permit.write_permit("sess-abc", "c1", "A", "zoe", "2026-07-10T03:09:00Z",
-                            path=pp, now=time.time())  # admit-time; default 300s TTL covers this ms test
+                            directory=pp, now=time.time())  # admit-time; default 300s TTL covers this ms test
         payload = self._run(self._transcript_A_then_B(), pp)
         self.assertEqual(payload["trigger"]["message_id"], "A",
                          "must bind to the invitation A, not the newest peer line B")
@@ -137,7 +148,7 @@ class FixtureZero(unittest.TestCase):
     def test_legacy_without_permit_reproduces_the_bug(self):
         """No permit → legacy newest-inbound scan → binds to B (the bug). This
         is what made my 'how's everyone' reply die as a false PASS."""
-        pp = pathlib.Path(tempfile.mkdtemp()) / "permits.json"  # empty: no permit
+        pp = pathlib.Path(tempfile.mkdtemp())  # empty: no permit
         payload = self._run(self._transcript_A_then_B(), pp)
         self.assertEqual(payload["trigger"]["message_id"], "B",
                          "without a permit the legacy scan binds to the newest inbound — the defect")
@@ -145,11 +156,25 @@ class FixtureZero(unittest.TestCase):
     def test_permit_from_another_session_does_not_bind(self):
         """A permit for a *different* session must not rebind this turn (no
         cross-session necro); it falls back to legacy."""
-        pp = pathlib.Path(tempfile.mkdtemp()) / "permits.json"
-        permit.write_permit("OTHER-session", "c1", "A", path=pp, now=time.time())
+        pp = pathlib.Path(tempfile.mkdtemp())
+        permit.write_permit("OTHER-session", "c1", "A", directory=pp, now=time.time())
         payload = self._run(self._transcript_A_then_B(), pp)
         self.assertEqual(payload["trigger"]["message_id"], "B",
                          "another session's permit must not bind this turn")
+
+    def test_permit_is_consumed_one_shot(self):
+        """The permit is consumed on the first outbound decision, so an unrelated
+        later send falls to legacy — not a 300s retargeting lease."""
+        pp = pathlib.Path(tempfile.mkdtemp())
+        permit.write_permit("sess-abc", "c1", "A", directory=pp, now=time.time())
+        transcript = self._transcript_A_then_B()
+        first = self._run(transcript, pp)
+        self.assertEqual(first["trigger"]["message_id"], "A", "first decision binds A")
+        self.assertIsNone(permit.read_permit("sess-abc", "c1", directory=pp),
+                          "permit must be consumed after the first decision")
+        second = self._run(transcript, pp)
+        self.assertEqual(second["trigger"]["message_id"], "B",
+                         "a second, unrelated decision falls to legacy — no retargeting lease")
 
 
 if __name__ == "__main__":

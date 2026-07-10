@@ -69,8 +69,16 @@ MARKER_VERSION = 1
 #: and the ``dashboard/`` tab assets — is the *running plugin* and is copied.
 HERMES_EXCLUDE_DIRS = frozenset({"__pycache__", "docs", "tests"})
 
-#: The two Claude Code hook scripts copied into ``~/.claude/hooks/``.
-CLAUDE_HOOK_FILES = ("nunchi_gate_hook.py", "nunchi_prompt_gate.py")
+#: The Claude Code hook scripts + the modules they import, copied into
+#: ``~/.claude/hooks/``. The permit/defer modules MUST ship: both hooks import
+#: them as siblings, and an absent module silently degrades to the legacy
+#: newest-inbound bind (i.e. the old false-PASS bug) with no signal.
+CLAUDE_HOOK_FILES = (
+    "nunchi_gate_hook.py",
+    "nunchi_prompt_gate.py",
+    "nunchi_causal_permit.py",
+    "nunchi_defer.py",
+)
 
 #: Fail-open shell wrappers written next to the hooks, mapped to the hook they
 #: invoke. ``settings.json`` registers *these*, never a repo path.

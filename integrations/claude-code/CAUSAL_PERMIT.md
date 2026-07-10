@@ -1,72 +1,77 @@
-# Causal permit: the outbound trigger re-bind fix
+# Causal reply-authorization — Claude Code implementation
 
-**Status: fixture-zero green; 966 tests pass, zero regressions.** Honest soft
-spots at the bottom — nothing swept under.
+**The contract is meant to be standard; this file is the Claude *implementation*
+of it.** Blocker-fixed per Aleph's review; honest soft spots at the bottom.
 
-## The bug (live, 2026-07-10 03:09)
+## The standard contract (should live in nunchi core, not here)
 
-The Claude Code inbound gate (`UserPromptSubmit`) and outbound gate
-(`PreToolUse`) are **separate processes**. The outbound gate had no memory of
-which message a reply was composed for, so it reverse-scanned the transcript for
-the **newest inbound** line and judged that (`nunchi_gate_hook.py`, old
-`for i in range(len(events)-1, -1, -1)`).
+> An admitted `ACK`/`ASK`/`SPEAK` authorizes **one** response from that same
+> live turn, causally bound to its triggering message A. A later `PASS` on B may
+> classify B but cannot revise A's authorization. The authorization is consumed
+> on send, or expires silently when the turn ends. It never survives a
+> turn/session/restart to revive an old answer.
 
-Result: Zoe posts invitation **A** → I compose a warm reply for A → a peer posts
-**B** → my outbound gate fires, picks **B**, judges "B isn't addressed to me,"
-and denies the already-composed reply as a false `PASS`. The classifier never
-forgot A; the integration handed it B.
+This is what "admission" has to mean everywhere. Hermes carries it in
+process/session state (and is only *accidentally* safe today); Codex has its own
+runner surface; Claude Code needs a small shared store because its inbound and
+outbound gates are **separate processes**. Promoting this to a core primitive
+(`reply_authorization` on every non-PASS decision) + a shared contract test each
+adapter must pass is the deliberate follow-on.
 
-## Invariant (room consensus: Aleph, Aether, Vigil, Zoe)
+## The bug this fixes (live, 2026-07-10 03:09)
 
-> A `PASS` on B must never silently rebind or cancel a reply composed for A.
-> The send is judged against the message it was **composed for**, established
-> **before composition** — never re-derived from transcript recency at send.
+Claude's outbound gate (`PreToolUse`) reverse-scanned the transcript for the
+**newest inbound** line and judged that. Zoe posts invitation A → I compose a
+reply for A → a peer posts B → the outbound gate picks B, judges "not addressed
+to me," and kills the composed reply as a false `PASS`.
 
-Vigil's framing, which shaped the scope: **a capability to answer, not a debt to
-answer.** Whether A is still *worth* answering (the room may have drifted on) is
-the classifier's social call — a drifted thread is a correct `PASS`, not a bug.
+## Implementation (`nunchi_causal_permit.py`)
 
-## Design — a turn-scoped causal permit, not a service queue
+- **Inbound admit → write authorization** (`write_permit`), *before composition*,
+  keyed by `(session, chat)`. A `PASS` writes nothing and never mutates one.
+- **Outbound → honor it** (`read_permit`): bind `trigger` to the origin message,
+  not newest-inbound; include the **post-origin tail** with timestamps so a
+  drifted thread can still correctly `PASS`. No permit → legacy scan.
+- **Send decision → consume it** (`clear_permit`, one-shot): so an unrelated
+  later send cannot inherit it.
 
-`nunchi_causal_permit.py`. The smallest state that closes the process gap:
+**Not a service queue:** session-scoped, newest-wins (not FIFO), TTL-silent, and
+consumed on first decision.
 
-- **Inbound admit → write permit.** When the inbound gate admits a room message
-  (SPEAK/ACK/ASK), it records the origin `{session, chat, message_id, …}`
-  *before composition*. A `PASS` records nothing and never mutates a permit.
-- **Outbound send → honor permit.** The outbound gate binds `trigger` to the
-  permit's origin message (found in the transcript by id) instead of the newest
-  inbound. No permit / origin rolled out of window → legacy newest scan.
-- **Both sides of the causal boundary.** History now carries the pre-origin
-  lead-in **and** the post-origin tail (peer lines after A), with timestamps
-  restored, so the classifier can tell "answer the invitation" from "necro a
-  drifted thread." Binding to A *without* the tail would just invert the blind
-  spot (SPEAK a cold thread).
+## Blockers from review — fixed
 
-It is **not** a ledger: session-scoped (never binds another session / survives a
-restart), newest-wins (a later admit supersedes — not FIFO), TTL-bounded (a past
-turn's permit is dead, not scavengable), and only admits write it.
+1. **Installer ships the modules.** `nunchi_causal_permit.py` + `nunchi_defer.py`
+   added to `CLAUDE_HOOK_FILES`; `test_install.py::ClaudeInstalledCausalPath`
+   runs the *installed* hook end-to-end and asserts it binds A. (Previously a
+   normal `nunchi-install` silently shipped the old bug.)
+2. **One-shot.** The outbound hook now calls `clear_permit` on the first
+   decision. A transport retry of *that* send degrades to legacy (documented
+   trade — TTL is not a turn boundary, so we don't pretend it distinguishes a
+   retry from an unrelated later send).
+3. **Concurrency.** One file **per (session, chat)** — atomic rename per key.
+   Concurrent admits for different keys can't clobber each other (fixes the
+   shared read-modify-write lost-permit race).
 
-## What is proven (`tests/test_causal_permit.py`)
+## Tests
 
-- **fixture-zero**: transcript A→B, permit for A → outbound binds to **A**, and
-  **B is in history** (post-origin tail visible).
-- **legacy contrast**: same transcript, *no* permit → binds to **B** — the bug,
-  reproduced, proving the permit is the fix.
-- **no cross-session necro**: a permit for another session does not bind.
-- permit units: session-scope, TTL expiry, newest-wins, clear, missing-file.
+`tests/test_causal_permit.py`: fixture-zero (binds A, B in post-tail), legacy
+contrast (binds B), no cross-session bind, one-shot consume, per-key isolation,
++ permit units. `tests/test_install.py`: installed-path bind. See
+`nunchi_defer.py` / `tests/test_defer.py` for the DEFER arm and `DEFER_EVAL.md`
+for its evaluation plan.
 
-## Honest soft spots (not solved tonight)
+## Honest soft spots (not solved)
 
-- **Concurrent distinct admits** (A and C both admitted, two overlapping
-  replies): newest-wins binds the current composition correctly, but a reply
-  still in flight for A would bind to C. Correct for the observed
-  single-invitation case; true multi-bid → reply matching needs a correlation
-  token threaded through composition, which this does not do.
-- **No `PostToolUse` hook exists**, so there is no delivery-confirmed
-  fulfilment. The permit closes by TTL/supersession, not by a recorded Discord
-  receipt. A crash between allow and delivery can lose a reply (never
-  double-send it — existing dedup holds). Vigil's durable send-intent + receipt
-  finalize is the robustness upgrade, deferred.
-- **`DEFER` / frontier escalation** (uncertain small-gate → adjudicate on the
-  stronger model) is a separate, opt-in arm — not this patch. Kept out on
-  purpose so the causal capability lands clean and reviewable.
+- **Concurrent distinct admits** (A and C both admitted, overlapping replies):
+  newest-wins binds the current composition correctly, but a reply still in
+  flight for A binds to C. Needs a correlation token threaded through
+  composition; this does not do that.
+- **No `PostToolUse` delivery-confirmed fulfilment** — consume is on the
+  *decision*, not a recorded Discord receipt. Vigil's durable send-intent +
+  receipt finalize is the robustness upgrade, deferred.
+- **DEFER is v1 mechanism, uncalibrated** — the uncertainty threshold's value
+  (does it improve room behaviour?) is unproven pending the eval arm; disabled
+  unless `NUNCHI_DEFER_MODEL` is set.
+- **Full suite is not clean-green here** — targeted suites (causal/defer/install/
+  hooks) pass, but a clean-env full run has ~4 pre-existing baseline failures
+  reproducible on `main` (not introduced by this branch).

@@ -591,5 +591,56 @@ class CliMainTest(_TmpTest):
         self.assertIn("error", out.lower())
 
 
+class ClaudeInstalledCausalPath(unittest.TestCase):
+    """The *installed* Claude hooks must ship the imported modules and bind the
+    causal origin end-to-end — not just the manually-primed fixture path."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def test_installed_hook_binds_permit_origin_not_newest(self) -> None:
+        import subprocess
+        import sys
+        import time as _time
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations" / "claude-code"))
+        import nunchi_causal_permit as _permit
+        from tests.test_causal_permit import _capturing_gate
+        from tests.test_claude_code_hook import (
+            _hook_input,
+            _make_transcript,
+            _user_channel_entry,
+        )
+
+        _installer(self.tmp).install(groups=["claude"])
+        hooks = self.tmp / ".claude" / "hooks"
+        # blocker-1: the modules the hooks import must actually ship, else a
+        # normal install silently degrades to the legacy (buggy) bind.
+        self.assertTrue((hooks / "nunchi_causal_permit.py").exists())
+        self.assertTrue((hooks / "nunchi_defer.py").exists())
+
+        permit_dir = self.tmp / "permits"
+        _permit.write_permit("s1", "c1", "A", directory=permit_dir, now=_time.time())
+        transcript = _make_transcript([
+            _user_channel_entry(chat_id="c1", message_id="A", user="zoe",
+                                body="How's everyone?", ts="2026-07-10T03:09:00Z"),
+            _user_channel_entry(chat_id="c1", message_id="B", user="Aleph",
+                                body="present", ts="2026-07-10T03:10:00Z"),
+        ])
+        wrapper, capture = _capturing_gate({
+            "verdict": "SPEAK", "silent": False, "reasons": ["ok"],
+            "confidences": {"PASS": 0.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 1.0},
+        })
+        hook_input = _hook_input(chat_id="c1", text="I'm good",
+                                 transcript_path=transcript, session_id="s1")
+        env = dict(os.environ, NUNCHI_CHANNEL_BIN=wrapper, NUNCHI_PERMIT_DIR=str(permit_dir))
+        subprocess.run([sys.executable, str(hooks / "nunchi_gate_hook.py")],
+                       input=json.dumps(hook_input), text=True, env=env, capture_output=True)
+        payload = json.loads(Path(capture).read_text())
+        self.assertEqual(
+            payload["trigger"]["message_id"], "A",
+            "the INSTALLED hook must import the shipped module and bind origin A, not newest B")
+
+
 if __name__ == "__main__":
     unittest.main()

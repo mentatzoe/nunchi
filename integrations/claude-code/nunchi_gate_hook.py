@@ -546,6 +546,32 @@ def _run_gate(
         print(out)
         sys.exit(0)
 
+    # DEFER v1 (host-side routing): if the cheap gate is about to suppress an
+    # *ambiguous* bid, escalate the same envelope once to a stronger model and
+    # use its verdict. Fail-open on frontier failure — never a forced PASS.
+    # Disabled unless NUNCHI_DEFER_MODEL is set; absent module → cheap stands.
+    try:
+        from nunchi_defer import resolve as _defer_resolve
+
+        def _escalate(frontier_model: str) -> dict:
+            env = os.environ.copy()
+            env["NUNCHI_CLASSIFIER_MODEL"] = frontier_model
+            r = subprocess.run(
+                [_CHANNEL_BIN],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                timeout=_TIMEOUT,
+                env=env,
+            )
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or "").strip() or f"exit {r.returncode}")
+            return json.loads(r.stdout)
+
+        directive, _defer_meta = _defer_resolve(directive, _escalate)
+    except Exception:
+        pass  # DEFER module absent / failed import → the cheap directive stands
+
     verdict: str = directive.get("verdict", "")
     silent: bool = directive.get("silent", False)
     reasons: list[str] = directive.get("reasons") or []
@@ -575,6 +601,17 @@ def _run_gate(
         reasons=reasons,
         error=None,
     )
+    # One-shot: consume the causal permit on this first outbound decision so an
+    # unrelated later send in the same session/chat cannot inherit it. (A
+    # transport retry of *this* send then degrades to legacy binding — an
+    # accepted trade vs. a 300s retargeting lease; TTL is not a turn boundary.)
+    if bound_via == "causal-permit":
+        try:
+            from nunchi_causal_permit import clear_permit
+
+            clear_permit(session_id, chat_id)
+        except Exception:
+            pass
     print(out)
     sys.exit(0)
 
