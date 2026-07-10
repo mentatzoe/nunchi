@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — round-4 review: confidence domain, uninstall confinement
+
+- **Confidences must be on the stated [0, 1] scale**, enforced identically at
+  the hook (`defer-malformed-confidence` when DEFER is on) and the shared
+  schema boundary (`ValidationError`), so core and adapters cannot disagree.
+  `{"PASS": 9.0, ...}` and negative vectors previously passed the exactness
+  check and hard-blocked — off-scale evidence has no defined margin meaning.
+- **Confinement covers destructive writes:** both uninstall paths now call the
+  ancestor check before mutating; uninstalling through a symlinked
+  `plugins/`/`hooks/` that escapes the configured root is rejected instead of
+  recursively deleting external directories. Aleph's repros are the
+  regression tests.
+- **Residue swept to the current contract:** remaining unreleased-changelog
+  lines and the two addressing fixture metas no longer assert the
+  deterministic fast-path or alias-authorship-as-fact; the hook's module
+  docstring now states the two fail-open contracts explicitly (runtime
+  failures receipted; malformed config knobs fall back silently to documented
+  defaults, verifiable from receipts' effective values).
+
 ### Fixed — round-3 review: terminal fail-open, exact destructive PASS, installer parity
 
 - **Declared fail-open is terminal.** A mistyped `transcript_path` used to
@@ -95,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contract (Aleph/Aether/Vigil/Station): *a deterministic rule may hard-PASS
   only what it can prove; a foreign mention proves reference, not exclusive
   targeting.* Foreign-mention messages now always get semantic adjudication.
-  Self-caused echo remains the sole short-circuit (structurally certain).
+  (Self-caused echo briefly remained as a short-circuit; the entry above
+  removes the whole deterministic layer — name/text equality is not proof.)
   Fixture `a-mention-other-alias-in-passing` keeps its PASS ground truth but is
   now model-scored. (The live canary was pinned in `tests/test_fastpath.py`
   until the whole deterministic layer was removed — see the entry above; the
@@ -245,7 +265,8 @@ is byte-for-byte identical to before (golden-request test pins this).
 - **Surface knobs** (each documented in its config docstring/README, all
   stating loudly that `mention_id` is the platform snowflake/token, NOT the
   display name — names belong in aliases):
-  - Claude Code hooks (PreToolUse + UserPromptSubmit) and the Codex
+  - the Claude Code wake gate (UserPromptSubmit; its PreToolUse sibling was
+    later retired — see above) and the Codex
     UserPromptSubmit hook: `NUNCHI_HOOK_ALIASES` (comma-separated);
   - Codex room runner: `NUNCHI_RUNNER_ALIASES`;
   - Hermes plugin: `aliases:` config key (CSV or list), global and
@@ -258,10 +279,10 @@ is byte-for-byte identical to before (golden-request test pins this).
   envelope+meta pairs distilled from the live failures: direct
   `@<snowflake>` mention with the snowflake in aliases (SPEAK), display-name
   address (SPEAK), secondary-alias address "Codex" (SPEAK), a different
-  bot's name (PASS), a relay echo under a profile-name alias (model-scored
-  since the deterministic layer's removal,
-  deterministic fast-path), and a mention of another participant with our
-  alias only in passing prose (PASS, deterministic fast-path). Loader,
+  bot's name (PASS), a relay echo under a profile-name alias, and a mention
+  of another participant with our alias only in passing prose (both PASS —
+  originally deterministic-fast-path cases, model-scored since the layer's
+  removal). Loader,
   runner (`--source addressing`), and runner self-tests discover the pool
   the same way as the injection and tool-chrome classes.
 - **Merged `feat/codex-plugin` into this branch** (Codex room runner +
@@ -269,9 +290,10 @@ is byte-for-byte identical to before (golden-request test pins this).
   land on the Codex surface too; its hook tests were also brought under
   `tests/hook_sandbox.sandbox_env`, matching main's receipt-log hygiene
   enforcement.
-- Scope note: alias matching is identity plumbing, not fuzzy matching — the
-  fast-path still compares only structured tokens and exact author strings;
-  prose name-spotting remains the classifier's judgment. The SPEAK
+- Scope note: alias matching is identity plumbing, not fuzzy matching —
+  (historical: the then-extant fast-path compared only structured tokens; the
+  layer is now removed and ALL addressing judgment, prose or structured, is
+  the classifier's). The SPEAK
   expectations in the new fixtures are model judgment (evidence:
   `predicted`), not fast-path guarantees.
 

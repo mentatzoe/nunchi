@@ -10,5 +10,5 @@
   },
   "failure_mode": "the mention token matches none of the agent's declared identities, so the gate reads a direct question at this agent as addressed to someone else and PASSes",
   "invariant": "a structured @mention of ANY identity in the agent's bundle (id, mention_id, aliases) is addressed to this agent",
-  "rationale": "One bot carries several identities; here the platform mention snowflake is carried via aliases. A direct operator question at that snowflake warrants a substantive turn. Conservative note: the deterministic fast-path only guarantees escalation (no false PASS shortcut); the SPEAK itself is the model's judgment."
+  "rationale": "One bot carries several identities; here the platform mention snowflake is carried via aliases. A direct operator question at that snowflake warrants a substantive turn. The SPEAK is the model's judgment end to end \u2014 the deterministic fast-path that once guaranteed escalation was removed 2026-07-10 (nothing short-circuits; everything is model-judged)."
 }

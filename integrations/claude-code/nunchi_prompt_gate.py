@@ -12,10 +12,21 @@ by mistake; nunchi now judges once, here, and then gets out of the way).
 Prompts WITHOUT a channel tag are the operator typing at the terminal and are
 ALWAYS allowed through immediately — zero gate calls, no receipt.
 
-This hook is permanently fail-open.  Any configuration error, missing binary,
-gate timeout, or unparseable output allows the prompt through and records the
-failure in the receipt log.  A broken gate must never silence the operator or
-wedge the session.
+This hook is permanently fail-open, on two distinct contracts:
+
+* **Runtime failures are receipted.** A missing binary, gate timeout,
+  unparseable output, malformed directive/envelope/input, or any unhandled
+  exception allows the prompt through and records the failure in the receipt
+  log (exit 0, always).
+* **Malformed config knobs fall back silently.** Operator-owned tuning env
+  (``NUNCHI_HOOK_TIMEOUT``, ``NUNCHI_HOOK_TOOL_PATTERN``,
+  ``NUNCHI_HOOK_HISTORY_WINDOW``, ``NUNCHI_DEFER_MARGIN``) that fails to
+  parse uses its documented default — no receipt per invocation (a broken
+  knob would spam one receipt per event) and no behavior cliff: the gate
+  keeps judging with default tuning. Verify knobs from a receipt's recorded
+  effective values (e.g. ``defer_margin``).
+
+A broken gate must never silence the operator or wedge the session.
 
 DECISIONS:
     PASS (confident)  → block the prompt (not this agent's turn; suppress pre-LLM).
@@ -225,6 +236,10 @@ def _confidence_malformation(conf) -> str | None:
             return f"confidence {key} is {type(value).__name__}, expected number"
         if not math.isfinite(float(value)):
             return f"confidence {key} is not finite"
+        if not (0.0 <= float(value) <= 1.0):
+            # The DEFER margin only has meaning on the stated scale (round-4:
+            # {"PASS": 9.0, ...} passed the exactness check and hard-blocked).
+            return f"confidence {key} is outside [0, 1]"
     return None
 
 

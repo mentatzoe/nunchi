@@ -674,6 +674,38 @@ class HermesIntegrityParityTest(_TmpTest):
         source = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "resolve.py"
         self.assertEqual(target.read_bytes(), source.read_bytes())
 
+    def test_uninstall_through_escaping_symlink_deletes_nothing_outside(self) -> None:
+        """Round-4: uninstall through a symlinked plugins/ recursively deleted
+        the EXTERNAL directory. Confinement must cover destructive writes."""
+        outside = Path(tempfile.mkdtemp(prefix="nunchi-hermes-uninstall-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        victim = outside / "nunchi-gate"
+        victim.mkdir()
+        (victim / "precious.py").write_text("# not yours to delete\n", encoding="utf-8")
+        hermes = self.tmp / ".hermes"
+        hermes.mkdir(parents=True)
+        (hermes / "plugins").symlink_to(outside)
+
+        inst = _installer(self.tmp)
+        with self.assertRaises(install.InstallError):
+            inst._uninstall_hermes()
+        self.assertTrue((victim / "precious.py").is_file(),
+                        "uninstall must not delete through an escaping symlink")
+
+    def test_claude_uninstall_through_escaping_symlink_deletes_nothing_outside(self) -> None:
+        outside = Path(tempfile.mkdtemp(prefix="nunchi-claude-uninstall-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        (outside / "nunchi_prompt_gate.py").write_text("# external\n", encoding="utf-8")
+        claude = self.tmp / ".claude"
+        claude.mkdir(parents=True)
+        (claude / "hooks").symlink_to(outside)
+
+        inst = _installer(self.tmp)
+        with self.assertRaises(install.InstallError):
+            inst._uninstall_claude()
+        self.assertTrue((outside / "nunchi_prompt_gate.py").is_file(),
+                        "uninstall must not delete externally located artifacts")
+
     def test_symlinked_plugins_dir_escaping_root_is_rejected(self) -> None:
         outside = Path(tempfile.mkdtemp(prefix="nunchi-hermes-outside-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))

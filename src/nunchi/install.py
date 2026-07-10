@@ -629,6 +629,9 @@ class Installer:
 
     def _uninstall_hermes(self) -> dict[str, Any]:
         dest = self.hermes_dest
+        # Confinement covers DESTRUCTIVE writes too (round-4: uninstall through
+        # a symlinked plugins/ recursively deleted an external directory).
+        self._ensure_confined(dest.parent, self.hermes_home, "hermes plugin (uninstall)")
         if dest.is_symlink():
             self._act("skip", dest, note="destination is a symlink, not a nunchi-install copy")
             return {"action": "skip", "dest": str(dest), "detail": "symlink, left untouched"}
@@ -908,6 +911,7 @@ class Installer:
 
     def _uninstall_claude(self) -> dict[str, Any]:
         hooks_dir = self.claude_hooks_dir
+        self._ensure_confined(hooks_dir, self.claude_home, "claude-code hooks (uninstall)")
         removed: list[str] = []
         for name in (*CLAUDE_HOOK_FILES, *CLAUDE_WRAPPERS, *CLAUDE_RETIRED_FILES, MARKER_NAME):
             path = hooks_dir / name

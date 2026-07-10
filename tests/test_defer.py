@@ -185,6 +185,19 @@ class DeferOnUncertainPass(unittest.TestCase):
         rc, out = self._run(d, {"NUNCHI_DEFER": "off"})
         self.assertEqual(json.loads(out).get("decision"), "block")
 
+    def test_out_of_range_confidences_defer_not_block(self):
+        """Round-4: {"PASS": 9.0, ...} and negative vectors passed the
+        exactness check and hard-blocked. The margin only has meaning on
+        [0, 1]; off-scale evidence abstains."""
+        for conf in ({"PASS": 9.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0},
+                     {"PASS": -0.1, "ACK": -1.0, "ASK": -1.0, "SPEAK": -1.0}):
+            with self.subTest(conf=conf):
+                d = _uncertain_pass_directive()
+                d["confidences"] = conf
+                rec = self._last_receipt(d)
+                self.assertEqual(rec["action"], "defer-malformed-confidence")
+                self.assertIn("outside [0, 1]", rec["confidence_malformation"])
+
     def test_degenerate_margins_fall_back_to_default(self):
         """inf (defer-everything), nan and negatives (defer-nothing) are
         operator error → default 0.25 applies, so this uncertain PASS defers."""

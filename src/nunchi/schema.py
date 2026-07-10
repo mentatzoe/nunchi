@@ -170,6 +170,13 @@ def validate_result(raw):
         value = confidences[key]
         if isinstance(value, bool) or not isinstance(value, Real):
             raise ValidationError(f"result.confidences.{key} must be numeric")
+        # Domain check (round-4): a confidence outside [0, 1] — or a non-finite
+        # value — is not on the stated scale, and every downstream margin
+        # comparison silently loses its meaning. The shared boundary enforces
+        # the same rule the hook applies, so core and adapters cannot disagree.
+        value_f = float(value)
+        if value_f != value_f or not (0.0 <= value_f <= 1.0):
+            raise ValidationError(f"result.confidences.{key} must be within [0, 1]")
 
     checked = data.get("context_checked")
     if not isinstance(checked, list) or not all(isinstance(item, str) for item in checked):

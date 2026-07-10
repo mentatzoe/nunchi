@@ -129,3 +129,31 @@ class SchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfidenceDomainTests(unittest.TestCase):
+    """Round-4: the shared boundary enforces the [0, 1] confidence scale so
+    core and the hook cannot disagree about what counts as evidence."""
+
+    def _result(self, conf):
+        return {
+            "classifier": "product",
+            "verdict": "PASS",
+            "confidences": conf,
+            "context_checked": [],
+            "reasons": ["r"],
+        }
+
+    def test_out_of_range_confidence_rejected(self):
+        from nunchi.schema import validate_result
+        from nunchi.errors import ValidationError
+        for conf in ({"PASS": 9.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0},
+                     {"PASS": -0.1, "ACK": -1.0, "ASK": -1.0, "SPEAK": -1.0},
+                     {"PASS": float("nan"), "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}):
+            with self.subTest(conf=conf):
+                with self.assertRaises(ValidationError):
+                    validate_result(self._result(conf))
+
+    def test_boundary_values_accepted(self):
+        from nunchi.schema import validate_result
+        validate_result(self._result({"PASS": 1.0, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.0}))
