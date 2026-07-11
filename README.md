@@ -27,6 +27,10 @@ This V2 target is selected but **not implemented**. Goal 1 only rebuilds the
 execution spine. A separate Goal 2 will implement the atomic contract cutover
 and prove parity across the agreed adapters and agent harnesses.
 
+The selected system boundaries, UML-style interfaces, lifecycle sequence,
+state machine, and implementation waves are shown in
+[`docs/architecture/v2-selected-design.md`](docs/architecture/v2-selected-design.md).
+
 ## Current implementation (V1)
 
 The current CLI/library decides whether an agent should visibly participate
@@ -347,6 +351,8 @@ tests, fixtures, evals, evidence, runtime assets, and product docs live only in
 ordinary paths; no product workflow may depend on `.specify/` or `specs/`.
 Details and reinitialization instructions are in
 [`docs/governance/execution-spine.md`](docs/governance/execution-spine.md).
+The corresponding renderable architecture views are in
+[`docs/architecture/v2-selected-design.md`](docs/architecture/v2-selected-design.md).
 
 ```sh
 python3 scripts/check_governance.py --check-cli

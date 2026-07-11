@@ -136,6 +136,10 @@ Each slice plan names:
 - deterministic and live evidence targets;
 - the exact handoff packet required by the final integrator.
 
+The program structure and selected product lifecycle are also available as
+renderable Mermaid component, class, sequence, state, and execution-wave views
+in [`../architecture/v2-selected-design.md`](../architecture/v2-selected-design.md).
+
 ## Reinitialization safety
 
 The control plane is safe to delete when:
