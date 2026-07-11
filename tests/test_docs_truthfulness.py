@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import re
+import tomllib
 import types
 import unittest
 from pathlib import Path
@@ -21,6 +22,9 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ADAPTERS_MD = _REPO_ROOT / "docs" / "adapters.md"
 _README_MD = _REPO_ROOT / "README.md"
+_INSTALL_MD = _REPO_ROOT / "docs" / "INSTALL.md"
+_MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
+_PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 
 # (module name, env var, adapters.md env-table row key)
@@ -139,6 +143,45 @@ class AdapterStatusClaimDisciplineTest(unittest.TestCase):
             combined,
         )
         self.assertIn("bounded live-smokes evidenced", combined)
+
+
+class ReadmeContractStateDisciplineTest(unittest.TestCase):
+    """The landing page must not collapse release, checkout, and V2 truth."""
+
+    def test_readme_separates_current_version_and_goal_states(self) -> None:
+        text = _README_MD.read_text(encoding="utf-8")
+        project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+        source_version = project["project"]["version"]
+
+        required = (
+            f"checkout still reports package version `{source_version}`",
+            "including the subsequently removed deterministic fast path",
+            "Goal 1 execution-spine rebuild is complete",
+            "Goal 2 implementation is not yet authorized",
+            "Selected V2 design — not implemented",
+            "Current implementation: V1",
+            "Status labels are evidence tiers",
+        )
+        for phrase in required:
+            with self.subTest(required=phrase):
+                self.assertIn(phrase, text)
+
+        forbidden = (
+            "This library gives your agent that",
+            "adapter tier (Constitution VI)",
+            "classifier verdict test suite is the merge contract",
+        )
+        for phrase in forbidden:
+            with self.subTest(forbidden=phrase):
+                self.assertNotIn(phrase, text)
+
+    def test_source_only_install_guides_do_not_claim_pypi_surfaces(self) -> None:
+        install_text = _INSTALL_MD.read_text(encoding="utf-8")
+        mcp_text = _MCP_DISCORD_README.read_text(encoding="utf-8")
+
+        self.assertIn("is not present in that release", install_text)
+        self.assertIn("does not contain the", mcp_text)
+        self.assertNotIn("pip install nunchi[mcp-discord]", mcp_text)
 
 
 if __name__ == "__main__":  # pragma: no cover

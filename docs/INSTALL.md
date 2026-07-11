@@ -1,5 +1,10 @@
 # Installing Nunchi's operator artifacts (`nunchi-install`)
 
+> **Source-checkout V1 tooling:** `nunchi-install` landed after the published
+> `0.2.0` wheel and is not present in that release. Install a reviewed current
+> source commit and retain its checkout because the Hermes and Claude artifacts
+> copied by this command live outside the Python package.
+
 Nunchi ships integration artifacts that must live in **stable operator
 locations**, decoupled from any git checkout:
 
@@ -38,13 +43,14 @@ recorded, backed up, and replaced with a real copy.
 ## Prerequisites
 
 `nunchi-install` copies **from a checkout** (the `integrations/` tree is not
-part of the published wheel). Install the package for the CLI, then run
-`nunchi-install` from inside a checkout — or point it at one with
-`--repo-root`:
+part of the published wheel). Install the current source, then run the command
+from inside that checkout—or point it at one with `--repo-root`:
 
 ```sh
-pip install nunchi          # provides nunchi-channel + the nunchi-install script
-git clone https://github.com/mentatzoe/nunchi && cd nunchi
+git clone https://github.com/mentatzoe/nunchi.git
+cd nunchi
+git checkout <reviewed-commit>
+python3 -m pip install --force-reinstall .
 nunchi-install install      # source auto-discovered from the current checkout
 ```
 

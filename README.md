@@ -1,362 +1,212 @@
 # Nunchi
 
-**nunchi** (눈치, *NOON-chee*): the art of reading the room and knowing
-whether it is your turn to speak. This library gives your agent that.
+**nunchi** (눈치, *NOON-chee*) is the art of reading the room. This project is
+building participant-owned pre-attention for agents in shared conversation:
+**is this room event worth waking me for?** It does not allocate the floor or
+decide what the participant should say.
 
-## Selected direction (V2 — not implemented)
+## Project state
 
-Nunchi's selected V2 role is the participant's delegated **pre-attention**. It
-receives exact self identity plus a bounded, structured, coverage-honest view of
-the room and decides whether the event is worth waking the participant. A
-participant-shaped model returns `SUPPRESS`, `WAKE`, or `DEFER`; operational
-`ERROR` remains separate. Only the model may socially suppress. Deterministic
-code handles transport-proven non-events, never conversational meaning.
-Trusted disabled preattention is a non-model bypass that wakes directly; it
-does not fabricate a classifier result.
+Nunchi is between contracts. Keep these states separate:
 
-A woken participant receives a normal room turn and contributes directly or
-sends nothing. It is not asked to answer a meta-question about contributing,
-and no send-time classifier judges the room again. Context is compact and may
-be expanded on demand; there is no participant registry, handled/open ledger,
-obligation queue, or central floor manager.
-Continuation authority stays host-only, and off-surface lifecycle receipts are
-immutable request-correlated observation, attention, participant-host, and
-transport stages rather than conversation state.
+| Surface | What exists | Contract |
+|---|---|---|
+| [PyPI `0.2.0`](https://pypi.org/project/nunchi/0.2.0/) | Historical release from 2026-07-02; core library plus `nunchi` and `nunchi-channel` | Older V1 `PASS / ACK / ASK / SPEAK`, including the subsequently removed deterministic fast path |
+| This repository checkout | V1 runtime plus substantial unreleased adapter and harness work | Still V1; surfaces do not yet share one parity-proven lifecycle |
+| Selected V2 target | Design, governance, interfaces, slices, and acceptance program are ready | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
+| Goal status | Goal 1 execution-spine rebuild is complete | Goal 2 implementation is not yet authorized |
 
-This V2 target is selected but **not implemented**. Goal 1 only rebuilds the
-execution spine. A separate Goal 2 will implement the atomic contract cutover
-and prove parity across the agreed adapters and agent harnesses.
+The checkout still reports package version `0.2.0`, so the version string alone
+does not establish which source or integration artifacts are installed. Record
+and verify the source commit for any operator deployment.
 
-The selected system boundaries, UML-style interfaces, lifecycle sequence,
-state machine, and implementation waves are shown in
-[`docs/architecture/v2-selected-design.md`](docs/architecture/v2-selected-design.md).
+## Selected V2 design — not implemented
 
-## Current implementation (V1)
+V2 makes Nunchi the participant's delegated pre-attention. It receives exact
+self identity and a bounded, structured, coverage-honest observation of the
+room. One participant-shaped model decides whether to spend a wake; after a
+wake, the participant gets a normal act-or-silence turn.
 
-The current CLI/library decides whether an agent should visibly participate
-before ordinary reply generation. It returns an auditable admission verdict:
-
-- `PASS` — hard stop; no ordinary visible reply
-- `ACK` — brief acknowledgement is warranted
-- `ASK` — clarification is warranted
-- `SPEAK` — substantive contribution is warranted
-
-## V1 status
-
-The current classifier slice exposes a product/default admission classifier path
-backed by a configured provider/model. Successful results include the selected
-classifier identity, provider/model audit fields, verdict, confidence
-distribution, checked context, and reasons. There is no public `deterministic`
-classifier path; offline/CI evidence uses a test fixture provider behind the
-product path.
-
-The repository also contains the generic channel adapter, standalone
-Matrix/Telegram/Discord adapters, Hermes plugin, Claude Code wake hook, shared
-Discord-MCP transport, and Codex runner/hooks/configuration app. Their evidence
-tiers differ: some are code-only, others have bounded live smokes, and the V1
-attention/contribution lifecycle is not portable across them. The selected V2
-design exists precisely to close that gap without central orchestration or reply
-composition.
-
-## Install
-
-Stdlib-only (Python 3.11+, no runtime dependencies). The published PyPI
-release (0.2.0) carries the core gate and the `nunchi`/`nunchi-channel`
-console scripts; the platform adapters (`nunchi-matrix`, `nunchi-telegram`,
-`nunchi-discord`) landed after that release and currently install from
-source only:
-
-```sh
-pip install nunchi                                          # PyPI 0.2.0: core + CLI
-pip install "git+https://github.com/mentatzoe/nunchi.git"   # source: core + adapters
-# zero-install one-shot:
-uvx --from "git+https://github.com/mentatzoe/nunchi.git" nunchi --help
+```mermaid
+flowchart LR
+    Event["Native room event"] --> Observe["Truthful bounded observation"]
+    Observe --> Attention["One participant-shaped<br/>attention judgment"]
+    Attention -->|"SUPPRESS"| Stop["No participant wake"]
+    Attention -->|"WAKE or DEFER"| Turn["Normal participant turn"]
+    Bypass["Trusted preattention-disabled bypass"] --> Turn
+    Error["Operational ERROR"] -->|"wake by default"| Turn
+    Turn --> Participant["Participant runs normally"]
+    Participant -->|"produces an action"| Act["Message, reaction, or tool action"]
+    Participant -->|"produces no action"| Silence["Send nothing"]
 ```
 
-A source install provides the `nunchi`, `nunchi-channel`, `nunchi-matrix`,
-`nunchi-telegram`, `nunchi-codex-room-runner`, `nunchi-codex-prompt-gate`, and
-`nunchi-codex-send-gate` console scripts. The `[mcp-discord]` extra also installs
-`nunchi-mcp-discord` and the `nunchi-codex-config-app` MCP Apps server;
-`nunchi-discord` needs `[discord]`. These extras are source-only for now:
-`pip install "nunchi[discord,mcp-discord] @ git+https://github.com/mentatzoe/nunchi.git"`. See
-[`CHANGELOG.md`](CHANGELOG.md) for releases and [`docs/STABILITY.md`](docs/STABILITY.md)
-for the versioning / verdict-surface stability contract.
+The selected invariants are:
 
-The repo also exposes the Codex plugin bundle through
-[`/.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json). A local
-Codex install can add this checkout as a marketplace and install
-`nunchi-codex@local-repo`; see
-[`integrations/codex/README.md`](integrations/codex/README.md) for the room
-runner setup, cached-copy update flow, hook trust steps, and task-embedded
-configuration/receipt panel.
+- Only a participant-shaped model may make a social suppression judgment.
+- Deterministic code handles only exact duplicate delivery, retained exact-self
+  no-self-wake, and unroutable or unconstructable native events—never
+  conversational meaning.
+- Exact self binding is separate from loose names, roles, and aliases.
+- Context is bounded and structured, with honest gaps and optional expansion;
+  host-only continuation authority never enters classifier input.
+- Trusted disabled preattention wakes directly with zero classifier calls and
+  no fabricated model disposition.
+- `SUPPRESS` requires explicitly enabled, inspectable, revocable delegation and
+  proven later-hearing recovery.
+- Classifier-DEFER and margin-DEFER remain distinct, evidence-gated safety
+  routes rather than an accidental compatibility layer.
+- There is no inferred participant roster, handled/open ledger, obligation
+  queue, or central floor manager.
+- Observation, attention, participant-host, and transport receipts are
+  immutable, request-correlated, and singly attested by their owners.
+- Preattention is judged once. The participant contributes directly or stays
+  silent; there is no admission meta-answer or send-time social reclassification.
+- V2 cuts over atomically across every in-tree adapter and harness. There is no
+  V1 compatibility bridge or mixed-contract repository state.
 
-## Quickstart
+See the renderable [V2 architecture diagrams](docs/architecture/v2-selected-design.md)
+for the component, UML, sequence, state, and execution-wave views.
 
-Evaluate a request from stdin through the product/default classifier:
+## V2 implementation program
+
+Goal 1 prepared an implementation spine without changing runtime behavior.
+Goal 2 will be commissioned separately and will execute these dependency waves:
+
+| Wave | Independently owned slice(s) | Outcome |
+|---:|---|---|
+| 0 | `010-v2-contract` | Canonical V2 request, decision, wake, continuation, and receipt contracts |
+| 1 | `020-v2-observation`, `030-v2-core-attention` | Truthful bounded observation and participant-shaped pre-attention |
+| 2 | `040-v2-participant-wake`, `050-v2-discord-transport` | Normal participant turn and shared Discord-native continuity |
+| 3 | `060-v2-hermes`, `070-v2-claude-code`, `080-v2-codex`, `090-v2-channel-adapters` | Parallel migration of every in-tree consumer |
+| 4 | `100-v2-security-provenance` | Blocking security, suppression-governance, and installed-provenance audit |
+| 5 | `110-v2-parity-cutover` | Sole integration sink, common live scenes, truthful docs, and atomic cutover |
+
+The umbrella program defines all eleven owners and dependencies, nine canonical
+interfaces, sixteen acceptance scenes, ordinary-path evidence requirements,
+and the final integration ladder. Its ordinary-path views are the
+[architecture guide](docs/architecture/v2-selected-design.md) and
+[execution-spine guide](docs/governance/execution-spine.md). Files under
+`specs/` are planning control plane—not product contracts or proof—and product
+documentation does not depend on them.
+
+## Current implementation: V1
+
+Until the atomic cutover, the runnable core is a pre-reply admission gate. Its
+model returns exactly one V1 verdict:
+
+| Verdict | Current V1 meaning |
+|---|---|
+| `PASS` | Hard stop; emit no ordinary room message |
+| `ACK` | A brief acknowledgement is warranted |
+| `ASK` | A clarification is warranted |
+| `SPEAK` | A substantive contribution is warranted |
+
+Every admission in the current checkout's core is model-judged. The former
+deterministic social fast path was removed after it falsely silenced direct
+corrections and treated name or text equality as proof of self-causation. The
+published `0.2.0` wheel predates that removal; use it only when deliberately
+reproducing the historical release. The current source improvement still does
+not make V1 equivalent to the selected V2 observation or lifecycle contract.
+
+### Current V1 surfaces and evidence
+
+| Surface | Current repository state | Committed proof | Goal 2 owner |
+|---|---|---|---|
+| Core CLI and generic channel adapter | Implemented; the older core/channel surface is released in `0.2.0` | Offline tests and the [V1 regression corpus](evidence/verdict-suite/README.md) | `010`, `030`, `040`, `090` |
+| Matrix, Telegram, standalone Discord | Implemented in source | Offline tests; no committed live-server evidence | `090` |
+| Shared Discord-MCP transport | Implemented in source | [Bounded transport live smoke](evidence/mcp-discord/2026-07-07-live-smoke.md) | `050` |
+| Hermes plugin | Implemented in source | Offline tests; no committed integration evidence | `060` |
+| Claude Code wake hook | Implemented in source | Offline tests; no committed integration evidence | `070` |
+| Codex runner, hooks, and config app | Implemented in source | [Bounded V1 live smokes](evidence/codex/2026-07-09-vigil-persistent-session.md) | `080` |
+
+Status labels are evidence tiers, not release promises. In particular, the
+Codex evidence proves a bounded V1 lifecycle that still includes an outbound
+social re-gate; Goal 2 must replace that behavior rather than treat it as V2
+parity. All current behavior records under `evidence/` remain V1 or historical
+inputs until new V2 evidence is produced.
+
+## Install and use the current V1 surface
+
+For the current repository behavior, install a reviewed source commit. A forced
+install matters because the source checkout and historical release currently
+share the `0.2.0` package version:
+
+```sh
+git clone https://github.com/mentatzoe/nunchi.git
+cd nunchi
+git checkout <reviewed-commit>
+python3 -m pip install --force-reinstall .
+
+# Optional dependencies for the standalone Discord adapter and Discord-MCP:
+python3 -m pip install --force-reinstall ".[discord,mcp-discord]"
+```
+
+The default package remains stdlib-only; the extras add their named optional
+dependencies. `nunchi-install` copies Hermes and Claude operator artifacts from
+a checkout into stable locations—it is not present in the published `0.2.0`
+wheel. See the [operator-artifact install guide](docs/INSTALL.md).
+
+For historical reproduction only, `python3 -m pip install "nunchi==0.2.0"`
+installs the older published core and `nunchi-channel` surface. Updating this
+README does not change the long description or code embedded in that release.
+
+### Minimal V1 CLI example
+
+Configure an OpenAI-compatible classifier and submit one admission request:
 
 ```sh
 export NUNCHI_CLASSIFIER_MODEL="your/provider-model"
 export OPENROUTER_API_KEY="..."
-PYTHONPATH=src python3 -m nunchi admit < tests/fixtures/speak.json
+
+printf '%s\n' \
+  '{"trigger":{"id":"m-42","content":"Could someone review the migration plan?"},"context":[],"agent":{"id":"example-agent"}}' \
+  | nunchi admit
 ```
 
-Evaluate a request from a file through the product classifier:
+The command makes a real provider call and prints one V1 result object. The
+provider endpoint and credentials are operator-owned; request payloads cannot
+redirect them. For the in-process API, generic subprocess adapter, room
+profiles, and current V1 result schema, use the explicitly versioned guides
+below.
 
-```sh
-PYTHONPATH=src python3 -m nunchi admit --input tests/fixtures/pass.json
-```
+## Documentation map
 
-Evaluate with classifier selection in the envelope, or override it from the CLI:
+| Topic | Source |
+|---|---|
+| Selected V2 flow, interfaces, owners, and diagrams | [V2 selected design](docs/architecture/v2-selected-design.md) |
+| V2 execution model, SpecKit, workflows, and reinitialization | [V2 execution spine](docs/governance/execution-spine.md) |
+| Current V1 public contract and versioning | [V1 stability contract](docs/STABILITY.md) |
+| Current V1 host integration | [V1 integration guide](docs/integration.md) |
+| Current V1 platform adapters | [V1 adapter reference](docs/adapters.md) |
+| Source-only Hermes and Claude artifact installation | [Operator-artifact install guide](docs/INSTALL.md) |
+| Current V1 evaluation corpus | [Verdict-suite guide](docs/evaluations/verdict-suite.md) |
+| Implemented and historical evidence index | [Evidence index](evidence/README.md) |
+| Unreleased source changes and release history | [Changelog](CHANGELOG.md) |
 
-```sh
-PYTHONPATH=src python3 -m nunchi admit --input tests/fixtures/speak_with_classifier.json
-PYTHONPATH=src python3 -m nunchi admit --classifier product --input tests/fixtures/speak_cli_precedence.json
-```
+## Development and governance
 
-Run the verification suite:
+Authority flows from the Zoe-selected Aleph Vault design—PR 67 at `bdd1ebb`,
+clarified by PR 68 at `c834e8c`—to the constitution, runtime agent guidance,
+the umbrella program and owned slice, then ordinary-path implementation and
+proof for current behavior.
 
-```sh
-python3 -m unittest
-```
-
-## Product contract
-
-The core output contract is:
-
-- `classifier`
-- `classifier_provider`
-- `classifier_model`
-- `verdict`
-- `confidences`
-- `context_checked`
-- `reasons`
-
-Successful CLI evaluations write one JSON object to stdout and exit `0`.
-Failures write diagnostics to stderr and do not emit a success verdict on
-stdout.
-
-Exit codes:
-
-- `0` — successful evaluation
-- `1` — unexpected runtime failure
-- `2` — input source or JSON parse failure
-- `3` — admission request validation failure
-
-Nunchi owns admission, not composition. It does not draft the final reply and
-it does not prescribe speech shape beyond the admission verdict.
-
-## Classifier selection
-
-The documented default classifier path is `product`. It is the only supported
-classifier path in this slice and is backed by a configured OpenAI-compatible
-provider/model. It is not a relabelled local keyword or deterministic verifier.
-If provider/model configuration is unavailable, Nunchi fails clearly instead
-of silently falling back to local logic.
-
-Classifier selection can be supplied by:
-
-- envelope field: `"classifier": "product"`
-- CLI flag: `--classifier product`
-
-If both are present, the CLI flag takes precedence. Optional
-`classifier_config` / `--classifier-config` must be a JSON object. Supported
-product configuration keys are `provider`, `model`, and `timeout`. Unsupported
-classifier names or config keys fail clearly without emitting a success result.
-
-The provider endpoint and API key are operator-only and are never read from
-`classifier_config`: because a request envelope carries `classifier_config`, an
-untrusted request must not be able to redirect the provider call (which carries
-the operator's API key) or choose which environment variable the key is read
-from. These are resolved exclusively from operator environment variables:
-
-- `NUNCHI_CLASSIFIER_MODEL` for the model name (or `classifier_config.model`).
-- `NUNCHI_CLASSIFIER_API_KEY` or `OPENROUTER_API_KEY` for the API key.
-- `NUNCHI_CLASSIFIER_BASE_URL` or `OPENAI_BASE_URL` for the compatible API
-  base URL; default is `https://openrouter.ai/api/v1`.
-
-The test suite sets a fixture provider response for deterministic offline
-verification. That fixture provider is not a selectable classifier path.
-
-## Python API
-
-The in-process core is available without shelling out:
-
-```python
-import os
-import sys
-sys.path.insert(0, os.path.abspath("src"))
-
-from nunchi import evaluate
-
-os.environ["NUNCHI_CLASSIFIER_MODEL"] = "your/provider-model"
-os.environ["OPENROUTER_API_KEY"] = "..."
-
-result = evaluate({
-    "trigger": {"content": "nunchi-vigil, please implement the CLI MVP."},
-    "context": [],
-})
-```
-
-`result["classifier"]` identifies the selected path, `result["classifier_model"]`
-identifies the provider model, and `result["verdict"]` is one of `PASS`, `ACK`,
-`ASK`, or `SPEAK`.
-
-## Consuming the gate: the channel adapter
-
-A participant agent on a shared, turn-aware surface does not call the core
-directly — it uses the **channel adapter** (`nunchi.adapters.channel`), which
-maps its channel-local inputs (the triggering message, the recent transcript,
-its own identity) to an admission request, runs the gate, and returns a
-transport-neutral decision: `verdict` plus `silent`. If `silent`, the host posts
-nothing; otherwise it composes one turn in the returned *run-shape*. The adapter
-never writes replies, and nothing in it is tied to a specific chat platform.
-
-In-process (Python host):
-
-```python
-from nunchi.adapters.channel import gate
-
-result = gate(
-    {"content": "dalgos, summarize the cache tradeoffs", "author": "zoe",
-     "author_kind": "human", "message_id": "m-42"},
-    history=[                      # last ~10 channel messages, oldest first
-        {"content": "I'd go in-process LRU.", "author": "vigil",
-         "author_kind": "peer_bot", "message_id": "m-41"},
-    ],
-    agent_id="dalgos",            # plus optional agent_role / agent_mention_id / agent_aliases
-    pinned_rules=None,            # optional channel governance text
-    fail_policy="open",           # open->SPEAK | closed->PASS | raise
-)
-
-if result.silent:
-    ...                           # post nothing this turn
-else:
-    ...                           # compose a turn per result.verdict / result.run_shape
-```
-
-Subprocess (non-Python host) — JSON in, a transport-neutral JSON directive out:
-
-```sh
-echo '{"trigger":{"content":"vigil, rebase the branch","message_id":"m-1"},
-       "history":[],"agent":{"id":"dalgos"},"fail_policy":"open"}' \
-  | PYTHONPATH=src python3 -m nunchi.adapters
-# -> {"verdict":"PASS","silent":true,...}    (host posts nothing)
-# -> {"verdict":"SPEAK","silent":false,...}  (host composes a turn)
-```
-
-If your transport suppresses a send via a magic final-output string, pass your
-own with `--silent-token "<token>"` (or `result.silent_token("<token>")`) to
-print it on PASS. cc-connect is just a named preset of this — `--format
-cc-connect` ≡ `--silent-token CC_CONNECT_SILENT_PASS` — with no special status;
-no transport is a dependency.
-
-### Room governance profiles
-
-The classifier core judges by plain social sense: who is speaking, what has
-been said, who this agent is — is it this agent's turn? It carries no room
-doctrine of its own. A room that wants a specific bar for taking a turn
-supplies its norms as `pinned_rules`; the classifier applies the room's bar
-with precedence over plain social sense.
-
-[`profiles/open-floor.md`](profiles/open-floor.md) ships as the first reusable
-profile: the strict operator-led working-channel doctrine of the original
-open-floor pilot (default PASS, net-new-value bar for SPEAK, rare ACK,
-operator-only directives, corroboration for completion claims). Pass its text
-as `pinned_rules` to opt a channel into that regime:
-
-```python
-from pathlib import Path
-from nunchi.adapters.channel import gate
-
-result = gate(trigger, history=history, agent_id="dalgos",
-              pinned_rules=Path("profiles/open-floor.md").read_text())
-```
-
-Verdict-suite fixtures whose expected verdicts were adjudicated under that
-doctrine declare `"governance_profile": "open-floor"` in their metadata; the
-suite loader injects the profile into their envelopes so the corpus stays
-honest about which expectations are social sense and which are room policy.
-
-**[`docs/integration.md`](docs/integration.md) is the full integration guide** —
-scope, the three install/integration paths (loader instruction, in-process
-import, subprocess CLI), how to wire it into a channel adapter, and how to
-generalize to other surfaces. A runnable multi-turn demo is in
-[`examples/read_the_room_demo.py`](examples/read_the_room_demo.py); the adapter
-current V1 adapter contract is in
-[`docs/contracts/channel-adapter-v1.md`](docs/contracts/channel-adapter-v1.md).
-This is the adapter tier (Constitution VI): it depends on the core and is not a
-live Discord integration — it produces the sentinel an existing cc-connect
-deployment already understands.
-
-## Adapters
-
-| Adapter | Surface | Install weight | Status |
-|---|---|---|---|
-| `nunchi-channel` | Any (subprocess) | stdlib | stable |
-| `nunchi-matrix` | Matrix | stdlib | code-only |
-| `nunchi-telegram` | Telegram | stdlib | code-only |
-| `nunchi-discord` | Discord | source install, `[discord]` extra | code-only |
-| Hermes plugin | Hermes gateway | stdlib | live-run; evidence owed |
-| Claude Code gate | Claude Code UserPromptSubmit (one judgment, at wake) | stdlib | offline-tested; live evidence incomplete |
-| Codex runner + hooks + config app | Codex CLI via shared Discord-MCP transport | stdlib + `[mcp-discord]` for transport/app | bounded live-smokes evidenced |
-
-Status labels are evidence tiers, not release-alpha/beta gates. `code-only`
-means implementation exists in the repo, but no committed live-server evidence
-supports a readiness claim yet. `bounded live-smokes evidenced` means committed
-live-room runs support the narrow wake/outbound and two-turn persistent-session
-claims; it is not a sustained operations claim. The configuration app has
-offline MCP protocol and responsive interaction evidence plus a live read of
-the resulting persistent-session health state.
-
-`nunchi-matrix` is the reference integration — one command, zero extra
-dependencies, unencrypted Matrix rooms only (encrypted rooms are skipped with a
-warning). `nunchi-telegram` and `nunchi-discord` follow the same gate-first
-architecture: every inbound message is checked before any response is generated.
-
-Full setup guides, environment variable tables, and the responder callback
-contract for every adapter are in **[docs/adapters.md](docs/adapters.md)**.
-
-## Verdict test suite
-
-The classifier verdict test suite is the merge contract for classifier
-changes: a fixture corpus of observed and predicted failure modes
-(Multica-shaped agent traffic, Discord-shaped human conversation, and
-verdict-surface contract cases) run through a pluggable adapter against any
-classifier candidate. The single entry command is
-`python3 -m evals.verdict_suite.runner`; see
-[`docs/evaluations/verdict-suite.md`](docs/evaluations/verdict-suite.md)
-for the offline deterministic path, live evidence runs, and how to add a
-fixture.
-
-## Development method
-
-This repository uses a pinned SpecKit `0.12.11` execution spine. Authority flows
-from Zoe-selected Aleph Vault decisions/design (PR 67 at `bdd1ebb`, clarified
-by PR 68 at `c834e8c`) to the
-constitution, then agent guidance, then the active umbrella and slice plans.
-Ordinary repository artifacts remain authoritative for what is implemented and
-proven.
-
-Goal 1 uses the planning-only workflow and cannot implement V2:
+SpecKit is pinned to exactly `0.12.11`. Its managed paths are disposable
+control plane and may never own product source, schemas, tests, evaluation
+assets, evidence, runtime artifacts, or product documentation. The planning
+workflow stops before implementation; the full workflow has an explicit Goal 2
+authorization gate.
 
 ```sh
 specify workflow info nunchi-plan
-```
+specify workflow info speckit
 
-The full `speckit` workflow adds an explicit Goal 2 authorization gate before
-implementation, followed by convergence and integration handoff.
-
-SpecKit-managed paths are disposable control plane. Product code, schemas,
-tests, fixtures, evals, evidence, runtime assets, and product docs live only in
-ordinary paths; no product workflow may depend on `.specify/` or `specs/`.
-Details and reinitialization instructions are in
-[`docs/governance/execution-spine.md`](docs/governance/execution-spine.md).
-The corresponding renderable architecture views are in
-[`docs/architecture/v2-selected-design.md`](docs/architecture/v2-selected-design.md).
-
-```sh
 python3 scripts/check_governance.py --check-cli
+python3 -m unittest
+python3 -m evals.verdict_suite.runner --list
 ```
+
+Offline tests use stdlib `unittest`. Live provider evaluations are explicit,
+cost-bearing evidence runs and are not part of the deterministic default suite.
 
 ## License
 

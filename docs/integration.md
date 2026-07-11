@@ -1,5 +1,10 @@
 # Integrating Nunchi
 
+> **Current V1 guide:** this document describes the implemented pre-reply
+> admission gate. The selected V2 pre-attention lifecycle is documented in
+> [`architecture/v2-selected-design.md`](architecture/v2-selected-design.md)
+> and is not implemented yet.
+
 This guide is for someone wiring Nunchi into a real agent or channel. It
 covers what Nunchi is responsible for, the integration paths and how to
 choose one, how to wire it into a channel adapter (using cc-connect / pilot-bot
@@ -237,22 +242,24 @@ sentinel interception that already ships in cc-connect.
 
 ## Installation
 
-Nunchi is stdlib-only (Python 3.11+, no runtime dependencies). The published
-PyPI release (0.2.0) carries the core gate and the `nunchi`/`nunchi-channel`
-console scripts — enough for everything in this guide. The platform adapters
-(`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`) landed after that
-release and currently require a source install:
+The published PyPI `0.2.0` wheel carries only the historical V1 core and the
+`nunchi`/`nunchi-channel` scripts. It predates the removal of the deterministic
+fast path and all later integration work. For current repository behavior,
+install a reviewed source commit; force the install because both builds still
+report package version `0.2.0`:
 
 ```sh
-pip install nunchi                  # PyPI 0.2.0: core + nunchi/nunchi-channel
-# or, from source (core + platform adapters):
-pip install .                       # from a checkout
-pip install "git+https://github.com/mentatzoe/nunchi.git"
+git clone https://github.com/mentatzoe/nunchi.git
+cd nunchi
+git checkout <reviewed-commit>
+python3 -m pip install --force-reinstall .
 ```
 
-This installs the `nunchi`, `nunchi-channel`, and `nunchi-install` console
-scripts. Without installing, you can run from a checkout with `PYTHONPATH=src
-python3 -m nunchi.adapters`.
+A current source install provides `nunchi`, `nunchi-channel`,
+`nunchi-install`, and the source-only adapter/harness entry points declared in
+`pyproject.toml`. The default core remains stdlib-only; optional extras add
+their named dependencies. Without installing, run from a checkout with
+`PYTHONPATH=src python3 -m nunchi.adapters`.
 
 ### Installing the operator artifacts (Hermes plugin, Claude Code hooks)
 

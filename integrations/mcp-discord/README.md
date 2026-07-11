@@ -11,8 +11,15 @@ design record in [DESIGN.md](DESIGN.md).
 
 ## Install
 
+The published `0.2.0` wheel predates this transport and does not contain the
+`mcp-discord` extra or `nunchi-mcp-discord` entry point. Install from current
+source:
+
 ```bash
-pip install nunchi[mcp-discord]
+pip install --force-reinstall \
+  "nunchi[mcp-discord] @ git+https://github.com/mentatzoe/nunchi.git@<reviewed-commit>"
+# or, from a reviewed checkout:
+pip install --force-reinstall ".[mcp-discord]"
 ```
 
 The Discord gateway client is stdlib; the extra pins the official `mcp` SDK

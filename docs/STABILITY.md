@@ -1,5 +1,10 @@
 # Nunchi stability and versioning contract
 
+> **Current V1 contract:** this document describes the implemented
+> `PASS / ACK / ASK / SPEAK` surface. It is not the selected V2
+> `SUPPRESS / WAKE / DEFER` contract, which remains unimplemented until the
+> separately authorized atomic cutover.
+
 This document is the stability promise an integrator can build against. It
 states what is part of the public contract, what may change within a major
 version, and what is explicitly experimental and may shift in a minor release.

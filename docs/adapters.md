@@ -1,5 +1,9 @@
 # Nunchi Adapter Reference
 
+> **Current V1 reference:** every adapter in this document uses the implemented
+> `PASS / ACK / ASK / SPEAK` contract. None is evidence of selected V2 parity;
+> V2 migration and atomic cutover remain Goal 2 work.
+
 This document is the full adapter reference for Nunchi. It covers every
 supported surface, how to install and configure each adapter, and how to wire a
 custom responder.
