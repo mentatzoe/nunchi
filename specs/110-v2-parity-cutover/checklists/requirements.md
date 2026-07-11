@@ -1,23 +1,23 @@
 # Specification Quality Checklist: V2 Parity and Atomic Cutover
 
-**Purpose**: Validate that the future Goal 2 final-integration requirements are
-complete, unambiguous, measurable, traceable, acyclic, and constitutionally
-bounded before analysis.
+**Purpose**: Validate that the planned final-integration slice requirements are
+complete, unambiguous, measurable, traceable, lifecycle-aware, acyclic, and
+constitutionally bounded before analysis.
 
 **Created**: 2026-07-11
 
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Content and Boundary Quality
 
-- [x] CHK001 Is Goal 1 explicitly planning-only and is all assembly, probing, live-room, documentation, and release work reserved for separately authorized Goal 2? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the complete program authorization record enumerating exactly slices `010` through `110`, every slice `010`–`100` in `ACCEPTED`, ordered `slice=full-sha` Dependency commits, matching consumer-owned Dependency acceptance references to the exact upstream acceptance packets, active `v2-integrator`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/parity/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain dormant in `PLANNED`? [Clarity, Spec §Control-Plane Boundary; tasks.md]
 - [x] CHK002 Are all implementation, tests, evals, evidence, scripts, and product/release docs assigned to ordinary repository paths? [Completeness, Spec §FR-020]
 - [x] CHK003 Is the final integrator prohibited from redesigning owned interfaces, accepting risk, adding a V1 bridge, or doing promotion? [Scope, Spec §Explicit Exclusions]
-- [x] CHK004 Is `v2-integrator` the sole owner while upstream semantic ownership and Zoe decisions remain explicit? [Consistency, Spec §Interface Summary]
+- [x] CHK004 Is `v2-integrator` the sole slice owner and recorder of Zoe's slice decision, while `v2-program-owner` records only accepted program cutover and upstream semantic ownership remains explicit? [Consistency, Spec §Interface Summary]
 
 ## Dependency and Interface Quality
 
-- [x] CHK005 Are all dependencies `010` through `100` explicit and required before candidate assembly? [Completeness, Spec §FR-001]
+- [x] CHK005 Are all dependencies `010` through `100` explicit, terminally `ACCEPTED`, and bound to ordered full candidate SHAs plus matching consumer-owned acceptance evidence before slice activation or candidate assembly? [Completeness, Spec §FR-001]
 - [x] CHK006 Are the exact canonical interfaces `I-010A`–`I-050A`, component handoffs `060`–`090`, and blocking slice-`100` assurance packet named without creating another interface family? [Traceability, Spec §Interface Summary]
 - [x] CHK007 Are the candidate manifest, parity evidence index, and release-readiness boundary defined as integration artifacts with clear consumers and ordinary authorities? [Traceability, Spec §FR-019]
 - [x] CHK008 Is the handoff manifest requirement measurable across commit, interface, package/schema/config, commands, evidence, provenance, and limitations? [Measurability, Spec §FR-002]
@@ -65,13 +65,16 @@ bounded before analysis.
 - [x] CHK035 Does one scene/surface manifest resolve every S01-S16 requirement to exact refs, commands, records, grades, and dispositions through stable `scene_id` values? [Traceability, Spec §FR-008]
 - [x] CHK036 Is meta-answer detection post-hoc acceptance evaluation with an explicit prohibition on runtime participant-prose filtering? [Boundary, Spec §FR-012]
 - [x] CHK037 Do required S14 lifecycle failures block cutover while only genuinely unavailable native platform facts may be limitations? [Acceptance, Spec §FR-014]
-- [x] CHK038 Does explicit Zoe repository-cutover acceptance gate one atomic product PR/merge plus post-merge verification and an evidence-only follow-up record? [Cutover, Spec §FR-022]
+- [x] CHK038 Does explicit Zoe repository-cutover acceptance gate one atomic product PR/merge whose docs remain verification-pending, followed by exact-main checks and final current-state docs validation in one docs/evidence-only follow-up with no product behavior change? [Cutover, Spec §FR-022]
 - [x] CHK039 Does parity prove trusted `PREATTENTION_BYPASS` makes zero classifier calls, invokes one advice-free act-or-silence turn, contains no fabricated social result, and is never treated as an injected verdict? [Contract, Spec §FR-023]
 - [x] CHK040 Does parity prove immutable request-correlated observation/attention/participant-host/transport records have one attesting owner each, with silence and unavailable outcomes left explicit? [Contract, Spec §FR-024]
-- [x] CHK041 Does documentation freshness name every exact affected root/shared/contract/evaluation/component/security/release/installed-surface path, require `UPDATE` for all including `README.md`, reject `NO_IMPACT`/`HANDOFF` and generic directories, validate rendered/runnable claims, and recheck the main merge SHA? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [x] CHK041 Does convergence-added work or a rejected completed handoff require a new bound slice-`110` run, while only paused post-convergence fixes with an unchanged task graph may resume? [Lifecycle, Spec/Plan/Tasks metadata]
+- [x] CHK042 Does documentation freshness name every exact affected root/shared/contract/evaluation/component/security/release/installed-surface path, require `UPDATE` for all including `README.md`, reject `NO_IMPACT`/`HANDOFF` and generic directories, validate rendered/runnable claims, and recheck the main merge SHA? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 
 - This checklist validates requirements writing, not implementation behavior.
-- All items pass for planning. Goal 2 authorization and dependency handoff
-  acceptance remain separate mandatory workflow gates.
+- All items pass for planning. The one valid complete authorization record
+  enumerating exactly slices `010` through `110`, accepted dependency handoffs,
+  and the completed slice-activation attestation remain separate mandatory
+  lifecycle gates.

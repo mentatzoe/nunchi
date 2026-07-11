@@ -1,36 +1,86 @@
 ---
-description: "Future Goal 2 task list for V2 parity and atomic cutover"
+description: "Slice delivery task list for V2 parity and atomic cutover (dormant until authorized)"
 ---
 
 # Tasks: V2 Parity and Atomic Cutover
 
-**Input**: Design documents from `/specs/110-v2-parity-cutover/`
+**Slice state**: `PLANNED`
 
-**Prerequisites**: `spec.md`, `plan.md`, zero CRITICAL/HIGH analysis findings,
-accepted handoffs from slices `010` through `100`, and explicit Zoe Goal 2
-authorization before T001 or any later task begins
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Input**: Existing slice design documents from `specs/110-v2-parity-cutover/`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Activation prerequisites**: valid
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+all eleven slices; slices `010` through `100` all `ACCEPTED`; ordered
+`Dependency commits` as `slice=full-sha`; matching ordered, consumer-owned
+`Dependency acceptance references` at
+`evidence/v2/parity/dependency-<slice>-acceptance.md` that attest the exact
+upstream `slice-acceptance.md` packet;
+`v2-integrator` active; assigned participant and durable external assignment
+source declared above; zero CRITICAL/HIGH analysis findings; and an isolated
+owner worktree
+
+**Activation evidence**: `evidence/v2/parity/slice-activation.md`, written only
+after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Candidate evidence**: append-only
+`evidence/v2/parity/slice-candidate.md` attempts (latest valid attempt supports
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: append-only `evidence/v2/parity/slice-handoff.md`
+`HANDOFF_READY` and `REJECTED` attempts (absent while `PLANNED`)
+
+**Acceptance evidence**: immutable
+`evidence/v2/parity/slice-acceptance.md` (for `ACCEPTED`; absent while
+`PLANNED`)
+
+**Rework execution**: Candidate and handoff files are append-only attempt
+streams. If convergence adds tasks, this slice stays `ACTIVE`, retains its
+immutable activation, and starts a new bound `run speckit`. If the completed
+handoff is rejected, the recorder appends `REJECTED`, returns the slice to
+`ACTIVE`, and the owner starts a new bound run—never resume the completed run.
+A paused post-convergence gate may resume only for fixes that leave the task
+graph unchanged; all later attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-integrator`
 
 **Integration handoff**: Umbrella program and Zoe; final sink with no downstream
 implementation slice
 
-**Goal state**: Future Goal 2 plan only. All tasks remain unexecuted under Goal 1.
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox. This planning baseline creates no product behavior
+or implementation authority.
 
 **Tests**: Required. Atomicity and parity tests precede assembly/comparison;
 installed-runtime and room evidence follow a deterministic green candidate.
 
-## Phase 1: Setup and Handoff Admission
+## Phase 1: Activation Attestation and Handoff Admission
 
-**Purpose**: Prove implementation authority, exact dependency readiness, and an
-isolated non-releaseable integration workspace.
+**Purpose**: Validate external program implementation authority evidence, exact
+dependency readiness, and an isolated non-releaseable integration workspace.
 
-- [ ] T001 Record explicit Zoe Goal 2 authorization, `v2-integrator` activation, and zero CRITICAL/HIGH analysis result in `evidence/v2/parity/authorization.md`
+- [ ] T001 Validate the readiness attestation in `evidence/v2/parity/slice-activation.md`, including the valid all-eleven-slice program authority record; every slice `010`–`100` in `ACCEPTED`; ordered `slice=full-sha` Dependency commits; matching consumer-owned Dependency acceptance references that attest the exact upstream acceptance packets; active `v2-integrator`; the assigned participant and durable assignment source; zero CRITICAL/HIGH analysis findings; and the isolated worktree; confirm that the record attests prerequisites and grants no authority
 - [ ] T002 Validate exact commits, canonical interfaces, commands/results, evidence, provenance, security disposition, and limitations from slices `010` through `100` and write `evidence/v2/parity/upstream-handoffs.json`
-- [ ] T003 Create isolated worktree `.worktrees/v2-integration/` on branch `integration/v2` and record its non-releaseable base commit in `evidence/v2/parity/upstream-handoffs.json`
+- [ ] T003 Verify isolated worktree `.worktrees/v2-integration/` on branch `integration/v2` and record its non-releaseable base commit in `evidence/v2/parity/upstream-handoffs.json`
 
-**Checkpoint**: Stop before assembly if Goal 2 is unauthorized, any owner lane is
-inactive, any handoff is incomplete, or slice `100` has unaccepted residual risk.
+**Checkpoint**: Stop if activation evidence is absent or invalid, any handoff is
+incomplete, or slice `100` has unaccepted residual risk.
 
 ---
 
@@ -39,7 +89,7 @@ inactive, any handoff is incomplete, or slice `100` has unaccepted residual risk
 **Purpose**: Define the candidate manifest and failing checks that all user
 stories depend on.
 
-- [ ] T004 Define the integrated candidate manifest, scene/surface evidence manifest, trusted-bypass and immutable receipt-stage fields, parity evidence index, post-hoc participant-output grades, main-cutover record, and release-readiness artifact fields without creating a product schema in `docs/evaluations/v2-parity.md`
+- [ ] T004 Define the integrated candidate manifest, scene/surface evidence manifest, trusted-bypass and immutable receipt-stage fields, parity evidence index, post-hoc participant-output grades, slice-candidate and slice-handoff records, program-tail cutover-acceptance and post-merge-verification records, and release-readiness artifact fields without creating a product schema in `docs/evaluations/v2-parity.md`
 - [ ] T005 [P] Add canonical-interface, trusted-bypass, immutable request-correlated receipt-stage ownership, dependency-commit, and manifest validation tests in `tests/v2/parity/test_integration_manifest.py`
 - [ ] T006 [P] Add V1 residue, translation bridge, mixed schema, retired hook/shim, second-social-gate, and SpecKit-dependency rejection tests in `tests/v2/parity/test_repository_atomicity.py`
 - [ ] T007 [P] Add S01-S16 scene-manifest completeness, surface-applicability, stable-`scene_id`, mandatory bypass/receipt fields, post-hoc meta-answer/no-runtime-filter, and blocking-versus-native-capability disposition tests in `tests/v2/parity/test_scene_catalog.py`
@@ -131,7 +181,7 @@ beyond the final candidate/evidence; release decision requires no launch asset.
 
 - [ ] T036 [US3] Assemble the V2 parity evidence index with S01-S16, security recheck, provenance, commands, failures, flicker, and limitations in `evidence/v2/README.md`
 - [ ] T037 [US3] Map every S01-S16/surface pair to exact candidate refs, commands, stable `scene_id`, request ID, stage owner, trusted bypass provenance, `classifier_not_invoked` and classifier-call count where applicable, record paths, post-hoc grades, evidence grade, and pass/block/native-capability disposition in `evidence/v2/parity/manifest.json`
-- [ ] T038 [US3] Complete documentation freshness by executing every exact `UPDATE` row in `plan.md` §Documentation Impact and Freshness, including `README.md` and every named root, shared, contract, evaluation, component, security, release, and installed-surface document; reconcile all accepted upstream claim deltas and validate links, Mermaid, examples, commands, install/version claims, evidence references, truthfulness tests, and reviewer acceptance against the exact atomic candidate
+- [ ] T038 [US3] Prepare documentation-freshness inputs by executing every exact `UPDATE` row in `plan.md` §Documentation Impact and Freshness, including `README.md` and every named root, shared, contract, evaluation, component, security, release, and installed-surface document; reconcile all accepted upstream claim deltas, keep candidate wording truthful that V2 remains verification-pending rather than verified current behavior, and record link, Mermaid, example, command, install/version, evidence-reference, truthfulness-test, and proposed-reviewer results against the exact atomic candidate for the later workflow gate
 - [ ] T039 [US3] Update exact version/change history and breaking migration boundary in `CHANGELOG.md` and `docs/releases/v2-readiness.md`
 - [ ] T040 [US3] Create the V2 release-readiness boundary with candidate identity, supported/reference scope, evidence bar, limitations, and Zoe go/no-go field in `docs/releases/v2-readiness.md` without adding promotion content
 
@@ -140,29 +190,48 @@ package is published and no promotion work is authorized by this checkpoint.
 
 ---
 
-## Phase 6: Final Candidate Decision Packet
+## Phase 6: Final Slice Candidate Inputs
 
 - [ ] T041 Run `python3 scripts/check_governance.py`, `python3 -m unittest`, the V2 atomicity checker, the full parity replay including trusted-bypass and immutable-stage controls, slice-`100` assembled-candidate assurance, and documented live-evidence audits and record exact results in `evidence/v2/parity/final-verification.txt`
 - [ ] T042 Re-run cross-artifact and dependency analysis, prove zero CRITICAL/HIGH findings and zero cycles, and record the result in `evidence/v2/README.md`
-- [ ] T043 Finalize the integrated candidate manifest, scene/surface manifest, parity evidence index, release-readiness boundary, and documentation dispositions/validation/reviewer; hand the exact candidate commit, package hashes, commands/results, evidence, security disposition, and limitations to Zoe in `evidence/v2/parity/final-handoff.md` only after documentation freshness passes
-- [ ] T044 After Zoe records explicit repository-cutover acceptance in `evidence/v2/parity/final-handoff.md`, open or update one atomic `integration/v2` pull request to main, record its URL in `evidence/v2/parity/main-cutover.md` before the final branch update, and merge only the complete accepted candidate
-- [ ] T045 Check out the resulting main merge SHA, rerun governance, the full baseline, V2 atomicity, parity, assurance, installed-provenance smoke, and documentation-freshness/truth checks, then record the merge SHA and exact results in `evidence/v2/parity/main-cutover.md` through an evidence-only follow-up commit/PR containing no product, runtime, schema, or behavior change and without publishing or promoting a release
+- [ ] T043 Have the assigned `v2-integrator` finalize the ordinary-path inputs for later convergence and handoff: the integrated candidate manifest, scene/surface manifest, parity evidence index, release-readiness boundary, limitations, task-state result, exact candidate commit and package hashes, reproduction commands/results, security disposition, and proposed documentation dispositions/validation/reviewer. This is the final slice implementation task; it does not write lifecycle evidence, advance slice state, require a later workflow gate to have passed, record acceptance, merge to main, or perform post-merge verification.
+
+---
+
+## Program Tail After Slice Handoff
+
+Post-implementation workflow and program-tail gates are deliberately outside
+this slice task graph. After T043, the assigned `v2-integrator` must separately
+pass convergence, documentation-freshness, and handoff gates before appending
+attempts to `slice-candidate.md` and `slice-handoff.md` or declaring
+`HANDOFF_READY`.
+Umbrella tasks `T035` and `T036` then govern those gates, the integrator's copy
+of Zoe's exact-candidate decision in `slice-acceptance.md`, the program owner's
+accepted-decision copy in `cutover-acceptance.md`, the atomic merge, and
+`post-merge-verification.md`. A rejection returns slice `110` to `ACTIVE` and
+requires a new bound run. The merged candidate may say
+`CUTOVER_ACCEPTED` with exact-main verification and final current-state docs
+pending. Umbrella T036 combines exact-main checks, final docs validation, and
+the post-merge record in one docs/evidence-only follow-up before
+`CUTOVER_VERIFIED`. None is a checked slice implementation task.
 
 ---
 
 ## Dependencies & Execution Order
 
-- T001-T003 require explicit Goal 2 authorization and accepted slices
-  `010`–`100`; no other task may begin first.
+- T001-T003 begin only after valid activation evidence establishes `READY`, the
+  assigned participant declares `ACTIVE`, and `010`–`100` handoffs are
+  accepted.
 - T004-T008 form the foundation and block all user stories.
 - US1 must produce a deterministic, non-releaseable atomic candidate and pass
   T015 assembled-candidate assurance before US2.
 - US2 must prove installed surface equivalence before US3 live room work.
 - US3 must close staged evidence and docs truth before final verification.
-- T041-T043 depend on all stories and complete the candidate decision packet.
-- T044 requires Zoe's explicit repository-cutover acceptance of T043; T045
-  requires the resulting main merge SHA and completes the atomic repository
-  cutover without authorizing package release or promotion.
+- T041-T043 depend on all stories and complete the ordinary candidate inputs;
+  separate workflow gates establish `CONVERGED` and `HANDOFF_READY` afterward.
+- Program task `T035` requires Zoe's explicit acceptance of the exact T043
+  packet; program task `T036` requires that accepted packet and completes the
+  atomic repository cutover without authorizing package release or promotion.
 - Slice `110` is the final sink. It consumes `010`–`100` and produces only final
   cutover, evidence, and release-decision artifacts; it feeds no upstream slice,
   so the graph is acyclic.
@@ -183,7 +252,9 @@ package is published and no promotion work is authorized by this checkpoint.
 
 ## Implementation Strategy
 
-1. Stop at T001 until Zoe authorizes Goal 2.
+1. Stop before T001 until valid activation evidence establishes `READY`, every
+   declared prerequisite is accepted, and the assigned participant then
+   declares `ACTIVE`.
 2. Admit every exact handoff and freeze canonical versions.
 3. Assemble and mechanically reject mixed V1/V2 state off main.
 4. Rerun blocking security assurance on the exact assembled candidate.
@@ -191,14 +262,17 @@ package is published and no promotion work is authorized by this checkpoint.
    surface by surface without a social-verdict oracle.
 6. Run the six-stage mixed-room ladder with post-hoc participant-output grading.
 7. Index evidence and make docs/release boundary truthful.
-8. Submit one final candidate packet, obtain explicit repository-cutover
-   acceptance, merge atomically to main, and verify the merge SHA.
-9. Leave package release and promotion to their separate decisions.
+8. Finish the ordinary candidate and proposed packet inputs, then stop the slice
+   implementation task graph.
+9. Use the later workflow gates for convergence, documentation freshness, and
+   handoff; leave acceptance, atomic merge, post-merge verification, package
+   release, and promotion to the separately owned umbrella program tail and
+   decisions.
 
 ## Notes
 
-- Every task is future Goal 2 work; creating this file grants no implementation
-  or release authority.
+- Every checkbox is authorized slice implementation; this planning file and its
+  activation record grant no program implementation or release authority.
 - `[P]` means distinct files and no dependency on an incomplete task.
 - Product artifacts remain in ordinary paths; `specs/110...` contains planning
   only.

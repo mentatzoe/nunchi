@@ -1,8 +1,8 @@
-# Implementation Plan: [FEATURE]
+# Existing Slice Implementation Plan: [SLICE]
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Branch**: `[canonical slice branch]` | **Date**: [DATE] | **Spec**: [link]
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Input**: Existing slice specification from `specs/[exact-slice]/spec.md`
 
 **Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
 
@@ -10,13 +10,44 @@
 
 **Accountable owner lane**: `[exactly one owner lane]`
 
-**Goal authorization**: `[Goal 1 planning only | Goal 2 explicitly authorized]`
+**Program implementation authority**: `[NOT_GRANTED | GRANTED with authorization record]`
+
+**Slice state**: `[PLANNED | READY | ACTIVE | CONVERGED | HANDOFF_READY | ACCEPTED]`
+
+**Assigned participant / source**: `[UNASSIGNED — awaiting durable external assignment source | participant — evidence/governance/assignments/<record>.md]`
+
+The non-symlink assignment record MUST contain exactly one `Assignee`, `Lane`,
+`Assigned by`, ISO `Assigned on`, and durable `Authority reference`. A non-Zoe
+assigner additionally requires `Delegated by: Zoe` and a durable `Delegation
+reference`. It is neither implementation authority nor slice activation, and
+unrelated slice assignments are not readiness prerequisites.
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run nunchi-plan specs/[exact-slice]` for planning, or `python3 scripts/run_slice_workflow.py run speckit specs/[exact-slice]` for delivery
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Activation evidence**: `[evidence/v2/[slice]/slice-activation.md]`
+
+**Candidate evidence**: `[evidence/v2/[slice]/slice-candidate.md]`
+
+**Handoff evidence**: `[evidence/v2/[slice]/slice-handoff.md]`
+
+**Acceptance evidence**: `[evidence/v2/[slice]/slice-acceptance.md]`
+
+**Task manifest**: `python3 scripts/check_governance.py --task-manifest specs/[exact-slice]`
+
+**Rework execution**: [new bound delivery run after convergence adds tasks or a
+completed handoff is rejected; resume only a paused post-convergence gate with
+an unchanged task graph; retain activation and append attempt history]
 
 **Upstream dependencies**: `[slice ids or none]`
 
+**Dependency acceptance mapping**: `[ordered slice=full-sha plus matching
+slice=repo-relative-evidence-reference entries; none when dependency-free]`
+
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+[Extract from the existing slice specification: primary requirement + technical approach from research]
 
 ## Technical Context
 
@@ -51,23 +82,23 @@
 [Gates determined based on constitution file]
 
 The check MUST include the SpecKit control-plane boundary, single-owner rule,
-Goal 1/Goal 2 boundary, ordinary-path artifact locations, and parity/evidence
-obligations, including the documentation-freshness gate. An unexplained failure
-stops planning.
+program-authority and slice-lifecycle boundary, ordinary-path artifact
+locations, and parity/evidence obligations, including documentation freshness.
+An unexplained failure stops planning.
 
 ## Slice Interfaces
 
 ### Consumes
 
-- `[interface name/version]` from `[owning slice]` at `[ordinary repository path planned for Goal 2]`
+- `[interface name/version]` from `[owning slice]` at `[authorized implementation target]`
 
 ### Produces
 
-- `[interface name/version]` for `[dependent slices]` at `[ordinary repository path planned for Goal 2]`
+- `[interface name/version]` for `[dependent slices]` at `[authorized implementation target]`
 
 Interface details in this plan are planning summaries only. Machine-readable
-contracts and schemas MUST be created under `schemas/` during Goal 2, never
-under this feature directory.
+contracts and schemas MUST be created under `schemas/` during authorized slice implementation, never
+under this existing slice directory.
 
 ## Integration Strategy
 
@@ -110,7 +141,7 @@ Generic directory rows are invalid when the affected files can be named.
 ### Control-plane artifacts (this slice)
 
 ```text
-specs/[###-feature]/
+specs/[exact-slice]/
 ├── spec.md              # Requirements and acceptance planning
 ├── plan.md              # This file
 ├── research.md          # Planning decisions only, when needed
@@ -124,7 +155,7 @@ runtime asset, or product documentation may be placed in this tree.
 ### Source Code (repository root)
 <!--
   ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
+  for this slice. Delete unused options and expand the chosen structure with
   real paths (e.g., apps/admin, packages/something). The delivered plan must
   not include Option labels.
 -->
@@ -170,7 +201,7 @@ directories captured above]
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Product implementation | `src/` or `integrations/` | [task/story] |
 | Machine-readable contracts | `schemas/` | [task/story] |

@@ -1,26 +1,25 @@
 <!--
 Sync Impact Report
-Version change: 2.0.1 -> 2.1.0
-Minor-bump rationale: adds a mandatory documentation-freshness disposition and
-review gate to every implementation slice and handoff.
+Version change: 2.1.0 -> 2.3.0
+Minor-bump rationale: replaces session-specific numbered-goal governance with
+an externally legible program-authority contract and per-slice lifecycle, then
+defines durable assignment, dependency-acceptance, and append-only rework rules.
 Modified principles:
-- Evidence Before Claims (README/docs review is now a completion obligation)
-- Single-Owner Slices and Deliberate Integration (shared-doc handoff ownership)
+- Selected V2 Product Boundary (current truth changes only at CUTOVER_VERIFIED)
+- Atomic Contract and Cross-Surface Parity (authorized program owns migration)
+- Single-Owner Slices and Deliberate Integration (slice state and activation)
 Added sections:
-- Documentation Freshness Gate
-Removed sections: none
+- Program and Slice Lifecycle Gates
+- Assignment and append-only rejection/rework contracts
+Removed sections:
+- Goal and Workflow Gates
 Dependent artifacts:
-- ✅ .specify/templates/spec-template.md (mandatory documentation disposition)
-- ✅ .specify/templates/plan-template.md (README/docs impact matrix)
-- ✅ .specify/templates/tasks-template.md (blocking documentation tasks)
-- ✅ .specify/templates/checklist-template.md (freshness requirement review)
-- ✅ .specify/workflows/speckit/workflow.yml (post-convergence freshness gate)
-- ✅ .specify/workflows/nunchi-plan/workflow.yml (planning review of doc impact)
-- ✅ AGENTS.md and CLAUDE.md (implementation and handoff obligations)
-- ✅ README.md and docs/governance/execution-spine.md (operator guidance)
-- ✅ specs/001-nunchi-v2-program and slices 010-110 (active-plan backfill)
-- ✅ scripts/check_governance.py and tests/test_governance.py (mechanical enforcement)
-- ✅ Goal 2 activation-record contract in guidance/checker (authorization-aware dormant-task guard)
+- ✅ Spec/plan/tasks/checklist templates (slice lifecycle metadata and gates)
+- ✅ nunchi-plan and speckit workflows (implementation authority + readiness)
+- ✅ AGENTS.md, CLAUDE.md, README.md, and execution-spine guidance
+- ✅ umbrella program and slices 010-110 (external lifecycle terminology)
+- ✅ governance checker and tests (authority/slice-state enforcement)
+- ✅ governance evidence (new amendment record; historical record unchanged)
 Follow-up TODOs: none
 -->
 
@@ -43,8 +42,9 @@ model `WAKE`, `DEFER`, or operational `ERROR`; it MUST NOT fabricate a
 classifier or effective social disposition.
 
 The repository's current V1 `PASS / ACK / ASK / SPEAK` implementation remains
-implementation truth until Goal 2 replaces it atomically. Goal 1 MUST NOT change
-product behavior or claim that V2 is implemented.
+implementation truth until the accepted V2 atomic cutover lands and is verified
+on `main`. Planning and governance changes MUST NOT claim that V2 is
+implemented.
 
 Rationale: the product failed when attention admission and contribution shape
 were treated as the same decision, and when target design was confused with
@@ -118,10 +118,11 @@ correct ownership boundary.
 ### V. Atomic Contract and Cross-Surface Parity
 
 V2 is a breaking replacement of the request, response, and lifecycle contract.
-Goal 2 MUST move the core, CLI, every in-tree adapter, and every in-tree agent
-harness to one contract without a mixed-version repository or a V1 translation
-bridge. The classifier-DEFER and margin-DEFER transition is independently
-evidence-gated and MUST NOT be conflated with schema compatibility.
+The authorized V2 implementation program MUST move the core, CLI, every in-tree
+adapter, and every in-tree agent harness to one contract without a mixed-version
+repository or a V1 translation bridge. The classifier-DEFER and margin-DEFER
+transition is independently evidence-gated and MUST NOT be conflated with
+schema compatibility.
 
 Equivalent platform facts MUST normalize to equivalent observations, attention
 routing, and participant factual availability across Hermes, Claude Code,
@@ -234,47 +235,200 @@ The canonical ordinary-path homes are:
 - `docs/`: product, integration, security, evaluation, and governance docs;
 - `scripts/`: repository tooling, including governance validation.
 
-## Goal and Workflow Gates
+## Program and Slice Lifecycle Gates
 
-The program has two separately authorized goals:
+Program progress and implementation authority are separate facts. Program
+progress uses:
 
-- **Goal 1 — execution spine**: pin and initialize SpecKit, relocate product
-  artifacts, establish governance, define the umbrella and slices, and validate
-  the baseline. Goal 1 MUST NOT implement V2 product behavior.
-- **Goal 2 — end-to-end V2**: separately commissioned implementation, atomic
-  cutover, integration, live deployment verification, and parity evidence.
+```text
+PLANNING -> READY -> DELIVERY -> INTEGRATION -> CUTOVER_ACCEPTED ->
+CUTOVER_VERIFIED
+```
+
+Implementation authority is independently `NOT_GRANTED` or `GRANTED`.
+Completing the planning baseline, creating tasks, changing a state label, or
+creating evidence MUST NOT grant authority.
+
+Zoe, or an assigner named by a durable Zoe delegation, MAY assign the
+`v2-program-owner` and the occupant of a slice's accountable owner lane.
+Declarations use `<participant identity>` —
+`evidence/governance/assignments/<record>.md`. That non-symlink repository record
+MUST contain exactly one `Assignee`, `Lane`, `Assigned by`, ISO `Assigned on`,
+and durable `Authority reference`. When `Assigned by` is not Zoe, it MUST also
+contain `Delegated by: Zoe` and a durable `Delegation reference`; transient
+chat or session memory alone is invalid. Assignment MAY happen during
+planning before implementation authority exists, but it neither grants that
+authority nor activates a slice. Only the bound slice needs an occupant for its
+readiness gate; work on one slice MUST NOT wait for unrelated slices to be
+staffed. The `v2-integrator` is the one deliberate early exception: its
+occupant MUST be assigned before the first `010`–`100` terminal-acceptance
+decision, without activating slice `110`. The program owner coordinates program
+facts and MUST NOT silently own or write another participant's slice lifecycle
+evidence.
+
+Each slice `010` through `110` uses:
+
+```text
+PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
+```
+
+- `PLANNED`: its control-plane artifacts agree; implementation remains dormant.
+- `READY`: the one complete program authority record is valid and enumerates
+  exactly slices `010` through `110`, one accountable occupant is assigned
+  from a durable source, every declared upstream handoff needed by this consumer
+  is accepted at an exact full commit with a durable
+  per-consumer acceptance reference, and analysis has zero CRITICAL/HIGH
+  findings. Slice `110` additionally requires every slice `010` through `100`
+  to be `ACCEPTED`. After those facts are accepted, the owner writes immutable
+  slice activation evidence recording the exact worktree, interfaces, scenes,
+  evidence targets, and documentation dispositions; that record plus matching
+  declarations establishes `READY` before any move to `ACTIVE`.
+- `ACTIVE`: that occupant is implementing only this slice in its isolated
+  worktree.
+- `CONVERGED`: every planned task is complete and the latest entry in the
+  append-only candidate stream
+  proves implementation, tests/evaluations, interfaces, and known limitations
+  agree.
+- `HANDOFF_READY`: documentation freshness has passed for the exact candidate
+  and the latest entry in the append-only handoff stream records the complete
+  packet.
+- `ACCEPTED`: the designated slice-level acceptance owner accepts the exact
+  commit and packet in immutable acceptance evidence. For slices `010` through
+  `100` that owner is `v2-integrator`; for slice `110` it is Zoe. Each dependent
+  separately records acceptance of the upstream handoffs it consumes before it
+  may become `READY`; slice-level `ACCEPTED` does not fabricate those
+  per-consumer facts. A rejection appends a `REJECTED` record to the existing
+  handoff file, naming the rejected candidate, acceptance owner, ISO date, and
+  durable decision reference, then returns the slice to `ACTIVE` under the same
+  owner. A new candidate and handoff are appended as new attempts; no rejected
+  attempt is deleted or rewritten. Because a handed-off run is complete, rework
+  MUST start a new bound delivery run for that same slice and MUST NOT resume the
+  completed run. If convergence appends tasks, the slice likewise remains
+  `ACTIVE`, retains its original activation, and starts a new bound run. Only
+  fixes requested by a paused post-convergence gate with an unchanged task graph
+  MAY resume that run. Review never transfers ownership silently.
+
+No central mutable slice-status registry is permitted. Current state MUST be
+derived from the slice's declared control-plane state, immutable activation
+and acceptance records, and append-only candidate and handoff attempt streams.
+Slice `110` specializes the tail:
+after it accepts slices `010` through `100`, it assembles one candidate; Zoe's
+explicit decision is copied into slice acceptance evidence by the assigned
+`v2-integrator`; on acceptance, the assigned `v2-program-owner` copies it into
+`evidence/v2/parity/cutover-acceptance.md`, establishing `CUTOVER_ACCEPTED` and
+permitting one atomic merge. The merged candidate's documentation MUST remain
+truthful that V2 is `CUTOVER_ACCEPTED` with exact-main verification pending; it
+MUST NOT describe V2 as the verified current product. Only verification of the
+resulting main commit plus validation of the final current-state documentation
+in a docs/evidence-only follow-up at
+`evidence/v2/parity/post-merge-verification.md` establishes
+`CUTOVER_VERIFIED`. Neither decision authorizes release or promotion.
+
+Lifecycle evidence uses one file per transition, never a mutable aggregate:
+
+- `slice-activation.md` names the slice, `READY` status, participant and durable
+  assignment reference, authority record, canonical accepted dependency IDs,
+  exact ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+  `Dependency acceptance references` as
+  `slice=repo-relative-evidence-reference`. Each reference MUST be a
+  consumer-owned evidence file whose name includes the upstream ID and whose
+  metadata names consumer slice, upstream slice, matching candidate commit,
+  accepting participant, ISO date, exact upstream packet record, and durable
+  decision reference, zero-blocker analysis result, branch/worktree and starting
+  commit, interfaces,
+  scenes, evidence targets, documentation scope, the exact `Initial task IDs`,
+  and their normalized `Initial tasks SHA256`;
+- `slice-candidate.md` names the slice, `CONVERGED` status, exact candidate
+  commit, exact `Completed task IDs`, matching normalized `Tasks SHA256`,
+  `Tasks complete: YES`, verification commands/results, interface versions,
+  evidence paths, and known limitations;
+- `slice-handoff.md` appends `HANDOFF_READY` attempts naming candidate commit,
+  acceptance owner, documentation-freshness result, and exact existing packet
+  files; a rejection appends the corresponding `REJECTED` decision with
+  `Recorded by: v2-integrator`; and
+- `slice-acceptance.md` names the slice, `ACCEPTED` status, candidate commit,
+  accepting owner, ISO acceptance date, durable decision reference, and
+  `Recorded by: v2-integrator`.
+
+Activation and acceptance records MUST be immutable. Candidate and handoff
+files MUST be append-only attempt streams, agree with the bound slice
+declarations, and remain absent before their first transition. A later attempt
+MUST NOT rewrite or delete an earlier record. Candidate evidence and handoff
+packets MUST name existing exact ordinary-path files, and every candidate SHA
+MUST identify an existing Git commit descending from the activation starting
+commit. The candidate commit MUST contain the bound `tasks.md` whose normalized
+manifest is attested and every named candidate evidence file; historical
+attempts are checked against their own commit rather than the latest task graph.
+
+Slice `110` program-tail evidence is equally exact. Cutover acceptance MUST
+contain program, `CUTOVER_ACCEPTED` status, candidate commit, Zoe as acceptance
+owner, ISO date, durable decision reference, and
+`Recorded by: v2-program-owner`. Post-merge verification MUST contain program,
+`CUTOVER_VERIFIED` status, full accepted-candidate and merged-candidate commits,
+`Main ref: refs/heads/main`, the matching full main commit, ISO verification
+date, verification commands/results beginning `PASS —`, exact evidence paths,
+`Documentation freshness: PASS`, and the full docs/evidence-only
+`Documentation commit`. The accepted candidate, merged candidate, verified main
+commit, and later documentation commit MUST form one ancestry chain contained
+in `refs/heads/main`; the diff from verified main to documentation commit MUST
+contain only `README.md`, `CHANGELOG.md`, `docs/`, or `evidence/` changes.
+
+Program progress is derived rather than independently asserted: `PLANNING`
+precedes the durable planning-baseline acceptance at
+`evidence/governance/slice-lifecycle-amendment-2026-07-11.md`; `READY` means
+that record is present and valid and no slice has entered `ACTIVE`; `DELIVERY` begins with the first
+`ACTIVE` implementation slice; `INTEGRATION` begins only when slice `110`
+enters `ACTIVE`; `CUTOVER_ACCEPTED` requires slice `110` acceptance plus the
+explicit Zoe decision record; and `CUTOVER_VERIFIED` additionally requires the
+complete post-merge record for the exact main commit and final documentation
+validation. A program declaration that does not match those facts is invalid.
 
 Every implementation slice MUST pass this control-plane sequence:
 
 ```text
-constitution -> specify -> clarify -> plan -> checklist -> tasks -> analyze ->
-explicit Goal 2 authorization -> implement -> converge -> documentation
-freshness -> parity integration
+bind existing slice -> review specification -> clarify -> plan -> review plan ->
+checklist -> tasks -> analyze -> review analysis -> implementation
+authorization -> slice readiness -> implement -> converge -> documentation
+freshness -> slice handoff
 ```
 
-The planning-only workflow MUST stop after analysis. The full workflow MUST have
-an explicit authorization gate immediately before implementation. No workflow
-MAY infer Goal 2 authorization from the existence of tasks or from completion of
-Goal 1.
+The planning-only workflow MUST stop after analysis. The delivery workflow MUST
+operate on an existing, explicitly bound slice; it MUST NOT create a replacement
+feature. It MUST verify implementation authority and then slice-specific
+readiness immediately before implementation. It ends when the assigned
+participant has established `HANDOFF_READY` and handed the exact packet to the
+designated acceptance owner. Acceptance or rejection is a separate act owned by
+that recipient; it MUST NOT be fabricated by the delivering participant. The
+assigned `v2-integrator` writes acceptance/rejection evidence for `010`–`100`.
+For slice `110`, Zoe makes the external decision and the assigned
+`v2-integrator` durably copies it into that slice's acceptance or rejection
+evidence; Zoe remains `Accepted by`/`Rejected by`. The assigned program owner
+copies an accepted Zoe decision only into the program-level cutover record.
+Neither recorder becomes the decision owner, and the program owner never writes
+another participant's slice evidence.
 
-After Zoe separately sets Goal 2 and before any implementation checkbox is
-completed, the program owner MUST record that external authorization at
-`evidence/governance/v2-goal-2-authorization.md`. The record MUST identify the
-commissioned objective, Zoe as authorizer, the authority source, date, and
-starting commit. The evidence file documents an authorization granted outside
-the repository; its existence MUST NOT be treated as self-authorization. Until
-that valid record exists, governance checks MUST reject every completed Goal 2
-task. Once it exists, those checks MUST permit truthful task progress while all
-workflow, dependency, evidence, and documentation gates remain in force. This
-is repository governance evidence only; it MUST NOT enter runtime,
-conversation, classifier, receipt, or social-memory state.
+Before any slice implementation checkbox is completed, the program owner MUST
+record Zoe's external grant at
+`evidence/governance/v2-implementation-authorization.md`. The single program
+record MUST name
+program `001-nunchi-v2-program`, status `AUTHORIZED`, every authorized slice
+`010` through `110`, Zoe as authorizer, an ISO date, the starting commit, the
+commissioned objective, a durable authority reference, and
+`Recorded by: v2-program-owner`. It documents
+authority granted outside the repository; it MUST NOT grant authority itself or
+authorize cutover, release, or promotion. Until it is valid, governance checks
+MUST reject every completed slice implementation task. Once valid, it removes
+only the program-level lock; a partial record is invalid and leaves every slice
+dormant. It does not make a dependency-blocked or unowned
+slice `READY`. This is repository governance evidence only and MUST NOT enter
+runtime, conversation, classifier, receipt, or social-memory state.
 
 For Nunchi, `spec.md`, `plan.md`, `research.md`, `tasks.md`, and requirement
 quality checklists are control-plane artifacts. The standard SpecKit
 `data-model.md`, `contracts/`, and `quickstart.md` outputs are prohibited inside
 managed paths; interface design, runnable validation guides, machine-readable
 contracts, and user documentation MUST instead be created under their ordinary
-repository homes during an authorized implementation goal. Plans MUST name
+repository homes during authorized slice implementation. Plans MUST name
 those target paths without embedding the product artifacts.
 
 Before implementation, analysis MUST report zero CRITICAL or HIGH findings,
@@ -317,9 +471,17 @@ disposition that does not match the exact candidate diff and evidence.
 The final integrator owns global current-state wording at an atomic cutover.
 When the cutover changes current behavior, `NO_IMPACT` and `HANDOFF` are invalid
 for `README.md` and the affected cross-surface documentation: those documents
-MUST use `UPDATE` in the accepted candidate. Actual docs and durable handoff
-evidence remain in ordinary repository paths; SpecKit records only the plan,
-tasks, disposition, ownership, and gate state.
+MUST use `UPDATE` in the accepted candidate. The atomic candidate and merged
+main commit MUST say that the cutover is accepted but exact-main verification
+and final documentation are pending; they MUST NOT claim that V2 is verified
+current behavior. After exact-main verification, the integrator MUST finalize
+current-state wording and its validation in the same docs/evidence-only
+follow-up that records post-merge verification. `CUTOVER_VERIFIED` is
+established only after both the exact-main checks and final documentation pass.
+That follow-up MUST contain no product source, schema, runtime, or behavior
+change. Actual docs and durable handoff evidence remain in ordinary repository
+paths; SpecKit records only the plan, tasks, disposition, ownership, and gate
+state.
 
 ## Governance
 
@@ -346,7 +508,7 @@ Versioning policy:
 
 Compliance review is mandatory before product implementation, slice handoff,
 integration, release, and any live-readiness claim. Any unexplained violation
-blocks the affected work. Goal completion requires the repository governance
-check and full existing test baseline to pass.
+blocks the affected work. Program and slice milestone acceptance requires the
+repository governance check and full existing test baseline to pass.
 
-**Version**: 2.1.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11
+**Version**: 2.3.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11

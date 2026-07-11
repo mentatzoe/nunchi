@@ -2,15 +2,53 @@
 
 **Branch**: `v2/codex` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/080-v2-codex/spec.md`
+**Input**: Existing slice specification from `specs/080-v2-codex/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-codex-owner`
 
-**Goal authorization**: Goal 1 planning only; product execution awaits explicit Goal 2 authorization
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/080-v2-codex`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/080-v2-codex`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/codex/slice-activation.md` (written only
+after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/codex/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/codex/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/codex/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`, `040-v2-participant-wake`, `050-v2-discord-transport`
+
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Summary
 
@@ -21,10 +59,12 @@ preattention bypass), deliver one I-010C act-or-silence turn, preserve immutable
 receipt stages, and remove the current send-time classifier and social permission state. Prove
 the exact installed plugin/process in persistent and mixed-agent room scenes.
 
+This planning baseline creates no product behavior.
+
 ## Technical Context
 
-**Language/Version**: Python 3.11+ integration code and the Goal 2-supported
-Codex CLI/plugin runtime
+**Language/Version**: Python 3.11+ integration code and the supported Codex
+CLI/plugin runtime
 
 **Primary Dependencies**: existing Nunchi package, Codex hook/plugin APIs,
 Codex CLI persistent-session capability, and `I-050A`; no new required product
@@ -64,8 +104,9 @@ humans, Hermes, and Claude Code
   this directory stays planning-only.
 - **PASS — single owner**: one Codex lane owns all Codex-specific files and hands
   shared changes back to their owners.
-- **PASS — evidence/Goal gate**: product tasks are dormant and installed process
-  plus mixed-room evidence is mandatory.
+- **PASS — slice lifecycle/evidence gate**: product tasks are dormant while the
+  slice is `PLANNED`; activation, installed-process, and mixed-room evidence are
+  mandatory.
 
 ## Slice Interfaces
 
@@ -102,14 +143,17 @@ adversarial fixtures; migrate event/observation and deduplication; migrate one
 attention/participant route; remove send re-gate/V1 residue; prove persistent and
 mixed-room installed runtime; pass `100`; hand to `110`.
 
-**Worktree/branch**: `.worktrees/v2-codex/` on `v2/codex`, based on the accepted
-foundation plus Discord event-source integration commit
+**Worktree/branch**: `.worktrees/v2-codex/` on `v2/codex` is an isolated,
+non-releaseable slice worktree that consumes the exact accepted upstream
+commits for `010` through `050` recorded in activation evidence. It creates no
+program integration or cutover artifact; only slice `110` integrates.
 
 **Handoff to**: `v2-security-owner`, then `v2-integrator`
 
 **Conflict ownership**: `v2-codex-owner` alone changes Codex-specific
 `src/nunchi/integrations/codex_*`, `integrations/codex/`, and verification paths;
-`v2-transport-owner` owns `I-050A`; foundation owners own shared interfaces;
+`v2-transport-owner` owns `I-050A`; owners of slices `010`–`040` own their
+shared interfaces;
 `v2-integrator` resolves packaging/current-state-doc conflicts.
 
 ## Acceptance Scenes and Evidence
@@ -161,7 +205,7 @@ do not embed evidence in the integration package.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning story |
+| Artifact class | Implementation target path(s) | Owning story |
 |---|---|---|
 | Product implementation | `src/nunchi/integrations/codex_*.py`, `integrations/codex/` | US1–US3 |
 | Shared contracts | consume the five files under `schemas/v2/`; no Codex-owned public schema | US1–US3 |

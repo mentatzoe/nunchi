@@ -2,24 +2,63 @@
 
 **Branch**: `v2/observation` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/020-v2-observation/spec.md`
+**Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-observation-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/020-v2-observation`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/020-v2-observation`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/observation/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/observation/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/observation/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/observation/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`
 
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
+
 ## Summary
 
-In future Goal 2, implement the shared observation provider that preserves
-exact identity and native structure, assembles bounded factual attention
-requests, exposes controlled context expansion where truthful, and supplies
-reusable recoverability/comparison scenes. Transport and harness slices bind their
-native surfaces later. Slice 020 stops at a tested I-020A handoff; 110 alone
-owns final parity and cutover. No product work is performed now.
+During authorized slice implementation, implement the shared observation
+provider that preserves exact identity and native structure, assembles bounded
+factual attention requests, exposes controlled context expansion where
+truthful, and supplies reusable recoverability/comparison scenes. Transport and
+harness slices bind their native surfaces later. Slice 020 stops at a tested
+I-020A handoff; 110 alone owns final parity and cutover. This planning baseline
+creates no product behavior.
 
 ## Technical Context
 
@@ -63,7 +102,7 @@ parity claim
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
 | Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence are distinct from downstream live-surface proof. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
-| Single owner and Goal gate | PASS | `v2-observation-owner` owns I-020A; all implementation awaits Goal 2. |
+| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
 Post-design re-check: PASS. No prohibited SpecKit output is planned.
 
@@ -143,7 +182,7 @@ specs/020-v2-observation/
 └── tasks.md
 ```
 
-### Ordinary repository targets for future Goal 2
+### Ordinary repository targets for authorized slice implementation
 
 ```text
 src/nunchi/observation.py
@@ -162,7 +201,7 @@ product module.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Shared implementation | `src/nunchi/observation.py` | US1–US2; consumed by US3 references |
 | Native/surface bindings | none; owned by `050`, `060`–`090` | Excluded |

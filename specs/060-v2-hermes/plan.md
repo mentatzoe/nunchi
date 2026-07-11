@@ -2,15 +2,53 @@
 
 **Branch**: `v2/hermes` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/060-v2-hermes/spec.md`
+**Input**: Existing slice specification from `specs/060-v2-hermes/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-hermes-owner`
 
-**Goal authorization**: Goal 1 planning only; product execution awaits explicit Goal 2 authorization
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/060-v2-hermes`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/060-v2-hermes`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/hermes/slice-activation.md` (written only
+after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/hermes/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/hermes/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/hermes/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`, `040-v2-participant-wake`
+
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Summary
 
@@ -19,6 +57,8 @@ profile to exact identity, assemble bounded truthful observation, call attention
 once, and route only `I-010C` through `I-040A` so the participant acts directly
 or stays silent. Prove multi-profile isolation and installed-runtime parity on
 live Discord and Hermes-native Telegram surfaces.
+
+This planning baseline creates no product behavior.
 
 ## Technical Context
 
@@ -61,8 +101,9 @@ Hermes Telegram parity scene
   target ordinary paths.
 - **PASS — ownership**: one Hermes lane owns its files; upstream owners retain
   shared interfaces.
-- **PASS — Goal/evidence gates**: all tasks are dormant; live provenance and
-  cross-surface scenes are mandatory before handoff.
+- **PASS — slice lifecycle/evidence gates**: all tasks are dormant while the
+  slice is `PLANNED`; activation, live provenance, and cross-surface scenes are
+  mandatory before handoff.
 
 ## Slice Interfaces
 
@@ -99,19 +140,22 @@ Shared schemas are planned under `schemas/v2/`; callable core/CLI behavior under
 
 ## Integration Strategy
 
-**Integration order**: accept all four foundation handoffs; add failing Hermes
-conformance scenes; migrate identity/observation; migrate attention routing and
-participant turn; prove multi-profile/restart/live surfaces; pass slice `100`;
-hand to `110`.
+**Integration order**: accept the exact `010`–`040` commits and handoffs; add
+failing Hermes conformance scenes; migrate identity/observation; migrate
+attention routing and participant turn; prove multi-profile/restart/live
+surfaces; pass slice `100`; hand to `110`.
 
-**Worktree/branch**: `.worktrees/v2-hermes/` on `v2/hermes`, based on the
-accepted foundation integration commit
+**Worktree/branch**: `.worktrees/v2-hermes/` on `v2/hermes` is an isolated,
+non-releaseable slice worktree that consumes the exact accepted upstream
+commits for `010` through `040` recorded in activation evidence. It creates no
+program integration or cutover artifact; only slice `110` integrates.
 
 **Handoff to**: `v2-security-owner`, then `v2-integrator`
 
 **Conflict ownership**: `v2-hermes-owner` alone changes `integrations/hermes/`
-and Hermes-specific test/eval/evidence/doc paths; foundation owners alone change
-shared schemas and core interfaces; `v2-integrator` resolves shared packaging.
+and Hermes-specific test/eval/evidence/doc paths; owners of slices `010`–`040`
+alone change their shared schemas and interfaces; `v2-integrator` resolves
+shared packaging.
 
 ## Acceptance Scenes and Evidence
 
@@ -160,7 +204,7 @@ the slice directory.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning story |
+| Artifact class | Implementation target path(s) | Owning story |
 |---|---|---|
 | Product implementation | `integrations/hermes/nunchi-gate/` | US1–US3 |
 | Shared contracts | consume `schemas/v2/`; no Hermes-owned public schema | US1–US2 |

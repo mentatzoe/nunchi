@@ -2,16 +2,64 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Prerequisites**: Zero CRITICAL/HIGH analysis findings, active
-`v2-contract-owner`, and explicit Goal 2 authorization
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/010-v2-contract`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted declared dependencies (none for this slice); an assigned
+participant and durable external assignment source declared above;
+active `v2-contract-owner`; zero CRITICAL/HIGH analysis findings; and an
+isolated owner worktree
+
+**Activation evidence**: `evidence/v2/contract/slice-activation.md`, written
+only after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST use
+`Accepted dependencies: none`, `Dependency commits: none`, and
+`Dependency acceptance references: none`.
+
+**Candidate evidence**: `evidence/v2/contract/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/contract/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/contract/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-contract-owner`
 
 **Integration handoff**: all named downstream owners for slices `020` through
 `110` and `v2-integrator`
 
-**Goal boundary**: Every checkbox below is future Goal 2 product work. All
-tasks remain unchecked and MUST NOT begin under Goal 1.
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox.
 
 **Tests**: Contract tests are required and precede schema acceptance.
 
@@ -66,11 +114,11 @@ records correlated by request ID.
 - [ ] T015 [P] [US3] Add bypass wake, host-only binding, immutable receipt-stage, and unknown/unavailable cases in `evals/v2/contract/downstream/cases.jsonl`
 - [ ] T016 [US3] Record wake, binding, and staged-receipt results with mandatory `scene_id` in `evidence/v2/contract/downstream.jsonl`
 
-## Phase 5: Documentation and Handoff
+## Phase 5: Documentation and Packet Inputs
 
-- [ ] T017 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md`
+- [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md` for the later workflow gate
 - [ ] T018 Run the exact offline dual-validator command and create the S-ID-to-JSONL-record manifest in `evidence/v2/contract/README.md`
-- [ ] T019 Record exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/contract/handoff.md`; handoff is blocked until documentation freshness passes
+- [ ] T019 Prepare the proposed packet input with exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/contract/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
@@ -82,7 +130,8 @@ records correlated by request ID.
   every currently available stdlib runtime adapter check to pass. Each downstream
   runtime owner must close its adapter result over the identical corpus before
   its own handoff.
-- Slices 020 and 030 may start implementation only after T019 is accepted;
+- Slices 020 and 030 may start implementation only after the lifecycle handoff
+  packet derived from T019 is separately accepted and recorded by each consumer;
   slice 040 additionally waits for their handoffs.
 
 ## Parallel Opportunities

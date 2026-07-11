@@ -22,6 +22,17 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ADAPTERS_MD = _REPO_ROOT / "docs" / "adapters.md"
 _README_MD = _REPO_ROOT / "README.md"
+_AGENTS_MD = _REPO_ROOT / "AGENTS.md"
+_CLAUDE_MD = _REPO_ROOT / "CLAUDE.md"
+_EXECUTION_SPINE_MD = _REPO_ROOT / "docs" / "governance" / "execution-spine.md"
+_SPECS_README = _REPO_ROOT / "specs" / "README.md"
+_EVIDENCE_README = _REPO_ROOT / "evidence" / "README.md"
+_LIFECYCLE_AMENDMENT = (
+    _REPO_ROOT
+    / "evidence"
+    / "governance"
+    / "slice-lifecycle-amendment-2026-07-11.md"
+)
 _INSTALL_MD = _REPO_ROOT / "docs" / "INSTALL.md"
 _MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
@@ -148,32 +159,141 @@ class AdapterStatusClaimDisciplineTest(unittest.TestCase):
 class ReadmeContractStateDisciplineTest(unittest.TestCase):
     """The landing page must not collapse release, checkout, and V2 truth."""
 
-    def test_readme_separates_current_version_and_goal_states(self) -> None:
+    def test_readme_separates_current_version_and_program_lifecycle(self) -> None:
         text = _README_MD.read_text(encoding="utf-8")
+        normalized_text = " ".join(text.split())
         project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
         source_version = project["project"]["version"]
+        bound_runner = (
+            "python3 scripts/run_slice_workflow.py run <workflow> "
+            + "specs"
+            + "/<exact-slice>"
+        )
+        persisted_feature_state = ".specify" + "/feature.json"
 
         required = (
             f"checkout still reports package version `{source_version}`",
             "including the subsequently removed deterministic fast path",
-            "Goal 1 execution-spine rebuild is complete",
-            "Goal 2 implementation is not yet authorized",
+            "2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED`",
+            "At that snapshot all slices were `PLANNED` and dormant",
+            "V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED`",
+            "dated snapshot of the shared repository program, not a permanent live registry",
+            "Resolve live program progress from the umbrella declaration",
+            "evidence/governance/v2-implementation-authorization.md",
+            "the record does not grant authority or make the slice ready",
+            bound_runner,
+            "allowlists and preflights the existing slice",
+            f"leaves `{persisted_feature_state}` unchanged",
+            "sets the exact binding inside the workflow process",
+            "Each dependent owner accepts every required upstream handoff",
+            "At slice level, `v2-integrator` accepts slices `010`–`100`, while Zoe accepts the exact slice-`110` candidate",
+            "Only `110-v2-parity-cutover` may combine accepted handoffs",
+            "Zoe's explicit `CUTOVER_ACCEPTED` decision",
             "Selected V2 design — not implemented",
             "Current implementation: V1",
             "Status labels are evidence tiers",
         )
         for phrase in required:
             with self.subTest(required=phrase):
-                self.assertIn(phrase, text)
+                self.assertIn(phrase, normalized_text)
 
         forbidden = (
             "This library gives your agent that",
             "adapter tier (Constitution VI)",
             "classifier verdict test suite is the merge contract",
+            "Goal 1",
+            "Goal 2",
+            "v2-goal-2-authorization.md",
         )
         for phrase in forbidden:
             with self.subTest(forbidden=phrase):
                 self.assertNotIn(phrase, text)
+
+    def test_external_guidance_resolves_live_state_from_authoritative_artifacts(self) -> None:
+        guidance_paths = (
+            _AGENTS_MD,
+            _CLAUDE_MD,
+            _README_MD,
+            _EXECUTION_SPINE_MD,
+            _SPECS_README,
+            _EVIDENCE_README,
+            _LIFECYCLE_AMENDMENT,
+        )
+        for path in guidance_paths:
+            with self.subTest(path=path.relative_to(_REPO_ROOT)):
+                normalized = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertIn("2026-07-11", normalized)
+                self.assertIn("001-nunchi-v2-program", normalized)
+                self.assertIn(
+                    "evidence/governance/v2-implementation-authorization.md",
+                    normalized,
+                )
+                self.assertIn("activation", normalized)
+                self.assertIn("candidate", normalized)
+                self.assertIn("handoff", normalized)
+                self.assertIn("acceptance", normalized)
+
+    def test_both_slice_workflows_use_the_bound_read_only_runner(self) -> None:
+        workflow_guidance_paths = (
+            _AGENTS_MD,
+            _CLAUDE_MD,
+            _README_MD,
+            _EXECUTION_SPINE_MD,
+            _SPECS_README,
+            _LIFECYCLE_AMENDMENT,
+        )
+        persisted_feature_state = ".specify" + "/feature.json"
+        direct_stateful_helper = (
+            ".specify" + "/scripts/bash/check-prerequisites.sh"
+        )
+        for path in workflow_guidance_paths:
+            with self.subTest(path=path.relative_to(_REPO_ROOT)):
+                normalized = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertIn("scripts/run_slice_workflow.py", normalized)
+                self.assertIn("run nunchi-plan", normalized)
+                self.assertIn("run speckit", normalized)
+                self.assertIn("resume <run-id>", normalized)
+                self.assertIn("010", normalized)
+                self.assertIn("110", normalized)
+                self.assertIn("nunchi-plan", normalized)
+                self.assertIn("speckit", normalized)
+                self.assertIn(persisted_feature_state, normalized)
+                self.assertNotIn(direct_stateful_helper, normalized)
+
+    def test_workflow_evidence_pins_existing_slice_cycles(self) -> None:
+        normalized = " ".join(
+            _LIFECYCLE_AMENDMENT.read_text(encoding="utf-8").split()
+        )
+        required = (
+            "Nunchi Existing-Slice Planning Cycle",
+            "version `1.4.0` with nine steps",
+            "beginning at `bind-existing-slice`",
+            "no `speckit.specify` or implementation step",
+            "version `2.5.0` with eighteen steps",
+        )
+        for phrase in required:
+            with self.subTest(required=phrase):
+                self.assertIn(phrase, normalized)
+
+    def test_slice_acceptance_is_distinct_from_dependency_acceptance(self) -> None:
+        acceptance_paths = (
+            _AGENTS_MD,
+            _CLAUDE_MD,
+            _README_MD,
+            _EXECUTION_SPINE_MD,
+            _SPECS_README,
+            _LIFECYCLE_AMENDMENT,
+        )
+        for path in acceptance_paths:
+            with self.subTest(path=path.relative_to(_REPO_ROOT)):
+                normalized = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertIn("v2-integrator", normalized)
+                self.assertIn("Zoe", normalized)
+                self.assertIn("010", normalized)
+                self.assertIn("100", normalized)
+                self.assertIn("110", normalized)
+                self.assertIn("dependent", normalized)
+                self.assertIn("upstream handoff", normalized)
 
     def test_source_only_install_guides_do_not_claim_pypi_surfaces(self) -> None:
         install_text = _INSTALL_MD.read_text(encoding="utf-8")

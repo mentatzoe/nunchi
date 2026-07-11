@@ -1,16 +1,16 @@
 # Specification Quality Checklist: V2 Security and Runtime Provenance
 
-**Purpose**: Validate that the future Goal 2 security/provenance requirements
-are complete, unambiguous, measurable, traceable, and constitutionally bounded
-before analysis.
+**Purpose**: Validate that the planned security/provenance slice requirements
+are complete, unambiguous, measurable, traceable, lifecycle-aware, and
+constitutionally bounded before analysis.
 
 **Created**: 2026-07-11
 
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Content and Boundary Quality
 
-- [x] CHK001 Is Goal 1 explicitly limited to planning and is every implementation action reserved for separately authorized Goal 2? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010`–`090` handoffs, active `v2-security-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/security/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain dormant in `PLANNED`? [Clarity, Spec §Control-Plane Boundary; tasks.md]
 - [x] CHK002 Are all product contracts, tests, evals, evidence, runtime assets, and documentation assigned to ordinary repository paths? [Completeness, Spec §FR-010]
 - [x] CHK003 Is the prohibition on social heuristics, governance profiles, registries, ledgers, moderation, and composition explicit? [Scope, Spec §Explicit Exclusions]
 - [x] CHK004 Is exactly one accountable owner named, with review and integration distinguished from ownership? [Consistency, Spec §Interface Summary]
@@ -52,15 +52,18 @@ before analysis.
 
 - [x] CHK026 No `[NEEDS CLARIFICATION]` marker remains and all mandatory template sections are complete. [Readiness]
 - [x] CHK027 Functional requirements, success criteria, acceptance scenes, interfaces, exclusions, and tasks are mutually traceable. [Consistency]
-- [x] CHK028 Does the assurance worktree use the single accepted slice-`010` baseline while auditing slices `020`–`090` through immutable refs rather than an undefined merged commit set? [Integration, Plan §Integration Strategy]
+- [x] CHK028 Does the isolated, non-releaseable assurance worktree consume the exact accepted commits for `010`–`090` through immutable refs, without creating a program integration/cutover artifact that belongs only to slice `110`? [Integration, Plan §Integration Strategy]
 - [x] CHK029 Does one evidence manifest resolve S01-S16 and SEC-A/SEC-B/SEC-C to exact candidate refs, commands, attempts, records, and dispositions? [Traceability, Spec §Security Evidence Manifest]
 - [x] CHK030 Does the handoff require reusable assurance commands so slice `110` can rerun controls against the exact assembled candidate without making slice `100` an integrator? [Dependency, Plan §Owner Handoff]
 - [x] CHK031 Does SEC-C prove trusted bypass makes zero classifier calls and invokes one advice-free act-or-silence turn without a fabricated social result, while rejecting room/request-controlled bypass claims? [Security, Spec §FR-018]
 - [x] CHK032 Does SEC-C audit immutable request-correlated observation/attention/participant-host/transport records so each owner attests only its own stage and silence/unavailable outcomes are never fabricated? [Security, Spec §FR-019]
 - [x] CHK033 Does documentation freshness inventory every exact known path, make stale security docs blocking, require each exact owned security-doc `UPDATE`, route shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
+- [x] CHK034 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
+
 ## Notes
 
 - This checklist validates requirements writing, not implementation behavior.
-- All items pass for planning. Goal 2 authorization remains a separate mandatory
-  workflow gate.
+- All items pass for planning. The one valid complete authorization record
+  enumerating exactly slices `010` through `110` and the independent completed
+  slice-activation attestation remain separate mandatory lifecycle gates.

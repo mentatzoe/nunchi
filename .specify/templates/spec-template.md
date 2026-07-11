@@ -1,6 +1,6 @@
-# Feature Specification: [FEATURE NAME]
+# Existing Slice Specification: [SLICE NAME]
 
-**Feature Branch**: `[###-feature-name]`
+**Slice Branch**: `[canonical branch from umbrella]`
 
 **Created**: [DATE]
 
@@ -14,7 +14,38 @@
 
 **Accountable owner lane**: [exactly one owner lane]
 
+**Assigned participant / source**: [UNASSIGNED — awaiting durable external assignment source | participant — evidence/governance/assignments/<record>.md]
+
+The non-symlink assignment record MUST contain exactly one `Assignee`, `Lane`,
+`Assigned by`, ISO `Assigned on`, and durable `Authority reference`. A non-Zoe
+assigner additionally requires `Delegated by: Zoe` and a durable `Delegation
+reference`. Assignment may precede implementation authority; it does not grant
+authority or activate the slice.
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run nunchi-plan specs/[exact-slice]` for planning, or `python3 scripts/run_slice_workflow.py run speckit specs/[exact-slice]` for delivery
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: [PLANNED | READY | ACTIVE | CONVERGED | HANDOFF_READY | ACCEPTED]
+
+**Program implementation authority**: [NOT_GRANTED | GRANTED with `evidence/governance/v2-implementation-authorization.md`]
+
+**Activation evidence**: [`evidence/v2/[slice]/slice-activation.md`; written after prerequisites are accepted to establish READY, before ACTIVE]
+
+**Candidate evidence**: [`evidence/v2/[slice]/slice-candidate.md`; required for CONVERGED]
+
+**Handoff evidence**: [`evidence/v2/[slice]/slice-handoff.md`; required for HANDOFF_READY]
+
+**Acceptance evidence**: [`evidence/v2/[slice]/slice-acceptance.md`; required for ACCEPTED]
+
+**Rework execution**: [convergence-added tasks and rejected completed handoffs
+start a new bound `run speckit`; paused post-convergence fixes resume only when
+the task graph is unchanged; activation is retained and attempt streams append]
+
 **Depends on**: [slice ids or none]
+
+**Dependency commits / acceptance references**: [ordered `slice=full-sha` and
+`slice=repo-relative-evidence-reference` mappings; `none` when dependency-free]
 
 **Feeds**: [dependent slice ids or final integration]
 
@@ -23,7 +54,9 @@
 - This directory contains planning artifacts only.
 - Product source, contracts, schemas, tests, fixtures, evaluations, evidence,
   runtime assets, and documentation MUST target ordinary repository paths.
-- Unless Goal 2 is explicitly authorized, this slice MUST remain planning-only.
+- Unless the one complete authorization record enumerates exactly slices `010`
+  through `110` and every independent readiness prerequisite for this slice is
+  satisfied, this slice MUST remain `PLANNED` and dormant.
 - State the exact product behavior that is out of scope for this slice.
 
 ## Interface Summary *(mandatory)*
@@ -53,15 +86,16 @@ paths when the affected documents are already known.
 
 <!--
   IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
+  Each user story/journey must be INDEPENDENTLY TESTABLE inside this slice.
+  Nunchi slices are not independently deployable products: only slice 110 may
+  integrate the complete accepted V2 set, and V2 cuts over atomically.
 
   Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
   Think of each story as a standalone slice of functionality that can be:
   - Developed independently
   - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
+  - Proven independently in the slice's ordinary evidence
+  - Handed to the designated acceptance owner without deployment
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)
@@ -145,7 +179,7 @@ paths when the affected documents are already known.
 - **FR-010**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-011**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
-### Key Entities *(include if feature involves data)*
+### Key Entities *(include if the slice involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
@@ -170,7 +204,7 @@ paths when the affected documents are already known.
 <!--
   ACTION REQUIRED: The content in this section represents placeholders.
   Fill them out with the right assumptions based on reasonable defaults
-  chosen when the feature description did not specify certain details.
+  chosen when the slice description did not specify certain details.
 -->
 
 - [Assumption about target users, e.g., "Users have stable internet connectivity"]

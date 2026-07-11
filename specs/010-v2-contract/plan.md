@@ -2,24 +2,61 @@
 
 **Branch**: `v2/contract` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/010-v2-contract/spec.md`
+**Input**: Existing slice specification from `specs/010-v2-contract/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-contract-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/010-v2-contract`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/010-v2-contract`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/contract/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/contract/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/contract/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/contract/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: none
 
+**Dependency acceptance mapping**: activation evidence MUST use
+`Accepted dependencies: none`, `Dependency commits: none`, and
+`Dependency acceptance references: none`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
+
 ## Summary
 
-In future Goal 2, define and land the five canonical V2 interfaces before any
-dependent product implementation: attention request, attention decision,
-participant wake, context continuation, and attention receipt. The schemas and
-tests will make the clean V2 cutover mechanically unambiguous while preserving
-the selected human-shaped product boundary. This plan creates no product
-artifact now.
+During authorized slice implementation, define and land the five canonical V2
+interfaces before any dependent product implementation: attention request,
+attention decision, participant wake, context continuation, and attention
+receipt. The schemas and tests will make the clean V2 cutover mechanically
+unambiguous while preserving the selected human-shaped product boundary. This
+planning baseline creates no product behavior.
 
 ## Technical Context
 
@@ -60,7 +97,7 @@ culminating in one final parity integration
 | Atomic parity contract | PASS | One versioned contract set feeds every in-tree consumer with no V1 bridge. |
 | Evidence before claims | PASS | Future tests, fixtures, evidence, and owner handoff are concrete. |
 | Control-plane boundary | PASS | This directory contains only spec, plan, tasks, and requirements checklist. |
-| Single owner and Goal gate | PASS | `v2-contract-owner` is sole owner; all product tasks await explicit Goal 2 authorization. |
+| Single owner and slice lifecycle | PASS | `v2-contract-owner` is sole owner; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
 Post-design re-check: PASS. Interface summaries remain planning prose; no
 `data-model.md`, `contracts/`, `quickstart.md`, schema, fixture, test, evidence,
@@ -95,8 +132,8 @@ or product documentation is created here.
   by request ID. Each stage owner appends only its stage; bypass attention records
   set `classifier_not_invoked` and carry trusted bypass provenance.
 
-These target paths are future Goal 2 outputs. Interface details here are
-planning summaries only.
+These target paths are outputs of authorized slice implementation. Interface
+details here are planning summaries only.
 
 ### Contract validation commands
 
@@ -167,7 +204,7 @@ specs/010-v2-contract/
 
 No other file or directory is permitted in this slice.
 
-### Ordinary repository targets for future Goal 2
+### Ordinary repository targets for authorized slice implementation
 
 ```text
 schemas/v2/
@@ -196,7 +233,7 @@ documentation remain separately addressable ordinary artifacts.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Machine-readable contracts | `schemas/v2/*.schema.json` | US1–US3 |
 | Contract tests | `tests/v2/contract/test_*.py` | US1–US3 |

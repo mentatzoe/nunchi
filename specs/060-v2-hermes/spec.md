@@ -1,10 +1,25 @@
-# Feature Specification: V2 Hermes Harness
+# Existing Slice Specification: V2 Hermes Harness
 
 **Feature Branch**: `v2/hermes`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; implementation is not authorized under Goal 1
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/hermes/slice-activation.md` (written only
+after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/hermes/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/hermes/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/hermes/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Plan Hermes V2 participant-turn parity without changing current behavior now.
 
@@ -14,18 +29,48 @@
 
 **Accountable owner lane**: `v2-hermes-owner`
 
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/060-v2-hermes`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/060-v2-hermes`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`, `040-v2-participant-wake`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `100-v2-security-provenance`, `110-v2-parity-cutover`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Hermes plugin code targets `integrations/hermes/`; tests and fixtures
+- Authorized Hermes slice implementation targets `integrations/hermes/`; tests and fixtures
   target `tests/`; replay material targets `evals/`; live records target
   `evidence/`; product documentation targets `docs/`.
-- No task may begin until Goal 2 is explicitly authorized and slices `010`
-  through `040` have supplied accepted versioned handoffs.
+- This planning baseline creates no product behavior. Authorized slice
+  implementation requires the one valid complete authorization record at
+  `evidence/governance/v2-implementation-authorization.md` enumerating exactly
+  slices `010` through `110`; slices `010` through `040` have supplied accepted
+  versioned handoffs; `v2-hermes-owner` is active; the assigned participant and durable
+  external assignment source are declared above; analysis has zero
+  CRITICAL/HIGH findings; and an isolated worktree exists. Only after those
+  facts are accepted does activation evidence attest them and establish
+  `READY` before `ACTIVE`.
 - This slice does not own the shared V2 schemas, attention model, observation
   algorithm, or participant-turn contract and creates no new public interface.
 
@@ -172,8 +217,9 @@ then compare receipts and participant outcomes with the common program catalog.
   ordinary later-hearing and restart claim is unproved.
 - **FR-013**: The slice MUST provide deterministic, replay, multi-profile,
   restart, Discord, Telegram, and installed-runtime evidence in ordinary paths.
-- **FR-014**: The slice MUST preserve the control-plane boundary and must not
-  implement any V2 behavior during Goal 1.
+- **FR-014**: The slice MUST preserve the control-plane boundary. Its planning
+  baseline MUST create no V2 product behavior, and implementation MUST remain
+  dormant until the slice-activation requirements are satisfied.
 
 ### Key Entities
 
@@ -235,4 +281,5 @@ then compare receipts and participant outcomes with the common program catalog.
   contract owned by slices `010`, `030`, and `040`.
 - A central Hermes roster, obligation tracker, speaker queue, or shared handled
   state across profiles.
-- Promotion, public release, or implementation/live deployment during Goal 1.
+- Promotion, public release, or implementation/live deployment before this
+  slice is validly activated.

@@ -1,10 +1,25 @@
-# Feature Specification: V2 Observation
+# Existing Slice Specification: V2 Observation
 
 **Feature Branch**: `v2/observation`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; no V2 implementation is authorized or present
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/observation/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/observation/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/observation/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/observation/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Define shared normalization and bounded-observation mechanics plus
 reusable reference scenes that every in-tree surface can bind and prove in its
@@ -16,20 +31,44 @@ own integration slice.
 
 **Accountable owner lane**: `v2-observation-owner`
 
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/020-v2-observation`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/020-v2-observation`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `040`, `050`, `060`, `070`, `080`, `090`, `100`, `110`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Goal 2 observation code targets `src/nunchi/observation.py`; tests target
+- Authorized slice implementation targets `src/nunchi/observation.py`; tests target
   `tests/v2/observation/`, reusable replay assets `evals/v2/observation/`, evidence
   `evidence/v2/observation/`, and documentation `docs/observation/`.
-- Goal 1 creates no collector, buffer, continuation provider, adapter change,
-  test, corpus, evidence, or product documentation.
-- The repository remains V1 until separately authorized Goal 2 performs the
-  atomic cutover.
+- This planning baseline creates no collector, buffer, continuation provider,
+  adapter change, test, corpus, evidence, product documentation, or V2 runtime
+  behavior.
+- While the slice is `PLANNED`, every task remains `DORMANT`; the repository
+  remains V1 until slice `110` performs the atomic cutover.
 
 ## Interface Summary
 
@@ -247,11 +286,12 @@ and limitation outcomes.
 
 ## Assumptions
 
-- Slice 010 lands all consumed `@1` contracts before Goal 2 work starts here.
+- Slice 010 lands all consumed `@1` contracts before this slice may enter
+  `READY`.
 - Existing transports continue to be the source of authentication and routing
   truth; observation code does not become a transport or provider registry.
-- Default eager/retention budgets are selected by replay evidence during Goal 2,
-  not guessed in this planning artifact.
+- Default eager/retention budgets are selected by replay evidence during
+  authorized slice implementation, not guessed in this planning artifact.
 - A surface may legitimately lack reactions, membership history, backfill, or
   continuation; parity requires honest representation, not fabrication.
 - Reference provider results establish reusable mechanics only. They never
@@ -277,7 +317,7 @@ and limitation outcomes.
 
 ## Explicit Exclusions
 
-- No V2 product behavior is implemented in Goal 1.
+- No V2 product behavior is implemented by this planning baseline.
 - No attention-model prompt, provider call, disposition transition, participant
   invocation, reply composition, send-time safety, or release decision.
 - No complete participant roster, handled/open ledger, obligation queue,

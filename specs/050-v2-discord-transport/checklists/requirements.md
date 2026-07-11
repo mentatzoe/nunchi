@@ -1,9 +1,9 @@
 # Requirements Quality Checklist: V2 Discord Transport
 
 **Purpose**: Review whether the slice requirements are complete, clear,
-measurable, and bounded before Goal 2 authorization
+measurable, lifecycle-safe, and bounded before slice activation
 **Created**: 2026-07-11
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Requirement Completeness
 
@@ -36,12 +36,14 @@ measurable, and bounded before Goal 2 authorization
 - [x] CHK015 Are `010` and `020` dependencies and the `070`/`080`/`100`/`110` consumers named consistently across all artifacts? [Dependency, Interface Summary]
 - [x] CHK016 Does one owner control Discord-specific files while shared schemas remain with `v2-contract-owner`? [Ownership, Plan §Integration Strategy]
 - [x] CHK017 Are all future executable artifacts assigned to ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
-- [x] CHK018 Is Goal 2 authorization explicit and impossible to infer from these completed planning files? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK018 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010-v2-contract` and `020-v2-observation`, active `v2-transport-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/discord-transport/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain `DORMANT` in `PLANNED`? [Lifecycle, Control-Plane Boundary; tasks.md §Slice activation]
 - [x] CHK019 Is `I-050A` limited to event/history/continuity while operational send actions remain implementation safety? [Scope, Spec §Interface Summary]
 - [x] CHK020 Does DT-07 have a harness-independent producing task that preserves the downstream dependency graph while final live participant behavior remains with slice `110`? [Coverage, Plan §Acceptance Scenes; tasks.md]
 - [x] CHK021 Does one manifest map DT-01 through DT-07 and common S IDs to exact evidence records through stable `scene_id` values? [Traceability, Spec §FR-012; Plan §Acceptance Scenes]
 - [x] CHK022 Does DT-05 keep transport action handling wake-source-agnostic, prove zero transport/send-path classifier calls, preserve rather than re-attest an upstream bypass stage, fabricate no social/silence-delivery result, and append only the immutable request-correlated transport stage this owner can attest? [Contract, Spec §FR-009, FR-015]
 - [x] CHK023 Does documentation freshness inventory every exact known path, require both existing Discord-MCP docs and the V2 guide to `UPDATE`, route shared/downstream `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+
+- [x] CHK024 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

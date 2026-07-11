@@ -2,27 +2,65 @@
 
 **Branch**: `v2/participant-wake` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/040-v2-participant-wake/spec.md`
+**Input**: Existing slice specification from `specs/040-v2-participant-wake/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-wake-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/040-v2-participant-wake`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/040-v2-participant-wake`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/participant/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/participant/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/participant/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/participant/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`, `020-v2-observation`,
 `030-v2-core-attention`
 
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
+
 ## Summary
 
-In future Goal 2, implement the common I-040A participant-turn host at
+During authorized slice implementation, implement the common I-040A participant-turn host at
 `src/nunchi/participant.py`. It obeys one attention result, builds an
 independently budgeted factual wake packet, routes trusted preattention bypass
 without a model claim, exposes bound expansion, invokes one direct act-or-
 silence turn, emits an immutable participant-host receipt stage, and keeps send
 safety free of social reclassification. It hands a framework-neutral lifecycle to surface slices;
-100 later audits it and 110 alone integrates/cuts over. No product work occurs
-now.
+100 later audits it and 110 alone integrates/cuts over. This planning baseline
+creates no product behavior.
 
 ## Technical Context
 
@@ -62,7 +100,7 @@ send callbacks, consumed by independently owned surface integrations
 | Atomic parity contract | PASS | I-040A is shared; surface slices bind it and 110 alone owns cutover. |
 | Evidence before claims | PASS | Call-count, replay, packet, expansion, silence, and handoff evidence are concrete. |
 | Control-plane boundary | PASS | This directory contains only planning Markdown. |
-| Single owner and Goal gate | PASS | `v2-wake-owner` owns I-040A and awaits explicit Goal 2. |
+| Single owner and slice lifecycle | PASS | `v2-wake-owner` owns I-040A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
 Post-design re-check: PASS. No prohibited design or product artifact is placed
 in this directory.
@@ -135,7 +173,7 @@ specs/040-v2-participant-wake/
 └── tasks.md
 ```
 
-### Ordinary repository targets for future Goal 2
+### Ordinary repository targets for authorized slice implementation
 
 ```text
 src/nunchi/participant.py
@@ -151,7 +189,7 @@ callbacks rather than importing any one agent harness.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Shared participant host | `src/nunchi/participant.py` | US1–US3 |
 | Tests | `tests/v2/participant/` | US1–US3 |

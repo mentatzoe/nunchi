@@ -1,15 +1,15 @@
 # Specification Quality Checklist: V2 Participant Wake
 
-**Purpose**: Validate that future Goal 2 participant-host requirements are
-complete, direct, bounded, and free of duplicate social judgment
+**Purpose**: Validate that participant-host requirements are complete, direct,
+bounded, lifecycle-safe, and free of duplicate social judgment
 
 **Created**: 2026-07-11
 
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Scope and Ownership
 
-- [x] CHK001 Is future Goal 2 work distinguished explicitly from current V1 behavior? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Is the `PLANNED` slice and its `NOT_GRANTED` program authority distinguished explicitly from current V1 implementation truth, with tasks `DORMANT` until `READY`? [Clarity, Spec §Control-Plane Boundary]
 - [x] CHK002 Are all shared-host product artifacts assigned to ordinary paths only? [Consistency, Spec §Control-Plane Boundary, FR-016]
 - [x] CHK003 Is `v2-wake-owner` the sole I-040A owner with complete 010/020/030 dependencies and 060–110 feeds? [Completeness, Spec §Interface Summary]
 - [x] CHK004 Are native/surface integrations, attention judgment, schemas, assurance, and final cutover assigned to other owner lanes explicitly? [Coverage, Spec §Explicit Exclusions]
@@ -34,6 +34,9 @@ complete, direct, bounded, and free of duplicate social judgment
 - [x] CHK014 Can every success criterion be measured by invocation count, schema-valid packet, result classification, fetch rejection, call graph, handoff, or boundary result? [Measurability, Spec §SC-001–SC-009]
 - [x] CHK015 Is it explicit that local evidence feeds slices 060–100 while 110 alone owns final parity and atomic cutover? [Dependency, Spec §Interface Summary, Explicit Exclusions]
 - [x] CHK016 Does documentation freshness inventory every exact known affected path, require the participant-guide `UPDATE`, route shared/downstream `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [x] CHK017 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/040-v2-participant-wake`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010-v2-contract`, `020-v2-observation`, and `030-v2-core-attention`, active `v2-wake-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/participant/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox? [Lifecycle, tasks.md §Slice activation]
+
+- [x] CHK018 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

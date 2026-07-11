@@ -1,10 +1,25 @@
-# Feature Specification: V2 Contract
+# Existing Slice Specification: V2 Contract
 
 **Feature Branch**: `v2/contract`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; no V2 implementation is authorized or present
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/contract/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/contract/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/contract/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/contract/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Define the atomic V2 request, decision, wake, continuation, and receipt contracts before any dependent implementation begins.
 
@@ -14,21 +29,43 @@
 
 **Accountable owner lane**: `v2-contract-owner`
 
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/010-v2-contract`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/010-v2-contract`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: none
 
+**Dependency commits / acceptance references**: activation evidence MUST use
+`Accepted dependencies: none`, `Dependency commits: none`, and
+`Dependency acceptance references: none`.
+
 **Feeds**: `020`, `030`, `040`, `050`, `060`, `070`, `080`, `090`, `100`, `110`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Goal 2 product schemas belong under `schemas/v2/`, contract
+- Authorized slice implementation places product schemas under `schemas/v2/`, contract
   tests under `tests/v2/contract/`, evaluation material under `evals/v2/`,
   evidence under `evidence/v2/contract/`, and product contract documentation
   under `docs/contracts/`.
-- Goal 1 does not create schemas, tests, evaluation assets, evidence, product
-  documentation, or V2 runtime behavior.
-- Until Zoe explicitly authorizes Goal 2, every task in this slice remains
-  future work and the repository continues to implement V1.
+- This planning baseline creates no schemas, tests, evaluation assets,
+  evidence, product documentation, or V2 runtime behavior.
+- While the slice is `PLANNED`, every task remains `DORMANT` and the repository
+  continues to implement V1.
 
 ## Interface Summary
 
@@ -267,7 +304,7 @@ participant outcomes and binding failures.
 
 ## Assumptions
 
-- Goal 2 will retain Python 3.11+ and stdlib-only runtime constraints unless a
+- Authorized slice implementation retains Python 3.11+ and stdlib-only runtime constraints unless a
   separately authorized decision changes them.
 - JSON Schema Draft 2020-12 is the portable machine-readable contract format
   planned for the ordinary `schemas/` path; generated language bindings are not
@@ -296,7 +333,7 @@ participant outcomes and binding failures.
 ## Explicit Exclusions
 
 - No V2 schema, test, evaluator, evidence, documentation, core, CLI, adapter,
-  or harness implementation is created under Goal 1.
+  or harness implementation is created by this planning baseline.
 - No classifier prompt, social heuristic, context collector, provider call,
   participant invocation, transport integration, or deployment choreography.
 - No V1 compatibility bridge and no decision about release numbering,

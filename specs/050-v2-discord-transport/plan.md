@@ -2,15 +2,53 @@
 
 **Branch**: `v2/discord-transport` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/050-v2-discord-transport/spec.md`
+**Input**: Existing slice specification from `specs/050-v2-discord-transport/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-transport-owner`
 
-**Goal authorization**: Goal 1 planning only; every product task is dormant until Goal 2 is explicitly authorized
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/050-v2-discord-transport`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/discord-transport/slice-activation.md`
+(written only after every readiness prerequisite is accepted; it attests those
+facts and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/discord-transport/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/discord-transport/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/discord-transport/slice-acceptance.md`
+(for `ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`, `020-v2-observation`
+
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Summary
 
@@ -18,6 +56,7 @@ Cut the existing Discord gateway/MCP surface over to the V2 factual event and
 bounded-continuation contract. Preserve bot-authored messages, exact native
 relations, authoritative order, restart/backfill truth, operational send safety,
 and runtime provenance while excluding every deterministic social inference.
+This planning baseline creates no product behavior.
 
 ## Technical Context
 
@@ -61,7 +100,8 @@ Discord rooms, with multiple human and bot actors per room
   paths; this directory remains planning-only.
 - **PASS — single owner**: `v2-transport-owner` owns all Discord-specific source
   files; slice `010` alone owns every machine-readable V2 schema.
-- **PASS — Goal boundary**: no task executes under Goal 1.
+- **PASS — slice lifecycle**: tasks remain `DORMANT` while the slice is
+  `PLANNED`.
 - **PASS — evidence**: deterministic, restart/backfill, security, and installed
   live records are required before handoff.
 
@@ -102,7 +142,10 @@ send tools; hand off to Claude Code and Codex; pass assurance `100`; integrate i
 `110`.
 
 **Worktree/branch**: `.worktrees/v2-discord-transport/` on
-`v2/discord-transport`, based on the accepted foundation integration commit
+`v2/discord-transport` is an isolated, non-releaseable slice worktree that
+consumes the exact accepted upstream commits for `010` and `020` recorded in
+activation evidence. It creates no program integration or cutover artifact;
+only slice `110` integrates.
 
 **Handoff to**: `v2-claude-owner`, `v2-codex-owner`,
 `v2-security-owner`, then `v2-integrator`
@@ -165,7 +208,7 @@ ordinary paths so parallel harness lanes do not collide.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning story |
+| Artifact class | Implementation target path(s) | Owning story |
 |---|---|---|
 | Product implementation | `src/nunchi/mcp_discord/` | US1–US3 |
 | Shared contracts | consume slice `010` files under `schemas/v2/`; no transport-owned schema | US1–US2 |

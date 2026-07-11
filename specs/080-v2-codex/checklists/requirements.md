@@ -1,9 +1,9 @@
 # Requirements Quality Checklist: V2 Codex Harness
 
 **Purpose**: Validate Codex event, session, one-judgment, participant-turn,
-packaging, and evidence requirements before future implementation
+packaging, and evidence requirements before authorized slice implementation
 **Created**: 2026-07-11
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Requirement Completeness
 
@@ -35,9 +35,11 @@ packaging, and evidence requirements before future implementation
 
 - [x] CHK015 Are dependencies `010`–`050` and consumers `100`/`110` consistent across all artifacts? [Dependency]
 - [x] CHK016 Does the Codex lane own only Codex-specific paths while shared transport and foundation interfaces stay upstream-owned? [Ownership, Plan §Integration Strategy]
-- [x] CHK017 Are all future implementation, test, eval, evidence, and doc files assigned to ordinary paths, with no new evidence under `integrations/codex/`? [Boundary, Plan §Project Structure]
-- [x] CHK018 Is Goal 2 an external explicit gate rather than a completed planning/task status? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK017 Are all implementation, test, eval, evidence, and doc files assigned to ordinary paths, with no new evidence under `integrations/codex/`? [Boundary, Plan §Project Structure]
+- [x] CHK018 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/080-v2-codex`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010`–`050` handoffs, active `v2-codex-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/codex/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain dormant in `PLANNED`? [Boundary, Control-Plane Boundary; tasks.md]
 - [x] CHK019 Does documentation freshness inventory every exact known path, require new/existing Codex operator guides to `UPDATE`, route shared/transport `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+
+- [x] CHK020 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

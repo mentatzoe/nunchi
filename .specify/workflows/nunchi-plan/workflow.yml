@@ -1,10 +1,10 @@
 schema_version: "1.0"
 workflow:
   id: "nunchi-plan"
-  name: "Nunchi Planning-Only Slice Cycle"
-  version: "1.1.0"
+  name: "Nunchi Existing-Slice Planning Cycle"
+  version: "1.4.0"
   author: "Nunchi"
-  description: "Specify through analysis with mandatory README/docs impact planning and no implementation step"
+  description: "Review and plan one existing V2 slice through analysis, with no implementation step"
 
 requires:
   speckit_version: "==0.12.11"
@@ -14,25 +14,25 @@ requires:
       - "claude"
 
 inputs:
-  spec:
+  slice_directory:
     type: string
     required: true
-    prompt: "Describe the umbrella program or bounded slice"
+    prompt: "Exact existing slice directory, for example specs/030-v2-core-attention"
   integration:
     type: string
     default: "auto"
     prompt: "Integration to use ('auto' uses the repository default)"
 
 steps:
-  - id: specify
-    command: speckit.specify
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
+  - id: bind-existing-slice
+    type: gate
+    message: "SLICE BINDING: this workflow must have been launched through python3 scripts/run_slice_workflow.py run nunchi-plan {{ inputs.slice_directory }}. The wrapper allowlists and preflights that exact existing 010-110 slice, sets SPECIFY_FEATURE_DIRECTORY in the workflow process, pins the run input and workflow digest, and leaves .specify/feature.json unchanged. Resume only through the same wrapper. Do not create or select a replacement feature."
+    options: [approve, reject]
+    on_reject: abort
 
   - id: review-spec
     type: gate
-    message: "Review scope, one owner lane, dependencies, interfaces, Goal boundary, control-plane-only compliance, and explicit README/docs freshness dispositions."
+    message: "Review the bound existing slice's scope, owner lane, assigned participant/source, dependencies, interfaces, lifecycle state, control-plane-only compliance, and explicit README/docs freshness dispositions."
     options: [approve, reject]
     on_reject: abort
 
@@ -64,7 +64,7 @@ steps:
     command: speckit.tasks
     integration: "{{ inputs.integration }}"
     input:
-      args: "Generate future Goal 2 tasks only; include blocking README/docs disposition, validation, evidence, and handoff tasks; do not execute them."
+      args: "Generate dormant slice implementation tasks only; include activation prerequisites plus blocking README/docs disposition, validation, evidence, and handoff tasks; do not execute them."
 
   - id: analyze
     command: speckit.analyze

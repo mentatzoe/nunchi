@@ -1,20 +1,69 @@
 ---
-description: "Future Goal 2 task plan for the V2 Codex harness"
+description: "Slice delivery task plan for the V2 Codex harness (dormant until authorized)"
 ---
 
 # Tasks: V2 Codex Harness
 
-**Execution status**: DORMANT. These tasks describe future Goal 2 work and MUST
-NOT be executed under the current Goal 1.
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/080-v2-codex`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
 **Input**: `specs/080-v2-codex/spec.md` and `plan.md`
 
-**Prerequisites**: explicit Goal 2 authorization; accepted `010`–`050` handoffs;
-zero CRITICAL/HIGH analysis findings; isolated owner worktree
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted `010`–`050` handoffs; `v2-codex-owner` active; assigned
+participant and durable external assignment source declared above; zero
+CRITICAL/HIGH analysis findings; and an isolated owner worktree
+
+**Activation evidence**: `evidence/v2/codex/slice-activation.md`, written only
+after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/codex/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/codex/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/codex/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-codex-owner`
 
 **Integration handoff**: `v2-security-owner`, then `v2-integrator`
+
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox. This planning baseline creates no product behavior
+or implementation authority.
 
 ## Phase 1: Cross-path conformance setup
 
@@ -70,26 +119,27 @@ components and proves retired V1 residue absent before mixed-room claims.
 - [ ] T019 [US3] Replace the packaged social send gate with an operational-only backstop in `integrations/codex/nunchi_send_gate_codex.py`
 - [ ] T020 [US3] Migrate trusted V2 configuration controls and remove social-permission settings in `src/nunchi/integrations/codex_config_app.py`
 - [ ] T021 [US3] Update the packaged configuration-app wrapper to the exact V2 implementation in `integrations/codex/nunchi_config_app.py`
-- [ ] T022 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Codex `UPDATE` paths, route each shared/transport `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/codex/handoff.md`
+- [ ] T022 [US3] Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Codex `UPDATE` paths, route each shared/transport `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/codex/handoff.md` for the later workflow gate
 
 **Checkpoint**: deterministic packaging and installed-runtime prerequisites for
 CD-06/CD-07 pass.
 
-## Phase 5: Live evidence and handoff
+## Phase 5: Live Evidence and Packet Inputs
 
 - [ ] T023 Run and commit Codex persistent-session, bypass/disposition, immutable-stage, action/silence, adversarial, and mixed-room results with mandatory `scene_id` and CD case ID in `evidence/v2/codex/scene-results.jsonl`
 - [ ] T024 Record exact source/plugin/package/Codex/transport/process/model/config identities, residue removal, restart, and schema-2 probe in `evidence/v2/codex/installed-runtime.md`
 - [ ] T025 Publish the exact command and scene-to-record manifest for applicable S01–S16/CD outcomes in `evidence/v2/codex/verification.md`
-- [ ] T026 Hand off commit, interface versions, commands/results, evidence, session/capability limits, documentation dispositions/validation/reviewer, and known gaps in `evidence/v2/codex/handoff.md` only after documentation freshness passes
+- [ ] T026 Prepare the proposed packet input with commit, interface versions, commands/results, evidence, session/capability limits, documentation dispositions/validation/reviewer, and known gaps in `evidence/v2/codex/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
-- T001–T003 require accepted `010`–`050` handoffs.
+- T001–T003 require activation evidence to establish `READY`, the assigned
+  participant to declare `ACTIVE`, and accepted `010`–`050` handoffs.
 - US1 must establish one exact event/session path before US2 changes routing.
 - US3 packaging begins after deterministic CD-03/CD-04 success.
-- Live evidence and T026 handoff identify the exact candidate submitted to slice
+- Live evidence and the proposed T026 packet input identify the exact candidate later submitted to slice
   `100`; assurance consumes rather than precedes that local handoff.
-- Slice `110` consumes the committed T026 handoff only after slice `100` accepts
+- Slice `110` consumes the terminally accepted slice candidate only after slice `100` accepts
   the candidate.
 
 ## Parallel Opportunities
@@ -102,6 +152,7 @@ CD-06/CD-07 pass.
 
 ## Implementation Strategy
 
-Unify input/session paths first, replace attention and participant routing second,
-retire send re-gating third, and prove the installed plugin last. No task may
-execute until Goal 2 is explicitly authorized.
+Unify input/session paths first, replace attention and participant routing
+second, retire send re-gating third, and prove the installed plugin last. The
+activation record attests readiness; it does not grant program implementation
+authority.

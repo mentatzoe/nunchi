@@ -1,15 +1,15 @@
 # Specification Quality Checklist: V2 Contract
 
-**Purpose**: Validate that the future Goal 2 contract requirements are complete,
-clear, measurable, and bounded before implementation planning is accepted
+**Purpose**: Validate that the contract-slice requirements are complete, clear,
+measurable, and bounded before slice activation is accepted
 
 **Created**: 2026-07-11
 
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Content and Boundary Quality
 
-- [x] CHK001 Is the current V1 implementation distinguished explicitly from future Goal 2 V2 work? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Is the `PLANNED` slice and its `NOT_GRANTED` program authority distinguished explicitly from current V1 implementation truth, with tasks `DORMANT` until `READY`? [Clarity, Spec §Control-Plane Boundary]
 - [x] CHK002 Are product schemas, tests, evals, evidence, and docs assigned only to ordinary repository paths? [Consistency, Spec §Control-Plane Boundary]
 - [x] CHK003 Is exactly one accountable owner named, with a non-silent contract-change handoff? [Completeness, Spec §Interface Summary]
 - [x] CHK004 Are implementation, classifier, collector, harness, release, and promotion work explicitly excluded? [Coverage, Spec §Explicit Exclusions]
@@ -32,8 +32,9 @@ clear, measurable, and bounded before implementation planning is accepted
 ## Acceptance Criteria and Dependencies
 
 - [x] CHK014 Do Draft 2020-12 and stdlib runtime adapters consume the same corpus under the exact offline `jsonschema==4.26.0` test command, with aggregate records carrying `scene_id` and a complete README manifest? [Measurability, Spec §SC-001–SC-006]
-- [x] CHK015 Are dependency order, downstream owner lanes, interface ownership, and Goal 2 authorization prerequisites complete? [Dependency, Spec §Interface Summary, Assumptions]
+- [x] CHK015 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/010-v2-contract`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted declared dependencies (none), active `v2-contract-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/contract/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox? [Lifecycle, tasks.md §Slice activation]
 - [x] CHK016 Does documentation freshness inventory every exact known affected path, require the owned contract-doc `UPDATE`, route exact shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [x] CHK017 Does activation evidence require `Accepted dependencies: none`, `Dependency commits: none`, and `Dependency acceptance references: none`, while candidate/handoff evidence is append-only, rejection appends `REJECTED` and returns the same owner to `ACTIVE`, requires a new bound run rather than resume of the completed run, preserves every prior attempt, and convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

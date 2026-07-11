@@ -2,7 +2,10 @@
 
 > **Current V1 reference:** every adapter in this document uses the implemented
 > `PASS / ACK / ASK / SPEAK` contract. None is evidence of selected V2 parity;
-> V2 migration and atomic cutover remain Goal 2 work.
+> the dated 2026-07-11 reset recorded the relevant V2 slices as `PLANNED` and
+> dormant. Resolve their live state from the execution spine. Only slice `110`
+> owns integration, and V2 becomes current only after its accepted atomic merge
+> is post-merge verified as `CUTOVER_VERIFIED`.
 
 This document is the full adapter reference for Nunchi. It covers every
 supported surface, how to install and configure each adapter, and how to wire a

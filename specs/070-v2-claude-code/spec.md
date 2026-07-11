@@ -1,10 +1,25 @@
-# Feature Specification: V2 Claude Code Harness
+# Existing Slice Specification: V2 Claude Code Harness
 
 **Feature Branch**: `v2/claude-code`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; implementation is not authorized under Goal 1
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/claude-code/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/claude-code/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/claude-code/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/claude-code/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Plan Claude Code V2 live-room parity, including the Station false-silence regression, without implementation now.
 
@@ -14,19 +29,48 @@
 
 **Accountable owner lane**: `v2-claude-owner`
 
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/070-v2-claude-code`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/070-v2-claude-code`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`, `040-v2-participant-wake`, `050-v2-discord-transport` for live room parity
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `100-v2-security-provenance`, `110-v2-parity-cutover`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Claude Code plugin/hook assets target `integrations/claude-code/`;
+- Authorized Claude Code slice implementation targets `integrations/claude-code/`;
   deterministic tests and fixtures target `tests/`; replay material targets
   `evals/`; live records target `evidence/`; product documentation targets
   `docs/`.
-- Product tasks require explicit Goal 2 authorization and accepted handoffs from
-  slices `010` through `050`.
+- This planning baseline creates no product behavior. Authorized slice
+  implementation requires the one valid complete authorization record at
+  `evidence/governance/v2-implementation-authorization.md` enumerating exactly
+  slices `010` through `110`; accepted handoffs from slices `010` through `050`;
+  an active `v2-claude-owner`; an assigned participant and durable external assignment
+  source declared above; zero CRITICAL/HIGH analysis findings; and an isolated
+  worktree. Only after those facts are accepted does activation evidence attest
+  them and establish `READY` before `ACTIVE`.
 - This slice does not own shared schemas, attention, observation, participant-turn,
   or Discord event-source contracts and creates no new public interface.
 
@@ -194,7 +238,9 @@ runtime prose filter.
   reactive no-polling bot-hearing, live-room, no-send, and installed-runtime
   evidence in ordinary paths; every record MUST carry its CC/common scene ID and
   be resolved by one evidence manifest.
-- **FR-015**: The slice MUST preserve the control-plane and Goal 1/Goal 2 boundary.
+- **FR-015**: The slice MUST preserve the control-plane/product-artifact and
+  program/slice lifecycle boundaries; its planning baseline MUST create no
+  product behavior.
 - **FR-016**: The Claude integration MUST preserve immutable, request-correlated
   `I-010E` observation, attention, participant-host, and transport stages. It
   MUST NOT mutate an upstream stage, fill a future stage, or append a stage for
@@ -274,5 +320,5 @@ runtime prose filter.
   participant-turn interfaces.
 - A central speaker manager, deterministic addressing algorithm, obligation
   ledger, or participant roster.
-- Kilo or other harness integrations, public promotion, or any Goal 1 product
-  implementation/live installation.
+- Kilo or other harness integrations, public promotion, or product
+  implementation/live installation before this slice is validly activated.

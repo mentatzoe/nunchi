@@ -2,16 +2,65 @@
 
 **Input**: `specs/030-v2-core-attention/spec.md` and `specs/030-v2-core-attention/plan.md`
 
-**Prerequisites**: Accepted 010 handoff, zero CRITICAL/HIGH analysis findings,
-active `v2-core-owner`, and explicit Goal 2 authorization
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/030-v2-core-attention`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted declared dependency `010-v2-contract`; an assigned
+participant and durable external assignment source declared above;
+active `v2-core-owner`; zero CRITICAL/HIGH analysis findings; and an isolated
+owner worktree
+
+**Activation evidence**: `evidence/v2/attention/slice-activation.md`, written
+only after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/attention/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/attention/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/attention/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-core-owner`
 
 **Integration handoff**: `v2-wake-owner`, owners of slices `060` through `110`,
 and `v2-integrator`
 
-**Goal boundary**: Every checkbox is future Goal 2 product work. No task may
-begin under Goal 1.
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox.
 
 **Tests**: Red deterministic contract/transition tests precede implementation;
 replay/model evidence remains separate from unit mechanics; live participant
@@ -69,12 +118,12 @@ or failed path returns ERROR and the correct wake-default/override audit.
 - [ ] T021 [P] [US3] Add core/CLI ok, preattention-bypass, validation, invalid-input, provider/runtime, malformed-model, and projection parity corpus in `evals/v2/attention/core-cli/cases.jsonl`
 - [ ] T022 [US3] Record core/CLI parity, bypass handoff, and error-fallback results with mandatory S06/S09/`030-CLI` `scene_id` values in `evidence/v2/attention/core-cli-parity.jsonl`
 
-## Phase 5: Social Evidence, Documentation, and Handoff
+## Phase 5: Social Evidence, Documentation, and Packet Inputs
 
 - [ ] T023 Run the incumbent Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3 comparison (or an explicit later Zoe override) and record every attempt with mandatory scene IDs, exact provider IDs, provider/endpoint, prompt/config, date, and results in `evidence/v2/attention/model-comparison/results.jsonl`
 - [ ] T024 Preregister the downstream live DEFER canary scenes, metrics, stop/retirement rules, owners, and immutable result paths in `evidence/v2/attention/defer-canary/protocol.md`; do not execute participant/live-room canaries in slice 030
-- [ ] T025 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each V2/V1-evidence `UPDATE`, route every shared and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/attention/handoff.md`
-- [ ] T026 Publish the scene-to-record command manifest in `evidence/v2/attention/README.md` and record commit, commands, I-030A/upstream versions, model/policy provenance, canary protocol, evidence, active margin, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/attention/handoff.md`; handoff is blocked until documentation freshness passes
+- [ ] T025 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each V2/V1-evidence `UPDATE`, route every shared and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/attention/handoff.md` for the later workflow gate
+- [ ] T026 Publish the scene-to-record command manifest in `evidence/v2/attention/README.md` and prepare the proposed packet input with commit, commands, I-030A/upstream versions, model/policy provenance, canary protocol, evidence, active margin, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/attention/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
@@ -87,7 +136,8 @@ or failed path returns ERROR and the correct wake-default/override audit.
   engine and explicit permission for provider calls, while T024 specifies
   downstream evidence without requiring a participant implementation.
 - T026 requires all deterministic, replay, model, protocol, and documentation
-  outputs. Slice 040 and later consumers start only after accepting it; live
+  outputs. Slice 040 and later consumers start only after separately accepting
+  and recording the lifecycle handoff packet derived from it; live
   participant outcomes are explicitly not a 030 handoff prerequisite.
 
 ## Parallel Opportunities

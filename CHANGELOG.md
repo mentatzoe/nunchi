@@ -7,16 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — program and slice lifecycle replaces local-run framing
+
+- External guidance records the 2026-07-11 reset baseline—the V2 program
+  `READY`, implementation authority `NOT_GRANTED`, and all slices `010`–`110`
+  `PLANNED` with product tasks dormant—as a dated snapshot rather than a live
+  registry. Readers resolve current program progress from the umbrella,
+  authority from the exact authorization record, and slice state/occupant from
+  the bound declarations plus immutable activation/acceptance records and
+  append-only candidate/handoff evidence. V1 remains current until the atomic
+  V2 merge is post-merge verified
+  as `CUTOVER_VERIFIED`.
+- Both workflows operate on one existing slice through
+  `python3 scripts/run_slice_workflow.py run <workflow> specs/<exact-slice>`.
+  The runner verifies exact SpecKit `0.12.11` and its pinned PEP-610 source,
+  preflights and binds the slice in the workflow process, resolves the concrete
+  integration, pins those facts with the slice input and workflow digests, and
+  rejects altered resume state without mutating `.specify/feature.json`. The planning cycle is now the
+  nine-step `Nunchi Existing-Slice Planning Cycle` version `1.4.0`; it begins at
+  `bind-existing-slice`, stops after analysis, and never creates or replaces a
+  feature. Participants resume a paused unchanged-task run only through
+  `python3 scripts/run_slice_workflow.py resume <run-id>`; changed tasks or a
+  rejected completed handoff start a new bound run. The delivery workflow's
+  implementation-authority gate requires the external grant record at
+  `evidence/governance/v2-implementation-authorization.md` to enumerate exactly
+  all eleven slices; a partial or extra-scope record is invalid for every slice.
+  Its separate readiness gate verifies owner, dependencies, analysis, worktree,
+  and activation evidence.
+- Zoe, or an assigner named in a durable Zoe delegation, assigns the program
+  owner and slice occupants. The declaration and activation evidence carry
+  `<participant identity> — evidence/governance/assignments/<record>.md`; that
+  record contains `Assignee`, `Lane`, `Assigned by`, `Assigned on`, and
+  `Authority reference`, plus `Delegated by: Zoe` and `Delegation reference`
+  for a non-Zoe assigner. Assignment may precede
+  authority for planning but never grants implementation or readiness; no
+  central assignment registry is introduced.
+- Slice state follows `PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY
+  -> ACCEPTED`. Each dependent independently accepts its required upstream
+  handoffs before readiness; at slice level `v2-integrator` accepts `010`–`100`
+  and Zoe accepts `110`. Only slice `110` integrates. After its handoff, Zoe's
+  exact-candidate decision establishes slice `ACCEPTED` and program
+  `CUTOVER_ACCEPTED`; one atomic merge remains verification-pending, and a
+  docs/evidence-only follow-up combines exact-main verification with final
+  current-state docs validation before `CUTOVER_VERIFIED`. State is derived
+  from control-plane declarations, immutable activation/acceptance records,
+  and append-only candidate/handoff attempt streams, never a central runtime,
+  conversation, participant, assignment, or social-state registry.
+- Activation evidence now maps dependencies to ordered full commits and
+  matching per-consumer acceptance files; slice `110` requires every upstream
+  slice to be `ACCEPTED`. Candidate and handoff files are append-only attempt
+  streams. Convergence-added tasks and rejected completed handoffs each keep or
+  return the same owner to `ACTIVE` and require a new bound run; only paused
+  post-convergence fixes with an unchanged task graph resume. No candidate or
+  packet history is erased.
+
 ### Changed — mandatory documentation freshness for implementation slices
 
-- Constitution 2.1.0 makes `README.md` and affected ordinary documentation a
+- Constitution 2.3.0 retains `README.md` and affected ordinary documentation as
   blocking part of every SpecKit implementation. Each reviewed surface must use
   `UPDATE`, evidence-backed `NO_IMPACT`, or an exact owner-accepted `HANDOFF`;
   generic documentation tasks and bare no-impact claims no longer close a
   slice.
-- The full workflow now gates documentation freshness after convergence and
-  before integration handoff. Spec, plan, task, checklist, agent-guidance, and
-  active V2 slice artifacts carry the same ownership and validation rules.
+- The delivery workflow gates documentation freshness after convergence and before
+  slice handoff. Spec, plan, task, checklist, agent-guidance, and all V2 slice
+  artifacts carry the same ownership and validation rules.
 - Slices `010`–`100` update their owned component guides and hand exact global
   claim deltas to `v2-integrator`; slice `110` must update `README.md` and all
   affected cross-surface documentation in the atomic candidate.
@@ -25,9 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate.
 - Active slices now inventory exact existing docs as well as planned V2 guides;
   generic directory scope is rejected. The dormant-task check remains strict
-  under Goal 1 but permits completed tasks after a valid, separately granted
-  Goal 2 authorization is recorded at
-  `evidence/governance/v2-goal-2-authorization.md`.
+  while implementation authority is `NOT_GRANTED`, but permits completed tasks
+  after the external grant is documented at
+  `evidence/governance/v2-implementation-authorization.md`, enumerates exactly
+  all eleven slices, and the bound slice's independent readiness gate passes.
 
 ### Fixed — round-4 review: confidence domain, uninstall confinement
 

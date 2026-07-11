@@ -1,10 +1,25 @@
-# Feature Specification: V2 Standalone Channel Adapters
+# Existing Slice Specification: V2 Standalone Channel Adapters
 
 **Feature Branch**: `v2/channel-adapters`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; implementation is not authorized under Goal 1
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/adapters/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/adapters/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/adapters/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/adapters/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Plan atomic V2 parity for the generic, Discord, Matrix, and Telegram standalone adapters without implementation now.
 
@@ -14,19 +29,48 @@
 
 **Accountable owner lane**: `v2-adapters-owner`
 
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/090-v2-channel-adapters`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/090-v2-channel-adapters`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`, `040-v2-participant-wake`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `100-v2-security-provenance`, `110-v2-parity-cutover`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future adapter implementation targets `src/nunchi/adapters/`; deterministic
+- Authorized slice implementation targets `src/nunchi/adapters/`; deterministic
   tests and native fixtures target `tests/`; reusable cross-adapter replay
   targets `evals/`; per-surface run records target `evidence/`; product
   documentation targets `docs/`.
-- Product tasks require explicit Goal 2 authorization and accepted handoffs from
-  slices `010` through `040`.
+- This planning baseline creates no product behavior. Authorized slice
+  implementation requires the one valid complete authorization record at
+  `evidence/governance/v2-implementation-authorization.md` enumerating exactly
+  slices `010` through `110`; accepted handoffs from slices `010` through `040`;
+  an active `v2-adapters-owner`; an assigned participant and durable external assignment
+  source declared above; zero CRITICAL/HIGH analysis findings; and an isolated
+  worktree. Only after those facts are accepted does activation evidence attest
+  them and establish `READY` before `ACTIVE`.
 - This slice creates no public interface and does not own shared schemas, core
   attention, observation semantics, or participant-turn behavior.
 
@@ -190,7 +234,9 @@ scenes, and record schema/interface versions plus honest capability differences.
   replay, surface probe, restart, mixed-room compatibility, and provenance
   evidence in ordinary paths; every record MUST carry its AD/common scene ID and
   be resolved by one evidence manifest.
-- **FR-016**: The slice MUST preserve the control-plane and Goal 1/Goal 2 boundary.
+- **FR-016**: The slice MUST preserve the control-plane/product-artifact and
+  program/slice lifecycle boundaries; its planning baseline MUST create no
+  product behavior.
 - **FR-017**: Each adapter MUST preserve immutable, request-correlated `I-010E`
   observation, attention, participant-host, and transport stages. It MAY append
   only the `transport` stage for a native delivery, rejection, or operational
@@ -269,5 +315,5 @@ scenes, and record schema/interface versions plus honest capability differences.
   participant-turn host, or shared Discord-MCP source.
 - A universal participant roster, floor manager, handled/open ledger, or
   adapter-specific deterministic social policy.
-- Promotion, release-tier decisions, or any implementation/live probing during
-  Goal 1.
+- Promotion, release-tier decisions, or implementation/live probing before this
+  slice is validly activated.

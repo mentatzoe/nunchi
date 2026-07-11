@@ -1,10 +1,25 @@
-# Feature Specification: V2 Participant Wake
+# Existing Slice Specification: V2 Participant Wake
 
 **Feature Branch**: `v2/participant-wake`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; no V2 implementation is authorized or present
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/participant/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/participant/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/participant/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/participant/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Provide one shared participant-turn host that converts V2 attention routing into a compact normal act-or-silence turn with bound context expansion, no intermediate admission answer, and no send-time social reclassification.
 
@@ -14,19 +29,43 @@
 
 **Accountable owner lane**: `v2-wake-owner`
 
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/040-v2-participant-wake`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/040-v2-participant-wake`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`, `020-v2-observation`, `030-v2-core-attention`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `060`, `070`, `080`, `090`, `100`, `110`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Goal 2 shared participant-host code targets
+- Authorized slice implementation targets shared participant-host code at
   `src/nunchi/participant.py`; deterministic tests target
   `tests/v2/participant/`, replay assets `evals/v2/participant/`, evidence
   `evidence/v2/participant/`, and product documentation `docs/participant/`.
-- Goal 1 creates no participant host, prompt/instruction, context tool, send
-  seam, harness binding, test, corpus, evidence, or product documentation.
+- This planning baseline creates no participant host, prompt/instruction,
+  context tool, send seam, harness binding, test, corpus, evidence, product
+  documentation, or V2 runtime behavior.
 - The repository remains V1 until slice 110 assembles every accepted owner
   handoff into one atomic V2 cutover.
 
@@ -291,7 +330,7 @@ participant outcomes.
 
 ## Explicit Exclusions
 
-- No V2 product behavior is implemented under Goal 1.
+- No V2 product behavior is implemented by this planning baseline.
 - No native transport, platform observation binding, Hermes/Claude/Codex/
   standalone-adapter integration, installed-runtime probe, or live-room cutover.
 - No attention-model or policy decision, schema change, reply composition,

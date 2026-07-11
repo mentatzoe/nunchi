@@ -4,10 +4,24 @@
 
 **Created**: 2026-07-11
 
-**Status**: Goal 1 planning complete; Goal 2 not yet authorized
+**Status at 2026-07-11 reset baseline**: READY — planning baseline accepted;
+implementation authority not granted
+
+**Program state**: READY
+
+**Program implementation authority**: NOT_GRANTED
+
+**Declaration reset observation**: 2026-07-11 — program `READY`, authority
+`NOT_GRANTED`, all slices `PLANNED`, all participant assignments `UNASSIGNED`
+
+**Implementation authorization**: `evidence/governance/v2-implementation-authorization.md` (absent until Zoe grants authority)
+
+**Assigned program participant / source (declaration)**: UNASSIGNED — reset
+2026-07-11; updated only from a durable external assignment source
 
 **Input**: Establish one implementation-ready V2 program from the selected
-Nunchi technical design without implementing V2 product behavior under Goal 1.
+Nunchi technical design without implementing V2 product behavior while building
+the planning baseline.
 
 **Authority source**: Aleph Vault selected design PR 67 (`bdd1ebb`) and contract-clarification PR 68 (`c834e8c`)
 
@@ -15,37 +29,51 @@ Nunchi technical design without implementing V2 product behavior under Goal 1.
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Depends on**: selected Vault design and Nunchi Constitution 2.1.0
+**Depends on**: selected Vault design and Nunchi Constitution 2.3.0
 
-**Feeds**: slices `010` through `110` and the separately commissioned Goal 2
+**Feeds**: independently activated slices `010` through `110`
 
 ## Control-Plane Boundary
 
 - This directory and every child slice contain planning artifacts only.
-- Goal 1 MUST NOT change V2 product behavior.
+- The accepted planning baseline MUST NOT change V2 product behavior.
 - Future product source targets `src/` or `integrations/`; contracts target
   `schemas/`; tests target `tests/`; reusable evaluation assets target `evals/`;
   run records target `evidence/`; documentation targets `docs/`.
 - No build, test, evaluation, docs, packaging, release, or runtime command may
   depend on this program directory.
-- Goal 2 is an explicit external authorization gate, not a task status.
+- V2 implementation requires an explicit external program-authority record;
+  task or lifecycle status never grants authority.
+- The reset observation above is dated history. Live program and slice facts
+  derive from this umbrella declaration, exact bound-slice declarations, and
+  immutable ordinary-path activation/acceptance records and append-only
+  candidate/handoff attempt evidence; no
+  planning table is a central mutable state or assignment registry.
+- `v2-integrator` is the slice-level acceptance owner for slices `010`–`100`;
+  Zoe is the acceptance owner for `110`. A source slice reaching `ACCEPTED`
+  does not imply every consumer accepted its packet: each dependent must record
+  its own per-recipient upstream acceptance before becoming `READY`.
 
 ## Interface Summary
 
 - **Consumes**: selected Aleph Vault V2 technical design; current ordinary-path
-  V1 implementation and evidence; Constitution 2.1.0.
+  V1 implementation and evidence; Constitution 2.3.0.
 - **Produces**: an acyclic slice graph, stable owner lanes, a shared interface
   registry, acceptance-scene catalog, integration order, and evidence contract.
-- **Integration handoff**: `v2-program-owner` activates the named slice lanes;
-  `v2-integrator` accepts their explicit handoffs and owns the atomic cutover.
+- **Integration handoff**: `v2-program-owner` coordinates slice order and
+  verifies owner-authored readiness/evidence; each assigned slice participant
+  activates and declares only its own lane. `v2-integrator` accepts explicit
+  handoffs for `010`–`100` and owns slice `110` assembly, while Zoe owns `110`
+  acceptance.
 
 ## User Scenarios & Testing
 
 ### User Story 1 - Start one bounded owner lane without rediscovering the design (Priority: P1)
 
-A Goal 2 implementer can select one slice, identify its one accountable owner,
-see all prerequisites and interfaces, and begin work without re-litigating the
-selected product flow or reading another slice's private context.
+An assigned participant can bind SpecKit to one existing slice, identify its
+owner lane and activation evidence, see all prerequisites and interfaces, and
+begin only when that slice becomes `READY`, without re-litigating the selected
+product flow or reading another slice's private context.
 
 **Why this priority**: Detached ownership and competing interpretations caused
 the previous parity failure.
@@ -138,8 +166,8 @@ and final parity gate.
   capability and parity compares only equivalent available facts.
 - A slice is code-green but misses a required scene or evidence record: the
   handoff is rejected.
-- A workflow reaches implementation during Goal 1: the Goal 2 gate is rejected
-  and the run aborts.
+- A workflow reaches implementation without valid program authority or slice
+  readiness: the relevant gate is rejected and the run aborts.
 - A new product artifact appears under `specs/`: governance validation fails.
 
 ## Requirements
@@ -159,8 +187,9 @@ and final parity gate.
   an explicit handoff recipient.
 - **FR-008**: Every slice MUST define independently testable acceptance scenes
   and ordinary-path evidence requirements.
-- **FR-009**: The program MUST reserve V2 implementation for separately
-  authorized Goal 2.
+- **FR-009**: The program MUST keep every slice implementation task dormant
+  until the one valid complete program authorization record enumerates exactly
+  slices `010` through `110` and the bound slice is independently `READY`.
 - **FR-010**: The program MUST prevent product assets and product workflow
   dependencies inside SpecKit-managed paths.
 - **FR-011**: The program MUST use a breaking atomic V2 cutover with no V1
@@ -179,11 +208,11 @@ and final parity gate.
 - **FR-017**: Every handoff MUST include commit, commands/results, interface
   version, evidence paths, runtime provenance, and known limitations.
 - **FR-018**: Analysis MUST have zero CRITICAL/HIGH findings before a slice may
-  cross the Goal 2 implementation gate.
+  pass its readiness gate.
 - **FR-019**: Green unit tests MUST NOT satisfy stochastic social-quality or
   live-parity evidence requirements by themselves.
-- **FR-020**: The full existing V1 test baseline MUST remain green throughout
-  Goal 1 and at Goal 2 entry.
+- **FR-020**: The full existing V1 test baseline MUST remain green at planning
+  acceptance and every slice activation.
 - **FR-021**: Trusted preattention-disabled operation MUST be represented as a
   non-social bypass that invokes the participant without a classifier call or
   fabricated social disposition; it MUST NOT be collapsed into WAKE, DEFER,
@@ -198,15 +227,55 @@ and final parity gate.
   ordinary docs, execute exact `UPDATE`, evidence-backed `NO_IMPACT`, or
   owner-accepted `HANDOFF` dispositions, and pass documentation freshness
   before handoff.
-- **FR-025**: Checked Goal 2 tasks MUST be rejected until Zoe's separately
-  granted objective is recorded at
-  `evidence/governance/v2-goal-2-authorization.md`; the record documents rather
-  than grants authority, and a valid record MUST permit truthful task progress.
+- **FR-025**: Checked slice implementation tasks MUST be rejected until Zoe's
+  external grant is validly recorded at
+  `evidence/governance/v2-implementation-authorization.md` with explicit scope
+  enumerating exactly slices `010` through `110`; a partial, extra, or
+  duplicate scope is invalid for every slice, and the record documents rather
+  than grants authority.
+- **FR-026**: Every slice MUST expose its lifecycle state, owner lane, assigned
+  participant/source, exact activation evidence path, declared upstream
+  handoffs, branch/worktree, interfaces, evidence targets, and handoff recipient
+  without introducing a central mutable status registry.
+- **FR-027**: Slice-level `ACCEPTED` MUST mean acceptance by `v2-integrator` for
+  slices `010`–`100` and by Zoe for slice `110`; it MUST NOT imply another
+  downstream recipient accepted unless that recipient's exact acceptance is
+  recorded. Every dependent MUST record its own acceptance of every required
+  upstream commit and packet before becoming `READY`. Its activation MUST use
+  canonical ordered dependency IDs, `Dependency commits` as `slice=full-sha`,
+  and matching `Dependency acceptance references` as
+  `slice=consumer-owned-evidence-file`. Each reference file MUST name the
+  consumer slice, upstream slice, matching commit, accepting participant, ISO
+  date, exact upstream packet record, and durable decision. Slice `110` MUST
+  require every slice `010`–`100` to be terminally `ACCEPTED`.
+- **FR-028**: Every slice MUST substantiate lifecycle transitions with immutable
+  ordinary-path `slice-activation.md` and `slice-acceptance.md` records plus
+  append-only `slice-candidate.md` and `slice-handoff.md` attempt streams beside
+  its declared activation path. Activation MUST freeze exact `Initial task IDs`
+  and normalized `Initial tasks SHA256`; each candidate attempt MUST record
+  exact `Completed task IDs`, matching normalized `Tasks SHA256`, and
+  `Tasks complete: YES`. Rejection MUST append a `REJECTED` handoff
+  decision naming the exact candidate, acceptance owner, ISO date, and durable
+  decision reference; the source owner then returns the declaration to `ACTIVE`
+  without deleting or rewriting any attempt. Rejection of a completed handoff
+  and convergence-added tasks each require a new bound delivery run with the
+  original activation; only a paused post-convergence fix with an unchanged task
+  graph may resume its run. Later retries append new candidate and handoff
+  entries. The program tail adjacent to slice `110` MUST
+  additionally require the assigned `v2-integrator` to durably copy Zoe's
+  external decision into slice acceptance/rejection evidence, the assigned
+  `v2-program-owner` to copy an acceptance into
+  `evidence/v2/parity/cutover-acceptance.md`, and the assigned integrator to
+  record `evidence/v2/parity/post-merge-verification.md`. Slice decisions use
+  `Recorded by: v2-integrator`; program cutover acceptance uses
+  `Recorded by: v2-program-owner`. These records MUST NOT become a central
+  mutable registry.
 
 ### Key Entities
 
-- **Program**: umbrella authority, dependency graph, interface registry,
-  integration waves, and final success contract.
+- **Program**: umbrella lifecycle, dependency graph, interface registry,
+  integration waves, and final success contract; it records but never grants
+  external implementation authority.
 - **Slice**: one bounded unit of implementation and evidence with one owner.
 - **Owner lane**: stable accountable role occupied by one runtime or human work
   context at a time.
@@ -231,8 +300,10 @@ and final parity gate.
   `specs/`.
 - **SC-006**: No executable build/test/eval/package/release/runtime path depends
   on `.specify/` or `specs/`.
-- **SC-007**: Both installed workflows parse; `nunchi-plan` has zero
-  implementation steps and `speckit` has a Goal 2 gate before implementation.
+- **SC-007**: Both installed workflows read-only bind one exact existing slice
+  and create no replacement feature; `nunchi-plan` has zero implementation
+  steps, while `speckit` places implementation authorization and slice
+  readiness before activation and implementation.
 - **SC-008**: Both Codex and Claude integration manifests and the installed CLI
   report SpecKit `0.12.11`.
 - **SC-009**: The pre-existing baseline remains 968 tests—960 passing and 8
@@ -241,30 +312,53 @@ and final parity gate.
 - **SC-010**: Every common acceptance scene maps to at least one implementing
   slice and to final parity slice `110`.
 - **SC-011**: There are zero unresolved placeholders, ownership gaps, dependency
-  ambiguities, or CRITICAL/HIGH analysis findings at Goal 1 exit.
+  ambiguities, or CRITICAL/HIGH analysis findings at planning acceptance.
 - **SC-012**: Removing managed paths in a disposable verification copy leaves
   ordinary tests and eval discovery runnable before fresh initialization.
 - **SC-013**: Every slice has an exact README/docs disposition, validation task,
-  ordinary handoff evidence target, and reviewer gate; slice `110` owns the
-  mandatory global current-state update at atomic cutover.
-- **SC-014**: Governance rejects a checked implementation task with no valid
-  Goal 2 authorization record and accepts the same task state after a valid
-  externally granted record exists.
+  ordinary handoff evidence target, and reviewer gate. Slice `110` updates the
+  atomic candidate truthfully as `CUTOVER_ACCEPTED` with verification pending;
+  exact-main checks and final current-state docs validation then land together
+  in a docs/evidence-only follow-up before `CUTOVER_VERIFIED`.
+- **SC-014**: Governance rejects a checked slice implementation task without
+  the one valid complete authority record enumerating exactly slices `010`
+  through `110`, and permits truthful progress only after that separate
+  program fact and the bound slice's readiness are both established.
+- **SC-015**: The dated 2026-07-11 reset baseline declares every slice
+  `PLANNED`, `NOT_GRANTED`, and `UNASSIGNED`, while every live slice declaration
+  exposes its exact read-only preflight, binding, and four per-transition
+  evidence paths; live state and occupancy are derived from declarations plus
+  immutable activation/acceptance records and append-only candidate/handoff
+  attempt streams, never a duplicated umbrella status table.
+- **SC-016**: Every `010`–`100` packet has an explicit integrator acceptance
+  record before its source slice is `ACCEPTED`, every `110` packet has Zoe's
+  explicit acceptance, and every dependent activation cites its own
+  per-recipient acceptance of each required upstream handoff through ordered
+  full-SHA and matching consumer-owned evidence mappings; slice `110` starts
+  only after every upstream slice is `ACCEPTED`.
+- **SC-017**: Every declared lifecycle transition cites the exact standard
+  milestone record for that slice, and program `CUTOVER_VERIFIED` cites both
+  the program owner's record of Zoe's cutover decision and the complete
+  post-merge verification/final-documentation record.
+- **SC-018**: A rejected handoff preserves every prior candidate and handoff
+  attempt, appends one attributable `REJECTED` decision, derives the source
+  slice as `ACTIVE`, requires a new bound run rather than resuming the completed
+  run, and permits a later attempt only by appending new entries.
 
 ## Assumptions
 
-- Owner lane names are stable accountability identities; Goal 2 may assign a
-  specific runtime or human without rewriting slice ownership.
+- Owner lane names are stable accountability identities; a durable assignment
+  source may assign a specific participant without rewriting slice ownership.
 - All in-tree consumers migrate even if their eventual release/product tier is
   decided later.
-- The selected Vault design is complete enough for planning; this goal does not
-  reopen product choices already selected by Zoe.
+- The selected Vault design is complete enough for delivery planning; this
+  program does not reopen product choices already selected by Zoe.
 - V1 ordinary-path tests and evidence remain historical inputs, not V2 proof.
 
 ## Explicit Exclusions
 
 - Any V2 source, schema, test, fixture, evaluation, runtime, deployment, or
-  product-documentation implementation under Goal 1.
+  product-documentation implementation while program authority is not granted.
 - A V1-to-V2 compatibility bridge or mixed-version in-tree repository.
 - A handled/open ledger, inferred participant registry, central floor manager,
   deterministic social heuristic, or send-time social reclassification.

@@ -1,20 +1,70 @@
 ---
-description: "Future Goal 2 task plan for the V2 Hermes harness"
+description: "Slice delivery task plan for the V2 Hermes harness (dormant until authorized)"
 ---
 
 # Tasks: V2 Hermes Harness
 
-**Execution status**: DORMANT. These tasks describe future Goal 2 work and MUST
-NOT be executed under the current Goal 1.
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/060-v2-hermes`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
 **Input**: `specs/060-v2-hermes/spec.md` and `plan.md`
 
-**Prerequisites**: explicit Goal 2 authorization; accepted `010`, `020`, `030`,
-and `040` handoffs; zero CRITICAL/HIGH analysis findings; isolated worktree
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted `010`, `020`, `030`, and `040` handoffs;
+`v2-hermes-owner` active; assigned participant and durable external assignment
+source declared above; zero CRITICAL/HIGH analysis findings; and an isolated
+worktree
+
+**Activation evidence**: `evidence/v2/hermes/slice-activation.md`, written only
+after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/hermes/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/hermes/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/hermes/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-hermes-owner`
 
 **Integration handoff**: `v2-security-owner`, then `v2-integrator`
+
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox. This planning baseline creates no product behavior
+or implementation authority.
 
 ## Phase 1: Conformance setup
 
@@ -63,7 +113,7 @@ waking route.
 surface capability differences without invented facts.
 
 - [ ] T013 [US3] Add failing restart and suppressed-event-later-heard conformance tests in `tests/v2/test_hermes.py`
-- [ ] T014 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Hermes `UPDATE` paths, route each shared `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/hermes/handoff.md`
+- [ ] T014 [US3] Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Hermes `UPDATE` paths, route each shared `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/hermes/handoff.md` for the later workflow gate
 - [ ] T015 [US3] Add multi-profile Discord and Telegram replay expectations in `evals/v2/hermes/live-scenes.jsonl`
 - [ ] T016 [US3] Record one-profile, multi-profile, bypass, and restart scene results with mandatory `scene_id` and HM case ID in `evidence/v2/hermes/hermes-scenes.jsonl`
 - [ ] T017 [US3] Record Telegram parity and unavailable-capability observations with mandatory `scene_id` and HM case ID in `evidence/v2/hermes/telegram-scenes.jsonl`
@@ -71,20 +121,23 @@ surface capability differences without invented facts.
 **Checkpoint**: HM-03 through HM-05 have committed evidence and no unsupported
 surface parity claim.
 
-## Phase 5: Provenance and handoff
+## Phase 5: Provenance and Packet Inputs
 
 - [ ] T018 Record exact installed plugin, Nunchi package, model, configuration source, process restart, and V2 probe in `evidence/v2/hermes/installed-runtime.md`
 - [ ] T019 Publish the exact deterministic/live command and scene-to-record manifest for all S/HM IDs in `evidence/v2/hermes/verification.md`
-- [ ] T020 Hand off commit, interface versions, commands/results, evidence, state-isolation shape, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/hermes/handoff.md` only after documentation freshness passes
+- [ ] T020 Prepare the proposed packet input with commit, interface versions, commands/results, evidence, state-isolation shape, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/hermes/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
-- T001–T003 begin only after all four upstream handoffs are accepted.
+- T001–T003 begin only after activation evidence establishes `READY`, the
+  assigned participant declares `ACTIVE`, and all four upstream handoffs are
+  accepted.
 - US1 establishes identity and observation before US2 participant routing.
 - US3 starts only after HM-01 and HM-02 pass in the sandbox.
-- Local provenance and T020 handoff feed slice `100`; assurance does not depend
+- Local provenance and the separately accepted lifecycle handoff packet derived
+  from T020 feed slice `100`; assurance does not depend
   on a handoff that itself waits for assurance.
-- Slice `110` consumes the committed T020 handoff only after slice `100` accepts
+- Slice `110` consumes the terminally accepted slice candidate only after slice `100` accepts
   the candidate.
 
 ## Parallel Opportunities
@@ -99,5 +152,5 @@ surface parity claim.
 
 Land exact identity and observation first, then replace routing atomically, then
 run multi-profile live scenes. Do not enable social suppression until later
-hearing/restart evidence supports the declared surface policy. Never infer
-implementation authorization from this task list.
+hearing/restart evidence supports the declared surface policy. The activation
+record attests readiness; it does not grant program implementation authority.

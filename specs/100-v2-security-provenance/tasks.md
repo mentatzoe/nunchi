@@ -1,34 +1,84 @@
 ---
-description: "Future Goal 2 task list for blocking V2 security and provenance assurance"
+description: "Slice delivery task list for blocking V2 security and provenance assurance (dormant until authorized)"
 ---
 
 # Tasks: V2 Security and Runtime Provenance Assurance
 
-**Input**: Design documents from `/specs/100-v2-security-provenance/`
+**Slice state**: `PLANNED`
 
-**Prerequisites**: `spec.md`, `plan.md`, zero CRITICAL/HIGH analysis findings,
-accepted handoffs from slices `010` through `090`, and explicit Zoe Goal 2
-authorization before T001 or any later task begins
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Input**: Existing slice design documents from `specs/100-v2-security-provenance/`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted declared handoffs from slices `010` through `090`;
+`v2-security-owner` active; assigned participant and durable external assignment
+source declared above; zero CRITICAL/HIGH analysis findings; and an isolated
+owner worktree
+
+**Activation evidence**: `evidence/v2/security/slice-activation.md`, written only
+after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/security/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/security/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/security/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-security-owner`
 
 **Integration handoff**: `v2-integrator` / slice `110-v2-parity-cutover`
 
-**Goal state**: Future Goal 2 plan only. All tasks remain unexecuted under Goal 1.
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox. This planning baseline creates no product behavior
+or implementation authority.
 
 **Ownership boundary**: This lane owns assurance tests/eval tooling, evidence,
 threat/security documentation, mitigation handbacks, and re-audit. Product
 contracts, source, observation, core, wake, transport, harnesses, and adapters
 remain owned by slices `010`–`090`.
 
-## Phase 1: Authorization and Audited-Commit Admission
+## Phase 1: Activation Attestation and Audited-Commit Admission
 
-- [ ] T001 Record explicit Zoe Goal 2 authorization, accountable owner activation, and analysis result in `evidence/v2/security/authorization.md`
-- [ ] T002 Validate the exact accepted slice-`010` contract/integration baseline plus immutable commit/package refs, canonical `I-010A`–`I-050A` versions, evidence manifests, commands/results, provenance, and limitations from slices `020` through `090` in `evidence/v2/security/upstream-handoffs.json`
-- [ ] T003 Create `.worktrees/v2-security-provenance/` on branch `v2/security-provenance` from the single accepted slice-`010` contract/integration baseline SHA, record that SHA in `evidence/v2/security/upstream-handoffs.json`, and audit later slices only through immutable refs rather than a synthetic merged base
+- [ ] T001 Validate the readiness attestation in `evidence/v2/security/slice-activation.md`, including the one valid complete program implementation-authority record enumerating exactly slices `010` through `110`, accepted dependencies, active `v2-security-owner`, the assigned participant and durable assignment source, zero CRITICAL/HIGH analysis findings, and the isolated worktree; confirm that the record attests prerequisites and grants no authority
+- [ ] T002 Validate the exact accepted commits/package refs, canonical `I-010A`–`I-050A` versions, evidence manifests, commands/results, provenance, and limitations from slices `010` through `090` in `evidence/v2/security/upstream-handoffs.json`
+- [ ] T003 Verify `.worktrees/v2-security-provenance/` on branch `v2/security-provenance` is isolated and non-releaseable, consumes every exact accepted `010`–`090` commit only through immutable refs recorded in `evidence/v2/security/upstream-handoffs.json`, and creates no program integration or cutover artifact
 
-**Checkpoint**: Stop if authorization is absent or any handoff is incomplete,
-stale, or incompatible with the canonical registry.
+**Checkpoint**: Stop if activation evidence is absent or invalid, or if any
+handoff is incomplete, stale, or incompatible with the canonical registry.
 
 ---
 
@@ -107,14 +157,16 @@ or unresolved CRITICAL/HIGH findings.
 - [ ] T031 Assemble the V2 security assurance report with audited commit set, canonical interfaces, trusted-bypass and immutable-stage results, commands/results, threat dispositions, mitigation handbacks/re-audits, evidence, provenance, accepted risk, limitations, and manifest coverage in `evidence/v2/security/README.md`
 - [ ] T032 Assemble the machine-readable readiness packet referencing those ordinary records and the evidence manifest in `evidence/v2/security/handoff.json`
 - [ ] T033 Run `python3 scripts/check_governance.py`, `python3 -m unittest`, and documented security assurance/eval commands and record exact results in `evidence/v2/security/final-verification.txt`
-- [ ] T034 Re-run cross-artifact analysis and complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each exact security `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record zero CRITICAL/HIGH findings plus all documentation dispositions, paths, results, and reviewer in `evidence/v2/security/README.md`
-- [ ] T035 Hand the exact audited commit/ref set, reusable assurance commands, evidence manifest, V2 security readiness packet, and accepted documentation dispositions to `v2-integrator`, recording acceptance or rejection in `evidence/v2/security/integrator-handoff.md`; handoff is blocked until documentation freshness passes
+- [ ] T034 Re-run cross-artifact analysis and prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each exact security `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record zero CRITICAL/HIGH findings plus all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/security/README.md` for the later workflow gate
+- [ ] T035 Prepare the proposed packet input with the exact audited commit/ref set, reusable assurance commands, evidence manifest, V2 security readiness packet, and documentation dispositions in `evidence/v2/security/integrator-handoff.md`; do not record recipient acceptance or rejection in this owner task—the later convergence, documentation-freshness, handoff, and recipient-decision gates own those transitions
 
 ---
 
 ## Dependencies & Execution Order
 
-- T001-T003 require explicit Goal 2 authorization and accepted `010`–`090`.
+- T001-T003 begin only after valid activation evidence establishes `READY`, the
+  assigned participant declares `ACTIVE`, and `010`–`090` handoffs are
+  accepted.
 - T004-T007 block all assurance stories.
 - US1 and US2 assurance tests may proceed in parallel against the same pinned
   commit set; owner repairs are explicit handbacks and re-audits.
@@ -135,9 +187,12 @@ or unresolved CRITICAL/HIGH findings.
 
 ## Implementation Strategy
 
-1. Stop at T001 until Zoe authorizes Goal 2.
-2. Branch from the single accepted slice-`010` baseline and freeze every later
-   upstream commit/package as an immutable audited reference without merging it.
+1. Stop before T001 until valid activation evidence establishes `READY`, every
+   declared prerequisite is accepted, and the assigned participant then
+   declares `ACTIVE`.
+2. Consume and freeze every exact accepted `010`–`090` commit/package as an
+   immutable audited reference in the isolated, non-releaseable slice worktree;
+   create no program integration or cutover artifact.
 3. Author assurance tests/eval tooling and threat documentation only.
 4. Return every failed mitigation to its named implementation owner.
 5. Re-audit repaired commits; never implement the repair in slice `100`.
@@ -147,7 +202,8 @@ or unresolved CRITICAL/HIGH findings.
 
 ## Notes
 
-- Every task is future Goal 2 work; this file grants no implementation authority.
+- Every checkbox is authorized slice implementation; this planning file and its
+  activation record grant no program implementation authority.
 - `[P]` means distinct files and no dependency on an incomplete task.
 - Product source, canonical schemas, and surface wiring are explicitly outside
   this lane.

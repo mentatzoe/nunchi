@@ -1,20 +1,69 @@
 ---
-description: "Future Goal 2 task plan for V2 standalone channel adapters"
+description: "Slice delivery task plan for V2 standalone channel adapters (dormant until authorized)"
 ---
 
 # Tasks: V2 Standalone Channel Adapters
 
-**Execution status**: DORMANT. These tasks describe future Goal 2 work and MUST
-NOT be executed under the current Goal 1.
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/090-v2-channel-adapters`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
 **Input**: `specs/090-v2-channel-adapters/spec.md` and `plan.md`
 
-**Prerequisites**: explicit Goal 2 authorization; accepted `010`–`040` handoffs;
-zero CRITICAL/HIGH analysis findings; isolated owner worktree
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted `010`–`040` handoffs; `v2-adapters-owner` active; assigned
+participant and durable external assignment source declared above; zero
+CRITICAL/HIGH analysis findings; and an isolated owner worktree
+
+**Activation evidence**: `evidence/v2/adapters/slice-activation.md`, written only
+after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/adapters/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/adapters/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/adapters/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-adapters-owner`
 
 **Integration handoff**: `v2-security-owner`, then `v2-integrator`
+
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox. This planning baseline creates no product behavior
+or implementation authority.
 
 ## Phase 1: Matched conformance setup
 
@@ -68,30 +117,31 @@ counts, facts, routes, outcomes, and receipts on every adapter.
 probes, and report per-surface capabilities/restart truth.
 
 - [ ] T016 [US3] Add failing installed-entrypoint, V1-residue, configuration, and schema-2 probe tests in `tests/v2/test_channel_adapters.py`
-- [ ] T017 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate the V2 adapter `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/adapters/handoff.md`
+- [ ] T017 [US3] Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate the V2 adapter `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/adapters/handoff.md` for the later workflow gate
 - [ ] T018 [US3] Record matched generic/Discord/Matrix/Telegram AD-01 through AD-06 and AD-08 results, including mandatory S06/S07/S10 bypass and immutable-stage cases, each with stable `scene_id`, request ID, stage owner, trusted provenance, `classifier_not_invoked` where applicable, and applicable S IDs, in `evidence/v2/adapters/scene-results.jsonl`
 - [ ] T019 [US3] Record exact installed package, entrypoints, config/process, restart/residue, and AD-07 V2 probes in `evidence/v2/adapters/installed-runtime.md`
 - [ ] T020 [US3] Run AD-09 across installed adapter entrypoints with harness-independent participant-host probes shaped like all six pinned S14 stages, including multi-human Discord and multi-human Telegram facts, and commit compatibility evidence in `evidence/v2/adapters/mixed-room.jsonl` without depending on downstream live-harness work
 
 **Checkpoint**: AD-07 proves all in-tree adapter entrypoints use one V2 lifecycle.
 
-## Phase 5: Equivalence and handoff
+## Phase 5: Equivalence and Packet Inputs
 
 - [ ] T021 Commit the per-surface fact/action/history/restart/continuation capability matrix in `evidence/v2/adapters/capability-matrix.md`
 - [ ] T022 Map AD-01 through AD-09 and applicable S IDs to exact records, commands, candidate commit, request ID, stage owner, classifier-call count, and result in `evidence/v2/adapters/manifest.json`
 - [ ] T023 Commit S01–S16 applicability and outcome index, including trusted-bypass zero-classifier-call/no-fabricated-result proof, immutable-stage ownership, post-hoc meta-answer grades, and confirmation that no runtime prose filter ran, in `evidence/v2/adapters/verification.md`
-- [ ] T024 Hand off commit, interface versions, commands/results, manifest, evidence, capability differences, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/adapters/handoff.md` only after documentation freshness passes
+- [ ] T024 Prepare the proposed packet input with commit, interface versions, commands/results, manifest, evidence, capability differences, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/adapters/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
-- T001–T003 require accepted `010`–`040` handoffs.
+- T001–T003 require activation evidence to establish `READY`, the assigned
+  participant to declare `ACTIVE`, and accepted `010`–`040` handoffs.
 - Shared model-free comparison establishes US1 before lifecycle migration in US2.
 - Generic, Discord, Matrix, and Telegram module changes may proceed in parallel
   only under the same owner lane after shared utilities freeze.
 - US3 waits for all four deterministic lifecycle paths.
-- Live/bounded evidence and T024 handoff identify the exact candidate submitted
+- Live/bounded evidence and the proposed T024 packet input identify the exact candidate later submitted
   to slice `100`; assurance consumes rather than precedes that local handoff.
-- Slice `110` consumes the committed T024 handoff only after slice `100` accepts
+- Slice `110` consumes the terminally accepted slice candidate only after slice `100` accepts
   the candidate.
 
 ## Parallel Opportunities
@@ -106,4 +156,5 @@ probes, and report per-surface capabilities/restart truth.
 
 Prove native-fact equivalence first, route one shared lifecycle second, and prove
 installed entrypoints third. Missing platform capability remains explicit; it is
-never “fixed” by inventing facts. This task list does not authorize execution.
+never “fixed” by inventing facts. The activation record attests readiness; it
+does not grant program implementation authority.

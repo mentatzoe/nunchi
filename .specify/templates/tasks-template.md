@@ -1,17 +1,55 @@
 ---
 
-description: "Task list template for feature implementation"
+description: "Task list template for one existing Nunchi slice"
 ---
 
-# Tasks: [FEATURE NAME]
+# Tasks: [EXISTING SLICE NAME]
 
-**Input**: Design documents from `/specs/[###-feature-name]/`
+**Input**: Existing slice design documents from `specs/[exact-slice]/`
 
 **Prerequisites**: plan.md and spec.md (required), research.md when present,
 zero CRITICAL/HIGH analysis findings, satisfied upstream slice dependencies,
-and explicit Goal 2 authorization before any product task begins
+one valid `evidence/governance/v2-implementation-authorization.md` enumerating
+exactly slices `010` through `110`, an assigned participant, and accepted
+slice-activation evidence before any product task begins
 
 **Accountable owner lane**: [exactly one lane]
+
+**Assigned participant / source**: [UNASSIGNED — awaiting durable external assignment source | participant — evidence/governance/assignments/<record>.md]
+
+The non-symlink assignment record contains exactly one `Assignee`, `Lane`,
+`Assigned by`, ISO `Assigned on`, and durable `Authority reference`; a non-Zoe
+assigner also requires `Delegated by: Zoe` and a durable `Delegation
+reference`. It may
+precede authority but never grants authority or activates the slice. Do not
+wait for unrelated slices to be assigned and do not create an assignment
+registry.
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/[exact-slice]`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: [PLANNED initially; update through the canonical lifecycle]
+
+**Program implementation authority**: [NOT_GRANTED | GRANTED with `evidence/governance/v2-implementation-authorization.md`]
+
+**Activation evidence**: [evidence/v2/[slice]/slice-activation.md; written after all prerequisites are accepted to establish READY, before ACTIVE or any checked implementation task]
+
+**Task manifest**: Run `python3 scripts/check_governance.py --task-manifest specs/[exact-slice]` and copy its exact `Initial task IDs` / `Initial tasks SHA256` into activation, then its `Completed task IDs` / `Tasks SHA256` into each candidate attempt.
+
+**Candidate evidence**: [evidence/v2/[slice]/slice-candidate.md; required before CONVERGED]
+
+**Handoff evidence**: [evidence/v2/[slice]/slice-handoff.md; required before HANDOFF_READY]
+
+**Acceptance evidence**: [evidence/v2/[slice]/slice-acceptance.md; required before ACCEPTED]
+
+Candidate and handoff files are append-only attempt streams. If convergence
+adds tasks, retain activation, remain `ACTIVE`, and start a new bound
+`run speckit`. A rejected completed handoff appends `REJECTED`, returns the
+slice to `ACTIVE`, and also requires a new bound run; never resume that completed
+run. A paused post-convergence gate may resume only for fixes that leave the
+task graph unchanged. Append later candidate/handoff attempts without rewriting
+history.
 
 **Integration handoff**: [dependent owner or final integrator]
 
@@ -56,7 +94,7 @@ optional polish.
 
   The /speckit-tasks command MUST replace these with actual tasks based on:
   - User stories from spec.md (with their priorities P1, P2, P3...)
-  - Feature requirements from plan.md
+  - Existing slice requirements from plan.md
   - Interface summaries and ordinary target paths from plan.md
 
   Tasks MUST be organized by user story so each story can be:
@@ -75,7 +113,7 @@ optional polish.
 - [ ] T001 Create project structure per implementation plan
 - [ ] T002 Initialize [language] project with [framework] dependencies
 - [ ] T003 [P] Configure linting and formatting tools
-- [ ] T004 Verify the externally granted Goal 2 authorization is validly recorded at `evidence/governance/v2-goal-2-authorization.md` and verify dependency readiness; the evidence record and task status document authorization but never grant it
+- [ ] T004 Record the already-ACTIVE slice's exact implementation starting manifest under its ordinary evidence path; the external authorization and activation records document prerequisites but never grant authority
 
 ---
 
@@ -228,7 +266,7 @@ Examples of foundational tasks (adjust based on your project):
 ## Parallel Example: User Story 1
 
 ```bash
-# Launch all tests for User Story 1 together (if tests requested):
+# Launch all required tests for User Story 1 together:
 Task: "Contract test for [endpoint] in tests/contract/test_[name].py"
 Task: "Integration test for [user journey] in tests/integration/test_[name].py"
 
@@ -241,21 +279,25 @@ Task: "Create [Entity2] model in src/models/[entity2].py"
 
 ## Implementation Strategy
 
-### MVP First (User Story 1 Only)
+### Slice Candidate First
 
 1. Complete Phase 1: Setup
 2. Complete Phase 2: Foundational (CRITICAL - blocks all stories)
 3. Complete Phase 3: User Story 1
 4. **STOP and VALIDATE**: Test User Story 1 independently
-5. Deploy/demo if ready
+5. Continue through the remaining planned stories; do not deploy or cut over
 
-### Incremental Delivery
+### Incremental Proof Within the Slice
 
-1. Complete Setup + Foundational → Foundation ready
-2. Add User Story 1 → Test independently → Deploy/Demo (MVP!)
-3. Add User Story 2 → Test independently → Deploy/Demo
-4. Add User Story 3 → Test independently → Deploy/Demo
-5. Each story adds value without breaking previous stories
+1. Complete Setup + Foundational → slice foundation ready
+2. Add User Story 1 → test independently → retain evidence
+3. Add User Story 2 → test independently → retain evidence
+4. Add User Story 3 → test independently → retain evidence
+5. Converge one complete slice candidate, then use the governed handoff path
+
+No story or intermediate slice state authorizes deployment, release, or
+cutover. Only slice `110` integrates the complete accepted V2 set, and V2 cuts
+over atomically after Zoe's decision.
 
 ### Parallel Team Strategy
 
@@ -263,10 +305,11 @@ With multiple developers:
 
 1. Team completes Setup + Foundational together
 2. Once Foundational is done:
-   - Developer A: User Story 1
-   - Developer B: User Story 2
-   - Developer C: User Story 3
-3. Stories complete and integrate independently
+   - Delegated task A: User Story 1
+   - Delegated task B: User Story 2
+   - Delegated task C: User Story 3
+3. One assigned slice participant remains accountable and converges all work;
+   stories do not integrate or deploy independently
 
 ---
 

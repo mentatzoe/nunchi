@@ -2,15 +2,64 @@
 
 **Input**: `specs/020-v2-observation/spec.md` and `specs/020-v2-observation/plan.md`
 
-**Prerequisites**: Accepted 010 handoff, zero CRITICAL/HIGH analysis findings,
-active `v2-observation-owner`, and explicit Goal 2 authorization
+**Slice state**: `PLANNED`
+
+**Execution status**: `DORMANT` while the slice remains `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/020-v2-observation`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Activation prerequisites**: the one valid complete
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`; accepted declared dependency `010-v2-contract`; an assigned
+participant and durable external assignment source declared above;
+active `v2-observation-owner`; zero CRITICAL/HIGH analysis findings; and an
+isolated owner worktree
+
+**Activation evidence**: `evidence/v2/observation/slice-activation.md`, written
+only after every activation prerequisite is accepted; it copies and attests the
+assignment declaration and all other prerequisite facts, establishing `READY`
+before `ACTIVE` or any implementation checkbox
+
+**Dependency evidence contract**: the activation record MUST preserve declared
+order in `Accepted dependencies`, record ordered `Dependency commits` as
+`slice=full-sha`, and record matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Candidate evidence**: `evidence/v2/observation/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/observation/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/observation/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
+
+**Rejection / rework**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 **Accountable owner lane**: `v2-observation-owner`
 
 **Integration handoff**: owners of slices `040` through `110` and `v2-integrator`
 
-**Goal boundary**: Every checkbox is future Goal 2 product work. No task may
-begin under Goal 1.
+**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
+before valid activation evidence attests the accepted prerequisites above and
+establishes `READY`. The assigned participant must then declare `ACTIVE` before
+beginning the first checkbox.
 
 **Tests**: Deterministic tests and replay scenes are required before each
 provider or continuity claim is accepted.
@@ -71,11 +120,11 @@ downstream evidence obligations.
 - [ ] T021 [US3] Record recoverability reference results in `evidence/v2/observation/s05-recoverability.jsonl`
 - [ ] T022 [US3] Record capability-neutral equivalence results in `evidence/v2/observation/s13-equivalence.jsonl`
 
-## Phase 5: Documentation and Handoff
+## Phase 5: Documentation and Packet Inputs
 
-- [ ] T023 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route every global and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/observation/handoff.md`
+- [ ] T023 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route every global and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/observation/handoff.md` for the later workflow gate
 - [ ] T024 Publish the scene-to-record manifest, reference capability rules, and explicit downstream suppression-eligibility proof boundary in `evidence/v2/observation/README.md`
-- [ ] T025 Record commit, commands, I-020A version, shared/reference modules, evidence, downstream comparator obligations, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/observation/handoff.md`; handoff is blocked until documentation freshness passes
+- [ ] T025 Prepare the proposed packet input with commit, commands, I-020A version, shared/reference modules, evidence, downstream comparator obligations, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/observation/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
@@ -86,7 +135,8 @@ downstream evidence obligations.
 - T017–T019 may proceed in parallel after US1/US2 shared seams stabilize.
 - T020 follows the red recoverability tests; T021/T022 require their respective
   suites; T025 requires all evidence and documentation.
-- Downstream slices may bind native surfaces only after accepting T025; each
+- Downstream slices may bind native surfaces only after separately accepting
+  and recording the lifecycle handoff packet derived from T025; each
   surface owner must rerun the comparator/recoverability contract, and 110 alone
   may make the final cross-surface claim.
 

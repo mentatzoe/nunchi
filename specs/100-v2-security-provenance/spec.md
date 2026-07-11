@@ -1,10 +1,25 @@
-# Feature Specification: V2 Security and Runtime Provenance
+# Existing Slice Specification: V2 Security and Runtime Provenance
 
 **Feature Branch**: `v2/security-provenance`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; not authorized for implementation
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/security/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/security/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/security/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/security/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: User description: "Close the V2 security, governed-suppression,
 operational-safety, credential, provenance, adversarial-evidence, and
@@ -17,21 +32,49 @@ contract-clarified by PR 68 at `c834e8c`
 
 **Accountable owner lane**: `v2-security-owner`
 
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010`, `020`, `030`, `040`, `050`, `060`, `070`, `080`, `090`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `110-v2-parity-cutover`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary *(mandatory)*
 
 - This directory contains planning artifacts only.
 - Product source, contracts, schemas, tests, fixtures, evaluations, evidence,
   runtime assets, and documentation MUST target ordinary repository paths.
-- Goal 2 has not been authorized. Every task in this slice is a future task and
-  MUST remain unexecuted until Zoe separately authorizes Goal 2 and all upstream
-  handoffs are accepted.
+- This planning baseline creates no product behavior. Authorized slice
+  implementation requires the one valid complete authorization record at
+  `evidence/governance/v2-implementation-authorization.md` enumerating exactly
+  slices `010` through `110`; accepted declared handoffs from slices `010`
+  through `090`; an active `v2-security-owner`; an assigned participant and durable external
+  assignment source declared above; zero CRITICAL/HIGH analysis findings; and
+  an isolated worktree. Only after those facts are accepted does activation
+  evidence attest them and establish `READY` before `ACTIVE`.
 - This slice MUST NOT implement V2 behavior, edit runtime code, create a
   machine-readable contract, execute a live probe, or accept residual risk
-  during Goal 1.
+  before valid slice activation.
 - This slice does not invent social rules, a governance-profile library, a
   participant registry, or deterministic conversational suppression.
 
@@ -261,7 +304,9 @@ explicit Zoe acceptance or blocks the handoff.
   risk acceptance, and MUST audit the security-relevant obligation in every
   shared scene S01-S16 without taking final parity ownership from slice `110`.
 - **FR-016**: The slice MUST preserve the SpecKit control-plane/product-artifact
-  boundary and MUST NOT execute any task before explicit Goal 2 authorization.
+  and program/slice lifecycle boundaries. Its planning baseline MUST create no
+  product behavior, and implementation MUST remain dormant until the slice is
+  validly activated.
 - **FR-017**: When an assurance control fails, the slice MUST return a precise
   mitigation request to the accountable owner of the failing artifact, wait for
   an explicit repaired-commit handoff, and re-audit; it MUST NOT implement the
@@ -377,7 +422,7 @@ explicit Zoe acceptance or blocks the handoff.
 
 ## Explicit Exclusions
 
-- Implementing any V2 product behavior during Goal 1.
+- Implementing any V2 product behavior before valid slice activation.
 - Defining social relevance rules, mention/reply heuristics, reply obligations,
   a governance-profile library, or a participant registry.
 - Reply composition, moderation, content safety, or tool-policy enforcement for

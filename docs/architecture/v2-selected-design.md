@@ -2,8 +2,11 @@
 
 > **Status:** these diagrams describe the selected V2 target from Aleph Vault
 > PR 67 (`bdd1ebb`), as clarified by PR 68 (`c834e8c`). The repository still
-> implements V1 until the separately authorized Goal 2 performs an atomic
-> cutover.
+> implements V1. At the dated 2026-07-11 reset baseline, the V2 program was
+> `READY`, implementation authority was `NOT_GRANTED`, and every slice was
+> `PLANNED` and dormant. Live state comes from the execution-spine declarations
+> and evidence. Only slice `110` may integrate; V2 becomes current only after
+> the accepted atomic merge is post-merge verified as `CUTOVER_VERIFIED`.
 
 The diagrams are explanatory views of the selected design. Canonical interface
 names and slice dependencies come from the V2 program; future machine-readable

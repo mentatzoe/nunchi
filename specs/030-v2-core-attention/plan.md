@@ -2,25 +2,64 @@
 
 **Branch**: `v2/core-attention` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/030-v2-core-attention/spec.md`
+**Input**: Existing slice specification from `specs/030-v2-core-attention/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-core-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/030-v2-core-attention`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/030-v2-core-attention`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/attention/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/attention/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/attention/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/attention/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010-v2-contract`
 
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
+
 ## Summary
 
-In future Goal 2, replace the V1 core and CLI on the slice branch with one
+During authorized slice implementation, replace the V1 core and CLI on the slice branch with one
 participant-shaped V2 attention engine. It validates I-010A, emits I-010B and
 immutable I-010E attention stages, governs suppression, preserves separately
 auditable classifier- and margin-DEFER valves, returns trusted preattention-
 disabled bypass without a model call, and keeps operational failure separate
 with wake as the shared default. The exact handoff feeds 040 and later surface
-slices; 110 alone owns atomic integration. No product work is performed now.
+slices; 110 alone owns atomic integration. This planning baseline creates no
+product behavior.
 
 ## Technical Context
 
@@ -60,7 +99,7 @@ policy, and one evidence-backed prompt/model configuration
 | Atomic parity contract | PASS | Core and CLI share I-030A with no V1 bridge; 110 owns final cutover. |
 | Evidence before claims | PASS | Mechanics, replay, multi-model, canary, and margin evidence targets are separate. |
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
-| Single owner and Goal gate | PASS | `v2-core-owner` owns I-030A; every product task waits for Goal 2. |
+| Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
 Post-design re-check: PASS. No `data-model.md`, local contract, quickstart,
 schema, test, corpus, evidence, or product documentation is created here.
@@ -150,7 +189,7 @@ specs/030-v2-core-attention/
 └── tasks.md
 ```
 
-### Ordinary repository targets for future Goal 2
+### Ordinary repository targets for authorized slice implementation
 
 ```text
 src/nunchi/
@@ -172,7 +211,7 @@ layer that could survive the atomic cutover.
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Attention engine | `src/nunchi/core.py`, `src/nunchi/classifiers.py` | US1, US2 |
 | CLI/validation/audit | `src/nunchi/cli.py`, `src/nunchi/models.py`, `src/nunchi/schema.py` | US2, US3 |

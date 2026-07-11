@@ -2,22 +2,60 @@
 
 **Branch**: `v2/security-provenance` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from
-`/specs/100-v2-security-provenance/spec.md`
+**Input**: Existing slice specification from
+`specs/100-v2-security-provenance/spec.md`
 
 **Program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/security/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/security/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/security/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/security/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Upstream dependencies**: `010`, `020`, `030`, `040`, `050`, `060`, `070`,
 `080`, `090`
 
+**Dependency acceptance mapping**: activation evidence MUST preserve the
+declared dependency order in `Accepted dependencies`, ordered
+`Dependency commits` entries as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
+**Rejection / rework contract**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
+
 ## Summary
 
-After every contract, core, and surface slice hands off, this future Goal 2
-blocking assurance slice audits the exact commits against governed suppression,
+Once validly activated after every contract, core, and surface slice hands off,
+this blocking assurance slice audits the exact commits against governed suppression,
 recoverability, send safety, credential, threat, adversarial, and installed-
 runtime provenance obligations. It authors assurance tests/eval tooling,
 evidence, the threat model, and audit handoffs. A failed control returns to the
@@ -25,7 +63,7 @@ named implementation owner; slice `100` re-audits the repaired commit and never
 implements the mitigation. It then hands one readiness packet to the final
 integrator.
 
-No action in this plan is authorized during Goal 1.
+This planning baseline authorizes no action and creates no product behavior.
 
 ## Technical Context
 
@@ -66,7 +104,8 @@ acceptance by an agent
 
 ## Constitution Check
 
-*GATE: Passes for planning; must be re-checked after design and before Goal 2.*
+*GATE: Passes in `PLANNED`; must be re-checked at slice activation and before
+the slice enters `ACTIVE`.*
 
 - **Selected V2 boundary**: PASS. This slice audits attention suppression and
   operational boundaries; it does not implement them, compose replies, or
@@ -87,7 +126,9 @@ acceptance by an agent
   product targets below are ordinary paths.
 - **Single owner**: PASS. `v2-security-owner` is solely accountable and hands
   off to `v2-integrator`.
-- **Goal boundary**: PASS. Goal 2 remains explicitly unauthorized.
+- **Program/slice lifecycle boundary**: PASS. The slice is `PLANNED`, program
+  implementation authority is `NOT_GRANTED`, and implementation tasks are
+  dormant.
 
 Post-design re-check: PASS. No prohibited SpecKit artifact is planned, all
 interfaces and evidence paths are concrete, and no unexplained constitution
@@ -136,19 +177,20 @@ this slice does not create aliases or bridges silently.
 
 ## Integration Strategy
 
-**Integration order**: Accept the exact slice-`010` contract/integration baseline,
-then exact handoffs from `020`–`050` and `060`–`090`; freeze their interface
-versions, commit refs, artifact hashes, and evidence manifests; author/run
+**Integration order**: Accept the exact upstream commits and handoffs from
+`010` through `090`; freeze their interface versions, commit refs, artifact
+hashes, and evidence manifests; author/run
 assurance tests and adversarial gates against those immutable refs; return each
 failed mitigation to the named owner; accept and re-audit repaired refs; obtain
 residual-risk acceptance; hand the audited ref set and one readiness packet to
 `110`. Slice `100` never assembles or semantically merges product branches.
 
-**Worktree/branch**: Future Goal 2 work uses an isolated worktree at
-`.worktrees/v2-security-provenance/` on branch `v2/security-provenance`, created
-from the exact accepted slice-`010` contract/integration baseline SHA recorded in
-the upstream manifest. Every other slice is consumed by immutable commit/package
-reference; a synthetic "commit-set base" is forbidden.
+**Worktree/branch**: Authorized slice implementation uses the isolated,
+non-releaseable worktree `.worktrees/v2-security-provenance/` on branch
+`v2/security-provenance`. It consumes every exact accepted upstream commit for
+`010` through `090` through immutable commit/package references recorded in
+activation evidence and the upstream manifest. It creates no program
+integration or cutover artifact; only slice `110` integrates.
 
 **Handoff to**: `v2-integrator` with the V2 security readiness handoff.
 
@@ -242,7 +284,7 @@ policy and high-level guarantees; detailed V2 analysis lives under
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning task/story |
+| Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Product implementation | None owned; failed controls return to the accountable `010`–`090` owner | All stories |
 | Machine-readable product contracts | None owned; consume slice-`010` contracts under `schemas/v2/` | All stories |

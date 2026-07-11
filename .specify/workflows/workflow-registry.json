@@ -2,20 +2,20 @@
   "schema_version": "1.0",
   "workflows": {
     "speckit": {
-      "name": "Nunchi Governed Slice Cycle",
-      "version": "2.1.0",
-      "description": "Full slice cycle with Goal 2 authorization and a blocking documentation-freshness gate",
+      "name": "Nunchi Existing-Slice Delivery Cycle",
+      "version": "2.5.0",
+      "description": "Initial delivery, active correction, or rejected-candidate rework for one existing authorized slice, ending in an owner handoff",
       "source": "project-customized",
       "installed_at": "2026-07-11T09:56:03.818565+00:00",
-      "updated_at": "2026-07-11T15:55:00+00:00"
+      "updated_at": "2026-07-11T19:30:00+00:00"
     },
     "nunchi-plan": {
-      "name": "Nunchi Planning-Only Slice Cycle",
-      "version": "1.1.0",
-      "description": "Specify through analysis with mandatory README/docs impact planning and no implementation step",
+      "name": "Nunchi Existing-Slice Planning Cycle",
+      "version": "1.4.0",
+      "description": "Review and plan one existing V2 slice through analysis, with no implementation step",
       "source": "project-customized",
       "installed_at": "2026-07-11T10:00:00+00:00",
-      "updated_at": "2026-07-11T15:55:00+00:00"
+      "updated_at": "2026-07-11T19:45:00+00:00"
     }
   }
 }

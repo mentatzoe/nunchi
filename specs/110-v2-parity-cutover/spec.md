@@ -1,10 +1,35 @@
-# Feature Specification: V2 Parity and Atomic Cutover
+# Existing Slice Specification: V2 Parity and Atomic Cutover
 
 **Feature Branch**: `integration/v2`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; not authorized for implementation
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/parity/slice-activation.md` (written only
+after every readiness prerequisite is accepted; it attests those facts and
+establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: append-only
+`evidence/v2/parity/slice-candidate.md` attempts (latest valid attempt supports
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: append-only `evidence/v2/parity/slice-handoff.md`
+`HANDOFF_READY` and `REJECTED` attempts (absent while `PLANNED`)
+
+**Acceptance evidence**: immutable
+`evidence/v2/parity/slice-acceptance.md` (for `ACCEPTED`; absent while
+`PLANNED`)
+
+**Rework execution**: Candidate and handoff files are append-only attempt
+streams. If convergence adds tasks, this slice stays `ACTIVE`, retains its
+immutable activation, and starts a new bound `run speckit`. If the completed
+handoff is rejected, the recorder appends `REJECTED`, returns the slice to
+`ACTIVE`, and the owner starts a new bound run—never resume the completed run.
+A paused post-convergence gate may resume only for fixes that leave the task
+graph unchanged; all later attempts append without rewriting history.
 
 **Input**: User description: "Integrate every accepted V2 slice atomically,
 prove installed-runtime and behavioral parity across adapters and harnesses,
@@ -18,7 +43,27 @@ contract-clarified by PR 68 at `c834e8c`
 
 **Accountable owner lane**: `v2-integrator`
 
+**Assigned participant / source**: `UNASSIGNED` — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/110-v2-parity-cutover`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010`, `020`, `030`, `040`, `050`, `060`, `070`, `080`, `090`, `100`
+
+**Dependency commits**: activation MUST record the ordered mapping
+`010=<full-sha>, 020=<full-sha>, 030=<full-sha>, 040=<full-sha>,
+050=<full-sha>, 060=<full-sha>, 070=<full-sha>, 080=<full-sha>,
+090=<full-sha>, 100=<full-sha>` from the exact accepted slice candidates
+
+**Dependency acceptance references**: activation MUST record matching ordered
+consumer-owned files `010=evidence/v2/parity/dependency-010-acceptance.md`
+through `100=evidence/v2/parity/dependency-100-acceptance.md`; each file attests
+the consumer, upstream slice/commit, accepting participant/date, exact upstream
+`slice-acceptance.md`, and durable decision
 
 **Feeds**: Final sink for the umbrella V2 program and input to a separate
 release decision; no downstream implementation slice
@@ -28,12 +73,18 @@ release decision; no downstream implementation slice
 - This directory contains planning artifacts only.
 - Product source, contracts, schemas, tests, fixtures, evaluations, evidence,
   runtime assets, and documentation MUST target ordinary repository paths.
-- Goal 2 has not been authorized. Every task in this slice is future work and
-  MUST remain unexecuted until Zoe separately authorizes Goal 2 and every
-  dependency handoff has been accepted.
+- This planning baseline creates no product behavior. Authorized slice
+  implementation requires the one valid complete authorization record at
+  `evidence/governance/v2-implementation-authorization.md` enumerating exactly
+  slices `010` through `110`; slices `010` through `100` all in `ACCEPTED` with the
+  ordered commit/reference mappings above; an
+  active `v2-integrator`; an assigned participant and durable external
+  assignment source declared above; zero CRITICAL/HIGH analysis findings; and
+  an isolated worktree. Only after those facts are accepted does activation
+  evidence attest them and establish `READY` before `ACTIVE`.
 - This slice MUST NOT merge V2 code, change runtime behavior, run live room
   scenes, select or publish a release, or rewrite product documentation during
-  Goal 1.
+  planning or before valid slice activation.
 - The final integrator assembles and adjudicates the selected design; it MUST
   NOT silently redesign an upstream interface, accept security risk for Zoe, or
   add a V1 bridge to make integration easier.
@@ -60,9 +111,12 @@ release decision; no downstream implementation slice
     IDs and one authoritative evidence manifest;
   - a V2 release-readiness boundary containing truthful version, upgrade,
     documentation, evidence, and limitation state for a separate decision; and
-  - after explicit project-owner repository-cutover acceptance, one atomic main
-    merge record with PR URL, merge SHA, and post-merge verification distinct
-    from release or promotion.
+  - append-only slice candidate and handoff attempt streams for Zoe's separate
+    repository-cutover decision; and
+  - inputs to the umbrella program tail, which consumes the assigned
+    integrator's slice-level copy and the assigned program owner's cutover-level
+    copy of Zoe's exact-candidate decision and has the integrator record the atomic
+    main merge and post-merge verification distinctly from release or promotion.
 - **Integration handoff**: Each upstream owner hands its exact reviewed commit,
   commands/results, interface versions, evidence, provenance, and limitations
   to `v2-integrator`. The integrator returns semantic conflicts to the owning
@@ -270,17 +324,32 @@ release claim against the exact integrated candidate.
   evidence index, and release-readiness boundary without defining a new product
   interface or creating a downstream dependency back into slices `010`–`100`.
 - **FR-020**: The slice MUST preserve the SpecKit control-plane/product-artifact
-  boundary and MUST NOT execute any task before explicit Goal 2 authorization.
+  and program/slice lifecycle boundaries. Its planning baseline MUST create no
+  product behavior, and implementation MUST remain dormant until the slice is
+  validly activated.
 - **FR-021**: After assembly, the exact candidate MUST rerun slice `100`'s
   deterministic assurance suite and immutable-ref checks. Any semantic divergence
   from the audited set MUST return to the owning slice and trigger affected
   stochastic/live re-audit before parity continues.
-- **FR-022**: After all gates pass, explicit Zoe repository-cutover acceptance
-  MUST precede one atomic PR/merge to main. The merged main SHA MUST pass
-  post-merge governance, baseline, atomicity, parity, provenance, and docs-truth
-  verification. The merge SHA and results MAY land in one evidence-only follow-up
-  commit/PR that changes no product/runtime behavior; package release and
-  promotion remain separate decisions.
+- **FR-022**: After all slice gates pass, the assigned `v2-integrator` MUST
+  append the exact candidate and handoff attempts and stop slice implementation at
+  `HANDOFF_READY`. The umbrella program tail MUST require Zoe's durable
+  exact-candidate acceptance, copied into slice evidence by the assigned
+  `v2-integrator` and, on acceptance, into program cutover evidence only by
+  `v2-program-owner`, before one atomic PR/merge to main. The merged candidate
+  docs MUST remain truthful that V2 is `CUTOVER_ACCEPTED` with verification and
+  final current-state wording pending; they MUST NOT claim verified-current
+  behavior. The merged main
+  SHA MUST pass post-merge governance, baseline, atomicity, parity, provenance,
+  and docs-truth verification. The merge SHA, results, and final current-state
+  documentation validation MUST land together in one docs/evidence-only
+  follow-up commit/PR that changes no product source, schema, runtime, or
+  behavior; only that complete follow-up establishes `CUTOVER_VERIFIED`.
+  Package release and promotion remain separate decisions. If Zoe rejects the
+  packet, the integrator MUST append her `REJECTED` decision to the handoff stream, the slice
+  MUST return to `ACTIVE`, and the owner MUST start a new bound run rather than
+  resume the completed delivery run. All later attempts MUST append without
+  rewriting prior history.
 - **FR-023**: Trusted `status: bypass` with cause `preattention-disabled` MUST
   make zero classifier calls on every applicable surface and MUST invoke one
   normal participant turn with advice-free source `PREATTENTION_BYPASS`. Parity
@@ -416,15 +485,22 @@ release claim against the exact integrated candidate.
   `integrations/claude-code/transport-patch/README.md`, and
   `integrations/codex/README.md`. Validate links, Mermaid, examples, commands,
   install/version claims, evidence references, and truthfulness tests.
-- **Handoff evidence**: `evidence/v2/parity/final-handoff.md` and
-  `evidence/v2/parity/main-cutover.md` record reviewed paths, validation,
-  reviewer acceptance, candidate SHA, and main merge SHA.
+- **Handoff evidence**: `evidence/v2/parity/slice-candidate.md` and
+  `evidence/v2/parity/slice-handoff.md` record the exact reviewed candidate,
+  paths, validation, and reviewer before slice implementation stops at
+  `HANDOFF_READY`. The assigned integrator copies Zoe's acceptance into
+  `evidence/v2/parity/slice-acceptance.md`; the assigned program owner copies it
+  into `evidence/v2/parity/cutover-acceptance.md`. The umbrella program tail records
+  the accepted and merged candidate commits, `refs/heads/main`, exact main SHA,
+  passing verification, evidence paths, documentation freshness, and final
+  documentation commit in `evidence/v2/parity/post-merge-verification.md`.
 - Because this slice changes global current behavior, `NO_IMPACT` and `HANDOFF`
   are invalid for the rows above.
 
 ## Explicit Exclusions
 
-- Implementing or integrating any V2 product behavior during Goal 1.
+- Implementing or integrating any V2 product behavior before valid slice
+  activation.
 - Adding new product behavior, social policy, deterministic conversation
   heuristics, a registry/ledger, or a V1 compatibility bridge in the integrator
   slice.

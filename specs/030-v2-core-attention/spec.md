@@ -1,10 +1,25 @@
-# Feature Specification: V2 Core Attention
+# Existing Slice Specification: V2 Core Attention
 
 **Feature Branch**: `v2/core-attention`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; no V2 implementation is authorized or present
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/attention/slice-activation.md` (written
+only after every readiness prerequisite is accepted; it attests those facts
+and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/attention/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/attention/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/attention/slice-acceptance.md` (for
+`ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Replace the V1 move classifier with one participant-shaped pre-attention judgment, governed suppression, dual DEFER valves, separate operational error, and contract-equivalent callable core and CLI.
 
@@ -14,20 +29,45 @@
 
 **Accountable owner lane**: `v2-core-owner`
 
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/030-v2-core-attention`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/030-v2-core-attention`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `040`, `060`, `070`, `080`, `090`, `100`, `110`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
 - This directory contains planning artifacts only.
-- Future Goal 2 core and CLI work targets `src/nunchi/`; deterministic tests
+- Authorized slice implementation targets `src/nunchi/`; deterministic tests
   target `tests/v2/attention/`, replay assets `evals/v2/attention/`, evidence
   `evidence/v2/attention/`, and product documentation `docs/attention/`.
-- Goal 1 creates no schema, prompt, classifier, provider call, CLI behavior,
-  test, replay corpus, evidence, or product documentation.
+- This planning baseline creates no schema, prompt, classifier, provider call,
+  CLI behavior, test, replay corpus, evidence, product documentation, or V2
+  runtime behavior.
 - The current V1 implementation and its `PASS / ACK / ASK / SPEAK` contract
-  remain implementation truth until Goal 2's final atomic integration.
+  remain implementation truth until slice `110` performs final atomic
+  integration.
 
 ## Interface Summary
 
@@ -317,7 +357,7 @@ with their own immutable I-010E attention-stage records.
 
 ## Explicit Exclusions
 
-- No V2 product behavior is implemented under Goal 1.
+- No V2 product behavior is implemented by this planning baseline.
 - No native event collection, observation buffer, continuation provider,
   participant invocation, harness/adapter binding, send path, or final cutover.
 - No margin retirement, release/version decision, promotion, or claim that unit

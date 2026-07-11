@@ -1,9 +1,9 @@
 # Requirements Quality Checklist: V2 Standalone Channel Adapters
 
 **Purpose**: Validate native-fact equivalence, common lifecycle, capability,
-entrypoint, and evidence requirements before future implementation
+entrypoint, and evidence requirements before authorized slice implementation
 **Created**: 2026-07-11
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Requirement Completeness
 
@@ -35,12 +35,14 @@ entrypoint, and evidence requirements before future implementation
 
 - [x] CHK015 Are dependencies `010`–`040` and consumers `100`/`110` consistent across all artifacts? [Dependency]
 - [x] CHK016 Does one adapter owner control shared adapter files while foundation, Discord-MCP, and final parity files remain with their owners? [Ownership, Plan §Integration Strategy]
-- [x] CHK017 Are every future implementation, test, fixture, eval, evidence, and docs target in ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
-- [x] CHK018 Is Goal 2 authorization an explicit external prerequisite rather than a planning status? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK017 Are every implementation, test, fixture, eval, evidence, and docs target in ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
+- [x] CHK018 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/090-v2-channel-adapters`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010`–`040` handoffs, active `v2-adapters-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/adapters/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain dormant in `PLANNED`? [Boundary, Control-Plane Boundary; tasks.md]
 - [x] CHK019 Does AD-09 have a harness-independent producing task shaped like the six pinned live stages without adding a reverse dependency on downstream harnesses? [Coverage, Plan §AD-09; tasks.md]
 - [x] CHK020 Does one manifest resolve AD-01 through AD-09 and common S IDs to exact evidence through stable `scene_id` values? [Traceability, Spec §FR-015; Plan §Acceptance Scenes]
 - [x] CHK021 Does AD-05 prove trusted `PREATTENTION_BYPASS` makes zero classifier calls, invokes one advice-free act-or-silence turn, fabricates no social/silent-delivery result, and preserves immutable singly owned request-correlated receipt stages? [Contract, Spec §FR-008, FR-009, FR-017]
 - [x] CHK022 Does documentation freshness inventory every exact known path, require the V2 adapter guide to `UPDATE`, route shared/current/supersession `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+
+- [x] CHK023 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

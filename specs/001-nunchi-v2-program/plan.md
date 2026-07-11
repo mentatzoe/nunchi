@@ -9,9 +9,20 @@ and the requirements in this program specification.
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+**Reset observation date**: 2026-07-11; the values below record the reset
+baseline and are superseded by the umbrella/bound-slice declarations, immutable
+activation/acceptance evidence, and append-only candidate/handoff attempts
 
-**Upstream dependencies**: Aleph Vault `c834e8c`; Constitution 2.1.0; the
+**Program state**: `READY`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Assigned program participant / source (declaration)**: `UNASSIGNED` — reset
+2026-07-11; updated only from a durable external assignment source
+
+**Implementation authorization**: `evidence/governance/v2-implementation-authorization.md`
+
+**Upstream dependencies**: Aleph Vault `c834e8c`; Constitution 2.3.0; the
 ordinary-path V1 inventory and evidence baseline
 
 ## Summary
@@ -36,8 +47,9 @@ social reclassification.
 **Language/Version**: Python `>=3.11`, matching `pyproject.toml`
 
 **Primary Dependencies**: zero required runtime dependencies for the shared
-core; existing optional surface dependencies remain surface-owned. Goal 2 may
-change an optional dependency only through its owning slice and the integrator.
+core; existing optional surface dependencies remain surface-owned. Authorized
+slice implementation may change an optional dependency only through its owning
+slice and the integrator.
 
 **Storage**: bounded in-memory or native-history-backed observation continuity;
 no participant registry, social ledger, or obligation store
@@ -64,8 +76,8 @@ sixteen common acceptance scenes, and one final integration sink
 
 ## Constitution Check
 
-*GATE: passed for Goal 1 planning; MUST be re-checked before Goal 2 and at every
-slice handoff.*
+*GATE: passed for planning acceptance; MUST be re-checked at slice activation
+and every handoff.*
 
 | Principle | Program proof | State |
 |---|---|---|
@@ -113,7 +125,7 @@ The drawing is explanatory; the table below is normative.
 | `080-v2-codex` | `v2-codex-owner` | `010`, `020`, `030`, `040`, `050` | `100`, `110` |
 | `090-v2-channel-adapters` | `v2-adapters-owner` | `010`, `020`, `030`, `040` | `100`, `110` |
 | `100-v2-security-provenance` | `v2-security-owner` | `010`–`090` | `110` |
-| `110-v2-parity-cutover` | `v2-integrator` | `010`–`100` | final Goal 2 acceptance |
+| `110-v2-parity-cutover` | `v2-integrator` | `010`–`100` | final cutover acceptance and verification |
 
 `020` and `030` may run in parallel after `010`. `040` and `050` may overlap
 only after their listed dependencies. The four surface lanes in Wave 3 may run
@@ -123,7 +135,8 @@ not silently co-own their implementations. `110` is the only final sink.
 ## Interface Registry
 
 Interface names and versions below are canonical planning identities. Slice
-`010` creates their machine-readable forms under `schemas/v2/` during Goal 2.
+`010` creates their machine-readable forms under `schemas/v2/` during
+authorized implementation.
 No control-plane file is a product contract.
 
 | ID | Interface | Owning slice | Named consumers / purpose | Planned ordinary home |
@@ -152,13 +165,19 @@ handoffs; security/provenance audits exact candidate commits; `v2-integrator`
 assembles all accepted commits, runs parity, replaces truthful docs, and performs
 one atomic V2 cutover.
 
-**Worktree/branch**: each Goal 2 lane uses `.worktrees/v2-<slice>/` and branch
+**Worktree/branch**: each active slice lane uses `.worktrees/v2-<slice>/` and branch
 `v2/<slice>`. Shared assembly uses `.worktrees/v2-integration/` and
 `integration/v2`. Main remains V1 until the final accepted cutover.
 
 **Handoff to**: foundation owners hand to every named dependent and
 `v2-integrator`; surface owners hand to `v2-security-owner` and
 `v2-integrator`; assurance hands its blocking report to `v2-integrator`.
+
+**Acceptance ownership**: `v2-integrator` is the slice-level acceptance owner
+for `010`–`100`; Zoe is the acceptance owner for `110`. Slice-level acceptance
+does not stand in for a named consumer's acceptance. Before a dependent becomes
+`READY`, its assigned owner records acceptance of every exact upstream commit,
+interface version, and packet that dependency supplies.
 
 **Conflict ownership**: `010` alone owns `schemas/v2/`; each implementation lane
 owns only the files named in its plan; `110` alone owns cross-surface fixtures,
@@ -169,6 +188,15 @@ its owner and handed back as a commit.
 **Atomicity**: lane branches may be green independently, but no surface is
 called migrated and no partial V2 state lands on main. The integration branch
 must contain all in-tree consumers on one contract before acceptance.
+
+**Rework**: A rejected handoff never erases an attempt. The designated recorder
+appends `REJECTED` for the exact candidate; the slice owner returns to `ACTIVE`
+and starts a new bound run because the prior run completed. Convergence-added
+tasks also keep the slice `ACTIVE` and require a new bound run with the original
+activation. Only paused post-convergence fixes with an unchanged task graph
+resume their run. Later candidate/handoff attempts append. Integration checks
+reject rewritten history, a resumed completed run, acceptance of a superseded
+attempt, or downstream activation citing an unaccepted retry.
 
 ## Common Acceptance Scenes and Evidence
 
@@ -251,7 +279,7 @@ docs/                          # truthful product/integration/security/evaluatio
 
 ## Ordinary Repository Targets
 
-| Artifact class | Goal 2 target path(s) | Owning slice(s) |
+| Artifact class | Implementation target path(s) | Owning slice(s) |
 |---|---|---|
 | Product implementation | `src/nunchi/`, `integrations/` | `020`–`090` |
 | Machine-readable contracts | `schemas/v2/` | `010` |
@@ -263,21 +291,74 @@ docs/                          # truthful product/integration/security/evaluatio
 ## Program Documentation Freshness
 
 Every implementing slice reviews `README.md` and its affected ordinary docs.
-Known files are named exactly; generic directory scope is invalid. Goal 2 task
-progress stays dormant until the separately granted objective is recorded at
-`evidence/governance/v2-goal-2-authorization.md`, which documents but cannot
-grant authorization.
+Known files are named exactly; generic directory scope is invalid. Slice task
+progress stays dormant until Zoe's external grant is recorded at
+`evidence/governance/v2-implementation-authorization.md` as one complete record
+enumerating exactly slices `010` through `110`; the record documents but cannot
+grant authority, and each bound slice still passes readiness independently.
 Slices `010`–`100` use `UPDATE` for owned component guides and an exact
 `HANDOFF` to `v2-integrator` for global current-state claim deltas. Slice `110`
 must use `UPDATE` for `README.md` and all affected cross-surface docs; because
 the atomic cutover changes current behavior, neither `NO_IMPACT` nor `HANDOFF`
-is valid for that final global wording.
+is valid for that final global wording. The accepted candidate and atomic merge
+remain truthful that exact-main verification and final current-state wording
+are pending. Exact-main checks and final docs validation land together in one
+docs/evidence-only follow-up; only then may the program become
+`CUTOVER_VERIFIED` or docs call V2 current.
 
 Each slice's ordinary handoff evidence records exact reviewed paths,
 dispositions, validation results, reviewer, and—where applicable—the precise
 delta and accepting owner. Planning checkboxes do not prove freshness. The full
 workflow's post-convergence documentation gate reviews the exact candidate
 before owner handoff.
+
+## Lifecycle Evidence Contract
+
+Within each slice's declared ordinary evidence directory, stable lifecycle files
+use exactly these names and mutation contracts:
+
+| Record | State established | Required subject |
+|---|---|---|
+| `slice-activation.md` | `READY` before the assigned participant declares `ACTIVE` | one immutable record of complete program authority, assigned participant/source, canonical accepted dependency IDs, ordered `slice=full-sha` Dependency commits, matching `slice=consumer-owned-evidence-file` Dependency acceptance references, analysis, worktree, starting commit, interfaces, scenes, evidence, docs scope, exact `Initial task IDs`, and normalized `Initial tasks SHA256`; all three dependency fields are `none` for `010` |
+| `slice-candidate.md` | `CONVERGED` | append-only stream whose latest candidate attempt names the exact commit, exact `Completed task IDs`, matching normalized `Tasks SHA256`, `Tasks complete: YES`, and agreement among implementation, tests/evaluations, evidence, limitations, task state, and docs disposition |
+| `slice-handoff.md` | `HANDOFF_READY`, or return to `ACTIVE` after rejection | append-only stream of exact candidate packets, named recipients, reviewer, reproduction commands, documentation-freshness result, and attributable `REJECTED` decisions |
+| `slice-acceptance.md` | `ACCEPTED` | one immutable record of the exact accepted commit/packet and named slice-level acceptance owner |
+
+The assigned participant for a slice writes that slice's declarations and
+immutable activation record, then appends candidate and handoff attempts after
+the corresponding workflow gates. The assigned `v2-integrator` is the
+designated recorder for every slice decision: on acceptance it writes immutable
+`slice-acceptance.md`, and on rejection it appends a `REJECTED` decision to
+`slice-handoff.md`, always with `Recorded by: v2-integrator`. For `010`–`100`
+the integrator is also the acceptance owner; for `110`, Zoe remains the decision
+owner and `Accepted by`/`Rejected by`. The source owner returns the slice
+declaration to `ACTIVE` after rejection. Repair in the required new bound run
+appends a new candidate and handoff attempt—no earlier entry is deleted or
+rewritten. Each dependent recipient
+separately writes its own upstream-acceptance file under the consumer evidence
+directory. That file includes the upstream ID in its name and attests consumer,
+upstream, matching commit, accepting participant/date, exact packet record, and
+durable decision. Slice `110` additionally requires every upstream slice to be
+`ACCEPTED`. The assigned
+`v2-program-owner` coordinates and verifies those records but writes only the
+umbrella declarations and program-state transitions. The sole cross-slice
+mechanical exception is synchronization of the complete externally granted
+program-authority fact; it assigns no participant and changes no slice state.
+
+The activation directories are `evidence/v2/contract/`,
+`evidence/v2/observation/`, `evidence/v2/attention/`,
+`evidence/v2/participant/`, `evidence/v2/discord-transport/`,
+`evidence/v2/hermes/`, `evidence/v2/claude-code/`, `evidence/v2/codex/`,
+`evidence/v2/adapters/`, `evidence/v2/security/`, and
+`evidence/v2/parity/`. The program tail adjacent to slice `110` requires the
+assigned integrator to copy Zoe's decision into slice acceptance/rejection
+evidence and, on acceptance, the assigned program owner to copy that decision
+only into `evidence/v2/parity/cutover-acceptance.md` with
+`Recorded by: v2-program-owner`. The assigned integrator records the exact
+merged-main verification and final docs validation in
+`evidence/v2/parity/post-merge-verification.md`. The records substantiate state
+declared in the umbrella and bound slice; collectively they are not a mutable
+registry.
 
 ## Owner Handoff Contract
 
@@ -295,8 +376,25 @@ Every slice owner hands off one packet containing:
 9. known limitations, residual risks, and any rejected claim.
 
 An incomplete packet is not accepted. Reviewers challenge the packet but do not
-silently take ownership. `v2-integrator` records acceptance or sends it back to
-the named owner lane.
+silently take ownership. For slices `010`–`100`, `v2-integrator` records
+slice-level acceptance or appends a `REJECTED` decision and sends the packet
+back to the named owner lane. Rejection returns the declaration to `ACTIVE` and
+requires a new bound delivery run; all later candidate/handoff attempts append
+to the existing streams. Every
+declared downstream recipient records its own acceptance separately, and the
+source slice's `ACCEPTED` state does not imply those recipient records exist.
+Each dependent's activation evidence uses ordered full-SHA and matching
+consumer-owned acceptance-reference mappings for all required upstream packets.
+For slice `110`, `v2-integrator` prepares the packet
+and moves it through `CONVERGED` and `HANDOFF_READY`; only Zoe may decide on the
+exact atomic candidate, and the assigned integrator records that decision and
+then moves the slice declaration to `ACCEPTED` or back to `ACTIVE`.
+
+The 2026-07-11 reset baseline in this plan is historical. Live program state,
+slice state, and assigned occupants derive from the umbrella and exact
+bound-slice declarations plus immutable ordinary-path activation/acceptance
+records and append-only candidate/handoff attempt streams. This plan contains
+no central mutable state or assignment registry.
 
 ## Complexity Tracking
 

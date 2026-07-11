@@ -1,9 +1,9 @@
 # Requirements Quality Checklist: V2 Hermes Harness
 
-**Purpose**: Validate identity, participant-turn, multi-profile, and evidence
-requirements before future Goal 2 execution
+**Purpose**: Validate identity, participant-turn, multi-profile, lifecycle, and
+evidence requirements before authorized slice implementation
 **Created**: 2026-07-11
-**Feature**: [spec.md](../spec.md)
+**Slice specification**: [spec.md](../spec.md)
 
 ## Requirement Completeness
 
@@ -35,9 +35,11 @@ requirements before future Goal 2 execution
 
 - [x] CHK015 Are dependencies `010`–`040` and consumers `100`/`110` consistent across spec, plan, and tasks? [Dependency]
 - [x] CHK016 Does `v2-hermes-owner` own only Hermes-specific paths while shared interface owners retain their files? [Ownership, Plan §Integration Strategy]
-- [x] CHK017 Are all future tests, evals, evidence, docs, and plugin code assigned to ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
-- [x] CHK018 Is Goal 2 authorization stated as an external gate rather than a task checkbox? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK017 Are all implementation tests, evals, evidence, docs, and plugin code assigned to ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
+- [x] CHK018 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/060-v2-hermes`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010`–`040` handoffs, active `v2-hermes-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/hermes/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox while tasks remain dormant in `PLANNED`? [Boundary, Control-Plane Boundary; tasks.md]
 - [x] CHK019 Does documentation freshness inventory every exact known path, require new/existing Hermes operator and patch docs to `UPDATE`, route shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+
+- [x] CHK020 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
 
 ## Notes
 

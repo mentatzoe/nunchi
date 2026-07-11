@@ -1,10 +1,25 @@
-# Feature Specification: V2 Discord Transport
+# Existing Slice Specification: V2 Discord Transport
 
 **Feature Branch**: `v2/discord-transport`
 
 **Created**: 2026-07-11
 
-**Status**: Planned for future Goal 2; implementation is not authorized under Goal 1
+**Slice state**: `PLANNED`
+
+**Program implementation authority**: `NOT_GRANTED`
+
+**Activation evidence**: `evidence/v2/discord-transport/slice-activation.md`
+(written only after every readiness prerequisite is accepted; it attests those
+facts and establishes `READY` before `ACTIVE`)
+
+**Candidate evidence**: `evidence/v2/discord-transport/slice-candidate.md` (for
+`CONVERGED`; absent while `PLANNED`)
+
+**Handoff evidence**: `evidence/v2/discord-transport/slice-handoff.md` (for
+`HANDOFF_READY`; absent while `PLANNED`)
+
+**Acceptance evidence**: `evidence/v2/discord-transport/slice-acceptance.md`
+(for `ACCEPTED`; absent while `PLANNED`)
 
 **Input**: Plan the shared Discord transport cutover without implementing V2 product behavior now.
 
@@ -14,9 +29,32 @@
 
 **Accountable owner lane**: `v2-transport-owner`
 
+**Assigned participant / source**: UNASSIGNED — may be replaced during
+planning, before implementation authority, only from a durable external
+assignment source; activation evidence later copies and attests it when
+establishing `READY`
+
+**SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/050-v2-discord-transport`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
 **Depends on**: `010-v2-contract`, `020-v2-observation`
 
+**Dependency commits / acceptance references**: at readiness,
+`slice-activation.md` MUST record `Accepted dependencies` in the declared order,
+ordered `Dependency commits` as `slice=full-sha`, and matching ordered
+`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+
 **Feeds**: `070-v2-claude-code`, `080-v2-codex`, `100-v2-security-provenance`, `110-v2-parity-cutover`
+
+**Rejection / rework evidence**: Candidate and handoff files are append-only attempt
+streams after first use.
+If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
+activation and start a new bound `run speckit` for this slice. If a completed
+handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
+a new bound run—never resume the completed run. Fixes requested by a paused
+post-convergence gate may resume that same run only when the task graph is
+unchanged. New candidate and handoff attempts append without rewriting history.
 
 ## Control-Plane Boundary
 
@@ -25,8 +63,9 @@
   `src/nunchi/mcp_discord/`; deterministic tests and fixtures target `tests/`;
   reusable replay material targets `evals/`; live records target `evidence/`;
   product documentation targets `docs/`.
-- No task in this slice may begin before explicit Goal 2 authorization and
-  accepted handoffs from slices `010` and `020`.
+- While the slice is `PLANNED`, every task remains `DORMANT`. Slice activation
+  requires accepted handoffs from slices `010` and `020` plus the lifecycle
+  prerequisites declared in `tasks.md`.
 - This slice does not implement pre-attention, participant invocation, a social
   classifier, a participant registry, or any handled/open conversation ledger.
 
@@ -186,7 +225,7 @@ off-surface receipts for exact installed-runtime provenance.
 - **FR-013**: The slice MUST expose unavailable Discord capabilities explicitly
   rather than synthesize facts.
 - **FR-014**: The slice MUST preserve the SpecKit control-plane boundary and the
-  future Goal 2 authorization gate.
+  program/slice lifecycle gate.
 - **FR-015**: The transport MUST preserve every immutable upstream I-010E stage
   unchanged, including an already-attested bypass attention stage, while
   remaining wake-source-agnostic. It MUST append only request-correlated
@@ -271,5 +310,5 @@ off-surface receipts for exact installed-runtime provenance.
 - A complete Discord member registry, presence model, handled/open ledger, or
   speaker queue.
 - Poll-only transport as a substitute for required reactive delivery.
-- Implementing, installing, restarting, or live-probing the transport during
-  Goal 1.
+- Implementing, installing, restarting, or live-probing the transport from this
+  planning baseline.
