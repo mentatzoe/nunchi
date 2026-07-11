@@ -1,83 +1,65 @@
-# Nunchi Agent Guidelines
+# Nunchi Claude Code Guidelines
 
-This repository builds Nunchi: a portable pre-reply admission gate for
-turn-aware agents.
+Follow `AGENTS.md` and `.specify/memory/constitution.md`. The condensed rules
+below are specific to Claude Code execution; they do not change the authority
+order or product design.
 
-## Source of truth
+## Grounding sequence
 
-Read these before substantive work:
+1. Read the selected Aleph Vault Nunchi technical design and decisions (PR 67
+   at `bdd1ebb`, contract-clarified by PR 68 at `c834e8c`).
+2. Read `.specify/memory/constitution.md`.
+3. Read `AGENTS.md` and this file.
+4. Read `specs/001-nunchi-v2-program/` and only the slice assigned to your owner
+   lane.
+5. Inspect ordinary-path implementation and evidence before making a current
+   product claim.
 
-1. `.specify/memory/constitution.md`
-2. this file
-3. the active SpecKit feature directory under `specs/`, when one exists
+Goal 1 is governance/planning only. Do not implement V2 until Zoe separately
+sets Goal 2 and the full workflow's authorization gate is approved.
 
-<!-- SPECKIT START -->
-For the active bounded feature, read `specs/002-admission-classifier/plan.md` for
-technologies, project structure, shell commands, and implementation constraints.
-<!-- SPECKIT END -->
+For V2 planning, preserve the explicit no-model preattention bypass, keep
+continuation authority out of classifier input, and treat observation,
+attention, participant-host, and transport receipts as immutable singly
+attested stages. These are lifecycle boundaries, not social state.
 
-## Product boundary
+## Runtime and tests
 
-Nunchi decides admission, not reply composition.
+- Python 3.11+, standard-library runtime core; do not add a runtime dependency
+  without an authorized slice and constitution check.
+- Tests use stdlib `unittest`: `python3 -m unittest`.
+- Governance check: `python3 scripts/check_governance.py --check-cli`.
+- Verdict corpus smoke: `python3 -m evals.verdict_suite.runner --list`.
+- Live classifier calls require `NUNCHI_CLASSIFIER_MODEL` and
+  `OPENROUTER_API_KEY` or `NUNCHI_CLASSIFIER_API_KEY`; offline tests inject
+  `NUNCHI_CLASSIFIER_TEST_RESULT` via `tests/provider_helpers.py`.
+- CLI smoke from source:
+  `PYTHONPATH=src python3 -m nunchi admit < tests/fixtures/speak.json`.
 
-The core verdicts are exactly:
+## SpecKit
 
-- `PASS`
-- `ACK`
-- `ASK`
-- `SPEAK`
+SpecKit CLI is pinned to `0.12.11`; Claude and Codex integrations are installed,
+with Codex as repository default. Claude uses `.claude/skills/speckit-*`.
 
-`PASS` is a hard stop: no ordinary user-visible room message may be emitted.
-Telemetry belongs outside the conversation surface.
+Use `nunchi-plan` through analysis for planning. The customized `speckit`
+workflow includes clarify, checklist, analysis, an explicit Goal 2 authorization
+gate, implementation, convergence, and integration handoff.
 
-Admission results must never carry reply prose: `message`, `reply`, `draft`,
-and `content` are forbidden result fields (`FORBIDDEN_REPLY_FIELDS` in
-`src/nunchi/models.py`).
+SpecKit-managed directories are disposable control plane. Never place product
+code, schemas/contracts, tests, fixtures, evals, evidence, runtime assets, or
+product docs in `.specify/`, `specs/`, or a SpecKit skill directory. The standard
+plan skill's `data-model.md`, `contracts/`, and `quickstart.md` outputs are
+constitutionally disabled for Nunchi; summarize those needs in `plan.md` and
+target ordinary repository paths.
 
-## Commands and environment
+## Ownership and handoff
 
-- Python 3.11+, zero runtime dependencies — stdlib only (HTTP via `urllib`).
-  Do not add third-party packages or pytest; tests use stdlib `unittest`.
-- Run tests: `python3 -m unittest`. CI (`.github/workflows/ci.yml`) runs this on
-  a Python 3.11/3.12/3.13 matrix plus a clean-install packaging job, all offline.
-- Run the CLI from the repo root (requires classifier env, below):
-  `PYTHONPATH=src python3 -m nunchi admit < tests/fixtures/speak.json`
-- Live classifier requires `NUNCHI_CLASSIFIER_MODEL` and `OPENROUTER_API_KEY`
-  (or `NUNCHI_CLASSIFIER_API_KEY`); optional `NUNCHI_CLASSIFIER_BASE_URL`
-  (defaults to OpenRouter).
-- Tests must stay offline and deterministic: inject classifier output via
-  `NUNCHI_CLASSIFIER_TEST_RESULT` using the helpers in
-  `tests/provider_helpers.py` (the payload needs `verdict`, `confidences`,
-  `context_checked`, and `reasons`). Every verdict (and false-positive cases)
-  has a fixture under `tests/fixtures/`.
+Work only in the assigned slice and an isolated worktree for non-trivial
+implementation. Do not change an upstream contract owned by another lane; file
+or hand back the needed change. Handoff must include the exact commit, commands
+and results, interface versions, ordinary evidence paths, runtime provenance,
+and known limitations.
 
-## SpecKit workflow
-
-Use the full production gate path unless the project owner explicitly authorizes a spike:
-
-```text
-/speckit-constitution -> /speckit-specify -> /speckit-clarify ->
-/speckit-plan -> /speckit-checklist -> /speckit-tasks ->
-/speckit-analyze -> /speckit-implement
-```
-
-Each bounded spec has one accountable owner end-to-end. Reviewers may challenge
-or red-team, but they do not silently co-own the same spec context.
-
-## Execution hygiene
-
-- Use isolated git worktrees under `.worktrees/<slug>` for non-trivial branch
-  work after the initial bootstrap.
-- Keep the main checkout on `main`.
-- Do not implement adapters before the core CLI contract is usable.
-- Do not treat schemas, fixtures, or docs as a completed product unless a
-  runnable CLI verdict path exists.
-- Pass explicit high-effort runtime flags when required:
-  - Codex: `-c model_reasoning_effort=xhigh`
-  - Claude Code: `--effort xhigh`
-
-## Definition of done
-
-A product claim is done only when it is verified by commands, tests, fixtures, or
-runnable examples committed in the repo. Documentation is product and must stay
-truthful about implemented vs planned capabilities.
+When high reasoning is required, pass `--effort xhigh`. A green unit suite does
+not establish social correctness; use the slice's replay and live acceptance
+scenes before making parity or readiness claims.

@@ -6,7 +6,7 @@ choose one, how to wire it into a channel adapter (using cc-connect / pilot-bot
 as the worked example), installation, and how to generalize to other surfaces.
 
 For the verdict semantics themselves see the project `README.md`; for the
-classifier-quality evidence see `specs/003-classifier-test-suite/evidence/`.
+classifier-quality evidence see `evidence/verdict-suite/`.
 
 ## Scope: what Nunchi decides (and what it does not)
 
@@ -34,8 +34,8 @@ file (this is how pilot-bot works). That judgment is invisible, untested, and
 varies per agent and per model. Nunchi turns the same decision into a single
 component with a fixed rubric, a **selected model**
 (`google/gemini-3.1-flash-lite`, chosen by live bake-off — see the evidence
-dir), a regression corpus (spec 003), and an auditable result (verdict +
-confidences + checked context + reasons).
+dir), the ordinary-path verdict-suite regression corpus, and an auditable result
+(verdict + confidences + checked context + reasons).
 
 ## The contract is transport-neutral
 
@@ -297,7 +297,7 @@ adversarial corpus, 6/7 load-bearing cases, ~1s latency). If you want an
 **open-weight** model with no big-3 dependency, `qwen/qwen3-235b-a22b-2507`
 matches that accuracy at roughly one-fifth the cost (with somewhat more latency
 variance). Either is a one-line `NUNCHI_CLASSIFIER_MODEL` change; see the
-per-model evidence under `specs/003-classifier-test-suite/evidence/`.
+per-model evidence under `evidence/verdict-suite/`.
 
 The full surface, and where each knob lives:
 

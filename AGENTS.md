@@ -1,65 +1,102 @@
 # Nunchi Agent Guidelines
 
-This repository builds Nunchi: a portable pre-reply admission gate for
-turn-aware agents.
+Nunchi is a portable pre-attention gate for turn-aware participants in shared
+conversation.
 
-## Source of truth
+## Authority order
 
-Read these before substantive work:
+Read these before substantive work, in this order:
 
-1. `.specify/memory/constitution.md`
-2. this file
-3. the active SpecKit feature directory under `specs/`, when one exists
+1. Zoe-selected Aleph Vault Nunchi decisions and technical design, selected in
+   PR 67 (`bdd1ebb`) and contract-clarified in PR 68 (`c834e8c`).
+2. `.specify/memory/constitution.md`.
+3. This file and `CLAUDE.md` for runtime-specific execution guidance.
+4. `specs/001-nunchi-v2-program/` and the one owned slice being worked.
+5. Ordinary-path source, schemas, tests, evals, evidence, and docs for what is
+   currently implemented and proven.
 
-<!-- SPECKIT START -->
-For the active bounded feature, read `specs/002-admission-classifier/plan.md` for
-technologies, project structure, shell commands, and implementation constraints.
-<!-- SPECKIT END -->
+Higher authority wins. SpecKit artifacts organize work; they do not redefine
+the selected design or current implementation truth.
 
-## Product boundary
+## Current goal boundary
 
-Nunchi decides admission, not reply composition.
+Goal 1 rebuilds governance and the execution spine. It may relocate existing
+assets and add governance tooling, but it MUST NOT implement V2 product
+behavior. Goal 2 is commissioned separately for implementation, atomic cutover,
+integration, and parity evidence.
 
-The core verdicts are exactly:
+The repository currently implements V1 (`PASS / ACK / ASK / SPEAK`). The
+selected, unimplemented V2 target uses `SUPPRESS / WAKE / DEFER` plus separate
+operational `ERROR`, followed by a normal participant act-or-silence turn.
+Never describe the target as current behavior.
 
-- `PASS`
-- `ACK`
-- `ASK`
-- `SPEAK`
+## SpecKit execution spine
 
-`PASS` is a hard stop: no ordinary user-visible room message may be emitted.
-Telemetry belongs outside the conversation surface.
+- Required CLI version: exactly `0.12.11`.
+- Installed integrations: Codex and Claude; Codex is the default.
+- Planning-only workflow: `specify workflow info nunchi-plan`.
+- Full slice workflow: `specify workflow info speckit`; its explicit Goal 2
+  authorization gate is mandatory before `implement`.
+- Each slice has one accountable owner lane. Reviewers do not silently co-own.
+- Use isolated worktrees for non-trivial slice implementation.
 
-## SpecKit workflow
+SpecKit-managed paths are control plane only:
 
-Use the full production gate path unless the project owner explicitly authorizes a spike:
+- `.specify/`
+- `specs/`
+- `.agents/skills/speckit-*`
+- `.claude/skills/speckit-*`
 
-```text
-/speckit-constitution -> /speckit-specify -> /speckit-clarify ->
-/speckit-plan -> /speckit-checklist -> /speckit-tasks ->
-/speckit-analyze -> /speckit-implement
+They may contain tool configuration, constitution, specs, plans, planning
+research, requirement-quality checklists, tasks, owners, dependencies, and
+workflow state. They may never contain product source, machine-readable
+contracts/schemas, executable tests, fixtures, eval runners/corpora, evidence,
+runtime assets, or product documentation.
+
+Product artifacts belong under `src/`, `schemas/`, `tests/`, `evals/`,
+`evidence/`, `integrations/`, `scripts/`, and `docs/`. Build, test, eval, docs,
+packaging, release, and runtime commands must not depend on managed paths.
+
+The standard SpecKit plan command normally proposes `data-model.md`,
+`contracts/`, and `quickstart.md` inside a feature directory. Nunchi's
+constitution forbids those outputs. Record interface and validation planning in
+`plan.md`; create actual schemas/contracts under `schemas/` and runnable guides
+under `docs/` only during an authorized implementation goal.
+
+## Product invariants
+
+- Only a participant-shaped model may make a social suppression judgment.
+- Deterministic code handles transport-proven non-events, never conversational
+  meaning.
+- Uncertainty wakes or defers.
+- Trusted preattention bypass wakes directly with no fabricated model result.
+- Exact self binding is separate from loose names and aliases.
+- Context is bounded, structured, coverage-honest, and optionally expandable.
+- Continuation authority is host-only; the classifier sees no opaque handle,
+  binding, cursor, expiry, or fetch secret.
+- Observation, attention, participant-host, and transport receipts are
+  immutable, request-correlated, and singly attested by their owner.
+- There is no social handled/open ledger, obligation queue, or inferred roster.
+- Preattention is judged once; no send-time social reclassification.
+- A woken participant contributes directly or sends nothing; no meta-answer.
+- V2 must cut over atomically across all in-tree consumers and prove parity.
+
+## Commands
+
+```sh
+python3 scripts/check_governance.py --check-cli
+python3 -m unittest
+python3 -m evals.verdict_suite.runner --list
 ```
 
-For Codex, invoke SpecKit skills through the installed `.agents/skills` skill
-surface. For Claude, use the installed `.claude/skills` skill surface.
-
-Each bounded spec has one accountable owner end-to-end. Reviewers may challenge
-or red-team, but they do not silently co-own the same spec context.
-
-## Execution hygiene
-
-- Use isolated git worktrees under `.worktrees/<slug>` for non-trivial branch
-  work after the initial bootstrap.
-- Keep the main checkout on `main`.
-- Do not implement adapters before the core CLI contract is usable.
-- Do not treat schemas, fixtures, or docs as a completed product unless a
-  runnable CLI verdict path exists.
-- Pass explicit high-effort runtime flags when required:
-  - Codex: `-c model_reasoning_effort=xhigh`
-  - Claude Code: `--effort xhigh`
+The test suite is stdlib `unittest`, offline, and deterministic unless a command
+explicitly performs a live provider evaluation. Current package/runtime details
+remain in `CLAUDE.md`, `README.md`, and `docs/`.
 
 ## Definition of done
 
-A product claim is done only when it is verified by commands, tests, fixtures, or
-runnable examples committed in the repo. Documentation is product and must stay
-truthful about implemented vs planned capabilities.
+A slice is ready only when its spec, plan, tasks, owner, dependencies,
+interfaces, integration strategy, acceptance scenes, and evidence requirements
+agree; analysis has no CRITICAL/HIGH findings; and the governance boundary
+passes. Product completion additionally requires ordinary-path implementation,
+tests, evidence, installed-runtime provenance, and integrator handoff.

@@ -8,6 +8,30 @@
 
 **Input**: User description: "$ARGUMENTS"
 
+**Authority source**: [Aleph Vault selected design/decision link]
+
+**Umbrella program**: [program directory]
+
+**Accountable owner lane**: [exactly one owner lane]
+
+**Depends on**: [slice ids or none]
+
+**Feeds**: [dependent slice ids or final integration]
+
+## Control-Plane Boundary *(mandatory)*
+
+- This directory contains planning artifacts only.
+- Product source, contracts, schemas, tests, fixtures, evaluations, evidence,
+  runtime assets, and documentation MUST target ordinary repository paths.
+- Unless Goal 2 is explicitly authorized, this slice MUST remain planning-only.
+- State the exact product behavior that is out of scope for this slice.
+
+## Interface Summary *(mandatory)*
+
+- **Consumes**: [named/versioned interfaces and owning slices]
+- **Produces**: [named/versioned interfaces and dependent slices]
+- **Integration handoff**: [owner lane and required handoff evidence]
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
@@ -77,6 +101,8 @@
 
 - What happens when [boundary condition]?
 - How does system handle [error scenario]?
+- What happens when an upstream interface is absent, stale, or at the wrong version?
+- What platform facts are unavailable and must remain explicitly unknown?
 
 ## Requirements *(mandatory)*
 
@@ -92,11 +118,14 @@
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
 - **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
 - **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-006**: The slice MUST name acceptance scenes and ordinary-path evidence requirements.
+- **FR-007**: The slice MUST preserve the control-plane/product-artifact boundary.
+- **FR-008**: Every aggregate evidence record MUST carry a stable scene/case ID and appear in an exact ordinary-path manifest.
 
 *Example of marking unclear requirements:*
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-009**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
+- **FR-010**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
 ### Key Entities *(include if feature involves data)*
 
@@ -129,3 +158,8 @@
 - [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
 - [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
 - [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
+
+## Explicit Exclusions
+
+- [Product behavior, component, migration bridge, or release claim intentionally excluded]
+- [Any work reserved for another owner lane]

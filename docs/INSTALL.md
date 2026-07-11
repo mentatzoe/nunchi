@@ -236,5 +236,5 @@ target and backup path there.
 - enable the Hermes plugin (`plugins.enabled` / the `nunchi:` block in
   `~/.hermes/config.yaml`) or set `DISCORD_ALLOW_BOTS` — see the
   [Hermes README](../integrations/hermes/README.md);
-- apply the operator-carried Hermes core-patch or the Claude Code
+- apply the operator-carried [Hermes core patch](integrations/hermes-core-patch.md) or the Claude Code
   transport-patch (separate, documented manual steps).

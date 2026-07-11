@@ -1,0 +1,187 @@
+# Implementation Plan: V2 Observation
+
+**Branch**: `v2/observation` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
+
+**Input**: Feature specification from `/specs/020-v2-observation/spec.md`
+
+**Program**: `specs/001-nunchi-v2-program/`
+
+**Accountable owner lane**: `v2-observation-owner`
+
+**Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
+
+**Upstream dependencies**: `010-v2-contract`
+
+## Summary
+
+In future Goal 2, implement the shared observation provider that preserves
+exact identity and native structure, assembles bounded factual attention
+requests, exposes controlled context expansion where truthful, and supplies
+reusable recoverability/comparison scenes. Transport and harness slices bind their
+native surfaces later. Slice 020 stops at a tested I-020A handoff; 110 alone
+owns final parity and cutover. No product work is performed now.
+
+## Technical Context
+
+**Language/Version**: Python 3.11+
+
+**Primary Dependencies**: standard library and 010-owned V2 schemas; transport
+clients remain owned by downstream native-surface slices
+
+**Storage**: bounded shared in-memory observation seam; native-history and
+persistence behavior remain surface-owned, while restart/backfill variants are
+simulated only in ordinary-path tests and evaluations
+
+**Testing**: stdlib `unittest`, native-shape replay fixtures, reference-provider
+comparison, budget tests, and simulated restart/backfill scenes
+
+**Target Platform**: transport-neutral shared observation mechanics consumed by
+generic channel, Matrix, Telegram, Discord, Discord-MCP, Hermes, Claude Code,
+and Codex bindings in later slices
+
+**Project Type**: shared library plus reference test/evaluation providers;
+integration-specific providers belong to downstream slices
+
+**Performance Goals**: hard event/byte caps on every projection and fetch;
+serialized size and model-specific estimated token cost recorded in evidence
+
+**Constraints**: no semantic deterministic gate, no inferred roster or social
+ledger, authoritative order, outcome-neutral retention, honest unknowns
+
+**Scale/Scope**: one shared provider implementation and reusable assembly,
+continuation, recoverability, and comparison reference assets; no native-surface
+parity claim
+
+## Constitution Check
+
+| Gate | Status | Planning evidence |
+|---|---|---|
+| Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
+| Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
+| Truthful identity/observation | PASS | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements. |
+| Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
+| Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
+| Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence are distinct from downstream live-surface proof. |
+| Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
+| Single owner and Goal gate | PASS | `v2-observation-owner` owns I-020A; all implementation awaits Goal 2. |
+
+Post-design re-check: PASS. No prohibited SpecKit output is planned.
+
+## Slice Interfaces
+
+### Consumes
+
+- `I-010A AttentionRequestV2@1` from 010 at
+  `schemas/v2/attention-request.schema.json`.
+- `I-010D ContextContinuationV2@1` from 010 at
+  `schemas/v2/context-continuation.schema.json`.
+- The immutable staged-record shape of `I-010E AttentionReceiptV2@1` at
+  `schemas/v2/attention-receipt.schema.json`.
+
+### Produces
+
+- `I-020A ObservationProviderV2@1` in future shared code at
+  `src/nunchi/observation.py`, returning a bounded I-010A request and optional
+  I-010D continuation provider, plus the observation-stage I-010E record for
+  facts this slice can attest. Later owners append separately correlated,
+  immutable stages; they never mutate this record.
+
+## Integration Strategy
+
+**Integration order**: 010 contract handoff → shared normalizer/buffer/assembler
+→ continuation seam → reference replay/recoverability/comparison evidence
+→ downstream handoff. Slice 030 can implement in parallel against I-010A;
+050 and 060–090 bind and prove native surfaces only after accepting I-020A, and
+110 owns the final comparison.
+
+**Worktree/branch**: future isolated worktree `.worktrees/v2-observation/` on
+branch `v2/observation`
+
+**Handoff to**: owners of slices `040` through `110` and `v2-integrator`
+
+**Conflict ownership**: 020 alone owns `src/nunchi/observation.py` until
+handoff. It does not edit 010 schemas, native transport sources, harness
+entrypoints, participant invocation, or send paths. Slices 050 and 060–090 own
+their bindings, and 110 owns final integration conflict resolution.
+
+## Acceptance Scenes and Evidence
+
+| Scene | Surface(s) | Required observation | Ordinary evidence target |
+|---|---|---|---|
+| S01 Exact self and alias collision | Shared provider fixtures | Exact attested self wins; names never establish authorship. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
+| S02 Native relations | Shared provider fixtures | Actor-targeted mentions and room-wide mention status remain distinct; reply/thread, reaction, and membership facts survive when supplied; absence stays honest. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
+| S03 Bounded context and tail | Shared assembler | Trigger, fitting relation closure, already-observed tail, bytes/events, and gaps are truthful. | `evidence/v2/observation/budget-sweep.jsonl`, `evidence/v2/observation/continuation.jsonl` |
+| S04 False-suppression scars | Shared provider fixtures | Referential mention, apparent resolution, other addressee, and class address never enter deterministic transport hygiene. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
+| S05 Governed suppression recoverability | Reference continuity variants | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility is explicit. | `evidence/v2/observation/s05-recoverability.jsonl` |
+| S11 Transport hygiene | Shared provider fixtures | Exact duplicate, exact self, and unroutable are the only mechanical no-wake classes. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
+| S13 Adapter equivalence | Capability-neutral reference variants | Equivalent supplied facts normalize equivalently and capability-only differences are explained; real adapters must rerun this contract downstream. | `evidence/v2/observation/s13-equivalence.jsonl` |
+| S15 Context budget | Shared assembler | Attention projection and fetch hard caps are enforced with byte/token receipts. | `evidence/v2/observation/budget-sweep.jsonl`, `evidence/v2/observation/continuation.jsonl` |
+| S16 No registry or ledger | Buffer/continuation fixtures | No roster inference, outcome registry, obligation queue, or handled/open state is created. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
+
+Reusable native fixtures and comparison tools target `evals/v2/observation/`;
+deterministic tests target `tests/v2/observation/`.
+
+Every aggregate JSONL row MUST carry a canonical `scene_id`. The manifest at
+`evidence/v2/observation/README.md` maps every applicable scene to its exact
+records and commands, so aggregation never makes scene coverage implicit.
+
+These records prove the shared seam and reference variants only. Slices 050 and
+060–090 own actual native binding evidence, and slice 110 owns the final
+cross-surface equivalence result. A reference pass cannot be cited as proof for
+an installed surface.
+
+## Project Structure
+
+### Control-plane artifacts (this slice)
+
+```text
+specs/020-v2-observation/
+├── spec.md
+├── plan.md
+├── checklists/
+│   └── requirements.md
+└── tasks.md
+```
+
+### Ordinary repository targets for future Goal 2
+
+```text
+src/nunchi/observation.py
+tests/v2/observation/
+evals/v2/observation/
+evidence/v2/observation/
+docs/observation/v2.md
+```
+
+**Structure Decision**: Shared observation mechanics live in the umbrella-
+registered `src/nunchi/observation.py`. Native transport and harness bindings
+are deliberately left to slices 050 and 060–090, avoiding file co-ownership.
+Reference restart/backfill state and capability variants live under `tests/v2/`
+and `evals/v2/`; no simulated transport lifecycle is implemented in the shared
+product module.
+
+## Ordinary Repository Targets
+
+| Artifact class | Goal 2 target path(s) | Owning task/story |
+|---|---|---|
+| Shared implementation | `src/nunchi/observation.py` | US1–US2; consumed by US3 references |
+| Native/surface bindings | none; owned by `050`, `060`–`090` | Excluded |
+| Tests | `tests/v2/observation/` | US1–US3 |
+| Replay runners/corpora | `evals/v2/observation/` | US1–US3 |
+| Evidence | `evidence/v2/observation/` | US1–US3 |
+| Product documentation | `docs/observation/v2.md` | Cross-cutting |
+| Shared schemas | `schemas/v2/` | Consumed; 010-owned |
+
+## Owner Handoff
+
+The handoff must include exact commit, I-020A version, shared module, capability
+requirements, budget evidence, deterministic/recoverability commands and
+reference results, comparator contract, suppression-eligibility limitations,
+and explicit downstream proof instructions. It MUST state that no actual
+surface, restart-safety, or parity claim was completed by reference variants.
+Review does not transfer normalization ownership silently; 110 remains the sole
+final integration sink.
+
+## Complexity Tracking
+
+No constitution violation or justified complexity exception is planned.

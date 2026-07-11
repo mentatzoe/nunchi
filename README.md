@@ -3,16 +3,41 @@
 **nunchi** (눈치, *NOON-chee*): the art of reading the room and knowing
 whether it is your turn to speak. This library gives your agent that.
 
-Nunchi is a portable CLI/library for deciding whether an agent should visibly
-participate on an unstructured shared surface before ordinary reply generation.
-It returns an auditable admission verdict:
+## Selected direction (V2 — not implemented)
+
+Nunchi's selected V2 role is the participant's delegated **pre-attention**. It
+receives exact self identity plus a bounded, structured, coverage-honest view of
+the room and decides whether the event is worth waking the participant. A
+participant-shaped model returns `SUPPRESS`, `WAKE`, or `DEFER`; operational
+`ERROR` remains separate. Only the model may socially suppress. Deterministic
+code handles transport-proven non-events, never conversational meaning.
+Trusted disabled preattention is a non-model bypass that wakes directly; it
+does not fabricate a classifier result.
+
+A woken participant receives a normal room turn and contributes directly or
+sends nothing. It is not asked to answer a meta-question about contributing,
+and no send-time classifier judges the room again. Context is compact and may
+be expanded on demand; there is no participant registry, handled/open ledger,
+obligation queue, or central floor manager.
+Continuation authority stays host-only, and off-surface lifecycle receipts are
+immutable request-correlated observation, attention, participant-host, and
+transport stages rather than conversation state.
+
+This V2 target is selected but **not implemented**. Goal 1 only rebuilds the
+execution spine. A separate Goal 2 will implement the atomic contract cutover
+and prove parity across the agreed adapters and agent harnesses.
+
+## Current implementation (V1)
+
+The current CLI/library decides whether an agent should visibly participate
+before ordinary reply generation. It returns an auditable admission verdict:
 
 - `PASS` — hard stop; no ordinary visible reply
 - `ACK` — brief acknowledgement is warranted
 - `ASK` — clarification is warranted
 - `SPEAK` — substantive contribution is warranted
 
-## Status
+## V1 status
 
 The current classifier slice exposes a product/default admission classifier path
 backed by a configured provider/model. Successful results include the selected
@@ -21,13 +46,13 @@ distribution, checked context, and reasons. There is no public `deterministic`
 classifier path; offline/CI evidence uses a test fixture provider behind the
 product path.
 
-The first **adapter** ships alongside the core: `nunchi.adapters.channel`
-maps a channel-local message shape to an admission request and routes the
-verdict for a participant agent (see "Consuming the gate" below). Live
-Discord/cc-connect process integration, central orchestration, broad benchmarks,
-launch claims, and reply composition remain out of scope — the adapter produces
-the sentinel an existing cc-connect deployment already understands; wiring it
-into a running bot is the consumer's step.
+The repository also contains the generic channel adapter, standalone
+Matrix/Telegram/Discord adapters, Hermes plugin, Claude Code wake hook, shared
+Discord-MCP transport, and Codex runner/hooks/configuration app. Their evidence
+tiers differ: some are code-only, others have bounded live smokes, and the V1
+attention/contribution lifecycle is not portable across them. The selected V2
+design exists precisely to close that gap without central orchestration or reply
+composition.
 
 ## Install
 
@@ -253,7 +278,8 @@ scope, the three install/integration paths (loader instruction, in-process
 import, subprocess CLI), how to wire it into a channel adapter, and how to
 generalize to other surfaces. A runnable multi-turn demo is in
 [`examples/read_the_room_demo.py`](examples/read_the_room_demo.py); the adapter
-contract is in [`specs/004-read-the-room-adapter/spec.md`](specs/004-read-the-room-adapter/spec.md).
+current V1 adapter contract is in
+[`docs/contracts/channel-adapter-v1.md`](docs/contracts/channel-adapter-v1.md).
 This is the adapter tier (Constitution VI): it depends on the core and is not a
 live Discord integration — it produces the sentinel an existing cc-connect
 deployment already understands.
@@ -293,25 +319,38 @@ changes: a fixture corpus of observed and predicted failure modes
 (Multica-shaped agent traffic, Discord-shaped human conversation, and
 verdict-surface contract cases) run through a pluggable adapter against any
 classifier candidate. The single entry command is
-`python3 specs/003-classifier-test-suite/contracts/runner.py`; see
-[specs/003-classifier-test-suite/quickstart.md](specs/003-classifier-test-suite/quickstart.md)
+`python3 -m evals.verdict_suite.runner`; see
+[`docs/evaluations/verdict-suite.md`](docs/evaluations/verdict-suite.md)
 for the offline deterministic path, live evidence runs, and how to add a
 fixture.
 
 ## Development method
 
-This repository uses Spec Kit. The constitution at
-`.specify/memory/constitution.md` is the source of governance for all specs,
-plans, tasks, implementation, documentation, and release claims.
+This repository uses a pinned SpecKit `0.12.11` execution spine. Authority flows
+from Zoe-selected Aleph Vault decisions/design (PR 67 at `bdd1ebb`, clarified
+by PR 68 at `c834e8c`) to the
+constitution, then agent guidance, then the active umbrella and slice plans.
+Ordinary repository artifacts remain authoritative for what is implemented and
+proven.
 
-For production work, use:
+Goal 1 uses the planning-only workflow and cannot implement V2:
 
-```text
-constitution -> specify -> clarify -> plan -> checklist -> tasks -> analyze -> implement
+```sh
+specify workflow info nunchi-plan
 ```
 
-A product spec should prove an end-to-end runnable path from supplied
-conversation context to a verdict a harness can obey.
+The full `speckit` workflow adds an explicit Goal 2 authorization gate before
+implementation, followed by convergence and integration handoff.
+
+SpecKit-managed paths are disposable control plane. Product code, schemas,
+tests, fixtures, evals, evidence, runtime assets, and product docs live only in
+ordinary paths; no product workflow may depend on `.specify/` or `specs/`.
+Details and reinitialization instructions are in
+[`docs/governance/execution-spine.md`](docs/governance/execution-spine.md).
+
+```sh
+python3 scripts/check_governance.py --check-cli
+```
 
 ## License
 

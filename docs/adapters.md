@@ -413,9 +413,9 @@ Status is **bounded live-smokes evidenced**: unit tests cover the
 runner, inbound hook, outbound send hook, hot state, configuration app protocol,
 package entry points, config loading, history backfill, and plugin bundle shape,
 while
-[`integrations/codex/evidence/2026-07-09-vigil-live-smoke.md`](../integrations/codex/evidence/2026-07-09-vigil-live-smoke.md)
+[`evidence/codex/2026-07-09-vigil-live-smoke.md`](../evidence/codex/2026-07-09-vigil-live-smoke.md)
 records one live-room wake and outbound hook allow, and
-[`integrations/codex/evidence/2026-07-09-vigil-persistent-session.md`](../integrations/codex/evidence/2026-07-09-vigil-persistent-session.md)
+[`evidence/codex/2026-07-09-vigil-persistent-session.md`](../evidence/codex/2026-07-09-vigil-persistent-session.md)
 records two admitted wakes on the same persisted Codex task plus one delivered
 response. These remain bounded smokes, not sustained-operations evidence.
 Sustained participation still requires the shared `nunchi-mcp-discord`

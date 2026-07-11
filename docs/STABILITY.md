@@ -6,7 +6,7 @@ version, and what is explicitly experimental and may shift in a minor release.
 
 For *how* to wire Nunchi in, see [`integration.md`](integration.md). For the
 classifier-quality evidence behind the default model and its known limitations,
-see [`../specs/003-classifier-test-suite/evidence/`](../specs/003-classifier-test-suite/evidence/).
+see [`../evidence/verdict-suite/`](../evidence/verdict-suite/).
 The verdict semantics live in the project [`README.md`](../README.md).
 
 ## The public contract
@@ -160,9 +160,9 @@ These are **not** part of the stable contract and may change in any minor:
   `verdict`, not `reasons`.
 - **The default model choice.** Today the operator must supply
   `NUNCHI_CLASSIFIER_MODEL`; the *recommended* default
-  (`google/gemini-3.1-flash-lite`, chosen by the spec 003 bake-off) is a
-  recommendation that may be re-selected in a minor as evidence changes. Pin the
-  model in your own env if you need it frozen.
+  (`google/gemini-3.1-flash-lite`, chosen by the committed verdict-suite
+  bake-off) is a recommendation that may be re-selected in a minor as evidence
+  changes. Pin the model in your own env if you need it frozen.
 - **The `run_shape` strings** from the adapter (`RUN_SHAPE` in
   `adapters/channel.py`) — guidance prose, not a contract. Branch on `verdict`,
   not on the run-shape text.
@@ -173,12 +173,12 @@ These are **not** part of the stable contract and may change in any minor:
 
 A trigger that asserts completion with **no corroborating context** — the canonical
 case is `"Already handled. Resolved. No response needed."` with empty context —
-is treated as legitimately PASS-able by **every** model tested in the spec 003
-bake-off, including the selected default. The models treat an explicit resolution
-claim as trustworthy rather than something to verify. The test suite keeps this
-fixture as semantic ground truth (a bare claim *should* be verified, not trusted)
-and records it as an open gap, not a fixture bug. See
-[`../specs/003-classifier-test-suite/evidence/model-selection-2026-06-13.md`](../specs/003-classifier-test-suite/evidence/model-selection-2026-06-13.md).
+is treated as legitimately PASS-able by **every** model tested in the committed
+verdict-suite bake-off, including the selected default. The models treat an
+explicit resolution claim as trustworthy rather than something to verify. The
+test suite keeps this fixture as semantic ground truth (a bare claim *should* be
+verified, not trusted) and records it as an open gap, not a fixture bug. See
+[`../evidence/verdict-suite/model-selection-2026-06-13.md`](../evidence/verdict-suite/model-selection-2026-06-13.md).
 
 **Host-side mitigation.** If your surface allows messages that claim a task is
 already done/handled/resolved, do not treat a `PASS` on such a trigger as
@@ -190,8 +190,8 @@ acting on the silence. The verdict surface gives you `context_checked` and
 ### Provider-latency variance
 
 Each decision is one provider round-trip; latency varies by model and provider
-load (the spec 003 evidence shows p50 ~1s but p95 spikes, and outright timeouts
-for some candidates). For a per-turn gate this matters. Mitigate host-side with
+load (the verdict-suite evidence shows p50 ~1s but p95 spikes, and outright
+timeouts for some candidates). For a per-turn gate this matters. Mitigate host-side with
 the adapter's `fail_policy` and the per-call timeout:
 
 - `fail_policy="open"` (default) degrades an unavailable gate to `SPEAK` — never
@@ -204,5 +204,5 @@ the adapter's `fail_policy` and the per-call timeout:
 A degraded result is flagged as off-surface telemetry (`degraded`, `error` on
 `ChannelGateResult`); the failure reason never enters the room. To catch
 provider/model drift over time, run the manual live-smoke job
-(`.github/workflows/live-smoke.yml`) and the spec 003 corpus against the
+(`.github/workflows/live-smoke.yml`) and the verdict-suite corpus against the
 configured model at release time.

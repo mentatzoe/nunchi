@@ -2,12 +2,20 @@
   "schema_version": "1.0",
   "workflows": {
     "speckit": {
-      "name": "Full SDD Cycle",
+      "name": "Nunchi Governed Slice Cycle",
+      "version": "2.0.0",
+      "description": "Full slice cycle with requirements gates and explicit Goal 2 authorization before implementation",
+      "source": "project-customized",
+      "installed_at": "2026-07-11T09:56:03.818565+00:00",
+      "updated_at": "2026-07-11T10:00:00+00:00"
+    },
+    "nunchi-plan": {
+      "name": "Nunchi Planning-Only Slice Cycle",
       "version": "1.0.0",
-      "description": "Runs specify \u2192 plan \u2192 tasks \u2192 implement with review gates",
-      "source": "bundled",
-      "installed_at": "2026-05-22T05:13:24.559959+00:00",
-      "updated_at": "2026-05-22T05:13:24.559966+00:00"
+      "description": "Specify through analysis without any product implementation step",
+      "source": "project-customized",
+      "installed_at": "2026-07-11T10:00:00+00:00",
+      "updated_at": "2026-07-11T10:00:00+00:00"
     }
   }
 }

@@ -4,7 +4,15 @@
 
 **Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
 
-**Note**: This template is filled in by the `/speckit-plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
+**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+
+**Program**: `[umbrella program directory]`
+
+**Accountable owner lane**: `[exactly one owner lane]`
+
+**Goal authorization**: `[Goal 1 planning only | Goal 2 explicitly authorized]`
+
+**Upstream dependencies**: `[slice ids or none]`
 
 ## Summary
 
@@ -42,19 +50,61 @@
 
 [Gates determined based on constitution file]
 
+The check MUST include the SpecKit control-plane boundary, single-owner rule,
+Goal 1/Goal 2 boundary, ordinary-path artifact locations, and parity/evidence
+obligations. An unexplained failure stops planning.
+
+## Slice Interfaces
+
+### Consumes
+
+- `[interface name/version]` from `[owning slice]` at `[ordinary repository path planned for Goal 2]`
+
+### Produces
+
+- `[interface name/version]` for `[dependent slices]` at `[ordinary repository path planned for Goal 2]`
+
+Interface details in this plan are planning summaries only. Machine-readable
+contracts and schemas MUST be created under `schemas/` during Goal 2, never
+under this feature directory.
+
+## Integration Strategy
+
+**Integration order**: [dependency and handoff order]
+
+**Worktree/branch**: [isolated worktree and branch convention]
+
+**Handoff to**: [dependent owner lane or final integrator]
+
+**Conflict ownership**: [single owner for shared files/contracts]
+
+## Acceptance Scenes and Evidence
+
+| Scene | Surface(s) | Required observation | Ordinary evidence target |
+|---|---|---|---|
+| [scene id/name] | [surface] | [measurable outcome] | `evidence/[path]` |
+
+List deterministic tests under `tests/`, reusable corpora/runners under
+`evals/`, and live records under `evidence/`. Green unit tests alone MUST NOT be
+used as social-quality evidence. Aggregate records MUST carry stable scene and
+case IDs, and the slice MUST name an ordinary-path manifest mapping each scene
+to exact records and reproducible commands.
+
 ## Project Structure
 
-### Documentation (this feature)
+### Control-plane artifacts (this slice)
 
 ```text
 specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+├── spec.md              # Requirements and acceptance planning
+├── plan.md              # This file
+├── research.md          # Planning decisions only, when needed
+├── checklists/          # Requirements-quality checks only
+└── tasks.md             # Dependency-ordered execution plan
 ```
+
+No product source, schema, contract, test, fixture, evaluation, evidence,
+runtime asset, or product documentation may be placed in this tree.
 
 ### Source Code (repository root)
 <!--
@@ -102,6 +152,24 @@ ios/ or android/
 
 **Structure Decision**: [Document the selected structure and reference the real
 directories captured above]
+
+## Ordinary Repository Targets
+
+| Artifact class | Goal 2 target path(s) | Owning task/story |
+|---|---|---|
+| Product implementation | `src/` or `integrations/` | [task/story] |
+| Machine-readable contracts | `schemas/` | [task/story] |
+| Tests | `tests/` | [task/story] |
+| Evaluation runners/corpora | `evals/` | [task/story] |
+| Evidence | `evidence/` | [task/story] |
+| Product/governance docs | `docs/` | [task/story] |
+
+## Owner Handoff
+
+The owner MUST hand off: exact commit, verification commands and results,
+ordinary-path evidence references, interface version(s), migration/provenance
+notes, a scene-to-record result manifest, and known limitations. Review does not
+transfer ownership silently.
 
 ## Complexity Tracking
 

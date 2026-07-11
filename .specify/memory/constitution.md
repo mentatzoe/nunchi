@@ -1,15 +1,38 @@
 <!--
 Sync Impact Report
-Version change: template -> 1.0.0
-Modified principles: all template placeholders replaced with Nunchi-specific principles
-Added sections: Product Boundaries; SpecKit Workflow & Review Gates; Agent Execution Hygiene
-Removed sections: placeholder Section 2 and Section 3 names/content
-Templates requiring updates:
-- ✅ .specify/templates/plan-template.md reviewed; generic Constitution Check gate already fits
-- ✅ .specify/templates/spec-template.md reviewed; user-story vertical slicing model retained
-- ✅ .specify/templates/tasks-template.md reviewed; independent-story tasking retained
-- ✅ .specify/templates/commands/ absent in this Spec Kit install; installed agent skill command docs retained
-- ✅ AGENTS.md and CLAUDE.md updated with Nunchi runtime guidance
+Version change: 1.0.0 -> 2.0.1
+Major-bump rationale: replaces the V1 admission/move-vocabulary constitution
+with the selected V2 pre-attention design and makes SpecKit a disposable,
+control-plane-only execution spine.
+Patch clarification: encodes the already-selected direct wake when preattention
+is disabled, host-only continuation authority, and immutable singly attested
+receipt stages after independent planning red-team review.
+Modified principles:
+- Admission, Not Composition -> Selected V2 Product Boundary
+- Hard-Stop PASS Is Load-Bearing -> Human-Shaped Social Judgment
+- CLI-First, Modular Core -> Truthful Identity and Observation
+- Vertical, Independently Testable Slices -> Attention and Contribution Have Different Owners
+- Test-First Contract and Fixture Discipline -> Atomic Contract and Cross-Surface Parity
+- Adapter Tier Honesty and Consumer Boundaries -> Evidence Before Claims
+- Context Truth and Room Inference -> SpecKit Is Control-Plane Only
+- Documentation Is Product -> Single-Owner Slices and Deliberate Integration
+Added sections:
+- Authority and Repository Boundaries
+- Goal and Workflow Gates
+Removed sections:
+- V1 Product Boundaries
+- V1 SpecKit Workflow & Review Gates
+- V1 Agent Execution Hygiene
+Dependent artifacts:
+- ✅ .specify/templates/plan-template.md (control-plane-only plan shape)
+- ✅ .specify/templates/spec-template.md (source, owner, dependency, and boundary fields)
+- ✅ .specify/templates/tasks-template.md (ordinary-path task targets and owner handoff)
+- ✅ .specify/workflows/speckit/workflow.yml (full governed sequence + Goal 2 gate)
+- ✅ .specify/workflows/nunchi-plan/workflow.yml (planning-only workflow)
+- ✅ AGENTS.md and CLAUDE.md (authority order and runtime instructions)
+- ✅ README.md (truthful V1/V2 state and development method)
+- ✅ docs/governance/execution-spine.md (operator workflow and reinitialization)
+- ✅ scripts/check_governance.py and tests/test_governance.py (mechanical enforcement)
 Follow-up TODOs: none
 -->
 
@@ -17,193 +40,263 @@ Follow-up TODOs: none
 
 ## Core Principles
 
-### I. Admission, Not Composition
+### I. Selected V2 Product Boundary
 
-Nunchi MUST decide admission for shared-surface triggers: whether the current
-agent produces visible participation. The core verdict vocabulary is exactly
-`PASS`, `ACK`, `ASK`, and `SPEAK` unless this constitution is amended. The core
-MUST NOT draft reply prose, prescribe wording, or define speech-shape commands.
-It MAY return evidence, confidence distribution, and context references so the
-host agent or harness can decide what to say after admission is granted.
+Nunchi MUST be the participant's delegated pre-attention for shared
+conversation. The selected V2 gate-facing outcomes are `SUPPRESS`, `WAKE`, and
+`DEFER`; operational `ERROR` is a separate path. Nunchi decides whether a room
+event is worth waking the participant. It MUST NOT compose the participant's
+reply, allocate the floor, coordinate speakers, or decide which social move the
+participant eventually makes.
 
-Rationale: the product exists to decide whether this agent enters the room, not
-to become a second composer hidden upstream of the normal agent.
+Trusted preattention-disabled configuration MUST bypass model judgment and wake
+the participant directly. That host branch MUST remain distinguishable from a
+model `WAKE`, `DEFER`, or operational `ERROR`; it MUST NOT fabricate a
+classifier or effective social disposition.
 
-### II. Hard-Stop PASS Is Load-Bearing
+The repository's current V1 `PASS / ACK / ASK / SPEAK` implementation remains
+implementation truth until Goal 2 replaces it atomically. Goal 1 MUST NOT change
+product behavior or claim that V2 is implemented.
 
-A `PASS` verdict MUST be terminal for ordinary visible participation. A
-successful PASS MUST NOT emit a room message, including sentinel strings,
-acknowledgements, or explanatory text. Telemetry, traces, and audit records MAY
-be written to non-conversational channels. Every integration MUST distinguish
-"the gate ran and decided PASS" from "the gate did not run" or "the harness
-swallowed the trigger before classification."
+Rationale: the product failed when attention admission and contribution shape
+were treated as the same decision, and when target design was confused with
+current code.
 
-Rationale: a PASS that still speaks is not a pass. It is coordination noise with
-a quieter costume.
+### II. Human-Shaped Social Judgment
 
-### III. CLI-First, Modular Core
+Only an explicitly authorized, participant-shaped model judgment over truthful
+facts MAY socially suppress a wake. Deterministic code MAY suppress or discard
+only transport-proven non-events: exact duplicate delivery, an exact self event
+that is retained but does not wake its author, or a payload from which no
+authorized and routable native event can be constructed. Deterministic code
+MUST NOT interpret mentions, replies, topology, apparent resolution, relevance,
+or any other conversational meaning.
 
-Every product capability MUST be reachable through the `nunchi` CLI and MUST
-also live behind an internal callable core. A command-line wrapper that contains
-all decision logic inline is not acceptable. The core MUST expose a stable
-in-process evaluation boundary that tests and adapters can call without shelling
-out. The CLI MUST support JSON input from stdin or file, JSON output on stdout,
-errors on stderr, and documented exit-code semantics.
+Uncertainty MUST widen attention through `WAKE` or `DEFER`; it MUST NOT be
+converted into silence by a heuristic. Governed suppression MUST remain
+inspectable, revocable, recoverable for later hearing, and separately
+receipted. Later hearing does not restore a missed conversational moment, so
+false suppression remains the highest-risk branch.
 
-Rationale: the public product is a portable utility, not a script with a
-costume. The CLI is the operator surface; the callable core is the adapter seam.
+Rationale: algorithmic social gates produced the Claude/Station false-silence
+failure. Nunchi exists to use model nuance, not to encode a brittle social
+algorithm around it.
 
-### IV. Vertical, Independently Testable Slices
+### III. Truthful Identity and Observation
 
-SpecKit feature specs MUST be vertical user-story increments that can be tested
-and demonstrated independently. Horizontal component specs are allowed only when
-they support a previously shipped vertical path or when the spec declares a
-non-user-facing maintenance purpose. The first product spec MUST prove an
-end-to-end path from supplied conversation context to a verdict that a harness
-can obey. A slice is not complete merely because schemas, docs, or internal
-pieces exist.
+Every V2 judgment MUST receive exact current-surface self binding separately
+from loose names, roles, and aliases. Loose descriptors MAY support model
+reasoning but MUST NOT establish authorship or self identity. Conversation input
+MUST preserve ordered native events, stable actors, literal reply/mention/
+reaction/membership relations when available, the trigger, and honest coverage
+and gap facts.
 
-Rationale: Nunchi's highest project risk is fake done. The first release
-candidate must do the product job, not only prepare to do it later.
+Eager context MUST be bounded by explicit event and byte budgets. Older or
+distant context MAY be exposed through participant- and room-bound continuation
+where the host can provide it truthfully. The system MUST model observed and
+referenced actors, not invent a complete participant roster or registry.
 
-### V. Test-First Contract and Fixture Discipline
+Opaque continuation handles, bindings, cursors, expiry values, and fetch
+authority MUST remain host-only and MUST NOT enter classifier input. The model
+MAY receive factual coverage and whether bounded expansion is available.
 
-Any feature that changes verdict semantics, input envelope shape, provider
-behavior, or adapter guarantees MUST define tests or fixtures before the
-implementation is treated as complete. The test set MUST cover all four verdicts
-where the feature can influence them. Contract tests MUST verify output schema,
-PASS suppression semantics, `context_checked` truthfulness, and failure behavior
-for invalid input. CI MUST have a deterministic provider path; a product claim
-that depends only on a live stochastic provider is incomplete.
+No component MAY maintain a handled/unhandled, addressed/unaddressed,
+obligation, or speaker queue as social memory. Overlapping windows are
+observations, not consumed work items. Operational receipts MUST remain
+off-surface telemetry. Receipt records MUST be immutable and request-correlated;
+observation, attention, participant-host, and transport owners may attest only
+their own stage and MUST NOT mutate or fill another owner's facts.
 
-Rationale: the contract is the product surface. Tests are how the project keeps
-agents from relabeling hopeful behavior as working behavior.
+Rationale: Nunchi needs enough structured perception to read the room without
+turning a social conversation into a FIFO service queue or a context bomb.
 
-### VI. Adapter Tier Honesty and Consumer Boundaries
+### IV. Attention and Contribution Have Different Owners
 
-Nunchi MUST support invocation at the earliest reliable boundary a host
-harness exposes: wrapper/gateway, pre-input hook, pre-model hook, agent-invoked
-tool, or output-suppression fallback. Each adapter or handoff document MUST
-state its capability tier and whether PASS is guaranteed to produce no visible
-reply. The product team owns the CLI, callable core, schema, fixtures, and
-handoff packet. It does not own every downstream adapter implementation.
+The pre-attention model MUST answer only whether to spend a wake. After `WAKE`,
+`DEFER`, trusted preattention bypass, or operational-error fallback, the harness
+MUST deliver a normal participant turn containing the room event and compact
+factual context. The participant then contributes through its normal message,
+reaction, or tool path, or sends nothing.
 
-Rationale: pre-LLM integration is valuable but not universal. Honest tiering
-keeps the portable core from overfitting to one harness.
+The participant MUST NOT be asked to return an intermediate yes/no answer about
+wanting to contribute. A transport send path MUST NOT run a second social
+classifier or require per-trigger social permission state. Deterministic send
+backstops MAY enforce operational safety without reinterpreting the room.
 
-### VII. Context Truth and Room Inference
+Rationale: judging admission twice caused valid wakes to be silenced at send
+time. One attention judgment plus one ordinary participant turn preserves the
+correct ownership boundary.
 
-`context_checked` MUST describe context actually inspected by the gate. It MUST
-NOT claim unavailable history, unqueried state, or inferred peer coverage as if
-it had been checked. The classifier MAY infer what "the room" is from supplied
-context, but it MUST NOT depend on a hardcoded surface taxonomy or predeclared
-social rule list as the hidden product contract. Plans MUST preserve the guiding
-heuristic: imagine a person entering this conversation and deciding whether to
-participate.
+### V. Atomic Contract and Cross-Surface Parity
 
-Rationale: false context receipts are worse than uncertainty. The classifier's
-judgment must stay auditable without turning human room sense into brittle
-surface rules.
+V2 is a breaking replacement of the request, response, and lifecycle contract.
+Goal 2 MUST move the core, CLI, every in-tree adapter, and every in-tree agent
+harness to one contract without a mixed-version repository or a V1 translation
+bridge. The classifier-DEFER and margin-DEFER transition is independently
+evidence-gated and MUST NOT be conflated with schema compatibility.
 
-### VIII. Documentation Is Product
+Equivalent platform facts MUST normalize to equivalent observations, attention
+routing, and participant factual availability across Hermes, Claude Code,
+Codex, Discord-MCP, and the standalone channel adapters. A platform MUST NOT
+invent facts its API cannot supply; unavailable capability MUST be represented
+honestly. Each surface MUST prove installed-runtime provenance and a live V2
+probe before it is called migrated.
 
-Quickstarts, examples, integration handoff documents, and README claims MUST be
-backed by runnable commands, fixtures, or tests. Documentation MUST state when a
-capability is implemented, planned, or intentionally out of scope. Marketing and
-positioning copy MUST NOT lead implementation truth; no public claim may imply a
-working adapter, provider, or release path that has not been verified.
+Rationale: local success without adapter and harness parity recreates the
+failure class that triggered V2.
 
-Rationale: for a portable CLI utility, docs are how other harness owners decide
-whether they can trust and integrate the tool.
+### VI. Evidence Before Claims
 
-## Product Boundaries
+Contract changes MUST be defined by ordinary-path schemas and tests before
+implementation is accepted. Offline tests MUST remain deterministic; stochastic
+social correctness MUST be evaluated through committed replay corpora,
+multi-model evidence where required, and live acceptance scenes. A green unit
+suite proves mechanics, not social quality.
 
-Nunchi is a portable pre-reply admission gate for unstructured multi-agent
-collaboration on shared surfaces such as chats, meetings, repos, or issue
-threads. It consumes supplied context and returns an auditable participation
-verdict. The core contract is:
+Every completion claim MUST cite a reproducible command and the committed test,
+fixture, evaluation, or evidence record that supports it. Documentation MUST
+distinguish current V1 behavior, selected V2 design, planned work, code-only
+integration, bounded live evidence, and sustained operational evidence.
+Release and promotion remain separate decisions.
 
-- `trigger`: the event or message being evaluated
-- `verdict`: one of `PASS`, `ACK`, `ASK`, `SPEAK`
-- `confidences`: per-verdict confidence distribution
-- `context_checked`: specific context the gate inspected
+Rationale: schemas and prose previously looked complete while the runnable
+cross-surface lifecycle was not.
 
-The following are out of scope unless a future constitution amendment explicitly
-moves them in:
+### VII. SpecKit Is Control-Plane Only (NON-NEGOTIABLE)
 
-- detecting coordination failure modes as the primary product job
-- central orchestration, fixed speaking order, or manager-agent routing
-- composing the final reply text
-- requiring a literal pre-LLM hook in every harness
-- building every downstream adapter before the core CLI is useful
-- research/evaluation tracking for the peer-coordination experiment
-- marketing, DevRel examples, or release claims before a runnable quickstart
+SpecKit-managed paths are disposable execution control plane. In this
+repository they are `.specify/`, `specs/`, `.agents/skills/speckit-*`, and
+`.claude/skills/speckit-*`. They MAY own only tool configuration, the
+constitution, planning specifications, plans, planning research, requirement
+quality checklists, task lists, ownership, dependencies, workflow definitions,
+and ephemeral workflow state.
 
-## SpecKit Workflow & Review Gates
+They MUST NEVER own or contain product implementation, machine-readable product
+contracts or schemas, executable tests, evaluation runners or corpora, fixtures,
+evidence, runtime/deployment assets, or product/user documentation. Those assets
+MUST live in ordinary repository paths such as `src/`, `schemas/`, `tests/`,
+`evals/`, `evidence/`, `integrations/`, `scripts/`, and `docs/`.
 
-Nunchi uses Spec Kit as the governing development workflow. The constitution
-MUST exist before product feature specs. Production features MUST use this gate
-sequence unless the project owner explicitly approves a narrower spike:
+Build, test, evaluation, documentation, packaging, release, and runtime paths
+MUST NOT depend on a SpecKit-managed path. Deleting and reinitializing all
+SpecKit-managed paths MAY destroy planning state but MUST leave the product,
+its tests, its evidence, and its documentation runnable and intelligible.
+Repository checks MUST enforce this boundary.
 
-1. `/speckit-constitution` for governance changes
-2. `/speckit-specify` focused on what and why, not implementation stack
-3. `/speckit-clarify` for high-impact ambiguity, one question at a time
-4. `/speckit-plan` for technical plan and Constitution Check
-5. `/speckit-checklist` for requirements quality before task generation
-6. `/speckit-tasks` for dependency-ordered tasks by user story
-7. `/speckit-analyze` before implementation; CRITICAL/HIGH findings block work
-8. `/speckit-implement` or equivalent agent execution against the task file
+Rationale: a planning tool must be replaceable without deleting or disabling
+the product truth it organizes.
 
-Each bounded spec MUST have exactly one accountable owner from specify through
-implementation or through a recorded handoff. Reviewers MAY challenge, red-team,
-or inspect artifacts, but they do not silently co-own the same spec context.
+### VIII. Single-Owner Slices and Deliberate Integration
 
-The first product spec SHOULD be named `001-core-cli-mvp` or another clear
-vertical equivalent. Its done bar MUST include a runnable CLI verdict path,
-callable modular core, schema/fixture tests, and PASS suppression semantics.
+One umbrella V2 program MUST define independently executable slices. Every
+slice MUST name exactly one accountable owner lane, its upstream dependencies,
+interfaces it consumes and produces, ordinary-path implementation targets,
+integration branch or handoff strategy, acceptance scenes, and evidence
+requirements. Reviewers MAY challenge and red-team; they MUST NOT silently
+co-own or mutate another slice's scope.
 
-## Agent Execution Hygiene
+Non-trivial slice work MUST use an isolated worktree. Parallel slices MUST not
+edit the same contract or integration file without an explicit handoff. Shared
+contract changes land before dependent slices; harness integrations land before
+the final parity slice. The final integrator owns cross-surface assembly and may
+reject a locally green slice whose interface or evidence does not match the
+program contract.
 
-Agents working in this repository MUST use isolated git worktrees for non-trivial
-branches after the initial bootstrap. The main checkout is reserved for main and
-trivial authorized bootstrap changes. Worktrees belong under `.worktrees/<slug>`.
+Rationale: explicit ownership and integration order preserve parallelism
+without recreating the previous detached patchwork.
 
-Agent-authored PRs MUST name:
+## Authority and Repository Boundaries
 
-- owning agent and runtime
-- SpecKit feature directory
-- issue or Multica card, when present
-- verification commands and results
-- whether the appropriate bot identity authored the commit
+Authority is ordered as follows:
 
-Codex runs that need high reasoning MUST pass `-c model_reasoning_effort=xhigh`.
-Claude Code runs that need high reasoning MUST pass `--effort xhigh`. If an
-agent runtime cannot expose the required effort setting, the issue or PR MUST
-state that limitation before the work is treated as reviewed.
+1. Zoe-selected Aleph Vault decisions and technical design, selected in PR 67
+   at `bdd1ebb` and contract-clarified in PR 68 at `c834e8c`.
+2. This constitution, which translates those decisions into repository
+   invariants.
+3. `AGENTS.md` and `CLAUDE.md`, which provide runtime-specific execution
+   guidance without changing product decisions.
+4. The active SpecKit umbrella and slice artifacts, which organize authorized
+   work without redefining higher authority.
+
+Ordinary-path source, schemas, tests, evaluations, evidence, and documentation
+are authoritative for what is currently implemented and proven. A planning
+artifact MUST NOT claim capability that those artifacts do not establish. When
+the Vault design and current implementation differ, both MUST be stated:
+selected target versus current behavior.
+
+The canonical ordinary-path homes are:
+
+- `src/` and `integrations/`: product and integration implementation;
+- `schemas/`: machine-readable public and inter-component contracts;
+- `tests/`: deterministic unit, contract, integration, and governance tests;
+- `evals/`: evaluation runners and reusable corpora;
+- `evidence/`: immutable or append-only run records and indexes;
+- `docs/`: product, integration, security, evaluation, and governance docs;
+- `scripts/`: repository tooling, including governance validation.
+
+## Goal and Workflow Gates
+
+The program has two separately authorized goals:
+
+- **Goal 1 — execution spine**: pin and initialize SpecKit, relocate product
+  artifacts, establish governance, define the umbrella and slices, and validate
+  the baseline. Goal 1 MUST NOT implement V2 product behavior.
+- **Goal 2 — end-to-end V2**: separately commissioned implementation, atomic
+  cutover, integration, live deployment verification, and parity evidence.
+
+Every implementation slice MUST pass this control-plane sequence:
+
+```text
+constitution -> specify -> clarify -> plan -> checklist -> tasks -> analyze ->
+explicit Goal 2 authorization -> implement -> converge -> parity integration
+```
+
+The planning-only workflow MUST stop after analysis. The full workflow MUST have
+an explicit authorization gate immediately before implementation. No workflow
+MAY infer Goal 2 authorization from the existence of tasks or from completion of
+Goal 1.
+
+For Nunchi, `spec.md`, `plan.md`, `research.md`, `tasks.md`, and requirement
+quality checklists are control-plane artifacts. The standard SpecKit
+`data-model.md`, `contracts/`, and `quickstart.md` outputs are prohibited inside
+managed paths; interface design, runnable validation guides, machine-readable
+contracts, and user documentation MUST instead be created under their ordinary
+repository homes during an authorized implementation goal. Plans MUST name
+those target paths without embedding the product artifacts.
+
+Before implementation, analysis MUST report zero CRITICAL or HIGH findings,
+the accountable owner MUST be active, dependencies MUST be satisfied or
+explicitly staged, and the slice's acceptance scenes and evidence locations
+MUST be concrete. Before integration, the slice owner MUST hand off a commit,
+verification commands, evidence references, and known limitations to the final
+integrator.
 
 ## Governance
 
-This constitution supersedes README text, issue descriptions, agent prompts, and
-ad hoc chat decisions when they conflict. A conflicting product request MUST
-pause for explicit constitutional amendment or a documented exception.
+This constitution supersedes repository READMEs, issue text, agent prompts,
+workflow defaults, and SpecKit templates when they conflict. It does not
+supersede a later explicit Zoe decision; such a decision requires this file and
+its dependent artifacts to be amended before conflicting work begins.
 
 Amendments require:
 
-- a written rationale
-- a semantic version bump
-- a Sync Impact Report in this file
-- review of affected templates, agent guidance, and active specs
-- project owner approval or an explicit delegated approval path
+- written rationale and project-owner authorization;
+- semantic version bump and updated Sync Impact Report;
+- review of templates, workflows, agent guidance, boundary checks, active
+  program/slices, and ordinary documentation;
+- proof that the full offline baseline remains green or an explicit approved
+  migration exception.
 
 Versioning policy:
 
-- MAJOR for principle removals, product-boundary reversals, or backward
-  incompatible governance changes
-- MINOR for new principles, new required gates, or materially expanded scope
-- PATCH for wording clarifications that do not change obligations
+- MAJOR for principle removal, product-boundary reversal, authority-order
+  change, or backward-incompatible governance;
+- MINOR for a new principle, required gate, or materially expanded obligation;
+- PATCH for non-semantic clarification.
 
-Compliance review is mandatory before implementation and before release claims.
-Any unjustified constitution violation in a spec, plan, task file, PR, or release
-artifact blocks the work until corrected or explicitly amended.
+Compliance review is mandatory before product implementation, slice handoff,
+integration, release, and any live-readiness claim. Any unexplained violation
+blocks the affected work. Goal completion requires the repository governance
+check and full existing test baseline to pass.
 
-**Version**: 1.0.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-05-22
+**Version**: 2.0.1 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11
