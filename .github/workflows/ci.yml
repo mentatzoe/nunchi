@@ -24,10 +24,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Enforce governance and repository boundaries
+        run: python3 scripts/check_governance.py
       - name: Run the full offline suite
         run: python -m unittest --verbose
       - name: Verdict-suite CLI loads the corpus (smoke)
-        run: python3 specs/003-classifier-test-suite/contracts/runner.py --list
+        run: python3 -m evals.verdict_suite.runner --list
 
   package:
     name: clean-install packaging

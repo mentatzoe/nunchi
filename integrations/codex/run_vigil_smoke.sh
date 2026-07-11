@@ -128,12 +128,12 @@ transport_url=$NUNCHI_TRANSPORT_URL
 receipts=$NUNCHI_RUNNER_LOG
 plugin=nunchi-codex@local-repo
 venv=$VENV
-evidence_command=$VENV/bin/python integrations/codex/summarize_vigil_smoke.py --log "$NUNCHI_RUNNER_LOG" --out integrations/codex/evidence/$(date -u +%Y-%m-%d)-vigil-live-smoke.md
+evidence_command=$VENV/bin/python integrations/codex/summarize_vigil_smoke.py --log "$NUNCHI_RUNNER_LOG" --out evidence/codex/$(date -u +%Y-%m-%d)-vigil-live-smoke.md
 EOF
 
 printf 'Vigil smoke runner ready. Ask in Discord channel %s; receipts: %s\n' "$NUNCHI_RUNNER_CHANNELS" "$NUNCHI_RUNNER_LOG"
 printf 'After a successful wake and send, summarize evidence with:\n'
-printf '  %s/bin/python integrations/codex/summarize_vigil_smoke.py --log %q --out integrations/codex/evidence/%s-vigil-live-smoke.md\n' "$VENV" "$NUNCHI_RUNNER_LOG" "$(date -u +%Y-%m-%d)"
+printf '  %s/bin/python integrations/codex/summarize_vigil_smoke.py --log %q --out evidence/codex/%s-vigil-live-smoke.md\n' "$VENV" "$NUNCHI_RUNNER_LOG" "$(date -u +%Y-%m-%d)"
 
 if [[ -n "${NUNCHI_RUNNER_CONFIG:-}" ]]; then
   exec nunchi-codex-room-runner --config "$NUNCHI_RUNNER_CONFIG"

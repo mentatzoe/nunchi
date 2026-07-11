@@ -1,12 +1,17 @@
 # Integrating Nunchi
 
+> **Current V1 guide:** this document describes the implemented pre-reply
+> admission gate. The selected V2 pre-attention lifecycle is documented in
+> [`architecture/v2-selected-design.md`](architecture/v2-selected-design.md)
+> and is not implemented yet.
+
 This guide is for someone wiring Nunchi into a real agent or channel. It
 covers what Nunchi is responsible for, the integration paths and how to
 choose one, how to wire it into a channel adapter (using cc-connect / pilot-bot
 as the worked example), installation, and how to generalize to other surfaces.
 
 For the verdict semantics themselves see the project `README.md`; for the
-classifier-quality evidence see `specs/003-classifier-test-suite/evidence/`.
+classifier-quality evidence see `evidence/verdict-suite/`.
 
 ## Scope: what Nunchi decides (and what it does not)
 
@@ -34,8 +39,8 @@ file (this is how pilot-bot works). That judgment is invisible, untested, and
 varies per agent and per model. Nunchi turns the same decision into a single
 component with a fixed rubric, a **selected model**
 (`google/gemini-3.1-flash-lite`, chosen by live bake-off — see the evidence
-dir), a regression corpus (spec 003), and an auditable result (verdict +
-confidences + checked context + reasons).
+dir), the ordinary-path verdict-suite regression corpus, and an auditable result
+(verdict + confidences + checked context + reasons).
 
 ## The contract is transport-neutral
 
@@ -237,22 +242,24 @@ sentinel interception that already ships in cc-connect.
 
 ## Installation
 
-Nunchi is stdlib-only (Python 3.11+, no runtime dependencies). The published
-PyPI release (0.2.0) carries the core gate and the `nunchi`/`nunchi-channel`
-console scripts — enough for everything in this guide. The platform adapters
-(`nunchi-matrix`, `nunchi-telegram`, `nunchi-discord`) landed after that
-release and currently require a source install:
+The published PyPI `0.2.0` wheel carries only the historical V1 core and the
+`nunchi`/`nunchi-channel` scripts. It predates the removal of the deterministic
+fast path and all later integration work. For current repository behavior,
+install a reviewed source commit; force the install because both builds still
+report package version `0.2.0`:
 
 ```sh
-pip install nunchi                  # PyPI 0.2.0: core + nunchi/nunchi-channel
-# or, from source (core + platform adapters):
-pip install .                       # from a checkout
-pip install "git+https://github.com/mentatzoe/nunchi.git"
+git clone https://github.com/mentatzoe/nunchi.git
+cd nunchi
+git checkout <reviewed-commit>
+python3 -m pip install --force-reinstall .
 ```
 
-This installs the `nunchi`, `nunchi-channel`, and `nunchi-install` console
-scripts. Without installing, you can run from a checkout with `PYTHONPATH=src
-python3 -m nunchi.adapters`.
+A current source install provides `nunchi`, `nunchi-channel`,
+`nunchi-install`, and the source-only adapter/harness entry points declared in
+`pyproject.toml`. The default core remains stdlib-only; optional extras add
+their named dependencies. Without installing, run from a checkout with
+`PYTHONPATH=src python3 -m nunchi.adapters`.
 
 ### Installing the operator artifacts (Hermes plugin, Claude Code hooks)
 
@@ -297,7 +304,7 @@ adversarial corpus, 6/7 load-bearing cases, ~1s latency). If you want an
 **open-weight** model with no big-3 dependency, `qwen/qwen3-235b-a22b-2507`
 matches that accuracy at roughly one-fifth the cost (with somewhat more latency
 variance). Either is a one-line `NUNCHI_CLASSIFIER_MODEL` change; see the
-per-model evidence under `specs/003-classifier-test-suite/evidence/`.
+per-model evidence under `evidence/verdict-suite/`.
 
 The full surface, and where each knob lives:
 

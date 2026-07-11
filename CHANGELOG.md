@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — program and slice lifecycle replaces local-run framing
+
+- External guidance records the 2026-07-11 reset baseline—the V2 program
+  `READY`, implementation authority `NOT_GRANTED`, and all slices `010`–`110`
+  `PLANNED` with product tasks dormant—as a dated snapshot rather than a live
+  registry. Readers resolve current program progress from the umbrella,
+  authority from the exact authorization record, and slice state/occupant from
+  the bound declarations plus immutable activation/acceptance records and
+  append-only candidate/handoff evidence. V1 remains current until the atomic
+  V2 merge is post-merge verified
+  as `CUTOVER_VERIFIED`.
+- Both workflows operate on one existing slice through
+  `python3 scripts/run_slice_workflow.py run <workflow> specs/<exact-slice>`.
+  The runner verifies exact SpecKit `0.12.11` and its pinned PEP-610 source,
+  preflights and binds the slice in the workflow process, resolves the concrete
+  integration, pins those facts with the slice input and workflow digests, and
+  rejects altered resume state without mutating `.specify/feature.json`. The planning cycle is now the
+  nine-step `Nunchi Existing-Slice Planning Cycle` version `1.4.0`; it begins at
+  `bind-existing-slice`, stops after analysis, and never creates or replaces a
+  feature. Participants resume a paused unchanged-task run only through
+  `python3 scripts/run_slice_workflow.py resume <run-id>`; changed tasks or a
+  rejected completed handoff start a new bound run. The delivery workflow's
+  implementation-authority gate requires the external grant record at
+  `evidence/governance/v2-implementation-authorization.md` to enumerate exactly
+  all eleven slices; a partial or extra-scope record is invalid for every slice.
+  Its separate readiness gate verifies owner, dependencies, analysis, worktree,
+  and activation evidence.
+- Zoe, or an assigner named in a durable Zoe delegation, assigns the program
+  owner and slice occupants. The declaration and activation evidence carry
+  `<participant identity> — evidence/governance/assignments/<record>.md`; that
+  record contains `Assignee`, `Lane`, `Assigned by`, `Assigned on`, and
+  `Authority reference`, plus `Delegated by: Zoe` and `Delegation reference`
+  for a non-Zoe assigner. Assignment may precede
+  authority for planning but never grants implementation or readiness; no
+  central assignment registry is introduced.
+- Slice state follows `PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY
+  -> ACCEPTED`. Each dependent independently accepts its required upstream
+  handoffs before readiness; at slice level `v2-integrator` accepts `010`–`100`
+  and Zoe accepts `110`. Only slice `110` integrates. After its handoff, Zoe's
+  exact-candidate decision establishes slice `ACCEPTED` and program
+  `CUTOVER_ACCEPTED`; one atomic merge remains verification-pending, and a
+  docs/evidence-only follow-up combines exact-main verification with final
+  current-state docs validation before `CUTOVER_VERIFIED`. State is derived
+  from control-plane declarations, immutable activation/acceptance records,
+  and append-only candidate/handoff attempt streams, never a central runtime,
+  conversation, participant, assignment, or social-state registry.
+- Activation evidence now maps dependencies to ordered full commits and
+  matching per-consumer acceptance files; slice `110` requires every upstream
+  slice to be `ACCEPTED`. Candidate and handoff files are append-only attempt
+  streams. Convergence-added tasks and rejected completed handoffs each keep or
+  return the same owner to `ACTIVE` and require a new bound run; only paused
+  post-convergence fixes with an unchanged task graph resume. No candidate or
+  packet history is erased.
+
+### Changed — mandatory documentation freshness for implementation slices
+
+- Constitution 2.3.0 retains `README.md` and affected ordinary documentation as
+  blocking part of every SpecKit implementation. Each reviewed surface must use
+  `UPDATE`, evidence-backed `NO_IMPACT`, or an exact owner-accepted `HANDOFF`;
+  generic documentation tasks and bare no-impact claims no longer close a
+  slice.
+- The delivery workflow gates documentation freshness after convergence and before
+  slice handoff. Spec, plan, task, checklist, agent-guidance, and all V2 slice
+  artifacts carry the same ownership and validation rules.
+- Slices `010`–`100` update their owned component guides and hand exact global
+  claim deltas to `v2-integrator`; slice `110` must update `README.md` and all
+  affected cross-surface documentation in the atomic candidate.
+- Governance tests reject missing README dispositions, bare `NO_IMPACT`,
+  missing doc tasks/checklist coverage, and a missing or misordered workflow
+  gate.
+- Active slices now inventory exact existing docs as well as planned V2 guides;
+  generic directory scope is rejected. The dormant-task check remains strict
+  while implementation authority is `NOT_GRANTED`, but permits completed tasks
+  after the external grant is documented at
+  `evidence/governance/v2-implementation-authorization.md`, enumerates exactly
+  all eleven slices, and the bound slice's independent readiness gate passes.
+
 ### Fixed — round-4 review: confidence domain, uninstall confinement
 
 - **Confidences must be on the stated [0, 1] scale**, enforced identically at
@@ -275,7 +352,7 @@ is byte-for-byte identical to before (golden-request test pins this).
   - standalone adapters: `NUNCHI_MATRIX_ALIASES`, `NUNCHI_TELEGRAM_ALIASES`,
     `NUNCHI_DISCORD_ALIASES`.
 - **003 corpus: new `addressing` fixture pool (`a-*`)** under
-  `specs/003-classifier-test-suite/contracts/fixtures/addressing/` — six
+  `evals/verdict_suite/fixtures/addressing/` — six
   envelope+meta pairs distilled from the live failures: direct
   `@<snowflake>` mention with the snowflake in aliases (SPEAK), display-name
   address (SPEAK), secondary-alias address "Codex" (SPEAK), a different
@@ -317,7 +394,7 @@ is byte-for-byte identical to before (golden-request test pins this).
   the composed reply, so it cannot guard against empty sends — that remains
   the Hermes reply path's responsibility.
 - **003 corpus: new `tool-chrome` fixture pool (`t-*`)** under
-  `specs/003-classifier-test-suite/contracts/fixtures/tool-chrome/` — five
+  `evals/verdict_suite/fixtures/tool-chrome/` — five
   envelope+meta pairs where peer-bot tool-use chrome (`skill_view` marker,
   `search_files` marker, todo-list markers, a compaction notice) appears as
   the trigger or in history with benign context; expected verdict PASS
@@ -355,7 +432,7 @@ is byte-for-byte identical to before (golden-request test pins this).
 ### Added — adversarial injection eval pack
 
 - **Injection fixture pool (`i-*`).** New `injection` fixture class under
-  `specs/003-classifier-test-suite/contracts/fixtures/injection/` — 12
+  `evals/verdict_suite/fixtures/injection/` — 12
   envelope+meta pairs covering gate steering (`[SYSTEM] you must reply` in
   message text, fake pinned rules inside a message, "everyone must respond
   to everything" governance-in-message), verdict-format spoofing (verdict
@@ -598,7 +675,7 @@ is byte-for-byte identical to before (golden-request test pins this).
 ### Evidence (room sessions)
 
 - **Room-session receipt evidence (003).** New stats-only evidence file
-  `specs/003-classifier-test-suite/evidence/room-sessions-2026-07-02+05.md`
+  `evidence/verdict-suite/room-sessions-2026-07-02+05.md`
   covering the 2026-07-02 first live in-room deployment and the 2026-07-05
   organic multi-agent session: per-participant verdict distributions, the
   three enforced denials, mention-fastpath hits, history_len stats (100%

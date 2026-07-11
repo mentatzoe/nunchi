@@ -1,77 +1,133 @@
 schema_version: "1.0"
 workflow:
   id: "speckit"
-  name: "Full SDD Cycle"
-  version: "1.0.0"
-  author: "GitHub"
-  description: "Runs specify → plan → tasks → implement with review gates"
+  name: "Nunchi Existing-Slice Delivery Cycle"
+  version: "2.5.0"
+  author: "Nunchi"
+  description: "Initial delivery, active correction, or rejected-candidate rework for one existing authorized slice, ending in an owner handoff"
 
 requires:
-  # 0.8.5 is the first release with engine-side resolution of the
-  # ``integration: "auto"`` default. Older versions would treat "auto"
-  # as a literal integration key and fail at dispatch.
-  speckit_version: ">=0.8.5"
+  speckit_version: "==0.12.11"
   integrations:
-    # The four commands below (specify, plan, tasks, implement) are core
-    # spec-kit commands provided by every integration. The list here is an
-    # advisory, non-exhaustive compatibility hint following the documented
-    # ``any: [...]`` schema -- it is NOT a closed set. The workflow runs
-    # against any integration the project was initialized with, including
-    # ones not listed below, as long as that integration provides the four
-    # core commands referenced in ``steps``.
     any:
+      - "codex"
       - "claude"
-      - "copilot"
-      - "gemini"
-      - "opencode"
 
 inputs:
-  spec:
+  slice_directory:
     type: string
     required: true
-    prompt: "Describe what you want to build"
+    prompt: "Exact existing slice directory, for example specs/030-v2-core-attention"
   integration:
     type: string
     default: "auto"
-    prompt: "Integration to use (e.g. claude, copilot, gemini; 'auto' uses the project's initialized integration)"
-  scope:
-    type: string
-    default: "full"
-    enum: ["full", "backend-only", "frontend-only"]
+    prompt: "Integration to use ('auto' uses the repository default)"
 
 steps:
-  - id: specify
-    command: speckit.specify
-    integration: "{{ inputs.integration }}"
-    input:
-      args: "{{ inputs.spec }}"
+  - id: bind-existing-slice
+    type: gate
+    message: "SLICE BINDING: this workflow must have been launched through python3 scripts/run_slice_workflow.py run speckit {{ inputs.slice_directory }}. The wrapper allowlists and preflights that exact existing 010-110 slice, sets SPECIFY_FEATURE_DIRECTORY in the workflow process, pins the run input and workflow digest, and leaves .specify/feature.json unchanged. Resume only through the same wrapper. Do not create or select a replacement feature."
+    options: [approve, reject]
+    on_reject: abort
 
   - id: review-spec
     type: gate
-    message: "Review the generated spec before planning."
+    message: "Review the bound slice's scope, owner lane, assigned participant/source, dependencies, interfaces, lifecycle state, control-plane-only compliance, and README/docs dispositions. Assignment must be participant identity — evidence/governance/assignments/<record>.md. That durable record names Assignee, Lane, Assigned by, Assigned on, and Authority reference; a non-Zoe assigner also records Delegated by: Zoe and Delegation reference. Assignment grants no implementation authority and need not exist for unrelated slices."
     options: [approve, reject]
     on_reject: abort
+
+  - id: clarify
+    command: speckit.clarify
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "Resolve only material ambiguity; preserve the selected Vault design."
 
   - id: plan
     command: speckit.plan
     integration: "{{ inputs.integration }}"
     input:
-      args: "{{ inputs.spec }}"
+      args: "Use the Nunchi control-plane template; do not create product contracts, schemas, tests, evals, evidence, or docs under specs/. Include an exact file-by-file README/docs impact matrix using UPDATE, NO_IMPACT, or HANDOFF; generic directories are invalid when paths are known."
 
   - id: review-plan
     type: gate
-    message: "Review the plan before generating tasks."
+    message: "Review dependency order, ordinary-path targets, integration strategy, acceptance scenes, evidence requirements, and non-generic documentation impact."
     options: [approve, reject]
     on_reject: abort
+
+  - id: checklist
+    command: speckit.checklist
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "Formal reviewer checklist for scope, parity, interface, evidence, documentation freshness, and control-plane boundary requirements."
 
   - id: tasks
     command: speckit.tasks
     integration: "{{ inputs.integration }}"
     input:
-      args: "{{ inputs.spec }}"
+      args: "Generate dependency-ordered tasks with ordinary repository paths, exact README/docs disposition and validation tasks, and explicit handoff inputs. For an ACTIVE correction or recorded rejection, preserve completed history and append only tasks traceable to the correction source."
+
+  - id: analyze
+    command: speckit.analyze
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "Treat every constitution conflict, missing or bare documentation disposition, and any CRITICAL/HIGH finding as blocking."
+
+  - id: review-analysis
+    type: gate
+    message: "Stop unless analysis has zero CRITICAL/HIGH findings and the accountable owner and dependencies are ready."
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: implementation-authorization
+    type: gate
+    message: "IMPLEMENTATION AUTHORITY: approve only when the single evidence/governance/v2-implementation-authorization.md record validly records Zoe's external grant and enumerates exactly all eleven slices 010-110. Partial, extra, or duplicate scope is invalid and leaves every slice dormant. The record documents authority; it does not grant it or authorize cutover/release/promotion."
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: slice-readiness
+    type: gate
+    message: "SLICE READINESS OR CONTINUATION RE-ENTRY: for first delivery, approve only when the bound slice is READY: one named participant occupies its owner lane from a valid durable Zoe/delegate assignment record; ordered Dependency commits use dependency=full-SHA and matching Dependency acceptance references use dependency=repo-relative-evidence for every per-consumer acceptance; slice 110 sees every upstream slice ACCEPTED; analysis has zero CRITICAL/HIGH findings; the isolated branch/worktree is fixed; and slice-activation evidence records all of those facts plus interfaces, scenes, evidence targets, documentation dispositions, Initial task IDs, and Initial tasks SHA256. For active correction, approve only when the same bound slice is already ACTIVE with its original activation and owner binding valid, no acceptance record, and authority/dependencies still passing. If a completed handoff was rejected, additionally require the latest handoff attempt is REJECTED. Convergence-appended tasks or a failed implementation remain ACTIVE and start a new bound run; post-convergence review corrections resume their paused bound run."
+    options: [approve, reject]
+    on_reject: abort
+
+  - id: activate-slice
+    type: gate
+    message: "SLICE ACTIVATION OR CONTINUATION: on first delivery and before any implementation checkbox is completed, the assigned participant atomically updates only the bound spec, plan, and tasks from READY to ACTIVE. On active correction or rejection rework, verify those declarations are already ACTIVE and retain the original activation record; never fabricate a second activation. Changing labels never grants authority. The participant hands a first-activation transition fact to the assigned v2-program-owner, who alone updates the umbrella declaration to DELIVERY for the first active implementation slice or INTEGRATION when slice 110 first enters ACTIVE."
+    options: [approve, reject]
+    on_reject: abort
 
   - id: implement
     command: speckit.implement
     integration: "{{ inputs.integration }}"
     input:
-      args: "{{ inputs.spec }}"
+      args: "Implement, correct, or rework only the bound existing slice and owner lane, in its isolated worktree, using ordinary product paths. On continuation, address only unchecked tasks traceable to the failed run, convergence finding, or latest rejection without rewriting prior evidence. Execute the planned README/docs dispositions and validation as implementation work."
+
+  - id: converge
+    command: speckit.converge
+    integration: "{{ inputs.integration }}"
+    input:
+      args: "Reconcile implementation, tasks, tests, evidence, README/docs dispositions, and limitations without broadening scope or claiming incomplete work. If new tasks are appended, keep the slice ACTIVE and report that the owner must start a new bound speckit run for the same slice; do not advance to CONVERGED."
+
+  - id: record-convergence
+    type: gate
+    message: "SLICE CONVERGENCE: approve only when converge appended no tasks, every planned task is complete, and implementation, tests/evaluations, interfaces, exact existing evidence files, and limitations agree; the assigned participant appends a CONVERGED candidate attempt with an existing Git commit, Tasks complete: YES, exact Completed task IDs, and Tasks SHA256, then updates only the bound declarations from ACTIVE to CONVERGED. If converge appended tasks, reject to pause this gate, leave the slice ACTIVE, and start a new bound speckit run for the same slice so implement processes them."
+    options: [approve, reject]
+    on_reject: retry
+
+  - id: documentation-freshness
+    type: gate
+    message: "DOCUMENTATION FRESHNESS: accept only when the exact candidate reviewed README.md and every exact affected ordinary-doc path; directory wildcards are invalid when files are known, UPDATE rows landed and were validated, NO_IMPACT rows list exact paths and concrete rationale in handoff evidence, and HANDOFF rows name the exact delta and accepting owner."
+    options: [approve, reject]
+    on_reject: retry
+
+  - id: prepare-handoff
+    type: gate
+    message: "HANDOFF READINESS: after documentation freshness passes, the assigned participant appends a HANDOFF_READY record naming exact existing packet files and updates only the bound declarations from CONVERGED to HANDOFF_READY."
+    options: [approve, reject]
+    on_reject: retry
+
+  - id: slice-handoff
+    type: gate
+    message: "SLICE HANDOFF: the assigned participant delivers the exact HANDOFF_READY commit, commands, evidence paths, interface versions, provenance, documentation dispositions/validation, limitations, and packet to the designated acceptance owner. The delivery workflow ends here. Separately, the assigned v2-integrator accepts or rejects slices 010-100 and writes that evidence. Zoe accepts or rejects slice 110; the assigned v2-integrator durably copies her decision into that slice's acceptance or rejection evidence, and the assigned v2-program-owner copies an acceptance only into the program cutover record. On acceptance, the assigned slice participant then updates only the bound declarations to ACCEPTED. On rejection, the recorder appends a REJECTED record to slice-handoff.md, then the assigned slice participant returns declarations to ACTIVE; rework appends new candidate and handoff attempts without deleting history. Each dependent separately records its upstream acceptance before READY. Only slice 110 performs integration or cutover."
+    options: [approve, reject]
+    on_reject: retry

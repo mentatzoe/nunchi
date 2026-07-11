@@ -9,8 +9,8 @@ TOML/env baseline, atomic hot runtime state, startup history backfill, and an
 MCP Apps configuration/receipt panel. The repo-installable plugin bundle lives
 at [`nunchi-codex/`](./nunchi-codex/). Offline tests cover all four components,
 the app protocol, and the plugin shape. Committed Vigil evidence records
-[one room wake/outbound smoke](./evidence/2026-07-09-vigil-live-smoke.md) and
-[one two-turn continuity smoke](./evidence/2026-07-09-vigil-persistent-session.md)
+[one room wake/outbound smoke](../../evidence/codex/2026-07-09-vigil-live-smoke.md) and
+[one two-turn continuity smoke](../../evidence/codex/2026-07-09-vigil-persistent-session.md)
 where both admitted wakes report the same persisted Codex task id and the
 second send reaches Discord. These do not prove sustained operations. Sustained
 participation still requires the shared
@@ -259,7 +259,7 @@ allow, summarize the receipt log into committed evidence:
 ```sh
 /tmp/nunchi-codex-smoke-venv/bin/python integrations/codex/summarize_vigil_smoke.py \
   --log .tmp/<smoke-dir>/codex-runner-receipts.jsonl \
-  --out integrations/codex/evidence/YYYY-MM-DD-vigil-live-smoke.md
+  --out evidence/codex/YYYY-MM-DD-vigil-live-smoke.md
 ```
 
 The summarizer fails unless the log proves both `wake-ok` and outbound

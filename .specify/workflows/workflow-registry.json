@@ -2,12 +2,20 @@
   "schema_version": "1.0",
   "workflows": {
     "speckit": {
-      "name": "Full SDD Cycle",
-      "version": "1.0.0",
-      "description": "Runs specify \u2192 plan \u2192 tasks \u2192 implement with review gates",
-      "source": "bundled",
-      "installed_at": "2026-05-22T05:13:24.559959+00:00",
-      "updated_at": "2026-05-22T05:13:24.559966+00:00"
+      "name": "Nunchi Existing-Slice Delivery Cycle",
+      "version": "2.5.0",
+      "description": "Initial delivery, active correction, or rejected-candidate rework for one existing authorized slice, ending in an owner handoff",
+      "source": "project-customized",
+      "installed_at": "2026-07-11T09:56:03.818565+00:00",
+      "updated_at": "2026-07-11T19:30:00+00:00"
+    },
+    "nunchi-plan": {
+      "name": "Nunchi Existing-Slice Planning Cycle",
+      "version": "1.4.0",
+      "description": "Review and plan one existing V2 slice through analysis, with no implementation step",
+      "source": "project-customized",
+      "installed_at": "2026-07-11T10:00:00+00:00",
+      "updated_at": "2026-07-11T19:45:00+00:00"
     }
   }
 }

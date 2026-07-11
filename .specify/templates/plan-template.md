@@ -1,14 +1,53 @@
-# Implementation Plan: [FEATURE]
+# Existing Slice Implementation Plan: [SLICE]
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Branch**: `[canonical slice branch]` | **Date**: [DATE] | **Spec**: [link]
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Input**: Existing slice specification from `specs/[exact-slice]/spec.md`
 
-**Note**: This template is filled in by the `/speckit-plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
+**Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
+
+**Program**: `[umbrella program directory]`
+
+**Accountable owner lane**: `[exactly one owner lane]`
+
+**Program implementation authority**: `[NOT_GRANTED | GRANTED with authorization record]`
+
+**Slice state**: `[PLANNED | READY | ACTIVE | CONVERGED | HANDOFF_READY | ACCEPTED]`
+
+**Assigned participant / source**: `[UNASSIGNED — awaiting durable external assignment source | participant — evidence/governance/assignments/<record>.md]`
+
+The non-symlink assignment record MUST contain exactly one `Assignee`, `Lane`,
+`Assigned by`, ISO `Assigned on`, and durable `Authority reference`. A non-Zoe
+assigner additionally requires `Delegated by: Zoe` and a durable `Delegation
+reference`. It is neither implementation authority nor slice activation, and
+unrelated slice assignments are not readiness prerequisites.
+
+**SpecKit binding**: `python3 scripts/run_slice_workflow.py run nunchi-plan specs/[exact-slice]` for planning, or `python3 scripts/run_slice_workflow.py run speckit specs/[exact-slice]` for delivery
+
+**Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
+
+**Activation evidence**: `[evidence/v2/[slice]/slice-activation.md]`
+
+**Candidate evidence**: `[evidence/v2/[slice]/slice-candidate.md]`
+
+**Handoff evidence**: `[evidence/v2/[slice]/slice-handoff.md]`
+
+**Acceptance evidence**: `[evidence/v2/[slice]/slice-acceptance.md]`
+
+**Task manifest**: `python3 scripts/check_governance.py --task-manifest specs/[exact-slice]`
+
+**Rework execution**: [new bound delivery run after convergence adds tasks or a
+completed handoff is rejected; resume only a paused post-convergence gate with
+an unchanged task graph; retain activation and append attempt history]
+
+**Upstream dependencies**: `[slice ids or none]`
+
+**Dependency acceptance mapping**: `[ordered slice=full-sha plus matching
+slice=repo-relative-evidence-reference entries; none when dependency-free]`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+[Extract from the existing slice specification: primary requirement + technical approach from research]
 
 ## Technical Context
 
@@ -42,24 +81,81 @@
 
 [Gates determined based on constitution file]
 
+The check MUST include the SpecKit control-plane boundary, single-owner rule,
+program-authority and slice-lifecycle boundary, ordinary-path artifact
+locations, and parity/evidence obligations, including documentation freshness.
+An unexplained failure stops planning.
+
+## Slice Interfaces
+
+### Consumes
+
+- `[interface name/version]` from `[owning slice]` at `[authorized implementation target]`
+
+### Produces
+
+- `[interface name/version]` for `[dependent slices]` at `[authorized implementation target]`
+
+Interface details in this plan are planning summaries only. Machine-readable
+contracts and schemas MUST be created under `schemas/` during authorized slice implementation, never
+under this existing slice directory.
+
+## Integration Strategy
+
+**Integration order**: [dependency and handoff order]
+
+**Worktree/branch**: [isolated worktree and branch convention]
+
+**Handoff to**: [dependent owner lane or final integrator]
+
+**Conflict ownership**: [single owner for shared files/contracts]
+
+## Acceptance Scenes and Evidence
+
+| Scene | Surface(s) | Required observation | Ordinary evidence target |
+|---|---|---|---|
+| [scene id/name] | [surface] | [measurable outcome] | `evidence/[path]` |
+
+List deterministic tests under `tests/`, reusable corpora/runners under
+`evals/`, and live records under `evidence/`. Green unit tests alone MUST NOT be
+used as social-quality evidence. Aggregate records MUST carry stable scene and
+case IDs, and the slice MUST name an ordinary-path manifest mapping each scene
+to exact records and reproducible commands.
+
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Project landing/current state | `README.md` | [`UPDATE` / `NO_IMPACT` / `HANDOFF`] | [task/lane] | [validation, or exact delta plus accepting owner] |
+| [affected contract/integration/operator/evaluation docs] | `docs/[exact-path].md` | [`UPDATE` / `NO_IMPACT` / `HANDOFF`] | [task/lane] | [links/Mermaid/examples/commands/truth tests] |
+
+The `README.md` row is mandatory. Every `NO_IMPACT` row MUST list exact reviewed
+paths and a concrete rationale in ordinary-path handoff evidence. Every
+`HANDOFF` row MUST identify an integrator-owned document, the exact required
+claim delta, and the accepting owner; it is not a synonym for no impact.
+Slice-owned affected docs MUST use `UPDATE` and land before handoff.
+Generic directory rows are invalid when the affected files can be named.
+
 ## Project Structure
 
-### Documentation (this feature)
+### Control-plane artifacts (this slice)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+specs/[exact-slice]/
+├── spec.md              # Requirements and acceptance planning
+├── plan.md              # This file
+├── research.md          # Planning decisions only, when needed
+├── checklists/          # Requirements-quality checks only
+└── tasks.md             # Dependency-ordered execution plan
 ```
+
+No product source, schema, contract, test, fixture, evaluation, evidence,
+runtime asset, or product documentation may be placed in this tree.
 
 ### Source Code (repository root)
 <!--
   ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
+  for this slice. Delete unused options and expand the chosen structure with
   real paths (e.g., apps/admin, packages/something). The delivered plan must
   not include Option labels.
 -->
@@ -102,6 +198,27 @@ ios/ or android/
 
 **Structure Decision**: [Document the selected structure and reference the real
 directories captured above]
+
+## Ordinary Repository Targets
+
+| Artifact class | Implementation target path(s) | Owning task/story |
+|---|---|---|
+| Product implementation | `src/` or `integrations/` | [task/story] |
+| Machine-readable contracts | `schemas/` | [task/story] |
+| Tests | `tests/` | [task/story] |
+| Evaluation runners/corpora | `evals/` | [task/story] |
+| Evidence | `evidence/` | [task/story] |
+| Product/governance docs | `docs/` | [task/story] |
+| Project landing page review | `README.md` | [documentation freshness task] |
+
+## Owner Handoff
+
+The owner MUST hand off: exact commit, verification commands and results,
+ordinary-path evidence references, interface version(s), migration/provenance
+notes, a scene-to-record result manifest, documentation dispositions and
+validation results, and known limitations. Review does not transfer ownership
+silently. The handoff is blocked until the documentation-freshness gate accepts
+the exact candidate.
 
 ## Complexity Tracking
 

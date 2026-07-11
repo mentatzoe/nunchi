@@ -1,5 +1,12 @@
 # Nunchi Adapter Reference
 
+> **Current V1 reference:** every adapter in this document uses the implemented
+> `PASS / ACK / ASK / SPEAK` contract. None is evidence of selected V2 parity;
+> the dated 2026-07-11 reset recorded the relevant V2 slices as `PLANNED` and
+> dormant. Resolve their live state from the execution spine. Only slice `110`
+> owns integration, and V2 becomes current only after its accepted atomic merge
+> is post-merge verified as `CUTOVER_VERIFIED`.
+
 This document is the full adapter reference for Nunchi. It covers every
 supported surface, how to install and configure each adapter, and how to wire a
 custom responder.
@@ -413,9 +420,9 @@ Status is **bounded live-smokes evidenced**: unit tests cover the
 runner, inbound hook, outbound send hook, hot state, configuration app protocol,
 package entry points, config loading, history backfill, and plugin bundle shape,
 while
-[`integrations/codex/evidence/2026-07-09-vigil-live-smoke.md`](../integrations/codex/evidence/2026-07-09-vigil-live-smoke.md)
+[`evidence/codex/2026-07-09-vigil-live-smoke.md`](../evidence/codex/2026-07-09-vigil-live-smoke.md)
 records one live-room wake and outbound hook allow, and
-[`integrations/codex/evidence/2026-07-09-vigil-persistent-session.md`](../integrations/codex/evidence/2026-07-09-vigil-persistent-session.md)
+[`evidence/codex/2026-07-09-vigil-persistent-session.md`](../evidence/codex/2026-07-09-vigil-persistent-session.md)
 records two admitted wakes on the same persisted Codex task plus one delivered
 response. These remain bounded smokes, not sustained-operations evidence.
 Sustained participation still requires the shared `nunchi-mcp-discord`

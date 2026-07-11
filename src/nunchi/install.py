@@ -63,9 +63,10 @@ MARKER_NAME = ".nunchi-install.json"
 #: Marker schema version, so future readers can detect format changes.
 MARKER_VERSION = 1
 
-#: Directory names never copied into an installed Hermes plugin. ``docs`` is
-#: operator reference material (the core-patch), not runtime plugin code;
-#: ``__pycache__`` and ``tests`` never belong in a deployed plugin. Everything
+#: Directory names never copied into an installed Hermes plugin. Product docs
+#: live under the repository's top-level ``docs/`` tree; any stray ``docs``
+#: directory is therefore not runtime plugin code. ``__pycache__`` and ``tests``
+#: never belong in a deployed plugin. Everything
 #: else under ``nunchi-gate/`` — the runtime ``.py`` files, ``plugin.yaml``,
 #: and the ``dashboard/`` tab assets — is the *running plugin* and is copied.
 HERMES_EXCLUDE_DIRS = frozenset({"__pycache__", "docs", "tests"})

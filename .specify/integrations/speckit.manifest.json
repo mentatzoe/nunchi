@@ -1,17 +1,17 @@
 {
   "integration": "speckit",
-  "version": "0.8.13",
-  "installed_at": "2026-05-22T05:13:24.469162+00:00",
+  "version": "0.12.11",
+  "installed_at": "2026-07-11T09:56:03.805438+00:00",
   "files": {
-    ".specify/scripts/bash/common.sh": "dd638316259e699fd466542c77ef16af5eb198efe0447c081f86b890db414ba8",
-    ".specify/scripts/bash/setup-plan.sh": "0d1d7a66de157b0be1385bb91aa71e5bf95550217abf47a73270dab0dc52895a",
-    ".specify/scripts/bash/setup-tasks.sh": "e8d050c63c5afb664a8b671b0b0155513fb9cab0567b335e16b9eb035482aad2",
-    ".specify/scripts/bash/check-prerequisites.sh": "aff361639c504b95a2901493f5022788adc01a6792fd37f132de8f57782e4b80",
-    ".specify/scripts/bash/create-new-feature.sh": "bcf4964ca0c6c78717bb42d9e66b8c7e5ee82779cd96afc5aa7b08b75abe5790",
+    ".specify/scripts/bash/common.sh": "3ca6dc3c2c70f877d7ef377d0e36dc43c390cc12f4f4a6f7134b57d235dad4a2",
+    ".specify/scripts/bash/setup-plan.sh": "4469b22960f43c07c33dca00de6dedb252145e9a9ce8fbb0e63be82e02b082ab",
+    ".specify/scripts/bash/setup-tasks.sh": "cf21ba2212b4dd5b435c5ea8527500cfd27768b86c0bbc7ebc3207759f118d27",
+    ".specify/scripts/bash/check-prerequisites.sh": "a7d8a14ecf87332b600cd966b5d0e7cb9d594abce7e4d1ee4372b2b5b3efff06",
+    ".specify/scripts/bash/create-new-feature.sh": "dd531f9ba47c9ce9975b597947377be9542b7236681d6dc033513c4e3cfc50f2",
     ".specify/templates/constitution-template.md": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
-    ".specify/templates/checklist-template.md": "c37695297e5d3153d64f82c21223509940b13932046c7961c42d1d669516130c",
-    ".specify/templates/tasks-template.md": "fc29a233f6f5a27ca31f1aa46b596af6500c627441c6e62b2bc4a1d721525842",
-    ".specify/templates/spec-template.md": "3945437fc35cd30a5b2bf7beea680337c3516826d3efa5a6b92c4a7eca1ba28e",
-    ".specify/templates/plan-template.md": "cc7f7979cf8d8836ec26492785affd80791d3422a2b745062ec695be8c985ef7"
+    ".specify/templates/checklist-template.md": "e8f7a42e8515b4ddab50adfca367048798853068ac16dd3cc2ae7b0942f771d5",
+    ".specify/templates/tasks-template.md": "5572643cfd38c77107f5fbb4551a43eb9bd8acf0904a6faa6fa14784580b79ca",
+    ".specify/templates/spec-template.md": "469ecd868abff93c7d60b57b43a2216310b41eb8fa52e41eb18e4a8c50a96c10",
+    ".specify/templates/plan-template.md": "485fba6b8189b646f8ee9d3eddb753db1908afdf6c61fa605508db4ef8fac6fb"
   }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live drift eval: run the 003 corpus against the configured model and report.
+"""Live drift eval: run the V1 verdict corpus against the configured model.
 
 Reads NUNCHI_CLASSIFIER_MODEL (+ a provider key) from the environment, runs
 the verdict-test-suite corpus live, and prints pass/fail/error counts, accuracy
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-RUNNER = REPO / "specs" / "003-classifier-test-suite" / "contracts" / "runner.py"
+RUNNER_MODULE = "evals.verdict_suite.runner"
 
 # The 7 load-bearing adversarial fixtures (see model-selection evidence).
 HEADLINE = {
@@ -35,14 +35,19 @@ HEADLINE = {
 def main() -> int:
     model = os.environ.get("NUNCHI_CLASSIFIER_MODEL", "(unset)")
     env = dict(os.environ)
-    env.setdefault("PYTHONPATH", str(REPO / "src"))
+    env["PYTHONPATH"] = os.pathsep.join(
+        part
+        for part in (str(REPO / "src"), str(REPO), env.get("PYTHONPATH", ""))
+        if part
+    )
     # The runner exits 1 when any fixture fails (expected); we parse its JSONL
     # regardless of exit code.
     proc = subprocess.run(
-        [sys.executable, str(RUNNER), "--source", "all", "--format", "jsonl"],
+        [sys.executable, "-m", RUNNER_MODULE, "--source", "all", "--format", "jsonl"],
         capture_output=True,
         text=True,
         env=env,
+        cwd=REPO,
     )
 
     records = []
