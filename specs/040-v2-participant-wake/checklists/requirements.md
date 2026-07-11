@@ -33,6 +33,7 @@ complete, direct, bounded, and free of duplicate social judgment
 - [x] CHK013 Do scenarios cover all common S03/S06/S07/S09/S10/S15/S16 outcomes, meta-answer failure, advice red-team, and continuation attacks? [Traceability, Spec §User Scenarios & Testing]
 - [x] CHK014 Can every success criterion be measured by invocation count, schema-valid packet, result classification, fetch rejection, call graph, handoff, or boundary result? [Measurability, Spec §SC-001–SC-009]
 - [x] CHK015 Is it explicit that local evidence feeds slices 060–100 while 110 alone owns final parity and atomic cutover? [Dependency, Spec §Interface Summary, Explicit Exclusions]
+- [x] CHK016 Does documentation freshness inventory every exact known affected path, require the participant-guide `UPDATE`, route shared/downstream `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

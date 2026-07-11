@@ -170,6 +170,18 @@ do not embed evidence in the integration package.
 | Evidence | `evidence/v2/codex/` | US1–US3 |
 | Product docs | `docs/integrations/codex-v2.md` | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global Codex support/evidence state | `README.md` | `HANDOFF` | T022 / `v2-codex-owner` | Accepting owner: `v2-integrator`; replace bounded V1/outbound-regate claims with exact V2 session, no-social-send-gate, provenance, limitation, and evidence-grade wording at atomic cutover. |
+| Codex V2 and existing operator guides | `docs/integrations/codex-v2.md`, `integrations/codex/README.md` | `UPDATE` | T022 / `v2-codex-owner` | Validate install/plugin/session/config, removal of the outbound social re-gate, residue/restart, links, examples, and probes against the installed candidate. |
+| Shared integration/adapter/design/change state | `CHANGELOG.md`, `docs/adapters.md`, `docs/integration.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T022 / `v2-codex-owner` | Accepting owner: `v2-integrator`; apply the exact breaking Codex session, send-path, evidence-grade, limitation, and diagram delta at cutover. |
+| Shared Discord transport configuration | `integrations/mcp-discord/README.md` | `HANDOFF` | T022 / `v2-codex-owner` | Accepting owner: `v2-transport-owner`; apply the exact accepted Codex V2 harness configuration and action-capability delta without changing transport ownership. |
+
+The handoff must make removal of the V1 outbound social gate explicit; 110 owns
+the corresponding global current-state update.
+
 ## Owner Handoff
 
 The owner supplies exact commit, verification commands/results, consumed

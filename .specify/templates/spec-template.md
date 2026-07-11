@@ -32,6 +32,23 @@
 - **Produces**: [named/versioned interfaces and dependent slices]
 - **Integration handoff**: [owner lane and required handoff evidence]
 
+## Documentation Freshness *(mandatory)*
+
+- **`README.md` disposition**: [`UPDATE` | `NO_IMPACT` with concrete rationale |
+  `HANDOFF` with exact claim delta and accepting owner]
+- **Affected ordinary docs**: [exact `docs/` or other ordinary documentation
+  paths, each with `UPDATE`, `NO_IMPACT`, or `HANDOFF`]
+- **Validation**: [links, Mermaid, examples, commands, truthfulness tests, or
+  other checks appropriate to the claims]
+- **Handoff evidence**: [ordinary-path evidence record that will contain exact
+  reviewed paths, dispositions, rationale/delta, reviewer, and results]
+
+Every implementation MUST review `README.md`. `NO_IMPACT` requires exact paths
+and rationale in ordinary handoff evidence. `HANDOFF` is valid only for shared
+or integrator-owned documentation and MUST name the accepting owner and exact
+required change. Generic directories or wildcards do not replace exact file
+paths when the affected documents are already known.
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
@@ -121,11 +138,12 @@
 - **FR-006**: The slice MUST name acceptance scenes and ordinary-path evidence requirements.
 - **FR-007**: The slice MUST preserve the control-plane/product-artifact boundary.
 - **FR-008**: Every aggregate evidence record MUST carry a stable scene/case ID and appear in an exact ordinary-path manifest.
+- **FR-009**: The slice MUST execute and evidence its `README.md` and affected-docs freshness dispositions before handoff.
 
 *Example of marking unclear requirements:*
 
-- **FR-009**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-010**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-010**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
+- **FR-011**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
 ### Key Entities *(include if feature involves data)*
 
@@ -145,6 +163,7 @@
 - **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+- **SC-005**: Every affected documentation claim is updated and validated, or has a reviewed evidence-backed `NO_IMPACT`/`HANDOFF` disposition.
 
 ## Assumptions
 

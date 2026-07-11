@@ -15,7 +15,7 @@ Nunchi technical design without implementing V2 product behavior under Goal 1.
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Depends on**: selected Vault design and Nunchi Constitution 2.0.1
+**Depends on**: selected Vault design and Nunchi Constitution 2.1.0
 
 **Feeds**: slices `010` through `110` and the separately commissioned Goal 2
 
@@ -33,7 +33,7 @@ Nunchi technical design without implementing V2 product behavior under Goal 1.
 ## Interface Summary
 
 - **Consumes**: selected Aleph Vault V2 technical design; current ordinary-path
-  V1 implementation and evidence; Constitution 2.0.1.
+  V1 implementation and evidence; Constitution 2.1.0.
 - **Produces**: an acyclic slice graph, stable owner lanes, a shared interface
   registry, acceptance-scene catalog, integration order, and evidence contract.
 - **Integration handoff**: `v2-program-owner` activates the named slice lanes;
@@ -194,6 +194,14 @@ and final parity gate.
 - **FR-023**: Host-only continuation handles, binding tokens, cursors, and
   expiry values MUST remain outside the classifier projection; only factual
   coverage and expansion-availability booleans may cross that boundary.
+- **FR-024**: Every implementation slice MUST review `README.md` and affected
+  ordinary docs, execute exact `UPDATE`, evidence-backed `NO_IMPACT`, or
+  owner-accepted `HANDOFF` dispositions, and pass documentation freshness
+  before handoff.
+- **FR-025**: Checked Goal 2 tasks MUST be rejected until Zoe's separately
+  granted objective is recorded at
+  `evidence/governance/v2-goal-2-authorization.md`; the record documents rather
+  than grants authority, and a valid record MUST permit truthful task progress.
 
 ### Key Entities
 
@@ -227,14 +235,21 @@ and final parity gate.
   implementation steps and `speckit` has a Goal 2 gate before implementation.
 - **SC-008**: Both Codex and Claude integration manifests and the installed CLI
   report SpecKit `0.12.11`.
-- **SC-009**: The pre-existing baseline remains 968 passing and 8 skipped tests;
-  governance tests add coverage without removing or weakening an existing test.
+- **SC-009**: The pre-existing baseline remains 968 tests—960 passing and 8
+  skipped; governance tests add coverage without removing or weakening an
+  existing test.
 - **SC-010**: Every common acceptance scene maps to at least one implementing
   slice and to final parity slice `110`.
 - **SC-011**: There are zero unresolved placeholders, ownership gaps, dependency
   ambiguities, or CRITICAL/HIGH analysis findings at Goal 1 exit.
 - **SC-012**: Removing managed paths in a disposable verification copy leaves
   ordinary tests and eval discovery runnable before fresh initialization.
+- **SC-013**: Every slice has an exact README/docs disposition, validation task,
+  ordinary handoff evidence target, and reviewer gate; slice `110` owns the
+  mandatory global current-state update at atomic cutover.
+- **SC-014**: Governance rejects a checked implementation task with no valid
+  Goal 2 authorization record and accepts the same task state after a valid
+  externally granted record exists.
 
 ## Assumptions
 

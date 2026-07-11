@@ -57,6 +57,7 @@ before analysis.
 - [x] CHK030 Does the handoff require reusable assurance commands so slice `110` can rerun controls against the exact assembled candidate without making slice `100` an integrator? [Dependency, Plan §Owner Handoff]
 - [x] CHK031 Does SEC-C prove trusted bypass makes zero classifier calls and invokes one advice-free act-or-silence turn without a fabricated social result, while rejecting room/request-controlled bypass claims? [Security, Spec §FR-018]
 - [x] CHK032 Does SEC-C audit immutable request-correlated observation/attention/participant-host/transport records so each owner attests only its own stage and silence/unavailable outcomes are never fabricated? [Security, Spec §FR-019]
+- [x] CHK033 Does documentation freshness inventory every exact known path, make stale security docs blocking, require each exact owned security-doc `UPDATE`, route shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

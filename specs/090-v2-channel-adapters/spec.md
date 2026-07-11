@@ -248,6 +248,21 @@ scenes, and record schema/interface versions plus honest capability differences.
 - Cross-adapter parity compares equivalent facts and lifecycle, not identical
   transport features.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact installed adapter entrypoints,
+  capability differences, limitations, and evidence-grade deltas to
+  `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `docs/adapters-v2.md` and validate
+  invocation, budgets, capability semantics, entrypoints, links, examples, and
+  probes across installed adapters. `HANDOFF` exact current-state,
+  supersession, stability, and breaking-change deltas for `CHANGELOG.md`,
+  `docs/adapters.md`, `docs/integration.md`, `docs/STABILITY.md`,
+  `docs/contracts/channel-adapter-v1.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+- **Handoff evidence**: `evidence/v2/adapters/handoff.md` records reviewed
+  paths, dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - Ownership of `schemas/v2/`, core attention, common observation semantics,

@@ -205,6 +205,18 @@ documentation remain separately addressable ordinary artifacts.
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
 | Product implementation | none in this slice | Excluded |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording only in the atomic candidate. |
+| V2 contract reference | `docs/contracts/nunchi-v2.md` | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, links, and examples against both validators. |
+| Existing change, contract, integration, adapter, stability, and selected-design status | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; apply the exact breaking-change, supersession, interface-version, request/result, bypass, ERROR, and diagram delta at atomic cutover. |
+
+`HANDOFF` preserves slice 110's ownership of global current-state wording; it
+is not a no-impact finding. The exact candidate cannot hand off until both rows
+and every exact path's validation/delta are recorded in ordinary handoff evidence.
+
 ## Owner Handoff
 
 `v2-contract-owner` must hand off the exact commit, five interface versions and

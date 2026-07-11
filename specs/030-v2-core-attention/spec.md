@@ -291,6 +291,30 @@ with their own immutable I-010E attention-stage records.
 - Slice 030 prepares but does not execute participant/live-room canaries;
   participant behavior does not exist until dependent slices land.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact I-030A disposition, bypass,
+  operational ERROR, CLI, and dual-DEFER claim deltas to `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `docs/attention/v2.md`,
+  `docs/contracts/verdict-suite-data-model-v1.md`,
+  `docs/contracts/verdict-suite-requirements-v1.md`,
+  `docs/evaluations/verdict-suite.md`, and
+  `docs/evaluations/verdict-suite-runner.md`, preserving V1 scar evidence while
+  naming its V2 role. `HANDOFF` exact result, CLI/error, disposition, bypass,
+  dual-DEFER, and supersession deltas for `CHANGELOG.md`, `docs/STABILITY.md`,
+  `docs/integration.md`, `docs/INSTALL.md`, `docs/adapters.md`,
+  `docs/contracts/channel-adapter-v1.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+  `HANDOFF` the surface-specific lifecycle delta for
+  `integrations/mcp-discord/README.md` and
+  `integrations/mcp-discord/DESIGN.md` to accepting `v2-transport-owner`,
+  `integrations/hermes/README.md` to accepting `v2-hermes-owner`,
+  `integrations/claude-code/README.md` and
+  `integrations/claude-code/DEFER_EVAL.md` to accepting `v2-claude-owner`, and
+  `integrations/codex/README.md` to accepting `v2-codex-owner`.
+- **Handoff evidence**: `evidence/v2/attention/handoff.md` records the exact
+  reviewed paths, dispositions, delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - No V2 product behavior is implemented under Goal 1.

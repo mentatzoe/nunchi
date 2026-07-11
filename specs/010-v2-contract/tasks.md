@@ -68,9 +68,9 @@ records correlated by request ID.
 
 ## Phase 5: Documentation and Handoff
 
-- [ ] T017 Document the five interfaces, bypass, classifier projection, staged-receipt ownership, dual validators, and breaking V1 rejection in `docs/contracts/nunchi-v2.md`
+- [ ] T017 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md`
 - [ ] T018 Run the exact offline dual-validator command and create the S-ID-to-JSONL-record manifest in `evidence/v2/contract/README.md`
-- [ ] T019 Record exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, and limitations in `evidence/v2/contract/handoff.md`
+- [ ] T019 Record exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/contract/handoff.md`; handoff is blocked until documentation freshness passes
 
 ## Dependencies & Execution Order
 

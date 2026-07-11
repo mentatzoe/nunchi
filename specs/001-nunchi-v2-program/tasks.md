@@ -27,7 +27,7 @@ Goal 1 or by the existence of this file.
 
 **Purpose**: Establish authorization and accountability before product work.
 
-- [ ] T001 Record Zoe's explicit Goal 2 objective and authorization outside task status, then have `v2-program-owner` verify it against Constitution 2.0.1.
+- [ ] T001 After Zoe separately grants Goal 2, record its objective, authorizer, authority source, ISO date, and starting commit at `evidence/governance/v2-goal-2-authorization.md`, state that the record documents rather than grants authority, then have `v2-program-owner` verify it against Constitution 2.1.0 before any implementation checkbox is completed.
 - [ ] T002 Record one active work context for each stable owner lane and one for `v2-integrator`; reject duplicate or silently shared occupancy.
 - [ ] T003 Run `python3 scripts/check_governance.py --check-cli` and the full ordinary-path test baseline before activating any slice.
 - [ ] T004 Create the isolated `.worktrees/v2-contract/` worktree on branch `v2/contract` and activate only slice `010-v2-contract`.
@@ -40,7 +40,7 @@ only contract work is active.
 **Purpose**: Land one product contract before dependents begin.
 
 - [ ] T005 [US1] Execute `010-v2-contract/tasks.md` under `v2-contract-owner`, creating schemas under `schemas/v2/` and contract tests under `tests/v2/contract/`.
-- [ ] T006 [US1] Have `v2-program-owner` verify the `010` handoff packet, interface registry `I-010A`–`I-010E`, bypass branch, host-only continuation projection, immutable receipt-stage union, commands, and scene evidence; reject contract forks or embedded reply/social-ledger fields.
+- [ ] T006 [US1] Have `v2-program-owner` verify the `010` handoff packet, interface registry `I-010A`–`I-010E`, bypass branch, host-only continuation projection, immutable receipt-stage union, commands, scene evidence, and accepted documentation dispositions; reject contract forks, embedded reply/social-ledger fields, or stale docs.
 - [ ] T007 [US1] Hand the accepted exact `010` commit and interface versions to `v2-observation-owner`, `v2-core-owner`, and `v2-integrator`.
 
 **Checkpoint**: one accepted V2 contract commit exists; no consumer has invented
@@ -55,7 +55,7 @@ contract.
 - [ ] T009 [P] [US1] Execute `030-v2-core-attention/tasks.md` in `.worktrees/v2-core-attention/` on `v2/core-attention` under `v2-core-owner`.
 - [ ] T010 [US2] Verify `020` produces `I-020A ObservationProviderV2@1` and immutable observation-stage records, preserves exact identity/native relations/budgets, and has no social inference or registry.
 - [ ] T011 [US2] Verify `030` produces `I-030A AttentionEngineV2@1`, implements one participant-shaped judgment, keeps bypass/`ERROR` separate, strips host-only continuation authority from classifier input, emits immutable attention stages, honors the exact CLI process contract, and preserves the dual-valve transition.
-- [ ] T012 [US2] Hand accepted exact commits and interface versions from `020` and `030` to `v2-wake-owner`, all named downstream consumers, and `v2-integrator`.
+- [ ] T012 [US2] Hand accepted exact commits, interface versions, and documentation dispositions/deltas from `020` and `030` to `v2-wake-owner`, all named downstream consumers, and `v2-integrator`.
 
 **Checkpoint**: observation and pre-attention are separately owned, independently
 green, and contract-compatible.
@@ -68,7 +68,7 @@ green, and contract-compatible.
 - [ ] T014 [P] [US2] Execute `050-v2-discord-transport/tasks.md` in `.worktrees/v2-discord-transport/` on `v2/discord-transport` under `v2-transport-owner` after `010` and `020` are accepted.
 - [ ] T015 [US3] Verify `040` produces `I-040A ParticipantTurnHostV2@1`, routes PREATTENTION_BYPASS without a model claim, emits immutable participant-host stages, exposes truthful context expansion, invokes a normal act-or-silence turn, and has no intermediate admission answer or send-time social gate.
 - [ ] T016 [US3] Verify `050` produces `I-050A DiscordEventSourceV2@1` and immutable transport stages, limits deterministic no-wake to exact transport non-events, and proves continuity and native fact provenance.
-- [ ] T017 [US3] Hand accepted exact `040` and `050` commits to their named surface owners and `v2-integrator`.
+- [ ] T017 [US3] Hand accepted exact `040` and `050` commits plus validated owned-doc updates and exact README deltas to their named surface owners and `v2-integrator`.
 
 **Checkpoint**: common wake and shared Discord transport interfaces are accepted;
 surface integrations may begin only where their full dependency sets are met.
@@ -84,7 +84,7 @@ or shared-file drift.
 - [ ] T021 [P] [US3] Execute `090-v2-channel-adapters/tasks.md` in `.worktrees/v2-channel-adapters/` on `v2/channel-adapters` under `v2-adapters-owner`.
 - [ ] T022 [US3] Verify every surface handoff uses the accepted interfaces, preserves preattention bypass and staged-receipt semantics, removes V1 lifecycle residue, proves direct act-or-silence behavior, and records honest unavailable platform facts.
 - [ ] T023 [US4] Verify every surface handoff includes its installed-runtime commit/package/config/process provenance and live schema-2 probe under `evidence/v2/provenance/`.
-- [ ] T024 [US3] Hand all accepted surface commits, scene matrices, evidence paths, and limitations to `v2-security-owner` and `v2-integrator`.
+- [ ] T024 [US3] Hand all accepted surface commits, scene matrices, evidence paths, documentation dispositions/validation/deltas, and limitations to `v2-security-owner` and `v2-integrator`.
 
 **Checkpoint**: every in-tree consumer has an accepted candidate handoff; main
 still has not entered a mixed V1/V2 state.
@@ -95,9 +95,9 @@ still has not entered a mixed V1/V2 state.
 claims.
 
 - [ ] T025 [US4] Execute `100-v2-security-provenance/tasks.md` in `.worktrees/v2-security-provenance/` on `v2/security-provenance` under `v2-security-owner` against accepted commits from `010`–`090`.
-- [ ] T026 [US4] Require tested mitigation for each threat by default; record any documentation-only residual risk only with Zoe's explicit acceptance under `docs/security/` and `evidence/v2/security/`.
+- [ ] T026 [US4] Require tested mitigation for each threat by default; record any documentation-only residual risk only with Zoe's explicit acceptance in `docs/security/threat-model-v2.md` and the exact corresponding `evidence/v2/security/manifest.json` record.
 - [ ] T027 [US4] Verify governed suppression, advice isolation, classifier projection secrecy, preattention bypass, immutable receipt-stage ownership, credentials, send safety, recoverability, restart behavior, and installed-runtime provenance against scenes `S01`–`S16`.
-- [ ] T028 [US4] Hand the blocking assurance report, exact audited commit set, accepted limitations, and unresolved rejection list to `v2-integrator`; do not waive a failed blocking control.
+- [ ] T028 [US4] Hand the blocking assurance report, exact audited commit set, accepted documentation dispositions/deltas, accepted limitations, and unresolved rejection list to `v2-integrator`; do not waive a failed blocking control or stale documentation.
 
 **Checkpoint**: the candidate either has an accepted blocking assurance packet or
 returns to its named owner; parity integration does not begin on a rejection.
@@ -112,8 +112,8 @@ atomically.
 - [ ] T031 [US4] Run the fixed S14 ladder and staged mixed-room lifecycle, including suppression, both DEFER valves, preattention bypass, participant silence, operational error, restart, immutable receipt correlation, and no send-time reclassification.
 - [ ] T032 [US4] Prove the integration branch contains no V1 contract consumer, compatibility bridge, obsolete hook/shim/config residue, registry/ledger field, or unproven runtime.
 - [ ] T033 [US4] Run the full ordinary-path test/evaluation/boundary suite and assemble the final evidence index under `evidence/v2/README.md`.
-- [ ] T034 [US3] Update current-state, stability, integration, security, evaluation, and migration documentation under `docs/` and `README.md` to describe only what the exact integrated evidence proves.
-- [ ] T035 [US3] Present one atomic cutover commit and complete handoff packet for project-owner acceptance; do not merge a partial surface set or make a release/promotion claim.
+- [ ] T034 [US3] Complete documentation freshness by executing every exact `UPDATE` row in slice `110`'s §Documentation Impact and Freshness matrix, including `README.md` and every named root/shared/contract/evaluation/component/security/release/installed-surface file; reconcile every accepted upstream delta and validate links, Mermaid, examples, commands, install/version claims, and truthfulness tests against the exact candidate.
+- [ ] T035 [US3] Present one atomic cutover commit and complete handoff packet, including exact documentation dispositions/validation/reviewer, for project-owner acceptance; do not merge a partial surface set or make a release/promotion claim.
 - [ ] T036 [US3] After project-owner acceptance, merge the reviewed single atomic cutover PR to `main`, rerun all blocking checks on the resulting main commit, and record the PR, merge SHA, and results; package release and outward promotion remain separate decisions.
 
 **Checkpoint**: Goal 2 is complete only when the accepted atomic V2 lifecycle is

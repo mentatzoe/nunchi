@@ -270,6 +270,22 @@ changes only through the accountable upstream owner.
 | Evidence | `evidence/v2/README.md`, `evidence/v2/parity/` including `manifest.json` and `main-cutover.md`, `evidence/v2/provenance/`, `evidence/v2/live/` with references to upstream evidence | US1, US2, US3 |
 | Product/release docs | `README.md`, `CHANGELOG.md`, `docs/integration.md`, `docs/STABILITY.md`, `docs/evaluations/v2-parity.md`, `docs/releases/v2-readiness.md`, security docs by reference | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global current product/evidence state | `README.md` | `UPDATE` | T038 / `v2-integrator` | Reconcile every accepted upstream delta and describe only behavior, surfaces, limitations, and evidence grades proven by the exact atomic candidate. |
+| Root guidance, change, and security state | `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, `SECURITY.md` | `UPDATE` | T038-T040 / `v2-integrator` | Replace Goal-1/current-V1 guidance, record the breaking change, and validate security/current-state claims against the exact candidate and main merge SHA. |
+| Shared current guides and V1 archive index | `docs/INSTALL.md`, `docs/STABILITY.md`, `docs/adapters.md`, `docs/integration.md`, `docs/architecture/v2-selected-design.md`, `docs/governance/execution-spine.md`, `docs/archive/v1/README.md` | `UPDATE` | T038-T040 / `v2-integrator` | Reconcile upstream deltas, change selected-design status, preserve historical truth, and validate links, Mermaid, examples, commands, install/version claims, and evidence grades. |
+| Contract and evaluation transition | `docs/contracts/channel-adapter-v1.md`, `docs/contracts/nunchi-v2.md`, `docs/contracts/verdict-suite-data-model-v1.md`, `docs/contracts/verdict-suite-requirements-v1.md`, `docs/evaluations/verdict-suite.md`, `docs/evaluations/verdict-suite-runner.md`, `docs/evaluations/v2-parity.md` | `UPDATE` | T038-T040 / `v2-integrator` | Mark exact supersession/retention boundaries, preserve V1 scar evidence, and validate V2 parity commands, schemas, links, and truthfulness tests. |
+| Component and integration guides | `docs/observation/v2.md`, `docs/attention/v2.md`, `docs/participant/v2.md`, `docs/adapters-v2.md`, `docs/integrations/discord-mcp-v2.md`, `docs/integrations/hermes-v2.md`, `docs/integrations/claude-code-v2.md`, `docs/integrations/codex-v2.md`, `docs/integrations/hermes-core-patch.md`, `docs/integrations/hermes-core-patch-test-plan.md` | `UPDATE` | T038 / `v2-integrator` | Validate every accepted component version, diagram, capability, limitation, install/probe command, and evidence reference against the atomic candidate. |
+| Security and release boundary | `docs/security/assurance-handoffs.md`, `docs/security/operational-safety.md`, `docs/security/runtime-provenance.md`, `docs/security/suppression-governance.md`, `docs/security/threat-model-v2.md`, `docs/releases/v2-readiness.md` | `UPDATE` | T038-T040 / `v2-integrator` | Reconcile the accepted assurance packet, residual risks, provenance, release boundary, evidence links, and post-merge verification without making a promotion claim. |
+| Installed-surface operator docs | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/claude-code/transport-patch/README.md`, `integrations/codex/README.md` | `UPDATE` | T038 / `v2-integrator` | Validate installed bytes/config/process identity, native capability truth, restart/residue, lifecycle, links, examples, probes, and evidence grade for each surface. |
+
+Because this slice changes global current behavior, `NO_IMPACT` and `HANDOFF`
+are invalid for the rows above. Documentation freshness must pass before T043
+handoff and again on the resulting main merge SHA.
+
 ## Owner Handoff
 
 Each dependency owner MUST hand off exact commit, verification commands/results,

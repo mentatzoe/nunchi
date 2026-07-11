@@ -268,6 +268,27 @@ participant outcomes.
 - Operational send backstop capability differs by harness and is not required
   to pretend universal parity.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` the exact direct act-or-silence,
+  expansion, valid-silence, and no-send-reclassification claim delta to
+  `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `docs/participant/v2.md`. `HANDOFF` exact
+  wake-source, act-or-silence, expansion, receipt, and no-reclassification
+  deltas for `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`,
+  `docs/contracts/channel-adapter-v1.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+  `HANDOFF` surface-specific deltas for `integrations/mcp-discord/README.md` and
+  `integrations/mcp-discord/DESIGN.md` to accepting `v2-transport-owner`,
+  `integrations/hermes/README.md` to accepting `v2-hermes-owner`,
+  `integrations/claude-code/README.md`,
+  `integrations/claude-code/DEFER_EVAL.md`, and
+  `integrations/claude-code/transport-patch/README.md` to accepting
+  `v2-claude-owner`, and `integrations/codex/README.md` to accepting
+  `v2-codex-owner`.
+- **Handoff evidence**: `evidence/v2/participant/handoff.md` records reviewed
+  paths, dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - No V2 product behavior is implemented under Goal 1.

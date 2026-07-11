@@ -26,7 +26,37 @@ own current implementation truth. SpecKit owns execution planning only.
 - Goal 2 is separately commissioned. It implements the atomic V2 cutover and
   closes adapter/harness parity with committed evidence.
 
-Creating or completing a task file is not Goal 2 authorization.
+Creating or completing a task file is not Goal 2 authorization. After Zoe sets
+Goal 2, the program owner records the external grant at
+`evidence/governance/v2-goal-2-authorization.md` before checking any product
+task. The record names the objective, authorizer, authority source, date, and
+starting commit. It documents authorization; it cannot grant it. In the
+record's absence, the governance checker rejects checked Goal 2 tasks; after a
+valid record exists, it permits truthful task progress without relaxing any
+workflow or acceptance gate. This is governance activation evidence, not a
+conversation ledger, runtime permission registry, classifier input, or receipt.
+
+Create the record only after the external goal is set, using this exact shape:
+
+```markdown
+# Nunchi V2 Goal 2 Authorization
+
+**Program**: `001-nunchi-v2-program`
+
+**Status**: AUTHORIZED
+
+**Authorized by**: Zoe
+
+**Authorized on**: YYYY-MM-DD
+
+**Starting commit**: `<full-40-character-sha>`
+
+**Objective**: <the separately commissioned Goal 2 objective>
+
+**Authority source**: <the user-set goal/thread reference>
+
+This record documents external authorization; it does not grant it.
+```
 
 ## Pinned installation
 
@@ -115,9 +145,38 @@ specify workflow info speckit
 ```
 
 The full workflow adds an explicit Goal 2 authorization gate before
-implementation, then convergence and integration handoff. Reject that gate
-unless Zoe has set Goal 2 and the slice owner, dependencies, interfaces,
-acceptance scenes, and evidence requirements are ready.
+implementation, then convergence, documentation freshness, and integration
+handoff. Reject the authorization gate unless Zoe has set Goal 2 and the slice
+owner, dependencies, interfaces, acceptance scenes, and evidence requirements
+are ready, and the external authorization record above is valid.
+
+## Documentation freshness
+
+Every implementation plan contains an exact documentation-impact matrix. It
+must review `README.md` and each relevant ordinary-path document, then assign:
+
+- `UPDATE` when the candidate must change and validate the document;
+- `NO_IMPACT` only with exact reviewed paths and concrete rationale in ordinary
+  handoff evidence; or
+- `HANDOFF` only for shared or integrator-owned wording, with the exact claim
+  delta and accepting owner.
+
+Name each known affected file. Generic directory rows and wildcards are invalid
+when the plan can identify the actual documents.
+
+The workflow's `documentation-freshness` gate runs after convergence and before
+integration handoff. It reviews the exact candidate rather than trusting a task
+checkbox. Links, Mermaid, examples, commands, install/version claims, and
+machine-checkable truthfulness tests are validated when relevant. Intermediate
+V2 slices update their component docs and hand global current-state deltas to
+`v2-integrator`; slice `110` updates `README.md` and affected cross-surface docs
+as part of the atomic cutover.
+
+`scripts/check_governance.py` mechanically enforces the required sections,
+README disposition, owned-doc update, tasks, checklist coverage, and workflow
+order. It cannot infer whether prose is socially or technically truthful; that
+remains the exact-candidate review gate, strengthened by focused truthfulness
+tests for claims that can be compared to code.
 
 ## Ownership model
 

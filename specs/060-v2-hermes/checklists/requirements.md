@@ -37,6 +37,7 @@ requirements before future Goal 2 execution
 - [x] CHK016 Does `v2-hermes-owner` own only Hermes-specific paths while shared interface owners retain their files? [Ownership, Plan §Integration Strategy]
 - [x] CHK017 Are all future tests, evals, evidence, docs, and plugin code assigned to ordinary repository paths? [Boundary, Plan §Ordinary Repository Targets]
 - [x] CHK018 Is Goal 2 authorization stated as an external gate rather than a task checkbox? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK019 Does documentation freshness inventory every exact known path, require new/existing Hermes operator and patch docs to `UPDATE`, route shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

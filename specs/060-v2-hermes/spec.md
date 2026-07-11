@@ -213,6 +213,22 @@ then compare receipts and participant outcomes with the common program catalog.
 - Surface-specific missing facts may differ, but equivalent facts must normalize
   and route equivalently.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact Hermes V2 lifecycle,
+  capability, provenance, limitation, and evidence-grade deltas to
+  `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `docs/integrations/hermes-v2.md`,
+  `integrations/hermes/README.md`,
+  `docs/integrations/hermes-core-patch.md`, and
+  `docs/integrations/hermes-core-patch-test-plan.md`; validate installation,
+  patch/runtime provenance, profile isolation, restart, links, examples, and
+  probes. `HANDOFF` exact current-state and breaking-change deltas for
+  `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/integration.md`,
+  and `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+- **Handoff evidence**: `evidence/v2/hermes/handoff.md` records reviewed paths,
+  dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - Changes to shared schemas, classifier behavior, or the common participant-turn

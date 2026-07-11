@@ -40,6 +40,7 @@ entrypoint, and evidence requirements before future implementation
 - [x] CHK019 Does AD-09 have a harness-independent producing task shaped like the six pinned live stages without adding a reverse dependency on downstream harnesses? [Coverage, Plan §AD-09; tasks.md]
 - [x] CHK020 Does one manifest resolve AD-01 through AD-09 and common S IDs to exact evidence through stable `scene_id` values? [Traceability, Spec §FR-015; Plan §Acceptance Scenes]
 - [x] CHK021 Does AD-05 prove trusted `PREATTENTION_BYPASS` makes zero classifier calls, invokes one advice-free act-or-silence turn, fabricates no social/silent-delivery result, and preserves immutable singly owned request-correlated receipt stages? [Contract, Spec §FR-008, FR-009, FR-017]
+- [x] CHK022 Does documentation freshness inventory every exact known path, require the V2 adapter guide to `UPDATE`, route shared/current/supersession `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

@@ -2,9 +2,9 @@ schema_version: "1.0"
 workflow:
   id: "speckit"
   name: "Nunchi Governed Slice Cycle"
-  version: "2.0.0"
+  version: "2.1.0"
   author: "Nunchi"
-  description: "Full slice cycle with requirements gates and explicit Goal 2 authorization before implementation"
+  description: "Full slice cycle with Goal 2 authorization and a blocking documentation-freshness gate"
 
 requires:
   speckit_version: "==0.12.11"
@@ -32,7 +32,7 @@ steps:
 
   - id: review-spec
     type: gate
-    message: "Review scope, single owner, dependencies, interfaces, Goal boundary, and control-plane-only compliance."
+    message: "Review scope, single owner, dependencies, interfaces, Goal boundary, control-plane-only compliance, and explicit README/docs freshness dispositions."
     options: [approve, reject]
     on_reject: abort
 
@@ -46,11 +46,11 @@ steps:
     command: speckit.plan
     integration: "{{ inputs.integration }}"
     input:
-      args: "Use the Nunchi control-plane template; do not create product contracts, schemas, tests, evals, evidence, or docs under specs/."
+      args: "Use the Nunchi control-plane template; do not create product contracts, schemas, tests, evals, evidence, or docs under specs/. Include an exact file-by-file README/docs impact matrix using UPDATE, NO_IMPACT, or HANDOFF; generic directories are invalid when paths are known."
 
   - id: review-plan
     type: gate
-    message: "Review dependency order, ordinary-path targets, integration strategy, acceptance scenes, and evidence requirements."
+    message: "Review dependency order, ordinary-path targets, integration strategy, acceptance scenes, evidence requirements, and non-generic documentation impact."
     options: [approve, reject]
     on_reject: abort
 
@@ -58,19 +58,19 @@ steps:
     command: speckit.checklist
     integration: "{{ inputs.integration }}"
     input:
-      args: "Formal reviewer checklist for scope, parity, interface, evidence, and control-plane boundary requirements."
+      args: "Formal reviewer checklist for scope, parity, interface, evidence, documentation freshness, and control-plane boundary requirements."
 
   - id: tasks
     command: speckit.tasks
     integration: "{{ inputs.integration }}"
     input:
-      args: "Generate dependency-ordered tasks with ordinary repository paths and explicit handoff evidence."
+      args: "Generate dependency-ordered tasks with ordinary repository paths, exact README/docs disposition and validation tasks, and explicit handoff evidence."
 
   - id: analyze
     command: speckit.analyze
     integration: "{{ inputs.integration }}"
     input:
-      args: "Treat every constitution conflict and any CRITICAL/HIGH finding as blocking."
+      args: "Treat every constitution conflict, missing or bare documentation disposition, and any CRITICAL/HIGH finding as blocking."
 
   - id: review-analysis
     type: gate
@@ -80,7 +80,7 @@ steps:
 
   - id: goal-2-authorization
     type: gate
-    message: "IMPLEMENTATION AUTHORITY: approve only when Zoe has separately set Goal 2 for this V2 program. Goal 1 never satisfies this gate."
+    message: "IMPLEMENTATION AUTHORITY: approve only when Zoe has separately set Goal 2 and that external grant is validly recorded at evidence/governance/v2-goal-2-authorization.md before any task is checked. The record documents authority; it does not grant it. Goal 1 never satisfies this gate."
     options: [approve, reject]
     on_reject: abort
 
@@ -88,16 +88,22 @@ steps:
     command: speckit.implement
     integration: "{{ inputs.integration }}"
     input:
-      args: "Implement only this owner lane, in an isolated worktree, using ordinary product paths."
+      args: "Implement only this owner lane, in an isolated worktree, using ordinary product paths. Execute the planned README/docs dispositions and validation as implementation work."
 
   - id: converge
     command: speckit.converge
     integration: "{{ inputs.integration }}"
     input:
-      args: "Reconcile implementation, tasks, tests, evidence, and limitations without broadening scope or claiming incomplete work."
+      args: "Reconcile implementation, tasks, tests, evidence, README/docs dispositions, and limitations without broadening scope or claiming incomplete work."
+
+  - id: documentation-freshness
+    type: gate
+    message: "DOCUMENTATION FRESHNESS: accept only when the exact candidate reviewed README.md and every exact affected ordinary-doc path; directory wildcards are invalid when files are known, UPDATE rows landed and were validated, NO_IMPACT rows list exact paths and concrete rationale in handoff evidence, and HANDOFF rows name the exact delta and accepting owner."
+    options: [approve, reject]
+    on_reject: abort
 
   - id: integration-handoff
     type: gate
-    message: "Accept only with commit, commands, evidence paths, interface versions, provenance, and known limitations handed to the named integrator."
+    message: "Accept only with commit, commands, evidence paths, interface versions, provenance, documentation dispositions/validation, and known limitations handed to the named integrator."
     options: [approve, reject]
     on_reject: abort

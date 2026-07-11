@@ -8,11 +8,13 @@ integration, acceptance, or evidence ambiguity before Zoe sets Goal 2
 ## Authority and Workflow
 
 - [x] Aleph Vault PR 67 (`bdd1ebb`) and contract-clarification PR 68 (`c834e8c`) are merged and verified as the selected upstream authority.
-- [x] Constitution 2.0.1, `AGENTS.md`, `CLAUDE.md`, repository docs, and active plans state the same authority order and two-goal boundary.
+- [x] Constitution 2.1.0, `AGENTS.md`, `CLAUDE.md`, repository docs, and active plans state the same authority order, two-goal boundary, and documentation-freshness gate.
 - [x] SpecKit `0.12.11` is pinned in the repository and installed CLI.
 - [x] Codex and Claude integrations are installed from the exact pin.
 - [x] The planning-only workflow parses and contains no implementation step.
 - [x] The full workflow parses and has an explicit Goal 2 authorization gate before implementation.
+- [x] The full workflow has a documentation-freshness gate after convergence and before integration handoff.
+- [x] Checked implementation tasks remain rejected until a valid externally granted Goal 2 record exists, then become legal progress rather than a governance failure.
 
 ## Control-Plane Boundary
 
@@ -37,6 +39,7 @@ integration, acceptance, or evidence ambiguity before Zoe sets Goal 2
 - [x] Scenes `S01`–`S16` have named implementing slices and final parity ownership.
 - [x] Every slice maps applicable scenes to exact ordinary test/eval/evidence targets.
 - [x] Every slice defines a complete owner handoff packet and rejects unit-only social-quality claims.
+- [x] Every slice reviews `README.md`, inventories exact known affected paths, updates its owned docs, hands exact shared-doc deltas to their accepting owners, and records validation/reviewer evidence before handoff.
 
 ## Analysis and Baseline
 

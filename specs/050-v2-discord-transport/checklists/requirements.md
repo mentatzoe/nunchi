@@ -41,6 +41,7 @@ measurable, and bounded before Goal 2 authorization
 - [x] CHK020 Does DT-07 have a harness-independent producing task that preserves the downstream dependency graph while final live participant behavior remains with slice `110`? [Coverage, Plan §Acceptance Scenes; tasks.md]
 - [x] CHK021 Does one manifest map DT-01 through DT-07 and common S IDs to exact evidence records through stable `scene_id` values? [Traceability, Spec §FR-012; Plan §Acceptance Scenes]
 - [x] CHK022 Does DT-05 keep transport action handling wake-source-agnostic, prove zero transport/send-path classifier calls, preserve rather than re-attest an upstream bypass stage, fabricate no social/silence-delivery result, and append only the immutable request-correlated transport stage this owner can attest? [Contract, Spec §FR-009, FR-015]
+- [x] CHK023 Does documentation freshness inventory every exact known path, require both existing Discord-MCP docs and the V2 guide to `UPDATE`, route shared/downstream `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

@@ -33,6 +33,7 @@ clear, measurable, and bounded before implementation planning is accepted
 
 - [x] CHK014 Do Draft 2020-12 and stdlib runtime adapters consume the same corpus under the exact offline `jsonschema==4.26.0` test command, with aggregate records carrying `scene_id` and a complete README manifest? [Measurability, Spec §SC-001–SC-006]
 - [x] CHK015 Are dependency order, downstream owner lanes, interface ownership, and Goal 2 authorization prerequisites complete? [Dependency, Spec §Interface Summary, Assumptions]
+- [x] CHK016 Does documentation freshness inventory every exact known affected path, require the owned contract-doc `UPDATE`, route exact shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

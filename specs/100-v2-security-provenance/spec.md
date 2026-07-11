@@ -356,6 +356,25 @@ explicit Zoe acceptance or blocks the handoff.
 - Zoe alone may explicitly accept any residual risk that remains after
   evidence-backed mitigation review.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` only audited suppression-governance,
+  operational-safety, provenance, accepted-risk, limitation, and evidence-grade
+  deltas to `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `SECURITY.md`,
+  `docs/security/assurance-handoffs.md`,
+  `docs/security/operational-safety.md`,
+  `docs/security/runtime-provenance.md`,
+  `docs/security/suppression-governance.md`, and
+  `docs/security/threat-model-v2.md`. `HANDOFF` exact audited security,
+  provenance, limitation, accepted-risk, current-state, and breaking-change
+  deltas for `CHANGELOG.md`, `docs/INSTALL.md`, `docs/integration.md`,
+  `docs/STABILITY.md`, and `docs/architecture/v2-selected-design.md` to
+  accepting `v2-integrator`; stale or overclaimed documentation is blocking.
+- **Handoff evidence**: `evidence/v2/security/integrator-handoff.md` records
+  exact reviewed paths, dispositions, delta, validation, reviewer, and
+  acceptance/rejection.
+
 ## Explicit Exclusions
 
 - Implementing any V2 product behavior during Goal 1.

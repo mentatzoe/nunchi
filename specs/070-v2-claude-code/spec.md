@@ -250,6 +250,24 @@ runtime prose filter.
 - Cold-start wake may remain limited; truthful capability and effective policy
   are required rather than an invented guarantee.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact Claude reactive/cold-wake,
+  single-judgment, provenance, limitation, and evidence-grade deltas to
+  `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE`
+  `docs/integrations/claude-code-v2.md`,
+  `integrations/claude-code/README.md`,
+  `integrations/claude-code/DEFER_EVAL.md`, and
+  `integrations/claude-code/transport-patch/README.md`; validate install,
+  configuration, dual-DEFER meaning, patch provenance, restart, links,
+  examples, and probes. `HANDOFF` exact current-state and breaking-change
+  deltas for `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`,
+  `docs/integration.md`, and `docs/architecture/v2-selected-design.md` to
+  accepting `v2-integrator`.
+- **Handoff evidence**: `evidence/v2/claude-code/handoff.md` records reviewed
+  paths, dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - Ownership of shared Discord transport, shared schemas, attention behavior, or

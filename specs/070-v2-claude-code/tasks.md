@@ -67,7 +67,7 @@ send-time social judgment is rejected.
 - [ ] T013 [US3] Add failing advice-isolation, message/reaction/tool, silence, PREATTENTION_BYPASS act-or-silence, evaluation-only meta-answer, no-runtime-prose-filter, no-send-regate, request-correlation, and no-cross-owner-stage-mutation tests in `tests/v2/test_claude_code.py`
 - [ ] T014 [US3] Deliver `I-010C` facts, including advice-free `PREATTENTION_BYPASS`, and optional bound `I-010D` expansion through one `I-040A` invocation while preserving upstream immutable stages in `integrations/claude-code/nunchi_prompt_gate.py`
 - [ ] T015 [US3] Replace V1 environment examples with trusted V2 interface, budget, and delegation settings in `integrations/claude-code/nunchi-gate.env.example`
-- [ ] T016 [US3] Document V2 installation, patch provenance, reactive/cold-wake capability, restart, and probes in `docs/integrations/claude-code-v2.md`
+- [ ] T016 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Claude `UPDATE` paths, route each shared `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/claude-code/handoff.md`
 
 **Checkpoint**: CC-04 passes and the send path has no social reclassification.
 
@@ -78,7 +78,7 @@ send-time social judgment is rejected.
 - [ ] T019 Record exact plugin base/patch, hook, Claude Code, Nunchi package, model/config, process restart, and CC-06 live V2 probe in `evidence/v2/claude-code/installed-runtime.md`
 - [ ] T020 Map CC-01 through CC-06 and applicable S IDs to exact records, commands, candidate commit, request ID, stage owner, classifier-call count, and result in `evidence/v2/claude-code/manifest.json`
 - [ ] T021 Index deterministic/live commands and CC-01 through CC-06 outcomes, including trusted-bypass zero-classifier-call/no-fabricated-result proof, immutable-stage ownership, post-hoc meta-answer grades, and confirmation that no runtime prose filter ran, in `evidence/v2/claude-code/verification.md`
-- [ ] T022 Hand off commit, interface versions, commands/results, manifest, evidence, capabilities, effective limits, and limitations in `evidence/v2/claude-code/handoff.md`
+- [ ] T022 Hand off commit, interface versions, commands/results, manifest, evidence, capabilities, effective limits, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/claude-code/handoff.md` only after documentation freshness passes
 
 ## Dependencies & Execution Order
 

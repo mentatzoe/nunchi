@@ -245,6 +245,25 @@ off-surface receipts for exact installed-runtime provenance.
   Discord facts and acceptance contract; runtime packaging parity is judged in
   its own slice and in `110`.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact installed Discord capability,
+  limitation, restart, provenance, and evidence-grade deltas to `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE`
+  `docs/integrations/discord-mcp-v2.md`,
+  `integrations/mcp-discord/README.md`, and
+  `integrations/mcp-discord/DESIGN.md`; validate native facts, exact-self,
+  gaps/budgets, continuation, actions, receipts, restart, install provenance,
+  links, and probes. `HANDOFF` exact global Discord and diagram deltas for
+  `docs/adapters.md` and `docs/architecture/v2-selected-design.md` to accepting
+  `v2-integrator`, hand the exact breaking-change delta for `CHANGELOG.md` to
+  accepting `v2-integrator`, plus the peer-hearing and Codex harness deltas for
+  `integrations/claude-code/transport-patch/README.md` to accepting
+  `v2-claude-owner` and `integrations/codex/README.md` to accepting
+  `v2-codex-owner`.
+- **Handoff evidence**: `evidence/v2/discord-transport/handoff.md` records exact
+  reviewed paths, dispositions, delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - Pre-attention model prompting, V2 disposition routing, or participant reply

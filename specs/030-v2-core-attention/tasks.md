@@ -73,8 +73,8 @@ or failed path returns ERROR and the correct wake-default/override audit.
 
 - [ ] T023 Run the incumbent Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3 comparison (or an explicit later Zoe override) and record every attempt with mandatory scene IDs, exact provider IDs, provider/endpoint, prompt/config, date, and results in `evidence/v2/attention/model-comparison/results.jsonl`
 - [ ] T024 Preregister the downstream live DEFER canary scenes, metrics, stop/retirement rules, owners, and immutable result paths in `evidence/v2/attention/defer-canary/protocol.md`; do not execute participant/live-room canaries in slice 030
-- [ ] T025 Document the V2 attention boundary, operator policy, error semantics, and active margin in `docs/attention/v2.md`
-- [ ] T026 Publish the scene-to-record command manifest in `evidence/v2/attention/README.md` and record commit, commands, I-030A/upstream versions, model/policy provenance, canary protocol, evidence, active margin, and limitations in `evidence/v2/attention/handoff.md`
+- [ ] T025 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each V2/V1-evidence `UPDATE`, route every shared and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/attention/handoff.md`
+- [ ] T026 Publish the scene-to-record command manifest in `evidence/v2/attention/README.md` and record commit, commands, I-030A/upstream versions, model/policy provenance, canary protocol, evidence, active margin, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/attention/handoff.md`; handoff is blocked until documentation freshness passes
 
 ## Dependencies & Execution Order
 

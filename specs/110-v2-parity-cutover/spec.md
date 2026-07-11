@@ -377,6 +377,51 @@ release claim against the exact integrated candidate.
 - A release/version go decision remains Zoe's; successful integration does not
   itself publish a package or authorize promotion.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `UPDATE`; reconcile every accepted upstream
+  claim delta and describe only behavior, surfaces, limitations, and evidence
+  grades proven by the exact atomic candidate.
+- **Affected ordinary docs**: `UPDATE` root current-state and governance
+  guidance in `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, and `SECURITY.md`;
+  shared/current guides in `docs/INSTALL.md`, `docs/STABILITY.md`,
+  `docs/adapters.md`, `docs/integration.md`,
+  `docs/architecture/v2-selected-design.md`,
+  `docs/governance/execution-spine.md`, and `docs/archive/v1/README.md`;
+  contract/evaluation transition docs in
+  `docs/contracts/channel-adapter-v1.md`, `docs/contracts/nunchi-v2.md`,
+  `docs/contracts/verdict-suite-data-model-v1.md`,
+  `docs/contracts/verdict-suite-requirements-v1.md`,
+  `docs/evaluations/verdict-suite.md`,
+  `docs/evaluations/verdict-suite-runner.md`, and
+  `docs/evaluations/v2-parity.md`; component guides in
+  `docs/observation/v2.md`, `docs/attention/v2.md`,
+  `docs/participant/v2.md`, `docs/adapters-v2.md`,
+  `docs/integrations/discord-mcp-v2.md`,
+  `docs/integrations/hermes-v2.md`,
+  `docs/integrations/claude-code-v2.md`,
+  `docs/integrations/codex-v2.md`,
+  `docs/integrations/hermes-core-patch.md`, and
+  `docs/integrations/hermes-core-patch-test-plan.md`; exact security/release
+  files `docs/security/assurance-handoffs.md`,
+  `docs/security/operational-safety.md`,
+  `docs/security/runtime-provenance.md`,
+  `docs/security/suppression-governance.md`,
+  `docs/security/threat-model-v2.md`, and
+  `docs/releases/v2-readiness.md`; and installed-surface docs
+  `integrations/mcp-discord/README.md`,
+  `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`,
+  `integrations/claude-code/README.md`,
+  `integrations/claude-code/DEFER_EVAL.md`,
+  `integrations/claude-code/transport-patch/README.md`, and
+  `integrations/codex/README.md`. Validate links, Mermaid, examples, commands,
+  install/version claims, evidence references, and truthfulness tests.
+- **Handoff evidence**: `evidence/v2/parity/final-handoff.md` and
+  `evidence/v2/parity/main-cutover.md` record reviewed paths, validation,
+  reviewer acceptance, candidate SHA, and main merge SHA.
+- Because this slice changes global current behavior, `NO_IMPACT` and `HANDOFF`
+  are invalid for the rows above.
+
 ## Explicit Exclusions
 
 - Implementing or integrating any V2 product behavior during Goal 1.

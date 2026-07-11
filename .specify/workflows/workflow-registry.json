@@ -3,19 +3,19 @@
   "workflows": {
     "speckit": {
       "name": "Nunchi Governed Slice Cycle",
-      "version": "2.0.0",
-      "description": "Full slice cycle with requirements gates and explicit Goal 2 authorization before implementation",
+      "version": "2.1.0",
+      "description": "Full slice cycle with Goal 2 authorization and a blocking documentation-freshness gate",
       "source": "project-customized",
       "installed_at": "2026-07-11T09:56:03.818565+00:00",
-      "updated_at": "2026-07-11T10:00:00+00:00"
+      "updated_at": "2026-07-11T15:55:00+00:00"
     },
     "nunchi-plan": {
       "name": "Nunchi Planning-Only Slice Cycle",
-      "version": "1.0.0",
-      "description": "Specify through analysis without any product implementation step",
+      "version": "1.1.0",
+      "description": "Specify through analysis with mandatory README/docs impact planning and no implementation step",
       "source": "project-customized",
       "installed_at": "2026-07-11T10:00:00+00:00",
-      "updated_at": "2026-07-11T10:00:00+00:00"
+      "updated_at": "2026-07-11T15:55:00+00:00"
     }
   }
 }

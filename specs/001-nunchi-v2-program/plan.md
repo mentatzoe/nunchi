@@ -11,7 +11,7 @@ and the requirements in this program specification.
 
 **Goal authorization**: Goal 1 planning only; Goal 2 is not authorized
 
-**Upstream dependencies**: Aleph Vault `c834e8c`; Constitution 2.0.1; the
+**Upstream dependencies**: Aleph Vault `c834e8c`; Constitution 2.1.0; the
 ordinary-path V1 inventory and evidence baseline
 
 ## Summary
@@ -77,6 +77,7 @@ slice handoff.*
 | VI. Evidence before claims | Every slice binds shared scenes to deterministic, replay, live, and provenance evidence as appropriate. | PASS |
 | VII. Control-plane only | This tree contains planning Markdown only; all future product artifacts target ordinary repository paths. | PASS |
 | VIII. Single-owner slices | Each slice has one stable owner lane, explicit edges, isolated work, and an integrator handoff. | PASS |
+| Documentation freshness | Every slice reviews `README.md`, updates owned docs, hands exact shared claim deltas to 110, and must pass a post-convergence reviewer gate. | PASS |
 
 No constitutional violation or complexity exception is accepted.
 
@@ -259,6 +260,25 @@ docs/                          # truthful product/integration/security/evaluatio
 | Evidence | `evidence/v2/` | each slice for its run records; final index in `110` |
 | Product and integration docs | `docs/` | implementing slice drafts; final truthful state in `110` |
 
+## Program Documentation Freshness
+
+Every implementing slice reviews `README.md` and its affected ordinary docs.
+Known files are named exactly; generic directory scope is invalid. Goal 2 task
+progress stays dormant until the separately granted objective is recorded at
+`evidence/governance/v2-goal-2-authorization.md`, which documents but cannot
+grant authorization.
+Slices `010`–`100` use `UPDATE` for owned component guides and an exact
+`HANDOFF` to `v2-integrator` for global current-state claim deltas. Slice `110`
+must use `UPDATE` for `README.md` and all affected cross-surface docs; because
+the atomic cutover changes current behavior, neither `NO_IMPACT` nor `HANDOFF`
+is valid for that final global wording.
+
+Each slice's ordinary handoff evidence records exact reviewed paths,
+dispositions, validation results, reviewer, and—where applicable—the precise
+delta and accepting owner. Planning checkboxes do not prove freshness. The full
+workflow's post-convergence documentation gate reviews the exact candidate
+before owner handoff.
+
 ## Owner Handoff Contract
 
 Every slice owner hands off one packet containing:
@@ -269,8 +289,10 @@ Every slice owner hands off one packet containing:
 4. deterministic test and replay paths;
 5. live evidence and installed-runtime provenance where required;
 6. acceptance-scene result matrix, including valid unavailable facts;
-7. effective configuration and migration/residue notes; and
-8. known limitations, residual risks, and any rejected claim.
+7. effective configuration and migration/residue notes;
+8. documentation dispositions, exact reviewed paths, validation results,
+   reviewer, and accepted shared-doc deltas; and
+9. known limitations, residual risks, and any rejected claim.
 
 An incomplete packet is not accepted. Reviewers challenge the packet but do not
 silently take ownership. `v2-integrator` records acceptance or sends it back to

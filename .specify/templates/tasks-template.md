@@ -19,6 +19,12 @@ and explicit Goal 2 authorization before any product task begins
 replay or live evidence where the claim requires it, and an ordinary-path
 scene-to-record command manifest. A unit-only social-quality claim is invalid.
 
+**Documentation freshness**: Every implementation MUST execute the plan's exact
+`README.md` and affected-doc dispositions. `NO_IMPACT` needs reviewed paths and
+concrete rationale in ordinary handoff evidence; `HANDOFF` needs the exact delta
+and accepting owner. Documentation is a blocking implementation task, not
+optional polish.
+
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -31,6 +37,8 @@ scene-to-record command manifest. A unit-only social-quality claim is invalid.
   `.specify/`, `specs/`, or a SpecKit skill directory.
 - `specs/.../tasks.md` may describe product work but MUST NOT contain product
   artifacts or embedded executable payloads.
+- Include exact documentation-disposition, validation, and handoff-evidence
+  tasks before the final owner handoff.
 
 ## Path Conventions
 
@@ -67,7 +75,7 @@ scene-to-record command manifest. A unit-only social-quality claim is invalid.
 - [ ] T001 Create project structure per implementation plan
 - [ ] T002 Initialize [language] project with [framework] dependencies
 - [ ] T003 [P] Configure linting and formatting tools
-- [ ] T004 Verify the externally recorded Goal 2 authorization and dependency readiness; task status itself never authorizes implementation
+- [ ] T004 Verify the externally granted Goal 2 authorization is validly recorded at `evidence/governance/v2-goal-2-authorization.md` and verify dependency readiness; the evidence record and task status document authorization but never grant it
 
 ---
 
@@ -166,14 +174,16 @@ Examples of foundational tasks (adjust based on your project):
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX Execute every exact row in `plan.md` §Documentation Impact and Freshness, including each `UPDATE` in `README.md` and affected ordinary docs; reject generic directory scope and do not change integrator-owned current-state wording prematurely
+- [ ] TXXX Validate affected documentation links, Mermaid diagrams, examples, commands, install/version claims, and truthfulness checks as applicable
+- [ ] TXXX Record every `UPDATE`, `NO_IMPACT`, and `HANDOFF` disposition with exact reviewed paths, rationale or required delta, accepting owner, reviewer, and validation results in the slice's ordinary-path handoff evidence
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
 - [ ] TXXX Run ordinary-path validation guide from docs/
 - [ ] TXXX Commit required run records under evidence/
-- [ ] TXXX Hand off commit, commands, evidence, interfaces, and limitations to [owner lane]
+- [ ] TXXX Hand off commit, commands, evidence, interfaces, documentation disposition, and limitations to [owner lane] only after the documentation-freshness gate passes
 
 ---
 
@@ -186,7 +196,8 @@ Examples of foundational tasks (adjust based on your project):
 - **User Stories (Phase 3+)**: All depend on Foundational phase completion
   - User stories can then proceed in parallel (if staffed)
   - Or sequentially in priority order (P1 → P2 → P3)
-- **Polish (Final Phase)**: Depends on all desired user stories being complete
+- **Polish (Final Phase)**: Depends on all desired user stories being complete;
+  documentation freshness blocks owner handoff
 
 ### User Story Dependencies
 
@@ -200,6 +211,7 @@ Examples of foundational tasks (adjust based on your project):
 - Models before services
 - Services before endpoints
 - Core implementation before integration
+- Documentation dispositions and validation before owner handoff
 - Story complete before moving to next priority
 
 ### Parallel Opportunities

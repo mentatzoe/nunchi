@@ -63,7 +63,7 @@ waking route.
 surface capability differences without invented facts.
 
 - [ ] T013 [US3] Add failing restart and suppressed-event-later-heard conformance tests in `tests/v2/test_hermes.py`
-- [ ] T014 [US3] Document V2 installation, profile isolation, configuration, restart, and probe procedures in `docs/integrations/hermes-v2.md`
+- [ ] T014 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Hermes `UPDATE` paths, route each shared `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/hermes/handoff.md`
 - [ ] T015 [US3] Add multi-profile Discord and Telegram replay expectations in `evals/v2/hermes/live-scenes.jsonl`
 - [ ] T016 [US3] Record one-profile, multi-profile, bypass, and restart scene results with mandatory `scene_id` and HM case ID in `evidence/v2/hermes/hermes-scenes.jsonl`
 - [ ] T017 [US3] Record Telegram parity and unavailable-capability observations with mandatory `scene_id` and HM case ID in `evidence/v2/hermes/telegram-scenes.jsonl`
@@ -75,7 +75,7 @@ surface parity claim.
 
 - [ ] T018 Record exact installed plugin, Nunchi package, model, configuration source, process restart, and V2 probe in `evidence/v2/hermes/installed-runtime.md`
 - [ ] T019 Publish the exact deterministic/live command and scene-to-record manifest for all S/HM IDs in `evidence/v2/hermes/verification.md`
-- [ ] T020 Hand off commit, interface versions, commands/results, evidence, state-isolation shape, and limitations in `evidence/v2/hermes/handoff.md`
+- [ ] T020 Hand off commit, interface versions, commands/results, evidence, state-isolation shape, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/hermes/handoff.md` only after documentation freshness passes
 
 ## Dependencies & Execution Order
 

@@ -70,7 +70,7 @@ components and proves retired V1 residue absent before mixed-room claims.
 - [ ] T019 [US3] Replace the packaged social send gate with an operational-only backstop in `integrations/codex/nunchi_send_gate_codex.py`
 - [ ] T020 [US3] Migrate trusted V2 configuration controls and remove social-permission settings in `src/nunchi/integrations/codex_config_app.py`
 - [ ] T021 [US3] Update the packaged configuration-app wrapper to the exact V2 implementation in `integrations/codex/nunchi_config_app.py`
-- [ ] T022 [US3] Document V2 installation, session behavior, residue removal, configuration, restart, and probes in `docs/integrations/codex-v2.md`
+- [ ] T022 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate all new/existing Codex `UPDATE` paths, route each shared/transport `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/codex/handoff.md`
 
 **Checkpoint**: deterministic packaging and installed-runtime prerequisites for
 CD-06/CD-07 pass.
@@ -80,7 +80,7 @@ CD-06/CD-07 pass.
 - [ ] T023 Run and commit Codex persistent-session, bypass/disposition, immutable-stage, action/silence, adversarial, and mixed-room results with mandatory `scene_id` and CD case ID in `evidence/v2/codex/scene-results.jsonl`
 - [ ] T024 Record exact source/plugin/package/Codex/transport/process/model/config identities, residue removal, restart, and schema-2 probe in `evidence/v2/codex/installed-runtime.md`
 - [ ] T025 Publish the exact command and scene-to-record manifest for applicable S01–S16/CD outcomes in `evidence/v2/codex/verification.md`
-- [ ] T026 Hand off commit, interface versions, commands/results, evidence, session/capability limits, and known gaps in `evidence/v2/codex/handoff.md`
+- [ ] T026 Hand off commit, interface versions, commands/results, evidence, session/capability limits, documentation dispositions/validation/reviewer, and known gaps in `evidence/v2/codex/handoff.md` only after documentation freshness passes
 
 ## Dependencies & Execution Order
 

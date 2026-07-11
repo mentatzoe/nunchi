@@ -15,6 +15,8 @@
   - Feature requirements from spec.md
   - Technical context from plan.md
   - Implementation details from tasks.md
+  - Mandatory `README.md` and affected-docs freshness dispositions, ownership,
+    validation, and ordinary-path handoff evidence
 
   DO NOT keep these sample items in the generated checklist file.
   ============================================================================
@@ -37,4 +39,7 @@
 - Check items off as completed: `[x]`
 - Add comments or findings inline
 - Link to relevant resources or documentation
+- Reject a bare `NO_IMPACT`, a generic "update docs" item, or a `HANDOFF`
+  without an exact delta and accepting owner
+- Reject a directory wildcard when the affected documentation files are known
 - Items are numbered sequentially for easy reference

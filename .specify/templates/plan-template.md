@@ -52,7 +52,8 @@
 
 The check MUST include the SpecKit control-plane boundary, single-owner rule,
 Goal 1/Goal 2 boundary, ordinary-path artifact locations, and parity/evidence
-obligations. An unexplained failure stops planning.
+obligations, including the documentation-freshness gate. An unexplained failure
+stops planning.
 
 ## Slice Interfaces
 
@@ -89,6 +90,20 @@ List deterministic tests under `tests/`, reusable corpora/runners under
 used as social-quality evidence. Aggregate records MUST carry stable scene and
 case IDs, and the slice MUST name an ordinary-path manifest mapping each scene
 to exact records and reproducible commands.
+
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Project landing/current state | `README.md` | [`UPDATE` / `NO_IMPACT` / `HANDOFF`] | [task/lane] | [validation, or exact delta plus accepting owner] |
+| [affected contract/integration/operator/evaluation docs] | `docs/[exact-path].md` | [`UPDATE` / `NO_IMPACT` / `HANDOFF`] | [task/lane] | [links/Mermaid/examples/commands/truth tests] |
+
+The `README.md` row is mandatory. Every `NO_IMPACT` row MUST list exact reviewed
+paths and a concrete rationale in ordinary-path handoff evidence. Every
+`HANDOFF` row MUST identify an integrator-owned document, the exact required
+claim delta, and the accepting owner; it is not a synonym for no impact.
+Slice-owned affected docs MUST use `UPDATE` and land before handoff.
+Generic directory rows are invalid when the affected files can be named.
 
 ## Project Structure
 
@@ -163,13 +178,16 @@ directories captured above]
 | Evaluation runners/corpora | `evals/` | [task/story] |
 | Evidence | `evidence/` | [task/story] |
 | Product/governance docs | `docs/` | [task/story] |
+| Project landing page review | `README.md` | [documentation freshness task] |
 
 ## Owner Handoff
 
 The owner MUST hand off: exact commit, verification commands and results,
 ordinary-path evidence references, interface version(s), migration/provenance
-notes, a scene-to-record result manifest, and known limitations. Review does not
-transfer ownership silently.
+notes, a scene-to-record result manifest, documentation dispositions and
+validation results, and known limitations. Review does not transfer ownership
+silently. The handoff is blocked until the documentation-freshness gate accepts
+the exact candidate.
 
 ## Complexity Tracking
 

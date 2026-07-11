@@ -181,6 +181,17 @@ No adapter product artifact lives under `specs/`.
 | Evidence | `evidence/v2/adapters/`, including `manifest.json` | US1–US3 |
 | Product docs | `docs/adapters-v2.md` | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global adapter support/evidence state | `README.md` | `HANDOFF` | T017 / `v2-adapters-owner` | Accepting owner: `v2-integrator`; replace V1/code-only claims with exact V2 installed entrypoints, capability differences, limitations, and evidence tiers at atomic cutover. |
+| Cross-adapter V2 guide | `docs/adapters-v2.md` | `UPDATE` | T017 / `v2-adapters-owner` | Validate invocation, budgets, capability semantics, entrypoints, links, examples, and probes across installed adapters. |
+| Existing adapter/current contract/integration/design/change state | `CHANGELOG.md`, `docs/adapters.md`, `docs/integration.md`, `docs/STABILITY.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-adapters-owner` | Accepting owner: `v2-integrator`; apply exact supersession, entrypoint, capability, limitation, evidence-tier, stability, and diagram deltas at atomic cutover. |
+
+Adapter-specific truth lands with 090; shared current-state wording transfers to
+110 as an exact accepted delta.
+
 ## Owner Handoff
 
 The owner supplies one exact commit, verification commands/results, consumed

@@ -1,38 +1,26 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 -> 2.0.1
-Major-bump rationale: replaces the V1 admission/move-vocabulary constitution
-with the selected V2 pre-attention design and makes SpecKit a disposable,
-control-plane-only execution spine.
-Patch clarification: encodes the already-selected direct wake when preattention
-is disabled, host-only continuation authority, and immutable singly attested
-receipt stages after independent planning red-team review.
+Version change: 2.0.1 -> 2.1.0
+Minor-bump rationale: adds a mandatory documentation-freshness disposition and
+review gate to every implementation slice and handoff.
 Modified principles:
-- Admission, Not Composition -> Selected V2 Product Boundary
-- Hard-Stop PASS Is Load-Bearing -> Human-Shaped Social Judgment
-- CLI-First, Modular Core -> Truthful Identity and Observation
-- Vertical, Independently Testable Slices -> Attention and Contribution Have Different Owners
-- Test-First Contract and Fixture Discipline -> Atomic Contract and Cross-Surface Parity
-- Adapter Tier Honesty and Consumer Boundaries -> Evidence Before Claims
-- Context Truth and Room Inference -> SpecKit Is Control-Plane Only
-- Documentation Is Product -> Single-Owner Slices and Deliberate Integration
+- Evidence Before Claims (README/docs review is now a completion obligation)
+- Single-Owner Slices and Deliberate Integration (shared-doc handoff ownership)
 Added sections:
-- Authority and Repository Boundaries
-- Goal and Workflow Gates
-Removed sections:
-- V1 Product Boundaries
-- V1 SpecKit Workflow & Review Gates
-- V1 Agent Execution Hygiene
+- Documentation Freshness Gate
+Removed sections: none
 Dependent artifacts:
-- ✅ .specify/templates/plan-template.md (control-plane-only plan shape)
-- ✅ .specify/templates/spec-template.md (source, owner, dependency, and boundary fields)
-- ✅ .specify/templates/tasks-template.md (ordinary-path task targets and owner handoff)
-- ✅ .specify/workflows/speckit/workflow.yml (full governed sequence + Goal 2 gate)
-- ✅ .specify/workflows/nunchi-plan/workflow.yml (planning-only workflow)
-- ✅ AGENTS.md and CLAUDE.md (authority order and runtime instructions)
-- ✅ README.md (truthful V1/V2 state and development method)
-- ✅ docs/governance/execution-spine.md (operator workflow and reinitialization)
+- ✅ .specify/templates/spec-template.md (mandatory documentation disposition)
+- ✅ .specify/templates/plan-template.md (README/docs impact matrix)
+- ✅ .specify/templates/tasks-template.md (blocking documentation tasks)
+- ✅ .specify/templates/checklist-template.md (freshness requirement review)
+- ✅ .specify/workflows/speckit/workflow.yml (post-convergence freshness gate)
+- ✅ .specify/workflows/nunchi-plan/workflow.yml (planning review of doc impact)
+- ✅ AGENTS.md and CLAUDE.md (implementation and handoff obligations)
+- ✅ README.md and docs/governance/execution-spine.md (operator guidance)
+- ✅ specs/001-nunchi-v2-program and slices 010-110 (active-plan backfill)
 - ✅ scripts/check_governance.py and tests/test_governance.py (mechanical enforcement)
+- ✅ Goal 2 activation-record contract in guidance/checker (authorization-aware dormant-task guard)
 Follow-up TODOs: none
 -->
 
@@ -159,6 +147,13 @@ distinguish current V1 behavior, selected V2 design, planned work, code-only
 integration, bounded live evidence, and sustained operational evidence.
 Release and promotion remain separate decisions.
 
+Every implementation slice MUST review `README.md` and every ordinary-path
+document whose claims intersect its changed behavior, interfaces,
+configuration, installation, supported surfaces, evidence grade, limitations,
+security posture, or current/release state. Impacted documentation MUST be
+updated and validated with the implementation before handoff. Documentation
+review is part of implementation evidence, not optional polish.
+
 Rationale: schemas and prose previously looked complete while the runnable
 cross-surface lifecycle was not.
 
@@ -201,6 +196,11 @@ contract changes land before dependent slices; harness integrations land before
 the final parity slice. The final integrator owns cross-surface assembly and may
 reject a locally green slice whose interface or evidence does not match the
 program contract.
+
+Shared documentation follows the same single-owner rule. A slice that cannot
+edit an integrator-owned document MUST hand off the exact required wording or
+claim delta and name the accepting owner. It MUST NOT silently defer the work or
+mislabel a known future change as having no documentation impact.
 
 Rationale: explicit ownership and integration order preserve parallelism
 without recreating the previous detached patchwork.
@@ -248,13 +248,26 @@ Every implementation slice MUST pass this control-plane sequence:
 
 ```text
 constitution -> specify -> clarify -> plan -> checklist -> tasks -> analyze ->
-explicit Goal 2 authorization -> implement -> converge -> parity integration
+explicit Goal 2 authorization -> implement -> converge -> documentation
+freshness -> parity integration
 ```
 
 The planning-only workflow MUST stop after analysis. The full workflow MUST have
 an explicit authorization gate immediately before implementation. No workflow
 MAY infer Goal 2 authorization from the existence of tasks or from completion of
 Goal 1.
+
+After Zoe separately sets Goal 2 and before any implementation checkbox is
+completed, the program owner MUST record that external authorization at
+`evidence/governance/v2-goal-2-authorization.md`. The record MUST identify the
+commissioned objective, Zoe as authorizer, the authority source, date, and
+starting commit. The evidence file documents an authorization granted outside
+the repository; its existence MUST NOT be treated as self-authorization. Until
+that valid record exists, governance checks MUST reject every completed Goal 2
+task. Once it exists, those checks MUST permit truthful task progress while all
+workflow, dependency, evidence, and documentation gates remain in force. This
+is repository governance evidence only; it MUST NOT enter runtime,
+conversation, classifier, receipt, or social-memory state.
 
 For Nunchi, `spec.md`, `plan.md`, `research.md`, `tasks.md`, and requirement
 quality checklists are control-plane artifacts. The standard SpecKit
@@ -269,7 +282,44 @@ the accountable owner MUST be active, dependencies MUST be satisfied or
 explicitly staged, and the slice's acceptance scenes and evidence locations
 MUST be concrete. Before integration, the slice owner MUST hand off a commit,
 verification commands, evidence references, and known limitations to the final
-integrator.
+integrator. That handoff MUST include the reviewed documentation disposition and
+validation results.
+
+## Documentation Freshness Gate
+
+Every implementation spec and plan MUST include a documentation-impact review.
+The plan MUST name `README.md`, every known affected ordinary-path document, the
+accountable documentation task or lane, and validation appropriate to each
+claim. The task graph MUST implement that review before handoff; a generic
+"update docs" task is not sufficient. A directory wildcard or generic path is
+also insufficient when the affected files are already known.
+
+Each reviewed documentation surface MUST receive exactly one disposition:
+
+- **`UPDATE`**: the affected ordinary-path document changes in the candidate,
+  and its links, diagrams, examples, commands, and machine-checkable claims are
+  validated as applicable.
+- **`NO_IMPACT`**: the document remains accurate. The ordinary-path handoff
+  evidence MUST list the exact reviewed paths and a concrete rationale. A task
+  checkbox or unexplained assertion is not evidence.
+- **`HANDOFF`**: a shared or integrator-owned document needs a later edit. The
+  slice MUST provide the exact required claim delta and name the accepting
+  owner. `HANDOFF` is not `NO_IMPACT`, and it is invalid for documentation the
+  slice itself owns.
+
+`README.md` MUST be reviewed for every implementation. Documentation impact
+includes changes to behavior, public or inter-component contracts,
+configuration/defaults, installation/upgrade, entry points, supported surfaces,
+security posture, evidence tier, limitations, version/current/release state,
+diagrams, runnable examples, and operator commands. The reviewer MUST reject a
+disposition that does not match the exact candidate diff and evidence.
+
+The final integrator owns global current-state wording at an atomic cutover.
+When the cutover changes current behavior, `NO_IMPACT` and `HANDOFF` are invalid
+for `README.md` and the affected cross-surface documentation: those documents
+MUST use `UPDATE` in the accepted candidate. Actual docs and durable handoff
+evidence remain in ordinary repository paths; SpecKit records only the plan,
+tasks, disposition, ownership, and gate state.
 
 ## Governance
 
@@ -299,4 +349,4 @@ integration, release, and any live-readiness claim. Any unexplained violation
 blocks the affected work. Goal completion requires the repository governance
 check and full existing test baseline to pass.
 
-**Version**: 2.0.1 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11
+**Version**: 2.1.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11

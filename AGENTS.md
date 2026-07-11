@@ -63,6 +63,34 @@ constitution forbids those outputs. Record interface and validation planning in
 `plan.md`; create actual schemas/contracts under `schemas/` and runnable guides
 under `docs/` only during an authorized implementation goal.
 
+## Documentation freshness
+
+Documentation is a blocking part of every implementation slice. Each spec,
+plan, and task graph must explicitly review `README.md` and every ordinary-path
+document affected by behavior, interfaces, configuration/defaults,
+installation, entry points, supported surfaces, security posture, evidence
+grade, limitations, version/current state, diagrams, examples, or commands.
+
+Use exactly one disposition per reviewed surface:
+
+- `UPDATE`: land and validate the affected docs with the candidate.
+- `NO_IMPACT`: list exact reviewed paths and concrete rationale in ordinary
+  handoff evidence.
+- `HANDOFF`: for shared/integrator-owned docs only, provide the exact required
+  claim delta and accepting owner. It is not a no-impact finding.
+
+Name exact affected files; a generic directory or wildcard is not a review when
+the paths are already known. Goal 2 task checkboxes remain dormant until Zoe's
+separately granted objective is recorded at
+`evidence/governance/v2-goal-2-authorization.md`; that record documents
+authority and never grants it.
+
+Intermediate V2 slices update their owned component docs and hand global
+current-state wording to `v2-integrator`; they must not claim partial V2 as
+current. Slice `110` must update `README.md` and affected cross-surface docs as
+part of the atomic cutover. No implementation may converge or hand off until
+the documentation-freshness gate passes for the exact candidate.
+
 ## Product invariants
 
 - Only a participant-shaped model may make a social suppression judgment.
@@ -99,4 +127,5 @@ A slice is ready only when its spec, plan, tasks, owner, dependencies,
 interfaces, integration strategy, acceptance scenes, and evidence requirements
 agree; analysis has no CRITICAL/HIGH findings; and the governance boundary
 passes. Product completion additionally requires ordinary-path implementation,
-tests, evidence, installed-runtime provenance, and integrator handoff.
+tests, evidence, installed-runtime provenance, accepted README/docs
+dispositions and validation, and integrator handoff.

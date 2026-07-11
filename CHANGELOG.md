@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — mandatory documentation freshness for implementation slices
+
+- Constitution 2.1.0 makes `README.md` and affected ordinary documentation a
+  blocking part of every SpecKit implementation. Each reviewed surface must use
+  `UPDATE`, evidence-backed `NO_IMPACT`, or an exact owner-accepted `HANDOFF`;
+  generic documentation tasks and bare no-impact claims no longer close a
+  slice.
+- The full workflow now gates documentation freshness after convergence and
+  before integration handoff. Spec, plan, task, checklist, agent-guidance, and
+  active V2 slice artifacts carry the same ownership and validation rules.
+- Slices `010`–`100` update their owned component guides and hand exact global
+  claim deltas to `v2-integrator`; slice `110` must update `README.md` and all
+  affected cross-surface documentation in the atomic candidate.
+- Governance tests reject missing README dispositions, bare `NO_IMPACT`,
+  missing doc tasks/checklist coverage, and a missing or misordered workflow
+  gate.
+- Active slices now inventory exact existing docs as well as planned V2 guides;
+  generic directory scope is rejected. The dormant-task check remains strict
+  under Goal 1 but permits completed tasks after a valid, separately granted
+  Goal 2 authorization is recorded at
+  `evidence/governance/v2-goal-2-authorization.md`.
+
 ### Fixed — round-4 review: confidence domain, uninstall confinement
 
 - **Confidences must be on the stated [0, 1] scale**, enforced identically at

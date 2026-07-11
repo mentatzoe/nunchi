@@ -40,6 +40,7 @@ provenance requirements before future implementation
 - [x] CHK019 Does CC-01 have an explicit installed reactive bot-hearing/no-polling evidence task rather than only an index entry? [Coverage, Plan §CC-01; tasks.md]
 - [x] CHK020 Does one manifest resolve CC-01 through CC-06 and common S IDs to exact evidence while meta-answer grading remains post-hoc and outside runtime? [Traceability, Spec §FR-014; Plan §Acceptance Scenes]
 - [x] CHK021 Do CC-03/CC-04 prove trusted `PREATTENTION_BYPASS` makes zero classifier calls, invokes one act-or-silence turn without fabricated social data, and preserves immutable singly owned request-correlated receipt stages? [Contract, Spec §FR-006, FR-008, FR-016]
+- [x] CHK022 Does documentation freshness inventory every exact known path, require all new/existing Claude and patch docs to `UPDATE`, route shared/current `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

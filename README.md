@@ -194,7 +194,13 @@ SpecKit is pinned to exactly `0.12.11`. Its managed paths are disposable
 control plane and may never own product source, schemas, tests, evaluation
 assets, evidence, runtime artifacts, or product documentation. The planning
 workflow stops before implementation; the full workflow has an explicit Goal 2
-authorization gate.
+authorization gate and a post-convergence documentation-freshness gate. Every
+implementation must review `README.md` and affected ordinary docs, then either
+update and validate them, record an evidence-backed `NO_IMPACT`, or hand an
+exact shared-doc delta to its accepting owner. Known affected files must be
+named individually; a directory wildcard does not satisfy the gate. Goal 2
+task progress remains mechanically dormant until Zoe's separately granted goal
+is recorded at `evidence/governance/v2-goal-2-authorization.md`.
 
 ```sh
 specify workflow info nunchi-plan

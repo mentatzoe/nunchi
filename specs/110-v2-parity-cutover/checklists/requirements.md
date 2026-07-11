@@ -68,6 +68,7 @@ bounded before analysis.
 - [x] CHK038 Does explicit Zoe repository-cutover acceptance gate one atomic product PR/merge plus post-merge verification and an evidence-only follow-up record? [Cutover, Spec §FR-022]
 - [x] CHK039 Does parity prove trusted `PREATTENTION_BYPASS` makes zero classifier calls, invokes one advice-free act-or-silence turn, contains no fabricated social result, and is never treated as an injected verdict? [Contract, Spec §FR-023]
 - [x] CHK040 Does parity prove immutable request-correlated observation/attention/participant-host/transport records have one attesting owner each, with silence and unavailable outcomes left explicit? [Contract, Spec §FR-024]
+- [x] CHK041 Does documentation freshness name every exact affected root/shared/contract/evaluation/component/security/release/installed-surface path, require `UPDATE` for all including `README.md`, reject `NO_IMPACT`/`HANDOFF` and generic directories, validate rendered/runnable claims, and recheck the main merge SHA? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

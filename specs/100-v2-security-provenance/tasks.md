@@ -107,8 +107,8 @@ or unresolved CRITICAL/HIGH findings.
 - [ ] T031 Assemble the V2 security assurance report with audited commit set, canonical interfaces, trusted-bypass and immutable-stage results, commands/results, threat dispositions, mitigation handbacks/re-audits, evidence, provenance, accepted risk, limitations, and manifest coverage in `evidence/v2/security/README.md`
 - [ ] T032 Assemble the machine-readable readiness packet referencing those ordinary records and the evidence manifest in `evidence/v2/security/handoff.json`
 - [ ] T033 Run `python3 scripts/check_governance.py`, `python3 -m unittest`, and documented security assurance/eval commands and record exact results in `evidence/v2/security/final-verification.txt`
-- [ ] T034 Re-run cross-artifact analysis and record zero CRITICAL/HIGH findings in `evidence/v2/security/README.md`
-- [ ] T035 Hand the exact audited commit/ref set, reusable assurance commands, evidence manifest, and V2 security readiness packet to `v2-integrator`, recording acceptance or rejection in `evidence/v2/security/integrator-handoff.md`
+- [ ] T034 Re-run cross-artifact analysis and complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each exact security `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record zero CRITICAL/HIGH findings plus all documentation dispositions, paths, results, and reviewer in `evidence/v2/security/README.md`
+- [ ] T035 Hand the exact audited commit/ref set, reusable assurance commands, evidence manifest, V2 security readiness packet, and accepted documentation dispositions to `v2-integrator`, recording acceptance or rejection in `evidence/v2/security/integrator-handoff.md`; handoff is blocked until documentation freshness passes
 
 ---
 

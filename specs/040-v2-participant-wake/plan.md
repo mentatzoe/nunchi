@@ -161,6 +161,18 @@ callbacks rather than importing any one agent harness.
 | Surface bindings | `integrations/`, `src/nunchi/adapters/` | Excluded; 060–090-owned |
 | Shared schemas/core/observation | `schemas/v2/`, `src/nunchi/core.py`, `src/nunchi/observation.py` | Consumed; upstream-owned |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global participant lifecycle | `README.md` | `HANDOFF` | T023 / `v2-wake-owner` | Accepting owner: `v2-integrator`; describe accepted direct act-or-silence, valid silence, expansion, and no send-time social gate only in the atomic candidate. |
+| Participant-host reference | `docs/participant/v2.md` | `UPDATE` | T023 / `v2-wake-owner` | Validate lifecycle diagrams, action/silence examples, expansion limits, links, and no-reclassification commands against the candidate. |
+| Shared change/current contract/integration/adapter/design state | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T023 / `v2-wake-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, wake-source, act-or-silence, expansion, receipt, no-reclassification, and diagram deltas at cutover. |
+| Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/claude-code/transport-patch/README.md`, `integrations/codex/README.md` | `HANDOFF` | T023 / `v2-wake-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-040A wake, expansion, receipt, participant-silence, and send-path delta. |
+
+The component guide lands with the slice; global current-state wording is an
+exact accepted handoff to 110 rather than a generic deferral.
+
 ## Owner Handoff
 
 The owner must hand off exact commit, I-040A and upstream versions, complete

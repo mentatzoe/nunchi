@@ -169,6 +169,18 @@ the slice directory.
 | Evidence | `evidence/v2/hermes/` | US1–US3 |
 | Product docs | `docs/integrations/hermes-v2.md` | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global Hermes support/evidence state | `README.md` | `HANDOFF` | T014 / `v2-hermes-owner` | Accepting owner: `v2-integrator`; replace V1/source-only claims with exact V2 lifecycle, capability, provenance, limitation, and evidence-grade wording at atomic cutover. |
+| Hermes V2 integration guide | `docs/integrations/hermes-v2.md` | `UPDATE` | T014 / `v2-hermes-owner` | Validate install/config/profile isolation, restart, links, examples, and probes against the installed candidate. |
+| Existing Hermes operator and patch docs | `integrations/hermes/README.md`, `docs/integrations/hermes-core-patch.md`, `docs/integrations/hermes-core-patch-test-plan.md` | `UPDATE` | T014 / `v2-hermes-owner` | Validate lifecycle, configuration, patch/runtime provenance, profile isolation, restart, examples, and installed probes. |
+| Shared install/integration/adapter/design/change state | `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/integration.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T014 / `v2-hermes-owner` | Accepting owner: `v2-integrator`; apply the exact breaking Hermes lifecycle, install/provenance, limitation, evidence-grade, and diagram delta at cutover. |
+
+Slice 060 owns the integration guide and hands only cross-surface current-state
+wording to 110 with an exact delta and accepting owner.
+
 ## Owner Handoff
 
 The owner supplies exact commit and installed plugin/package provenance,

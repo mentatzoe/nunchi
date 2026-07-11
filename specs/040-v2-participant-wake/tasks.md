@@ -71,9 +71,9 @@ limits, one attention call total, and zero send-time social classification.
 
 ## Phase 5: Documentation and Handoff
 
-- [ ] T023 Document the direct act-or-silence lifecycle, capability seams, valid silence, and no-reclassification boundary in `docs/participant/v2.md`
+- [ ] T023 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route every shared and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/participant/handoff.md`
 - [ ] T024 Run the full shared-host scene matrix and publish its exact scene-to-record command manifest in `evidence/v2/participant/README.md`
-- [ ] T025 Record commit, commands, I-040A/upstream versions, instruction, callbacks, evidence, and limitations in `evidence/v2/participant/handoff.md`
+- [ ] T025 Record commit, commands, I-040A/upstream versions, instruction, callbacks, evidence, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/participant/handoff.md`; handoff is blocked until documentation freshness passes
 
 ## Dependencies & Execution Order
 

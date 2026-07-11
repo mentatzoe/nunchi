@@ -13,8 +13,11 @@ from pathlib import Path
 
 PINNED_SPECKIT_VERSION = "0.12.11"
 PINNED_SPECKIT_COMMIT = "e802a7dd52a6eceba9403cbbf40e60dced043238"
-PINNED_CONSTITUTION_VERSION = "2.0.1"
+PINNED_CONSTITUTION_VERSION = "2.1.0"
 PINNED_VAULT_COMMIT = "c834e8c"
+GOAL_2_AUTHORIZATION_PATH = Path(
+    "evidence/governance/v2-goal-2-authorization.md"
+)
 ALLOWED_SPEC_FILES = {"spec.md", "plan.md", "tasks.md", "research.md", "README.md"}
 FORBIDDEN_SPEC_PARTS = {
     "contracts",
@@ -168,12 +171,14 @@ REQUIRED_PLAN_SECTIONS = {
     "## Slice Interfaces",
     "## Integration Strategy",
     "## Acceptance Scenes and Evidence",
+    "## Documentation Impact and Freshness",
     "## Ordinary Repository Targets",
     "## Owner Handoff",
 }
 REQUIRED_SPEC_SECTIONS = {
     "## Control-Plane Boundary",
     "## Interface Summary",
+    "## Documentation Freshness",
     "## User Scenarios & Testing",
     "## Requirements",
     "## Success Criteria",
@@ -187,6 +192,184 @@ PLANNING_PLACEHOLDER = re.compile(
 TASK_LINE = re.compile(r"^- \[ \] T(\d{3})(?: \[P\])?(?: \[US\d+\])? .+$")
 INTERFACE_ID = re.compile(r"\bI-\d{3}[A-Z]\b")
 SCENE_ID = re.compile(r"\bS(?:0[1-9]|1[0-6])\b")
+
+EXPECTED_DOCUMENTATION_PATHS = {
+    "010-v2-contract": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/contracts/channel-adapter-v1.md",
+        "docs/contracts/nunchi-v2.md",
+        "docs/integration.md",
+        "docs/STABILITY.md",
+    },
+    "020-v2-observation": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/integration.md",
+        "docs/observation/v2.md",
+        "docs/STABILITY.md",
+        "integrations/claude-code/README.md",
+        "integrations/codex/README.md",
+        "integrations/hermes/README.md",
+        "integrations/mcp-discord/DESIGN.md",
+        "integrations/mcp-discord/README.md",
+    },
+    "030-v2-core-attention": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/attention/v2.md",
+        "docs/contracts/channel-adapter-v1.md",
+        "docs/contracts/verdict-suite-data-model-v1.md",
+        "docs/contracts/verdict-suite-requirements-v1.md",
+        "docs/evaluations/verdict-suite-runner.md",
+        "docs/evaluations/verdict-suite.md",
+        "docs/INSTALL.md",
+        "docs/integration.md",
+        "docs/STABILITY.md",
+        "integrations/claude-code/DEFER_EVAL.md",
+        "integrations/claude-code/README.md",
+        "integrations/codex/README.md",
+        "integrations/hermes/README.md",
+        "integrations/mcp-discord/DESIGN.md",
+        "integrations/mcp-discord/README.md",
+    },
+    "040-v2-participant-wake": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/contracts/channel-adapter-v1.md",
+        "docs/integration.md",
+        "docs/participant/v2.md",
+        "docs/STABILITY.md",
+        "integrations/claude-code/DEFER_EVAL.md",
+        "integrations/claude-code/README.md",
+        "integrations/claude-code/transport-patch/README.md",
+        "integrations/codex/README.md",
+        "integrations/hermes/README.md",
+        "integrations/mcp-discord/DESIGN.md",
+        "integrations/mcp-discord/README.md",
+    },
+    "050-v2-discord-transport": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/integrations/discord-mcp-v2.md",
+        "integrations/claude-code/transport-patch/README.md",
+        "integrations/codex/README.md",
+        "integrations/mcp-discord/DESIGN.md",
+        "integrations/mcp-discord/README.md",
+    },
+    "060-v2-hermes": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/INSTALL.md",
+        "docs/integration.md",
+        "docs/integrations/hermes-core-patch-test-plan.md",
+        "docs/integrations/hermes-core-patch.md",
+        "docs/integrations/hermes-v2.md",
+        "integrations/hermes/README.md",
+    },
+    "070-v2-claude-code": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/INSTALL.md",
+        "docs/integration.md",
+        "docs/integrations/claude-code-v2.md",
+        "integrations/claude-code/DEFER_EVAL.md",
+        "integrations/claude-code/README.md",
+        "integrations/claude-code/transport-patch/README.md",
+    },
+    "080-v2-codex": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/integration.md",
+        "docs/integrations/codex-v2.md",
+        "integrations/codex/README.md",
+        "integrations/mcp-discord/README.md",
+    },
+    "090-v2-channel-adapters": {
+        "CHANGELOG.md",
+        "README.md",
+        "docs/adapters-v2.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/contracts/channel-adapter-v1.md",
+        "docs/integration.md",
+        "docs/STABILITY.md",
+    },
+    "100-v2-security-provenance": {
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/INSTALL.md",
+        "docs/integration.md",
+        "docs/security/assurance-handoffs.md",
+        "docs/security/operational-safety.md",
+        "docs/security/runtime-provenance.md",
+        "docs/security/suppression-governance.md",
+        "docs/security/threat-model-v2.md",
+        "docs/STABILITY.md",
+    },
+    "110-v2-parity-cutover": {
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "CLAUDE.md",
+        "README.md",
+        "SECURITY.md",
+        "docs/INSTALL.md",
+        "docs/STABILITY.md",
+        "docs/adapters-v2.md",
+        "docs/adapters.md",
+        "docs/architecture/v2-selected-design.md",
+        "docs/archive/v1/README.md",
+        "docs/attention/v2.md",
+        "docs/contracts/channel-adapter-v1.md",
+        "docs/contracts/nunchi-v2.md",
+        "docs/contracts/verdict-suite-data-model-v1.md",
+        "docs/contracts/verdict-suite-requirements-v1.md",
+        "docs/evaluations/v2-parity.md",
+        "docs/evaluations/verdict-suite-runner.md",
+        "docs/evaluations/verdict-suite.md",
+        "docs/governance/execution-spine.md",
+        "docs/integration.md",
+        "docs/integrations/claude-code-v2.md",
+        "docs/integrations/codex-v2.md",
+        "docs/integrations/discord-mcp-v2.md",
+        "docs/integrations/hermes-core-patch-test-plan.md",
+        "docs/integrations/hermes-core-patch.md",
+        "docs/integrations/hermes-v2.md",
+        "docs/observation/v2.md",
+        "docs/participant/v2.md",
+        "docs/releases/v2-readiness.md",
+        "docs/security/assurance-handoffs.md",
+        "docs/security/operational-safety.md",
+        "docs/security/runtime-provenance.md",
+        "docs/security/suppression-governance.md",
+        "docs/security/threat-model-v2.md",
+        "integrations/claude-code/DEFER_EVAL.md",
+        "integrations/claude-code/README.md",
+        "integrations/claude-code/transport-patch/README.md",
+        "integrations/codex/README.md",
+        "integrations/hermes/README.md",
+        "integrations/mcp-discord/DESIGN.md",
+        "integrations/mcp-discord/README.md",
+    },
+}
 
 
 def _json(path: Path, errors: list[str]) -> dict:
@@ -325,23 +508,59 @@ def check_governance_documents(root: Path) -> list[str]:
             "SpecKit Is Control-Plane Only (NON-NEGOTIABLE)",
             "Trusted preattention-disabled configuration MUST bypass model judgment",
             "Receipt records MUST be immutable and request-correlated",
+            "## Documentation Freshness Gate",
+            "Each reviewed documentation surface MUST receive exactly one disposition",
+            str(GOAL_2_AUTHORIZATION_PATH),
+            "directory wildcard or generic path is",
         ),
         ".specify/templates/plan-template.md": (
             "Aggregate records MUST carry stable scene and",
             "scene-to-record result manifest",
+            "## Documentation Impact and Freshness",
+            "The `README.md` row is mandatory",
+            "Generic directory rows are invalid",
+        ),
+        ".specify/templates/spec-template.md": (
+            "## Documentation Freshness *(mandatory)*",
+            "Every implementation MUST review `README.md`",
+            "Generic directories or wildcards",
         ),
         ".specify/templates/tasks-template.md": (
-            "task status itself never authorizes implementation",
+            "evidence record and task status document authorization but never grant it",
             "A unit-only social-quality claim is invalid",
+            "Documentation is a blocking implementation task",
+            "documentation-freshness gate passes",
+            "every exact row in `plan.md` §Documentation Impact and Freshness",
+        ),
+        ".specify/templates/checklist-template.md": (
+            "Mandatory `README.md` and affected-docs freshness dispositions",
+            "Reject a bare `NO_IMPACT`",
+            "Reject a directory wildcard",
         ),
         "AGENTS.md": (
             "SpecKit-managed paths are control plane only",
             "Trusted preattention bypass wakes directly",
             PINNED_VAULT_COMMIT,
+            "## Documentation freshness",
+            "Use exactly one disposition per reviewed surface",
+            str(GOAL_2_AUTHORIZATION_PATH),
         ),
         "CLAUDE.md": (
             "continuation authority out of classifier input",
             "immutable singly",
+            "documentation-freshness gate",
+            str(GOAL_2_AUTHORIZATION_PATH),
+        ),
+        "README.md": (
+            "post-convergence documentation-freshness gate",
+            "evidence-backed `NO_IMPACT`",
+            "directory wildcard does not satisfy the gate",
+            str(GOAL_2_AUTHORIZATION_PATH),
+        ),
+        "docs/governance/execution-spine.md": (
+            "## Documentation freshness",
+            "The workflow's `documentation-freshness` gate",
+            str(GOAL_2_AUTHORIZATION_PATH),
         ),
     }
     for relative, tokens in required_tokens.items():
@@ -411,6 +630,33 @@ def check_workflow_surface(root: Path) -> list[str]:
         errors.append(
             "speckit workflow must place the Goal 2 authorization gate before implementation"
         )
+    if str(GOAL_2_AUTHORIZATION_PATH) not in full:
+        errors.append(
+            "speckit workflow must require the external Goal 2 authorization record"
+        )
+    convergence = full.find("command: speckit.converge")
+    documentation = full.find("- id: documentation-freshness")
+    handoff = full.find("- id: integration-handoff")
+    if (
+        convergence < 0
+        or documentation < 0
+        or handoff < 0
+        or not convergence < documentation < handoff
+    ):
+        errors.append(
+            "speckit workflow must place documentation freshness after "
+            "convergence and before integration handoff"
+        )
+
+    registry = _json(root / ".specify" / "workflows" / "workflow-registry.json", errors)
+    registered = registry.get("workflows", {})
+    expected_versions = {"speckit": "2.1.0", "nunchi-plan": "1.1.0"}
+    for name, version in expected_versions.items():
+        observed = registered.get(name, {}) if isinstance(registered, dict) else {}
+        if observed.get("version") != version:
+            errors.append(
+                f".specify/workflows/workflow-registry.json: {name} must be version {version}"
+            )
     return errors
 
 
@@ -437,6 +683,77 @@ def _slice_ids(value: str | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(match for match in re.findall(r"(?<!\d)\d{3}(?!\d)", value) if match in known))
 
 
+def _goal_2_authorization_state(root: Path) -> tuple[bool, list[str]]:
+    """Return whether a separately granted Goal 2 authorization is validly recorded."""
+
+    path = root / GOAL_2_AUTHORIZATION_PATH
+    if not path.exists():
+        return False, []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, [f"{GOAL_2_AUTHORIZATION_PATH}: cannot read ({exc})"]
+
+    errors: list[str] = []
+    expected = {
+        "Program": "001-nunchi-v2-program",
+        "Status": "AUTHORIZED",
+        "Authorized by": "Zoe",
+    }
+    for label, value in expected.items():
+        observed = (_metadata_value(text, label) or "").strip("`")
+        if observed != value:
+            errors.append(
+                f"{GOAL_2_AUTHORIZATION_PATH}: {label} must be {value!r}; "
+                f"observed {observed!r}"
+            )
+
+    authorized_on = (_metadata_value(text, "Authorized on") or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", authorized_on):
+        errors.append(
+            f"{GOAL_2_AUTHORIZATION_PATH}: Authorized on must be an ISO date"
+        )
+    starting_commit = (_metadata_value(text, "Starting commit") or "").strip("`")
+    if not re.fullmatch(r"[0-9a-f]{40}", starting_commit):
+        errors.append(
+            f"{GOAL_2_AUTHORIZATION_PATH}: Starting commit must be a full Git SHA"
+        )
+    objective = (_metadata_value(text, "Objective") or "").strip()
+    if len(objective) < 40:
+        errors.append(
+            f"{GOAL_2_AUTHORIZATION_PATH}: Objective must record the commissioned Goal 2"
+        )
+    source = (_metadata_value(text, "Authority source") or "").strip()
+    if len(source) < 10:
+        errors.append(
+            f"{GOAL_2_AUTHORIZATION_PATH}: Authority source must identify the external authorization"
+        )
+    if "This record documents external authorization; it does not grant it." not in text:
+        errors.append(
+            f"{GOAL_2_AUTHORIZATION_PATH}: missing non-self-authorizing boundary statement"
+        )
+    return not errors, errors
+
+
+def _checked_task_authorization_errors(
+    feature: Path,
+    tasks_text: str,
+    goal_2_authorized: bool,
+) -> list[str]:
+    """Keep Goal 2 dormant until a valid external authorization record exists."""
+
+    if goal_2_authorized:
+        return []
+    errors: list[str] = []
+    for line_number, line in enumerate(tasks_text.splitlines(), 1):
+        if line.startswith("- [x] T") or line.startswith("- [X] T"):
+            errors.append(
+                f"{feature}/tasks.md:{line_number}: Goal 2 task is checked without "
+                f"valid {GOAL_2_AUTHORIZATION_PATH}"
+            )
+    return errors
+
+
 def _markdown_subsection(text: str, heading: str) -> str:
     marker = f"### {heading}"
     start = text.find(marker)
@@ -444,6 +761,115 @@ def _markdown_subsection(text: str, heading: str) -> str:
         return ""
     end = text.find("\n## ", start + len(marker))
     return text[start:] if end < 0 else text[start:end]
+
+
+def _markdown_section(text: str, heading: str) -> str:
+    marker = f"## {heading}"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start + len(marker))
+    return text[start:] if end < 0 else text[start:end]
+
+
+def _documentation_planning_errors(
+    dirname: str,
+    spec_text: str,
+    plan_text: str,
+    tasks_text: str,
+    checklist_text: str,
+) -> list[str]:
+    """Validate one slice's mandatory README/docs disposition and gate tasks."""
+
+    errors: list[str] = []
+    spec_section = _markdown_section(spec_text, "Documentation Freshness")
+    plan_section = _markdown_section(plan_text, "Documentation Impact and Freshness")
+    if not spec_section:
+        errors.append(f"{dirname}/spec.md: missing documentation freshness section")
+    if not plan_section:
+        errors.append(f"{dirname}/plan.md: missing documentation impact section")
+        return errors
+
+    for generic in ("`docs/`", "`docs/security/`"):
+        if generic in plan_section or generic in spec_section:
+            errors.append(
+                f"{dirname}: generic documentation path {generic} is invalid when exact files are known"
+            )
+
+    for expected_path in sorted(EXPECTED_DOCUMENTATION_PATHS.get(dirname, set())):
+        token = f"`{expected_path}`"
+        if token not in plan_section:
+            errors.append(
+                f"{dirname}/plan.md: documentation matrix omits known affected path {expected_path!r}"
+            )
+        if token not in spec_section:
+            errors.append(
+                f"{dirname}/spec.md: documentation review omits known affected path {expected_path!r}"
+            )
+
+    rows: list[list[str]] = []
+    for line in plan_section.splitlines():
+        if not line.startswith("|") or re.fullmatch(r"[|:\- ]+", line):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 5 or cells[0] == "Claim surface":
+            continue
+        rows.append(cells)
+
+    readme_rows = [row for row in rows if "`README.md`" in row[1]]
+    if len(readme_rows) != 1:
+        errors.append(f"{dirname}/plan.md: documentation matrix must contain one README.md row")
+    else:
+        readme = readme_rows[0]
+        disposition = readme[2].strip("`")
+        expected = "UPDATE" if dirname == "110-v2-parity-cutover" else "HANDOFF"
+        if disposition != expected:
+            errors.append(
+                f"{dirname}/plan.md: README.md disposition must be {expected}; "
+                f"observed {disposition or 'missing'}"
+            )
+
+    if not any(row[2].strip("`") == "UPDATE" for row in rows):
+        errors.append(f"{dirname}/plan.md: no owned documentation UPDATE row")
+
+    for row in rows:
+        disposition = row[2].strip("`")
+        details = row[4]
+        if disposition not in {"UPDATE", "NO_IMPACT", "HANDOFF"}:
+            errors.append(
+                f"{dirname}/plan.md: invalid documentation disposition {disposition!r}"
+            )
+            continue
+        if len(details) < 20:
+            errors.append(
+                f"{dirname}/plan.md: {disposition} row lacks concrete validation/rationale/delta"
+            )
+        if disposition == "HANDOFF" and "Accepting owner:" not in details:
+            errors.append(
+                f"{dirname}/plan.md: HANDOFF row lacks an explicit accepting owner"
+            )
+        if disposition == "NO_IMPACT" and "rationale" not in details.lower():
+            errors.append(
+                f"{dirname}/plan.md: NO_IMPACT row lacks concrete rationale"
+            )
+
+    tasks_lower = tasks_text.lower()
+    for token in (
+        "documentation freshness",
+        "documentation impact and freshness",
+        "readme.md",
+        "documentation dispositions",
+        "reviewer",
+    ):
+        if token not in tasks_lower:
+            errors.append(f"{dirname}/tasks.md: missing documentation gate task term {token!r}")
+    if "documentation freshness" not in checklist_text.lower():
+        errors.append(f"{dirname}/checklists/requirements.md: missing documentation freshness review")
+    if "**`README.md` disposition**" not in spec_section:
+        errors.append(f"{dirname}/spec.md: missing explicit README.md disposition")
+    if "handoff evidence" not in spec_section.lower():
+        errors.append(f"{dirname}/spec.md: missing ordinary handoff evidence for documentation")
+    return errors
 
 
 def _graph_cycle(graph: dict[str, tuple[str, ...]]) -> list[str]:
@@ -480,6 +906,8 @@ def check_program(root: Path) -> list[str]:
     """Validate the V2 umbrella/slice graph and planning completeness."""
 
     errors: list[str] = []
+    goal_2_authorized, authorization_errors = _goal_2_authorization_state(root)
+    errors.extend(authorization_errors)
     specs = root / "specs"
     expected_directories = {"001-nunchi-v2-program", *EXPECTED_SLICES}
     actual_directories = {path.name for path in specs.iterdir() if path.is_dir()} if specs.is_dir() else set()
@@ -521,6 +949,7 @@ def check_program(root: Path) -> list[str]:
         spec_text = (feature / "spec.md").read_text(encoding="utf-8")
         plan_text = (feature / "plan.md").read_text(encoding="utf-8")
         tasks_text = (feature / "tasks.md").read_text(encoding="utf-8")
+        checklist_text = (feature / "checklists" / "requirements.md").read_text(encoding="utf-8")
         combined = "\n".join((spec_text, plan_text, tasks_text))
 
         if PINNED_VAULT_COMMIT not in spec_text:
@@ -535,6 +964,15 @@ def check_program(root: Path) -> list[str]:
         for section in REQUIRED_PLAN_SECTIONS:
             if section not in plan_text:
                 errors.append(f"{feature.relative_to(root)}/plan.md: missing section {section!r}")
+        errors.extend(
+            _documentation_planning_errors(
+                dirname,
+                spec_text,
+                plan_text,
+                tasks_text,
+                checklist_text,
+            )
+        )
         placeholder = PLANNING_PLACEHOLDER.search(combined)
         if placeholder:
             errors.append(
@@ -600,22 +1038,26 @@ def check_program(root: Path) -> list[str]:
             )
         graph[dirname[:3]] = dependencies
 
+        errors.extend(
+            _checked_task_authorization_errors(
+                feature.relative_to(root),
+                tasks_text,
+                goal_2_authorized,
+            )
+        )
         task_numbers: list[int] = []
         for line_number, line in enumerate(tasks_text.splitlines(), 1):
-            if line.startswith("- [x] T") or line.startswith("- [X] T"):
-                errors.append(
-                    f"{feature.relative_to(root)}/tasks.md:{line_number}: future Goal 2 task is checked"
-                )
-            if not line.startswith("- [ ] T"):
+            if not line.startswith(("- [ ] T", "- [x] T", "- [X] T")):
                 continue
-            match = TASK_LINE.fullmatch(line)
+            normalized_line = re.sub(r"^- \[[xX]\]", "- [ ]", line)
+            match = TASK_LINE.fullmatch(normalized_line)
             if not match:
                 errors.append(
                     f"{feature.relative_to(root)}/tasks.md:{line_number}: invalid task format"
                 )
                 continue
             task_numbers.append(int(match.group(1)))
-            if MANAGED_REFERENCE.search(line):
+            if MANAGED_REFERENCE.search(normalized_line):
                 errors.append(
                     f"{feature.relative_to(root)}/tasks.md:{line_number}: product task targets managed path"
                 )

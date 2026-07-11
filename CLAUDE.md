@@ -43,7 +43,8 @@ with Codex as repository default. Claude uses `.claude/skills/speckit-*`.
 
 Use `nunchi-plan` through analysis for planning. The customized `speckit`
 workflow includes clarify, checklist, analysis, an explicit Goal 2 authorization
-gate, implementation, convergence, and integration handoff.
+gate, implementation, convergence, a documentation-freshness gate, and
+integration handoff.
 
 SpecKit-managed directories are disposable control plane. Never place product
 code, schemas/contracts, tests, fixtures, evals, evidence, runtime assets, or
@@ -58,7 +59,13 @@ Work only in the assigned slice and an isolated worktree for non-trivial
 implementation. Do not change an upstream contract owned by another lane; file
 or hand back the needed change. Handoff must include the exact commit, commands
 and results, interface versions, ordinary evidence paths, runtime provenance,
-and known limitations.
+documentation dispositions and validation, and known limitations. Every
+implementation must review `README.md` plus affected ordinary docs using
+`UPDATE`, evidence-backed `NO_IMPACT`, or an exact integrator-owned `HANDOFF`;
+bare no-impact claims and generic directory scope block convergence. Do not
+check a Goal 2 task until Zoe's external authorization is recorded at
+`evidence/governance/v2-goal-2-authorization.md`; the record documents rather
+than grants that authority.
 
 When high reasoning is required, pass `--effort xhigh`. A green unit suite does
 not establish social correctness; use the slice's replay and live acceptance

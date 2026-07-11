@@ -28,6 +28,10 @@
 - [x] Keeps continuation authority host-only while allowing factual coverage and expansion-availability signals in classifier input.
 - [x] Assigns live canary execution to dependent surface/integration owners without making the core handoff cyclic.
 - [x] Requires final accepted atomic integration to merge to main and be reverified there, while keeping release/promotion separate.
+- [x] Requires every implementation slice to review `README.md` and affected ordinary docs with exact `UPDATE`, evidence-backed `NO_IMPACT`, or owner-accepted `HANDOFF` dispositions before handoff.
+- [x] Assigns global current-state documentation to slice `110` while requiring slices `010`–`100` to update owned guides and hand off exact claim deltas.
+- [x] Rejects generic directory scope when known affected documentation files can be named.
+- [x] Keeps Goal 2 task progress dormant before an external authorization record and allows truthful checked tasks after one is validly recorded.
 
 ## Verifiability
 
@@ -37,6 +41,7 @@
 - [x] Aggregate evidence records carry canonical scene IDs and have explicit scene-to-record manifests.
 - [x] Baseline and reinitialization-safety criteria are explicit.
 - [x] No `[NEEDS CLARIFICATION]`, owner placeholder, unresolved dependency, or undefined final sink remains.
+- [x] Documentation-freshness dispositions, validation, evidence, and review are measurable rather than generic polish tasks.
 
 ## Control-Plane Boundary
 

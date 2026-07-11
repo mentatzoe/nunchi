@@ -224,6 +224,22 @@ Claude Code, and capture installed identities in every receipt.
 - Operational session persistence remains useful, but it never authorizes a send
   or records whether a conversation item is handled.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact Codex V2 session,
+  no-social-send-gate, provenance, limitation, and evidence-grade deltas to
+  `v2-integrator`.
+- **Affected ordinary docs**: `UPDATE` `docs/integrations/codex-v2.md` and
+  `integrations/codex/README.md`; validate install/plugin/session,
+  configuration, removal of the outbound social re-gate, residue/restart,
+  links, examples, and probes. `HANDOFF` exact current-state and breaking-change
+  deltas for `CHANGELOG.md`, `docs/adapters.md`, `docs/integration.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`, plus
+  the Codex harness configuration delta in `integrations/mcp-discord/README.md`
+  to accepting `v2-transport-owner`.
+- **Handoff evidence**: `evidence/v2/codex/handoff.md` records reviewed paths,
+  dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - Shared Discord transport, shared schemas, core attention, or participant-turn

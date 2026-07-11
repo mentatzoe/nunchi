@@ -73,9 +73,9 @@ downstream evidence obligations.
 
 ## Phase 5: Documentation and Handoff
 
-- [ ] T023 Document budgets, capability truth, continuation, and non-ledger boundaries in `docs/observation/v2.md`
+- [ ] T023 Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route every global and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/observation/handoff.md`
 - [ ] T024 Publish the scene-to-record manifest, reference capability rules, and explicit downstream suppression-eligibility proof boundary in `evidence/v2/observation/README.md`
-- [ ] T025 Record commit, commands, I-020A version, shared/reference modules, evidence, downstream comparator obligations, and limitations in `evidence/v2/observation/handoff.md`
+- [ ] T025 Record commit, commands, I-020A version, shared/reference modules, evidence, downstream comparator obligations, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/observation/handoff.md`; handoff is blocked until documentation freshness passes
 
 ## Dependencies & Execution Order
 

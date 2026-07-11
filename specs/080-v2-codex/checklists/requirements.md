@@ -37,6 +37,7 @@ packaging, and evidence requirements before future implementation
 - [x] CHK016 Does the Codex lane own only Codex-specific paths while shared transport and foundation interfaces stay upstream-owned? [Ownership, Plan §Integration Strategy]
 - [x] CHK017 Are all future implementation, test, eval, evidence, and doc files assigned to ordinary paths, with no new evidence under `integrations/codex/`? [Boundary, Plan §Project Structure]
 - [x] CHK018 Is Goal 2 an external explicit gate rather than a completed planning/task status? [Boundary, Control-Plane Boundary; tasks.md]
+- [x] CHK019 Does documentation freshness inventory every exact known path, require new/existing Codex operator guides to `UPDATE`, route shared/transport `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

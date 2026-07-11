@@ -131,7 +131,7 @@ beyond the final candidate/evidence; release decision requires no launch asset.
 
 - [ ] T036 [US3] Assemble the V2 parity evidence index with S01-S16, security recheck, provenance, commands, failures, flicker, and limitations in `evidence/v2/README.md`
 - [ ] T037 [US3] Map every S01-S16/surface pair to exact candidate refs, commands, stable `scene_id`, request ID, stage owner, trusted bypass provenance, `classifier_not_invoked` and classifier-call count where applicable, record paths, post-hoc grades, evidence grade, and pass/block/native-capability disposition in `evidence/v2/parity/manifest.json`
-- [ ] T038 [US3] Update current behavior, V2 upgrade, supported/reference surface, and evidence-grade claims in `README.md`, `docs/integration.md`, and `docs/STABILITY.md`
+- [ ] T038 [US3] Complete documentation freshness by executing every exact `UPDATE` row in `plan.md` §Documentation Impact and Freshness, including `README.md` and every named root, shared, contract, evaluation, component, security, release, and installed-surface document; reconcile all accepted upstream claim deltas and validate links, Mermaid, examples, commands, install/version claims, evidence references, truthfulness tests, and reviewer acceptance against the exact atomic candidate
 - [ ] T039 [US3] Update exact version/change history and breaking migration boundary in `CHANGELOG.md` and `docs/releases/v2-readiness.md`
 - [ ] T040 [US3] Create the V2 release-readiness boundary with candidate identity, supported/reference scope, evidence bar, limitations, and Zoe go/no-go field in `docs/releases/v2-readiness.md` without adding promotion content
 
@@ -144,9 +144,9 @@ package is published and no promotion work is authorized by this checkpoint.
 
 - [ ] T041 Run `python3 scripts/check_governance.py`, `python3 -m unittest`, the V2 atomicity checker, the full parity replay including trusted-bypass and immutable-stage controls, slice-`100` assembled-candidate assurance, and documented live-evidence audits and record exact results in `evidence/v2/parity/final-verification.txt`
 - [ ] T042 Re-run cross-artifact and dependency analysis, prove zero CRITICAL/HIGH findings and zero cycles, and record the result in `evidence/v2/README.md`
-- [ ] T043 Finalize the integrated candidate manifest, scene/surface manifest, parity evidence index, and release-readiness boundary and hand the exact candidate commit, package hashes, commands/results, evidence, security disposition, and limitations to Zoe in `evidence/v2/parity/final-handoff.md`
+- [ ] T043 Finalize the integrated candidate manifest, scene/surface manifest, parity evidence index, release-readiness boundary, and documentation dispositions/validation/reviewer; hand the exact candidate commit, package hashes, commands/results, evidence, security disposition, and limitations to Zoe in `evidence/v2/parity/final-handoff.md` only after documentation freshness passes
 - [ ] T044 After Zoe records explicit repository-cutover acceptance in `evidence/v2/parity/final-handoff.md`, open or update one atomic `integration/v2` pull request to main, record its URL in `evidence/v2/parity/main-cutover.md` before the final branch update, and merge only the complete accepted candidate
-- [ ] T045 Check out the resulting main merge SHA, rerun governance, the full baseline, V2 atomicity, parity, assurance, installed-provenance smoke, and docs-truth checks, then record the merge SHA and exact results in `evidence/v2/parity/main-cutover.md` through an evidence-only follow-up commit/PR containing no product, runtime, schema, or behavior change and without publishing or promoting a release
+- [ ] T045 Check out the resulting main merge SHA, rerun governance, the full baseline, V2 atomicity, parity, assurance, installed-provenance smoke, and documentation-freshness/truth checks, then record the merge SHA and exact results in `evidence/v2/parity/main-cutover.md` through an evidence-only follow-up commit/PR containing no product, runtime, schema, or behavior change and without publishing or promoting a release
 
 ---
 

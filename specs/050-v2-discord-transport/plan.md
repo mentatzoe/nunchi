@@ -174,6 +174,19 @@ ordinary paths so parallel harness lanes do not collide.
 | Evidence | `evidence/v2/discord-transport/`, including `manifest.json` | US1–US3 |
 | Product docs | `docs/integrations/discord-mcp-v2.md` | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global Discord capability/status | `README.md` | `HANDOFF` | T017 / `v2-transport-owner` | Accepting owner: `v2-integrator`; replace historical/source-only claims with exact installed V2 capabilities, limitations, restart evidence, and proof tier at atomic cutover. |
+| Discord-MCP V2 guide | `docs/integrations/discord-mcp-v2.md` | `UPDATE` | T017 / `v2-transport-owner` | Validate install commands, native capability truth, restart/continuation claims, links, and probes against installed provenance. |
+| Existing Discord-MCP operator/design docs | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md` | `UPDATE` | T017 / `v2-transport-owner` | Validate native facts, exact-self, gaps/budgets, continuation, actions, receipts, restart, install provenance, links, and probes against I-050A. |
+| Shared change/adapter/design status | `CHANGELOG.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-transport-owner` | Accepting owner: `v2-integrator`; apply the exact breaking-change, installed Discord capability, limitation, evidence-grade, and diagram delta at cutover. |
+| Downstream peer-hearing/Codex transport wording | `integrations/claude-code/transport-patch/README.md`, `integrations/codex/README.md` | `HANDOFF` | T017 / `v2-transport-owner` | Accepting owner: `v2-claude-owner` and `v2-codex-owner`; apply the exact peer-hearing, native-event, action-capability, and transport-provenance delta. |
+
+The transport owner updates its guide and hands global status wording to 110;
+neither row may be closed by a bare `NO_IMPACT` claim.
+
 ## Owner Handoff
 
 The owner hands off the exact commit, commands and results, `I-050A

@@ -182,6 +182,19 @@ layer that could survive the atomic cutover.
 | Product documentation draft | `docs/attention/v2.md` | Cross-cutting; final truth owned by 110 |
 | Shared schemas | `schemas/v2/` | Consumed; 010-owned |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global attention/CLI state | `README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/CLI claims with accepted I-030A disposition, bypass, ERROR, and dual-DEFER behavior only at atomic cutover. |
+| Attention/operator reference | `docs/attention/v2.md` | `UPDATE` | T025 / `v2-core-owner` | Validate policy, error/exit semantics, active margin, model provenance, links, and commands against the exact candidate. |
+| Retained V1 scar/evaluation references | `docs/contracts/verdict-suite-data-model-v1.md`, `docs/contracts/verdict-suite-requirements-v1.md`, `docs/evaluations/verdict-suite.md`, `docs/evaluations/verdict-suite-runner.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve V1 evidence semantics, name its exact V2 regression/transition role, link the V2 evaluation, and validate retained commands. |
+| Shared change/current contract, install, integration, adapter, and design state | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, disposition/result, CLI/error, bypass, dual-DEFER, supersession, model/config, and diagram deltas at cutover. |
+| Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/codex/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-030A lifecycle, bypass, ERROR, and dual-DEFER delta in each owned guide. |
+
+Global current-state claims remain integrator-owned; the component guide and
+exact handoff delta are both required before 030 can converge.
+
 ## Owner Handoff
 
 The owner must hand off the exact commit, I-030A and upstream interface

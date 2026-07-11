@@ -172,6 +172,18 @@ product module.
 | Product documentation | `docs/observation/v2.md` | Cross-cutting |
 | Shared schemas | `schemas/v2/` | Consumed; 010-owned |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global context/identity description | `README.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
+| Observation reference | `docs/observation/v2.md` | `UPDATE` | T023 / `v2-observation-owner` | Validate budgets, capability truth, continuation authority, diagrams/links, and runnable examples against the accepted provider. |
+| Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
+| Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |
+
+The README handoff is an owned future delta, not `NO_IMPACT`; slice 020 must
+land and validate its own reference before handoff.
+
 ## Owner Handoff
 
 The handoff must include exact commit, I-020A version, shared module, capability

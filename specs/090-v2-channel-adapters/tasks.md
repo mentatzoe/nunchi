@@ -68,7 +68,7 @@ counts, facts, routes, outcomes, and receipts on every adapter.
 probes, and report per-surface capabilities/restart truth.
 
 - [ ] T016 [US3] Add failing installed-entrypoint, V1-residue, configuration, and schema-2 probe tests in `tests/v2/test_channel_adapters.py`
-- [ ] T017 [US3] Document generic and cross-adapter V2 invocation, budgets, capability semantics, and probes in `docs/adapters-v2.md`
+- [ ] T017 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate the V2 adapter `UPDATE`, route each shared/current-state `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/adapters/handoff.md`
 - [ ] T018 [US3] Record matched generic/Discord/Matrix/Telegram AD-01 through AD-06 and AD-08 results, including mandatory S06/S07/S10 bypass and immutable-stage cases, each with stable `scene_id`, request ID, stage owner, trusted provenance, `classifier_not_invoked` where applicable, and applicable S IDs, in `evidence/v2/adapters/scene-results.jsonl`
 - [ ] T019 [US3] Record exact installed package, entrypoints, config/process, restart/residue, and AD-07 V2 probes in `evidence/v2/adapters/installed-runtime.md`
 - [ ] T020 [US3] Run AD-09 across installed adapter entrypoints with harness-independent participant-host probes shaped like all six pinned S14 stages, including multi-human Discord and multi-human Telegram facts, and commit compatibility evidence in `evidence/v2/adapters/mixed-room.jsonl` without depending on downstream live-harness work
@@ -80,7 +80,7 @@ probes, and report per-surface capabilities/restart truth.
 - [ ] T021 Commit the per-surface fact/action/history/restart/continuation capability matrix in `evidence/v2/adapters/capability-matrix.md`
 - [ ] T022 Map AD-01 through AD-09 and applicable S IDs to exact records, commands, candidate commit, request ID, stage owner, classifier-call count, and result in `evidence/v2/adapters/manifest.json`
 - [ ] T023 Commit S01–S16 applicability and outcome index, including trusted-bypass zero-classifier-call/no-fabricated-result proof, immutable-stage ownership, post-hoc meta-answer grades, and confirmation that no runtime prose filter ran, in `evidence/v2/adapters/verification.md`
-- [ ] T024 Hand off commit, interface versions, commands/results, manifest, evidence, capability differences, provenance, and limitations in `evidence/v2/adapters/handoff.md`
+- [ ] T024 Hand off commit, interface versions, commands/results, manifest, evidence, capability differences, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/adapters/handoff.md` only after documentation freshness passes
 
 ## Dependencies & Execution Order
 

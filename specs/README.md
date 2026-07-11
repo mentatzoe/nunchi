@@ -28,5 +28,8 @@ documentation.
 | `110-v2-parity-cutover` | `v2-integrator` | `010`–`100` |
 
 The plans are not implementation authorization. Goal 2 begins only when Zoe
-sets it explicitly. Ordinary repository truth remains under `src/`, `schemas/`,
-`tests/`, `evals/`, `evidence/`, `integrations/`, `scripts/`, and `docs/`.
+sets it explicitly and the external grant is recorded at
+`evidence/governance/v2-goal-2-authorization.md`; the record documents but does
+not grant authority. Ordinary repository truth remains under `src/`,
+`schemas/`, `tests/`, `evals/`, `evidence/`, `integrations/`, `scripts/`, and
+`docs/`.

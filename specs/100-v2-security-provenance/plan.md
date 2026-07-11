@@ -122,7 +122,7 @@ exception exists.
 
 | Assurance/integration handoff | Owner and consumer | Planned ordinary-path authority |
 |---|---|---|
-| V2 security assurance report | owned by `100`; consumed by `110` | `docs/security/`, `evidence/v2/security/README.md` |
+| V2 security assurance report | owned by `100`; consumed by `110` | `SECURITY.md`, `docs/security/assurance-handoffs.md`, `docs/security/operational-safety.md`, `docs/security/runtime-provenance.md`, `docs/security/suppression-governance.md`, `docs/security/threat-model-v2.md`, `evidence/v2/security/README.md` |
 | Audited runtime/provenance set | owned by `100`; consumed by `110` | `evidence/v2/security/provenance/` |
 | V2 security readiness handoff | owned by `100`; consumed by `110` | `evidence/v2/security/handoff.json`, `evidence/v2/security/README.md` |
 | Security scene/evidence manifest | owned by `100`; consumed and rechecked by `110` | `evidence/v2/security/manifest.json` |
@@ -249,7 +249,19 @@ policy and high-level guarantees; detailed V2 analysis lives under
 | Tests | `tests/v2/security/` only; upstream suites are consumed, not owned | US1, US2, US3 |
 | Evaluation runners/corpora | `evals/v2/security/` | US3 |
 | Evidence | `evidence/v2/security/`, including `manifest.json` | US1, US2, US3 |
-| Product/security docs | `SECURITY.md`, `docs/security/` | US2, US3 |
+| Product/security docs | `SECURITY.md`, `docs/security/assurance-handoffs.md`, `docs/security/operational-safety.md`, `docs/security/runtime-provenance.md`, `docs/security/suppression-governance.md`, `docs/security/threat-model-v2.md` | US2, US3 |
+
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global security/provenance claims | `README.md` | `HANDOFF` | T034 / `v2-security-owner` | Accepting owner: `v2-integrator`; add only audited suppression governance, operational safety, provenance, accepted-risk, limitation, and evidence-grade claims at atomic cutover. |
+| Security and assurance references | `SECURITY.md`, `docs/security/assurance-handoffs.md`, `docs/security/operational-safety.md`, `docs/security/runtime-provenance.md`, `docs/security/suppression-governance.md`, `docs/security/threat-model-v2.md` | `UPDATE` | T004, T006, T014, T022, T028, T034 / `v2-security-owner` | Validate threat/control mappings, links, commands, evidence references, accepted risks, and provenance against the exact audited commit set. |
+| Shared install/integration/stability/design/change state | `CHANGELOG.md`, `docs/INSTALL.md`, `docs/integration.md`, `docs/STABILITY.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T034 / `v2-security-owner` | Accepting owner: `v2-integrator`; apply exact audited security, provenance, limitation, accepted-risk, current-state, and diagram deltas at cutover. |
+
+The assurance lane must reject stale or overclaimed docs as a blocking finding;
+global wording is an exact handoff to 110, never a documentation-only residual
+risk or unexplained `NO_IMPACT`.
 
 ## Owner Handoff
 

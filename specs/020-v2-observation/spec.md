@@ -257,6 +257,24 @@ and limitation outcomes.
 - Reference provider results establish reusable mechanics only. They never
   substitute for installed-runtime evidence from a native surface binding.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` exact identity, native-relation,
+  budget/gap, and continuation claim deltas to `v2-integrator` for atomic
+  current-state wording.
+- **Affected ordinary docs**: `UPDATE` `docs/observation/v2.md`. `HANDOFF` exact
+  request, identity, native-relation, order, budget, gap, and continuation
+  deltas for `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+  `HANDOFF` the same interface-specific delta for
+  `integrations/mcp-discord/README.md` and
+  `integrations/mcp-discord/DESIGN.md` to accepting `v2-transport-owner`,
+  `integrations/hermes/README.md` to accepting `v2-hermes-owner`,
+  `integrations/claude-code/README.md` to accepting `v2-claude-owner`, and
+  `integrations/codex/README.md` to accepting `v2-codex-owner`.
+- **Handoff evidence**: `evidence/v2/observation/handoff.md` records reviewed
+  paths, dispositions, exact delta, validation, and reviewer.
+
 ## Explicit Exclusions
 
 - No V2 product behavior is implemented in Goal 1.

@@ -68,7 +68,7 @@ routing, credential isolation, and the absence of a classifier call.
 - [ ] T014 [US3] Add failing send/reply/react/history authorization, rate-limit, wake-source/social-result input rejection, zero transport/send-path classifier calls, unchanged upstream-bypass-stage, participant-silence-no-delivery, request-correlation, and immutable single-writer transport-stage tests in `tests/v2/test_discord_transport.py`
 - [ ] T015 [US3] Implement V2 send, reply, reaction, and bounded-history tools plus only transport-attested immutable I-010E stage append in `src/nunchi/mcp_discord/tools.py`
 - [ ] T016 [US3] Keep rate-limit and retry handling operational, wake-source-agnostic, and off-surface without fabricating social results or mutating observation/attention/participant-host stages in `src/nunchi/mcp_discord/ratelimit.py`
-- [ ] T017 [US3] Document installation, exact capabilities, trusted configuration, restart claims, and V2 probes in `docs/integrations/discord-mcp-v2.md`
+- [ ] T017 [US3] Complete documentation freshness by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate the new and existing Discord-MCP `UPDATE` paths, route each shared/downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all documentation dispositions, paths, results, and reviewer in `evidence/v2/discord-transport/handoff.md`
 
 **Checkpoint**: DT-05 passes without pre-attention or per-trigger permission
 state in the send path.
@@ -79,7 +79,7 @@ state in the send path.
 - [ ] T019 Record exact installed commit/package, process configuration, restart, and live receive/send probe in `evidence/v2/discord-transport/installed-runtime.md`
 - [ ] T020 Run DT-07 against the exact installed shared Discord source using harness-independent transport-attested Hermes, Claude Code, Codex, and human actor probes, then commit peer-delivery and no-filter evidence in `evidence/v2/discord-transport/mixed-room.jsonl` without depending on downstream harness implementations
 - [ ] T021 Map DT-01 through DT-07 and applicable S IDs to exact records, commands, candidate commit, request ID, transport stage owner, immutable upstream-stage reference, transport/send-path classifier-call count, and result in `evidence/v2/discord-transport/manifest.json`
-- [ ] T022 Hand off interface version, commit, commands/results, manifest, evidence, capability limits, and known gaps in `evidence/v2/discord-transport/handoff.md`
+- [ ] T022 Hand off interface version, commit, commands/results, manifest, evidence, capability limits, documentation dispositions/validation/reviewer, and known gaps in `evidence/v2/discord-transport/handoff.md` only after documentation freshness passes
 
 ## Dependencies & Execution Order
 

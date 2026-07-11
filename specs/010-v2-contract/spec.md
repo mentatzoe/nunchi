@@ -278,6 +278,21 @@ participant outcomes and binding failures.
 - Interface version `@1` is the first V2 execution version; breaking edits
   require an explicit owner handoff and dependent re-analysis.
 
+## Documentation Freshness
+
+- **`README.md` disposition**: `HANDOFF` the exact accepted I-010A-E and
+  breaking-cutover claim delta to `v2-integrator`; do not present partial V2 as
+  current.
+- **Affected ordinary docs**: `UPDATE` `docs/contracts/nunchi-v2.md`. `HANDOFF`
+  exact supersession, interface-version, request/result, bypass, and ERROR
+  deltas for `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`,
+  `docs/adapters.md`,
+  `docs/contracts/channel-adapter-v1.md`, and
+  `docs/architecture/v2-selected-design.md` to accepting
+  `v2-integrator` for the atomic current-state update.
+- **Handoff evidence**: `evidence/v2/contract/handoff.md` records both
+  dispositions, exact reviewed paths, validation, reviewer, and accepted delta.
+
 ## Explicit Exclusions
 
 - No V2 schema, test, evaluator, evidence, documentation, core, CLI, adapter,

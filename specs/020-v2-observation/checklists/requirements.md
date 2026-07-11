@@ -35,6 +35,7 @@ continuation, recoverability, and downstream-comparison requirements
 - [x] CHK015 Are the accepted 010 dependency, I-020A output, 040–110 handoffs, and evidence obligations all traceable without making 020 the final integrator? [Dependency, Spec §Interface Summary, FR-001, FR-013]
 - [x] CHK016 Is the observation owner limited to one immutable request-correlated observation stage, leaving future attention/participant/transport facts explicitly unknown? [Ownership, Spec §FR-015]
 - [x] CHK017 Do aggregate evidence records require canonical scene IDs and an exact README scene-to-record manifest? [Traceability, Plan §Acceptance Scenes and Evidence]
+- [x] CHK018 Does documentation freshness inventory every exact known affected path, require the observation-guide `UPDATE`, route global and downstream `HANDOFF` deltas including `README.md` to accepting owners, and require validation/reviewer evidence? [Documentation, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 
 ## Notes
 

@@ -179,6 +179,17 @@ product artifacts out of `specs/`.
 | Evidence | `evidence/v2/claude-code/`, including `manifest.json` | US1–US3 |
 | Product docs | `docs/integrations/claude-code-v2.md` | US3 |
 
+## Documentation Impact and Freshness
+
+| Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
+|---|---|---|---|---|
+| Global Claude support/evidence state | `README.md` | `HANDOFF` | T016 / `v2-claude-owner` | Accepting owner: `v2-integrator`; replace V1 hook/patch claims with exact reactive/cold-wake capability, single-judgment lifecycle, provenance, limits, and evidence grade at atomic cutover. |
+| Claude Code V2 and existing operator docs | `docs/integrations/claude-code-v2.md`, `integrations/claude-code/README.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/claude-code/transport-patch/README.md` | `UPDATE` | T007, T016 / `v2-claude-owner` | Validate install/config, dual-DEFER meaning, patch base/digest, restart, links, examples, and probes against the exact installed candidate. |
+| Shared install/integration/adapter/design/change state | `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/integration.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T016 / `v2-claude-owner` | Accepting owner: `v2-integrator`; apply the exact breaking Claude lifecycle, installation/residue, evidence-grade, limitation, and diagram delta at cutover. |
+
+The owned guide/provenance docs update in this lane; root current-state wording
+is an exact handoff to 110, not `NO_IMPACT`.
+
 ## Owner Handoff
 
 The owner supplies exact commit, verification commands/results, consumed
