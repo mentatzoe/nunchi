@@ -42,6 +42,10 @@ _SKIP_DIRS = {
     # Build artifacts are copies of tracked source; scanning them makes the
     # test fail after an ordinary `python -m build` (round-2 finding).
     "build", "dist", ".eggs",
+    # Gitignored agent-session history written into the checkout by the
+    # operator's harness; conversation notes about removing the ledger would
+    # otherwise trip the ledger scan forever.
+    ".remember",
 }
 
 _TEXT_SUFFIXES = {".py", ".md", ".sh", ".example", ".toml", ".yaml", ".yml", ".json", ".txt"}
