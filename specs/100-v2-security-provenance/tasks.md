@@ -8,10 +8,7 @@ description: "Slice delivery task list for blocking V2 security and provenance a
 
 **Program implementation authority**: `NOT_GRANTED`
 
-**Assigned participant / source**: `UNASSIGNED` — may be replaced during
-planning, before implementation authority, only from a durable external
-assignment source; activation evidence later copies and attests it when
-establishing `READY`
+**Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 

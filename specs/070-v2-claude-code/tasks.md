@@ -10,10 +10,7 @@ description: "Slice delivery task plan for the V2 Claude Code harness (dormant u
 
 **Program implementation authority**: `NOT_GRANTED`
 
-**Assigned participant / source**: `UNASSIGNED` — may be replaced during
-planning, before implementation authority, only from a durable external
-assignment source; activation evidence later copies and attests it when
-establishing `READY`
+**Assigned participant / source**: Station — evidence/governance/assignments/station-v2-claude-owner-2026-07-16.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/070-v2-claude-code`
 

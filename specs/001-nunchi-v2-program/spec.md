@@ -16,8 +16,7 @@ implementation authority not granted
 
 **Implementation authorization**: `evidence/governance/v2-implementation-authorization.md` (absent until Zoe grants authority)
 
-**Assigned program participant / source (declaration)**: UNASSIGNED — reset
-2026-07-11; updated only from a durable external assignment source
+**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
 **Input**: Establish one implementation-ready V2 program from the selected
 Nunchi technical design without implementing V2 product behavior while building

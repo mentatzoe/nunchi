@@ -17,8 +17,7 @@ activation/acceptance evidence, and append-only candidate/handoff attempts
 
 **Program implementation authority**: `NOT_GRANTED`
 
-**Assigned program participant / source (declaration)**: `UNASSIGNED` — reset
-2026-07-11; updated only from a durable external assignment source
+**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
 **Implementation authorization**: `evidence/governance/v2-implementation-authorization.md`
 

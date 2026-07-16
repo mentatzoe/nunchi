@@ -27,8 +27,7 @@ not a live umbrella registry
 
 **Program implementation authority**: `NOT_GRANTED`
 
-**Assigned program participant / source (declaration)**: `UNASSIGNED` — reset
-2026-07-11; updated only from a durable external assignment source
+**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
 **2026-07-11 reset baseline — slice state**: every slice `010` through `110` is
 `PLANNED`; all product tasks below are dormant. Live facts derive from the

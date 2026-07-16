@@ -32,10 +32,7 @@ contract-clarified by PR 68 at `c834e8c`
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Assigned participant / source**: `UNASSIGNED` — may be replaced during
-planning, before implementation authority, only from a durable external
-assignment source; activation evidence later copies and attests it when
-establishing `READY`
+**Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 

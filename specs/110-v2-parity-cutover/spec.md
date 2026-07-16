@@ -43,10 +43,7 @@ contract-clarified by PR 68 at `c834e8c`
 
 **Accountable owner lane**: `v2-integrator`
 
-**Assigned participant / source**: `UNASSIGNED` — may be replaced during
-planning, before implementation authority, only from a durable external
-assignment source; activation evidence later copies and attests it when
-establishing `READY`
+**Assigned participant / source**: codex-session-2 — evidence/governance/assignments/codex-session-2-v2-integrator-2026-07-16.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/110-v2-parity-cutover`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
 

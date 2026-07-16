@@ -10,10 +10,7 @@ description: "Slice delivery task plan for V2 standalone channel adapters (dorma
 
 **Program implementation authority**: `NOT_GRANTED`
 
-**Assigned participant / source**: `UNASSIGNED` — may be replaced during
-planning, before implementation authority, only from a durable external
-assignment source; activation evidence later copies and attests it when
-establishing `READY`
+**Assigned participant / source**: mid-dev — evidence/governance/assignments/mid-dev-v2-adapters-owner-2026-07-16.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/090-v2-channel-adapters`
 
