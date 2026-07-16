@@ -518,8 +518,6 @@ def _validate_bound_run(
         )
     if _sha256(persisted) != binding.get("persisted_workflow_sha256"):
         raise ValueError("persisted workflow changed after the run was bound")
-    if _sha256(persisted) != binding.get("workflow_sha256"):
-        raise ValueError("persisted workflow differs from the canonical bound workflow")
 
     _validate_inputs(run_directory, binding)
     if _sha256(_tasks_path(root, binding)) != binding.get("tasks_file_sha256"):
@@ -613,8 +611,12 @@ def finalize_run_binding(root: Path, run_id: str) -> dict[str, object]:
     persisted_id, persisted_version = _workflow_metadata(persisted)
     if persisted_id != binding["workflow"] or persisted_version != workflow_version:
         raise ValueError("SpecKit persisted a different workflow identity or version")
-    if _sha256(persisted) != binding["workflow_sha256"]:
-        raise ValueError("SpecKit persisted a workflow that differs from the canonical binding")
+    # SpecKit re-serializes the workflow when persisting its run copy (quote
+    # style, line wrapping), so byte-equality with the canonical file is the
+    # wrong oracle here. The canonical file — the one SpecKit actually loaded —
+    # is re-verified against the prepare-time pin in _validate_binding_shape;
+    # the persisted copy is identity-checked above and its exact digest is
+    # recorded below so resume can prove it never changes afterwards.
 
     inputs_path = run_directory / "inputs.json"
     inputs = _load_json_file(inputs_path, "SpecKit run inputs")
@@ -683,7 +685,6 @@ def _refresh_state_binding_after_resume(
         persisted_id != current_binding["workflow"]
         or persisted_version != workflow_version
         or _sha256(persisted) != current_binding["persisted_workflow_sha256"]
-        or _sha256(persisted) != current_binding["workflow_sha256"]
     ):
         raise ValueError("persisted workflow changed during resume")
     _validate_inputs(run_directory, current_binding)

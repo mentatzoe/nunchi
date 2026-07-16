@@ -335,7 +335,7 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "persisted workflow changed"):
             runner.validate_resume(self.root, run_id)
 
-    def test_finalize_rejects_initially_divergent_persisted_workflow(self) -> None:
+    def test_finalize_rejects_persisted_workflow_with_different_version(self) -> None:
         runner.prepare_run(
             self.root,
             WORKFLOW,
@@ -348,12 +348,56 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
             / "workflow.yml"
         )
         persisted.write_text(
-            persisted.read_text(encoding="utf-8") + "# divergent copy\n",
+            persisted.read_text(encoding="utf-8").replace(
+                f'version: "{WORKFLOW_VERSION}"', 'version: "0.0.1"'
+            ),
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(ValueError, "differs from the canonical binding"):
+        with self.assertRaisesRegex(
+            ValueError, "different workflow identity or version"
+        ):
             runner.finalize_run_binding(self.root, "divergent-workflow-run")
+
+    def test_finalize_accepts_reserialized_persisted_workflow(self) -> None:
+        """The live specify CLI re-emits YAML (quotes, wrapping); finalize must
+        accept a byte-different but identity-equal persisted copy — the gap the
+        byte-exact mock previously hid."""
+        runner.prepare_run(
+            self.root,
+            WORKFLOW,
+            SLICE,
+            run_id="reserialized-workflow-run",
+        )
+        self._materialize_specify_run("reserialized-workflow-run")
+        persisted = (
+            runner._run_directory(self.root, "reserialized-workflow-run")
+            / "workflow.yml"
+        )
+        reserialized = persisted.read_text(encoding="utf-8").replace('"', "'")
+        persisted.write_text(reserialized, encoding="utf-8")
+
+        finalized = runner.finalize_run_binding(
+            self.root, "reserialized-workflow-run"
+        )
+        self.assertEqual(
+            finalized["persisted_workflow_sha256"],
+            runner._sha256(persisted),
+        )
+        runner.validate_resume(self.root, "reserialized-workflow-run")
+
+    def test_resume_rejects_persisted_workflow_tampered_after_finalize(self) -> None:
+        run_id = self._create_finalized_run()
+        persisted = runner._run_directory(self.root, run_id) / "workflow.yml"
+        persisted.write_text(
+            persisted.read_text(encoding="utf-8") + "# tampered after bind\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "changed after the run was bound"
+        ):
+            runner.validate_resume(self.root, run_id)
 
     def test_resume_rejects_altered_state(self) -> None:
         run_id = self._create_finalized_run()
