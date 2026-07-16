@@ -8,7 +8,7 @@ description: "Slice delivery task plan for the V2 Claude Code harness (dormant u
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: Station — evidence/governance/assignments/station-v2-claude-owner-2026-07-16.md
 

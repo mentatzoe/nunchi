@@ -16,7 +16,7 @@
 
 **Slice state**: `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Activation evidence**: `evidence/v2/attention/slice-activation.md` (written
 only after every readiness prerequisite is accepted; it attests those facts

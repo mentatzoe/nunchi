@@ -6,7 +6,7 @@
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: architect — evidence/governance/assignments/architect-v2-wake-owner-2026-07-16.md
 

@@ -6,7 +6,7 @@
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: Aleph — evidence/governance/assignments/aleph-v2-observation-owner-2026-07-16.md
 

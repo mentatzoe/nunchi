@@ -8,7 +8,7 @@ description: "Slice delivery task plan for the V2 Hermes harness (dormant until 
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: sr-dev — evidence/governance/assignments/sr-dev-v2-hermes-owner-2026-07-16.md
 

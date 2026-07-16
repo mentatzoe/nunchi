@@ -9,7 +9,7 @@ implementation authority not granted
 
 **Program state**: READY
 
-**Program implementation authority**: NOT_GRANTED
+**Program implementation authority**: `GRANTED`
 
 **Declaration reset observation**: 2026-07-11 — program `READY`, authority
 `NOT_GRANTED`, all slices `PLANNED`, all participant assignments `UNASSIGNED`

@@ -6,7 +6,7 @@ description: "Slice delivery task list for V2 parity and atomic cutover (dormant
 
 **Slice state**: `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: codex-session-2 — evidence/governance/assignments/codex-session-2-v2-integrator-2026-07-16.md
 

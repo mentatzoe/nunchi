@@ -8,7 +8,7 @@ description: "Slice delivery task plan for V2 standalone channel adapters (dorma
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: mid-dev — evidence/governance/assignments/mid-dev-v2-adapters-owner-2026-07-16.md
 

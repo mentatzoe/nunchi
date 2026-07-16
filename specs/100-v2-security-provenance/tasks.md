@@ -6,7 +6,7 @@ description: "Slice delivery task list for blocking V2 security and provenance a
 
 **Slice state**: `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
 

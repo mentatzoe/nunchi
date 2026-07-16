@@ -15,7 +15,7 @@ activation/acceptance evidence, and append-only candidate/handoff attempts
 
 **Program state**: `READY`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 

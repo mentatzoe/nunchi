@@ -8,7 +8,7 @@ description: "Slice delivery task plan for the V2 Codex harness (dormant until a
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 
-**Program implementation authority**: `NOT_GRANTED`
+**Program implementation authority**: `GRANTED`
 
 **Assigned participant / source**: Vigil — evidence/governance/assignments/vigil-v2-codex-owner-2026-07-16.md
 
