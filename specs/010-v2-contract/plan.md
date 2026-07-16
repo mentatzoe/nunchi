@@ -142,7 +142,12 @@ uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s test
 ```
 
 The package must already be present in the operator's uv cache; `--offline`
-MUST fail rather than access the network. The suite loads each case once and
+MUST fail rather than access the network. Under the repository baseline
+(`python3 -m unittest` without the oracle), the stdlib runtime-validation
+adapter and its corpus MUST still run and pass; oracle-dependent cases are
+skipped only under that baseline, with an explicit skip count asserted so
+absence is loud, and the pinned command above remains the sole complete
+dual-validator run. No silent skips. The suite loads each case once and
 runs it through both the Draft 2020-12 oracle and the stdlib runtime-validation
 adapter. The 010 handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
@@ -174,6 +179,8 @@ contract changes through an explicit return handoff and re-analysis.
 | S05 Governed suppression | Decision fixtures | Suppression legitimacy and policy widening are explicit; missing legitimacy cannot validate a hard stop. | `evidence/v2/contract/attention-decision.jsonl` |
 | S08 Dual DEFER valves | Decision fixtures | Classifier-DEFER and margin-DEFER remain distinct and separately auditable. | `evidence/v2/contract/attention-decision.jsonl` |
 | S09 Operational error | Decision fixtures | Invalid transitions and malformed evidence validate only as tagged error. | `evidence/v2/contract/attention-decision.jsonl` |
+| S06 WAKE/bypass contribution | Wake/receipt fixtures | WAKE and `PREATTENTION_BYPASS` wake packets validate with distinct attention sources (no advice on bypass), and a participant-host stage can record a direct contribution act tied to the same request ID. | `evidence/v2/contract/downstream.jsonl` |
+| S07 Participant silence | Wake/receipt fixtures | An invoked participant that sends nothing is representable as a distinct staged outcome — separate from suppression and from non-invocation — with no handled/owed/obligation field validating anywhere. | `evidence/v2/contract/downstream.jsonl` |
 | S15 Context budget | Request/wake fixtures | Independent attention and participant event/byte budgets are explicit and positive. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | S16 No registry or ledger | All five interfaces | Reply-bearing and handled/open/owed/permission fields fail validation. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | 010-Preattention bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
@@ -212,6 +219,7 @@ schemas/v2/
 └── attention-receipt.schema.json
 
 tests/v2/contract/
+├── schema_helpers.py
 ├── test_attention_request.py
 ├── test_attention_decision.py
 ├── test_participant_wake.py
@@ -243,8 +251,8 @@ documentation remain separately addressable ordinary artifacts.
 
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
-| Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording only in the atomic candidate. |
-| V2 contract reference | `docs/contracts/nunchi-v2.md` | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, links, and examples against both validators. |
+| Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording, plus the exact new dual-validator test command and dev/test-only `jsonschema==4.26.0` dependency wording, only in the atomic candidate. |
+| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, links, and examples against both validators. |
 | Existing change, contract, integration, adapter, stability, and selected-design status | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; apply the exact breaking-change, supersession, interface-version, request/result, bypass, ERROR, and diagram delta at atomic cutover. |
 
 `HANDOFF` preserves slice 110's ownership of global current-state wording; it

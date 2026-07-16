@@ -9,7 +9,7 @@ measurable, and bounded before slice activation is accepted
 
 ## Content and Boundary Quality
 
-- [x] CHK001 Is the `PLANNED` slice and its `NOT_GRANTED` program authority distinguished explicitly from current V1 implementation truth, with tasks `DORMANT` until `READY`? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Is the `PLANNED` slice distinguished explicitly from current V1 implementation truth — program authority `GRANTED` (recorded 2026-07-16) but tasks `DORMANT` until the slice is independently `READY`? [Clarity, Spec §Control-Plane Boundary]
 - [x] CHK002 Are product schemas, tests, evals, evidence, and docs assigned only to ordinary repository paths? [Consistency, Spec §Control-Plane Boundary]
 - [x] CHK003 Is exactly one accountable owner named, with a non-silent contract-change handoff? [Completeness, Spec §Interface Summary]
 - [x] CHK004 Are implementation, classifier, collector, harness, release, and promotion work explicitly excluded? [Coverage, Spec §Explicit Exclusions]
