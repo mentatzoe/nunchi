@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -3831,12 +3832,18 @@ def _check_installed_direct_url(tool_dir: Path) -> list[str]:
 
 def check_cli(root: Path) -> list[str]:
     del root
+    # Color-forcing environments (FORCE_COLOR) make uv/specify emit ANSI codes
+    # on stdout; the version comparison and Path(stdout) parsing below need
+    # plain text.
+    plain_env = {**os.environ, "NO_COLOR": "1"}
+    plain_env.pop("FORCE_COLOR", None)
     try:
         completed = subprocess.run(
             ["specify", "--version"],
             check=False,
             capture_output=True,
             text=True,
+            env=plain_env,
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -3851,6 +3858,7 @@ def check_cli(root: Path) -> list[str]:
             check=False,
             capture_output=True,
             text=True,
+            env=plain_env,
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
