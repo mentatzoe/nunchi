@@ -20,6 +20,8 @@ technical design and the 001 program contract.
 2026-07-16 V2 implementation grant (Zoe), commit
 554fc4f636a0eed18168eebd49d87b688df97a06
 
+**Recorded by**: v2-program-owner
+
 This record documents externally granted implementation authority; it does
 not grant it and does not authorize cutover, release, or promotion. Each
 slice must still independently satisfy its `READY` gate (dependency

@@ -1652,6 +1652,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
             "**Commissioned objective**: Implement and validate the complete atomic "
             "Nunchi V2 lifecycle across every independently owned slice.\n\n"
             "**Authority reference**: Zoe's durable program-implementation commission.\n\n"
+            "**Recorded by**: v2-program-owner\n\n"
             "This record documents externally granted implementation authority; it "
             "does not grant it and does not authorize cutover, release, or promotion.\n",
             encoding="utf-8",
@@ -1667,6 +1668,20 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
         self.assertTrue(authorized)
         self.assertEqual(errors, [])
+
+    def test_implementation_authorization_requires_recorded_by(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = self._write_valid_implementation_authorization(root)
+            text = path.read_text(encoding="utf-8").replace(
+                "**Recorded by**: v2-program-owner\n\n", ""
+            )
+            path.write_text(text, encoding="utf-8")
+            authorized, errors = check_governance._implementation_authorization_state(
+                root
+            )
+        self.assertFalse(authorized)
+        self.assertTrue(any("Recorded by" in error for error in errors))
 
     def test_implementation_authorization_rejects_duplicate_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:

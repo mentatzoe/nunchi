@@ -1453,6 +1453,7 @@ def _implementation_authorization_state(root: Path) -> tuple[bool, list[str]]:
                 "Starting commit",
                 "Commissioned objective",
                 "Authority reference",
+                "Recorded by",
             ),
             IMPLEMENTATION_AUTHORIZATION_PATH,
         )
@@ -1461,6 +1462,7 @@ def _implementation_authorization_state(root: Path) -> tuple[bool, list[str]]:
         "Program": "001-nunchi-v2-program",
         "Status": "AUTHORIZED",
         "Authorized by": "Zoe",
+        "Recorded by": "v2-program-owner",
     }
     for label, value in expected.items():
         observed = (_metadata_value(text, label) or "").strip("`")

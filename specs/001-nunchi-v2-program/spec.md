@@ -14,7 +14,7 @@ implementation authority not granted
 **Declaration reset observation**: 2026-07-11 — program `READY`, authority
 `NOT_GRANTED`, all slices `PLANNED`, all participant assignments `UNASSIGNED`
 
-**Implementation authorization**: `evidence/governance/v2-implementation-authorization.md` (absent until Zoe grants authority)
+**Implementation authorization**: `evidence/governance/v2-implementation-authorization.md` (recorded 2026-07-16)
 
 **Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
@@ -188,7 +188,8 @@ and final parity gate.
   and ordinary-path evidence requirements.
 - **FR-009**: The program MUST keep every slice implementation task dormant
   until the one valid complete program authorization record enumerates exactly
-  slices `010` through `110` and the bound slice is independently `READY`.
+  slices `010` through `110` and the bound slice is independently `READY`
+  (the record contract and documents-not-grants rule live in FR-025).
 - **FR-010**: The program MUST prevent product assets and product workflow
   dependencies inside SpecKit-managed paths.
 - **FR-011**: The program MUST use a breaking atomic V2 cutover with no V1

@@ -9,9 +9,10 @@ and the requirements in this program specification.
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Reset observation date**: 2026-07-11; the values below record the reset
-baseline and are superseded by the umbrella/bound-slice declarations, immutable
-activation/acceptance evidence, and append-only candidate/handoff attempts
+**Declaration reset observation**: 2026-07-11 — program `READY`, authority
+`NOT_GRANTED`, assignment `UNASSIGNED`; the values below are live declarations,
+superseded only by immutable activation/acceptance evidence and append-only
+candidate/handoff attempts
 
 **Program state**: `READY`
 
