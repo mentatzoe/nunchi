@@ -63,9 +63,9 @@ beginning the first checkbox.
 ## Phase 1: Contract Harness
 
 - [ ] T001 Create shared `Draft202012Validator` and stdlib-runtime corpus adapters pinned to dev/test-only `jsonschema==4.26.0` — the stdlib adapter always runs under the repo baseline; oracle absence yields explicit counted skips there and a loud failure only under the pinned dual-validator command — in `tests/v2/contract/schema_helpers.py`
-- [ ] T002 [P] Add red request cases for exact identity, actor mentions versus `mentions_room`, classifier-safe continuation projection, and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
-- [ ] T003 [P] Add red ok/error/bypass decision cases — including forbidden classifier fields on `preattention-disabled` and legacy-confidence-vector constraints (exactly the four `PASS`/`ACK`/`ASK`/`SPEAK` keys, finite values in [0,1], extra keys forbidden) — in `tests/v2/contract/test_attention_decision.py`
-- [ ] T004 [P] Add red wake-source cases including advice-free `PREATTENTION_BYPASS` in `tests/v2/contract/test_participant_wake.py`
+- [ ] T002 [P] Add red request cases for exact identity (S01), actor mentions versus `mentions_room` (S02), classifier-safe continuation projection and bounded tail (S03), non-positive budgets (S15), and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
+- [ ] T003 [P] Add red ok/error/bypass decision cases — including forbidden classifier fields on `preattention-disabled` legacy-confidence-vector constraints (exactly the four `PASS`/`ACK`/`ASK`/`SPEAK` keys, finite values in [0,1], extra keys forbidden), and FR-013 advice red cases (advice on `DEFER`/`SUPPRESS`, advice citing nonexistent event IDs) — in `tests/v2/contract/test_attention_decision.py`
+- [ ] T004 [P] Add red wake-source cases including advice-free `PREATTENTION_BYPASS` (010-Preattention-bypass), FR-013 advice-source violations, and non-positive participant budgets (S15) in `tests/v2/contract/test_participant_wake.py`
 - [ ] T005 [P] Add red host-secret leakage, binding, immutable-stage, writer-ownership, and explicit unknown/unavailable cases in `tests/v2/contract/test_context_and_receipt.py`
 
 ## Phase 2: User Story 1 - Truthful Attention Request (Priority: P1)
@@ -78,8 +78,8 @@ the valid scene matrix and rejects every enumerated identity, order, reference,
 coverage, V1, and forbidden-field case.
 
 - [ ] T006 [US1] Define `I-010A AttentionRequestV2@1` with distinct actor mentions, `mentions_room`, and host-only continuation metadata in `schemas/v2/attention-request.schema.json`
-- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl`
-- [ ] T008 [US1] Record exact-self, native-relation, gap, projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
+- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl`
+- [ ] T008 [US1] Record exact-self (S01), native-relation (S02), bounded-context/gap (S03), budget (S15), projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
 
 ## Phase 3: User Story 2 - Auditable Attention Decision (Priority: P1)
 
@@ -92,8 +92,8 @@ four ok pairs validate, malformed transition evidence cannot support
 suppression, and bypass validates only without a classifier/effective result.
 
 - [ ] T009 [US2] Define `I-010B AttentionDecisionV2@1` ok/error/bypass union with exact `preattention-disabled` constraints in `schemas/v2/attention-decision.schema.json`
-- [ ] T010 [P] [US2] Add transition, bypass, malformed-output, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl`
-- [ ] T011 [US2] Record transition, bypass, error, and S16 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-decision.jsonl`
+- [ ] T010 [P] [US2] Add transition (S09), governed-suppression (S05), dual-DEFER (S08), bypass (010-Preattention-bypass), malformed-output, FR-013 advice-rule, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl`
+- [ ] T011 [US2] Record governed-suppression (S05), dual-DEFER (S08), transition/error (S09), bypass (010-Preattention-bypass), and S16 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-decision.jsonl`
 
 ## Phase 4: User Story 3 - Participant Wake, Continuation, and Receipt (Priority: P2)
 
@@ -114,7 +114,7 @@ records correlated by request ID.
 ## Phase 5: Documentation and Packet Inputs
 
 - [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md` for the later workflow gate
-- [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` (SC-006 boundary verification), and create the S-ID-to-JSONL-record manifest in `evidence/v2/contract/README.md`
+- [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` with no flags (boundary-only SC-006 verification; `--check-cli` is the separate pinned-CLI check), and create the S-ID-to-JSONL-record manifest covering all twelve scene rows (S01, S02, S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) in `evidence/v2/contract/README.md`
 - [ ] T019 Prepare the proposed packet input with exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/contract/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order

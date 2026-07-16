@@ -165,7 +165,8 @@ participant outcomes and binding failures.
 1. **Given** effective `WAKE`, `DEFER`, error fallback, or preattention bypass,
    **When** a participant wake is formed, **Then** the source is explicit
    (`WAKE`, `DEFER`, `ERROR_FALLBACK`, or `PREATTENTION_BYPASS`) and facts remain
-   separate from optional, evidence-grounded attention advice.
+   separate from attention advice, which is present only on `WAKE`-source
+   packets and always evidence-grounded (FR-013).
 2. **Given** a continuation handle, **When** a fetch changes participant, room,
    continuity scope, or trigger binding, **Then** the request is rejected.
 3. **Given** a participant that sends nothing after being woken, **When** the
@@ -176,15 +177,17 @@ participant outcomes and binding failures.
 
 ### Edge Cases
 
-- Duplicate event IDs within one continuity scope; identical text with distinct
-  native IDs; and timestamps that disagree with authoritative array order.
+- Invalid (FR-003): duplicate event IDs within one request/continuity scope,
+  and timestamps that disagree with authoritative array order. Valid but
+  tricky: identical text with distinct native IDs.
 - Missing referenced actors, a trigger absent from `events`, unresolved
   relation targets, and transports that cannot know whether more events exist.
 - Empty or non-positive budgets, out-of-range margins, non-finite confidence
   values, extra legacy confidence keys, expired continuation handles, and cursor
   reuse across bindings.
-- Advice on `DEFER` or `SUPPRESS`, advice citing nonexistent events, and any
-  reply-bearing or social-ledger field in a public contract.
+- Invalid (FR-013/FR-011): advice on `DEFER` or `SUPPRESS`, advice citing
+  nonexistent events, and any reply-bearing or social-ledger field in a public
+  contract.
 - A bypass carrying classifier/effective disposition or advice; a
   `PREATTENTION_BYPASS` wake without a matching trusted bypass decision; or an
   attention receipt that fails to mark `classifier_not_invoked`.
@@ -207,18 +210,20 @@ participant outcomes and binding failures.
   separate from loose names, role, and description; loose descriptors MUST NOT
   establish authorship.
 - **FR-003**: Event requirements MUST preserve authoritative array order,
-  stable IDs, literal message/reply/thread/reaction/membership facts, distinct
-  actor-targeted mention IDs and `mentions_room`, and explicitly unknown or
-  unresolved platform facts.
+  stable IDs that are unique within one request and continuity scope
+  (duplicate event IDs reject), literal
+  message/reply/thread/reaction/membership facts, distinct actor-targeted
+  mention IDs and `mentions_room`, and explicitly unknown or unresolved
+  platform facts.
 - **FR-004**: Coverage and continuation requirements MUST bound event and byte
   access, expose truncation, gaps, visibility, and restart continuity honestly,
   and bind every fetch to participant, room, continuity scope, and trigger. The
-  handle, binding, cursor, and opaque continuation metadata MUST be host-only;
+  handle, binding, cursor, expiry values, and opaque continuation metadata MUST be host-only;
   the classifier projection MAY receive coverage and expansion capability
   booleans but MUST NOT receive those host secrets.
 - **FR-005**: The slice MUST define `I-010B AttentionDecisionV2@1` as a tagged
   host-facing union with `status: ok`, `status: bypass`, and `status: error`.
-  The ok branch contains classifier/effective dispositions, grounded advice,
+  The ok branch contains classifier/effective dispositions, `WAKE`-only grounded advice (FR-013),
   evidence IDs, classifier audit, and routing audit; the bypass branch contains
   exactly cause `preattention-disabled` with no classifier or effective
   disposition; the error branch remains operational and separate.
@@ -234,12 +239,14 @@ participant outcomes and binding failures.
   coverage, continuation, attention source, and optional advice remain
   separate, and no intermediate admission answer or composed reply is part of
   the contract. Its sources MUST include `WAKE`, `DEFER`, `ERROR_FALLBACK`, and
-  non-social `PREATTENTION_BYPASS`; bypass carries no attention advice.
+  non-social `PREATTENTION_BYPASS`; advice appears only on `WAKE`-source
+  packets (FR-013), so bypass, `DEFER`, and `ERROR_FALLBACK` wakes carry none.
 - **FR-009**: The slice MUST define `I-010D ContextContinuationV2@1` request and
   page shapes with bounded fetch, opaque cursor, authoritative order, exact
   merge identity, returned coverage, and binding validation. Handles, bindings,
-  cursors, and fetch credentials remain host-only and are forbidden from the
-  classifier projection.
+  cursors, expiry values, and fetch credentials remain host-only and are
+  forbidden from the classifier projection; an expired handle is rejected at
+  fetch time as a binding-validation failure.
 - **FR-010**: The slice MUST define `I-010E AttentionReceiptV2@1` as immutable,
   append-only stage records for `observation`, `attention`, `participant-host`,
   and `transport`, correlated by request ID. Each owner appends only its own
@@ -250,6 +257,14 @@ participant outcomes and binding failures.
 - **FR-011**: V2 contracts MUST reject V1 envelopes, reply-bearing fields,
   inferred-roster claims, and handled/open/owed/permission state; no V1
   translation bridge is permitted.
+- **FR-013**: Advice validity follows the attention engine's contract (030
+  FR-005: `SUPPRESS` and `DEFER` carry no participant advice). On the `I-010B`
+  ok branch, `advice` MUST be present only when the classifier disposition is
+  `WAKE`, and every advice evidence citation MUST reference an event ID
+  supplied in the request; citations of nonexistent events are invalid. On
+  `I-010C`, `advice` MUST be present only when `source` is `WAKE`; `DEFER`,
+  `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because no
+  classifier advice exists for those sources.
 - **FR-012**: Every contract MUST have deterministic ordinary-path tests,
   acceptance scenes, evidence targets, version ownership, and a documented
   handoff; no product artifact may live in this slice directory. JSON Schema

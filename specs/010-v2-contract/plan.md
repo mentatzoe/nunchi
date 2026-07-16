@@ -73,7 +73,8 @@ repository governance checks
 **Project Type**: Versioned library/CLI and inter-component contract
 
 **Performance Goals**: Contract validation remains negligible beside a model
-call; fixture suites remain deterministic and offline
+call (full corpus dual-validator run completes offline in under a minute on
+the reference machine); fixture suites remain deterministic and offline
 
 **Constraints**: Atomic V2 replacement; no V1 bridge; exact self binding; no
 social ledger or reply prose; transition margin remains independently gated;
