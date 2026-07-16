@@ -1496,6 +1496,13 @@ class GovernanceBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shutil.copytree(ROOT / "specs", root / "specs")
+            # Real slice declarations may reference durable assignment records;
+            # the synthetic repo must carry them or every declaration dangles.
+            assignments = ROOT / "evidence" / "governance" / "assignments"
+            if assignments.is_dir():
+                shutil.copytree(
+                    assignments, root / "evidence" / "governance" / "assignments"
+                )
             self._write_valid_implementation_authorization(root)
 
             for dirname in check_governance.EXPECTED_SLICES:
@@ -1630,7 +1637,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
         if starting_commit is None:
             starting_commit = GovernanceBoundaryTests._init_git_repo(root)
         path = root / check_governance.IMPLEMENTATION_AUTHORIZATION_PATH
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         slices = ", ".join(
             f"`{dirname[:3]}`" for dirname in check_governance.EXPECTED_SLICES
         )
