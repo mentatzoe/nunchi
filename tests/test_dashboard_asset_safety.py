@@ -31,7 +31,9 @@ _ASSET_SUFFIXES = {
 }
 
 # Directories that never contain served assets of this project.
-_SKIP_DIRS = {".git", ".worktrees", "__pycache__", "node_modules", ".venv", "venv"}
+# .remember is gitignored agent-session history written into live checkouts
+# by the operator's harness (same rationale as test_no_second_judgment).
+_SKIP_DIRS = {".git", ".worktrees", "__pycache__", "node_modules", ".venv", "venv", ".remember"}
 
 # Forbidden HTML-injection sinks. Substring match is intentional:
 # "document.write" also catches document.writeln; property writes and reads
