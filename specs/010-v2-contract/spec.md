@@ -180,7 +180,7 @@ participant outcomes and binding failures.
 - Invalid (FR-003): duplicate event IDs within one request/continuity scope,
   and timestamps that disagree with authoritative array order. Valid but
   tricky: identical text with distinct native IDs. Non-finite confidence red
-  cases use an encoded sentinel (string `"NaN"`/`"Infinity"` in the JSONL case
+  cases use an encoded sentinel (string `"NaN"`/`"Infinity"`/`"-Infinity"` in the JSONL case
   envelope, decoded by the corpus loader) because strict JSON forbids
   non-finite literals.
 - Missing referenced actors, a trigger absent from `events`, unresolved
@@ -235,8 +235,10 @@ participant outcomes and binding failures.
   other `status: ok` pairing MUST take the operational-error path. Bypass is not
   a successful disposition pairing and MUST NOT fabricate a model judgment.
 - **FR-007**: Legacy verdict confidence evidence is required on every
-  `status: ok` decision at `@1` (the protective transition margin is active for
-  the whole major version; retirement is a breaking `@2` edit) and MUST
+  `status: ok` decision at `@1` (the evidence-field requirement is permanent
+  for the major version — margin retirement itself stays independently
+  evidence-gated per Constitution V — and removing the field is a breaking
+  `@2` edit) and MUST
   contain exactly `PASS`, `ACK`, `ASK`, and `SPEAK` with finite values in
   `[0,1]`; malformed evidence MUST NOT support suppression.
 - **FR-008**: The slice MUST define `I-010C ParticipantWakeV2@1` so facts,
@@ -247,14 +249,20 @@ participant outcomes and binding failures.
   packets (FR-013), so bypass, `DEFER`, and `ERROR_FALLBACK` wakes carry none.
 - **FR-009**: The slice MUST define `I-010D ContextContinuationV2@1` request and
   page shapes with bounded fetch, opaque cursor, authoritative order, exact
-  merge identity, returned coverage, and binding validation. Handles, bindings,
+  merge identity, returned coverage, and binding validation; a continuation
+  page whose event IDs collide with the originating request rejects at fetch
+  time under the exact merge-identity rule. Handles, bindings,
   cursors, expiry values, and fetch credentials remain host-only and are
   forbidden from the classifier projection; an expired handle is rejected at
   fetch time as a binding-validation failure.
 - **FR-010**: The slice MUST define `I-010E AttentionReceiptV2@1` as immutable,
   append-only stage records for `observation`, `attention`, `participant-host`,
-  and `transport`, correlated by request ID. Each owner appends only its own
-  stage and MUST NOT mutate prior records or fill future stages. Unknown and
+  and `transport`, correlated by request ID, in that canonical order
+  (observation → attention → participant-host → transport). A prefix-partial
+  receipt — for example one awaiting its transport stage, or an S07 silence
+  outcome ending at participant-host — is valid-in-progress. Each owner
+  appends only its own stage and MUST NOT mutate prior records or fill future
+  stages. Unknown and
   unavailable remain explicit. The attention-stage record keeps classifier
   outcome, effective routing, policy provenance, and operational error separate;
   bypass records `classifier_not_invoked` and its trusted bypass provenance.
@@ -271,9 +279,15 @@ participant outcomes and binding failures.
   expected results for both validators; semantic and relational cases —
   cross-item ID uniqueness, timestamp-versus-order agreement, cross-document
   advice citations, trigger membership, fetch-time binding/expiry state, and
-  receipt-stage sequence rules — are runtime-adapter-only, with the oracle
-  either expecting valid or skipping by explicit class. Per-class case counts
-  MUST be asserted loudly so neither partition can silently shrink.
+  receipt-stage sequence rules — are runtime-adapter-only. The oracle
+  treatment is fixed per class: document-shaped relational cases (cross-item
+  ID uniqueness, timestamp-versus-order agreement, cross-document advice
+  citations, trigger membership) are oracle-expected-valid, because each
+  document is schema-valid in isolation; behavioral and sequence classes
+  (fetch-time binding/expiry state, receipt-stage sequence rules) are
+  oracle-class-skipped, because there is no single document to validate.
+  Per-class case counts MUST be asserted loudly so neither partition can
+  silently shrink.
 - **FR-013**: Advice validity follows the attention engine's contract (030
   FR-005: `SUPPRESS` and `DEFER` carry no participant advice). On the `I-010B`
   ok branch, `advice` MUST be present only when the classifier disposition is
@@ -313,9 +327,10 @@ participant outcomes and binding failures.
   asserted.
 - **SC-002**: Every valid request fixture preserves the supplied event order and
   exact actor/event references at the semantic field level: parsed field
-  values compare equal as exact strings/numbers and event-array order is
-  preserved; raw-byte serialization (key order, whitespace, unicode escapes,
-  numeric formatting) is out of scope.
+  values compare equal — strings as exact strings, numbers by exact decimal
+  token (so `1` and `1.0` are distinct) — and event-array order is preserved;
+  raw-byte serialization (key order, whitespace, unicode escapes) is out of
+  scope.
 - **SC-003**: Every `status: ok` decision fixture matches one of exactly four
   permitted classifier/effective pairs; every other ok pair validates only as
   operational error; and every bypass fixture has no classifier/effective
@@ -328,7 +343,7 @@ participant outcomes and binding failures.
   scene-to-record manifest, receipt stage ownership, rejected-case inventory,
   migration/provenance notes, documentation dispositions/validation/reviewer,
   evidence references, and known limitations with no unresolved ownership
-  ambiguity.
+  ambiguity (T019's enumeration is the authoritative packet list).
 - **SC-006**: A repository-boundary check finds zero product schemas, tests,
   fixtures, evaluation assets, evidence, or product documentation under this
   SpecKit directory.
@@ -367,8 +382,11 @@ participant outcomes and binding failures.
 
 - No V2 schema, test, evaluator, evidence, documentation, core, CLI, adapter,
   or harness implementation is created by this planning baseline.
-- No classifier prompt, social heuristic, context collector, provider call,
-  participant invocation, transport integration, or deployment choreography.
+- No classifier prompt or provider call (slice `030` owns them), social
+  heuristic (constitutionally excluded program-wide), context collector
+  (slice `020`), participant invocation (slice `040`), transport integration
+  (slice `050` for shared Discord; `060`–`090` for their surfaces), or
+  deployment choreography (slice `110` and the separate release decision).
 - No V1 compatibility bridge and no decision about release numbering,
   promotion, or standalone-adapter release scope.
 - Slices 020, 030, and 040 own their implementations and MUST request contract

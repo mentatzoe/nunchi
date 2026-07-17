@@ -75,8 +75,8 @@ repository governance checks
 **Project Type**: Versioned library/CLI and inter-component contract
 
 **Performance Goals**: Contract validation remains negligible beside a model
-call (full corpus dual-validator run completes offline in under a minute on
-the reference machine); fixture suites remain deterministic and offline
+call (advisory, not gated: the full corpus dual-validator run is expected to
+complete offline in well under a minute); fixture suites remain deterministic and offline
 
 **Constraints**: Atomic V2 replacement; no V1 bridge; exact self binding; no
 social ledger or reply prose; transition margin remains independently gated;
@@ -157,8 +157,9 @@ dual-validator run. No silent skips. The suite loads each case once and
 runs it through both the Draft 2020-12 oracle and the stdlib runtime-validation
 adapter, honoring the FR-012 partition: schema-expressible cases assert
 identical results from both validators; semantic/relational cases (cross-item
-uniqueness, order agreement, cross-document citations, fetch-time state,
-stage sequences) assert through the runtime adapter with the oracle expecting
+ID uniqueness, timestamp-versus-order agreement, cross-document advice
+citations, trigger membership, fetch-time binding/expiry state, and
+receipt-stage sequence rules) assert through the runtime adapter with the oracle expecting
 valid or skipping by explicit class, and per-class counts asserted. The 010 handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
 its own handoff.
@@ -199,7 +200,9 @@ failing case, and known impact on other consumers — followed by re-analysis.
 | 010-Preattention-bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | 010-V1 Breaking rejection | CLI/core-neutral fixtures | V1 envelopes are rejected with no translation bridge. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 
-Reusable fixtures and their runner target `evals/v2/contract/`; deterministic
+Reusable corpus assets (`cases.jsonl`, `expected-counts.json`) target
+`evals/v2/contract/`; the `tests/v2/contract/` suite is the corpus runner;
+deterministic
 tests target `tests/v2/contract/`. Every aggregate JSONL evidence record MUST
 contain `scene_id`, stable `case_id`, validator identity, expected result, and
 observed result. `evidence/v2/contract/README.md` is the exact manifest mapping
@@ -255,7 +258,7 @@ documentation remain separately addressable ordinary artifacts.
 |---|---|---|
 | Machine-readable contracts | `schemas/v2/*.schema.json` | US1–US3 |
 | Contract tests | `tests/v2/contract/test_*.py` | US1–US3 |
-| Evaluation runner/corpus | `evals/v2/contract/` | US1–US3 |
+| Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/` | US1–US3 |
 | Evidence | `evidence/v2/contract/` | Cross-cutting |
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
 | Product implementation | none in this slice | Excluded |
@@ -265,7 +268,7 @@ documentation remain separately addressable ordinary artifacts.
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
 | Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording, plus the exact new dual-validator test command and dev/test-only `jsonschema==4.26.0` dependency wording, only in the atomic candidate. |
-| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, links, and examples against both validators. |
+| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, the FR-012 runtime-adapter-only semantic rules, links, and examples against both validators. |
 | Release/change history | `CHANGELOG.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the breaking-change entry naming I-010A-E `@1`, the five exact `schemas/v2/*.schema.json` paths, supersession of the V1 `PASS/ACK/ASK/SPEAK` request/verdict contract with no translation bridge, and the pinned dual-validator command, only in the atomic candidate. |
 | Contract stability tiers | `docs/STABILITY.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace the V1 contract stability rows with the five `@1` interface versions and their breaking-cutover status, keeping the classifier-DEFER/margin-DEFER transition described as independently evidence-gated, not schema compatibility. |
 | Integration lifecycle | `docs/integration.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 request/verdict flow wording with the request → decision (`ok`/`bypass`/`error`) → wake → continuation → receipt lifecycle, including the non-social `preattention-disabled` bypass and the tagged operational ERROR path. |
