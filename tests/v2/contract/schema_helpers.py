@@ -1341,7 +1341,16 @@ _STAGE_BODY_CHECKS: dict[str, Callable[[_Errors, str, Any], None]] = {
 
 
 def validate_attention_receipt(doc: Any) -> list[str]:
-    """Mirror of schemas/v2/attention-receipt.schema.json (I-010E)."""
+    """Mirror of schemas/v2/attention-receipt.schema.json (I-010E).
+
+    The FR-010 stage-to-writer binding is part of the public per-record
+    contract (rejection R3): each stage names its single directly
+    observing owner per ``RECEIPT_WRITER_MAP``, so a record attributing
+    one stage to another stage's owner — for example ``stage:
+    observation`` written by ``transport`` — is invalid as a single
+    document, independent of the stream-level checks in
+    ``validate_receipt_stream``.
+    """
     errors = _Errors()
     fields = ("interface", "version", "request_id", "stage", "writer", "body")
     if not _check_closed_object(errors, "receipt", doc, fields, fields):
@@ -1352,6 +1361,15 @@ def validate_attention_receipt(doc: Any) -> list[str]:
         _check_enum(errors, "stage", stage, RECEIPT_STAGES)
     if "writer" in doc:
         _check_enum(errors, "writer", doc["writer"], RECEIPT_WRITERS)
+        if stage in RECEIPT_WRITER_MAP and doc["writer"] in RECEIPT_WRITERS:
+            owner = RECEIPT_WRITER_MAP[stage]
+            if doc["writer"] != owner:
+                errors.add(
+                    "writer",
+                    f"stage {stage!r} is owned by {owner!r}; {doc['writer']!r} "
+                    "must not attest another owner's stage (FR-010 per-record "
+                    "stage-to-writer binding)",
+                )
     if "body" in doc and stage in _STAGE_BODY_CHECKS:
         _STAGE_BODY_CHECKS[stage](errors, "body", doc["body"])
     elif "body" in doc and not isinstance(doc["body"], dict):

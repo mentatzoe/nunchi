@@ -238,8 +238,32 @@ class ReceiptRecordCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-receipt", v1, "invalid")
 
 
+class ReceiptWriterBindingCases(unittest.TestCase):
+    """FR-010 per-record stage-to-writer binding (rejection R3, CHK082/CHK087):
+    a record attributing one stage to another stage's owner is invalid as a
+    single document in both validators — schema-expressible enforcement,
+    reclassified from the stream-only receipt-sequence coverage (the moved
+    corpus case is DWN-S06-306)."""
+
+    def test_the_reviews_forged_record_rejects_as_a_single_document(self):
+        # The exact rejected probe: stage observation written by transport.
+        forged = make_receipt("observation", writer="transport")
+        assert_schema_verdict(self, "attention-receipt", forged, "invalid")
+
+    def test_every_cross_owner_stage_writer_pair_rejects(self):
+        for stage in RECEIPT_STAGES:
+            for writer in RECEIPT_WRITER_MAP.values():
+                expected = "valid" if RECEIPT_WRITER_MAP[stage] == writer else "invalid"
+                with self.subTest(stage=stage, writer=writer):
+                    doc = make_receipt(stage, writer=writer)
+                    assert_schema_verdict(self, "attention-receipt", doc, expected)
+
+
 class ReceiptSequenceCases(unittest.TestCase):
-    """FR-012 ``receipt-sequence`` class: behavioral, runtime-adapter-only."""
+    """FR-012 ``receipt-sequence`` class: behavioral, runtime-adapter-only.
+    The multi-record stream checks (canonical order, skipped stages,
+    earlier-stage mutation, request-ID correlation, and stream-level writer
+    ownership) remain here in addition to the per-record binding above."""
 
     def test_full_canonical_stream_passes(self):
         self.assertEqual([], validate_receipt_stream(make_receipt_stream()))

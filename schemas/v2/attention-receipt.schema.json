@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-receipt.schema.json",
   "title": "AttentionReceiptV2",
-  "description": "I-010E AttentionReceiptV2@1 — one immutable stage record of the request-correlated receipt stream. The canonical order is observation -> attention -> participant-host -> transport; a prefix-partial receipt is valid-in-progress. Each stage is appended only by its owning writer (observation-provider, attention-engine, participant-host, transport); the append-only sequence, immutability, and writer-ownership rules span multiple records and are runtime-adapter-only (FR-012 receipt-stage sequence class). The attention stage keeps classifier outcome, effective routing, policy provenance, operational error, and trusted bypass provenance separate; bypass records set classifier_not_invoked. Unknown and unavailable remain explicit.",
+  "description": "I-010E AttentionReceiptV2@1 — one immutable stage record of the request-correlated receipt stream. The canonical order is observation -> attention -> participant-host -> transport; a prefix-partial receipt is valid-in-progress. The stage-to-writer binding is part of this public per-record contract (FR-010, rejection R3): the closed map is observation -> observation-provider, attention -> attention-engine, participant-host -> participant-host, transport -> transport, and a record attributing one stage to another stage's owner is invalid as a single document. The multi-record rules — append-only sequence, canonical order, immutability, request-ID correlation, and stream-level writer ownership — span multiple records and remain runtime-adapter-only in addition (FR-012 receipt-stage sequence class). The attention stage keeps classifier outcome, effective routing, policy provenance, operational error, and trusted bypass provenance separate; bypass records set classifier_not_invoked. Unknown and unavailable remain explicit.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -109,20 +109,41 @@
   },
   "allOf": [
     {
+      "$comment": "FR-010 per-record stage-to-writer binding: each stage is written only by its single directly observing owner; a cross-owner record is invalid as a single document.",
       "if": {"required": ["stage"], "properties": {"stage": {"const": "observation"}}},
-      "then": {"properties": {"body": {"$ref": "#/$defs/observationBody"}}}
+      "then": {
+        "properties": {
+          "writer": {"const": "observation-provider"},
+          "body": {"$ref": "#/$defs/observationBody"}
+        }
+      }
     },
     {
       "if": {"required": ["stage"], "properties": {"stage": {"const": "attention"}}},
-      "then": {"properties": {"body": {"$ref": "#/$defs/attentionBody"}}}
+      "then": {
+        "properties": {
+          "writer": {"const": "attention-engine"},
+          "body": {"$ref": "#/$defs/attentionBody"}
+        }
+      }
     },
     {
       "if": {"required": ["stage"], "properties": {"stage": {"const": "participant-host"}}},
-      "then": {"properties": {"body": {"$ref": "#/$defs/participantHostBody"}}}
+      "then": {
+        "properties": {
+          "writer": {"const": "participant-host"},
+          "body": {"$ref": "#/$defs/participantHostBody"}
+        }
+      }
     },
     {
       "if": {"required": ["stage"], "properties": {"stage": {"const": "transport"}}},
-      "then": {"properties": {"body": {"$ref": "#/$defs/transportBody"}}}
+      "then": {
+        "properties": {
+          "writer": {"const": "transport"},
+          "body": {"$ref": "#/$defs/transportBody"}
+        }
+      }
     }
   ]
 }
