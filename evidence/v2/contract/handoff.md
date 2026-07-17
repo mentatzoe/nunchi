@@ -68,3 +68,156 @@ the deltas below become true wording only at cutover.
 **Result**: 1 `UPDATE` authored and validated; 7 `HANDOFF` deltas routed to
 accepting owner `v2-integrator`; 10 `NO_IMPACT` rationales re-verified
 CONFIRMED against the exact candidate diff. No row is unresolved.
+
+## Proposed handoff packet input (T019)
+
+Appended after the T017 documentation section without rewriting it. This
+enumeration is authoritative for the SC-005 packet inventory; the later
+convergence, documentation-freshness, and handoff gates — not the T019
+checkbox — establish lifecycle state.
+
+**Prepared by**: cc-session-1 (assigned `v2-contract-owner`), 2026-07-17,
+in the implement step of bound run `speckit-010-20260717T081350382670Z`.
+
+### Exact commit
+
+`3ed8bb333a15d715237a9bc66468592e30886972` on branch `v2/contract`
+(worktree `.worktrees/v2-contract/`). This tree contains all five schemas,
+the contract test suite, the three corpora with authoritative per-class
+counts, the aggregate evidence files, the scene manifest, and the
+slice-owned contract documentation.
+
+### Interface inventory (versions and exact paths)
+
+| Interface | Version | Exact path |
+|---|---|---|
+| `I-010A AttentionRequestV2` | `@1` | `schemas/v2/attention-request.schema.json` |
+| `I-010B AttentionDecisionV2` | `@1` | `schemas/v2/attention-decision.schema.json` |
+| `I-010C ParticipantWakeV2` | `@1` | `schemas/v2/participant-wake.schema.json` |
+| `I-010D ContextContinuationV2` | `@1` | `schemas/v2/context-continuation.schema.json` |
+| `I-010E AttentionReceiptV2` | `@1` | `schemas/v2/attention-receipt.schema.json` |
+
+Only `v2-contract-owner` edits `schemas/v2/**`; breaking edits land as
+`@2` through an explicit owner handoff plus dependent re-analysis.
+
+### Commands and results (2026-07-17, at the exact commit)
+
+| Command | Result |
+|---|---|
+| `uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 151 tests, OK, 0 skipped (the sole complete dual-validator run) |
+| `python3 -m unittest` (repository baseline, full suite) | 1208 tests, OK, 11 skipped (8 pre-existing V1 + 3 counted `baseline-oracle-absence`) |
+| `python3 scripts/check_governance.py` (boundary-only, SC-006) | `governance boundary: OK (SpecKit 0.12.11)` |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence` | 72 + 94 + 122 records, 0 mismatched |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence` | all records carry the five mandatory fields |
+
+### Dual-validator pin and results over the shared corpus
+
+The Draft 2020-12 oracle is dev/test-only `jsonschema==4.26.0` (any other
+version is treated as an absent oracle); the runtime side is the explicit
+stdlib adapter in `tests/v2/contract/schema_helpers.py`. Both validators
+consumed the identical decoded corpus (144 cases; 118 schema-expressible
+with identical expected results from both validators, 26
+runtime-adapter-only across the six semantic/relational classes with the
+fixed per-class oracle treatment). Observed per-class partition counts and
+both separately named skip regimes (`oracle-class-skip`: 16 cases;
+`baseline-oracle-absence`: 128 oracle-side checks) are recorded in
+`evidence/v2/contract/README.md` and match every corpus's authoritative
+`expected-counts.json`.
+
+### Corpus revision and downstream adapter obligation
+
+The shared conformance corpus revision is the exact commit above
+(`3ed8bb333a15d715237a9bc66468592e30886972`), covering
+`evals/v2/contract/attention-request/`,
+`evals/v2/contract/attention-decision/`, and
+`evals/v2/contract/downstream/` (each `cases.jsonl` plus
+`expected-counts.json`). **Obligation**: each downstream runtime owner
+must pass its own stdlib runtime-validation adapter over this identical
+corpus revision — including the six runtime-adapter-only semantic rule
+classes — before its own handoff.
+
+### Staged-receipt writer map
+
+| Stage | Sole appending owner |
+|---|---|
+| `observation` | `observation-provider` |
+| `attention` | `attention-engine` |
+| `participant-host` | `participant-host` |
+| `transport` | `transport` |
+
+Stages are immutable and append-only in canonical order; a prefix-partial
+receipt is valid-in-progress; no writer mutates a prior record or fills
+another owner's stage.
+
+### Scene-to-record evidence manifest
+
+`evidence/v2/contract/README.md` maps all twelve scene rows (S01, S02,
+S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1)
+to their JSONL files and record IDs, verified exhaustive and exact against
+the 144 evidence cases.
+
+### Rejected-case inventory
+
+99 of the 144 corpus cases are expected-invalid red cases, every one
+enumerated in its corpus `cases.jsonl` and present in the evidence files
+and manifest: attention-request 26 (23 schema-expressible; 1 each
+id-uniqueness, timestamp-order, trigger-membership), attention-decision 36
+(35 schema-expressible; 1 advice-citation), downstream 37 (27
+schema-expressible; 1 id-uniqueness; 4 binding-expiry; 5
+receipt-sequence). They cover invalid identity, reference, order,
+coverage, budget, transition, bypass-contamination, confidence,
+host-secret leakage, binding/expiry, receipt-stage sequence, reply-field,
+social-ledger, and V1-envelope cases; 100% reject (SC-001, 0 mismatches).
+
+### Migration and provenance notes
+
+- No V1 translation bridge exists or is permitted (FR-011): V1 envelopes,
+  reply-bearing fields, inferred-roster claims, and
+  handled/open/owed/permission state reject in every contract.
+- V1 remains the current product until the atomic V2 merge is verified on
+  `main`; these contracts create no V2 runtime behavior.
+- `legacy_confidence` embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` verdict
+  vocabulary as transition evidence only; it is required on every
+  `status: ok` decision for all of `@1`, and margin retirement remains
+  independently evidence-gated.
+- Provenance: implemented under program authority
+  `evidence/governance/v2-implementation-authorization.md` (all eleven
+  slices enumerated), activation
+  `evidence/v2/contract/slice-activation.md` (`READY` at `16cccb7`),
+  assignment `evidence/governance/assignments/cc-session-1-v2-contract-owner-2026-07-16.md`,
+  within bound runs `speckit-010-20260717T003300631902Z` (analysis/
+  readiness) and `speckit-010-20260717T081350382670Z` (delivery).
+- Runtime provenance: Python 3.11+ stdlib-only runtime; `jsonschema==4.26.0`
+  is dev/test-only behind the pinned offline command and never enters
+  runtime dependencies.
+
+### Documentation dispositions, validation, and reviewer
+
+Recorded in full as the first section of this file (T017): 1 slice-owned
+`UPDATE` authored and validated (`docs/contracts/nunchi-v2.md`), 7
+`HANDOFF` deltas routed to accepting owner `v2-integrator`, 10 `NO_IMPACT`
+rationales re-verified CONFIRMED against the exact candidate diff;
+reviewer cc-session-1.
+
+### Known limitations
+
+- A green contract suite proves contract mechanics, not social judgment
+  quality; social correctness claims require the downstream slices' replay
+  and live acceptance scenes.
+- The Draft 2020-12 oracle cannot express the six semantic/relational rule
+  classes; they bind only through each consumer's stdlib adapter, so the
+  downstream adapter obligation above is load-bearing, not advisory.
+- Strict JSON cannot carry non-finite literals: corpus red cases use the
+  reserved sentinel strings decoded once by the loader. An in-process
+  non-finite float constructed by a consumer never appears on the wire, so
+  runtime adapters must enforce the finite `[0, 1]` confidence rule
+  themselves (the schema's contradictory-bounds clause covers only decoded
+  instances).
+- The pinned offline command requires `jsonschema==4.26.0` already present
+  in the operator's uv cache; `--offline` fails rather than fetching.
+- The umbrella parity scenes S04 and S10 through S14 are owned by other
+  slices (see the plan's scene-ownership note); this packet claims no
+  coverage of them.
+- The seven `HANDOFF` documentation deltas apply only in the atomic
+  candidate; until cutover the affected documents intentionally retain
+  their V1 current-state wording.
