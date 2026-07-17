@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Contract
 
-**Branch**: `v2/contract` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/010-v2-contract/spec.md`
 
@@ -200,8 +200,11 @@ failing case, and known impact on other consumers — followed by re-analysis.
 | 010-Preattention-bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | 010-V1 Breaking rejection | CLI/core-neutral fixtures | V1 envelopes are rejected with no translation bridge. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 
-Reusable corpus assets (`cases.jsonl`, `expected-counts.json`) target
-`evals/v2/contract/`; the `tests/v2/contract/` suite is the corpus runner;
+Reusable corpus assets are partitioned per interface family at exactly
+`evals/v2/contract/attention-request/`,
+`evals/v2/contract/attention-decision/`, and `evals/v2/contract/downstream/`,
+each holding `cases.jsonl` and its authoritative per-class
+`expected-counts.json`; the `tests/v2/contract/` suite is the corpus runner;
 deterministic
 tests target `tests/v2/contract/`. Every aggregate JSONL evidence record MUST
 contain `scene_id`, stable `case_id`, validator identity, expected result, and
@@ -235,6 +238,7 @@ schemas/v2/
 └── attention-receipt.schema.json
 
 tests/v2/contract/
+├── __init__.py
 ├── schema_helpers.py
 ├── test_attention_request.py
 ├── test_attention_decision.py
@@ -242,6 +246,16 @@ tests/v2/contract/
 └── test_context_and_receipt.py
 
 evals/v2/contract/
+├── attention-request/
+│   ├── cases.jsonl
+│   └── expected-counts.json
+├── attention-decision/
+│   ├── cases.jsonl
+│   └── expected-counts.json
+└── downstream/
+    ├── cases.jsonl
+    └── expected-counts.json
+
 docs/contracts/
 └── nunchi-v2.md
 
@@ -258,8 +272,8 @@ documentation remain separately addressable ordinary artifacts.
 |---|---|---|
 | Machine-readable contracts | `schemas/v2/*.schema.json` | US1–US3 |
 | Contract tests | `tests/v2/contract/test_*.py` | US1–US3 |
-| Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/` | US1–US3 |
-| Evidence | `evidence/v2/contract/` | Cross-cutting |
+| Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/attention-request/`, `evals/v2/contract/attention-decision/`, `evals/v2/contract/downstream/` (each: `cases.jsonl` + per-class `expected-counts.json`) | US1–US3 |
+| Evidence | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl`, `evidence/v2/contract/README.md`, `evidence/v2/contract/handoff.md`, plus the declared lifecycle records | Cross-cutting |
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
 | Product implementation | none in this slice | Excluded |
 
@@ -276,6 +290,8 @@ documentation remain separately addressable ordinary artifacts.
 | V1 adapter contract | `docs/contracts/channel-adapter-v1.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the exact supersession notice naming I-010A-E `@1` and the atomic no-bridge cutover; the V1 body remains as a superseded historical reference. |
 | Selected-design status | `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; mark the five contract seams as landed at their exact `schemas/v2/` paths and align the request/decision/wake/receipt diagram labels with the `@1` interface names. |
 | Operator installation | `docs/INSTALL.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: install flow and installed artifacts are unchanged; this slice adds schemas, tests, evals, evidence, and one new doc only, and `jsonschema==4.26.0` stays dev/test-only behind the pinned `uv run --offline --with` command, never entering runtime or install dependencies. |
+| Agent execution guidance | `AGENTS.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: its test and runtime claims remain true — `python3 -m unittest` stays the green stdlib offline baseline (oracle-dependent cases skip loudly with asserted counts), the runtime stays dependency-free, and its V2-program wording (V1 current until `CUTOVER_VERIFIED`) is unchanged by this additive slice; cutover-time current-state wording is owned by the atomic candidate, not this slice. |
+| Claude execution guidance | `CLAUDE.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: its "standard-library runtime core" and `python3 -m unittest` claims remain accurate because `jsonschema==4.26.0` is dev/test-only behind the pinned offline command and never enters runtime dependencies; grounding sequence, governance commands, and workflow bindings are untouched by this slice. |
 | Verdict-suite data model | `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 verdict-suite data model remains current truth; I-010B embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` confidence-vector shape as transition evidence (FR-007) without changing any verdict-suite artifact or claim. |
 | Verdict-suite requirements | `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the verdict-suite data-model row; no verdict-suite requirement changes in this slice. |
 | Verdict-suite evaluation | `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 corpus and its claims are untouched; this slice adds `evals/v2/contract/` beside it without changing verdict-suite behavior. |
