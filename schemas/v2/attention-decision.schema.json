@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
   "title": "AttentionDecisionV2",
-  "description": "I-010B AttentionDecisionV2@1 — the tagged host-facing decision union. status 'ok' carries one of exactly four permitted classifier/effective pairs (SUPPRESS->SUPPRESS, SUPPRESS->DEFER, WAKE->WAKE, DEFER->DEFER) with routing audit, evidence IDs, classifier audit, the mandatory legacy verdict-confidence vector, and WAKE-only grounded advice; status 'bypass' carries exactly cause 'preattention-disabled' with no classifier or effective disposition; status 'error' remains operational and separate. Advice citations against the request's event IDs are a runtime-adapter-only rule (FR-013).",
+  "description": "I-010B AttentionDecisionV2@1 — the tagged host-facing decision union. status 'ok' carries one of exactly four permitted classifier/effective pairs (SUPPRESS->SUPPRESS, SUPPRESS->DEFER, WAKE->WAKE, DEFER->DEFER) with the closed routing audit (applied valve, override cause, margin status, effective margin exactly when the margin applied, trusted margin source only on a margin-applied decision), the sibling ok-branch 'reasons' audit field, evidence IDs, classifier audit, the optional legacy verdict-confidence vector — required exactly when the classifier disposition is SUPPRESS while the routing audit reports the margin active (FR-007) — and WAKE-only grounded advice (FR-013); status 'bypass' carries exactly cause 'preattention-disabled' and excludes the full FR-005 set (classifier/effective disposition, classifier audit, reasons, evidence, legacy confidence vector, routing audit, advice); status 'error' remains operational and separate. Advice citations against the request's event IDs are a runtime-adapter-only rule (FR-013).",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -30,6 +30,53 @@
         }
       }
     },
+    "routing": {
+      "$comment": "The closed FR-005 routing audit with its per-combination rules: a margin counts as applied exactly on valve margin-defer — the effective margin is then required and is forbidden on every other valve, override cause must be margin, and the margin status must be active (a retired margin cannot apply); the trusted margin source may appear only on that margin-applied decision (optional there); valves none and classifier-defer pair with override cause none; valve policy-defer pairs with override cause suppression-disabled or recoverability-unproven.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valve", "override_cause", "margin_status"],
+      "properties": {
+        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer"]},
+        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven"]},
+        "margin_status": {"enum": ["active", "retired"]},
+        "effective_margin": {
+          "$comment": "Finite (0, 1]; the contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
+        },
+        "margin_source": {"$ref": "#/$defs/nonEmptyString"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "margin-defer"}}},
+          "then": {
+            "required": ["effective_margin"],
+            "properties": {
+              "override_cause": {"const": "margin"},
+              "margin_status": {"const": "active"}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["effective_margin"]},
+                {"required": ["margin_source"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"enum": ["none", "classifier-defer"]}}},
+          "then": {"properties": {"override_cause": {"const": "none"}}}
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "policy-defer"}}},
+          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}
+        }
+      ]
+    },
     "ok": {
       "type": "object",
       "additionalProperties": false,
@@ -41,9 +88,9 @@
         "classifier_disposition",
         "effective_disposition",
         "routing",
+        "reasons",
         "evidence_event_ids",
-        "classifier_audit",
-        "legacy_confidence"
+        "classifier_audit"
       ],
       "properties": {
         "interface": {"const": "AttentionDecisionV2"},
@@ -52,22 +99,11 @@
         "status": {"const": "ok"},
         "classifier_disposition": {"$ref": "#/$defs/disposition"},
         "effective_disposition": {"$ref": "#/$defs/disposition"},
-        "routing": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["route"],
-          "properties": {
-            "route": {
-              "enum": [
-                "wake",
-                "classifier-defer",
-                "margin-defer",
-                "delegation-defer",
-                "suppress-no-override"
-              ]
-            },
-            "override_cause": {"$ref": "#/$defs/nonEmptyString"}
-          }
+        "routing": {"$ref": "#/$defs/routing"},
+        "reasons": {
+          "$comment": "A required sibling ok-branch audit field — never a member of the routing-audit object — retained as audit material that never enters the participant turn.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
         },
         "evidence_event_ids": {
           "type": "array",
@@ -84,7 +120,7 @@
           }
         },
         "legacy_confidence": {
-          "$comment": "FR-007: required on every ok decision at @1; exactly the four legacy verdict keys with finite values in [0,1]. Malformed evidence must not support suppression; removing this field is a breaking @2 edit.",
+          "$comment": "FR-007: optional on status ok and required exactly when the classifier disposition is SUPPRESS while the routing audit reports the margin active; a well-formed vector may accompany WAKE, DEFER, or a margin-retired SUPPRESS without invalidating them. When present: exactly the four legacy verdict keys with finite values in [0,1]. The optional field, its exact shape, and the conditional requirement are fixed for @1; removing or reshaping the field is a breaking @2 edit.",
           "type": "object",
           "additionalProperties": false,
           "required": ["PASS", "ACK", "ASK", "SPEAK"],
@@ -97,58 +133,62 @@
         },
         "advice": {"$ref": "#/$defs/advice"}
       },
+      "allOf": [
+        {
+          "$comment": "FR-007 conditional requirement: a margin-active candidate SUPPRESS must carry the legacy vector.",
+          "if": {
+            "required": ["classifier_disposition", "routing"],
+            "properties": {
+              "classifier_disposition": {"const": "SUPPRESS"},
+              "routing": {
+                "required": ["margin_status"],
+                "properties": {"margin_status": {"const": "active"}}
+              }
+            }
+          },
+          "then": {"required": ["legacy_confidence"]}
+        }
+      ],
       "oneOf": [
         {
-          "$comment": "WAKE->WAKE: the only pair that may carry advice (FR-013).",
+          "$comment": "WAKE->WAKE: valve none (no widening valve applied); the only pair that may carry advice (FR-013).",
           "properties": {
             "classifier_disposition": {"const": "WAKE"},
             "effective_disposition": {"const": "WAKE"},
-            "routing": {
-              "properties": {"route": {"const": "wake"}},
-              "not": {"required": ["override_cause"]}
-            }
+            "routing": {"properties": {"valve": {"const": "none"}}}
           }
         },
         {
-          "$comment": "DEFER->DEFER: classifier-DEFER valve, distinct from margin-DEFER (S08).",
+          "$comment": "DEFER->DEFER: the classifier-defer valve, distinct from margin-defer (S08).",
           "properties": {
             "classifier_disposition": {"const": "DEFER"},
             "effective_disposition": {"const": "DEFER"},
-            "routing": {
-              "properties": {"route": {"const": "classifier-defer"}},
-              "not": {"required": ["override_cause"]}
-            }
+            "routing": {"properties": {"valve": {"const": "classifier-defer"}}}
           },
           "not": {"required": ["advice"]}
         },
         {
-          "$comment": "SUPPRESS->DEFER: widened by the margin or delegation valve; the exact valve and override cause are preserved.",
+          "$comment": "SUPPRESS->DEFER: widened by the margin or policy valve; the exact valve, override cause, and margin facts follow the routing cross-field rules.",
           "properties": {
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "DEFER"},
-            "routing": {
-              "properties": {"route": {"enum": ["margin-defer", "delegation-defer"]}},
-              "required": ["override_cause"]
-            }
+            "routing": {"properties": {"valve": {"enum": ["margin-defer", "policy-defer"]}}}
           },
           "not": {"required": ["advice"]}
         },
         {
-          "$comment": "SUPPRESS->SUPPRESS: governed suppression names the no-override route (S05).",
+          "$comment": "SUPPRESS->SUPPRESS: governed suppression with no widening valve applied (S05).",
           "properties": {
             "classifier_disposition": {"const": "SUPPRESS"},
             "effective_disposition": {"const": "SUPPRESS"},
-            "routing": {
-              "properties": {"route": {"const": "suppress-no-override"}},
-              "not": {"required": ["override_cause"]}
-            }
+            "routing": {"properties": {"valve": {"const": "none"}}}
           },
           "not": {"required": ["advice"]}
         }
       ]
     },
     "bypass": {
-      "$comment": "A non-social no-classifier outcome: not a successful disposition pairing, and it must not fabricate a model judgment, audit, advice, reasons, or evidence.",
+      "$comment": "A non-social no-classifier outcome excluding the full FR-005 set: no classifier/effective disposition, classifier audit, reasons, evidence, legacy confidence vector, routing audit, or advice. Not a successful disposition pairing; it must not fabricate a model judgment.",
       "type": "object",
       "additionalProperties": false,
       "required": ["interface", "version", "request_id", "status", "cause"],

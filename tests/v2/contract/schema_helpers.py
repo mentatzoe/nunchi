@@ -137,13 +137,14 @@ ERROR_KINDS = (
     "runtime-failure",
 )
 EVENT_KINDS = ("message", "reply", "reaction", "membership", "thread")
-ROUTES = (
-    "wake",
-    "classifier-defer",
-    "margin-defer",
-    "delegation-defer",
-    "suppress-no-override",
+ROUTING_VALVES = ("none", "classifier-defer", "margin-defer", "policy-defer")
+OVERRIDE_CAUSES = (
+    "none",
+    "margin",
+    "suppression-disabled",
+    "recoverability-unproven",
 )
+MARGIN_STATUSES = ("active", "retired")
 RECEIPT_STAGES = ("observation", "attention", "participant-host", "transport")
 RECEIPT_WRITERS = (
     "observation-provider",
@@ -852,22 +853,19 @@ def _check_advice(errors: _Errors, path: str, value: Any) -> None:
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
-# The closed ok-transition matrix (FR-006) with each pair's routing rule:
-# route set, whether routing.override_cause is required, and whether the
-# pair may carry advice (FR-013: classifier WAKE only).
+# The closed ok-transition matrix (FR-006) with each pair's allowed valves
+# and whether the pair may carry advice (FR-013: classifier WAKE only).
+# WAKE->WAKE and SUPPRESS->SUPPRESS carry valve "none" (no widening valve
+# applied); valve/override-cause/margin cross-field legality is enforced
+# separately by the routing-audit rules (FR-005).
 _OK_TRANSITIONS = {
-    ("WAKE", "WAKE"): {"routes": ("wake",), "override": False, "advice": True},
-    ("DEFER", "DEFER"): {"routes": ("classifier-defer",), "override": False, "advice": False},
+    ("WAKE", "WAKE"): {"valves": ("none",), "advice": True},
+    ("DEFER", "DEFER"): {"valves": ("classifier-defer",), "advice": False},
     ("SUPPRESS", "DEFER"): {
-        "routes": ("margin-defer", "delegation-defer"),
-        "override": True,
+        "valves": ("margin-defer", "policy-defer"),
         "advice": False,
     },
-    ("SUPPRESS", "SUPPRESS"): {
-        "routes": ("suppress-no-override",),
-        "override": False,
-        "advice": False,
-    },
+    ("SUPPRESS", "SUPPRESS"): {"valves": ("none",), "advice": False},
 }
 
 
@@ -887,6 +885,94 @@ def validate_attention_decision(doc: Any) -> list[str]:
     return list(errors)
 
 
+def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
+    """The closed FR-005 routing audit with its per-combination rules.
+
+    A margin counts as applied exactly on valve ``margin-defer``: the
+    effective margin (finite, in (0, 1]) is then required and forbidden on
+    every other valve, the override cause must be ``margin``, and the
+    margin status must be ``active`` (a retired margin cannot apply). The
+    trusted margin source may appear only on that margin-applied decision.
+    Valves ``none``/``classifier-defer`` pair with override cause ``none``;
+    valve ``policy-defer`` pairs with ``suppression-disabled`` or
+    ``recoverability-unproven``.
+    """
+    if not _check_closed_object(
+        errors,
+        "routing",
+        routing,
+        ("valve", "override_cause", "margin_status"),
+        ("valve", "override_cause", "margin_status", "effective_margin", "margin_source"),
+    ):
+        return None
+    valve = routing.get("valve")
+    if "valve" in routing:
+        _check_enum(errors, "routing.valve", valve, ROUTING_VALVES)
+    if "override_cause" in routing:
+        _check_enum(errors, "routing.override_cause", routing["override_cause"], OVERRIDE_CAUSES)
+    if "margin_status" in routing:
+        _check_enum(errors, "routing.margin_status", routing["margin_status"], MARGIN_STATUSES)
+    if "effective_margin" in routing:
+        margin = routing["effective_margin"]
+        if not _is_number(margin):
+            errors.add("routing.effective_margin", "must be a number")
+        elif not math.isfinite(margin) or not (0.0 < float(margin) <= 1.0):
+            errors.add(
+                "routing.effective_margin", "must be a finite number within (0, 1]"
+            )
+    if "margin_source" in routing:
+        _check_nes(errors, "routing.margin_source", routing["margin_source"])
+
+    if valve == "margin-defer":
+        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "margin":
+            errors.add(
+                "routing.override_cause",
+                "valve margin-defer requires override cause 'margin'",
+            )
+        if routing.get("margin_status") in MARGIN_STATUSES and routing["margin_status"] != "active":
+            errors.add(
+                "routing.margin_status",
+                "valve margin-defer requires margin status 'active'; a retired "
+                "margin cannot apply",
+            )
+        if "effective_margin" not in routing:
+            errors.add(
+                "routing.effective_margin",
+                "required: a margin applied exactly when the valve is "
+                "margin-defer, and the applied margin must record its "
+                "effective width",
+            )
+    elif valve in ("none", "classifier-defer"):
+        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "none":
+            errors.add(
+                "routing.override_cause",
+                f"valve {valve!r} requires override cause 'none'",
+            )
+    elif valve == "policy-defer":
+        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] not in (
+            "suppression-disabled",
+            "recoverability-unproven",
+        ):
+            errors.add(
+                "routing.override_cause",
+                "valve policy-defer requires override cause "
+                "'suppression-disabled' or 'recoverability-unproven'",
+            )
+    if valve != "margin-defer":
+        if "effective_margin" in routing:
+            errors.add(
+                "routing.effective_margin",
+                "forbidden: no margin applied unless the valve is margin-defer",
+            )
+        if "margin_source" in routing:
+            errors.add(
+                "routing.margin_source",
+                "forbidden: the trusted margin source may appear only on a "
+                "margin-applied (valve margin-defer) decision",
+            )
+    return valve if valve in ROUTING_VALVES else None
+
+
 def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     errors = _Errors()
     allowed = (
@@ -897,12 +983,15 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         "classifier_disposition",
         "effective_disposition",
         "routing",
+        "reasons",
         "evidence_event_ids",
         "classifier_audit",
         "legacy_confidence",
         "advice",
     )
-    required = tuple(name for name in allowed if name != "advice")
+    required = tuple(
+        name for name in allowed if name not in ("legacy_confidence", "advice")
+    )
     if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
     _check_envelope(errors, doc, "AttentionDecisionV2")
@@ -915,15 +1004,17 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         _check_enum(errors, "effective_disposition", effective, DISPOSITIONS)
 
     routing = doc.get("routing")
-    route = None
-    if "routing" in doc and _check_closed_object(
-        errors, "routing", routing, ("route",), ("route", "override_cause")
-    ):
-        route = routing.get("route")
-        if "route" in routing:
-            _check_enum(errors, "routing.route", route, ROUTES)
-        if "override_cause" in routing:
-            _check_nes(errors, "routing.override_cause", routing["override_cause"])
+    valve = None
+    if "routing" in doc:
+        valve = _check_routing_audit(errors, routing)
+
+    if "reasons" in doc:
+        reasons = doc["reasons"]
+        if not isinstance(reasons, list):
+            errors.add("reasons", "must be an array of audit strings")
+        else:
+            for index, reason in enumerate(reasons):
+                _check_nes(errors, f"reasons[{index}]", reason)
 
     if "evidence_event_ids" in doc:
         cited = doc["evidence_event_ids"]
@@ -965,6 +1056,22 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     if "advice" in doc:
         _check_advice(errors, "advice", doc["advice"])
 
+    # FR-007 conditional requirement: the legacy vector is required exactly
+    # when the classifier disposition is SUPPRESS while the routing audit
+    # reports the margin active; it stays optional (and permitted) on WAKE,
+    # DEFER, and a margin-retired SUPPRESS.
+    if (
+        classifier == "SUPPRESS"
+        and isinstance(routing, dict)
+        and routing.get("margin_status") == "active"
+        and "legacy_confidence" not in doc
+    ):
+        errors.add(
+            "legacy_confidence",
+            "required: a margin-active candidate SUPPRESS must carry the "
+            "legacy verdict confidence vector (FR-007)",
+        )
+
     # Closed ok-transition matrix: only four classifier/effective pairs are
     # successful; every other pairing must take the operational-error path.
     if classifier in DISPOSITIONS and effective in DISPOSITIONS:
@@ -976,24 +1083,12 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                 "permitted pairs; report it on the error branch instead",
             )
         else:
-            if isinstance(routing, dict):
-                if route in ROUTES and route not in rule["routes"]:
-                    errors.add(
-                        "routing.route",
-                        f"transition {classifier}->{effective} requires route in "
-                        f"{rule['routes']}",
-                    )
-                if rule["override"] and "override_cause" not in routing:
-                    errors.add(
-                        "routing.override_cause",
-                        "required: a widened suppression must preserve its exact "
-                        "valve and override cause",
-                    )
-                if not rule["override"] and "override_cause" in routing:
-                    errors.add(
-                        "routing.override_cause",
-                        f"not allowed on transition {classifier}->{effective}",
-                    )
+            if valve is not None and valve not in rule["valves"]:
+                errors.add(
+                    "routing.valve",
+                    f"transition {classifier}->{effective} requires the applied "
+                    f"valve in {rule['valves']}",
+                )
             if not rule["advice"] and "advice" in doc:
                 errors.add(
                     "advice",
@@ -1856,10 +1951,33 @@ def make_advice(**overrides: Any) -> dict[str, Any]:
     return advice
 
 
+def make_routing(valve: str = "none", **overrides: Any) -> dict[str, Any]:
+    """A legal closed routing audit for the given applied valve.
+
+    ``margin-defer`` carries the margin cross-field facts (override cause
+    ``margin``, margin status ``active``, the effective margin) and
+    ``policy-defer`` a policy override cause; ``none``/``classifier-defer``
+    carry override cause ``none``. The default margin status is ``active``
+    because the uncertainty margin remains active at initial V2 cutover.
+    """
+    routing: dict[str, Any] = {
+        "valve": valve,
+        "override_cause": "none",
+        "margin_status": "active",
+    }
+    if valve == "margin-defer":
+        routing["override_cause"] = "margin"
+        routing["effective_margin"] = 0.12
+    elif valve == "policy-defer":
+        routing["override_cause"] = "suppression-disabled"
+    routing.update(overrides)
+    return routing
+
+
 def make_decision_ok(
     classifier: str = "WAKE",
     effective: str = "WAKE",
-    route: str = "wake",
+    valve: str = "none",
     **overrides: Any,
 ) -> dict[str, Any]:
     doc = {
@@ -1869,7 +1987,8 @@ def make_decision_ok(
         "status": "ok",
         "classifier_disposition": classifier,
         "effective_disposition": effective,
-        "routing": {"route": route},
+        "routing": make_routing(valve),
+        "reasons": ["directly addressed about the deploy"],
         "evidence_event_ids": ["e1", "e3"],
         "classifier_audit": {
             "model": "openrouter/test-model",

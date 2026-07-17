@@ -1,7 +1,7 @@
 {
   "schema-expressible": {
-    "valid": 10,
-    "invalid": 35
+    "valid": 15,
+    "invalid": 44
   },
   "id-uniqueness": {
     "valid": 0,
