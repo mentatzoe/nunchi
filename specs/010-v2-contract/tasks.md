@@ -34,6 +34,9 @@ before `ACTIVE` or any implementation checkbox
 `python3 scripts/check_governance.py --task-manifest specs/010-v2-contract`
 and copy its exact `Initial task IDs` / `Initial tasks SHA256` into activation,
 then its `Completed task IDs` / `Tasks SHA256` into each candidate attempt.
+Each candidate attempt hashes the task graph as it stands for that attempt
+(including any convergence-appended tasks); the immutable activation record
+retains the initial values unchanged.
 
 **Candidate evidence**: `evidence/v2/contract/slice-candidate.md` (for
 `CONVERGED`; absent while `PLANNED`)
@@ -67,11 +70,11 @@ beginning the first checkbox.
 
 ## Phase 1: Contract Harness
 
-- [ ] T001 Create shared `Draft202012Validator` and stdlib-runtime corpus adapters — implementing the FR-012 expressiveness partition (dual-validator vs runtime-adapter-only case classes, per-class counts asserted) — pinned to dev/test-only `jsonschema==4.26.0` — the stdlib adapter always runs under the repo baseline; oracle absence yields explicit counted skips there and a loud failure only under the pinned dual-validator command — in `tests/v2/contract/schema_helpers.py`
-- [ ] T002 [P] Add red request cases for exact identity (S01), actor mentions versus `mentions_room` (S02), duplicate event IDs and timestamp-versus-order disagreement (runtime-adapter-only) with the valid identical-text-distinct-ID case, classifier-safe continuation projection and bounded tail (S03), non-positive budgets (S15), and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
-- [ ] T003 [P] Add red ok/error/bypass decision cases — including forbidden classifier fields on `preattention-disabled` legacy-confidence-vector constraints (exactly the four `PASS`/`ACK`/`ASK`/`SPEAK` keys, finite values in [0,1], extra keys forbidden), and FR-013 advice red cases (advice on `DEFER`/`SUPPRESS`, advice citing nonexistent event IDs) — in `tests/v2/contract/test_attention_decision.py`
-- [ ] T004 [P] Add red wake-source cases including advice-free `PREATTENTION_BYPASS` (010-Preattention-bypass), FR-013 advice-source violations, and non-positive participant budgets (S15) in `tests/v2/contract/test_participant_wake.py`
-- [ ] T005 [P] Add red host-secret leakage, binding, immutable-stage, writer-ownership, and explicit unknown/unavailable cases in `tests/v2/contract/test_context_and_receipt.py`
+- [ ] T001 Create shared `Draft202012Validator` and stdlib-runtime corpus adapters — implementing the FR-012 expressiveness partition with the spec's closed six-class runtime-adapter-only set (cross-item ID uniqueness, timestamp-versus-order agreement, cross-document advice citations, trigger membership, fetch-time binding/expiry state, receipt-stage sequence rules; every other case is schema-expressible and must yield identical results from both validators) — pinned to dev/test-only `jsonschema==4.26.0`; the corpus loader decodes non-finite sentinel strings (`"NaN"`, `"Infinity"`, `"-Infinity"`) once so both validators receive identical decoded cases, and asserts each corpus directory's per-class counts loudly against its authoritative `expected-counts.json` (updated in the same change as any corpus edit); the two skip regimes stay separately named and counted — baseline oracle-absence skips under `python3 -m unittest` versus explicit per-class oracle skips under the pinned dual-validator command; the stdlib adapter always runs under the repo baseline, and a missing oracle fails loudly only under the pinned command — in `tests/v2/contract/schema_helpers.py`
+- [ ] T002 [P] Add red request cases for exact identity (S01), actor mentions versus `mentions_room` (S02), duplicate event IDs, timestamp-versus-order disagreement, and trigger-membership violation (trigger absent from `events`) — all runtime-adapter-only — with the valid identical-text-distinct-ID case, classifier-safe continuation projection and bounded tail (S03), non-positive budgets (S15), and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
+- [ ] T003 [P] Add red ok/error/bypass decision cases — forbidden classifier fields on `preattention-disabled`; legacy-confidence-vector constraints on every `status: ok` (exactly the four `PASS`/`ACK`/`ASK`/`SPEAK` keys, finite values in [0,1] including sentinel-decoded `"NaN"`/`"Infinity"`/`"-Infinity"` red cases, extra keys forbidden); and FR-013 advice red cases keyed to the classifier disposition (advice present when the classifier disposition is `DEFER` or `SUPPRESS`; advice citing nonexistent event IDs, runtime-adapter-only) — in `tests/v2/contract/test_attention_decision.py`
+- [ ] T004 [P] Add red wake-source cases including advice-free `PREATTENTION_BYPASS` (010-Preattention-bypass), FR-013 advice-source violations (advice on any non-`WAKE` `source`), and non-positive participant budgets (S15) in `tests/v2/contract/test_participant_wake.py`
+- [ ] T005 [P] Add red host-secret leakage, binding (fetch-time expired-handle rejection and cross-binding cursor reuse, runtime-adapter-only), continuity-scope duplicate-ID collision between a continuation page and its originating request (FR-003/FR-009, runtime-adapter-only), immutable-stage and writer-ownership (receipt-stage sequence rules, runtime-adapter-only), and explicit unknown/unavailable cases in `tests/v2/contract/test_context_and_receipt.py`
 
 ## Phase 2: User Story 1 - Truthful Attention Request (Priority: P1)
 
@@ -83,7 +86,7 @@ the valid scene matrix and rejects every enumerated identity, order, reference,
 coverage, V1, and forbidden-field case.
 
 - [ ] T006 [US1] Define `I-010A AttentionRequestV2@1` with distinct actor mentions, `mentions_room`, and host-only continuation metadata in `schemas/v2/attention-request.schema.json`
-- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) including duplicate-ID and timestamp-order relational red cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl`
+- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) including duplicate-ID, timestamp-order, and trigger-membership relational red cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change
 - [ ] T008 [US1] Record exact-self (S01), native-relation (S02), bounded-context/gap (S03), budget (S15), projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
 
 ## Phase 3: User Story 2 - Auditable Attention Decision (Priority: P1)
@@ -97,7 +100,7 @@ four ok pairs validate, malformed transition evidence cannot support
 suppression, and bypass validates only without a classifier/effective result.
 
 - [ ] T009 [US2] Define `I-010B AttentionDecisionV2@1` ok/error/bypass union with exact `preattention-disabled` constraints in `schemas/v2/attention-decision.schema.json`
-- [ ] T010 [P] [US2] Add — partitioned per FR-012 — transition (S09), governed-suppression (S05), dual-DEFER (S08), bypass (010-Preattention-bypass), malformed-output, FR-013 advice-rule, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl`
+- [ ] T010 [P] [US2] Add — partitioned per FR-012 — transition (S09), governed-suppression (S05), dual-DEFER (S08), bypass (010-Preattention-bypass), malformed-output, FR-013 advice-rule, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change
 - [ ] T011 [US2] Record governed-suppression (S05), dual-DEFER (S08), transition/error (S09), bypass (010-Preattention-bypass), and S16 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-decision.jsonl`
 
 ## Phase 4: User Story 3 - Participant Wake, Continuation, and Receipt (Priority: P2)
@@ -113,14 +116,14 @@ records correlated by request ID.
 - [ ] T012 [P] [US3] Define `I-010C ParticipantWakeV2@1` with advice-free `PREATTENTION_BYPASS` in `schemas/v2/participant-wake.schema.json`
 - [ ] T013 [P] [US3] Define host-only handle/binding/cursor semantics for `I-010D ContextContinuationV2@1` in `schemas/v2/context-continuation.schema.json`
 - [ ] T014 [P] [US3] Define immutable request-correlated observation/attention/participant-host/transport stage records and bypass provenance for `I-010E AttentionReceiptV2@1` in `schemas/v2/attention-receipt.schema.json`
-- [ ] T015 [P] [US3] Add bypass wake (S06 contribution), participant-silence (S07), host-only binding, immutable receipt-stage, unknown/unavailable, and V1-envelope/reply-field/social-ledger rejection cases in `evals/v2/contract/downstream/cases.jsonl`
+- [ ] T015 [P] [US3] Add bypass wake (S06 contribution), participant-silence (S07), host-only binding — including expired-handle and cross-binding cursor-reuse fetch-time red cases and the continuation-page/originating-request duplicate-ID collision (runtime-adapter-only) — immutable receipt-stage, unknown/unavailable, and V1-envelope/reply-field/social-ledger rejection cases in `evals/v2/contract/downstream/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change
 - [ ] T016 [US3] Record wake (S06), silence (S07), binding, staged-receipt, bypass-provenance (010-Preattention-bypass), and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/downstream.jsonl`
 
 ## Phase 5: Documentation and Packet Inputs
 
-- [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, re-verify each `NO_IMPACT` rationale against the exact candidate diff with its reviewed path, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md` for the later workflow gate
-- [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` with no flags (boundary-only SC-006 verification; `--check-cli` is the separate pinned-CLI check), and create the S-ID-to-JSONL-record manifest covering all twelve scene rows (S01, S02, S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) in `evidence/v2/contract/README.md`
-- [ ] T019 Prepare the proposed packet input with the exact commit, commands, five interface versions and exact `schemas/v2/` paths, dual-validator pin/results over the shared corpus, staged-receipt writer map, scene-to-record evidence manifest, rejected-case inventory, migration/provenance notes, documentation dispositions/validation/reviewer, and known limitations in `evidence/v2/contract/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
+- [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; author and validate the slice-owned `UPDATE` `docs/contracts/nunchi-v2.md` so it documents the five `@1` interfaces and the FR-012 runtime-adapter-only semantic rules that live outside the schemas; re-verify each `NO_IMPACT` rationale against the exact candidate diff with its reviewed path, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer as the first section of `evidence/v2/contract/handoff.md` (documentation/packet evidence, a different file from the lifecycle attempt stream `slice-handoff.md`) for the later workflow gate
+- [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` with no flags (boundary-only SC-006 verification; `--check-cli` is the separate pinned-CLI check), and create the S-ID-to-JSONL-record manifest covering all twelve scene rows (S01, S02, S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) — recording the observed per-class partition counts and both skip-regime counts beside the commands and results — in `evidence/v2/contract/README.md`
+- [ ] T019 Prepare the proposed packet input with the exact commit, commands, five interface versions and exact `schemas/v2/` paths, dual-validator pin/results over the shared corpus, the corpus revision (that exact commit) with the downstream obligation that each runtime owner pass its stdlib adapter over the identical corpus before its own handoff, staged-receipt writer map, scene-to-record evidence manifest, rejected-case inventory, migration/provenance notes, documentation dispositions/validation/reviewer, and known limitations, appended to `evidence/v2/contract/handoff.md` after T017's documentation section without rewriting it; this enumeration is authoritative for the SC-005 packet inventory, and the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
@@ -129,9 +132,11 @@ records correlated by request ID.
   neither edits the other's schema.
 - US3 begins after the shared concepts used by I-010A and I-010B are stable.
 - T017–T019 require all five interfaces, all Draft 2020-12 oracle checks, and
-  every currently available stdlib runtime adapter check to pass. Each downstream
-  runtime owner must close its adapter result over the identical corpus before
-  its own handoff.
+  every currently available stdlib runtime adapter check to pass. T017 precedes
+  T019: both write `evidence/v2/contract/handoff.md` append-only, documentation
+  section first, packet section second. Each downstream runtime owner must
+  close its adapter result over the identical corpus revision named in the T019
+  packet before its own handoff.
 - Slices 020 and 030 may start implementation only after the lifecycle handoff
   packet derived from T019 is separately accepted and recorded by each consumer;
   slice 040 additionally waits for their handoffs.
@@ -139,7 +144,8 @@ records correlated by request ID.
 ## Parallel Opportunities
 
 - T002–T005 target separate test files.
-- T007 and T010 target separate corpus directories.
+- T007, T010, and T015 target separate corpus directories, each owning its own
+  `cases.jsonl` and per-class `expected-counts.json`.
 - T012–T014 target separate schema files under the same sole owner.
 
 ## Implementation Strategy
@@ -155,3 +161,7 @@ do not let a dependent implementation silently define the shared interface.
 - A green schema suite proves contract mechanics, not social judgment quality.
 - `jsonschema==4.26.0` is available only to dev/test commands; shipped runtime
   validation remains explicit stdlib code.
+- The FR-012 partition class vocabulary is spec-owned; case membership and
+  per-class expected counts live only in ordinary paths
+  (`tests/v2/contract/`, `evals/v2/contract/*/expected-counts.json`), so corpus
+  growth never edits a SpecKit artifact.
