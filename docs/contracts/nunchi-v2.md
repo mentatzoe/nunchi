@@ -78,33 +78,59 @@ A truthful attention request represents:
 A tagged host-facing union on `status`:
 
 - **`status: ok`** — carries `classifier_disposition`,
-  `effective_disposition`, `routing` (route plus optional
-  `override_cause`), `evidence_event_ids`, `classifier_audit` (model,
-  optional `prompt_sha256`, optional `latency_ms`), the mandatory
-  `legacy_confidence` vector, and optional WAKE-only `advice`. Exactly four
-  classifier/effective pairs validate (FR-006):
+  `effective_disposition`, the closed `routing` audit (below), the
+  required sibling `reasons` audit field (an array of audit strings,
+  possibly empty, that never enters the participant turn and is never a
+  member of the routing-audit object), `evidence_event_ids`,
+  `classifier_audit` (model, optional `prompt_sha256`, optional
+  `latency_ms`), the optional conditional `legacy_confidence` vector
+  (FR-007, below), and optional WAKE-only `advice`. Exactly four
+  classifier/effective pairs validate, each mapped onto its applied valve
+  (FR-006):
 
-  | Transition | Route(s) | `override_cause` | `advice` |
+  | Transition | Applied valve | `override_cause` | `advice` |
   |---|---|---|---|
-  | `WAKE -> WAKE` | `wake` | forbidden | allowed (FR-013) |
-  | `DEFER -> DEFER` | `classifier-defer` | forbidden | forbidden |
-  | `SUPPRESS -> DEFER` | `margin-defer` or `delegation-defer` | required | forbidden |
-  | `SUPPRESS -> SUPPRESS` | `suppress-no-override` | forbidden | forbidden |
+  | `WAKE -> WAKE` | `none` | `none` | allowed (FR-013) |
+  | `DEFER -> DEFER` | `classifier-defer` | `none` | forbidden |
+  | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled` or `recoverability-unproven` (policy valve) | forbidden |
+  | `SUPPRESS -> SUPPRESS` | `none` | `none` | forbidden |
 
   Classifier-DEFER and margin-DEFER stay separately auditable (S08); a
   widened suppression preserves its exact valve and override cause (S05).
   Every other pairing must be reported on the error branch — malformed
   evidence never supports suppression (S09).
-- **`legacy_confidence` (FR-007)** — required on every `status: ok`
-  decision at `@1`: exactly the four keys `PASS`, `ACK`, `ASK`, `SPEAK`,
-  each a finite number in `[0, 1]`. The field requirement is permanent for
-  the `@1` major version; removing it is a breaking `@2` edit. Margin
-  retirement itself remains independently evidence-gated and does not
-  remove this field.
+- **`routing` (the closed FR-005 audit set)** — a closed object recording
+  the applied `valve` (`none`, `classifier-defer`, `margin-defer`, or
+  `policy-defer`), the `override_cause` (`none`, `margin`,
+  `suppression-disabled`, or `recoverability-unproven`), the
+  `margin_status` (`active` or `retired`, recorded on every ok decision),
+  the `effective_margin`, and the trusted `margin_source`. The
+  cross-field rules are part of the contract: a margin counts as
+  **applied** exactly when the valve is `margin-defer` — the
+  `effective_margin` (a finite number in `(0, 1]`) is then required and is
+  forbidden on every other valve, the override cause must be `margin`,
+  and the margin status must be `active` (a retired margin cannot apply);
+  the trusted `margin_source` may appear only on that margin-applied
+  decision (optional there); valves `none`/`classifier-defer` pair with
+  override cause `none`, and `policy-defer` pairs with
+  `suppression-disabled` or `recoverability-unproven`.
+- **`legacy_confidence` (FR-007, conditional)** — optional on
+  `status: ok` and required exactly when the classifier disposition is
+  `SUPPRESS` while the routing audit reports the margin `active`; a
+  margin-active candidate suppression without a valid vector does not
+  validate. A well-formed vector may accompany `WAKE`, `DEFER`, or a
+  margin-retired `SUPPRESS` without invalidating them. When present:
+  exactly the four keys `PASS`, `ACK`, `ASK`, `SPEAK`, each a finite
+  number in `[0, 1]`. The optional field, its exact four-key shape, and
+  this conditional requirement are fixed for the `@1` major version —
+  margin retirement flips only the reported margin status under later
+  evidence and is not a schema edit, while removing or reshaping the
+  field is a breaking `@2` edit.
 - **`status: bypass`** — exactly `cause: "preattention-disabled"` and the
-  envelope, nothing else: no classifier or effective disposition, no audit,
-  no advice, no evidence. Bypass is non-social and fabricates no model
-  judgment.
+  envelope, nothing else. The full FR-005 exclusion set applies
+  identically everywhere: no classifier/effective disposition, classifier
+  audit, reasons, evidence, legacy confidence vector, routing audit, or
+  advice. Bypass is non-social and fabricates no model judgment.
 - **`status: error`** — the operational branch: `error.kind` is one of
   `malformed-model-output`, `invalid-transition`,
   `invalid-legacy-confidence`, `provider-failure`, `runtime-failure`, with
@@ -150,6 +176,13 @@ stage-shaped `body`:
 | `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `policy_provenance`) or operational error (`error_kind`, `detail`) or bypass (`classifier_not_invoked: true`, `bypass_provenance`) — three mutually exclusive shapes |
 | `participant-host` | `participant-host` | `outcome: contributed` (with `action_ref`) or `outcome: silence` |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
+
+The stage-to-writer binding is part of the public per-record contract
+(FR-010): each stage names its single directly observing owner per the
+closed map above, and a record attributing one stage to another stage's
+owner — for example `stage: "observation"` written by `transport` — is
+invalid as a single document in both validators, independent of the
+stream-level checks below.
 
 A prefix-partial receipt — for example a contributed stream awaiting its
 transport stage, or a participant-silence outcome ending at
@@ -234,7 +267,9 @@ every runtime consumer must enforce them in its stdlib adapter:
    cross-binding cursor reuse reject as binding-validation failures.
 6. **Receipt-stage sequence rules** (FR-010): one request ID per stream,
    canonical stage order as a prefix, each stage appended at most once,
-   each stage written only by its owning writer.
+   and stream-level writer ownership. These are the multi-record checks;
+   the per-record stage-to-writer binding itself is schema-expressible
+   and enforced by both validators on every single record, in addition.
 
 ## Examples
 
@@ -266,7 +301,9 @@ A minimal valid `AttentionRequestV2` document:
 }
 ```
 
-A governed suppression (`status: ok`, `SUPPRESS -> SUPPRESS`):
+A governed suppression (`status: ok`, `SUPPRESS -> SUPPRESS`; the margin
+is active, so the legacy vector is required per the conditional FR-007
+rule):
 
 ```json
 {
@@ -276,10 +313,30 @@ A governed suppression (`status: ok`, `SUPPRESS -> SUPPRESS`):
   "status": "ok",
   "classifier_disposition": "SUPPRESS",
   "effective_disposition": "SUPPRESS",
-  "routing": {"route": "suppress-no-override"},
+  "routing": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+  "reasons": ["no direct address and no open question"],
   "evidence_event_ids": ["e1"],
   "classifier_audit": {"model": "openrouter/example-model"},
   "legacy_confidence": {"PASS": 0.8, "ACK": 0.1, "ASK": 0.05, "SPEAK": 0.05}
+}
+```
+
+A margin-widened deferral (`SUPPRESS -> DEFER`; the margin applied, so the
+routing audit records its effective width):
+
+```json
+{
+  "interface": "AttentionDecisionV2",
+  "version": 1,
+  "request_id": "req-0102",
+  "status": "ok",
+  "classifier_disposition": "SUPPRESS",
+  "effective_disposition": "DEFER",
+  "routing": {"valve": "margin-defer", "override_cause": "margin", "margin_status": "active", "effective_margin": 0.12},
+  "reasons": ["candidate suppression inside the protective margin"],
+  "evidence_event_ids": ["e1"],
+  "classifier_audit": {"model": "openrouter/example-model"},
+  "legacy_confidence": {"PASS": 0.55, "ACK": 0.2, "ASK": 0.15, "SPEAK": 0.1}
 }
 ```
 
@@ -312,8 +369,10 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 
 `@1` is the first V2 execution version. A breaking edit requires an
 explicit owner handoff and dependent re-analysis and lands as `@2`; the
-`legacy_confidence` requirement on `status: ok` decisions is permanent for
-`@1` (FR-007). The slice 010 handoff packet names the exact contract
+optional `legacy_confidence` field, its exact four-key shape, and its
+conditional margin-active-suppression requirement are permanent for `@1`
+(FR-007) — margin retirement flips only the reported `margin_status`,
+never the schema. The slice 010 handoff packet names the exact contract
 commit and corpus revision; each downstream runtime owner must pass its own
 stdlib adapter over the identical corpus revision before its own handoff.
 Evidence for the contract runs lives at

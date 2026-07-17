@@ -221,3 +221,73 @@ reviewer cc-session-1.
 - The seven `HANDOFF` documentation deltas apply only in the atomic
   candidate; until cutover the affected documents intentionally retain
   their V1 current-state wording.
+
+## Documentation dispositions — attempt 2 (T032)
+
+Appended after the attempt-1 sections without rewriting them (CHK089).
+This section re-executes every row of plan §Documentation Impact and
+Freshness against the attempt-2 candidate diff (CHK092).
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Reviewed on**: 2026-07-17, in the implement step of bound run
+`speckit-010-20260717T163451669036Z`
+
+**Candidate diff basis**: the rework delta
+`81483ce017eb834c5ab533556fa64cd62a8cf2aa..` this candidate (the rejected
+attempt-1 candidate to the attempt-2 tree). Verified with
+`git diff --name-only 81483ce...`: the ordinary-path delta touches only
+`schemas/v2/attention-decision.schema.json`,
+`schemas/v2/attention-receipt.schema.json`, `tests/v2/contract/`,
+`tests/test_governance.py` (the owned R1 repair; plan §Integration
+Strategy), `evals/v2/contract/attention-decision/`,
+`evals/v2/contract/downstream/`, `evidence/v2/contract/`, and
+`docs/contracts/nunchi-v2.md`, plus the slice's own SpecKit planning
+artifacts. No file under `src/`, `scripts/`, `docs/governance/`,
+`docs/integrations/`, `docs/evaluations/`, or the repository root
+documentation set is modified.
+
+### UPDATE (slice-owned), re-validated (CHK094)
+
+| Reviewed path | Disposition | Result |
+|---|---|---|
+| `docs/contracts/nunchi-v2.md` | `UPDATE` (re-validated) | Reworked to the clarified shapes: the conditional FR-007 vector rule (optional on ok; required exactly for a margin-active candidate `SUPPRESS`; presence never invalidates; `@1` permanence restated for the conditional rule), the closed FR-005 routing-audit set with its cross-field rules (applied valve, override cause, margin status, effective margin exactly when the margin applied, trusted margin source only on a margin-applied decision), the required sibling `reasons` placement, and the per-record FR-010 stage-to-writer binding (forged single documents invalid in both validators, stream-level rules retained in addition) — alongside the five `@1` interfaces and the FR-012 runtime-adapter-only rules. All five embedded JSON examples (request, governed suppression, margin-widened deferral, bypass, silence receipt) validate under both the pinned Draft 2020-12 oracle and the stdlib runtime adapter (validated 2026-07-17, 0 failures); all relative links resolve and none targets a SpecKit-managed path. |
+
+### HANDOFF (accepting owner: `v2-integrator`), re-routed
+
+All seven attempt-1 `HANDOFF` rows re-verified and re-routed unchanged in
+scope — `README.md`, `CHANGELOG.md`, `docs/STABILITY.md`,
+`docs/integration.md`, `docs/adapters.md`,
+`docs/contracts/channel-adapter-v1.md`,
+`docs/architecture/v2-selected-design.md` — each still routing its exact
+delta to `v2-integrator` for the atomic current-state update only. The
+routed deltas now reference the clarified I-010B shape (conditional
+FR-007 vector, closed valve-based routing audit) and the per-record
+I-010E stage-to-writer binding wherever the attempt-1 delta named the
+superseded shapes; the accepting owner and atomic-candidate-only
+application are unchanged.
+
+### NO_IMPACT, re-verified against the attempt-2 diff (CHK093 sequencing)
+
+Re-verification is sequenced after the R1 repair (T026, landed at
+`b3cbb8f`) within this same candidate, so the baseline-health claims are
+checked against a tree where they are true.
+
+| Reviewed path | Disposition | Re-verification result |
+|---|---|---|
+| `docs/INSTALL.md` | `NO_IMPACT` | CONFIRMED — the rework diff changes no install flow or installed artifact; `jsonschema==4.26.0` still appears only behind the pinned `uv run --offline --with` dev/test command (no packaging change in the diff). |
+| `AGENTS.md` | `NO_IMPACT` | CONFIRMED — after the T026 repair, `python3 -m unittest` is the green stdlib offline baseline at this tree (run 2026-07-17, post-repair: 1225 tests, OK, 11 skipped — 8 pre-existing V1 plus 3 counted contract oracle-absence skips), and the fixture-independence regression proof keeps the claim true regardless of live slice state; the runtime stays dependency-free; the V2-program wording (V1 current until `CUTOVER_VERIFIED`) is unchanged. |
+| `CLAUDE.md` | `NO_IMPACT` | CONFIRMED — the "standard-library runtime core" and `python3 -m unittest` claims stay accurate: the rework adds no runtime dependency and does not modify grounding sequence, governance commands, or workflow bindings. |
+| `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | CONFIRMED — no verdict-suite artifact changes in the diff; I-010B embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` confidence-vector shape as optional, conditionally required transition evidence (FR-007 as clarified) without changing any verdict-suite artifact or claim. |
+| `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | CONFIRMED — same diff basis; no verdict-suite requirement file or claim changes. |
+| `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | CONFIRMED — the V1 corpus under `evals/verdict_suite/` is untouched by the rework diff; `python3 -m evals.verdict_suite.runner --list` still succeeds (60 fixtures discovered, 2026-07-17). |
+| `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | CONFIRMED — the runner, its commands, and its outputs are untouched by the diff. |
+| `docs/governance/execution-spine.md` | `NO_IMPACT` | CONFIRMED — the rework diff contains no change under `docs/governance/`, none to `scripts/check_governance.py` or its checks, and none to any documented governance command or gate; the R1 repair touches only the `tests/test_governance.py` fixture's synthetic baseline construction, which this doc does not document. |
+| `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | CONFIRMED — no Hermes surface file changes in the rework diff. |
+| `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | CONFIRMED — same diff basis as the Hermes core patch row. |
+
+**Result (attempt 2)**: 1 `UPDATE` re-validated against the clarified
+shapes; 7 `HANDOFF` deltas re-routed to accepting owner `v2-integrator`;
+10 `NO_IMPACT` rationales re-verified CONFIRMED against the attempt-2
+diff, with the baseline-health rows sequenced after the R1 repair. No row
+is unresolved.
