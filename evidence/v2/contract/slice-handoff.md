@@ -43,3 +43,19 @@
 **Documentation freshness**: PASS
 
 **Packet paths**: evidence/v2/contract/handoff.md, evidence/v2/contract/README.md, evidence/v2/contract/slice-activation.md, evidence/v2/contract/slice-candidate.md, evidence/v2/contract/checklist-adjudication.md, evidence/v2/contract/attention-request.jsonl, evidence/v2/contract/attention-decision.jsonl, evidence/v2/contract/downstream.jsonl
+
+## Attempt 2 — REJECTED
+
+**Slice**: `010-v2-contract`
+
+**Status**: REJECTED
+
+**Candidate commit**: `001fdf85acd5098264c4975559c97114aa7278af`
+
+**Rejected by**: v2-integrator
+
+**Rejected on**: 2026-07-17
+
+**Decision reference**: `evidence/v2/contract/review-2026-07-17-v2-integrator-attempt-2.md`
+
+**Recorded by**: v2-integrator
