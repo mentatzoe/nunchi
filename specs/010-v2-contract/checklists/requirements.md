@@ -97,3 +97,51 @@ do not alter the checked baseline above.
 - [ ] CHK044 Are the constitutionally disabled SpecKit outputs (`data-model.md`, `contracts/`, `quickstart.md`) absent from every planned output list, with interface detail explicitly labeled a planning summary rather than an embedded product contract? [Consistency, Plan §Slice Interfaces; Constitution §VII]
 - [ ] CHK045 Do the requirements keep governance lifecycle state (`PLANNED` through `ACCEPTED`) out of runtime, classifier, receipt, and social state — no contract field, fixture, or evidence record is required to carry slice-lifecycle facts? [Coverage, Spec §Control-Plane Boundary; Constitution §Program and Slice Lifecycle Gates]
 - [ ] CHK046 Is the dev/test-only `jsonschema==4.26.0` constraint stated consistently at every dependency claim — spec assumptions, plan technical context, tasks notes, and the `docs/INSTALL.md` `NO_IMPACT` rationale — with no wording that permits it as a runtime or install dependency? [Consistency, Spec §Assumptions; Plan §Technical Context; Tasks §Notes]
+
+## Formal Reviewer Gate — Post-Round-3 Delta Addendum (appended 2026-07-17)
+
+**Purpose**: Extend the formal reviewer gate (CHK018–CHK046) to the artifacts
+as amended after that gate was appended: the FR-012 validator-expressiveness
+partition, the round-3 LOW resolutions (non-finite sentinel encoding, FR-003
+uniqueness scope, the SC-002 semantic-field-level rewrite, FR-013 label-safe
+advice keying), and the pinned task-manifest copy rule. These items test the
+amended requirement text only — not any implementation — and are appended
+unchecked for the reviewer's pass. Note: CHK024 quotes SC-002 wording
+("byte-for-byte") that the round-3 amendment has since replaced; CHK054 tests
+the current SC-002 text, and CHK024 should be adjudicated against the wording
+it cites as historical context.
+
+### Scope Requirement Quality (delta)
+
+- [ ] CHK047 Is the downstream obligation that every runtime owner must pass its adapter over the identical conformance corpus before its own handoff carried into the T019 packet contents (or another artifact a consumer must accept), rather than existing only as a floating sentence in the plan's validation section and task dependencies? [Gap, Plan §Contract validation commands; Tasks T019, §Dependencies & Execution Order]
+
+### Parity Requirement Quality (delta)
+
+- [ ] CHK048 Do spec FR-012, the plan's contract-validation section, and T001 state the identical closed set of runtime-adapter-only case classes — or does the plan's five-item parenthetical (cross-item uniqueness, order agreement, cross-document citations, fetch-time state, stage sequences) omit `trigger membership` from the spec's six-class enumeration? [Conflict, Spec §FR-012; Plan §Contract validation commands; Tasks T001]
+- [ ] CHK049 For each runtime-adapter-only class, is the oracle-side treatment decided in writing — which classes the oracle validates as `expected: valid` versus which it skips by explicit class — or is the "expecting valid or skipping" choice left per-case to the implementer? [Ambiguity, Spec §FR-012; Plan §Contract validation commands]
+- [ ] CHK050 Is the authoritative source of the expected per-class case counts pinned — where the expectation is recorded, who updates it when the corpus grows, and what "asserted loudly" fails against — so the no-silent-shrink rule is objectively checkable rather than self-referential to whatever the corpus currently contains? [Measurability, Gap, Spec §FR-012, §SC-001; Tasks T001]
+- [ ] CHK051 Are the two distinct skip regimes — baseline-run oracle-absence skips (explicit counted skips under `python3 -m unittest`) and partition-class skips (oracle skipping semantic classes under the pinned dual-validator command) — separately named and separately counted, so one regime's expected skips cannot mask the other's missing cases? [Clarity, Plan §Contract validation commands; Tasks T001]
+- [ ] CHK052 Does every FR-012 semantic/relational class trace to at least one named red case in the task graph — in particular `trigger membership` (trigger absent from `events`) and `fetch-time binding/expiry state`, which appear in the class list and Edge Cases but are not named in the T002–T005/T007/T010/T015 case enumerations the way duplicate-ID and timestamp-order cases are? [Coverage, Gap, Spec §FR-012, §Edge Cases; Tasks T002–T005]
+- [ ] CHK053 Is the non-finite sentinel vocabulary complete and singly owned — the Edge Cases name string `"NaN"`/`"Infinity"` but not negative infinity, which FR-007's finite-`[0,1]` rule equally forbids — and is the decode responsibility (corpus loader) stated where the shared harness is specified (T001) so both validators receive identical decoded cases? [Completeness, Spec §Edge Cases, §FR-007; Tasks T001]
+- [ ] CHK054 Is SC-002's semantic-field-level equality decidable from the text — do "compare equal as exact strings/numbers" and preserved event-array order define number-comparison semantics under JSON parsing (e.g., `1.0` versus `1`, float round-trip) precisely enough that both validators and the fixture checks must reach the same verdict? [Measurability, Spec §SC-002]
+- [ ] CHK055 Is the performance goal "full corpus dual-validator run completes offline in under a minute on the reference machine" measurable — is the reference machine identified, and is any task assigned to observe the goal — or is it intentionally advisory? [Measurability, Plan §Performance Goals]
+
+### Interface Requirement Quality (delta)
+
+- [ ] CHK056 Is the advice-presence key named identically at every statement — FR-013 keys I-010B advice to the classifier disposition `WAKE` and I-010C advice to `source: WAKE`, while FR-005 says only "`WAKE`-only grounded advice" and the US3 scenario says "`WAKE`-source packets" — so no reading permits advice keyed to the effective disposition instead? [Consistency, Spec §FR-005, §FR-013, §User Scenarios & Testing; Tasks T003–T004]
+- [ ] CHK057 Are the canonical receipt-stage order and the validity of partial sequences specified — FR-010's "prior records" and "future stages" presuppose an order over observation/attention/participant-host/transport, and scenes require in-flight and silence outcomes — so a reviewer can decide from the text whether a receipt lacking later stages is valid-in-progress or invalid? [Gap, Spec §FR-010, §FR-012, §Edge Cases]
+- [ ] CHK058 Is the evaluation locus of FR-003's continuity-scope ID uniqueness specified for the cross-document case — when a continuation page's events collide with the originating request's IDs, is rejection defined at fetch time, at merge identity, or both, and which runtime-adapter check owns it? [Clarity, Spec §FR-003, §FR-009, §FR-012]
+
+### Evidence Requirement Quality (delta)
+
+- [ ] CHK059 Is the task-manifest copy rule complete and stated consistently in plan and tasks — exact field names (`Initial task IDs`/`Initial tasks SHA256` into activation; `Completed task IDs`/`Tasks SHA256` into each candidate attempt), plus which task-graph revision each later candidate attempt hashes after convergence appends tasks and a new bound run begins, while the immutable activation retains the initial values? [Completeness, Plan §Task manifest; Tasks §Task manifest, §Rejection / rework]
+- [ ] CHK060 Are the two writes to `evidence/v2/contract/handoff.md` (T017 documentation dispositions; T019 packet input) specified as compatible contributions to one file — ordering, no overwrite of the earlier content — and is its distinction from the lifecycle attempt stream `slice-handoff.md` stated at every mention of either file? [Consistency, Spec §Documentation Freshness; Tasks T017, T019]
+- [ ] CHK061 Is the plan's designation "T019's enumeration is authoritative" for the handoff packet visible from the spec side — can a reviewer applying SC-005 alone learn that T019 resolves any inventory divergence, or does the authority rule live only in the plan? [Consistency, Spec §SC-005; Plan §Owner Handoff; Tasks T019]
+
+### Documentation Freshness Requirement Quality (delta)
+
+- [ ] CHK062 Does the `docs/contracts/nunchi-v2.md` `UPDATE` validation cover the runtime-adapter-only semantic rules — the row validates interface names/versions, bypass/error separation, links, and examples, but the FR-012 partition means the semantic/relational rules exist outside the schemas, so a contract doc validated only against the schemas would omit them for downstream implementers? [Gap, Plan §Documentation Impact and Freshness; Spec §FR-012]
+
+### Control-Plane Boundary Requirement Quality (delta)
+
+- [ ] CHK063 Is ownership split cleanly between the spec-owned partition vocabulary (the closed class list in FR-012) and ordinary-path-owned case membership and per-class counts (tests/evals), so corpus growth never requires editing a SpecKit artifact and no per-case product data is embedded in this slice directory? [Clarity, Spec §FR-012, §Control-Plane Boundary; Tasks T001]
