@@ -1492,110 +1492,133 @@ class GovernanceBoundaryTests(unittest.TestCase):
         self.assertTrue(any("current.md" in error for error in errors))
         self.assertFalse(any("results.json" in error for error in errors))
 
-    def test_authorized_contract_slice_can_reach_active_end_to_end(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            shutil.copytree(ROOT / "specs", root / "specs")
-            # Real slice declarations may reference durable assignment records;
-            # the synthetic repo must carry them or every declaration dangles.
-            assignments = ROOT / "evidence" / "governance" / "assignments"
-            if assignments.is_dir():
-                shutil.copytree(
-                    assignments, root / "evidence" / "governance" / "assignments"
-                )
-            self._write_valid_implementation_authorization(root)
+    def _stage_synthetic_active_contract_baseline(
+        self, source_root: Path, root: Path
+    ) -> dict[str, str]:
+        """Construct the synthetic ACTIVE-slice-010 planning baseline at
+        ``root`` from ``source_root``'s planning tree.
 
-            for dirname in check_governance.EXPECTED_SLICES:
-                for artifact in ("spec.md", "plan.md", "tasks.md"):
-                    path = root / "specs" / dirname / artifact
-                    text = path.read_text(encoding="utf-8")
-                    text = re.sub(
-                        r"(\*\*Program implementation authority\*\*: )`?NOT_GRANTED`?",
-                        r"\1`GRANTED`",
-                        text,
-                        count=1,
-                    )
-                    path.write_text(text, encoding="utf-8")
-
-            dirname = "010-v2-contract"
-            assigned = self._write_assignment(
-                root, "Alice", "v2-contract-owner", "contract-owner"
+        Rejection R1 invariant: the staged baseline is independent of the
+        source repository's live slice state. Every copied slice
+        declaration is replaced with the synthetic state — not only
+        ``PLANNED`` ones — and any lifecycle record staged under the
+        synthetic evidence paths is removed before the one synthetic
+        activation record is written.
+        """
+        shutil.copytree(source_root / "specs", root / "specs")
+        # Real slice declarations may reference durable assignment records;
+        # the synthetic repo must carry them or every declaration dangles.
+        assignments = source_root / "evidence" / "governance" / "assignments"
+        if assignments.is_dir():
+            shutil.copytree(
+                assignments, root / "evidence" / "governance" / "assignments"
             )
+        self._write_valid_implementation_authorization(root)
+
+        for dirname in check_governance.EXPECTED_SLICES:
             for artifact in ("spec.md", "plan.md", "tasks.md"):
                 path = root / "specs" / dirname / artifact
                 text = path.read_text(encoding="utf-8")
-                text = text.replace(
-                    "**Slice state**: `PLANNED`", "**Slice state**: `ACTIVE`", 1
-                )
                 text = re.sub(
-                    r"(\*\*Assigned participant / source\*\*:).*?(?=\n\n\*\*)",
-                    rf"\1 {assigned}",
+                    r"(\*\*Slice state\*\*: )`?[A-Z_]+`?",
+                    r"\1`PLANNED`",
                     text,
                     count=1,
-                    flags=re.DOTALL,
                 )
-                path.write_text(text, encoding="utf-8")
-
-            umbrella = root / "specs" / "001-nunchi-v2-program"
-            program_assignment = self._write_assignment(
-                root, "Pat", "v2-program-owner", "program-owner"
-            )
-            for artifact in ("spec.md", "plan.md", "tasks.md"):
-                path = umbrella / artifact
-                text = path.read_text(encoding="utf-8")
                 text = re.sub(
-                    r"(\*\*Program implementation authority\*\*: )`?NOT_GRANTED`?",
+                    r"(\*\*Program implementation authority\*\*: )`?[A-Z_]+`?",
                     r"\1`GRANTED`",
                     text,
                     count=1,
                 )
-                text = re.sub(
-                    r"(\*\*Program state\*\*: )`?READY`?",
-                    r"\1`DELIVERY`",
-                    text,
-                    count=1,
-                )
-                text = re.sub(
-                    r"(\*\*Assigned program participant / source \(declaration\)\*\*:).*?(?=\n\n\*\*)",
-                    rf"\1 {program_assignment}",
-                    text,
-                    count=1,
-                    flags=re.DOTALL,
-                )
                 path.write_text(text, encoding="utf-8")
+        # No live lifecycle record may survive into the synthetic
+        # baseline; only the activation record written below exists.
+        for lifecycle_paths in check_governance.EXPECTED_LIFECYCLE_PATHS.values():
+            for relative in lifecycle_paths.values():
+                staged = root / relative
+                if staged.exists():
+                    staged.unlink()
 
-            expected = check_governance.EXPECTED_SLICES[dirname]
-            activation = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname][
-                "activation"
-            ]
-            sha = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=root,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            task_text = (root / "specs" / dirname / "tasks.md").read_text(
-                encoding="utf-8"
+        dirname = "010-v2-contract"
+        assigned = self._write_assignment(
+            root, "Alice", "v2-contract-owner", "contract-owner"
+        )
+        for artifact in ("spec.md", "plan.md", "tasks.md"):
+            path = root / "specs" / dirname / artifact
+            text = path.read_text(encoding="utf-8")
+            text = text.replace(
+                "**Slice state**: `PLANNED`", "**Slice state**: `ACTIVE`", 1
             )
-            task_ids, task_hash = self._task_fields(task_text)
-            plan_text = (root / "specs" / dirname / "plan.md").read_text(
-                encoding="utf-8"
+            text = re.sub(
+                r"(\*\*Assigned participant / source\*\*:).*?(?=\n\n\*\*)",
+                rf"\1 {assigned}",
+                text,
+                count=1,
+                flags=re.DOTALL,
             )
-            interfaces = ", ".join(
-                sorted(set(check_governance.INTERFACE_ID.findall(plan_text)))
+            path.write_text(text, encoding="utf-8")
+
+        umbrella = root / "specs" / "001-nunchi-v2-program"
+        program_assignment = self._write_assignment(
+            root, "Pat", "v2-program-owner", "program-owner"
+        )
+        for artifact in ("spec.md", "plan.md", "tasks.md"):
+            path = umbrella / artifact
+            text = path.read_text(encoding="utf-8")
+            text = re.sub(
+                r"(\*\*Program implementation authority\*\*: )`?[A-Z_]+`?",
+                r"\1`GRANTED`",
+                text,
+                count=1,
             )
-            scenes = ", ".join(
-                sorted(set(check_governance.SCENE_ID.findall(plan_text)))
+            text = re.sub(
+                r"(\*\*Program state\*\*: )`?[A-Z_]+`?",
+                r"\1`DELIVERY`",
+                text,
+                count=1,
             )
-            evidence_target = "evidence/v2/contract/attention-request.jsonl"
-            documentation_scope = ", ".join(
-                sorted(check_governance.EXPECTED_DOCUMENTATION_PATHS[dirname])
+            text = re.sub(
+                r"(\*\*Assigned program participant / source \(declaration\)\*\*:).*?(?=\n\n\*\*)",
+                rf"\1 {program_assignment}",
+                text,
+                count=1,
+                flags=re.DOTALL,
             )
-            self._write_lifecycle_record(
-                root,
-                activation,
-                f"""# Activation
+            path.write_text(text, encoding="utf-8")
+
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        activation = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname][
+            "activation"
+        ]
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        task_text = (root / "specs" / dirname / "tasks.md").read_text(
+            encoding="utf-8"
+        )
+        task_ids, task_hash = self._task_fields(task_text)
+        plan_text = (root / "specs" / dirname / "plan.md").read_text(
+            encoding="utf-8"
+        )
+        interfaces = ", ".join(
+            sorted(set(check_governance.INTERFACE_ID.findall(plan_text)))
+        )
+        scenes = ", ".join(
+            sorted(set(check_governance.SCENE_ID.findall(plan_text)))
+        )
+        evidence_target = "evidence/v2/contract/attention-request.jsonl"
+        documentation_scope = ", ".join(
+            sorted(check_governance.EXPECTED_DOCUMENTATION_PATHS[dirname])
+        )
+        self._write_lifecycle_record(
+            root,
+            activation,
+            f"""# Activation
 **Slice**: `{dirname}`
 **Status**: READY
 **Assigned participant / source**: {assigned}
@@ -1614,10 +1637,18 @@ class GovernanceBoundaryTests(unittest.TestCase):
 **Initial task IDs**: {task_ids}
 **Initial tasks SHA256**: {task_hash}
 """,
-            )
+        )
+        return {"assigned": assigned, "program_assignment": program_assignment}
+
+    def test_authorized_contract_slice_can_reach_active_end_to_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = self._stage_synthetic_active_contract_baseline(ROOT, root)
             errors = check_governance.check_program(root)
             self.assertEqual(errors, [])
 
+            umbrella = root / "specs" / "001-nunchi-v2-program"
+            program_assignment = staged["program_assignment"]
             for artifact in ("spec.md", "plan.md", "tasks.md"):
                 path = umbrella / artifact
                 path.write_text(
@@ -1630,6 +1661,55 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             errors = check_governance.check_program(root)
         self.assertTrue(any("active delivery requires" in error for error in errors))
+
+    def test_activation_fixture_is_independent_of_live_slice_state(self):
+        # Rejection R1 / CHK095 regression proof: the synthetic activation
+        # baseline stays green while the source tree's live slice
+        # declarations read ACTIVE or HANDOFF_READY. The rejected packet
+        # commit failed exactly here — the fixture replaced only PLANNED
+        # declarations, so live HANDOFF_READY records leaked into a
+        # contradictory synthetic baseline.
+        for live_state in ("ACTIVE", "HANDOFF_READY"):
+            with self.subTest(live_state=live_state):
+                with tempfile.TemporaryDirectory() as tmp:
+                    base = Path(tmp)
+                    source = base / "source"
+                    source.mkdir()
+                    shutil.copytree(ROOT / "specs", source / "specs")
+                    assignments = ROOT / "evidence" / "governance" / "assignments"
+                    if assignments.is_dir():
+                        shutil.copytree(
+                            assignments,
+                            source / "evidence" / "governance" / "assignments",
+                        )
+                    for dirname in check_governance.EXPECTED_SLICES:
+                        for artifact in ("spec.md", "plan.md", "tasks.md"):
+                            path = source / "specs" / dirname / artifact
+                            text = path.read_text(encoding="utf-8")
+                            text = re.sub(
+                                r"(\*\*Slice state\*\*: )`?[A-Z_]+`?",
+                                rf"\1`{live_state}`",
+                                text,
+                                count=1,
+                            )
+                            path.write_text(text, encoding="utf-8")
+                    # A live tree carries lifecycle attempt records too;
+                    # none of them may leak into the synthetic baseline.
+                    for lifecycle_paths in (
+                        check_governance.EXPECTED_LIFECYCLE_PATHS.values()
+                    ):
+                        for relative in lifecycle_paths.values():
+                            record = source / relative
+                            record.parent.mkdir(parents=True, exist_ok=True)
+                            record.write_text(
+                                "# Live lifecycle record\n"
+                                f"**Status**: {live_state}\n",
+                                encoding="utf-8",
+                            )
+                    root = base / "staged"
+                    self._stage_synthetic_active_contract_baseline(source, root)
+                    errors = check_governance.check_program(root)
+                    self.assertEqual(errors, [])
 
     @staticmethod
     def _write_valid_implementation_authorization(root: Path) -> Path:
