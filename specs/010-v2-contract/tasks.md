@@ -4,7 +4,9 @@
 
 **Slice state**: `ACTIVE`
 
-**Execution status**: `DORMANT` while the slice remains `PLANNED`
+**Execution status**: `EXECUTABLE` — the slice is `ACTIVE`, so unchecked
+tasks execute only inside a bound `run speckit` run for this slice; tasks are
+`DORMANT` whenever the slice state is `PLANNED` (statement added per CHK065)
 
 **Program implementation authority**: `GRANTED`
 
@@ -125,6 +127,25 @@ records correlated by request ID.
 - [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` with no flags (boundary-only SC-006 verification; `--check-cli` is the separate pinned-CLI check), and create the S-ID-to-JSONL-record manifest covering all twelve scene rows (S01, S02, S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) — recording the observed per-class partition counts and both skip-regime counts beside the commands and results — in `evidence/v2/contract/README.md`
 - [ ] T019 Prepare the proposed packet input with the exact commit, commands, five interface versions and exact `schemas/v2/` paths, dual-validator pin/results over the shared corpus, the corpus revision (that exact commit) with the downstream obligation that each runtime owner pass its stdlib adapter over the identical corpus before its own handoff, staged-receipt writer map, scene-to-record evidence manifest, rejected-case inventory, migration/provenance notes, documentation dispositions/validation/reviewer, and known limitations, appended to `evidence/v2/contract/handoff.md` after T017's documentation section without rewriting it; this enumeration is authoritative for the SC-005 packet inventory, and the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
+## Phase 6: Post-Refresh Reviewer-Gate Corrections (appended 2026-07-17)
+
+**Correction source**: the round-4 spec amendments (`16cccb7`: FR-012 fixed
+per-class oracle treatment, FR-010 canonical-order and prefix-partial receipt
+rule, FR-007 `@1` permanence), the plan refresh (`e4ada5c`: per-family corpus
+directories, exact evidence-file enumeration, completed file-by-file
+documentation matrix), and the appended formal-reviewer refresh gate
+CHK064–CHK076 (`b1204f5`). This phase is strictly append-only: completed
+tasks T001–T008 and all prior task text remain exactly as landed; the only
+non-append change in this refresh is the header **Execution status** line,
+which now states the `ACTIVE`-state rule the gate found implied (CHK065).
+Every task below cites the checklist item(s) or amendment it traces to.
+
+- [ ] T020 Assert the closed on-disk corpus inventory at load time in `tests/v2/contract/schema_helpers.py` — the set of subdirectories of `evals/v2/contract/` must equal exactly the registered `CORPUS_NAMES` (`attention-request`, `attention-decision`, `downstream`), each holding `cases.jsonl` and its authoritative `expected-counts.json`, so a wholly missing or unregistered corpus directory fails loudly rather than passing vacuously — with a red-path helper test beside the existing helper cases in `tests/v2/contract/test_attention_request.py` (CHK067)
+- [ ] T021 Enforce all five mandatory aggregate-record fields (`scene_id`, stable `case_id`, validator identity, expected result, observed result) in the shared evidence writer in `tests/v2/contract/schema_helpers.py`, refusing any record missing one, and re-verify the landed `evidence/v2/contract/attention-request.jsonl` and the in-flight `evidence/v2/contract/attention-decision.jsonl` and `evidence/v2/contract/downstream.jsonl` against the enforced shape before T011/T016 are checked (CHK070; plan §Acceptance Scenes and Evidence)
+- [ ] T022 [P] Verify under the pinned dual-validator command that `evals/v2/contract/downstream/cases.jsonl` names the complete refreshed FR-010 receipt-sequence coverage — full canonical observation→attention→participant-host→transport stream valid; prefix-partial valid-in-progress (awaiting-transport, and the S07 silence outcome ending at participant-host); out-of-canonical-order red; skipped-stage red; earlier-stage mutation red; cross-owner writer red; uncorrelated request-ID red — appending any missing case with `expected-counts.json` updated in the same change (CHK069; FR-010 as amended at `16cccb7`)
+- [ ] T023 Add the control-plane read-boundary enforcement — a scanner helper in `tests/v2/contract/schema_helpers.py` plus its covering test beside the existing helper cases in `tests/v2/contract/test_attention_request.py` asserting that no file under `tests/v2/contract/` or `evals/v2/contract/` references a SpecKit-managed control-plane path (the slice-specification tree or the SpecKit configuration tree; the literal forbidden prefixes are embedded in the test itself), making explicit that the suite embeds its own copy of the FR-012 class vocabulary and no build or test path reads a SpecKit-managed file (CHK076)
+- [ ] T024 Adjudicate CHK064–CHK076 against the refreshed artifacts and append per-item verdicts with evidence anchors to `evidence/v2/contract/checklist-adjudication.md` (append-only; the CHK018–CHK063 adjudication is never rewritten); for each sustained text gap, land the fix in the named SpecKit artifact in the same commit before check-off — CHK064 "tagged contract commit" wording in plan §Integration Strategy; CHK065 execution-status statement (fixed in this tasks refresh — verify and record); CHK066 restating or explicitly deferring to the spec's fixed per-class oracle treatment in plan §Contract validation commands; CHK071 a written ownership note for the absent umbrella scene IDs (S04, S10–S14); CHK073–CHK075 documentation-matrix consistency, per-row verifiability, and the written derivation/exhaustiveness claim in plan §Documentation Impact and Freshness — citing T020 (CHK067), T021 (CHK070), T022 (CHK069), and T023 (CHK076) as landed evidence, and recording CHK068 and CHK072 as consistency confirmations
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -140,6 +161,15 @@ records correlated by request ID.
 - Slices 020 and 030 may start implementation only after the lifecycle handoff
   packet derived from T019 is separately accepted and recorded by each consumer;
   slice 040 additionally waits for their handoffs.
+- Correction phase: T020 precedes T021, which precedes T023 (all three edit
+  `tests/v2/contract/schema_helpers.py`); T022 runs in parallel once T015's
+  corpus artifacts exist. T020–T023 precede T024. T024 precedes T017, because
+  a sustained CHK073–CHK075 gap amends the documentation-matrix rows T017
+  executes; T020–T022 precede T018, so the manifest records post-correction
+  partition and skip counts. The appended tasks add no new documentation
+  surface: T017's existing row-by-row execution already covers the refreshed
+  matrix, including the `AGENTS.md` and `CLAUDE.md` `NO_IMPACT` rows added at
+  `e4ada5c`.
 
 ## Parallel Opportunities
 
@@ -147,6 +177,8 @@ records correlated by request ID.
 - T007, T010, and T015 target separate corpus directories, each owning its own
   `cases.jsonl` and per-class `expected-counts.json`.
 - T012–T014 target separate schema files under the same sole owner.
+- T022 (downstream corpus) is parallel to the T020→T021→T023 harness chain;
+  T024 waits for all four.
 
 ## Implementation Strategy
 
@@ -165,3 +197,7 @@ do not let a dependent implementation silently define the shared interface.
   per-class expected counts live only in ordinary paths
   (`tests/v2/contract/`, `evals/v2/contract/*/expected-counts.json`), so corpus
   growth never edits a SpecKit artifact.
+- Phase 6 is the append-only correction for the post-`e4ada5c` reviewer
+  refresh gate: completed history (checked tasks, evidence records, prior
+  attempt streams) is preserved unchanged, and every appended task is
+  traceable to its named correction source.
