@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `ACTIVE`
+**Slice state**: `CONVERGED`
 
 **Execution status**: `EXECUTABLE` — the slice is `ACTIVE`, so unchecked
 tasks execute only inside a bound `run speckit` run for this slice; tasks are
