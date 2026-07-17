@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
+  "title": "ParticipantWakeV2",
+  "description": "I-010C ParticipantWakeV2@1 — the normal participant turn input: an explicit attention source (WAKE, DEFER, ERROR_FALLBACK, or non-social PREATTENTION_BYPASS), the factual observation (a full I-010A document), independent positive participant budgets, and optional attention advice that appears only on source WAKE (FR-013). No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["interface", "version", "request_id", "source", "observation", "budgets"],
+  "properties": {
+    "interface": {"const": "ParticipantWakeV2"},
+    "version": {"const": 1},
+    "request_id": {"$ref": "#/$defs/nonEmptyString"},
+    "source": {
+      "$comment": "PREATTENTION_BYPASS is a lifecycle fact, not a social judgment.",
+      "enum": ["WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
+    },
+    "observation": {
+      "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json"
+    },
+    "advice": {
+      "$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/advice"
+    },
+    "budgets": {
+      "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/budgets"
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "FR-013: DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
+      "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
+      "else": {"not": {"required": ["advice"]}}
+    }
+  ]
+}

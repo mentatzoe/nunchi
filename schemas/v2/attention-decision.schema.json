@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
+  "title": "AttentionDecisionV2",
+  "description": "I-010B AttentionDecisionV2@1 — the tagged host-facing decision union. status 'ok' carries one of exactly four permitted classifier/effective pairs (SUPPRESS->SUPPRESS, SUPPRESS->DEFER, WAKE->WAKE, DEFER->DEFER) with routing audit, evidence IDs, classifier audit, the mandatory legacy verdict-confidence vector, and WAKE-only grounded advice; status 'bypass' carries exactly cause 'preattention-disabled' with no classifier or effective disposition; status 'error' remains operational and separate. Advice citations against the request's event IDs are a runtime-adapter-only rule (FR-013).",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
+    "confidence": {
+      "$comment": "Finite [0,1]. The contradictory-bounds not-clause rejects NaN, which vacuously satisfies every numeric comparison keyword; strict JSON cannot carry non-finite literals, but sentinel-decoded corpus instances can.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
+    },
+    "advice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "evidence_event_ids"],
+      "properties": {
+        "summary": {"$ref": "#/$defs/nonEmptyString"},
+        "evidence_event_ids": {
+          "$comment": "Every citation must reference an event ID supplied in the request; that cross-document rule is runtime-adapter-only (FR-012/FR-013).",
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      }
+    },
+    "ok": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interface",
+        "version",
+        "request_id",
+        "status",
+        "classifier_disposition",
+        "effective_disposition",
+        "routing",
+        "evidence_event_ids",
+        "classifier_audit",
+        "legacy_confidence"
+      ],
+      "properties": {
+        "interface": {"const": "AttentionDecisionV2"},
+        "version": {"const": 1},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "status": {"const": "ok"},
+        "classifier_disposition": {"$ref": "#/$defs/disposition"},
+        "effective_disposition": {"$ref": "#/$defs/disposition"},
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["route"],
+          "properties": {
+            "route": {
+              "enum": [
+                "wake",
+                "classifier-defer",
+                "margin-defer",
+                "delegation-defer",
+                "suppress-no-override"
+              ]
+            },
+            "override_cause": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        },
+        "evidence_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "classifier_audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model"],
+          "properties": {
+            "model": {"$ref": "#/$defs/nonEmptyString"},
+            "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "latency_ms": {"type": "number", "minimum": 0}
+          }
+        },
+        "legacy_confidence": {
+          "$comment": "FR-007: required on every ok decision at @1; exactly the four legacy verdict keys with finite values in [0,1]. Malformed evidence must not support suppression; removing this field is a breaking @2 edit.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["PASS", "ACK", "ASK", "SPEAK"],
+          "properties": {
+            "PASS": {"$ref": "#/$defs/confidence"},
+            "ACK": {"$ref": "#/$defs/confidence"},
+            "ASK": {"$ref": "#/$defs/confidence"},
+            "SPEAK": {"$ref": "#/$defs/confidence"}
+          }
+        },
+        "advice": {"$ref": "#/$defs/advice"}
+      },
+      "oneOf": [
+        {
+          "$comment": "WAKE->WAKE: the only pair that may carry advice (FR-013).",
+          "properties": {
+            "classifier_disposition": {"const": "WAKE"},
+            "effective_disposition": {"const": "WAKE"},
+            "routing": {
+              "properties": {"route": {"const": "wake"}},
+              "not": {"required": ["override_cause"]}
+            }
+          }
+        },
+        {
+          "$comment": "DEFER->DEFER: classifier-DEFER valve, distinct from margin-DEFER (S08).",
+          "properties": {
+            "classifier_disposition": {"const": "DEFER"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing": {
+              "properties": {"route": {"const": "classifier-defer"}},
+              "not": {"required": ["override_cause"]}
+            }
+          },
+          "not": {"required": ["advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->DEFER: widened by the margin or delegation valve; the exact valve and override cause are preserved.",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing": {
+              "properties": {"route": {"enum": ["margin-defer", "delegation-defer"]}},
+              "required": ["override_cause"]
+            }
+          },
+          "not": {"required": ["advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->SUPPRESS: governed suppression names the no-override route (S05).",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "SUPPRESS"},
+            "routing": {
+              "properties": {"route": {"const": "suppress-no-override"}},
+              "not": {"required": ["override_cause"]}
+            }
+          },
+          "not": {"required": ["advice"]}
+        }
+      ]
+    },
+    "bypass": {
+      "$comment": "A non-social no-classifier outcome: not a successful disposition pairing, and it must not fabricate a model judgment, audit, advice, reasons, or evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface", "version", "request_id", "status", "cause"],
+      "properties": {
+        "interface": {"const": "AttentionDecisionV2"},
+        "version": {"const": 1},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "status": {"const": "bypass"},
+        "cause": {"const": "preattention-disabled"}
+      }
+    },
+    "error": {
+      "$comment": "The tagged operational branch: malformed output, illegal pairings, and invalid legacy confidence land here and cannot fabricate a social suppression.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface", "version", "request_id", "status", "error"],
+      "properties": {
+        "interface": {"const": "AttentionDecisionV2"},
+        "version": {"const": 1},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "status": {"const": "error"},
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "enum": [
+                "malformed-model-output",
+                "invalid-transition",
+                "invalid-legacy-confidence",
+                "provider-failure",
+                "runtime-failure"
+              ]
+            },
+            "detail": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ok"},
+    {"$ref": "#/$defs/bypass"},
+    {"$ref": "#/$defs/error"}
+  ]
+}

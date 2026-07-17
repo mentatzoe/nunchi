@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/context-continuation.schema.json",
+  "title": "ContextContinuationV2",
+  "description": "I-010D ContextContinuationV2@1 — host-only bounded context expansion: the fetch-request shape (opaque handle, exact binding, opaque cursor, expiry, positive budgets) and the fetch-page shape (authoritative-order events, opaque next cursor, returned coverage). Handles, bindings, cursors, expiry values, and fetch credentials are host-only and forbidden from the classifier projection (I-010A). Fetch-time binding/expiry validation, cross-binding cursor reuse, and the continuation-page/originating-request duplicate-ID merge-identity rule are runtime-adapter-only (FR-012).",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "binding": {
+      "$comment": "Every fetch is bound to participant, room, continuity scope, and trigger; a fetch that changes any of them is rejected at fetch time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_id", "room_id", "continuity_scope", "trigger_event_id"],
+      "properties": {
+        "participant_id": {"$ref": "#/$defs/nonEmptyString"},
+        "room_id": {"$ref": "#/$defs/nonEmptyString"},
+        "continuity_scope": {"$ref": "#/$defs/nonEmptyString"},
+        "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "fetchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interface",
+        "version",
+        "kind",
+        "request_id",
+        "handle",
+        "binding",
+        "cursor",
+        "expires_at",
+        "budgets"
+      ],
+      "properties": {
+        "interface": {"const": "ContextContinuationV2"},
+        "version": {"const": 1},
+        "kind": {"const": "fetch-request"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "handle": {"$ref": "#/$defs/nonEmptyString"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "cursor": {
+          "$comment": "Opaque; null starts from the binding's beginning.",
+          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
+        },
+        "expires_at": {"$ref": "#/$defs/nonEmptyString"},
+        "budgets": {
+          "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/budgets"
+        }
+      }
+    },
+    "fetchPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "interface",
+        "version",
+        "kind",
+        "request_id",
+        "handle",
+        "events",
+        "cursor_next",
+        "coverage"
+      ],
+      "properties": {
+        "interface": {"const": "ContextContinuationV2"},
+        "version": {"const": 1},
+        "kind": {"const": "fetch-page"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "handle": {"$ref": "#/$defs/nonEmptyString"},
+        "events": {
+          "$comment": "Authoritative order; exact merge identity against the originating request is runtime-adapter-only.",
+          "type": "array",
+          "items": {
+            "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/event"
+          }
+        },
+        "cursor_next": {
+          "$comment": "Opaque; null means the binding is exhausted.",
+          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
+        },
+        "coverage": {
+          "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"
+        }
+      }
+    }
+  },
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/fetchRequest"},
+    {"$ref": "#/$defs/fetchPage"}
+  ]
+}

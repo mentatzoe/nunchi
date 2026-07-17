@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/attention-receipt.schema.json",
+  "title": "AttentionReceiptV2",
+  "description": "I-010E AttentionReceiptV2@1 — one immutable stage record of the request-correlated receipt stream. The canonical order is observation -> attention -> participant-host -> transport; a prefix-partial receipt is valid-in-progress. Each stage is appended only by its owning writer (observation-provider, attention-engine, participant-host, transport); the append-only sequence, immutability, and writer-ownership rules span multiple records and are runtime-adapter-only (FR-012 receipt-stage sequence class). The attention stage keeps classifier outcome, effective routing, policy provenance, operational error, and trusted bypass provenance separate; bypass records set classifier_not_invoked. Unknown and unavailable remain explicit.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
+    "observationBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_count", "visibility"],
+      "properties": {
+        "event_count": {"type": "integer", "minimum": 0},
+        "visibility": {"enum": ["complete", "partial", "unknown"]}
+      }
+    },
+    "attentionBody": {
+      "oneOf": [
+        {
+          "$comment": "Classifier outcome with effective routing and policy provenance.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classifier_disposition", "effective_disposition", "policy_provenance"],
+          "properties": {
+            "classifier_disposition": {"$ref": "#/$defs/disposition"},
+            "effective_disposition": {"$ref": "#/$defs/disposition"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        },
+        {
+          "$comment": "Operational error, kept separate from any social outcome.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error_kind"],
+          "properties": {
+            "error_kind": {
+              "enum": [
+                "malformed-model-output",
+                "invalid-transition",
+                "invalid-legacy-confidence",
+                "provider-failure",
+                "runtime-failure"
+              ]
+            },
+            "detail": {"type": "string"}
+          }
+        },
+        {
+          "$comment": "Trusted bypass: no classifier was invoked and no social result is fabricated.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classifier_not_invoked", "bypass_provenance"],
+          "properties": {
+            "classifier_not_invoked": {"const": true},
+            "bypass_provenance": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["policy", "attested_by"],
+              "properties": {
+                "policy": {"const": "preattention-disabled"},
+                "attested_by": {"$ref": "#/$defs/nonEmptyString"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "participantHostBody": {
+      "$comment": "Participant silence is a distinct staged outcome — separate from model suppression and from non-invocation — with no handled/owed/obligation state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {"enum": ["contributed", "silence"]},
+        "action_ref": {"$ref": "#/$defs/nonEmptyString"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["outcome"], "properties": {"outcome": {"const": "contributed"}}},
+          "then": {"required": ["action_ref"]},
+          "else": {"not": {"required": ["action_ref"]}}
+        }
+      ]
+    },
+    "transportBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delivery"],
+      "properties": {
+        "delivery": {"enum": ["sent", "failed", "unknown", "unavailable"]},
+        "detail": {"type": "string"}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["interface", "version", "request_id", "stage", "writer", "body"],
+  "properties": {
+    "interface": {"const": "AttentionReceiptV2"},
+    "version": {"const": 1},
+    "request_id": {"$ref": "#/$defs/nonEmptyString"},
+    "stage": {"enum": ["observation", "attention", "participant-host", "transport"]},
+    "writer": {"enum": ["observation-provider", "attention-engine", "participant-host", "transport"]},
+    "body": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "observation"}}},
+      "then": {"properties": {"body": {"$ref": "#/$defs/observationBody"}}}
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "attention"}}},
+      "then": {"properties": {"body": {"$ref": "#/$defs/attentionBody"}}}
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "participant-host"}}},
+      "then": {"properties": {"body": {"$ref": "#/$defs/participantHostBody"}}}
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "transport"}}},
+      "then": {"properties": {"body": {"$ref": "#/$defs/transportBody"}}}
+    }
+  ]
+}
