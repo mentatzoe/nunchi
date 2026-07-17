@@ -31,6 +31,8 @@ and establishes `READY` before `ACTIVE`)
 **Acceptance evidence**: `evidence/v2/contract/slice-acceptance.md` (for
 `ACCEPTED`; absent while `PLANNED`)
 
+**Task manifest**: `python3 scripts/check_governance.py --task-manifest specs/010-v2-contract`
+
 **Upstream dependencies**: none
 
 **Dependency acceptance mapping**: activation evidence MUST use
@@ -96,10 +98,13 @@ culminating in one final parity integration
 | Evidence before claims | PASS | Future tests, fixtures, evidence, and owner handoff are concrete. |
 | Control-plane boundary | PASS | This directory contains only spec, plan, tasks, and requirements checklist. |
 | Single owner and slice lifecycle | PASS | `v2-contract-owner` is sole owner; tasks remain `DORMANT` while the slice is `PLANNED`. |
+| Documentation freshness | PASS | `README.md` and every known ordinary doc receive exactly one file-by-file `UPDATE`, `NO_IMPACT`, or `HANDOFF` row with owning task, accepting owner, and validation or exact delta; no generic directory rows. |
 
 Post-design re-check: PASS. Interface summaries remain planning prose; no
 `data-model.md`, `contracts/`, `quickstart.md`, schema, fixture, test, evidence,
-or product documentation is created here.
+or product documentation is created here. The documentation-impact matrix names
+each reviewed ordinary document individually with a per-file disposition and
+per-file validation or handoff delta.
 
 ## Slice Interfaces
 
@@ -254,11 +259,29 @@ documentation remain separately addressable ordinary artifacts.
 |---|---|---|---|---|
 | Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording, plus the exact new dual-validator test command and dev/test-only `jsonschema==4.26.0` dependency wording, only in the atomic candidate. |
 | V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, links, and examples against both validators. |
-| Existing change, contract, integration, adapter, stability, and selected-design status | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/contracts/channel-adapter-v1.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; apply the exact breaking-change, supersession, interface-version, request/result, bypass, ERROR, and diagram delta at atomic cutover. |
+| Release/change history | `CHANGELOG.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the breaking-change entry naming I-010A-E `@1`, the five exact `schemas/v2/*.schema.json` paths, supersession of the V1 `PASS/ACK/ASK/SPEAK` request/verdict contract with no translation bridge, and the pinned dual-validator command, only in the atomic candidate. |
+| Contract stability tiers | `docs/STABILITY.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace the V1 contract stability rows with the five `@1` interface versions and their breaking-cutover status, keeping the classifier-DEFER/margin-DEFER transition described as independently evidence-gated, not schema compatibility. |
+| Integration lifecycle | `docs/integration.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 request/verdict flow wording with the request → decision (`ok`/`bypass`/`error`) → wake → continuation → receipt lifecycle, including the non-social `preattention-disabled` bypass and the tagged operational ERROR path. |
+| Adapter obligations | `docs/adapters.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace adapter-facing V1 envelope/verdict wording with I-010A request-construction and I-010E transport-stage receipt obligations, including honest unknown/unavailable capability wording. |
+| V1 adapter contract | `docs/contracts/channel-adapter-v1.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the exact supersession notice naming I-010A-E `@1` and the atomic no-bridge cutover; the V1 body remains as a superseded historical reference. |
+| Selected-design status | `docs/architecture/v2-selected-design.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; mark the five contract seams as landed at their exact `schemas/v2/` paths and align the request/decision/wake/receipt diagram labels with the `@1` interface names. |
+| Operator installation | `docs/INSTALL.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: install flow and installed artifacts are unchanged; this slice adds schemas, tests, evals, evidence, and one new doc only, and `jsonschema==4.26.0` stays dev/test-only behind the pinned `uv run --offline --with` command, never entering runtime or install dependencies. |
+| Verdict-suite data model | `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 verdict-suite data model remains current truth; I-010B embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` confidence-vector shape as transition evidence (FR-007) without changing any verdict-suite artifact or claim. |
+| Verdict-suite requirements | `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the verdict-suite data-model row; no verdict-suite requirement changes in this slice. |
+| Verdict-suite evaluation | `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 corpus and its claims are untouched; this slice adds `evals/v2/contract/` beside it without changing verdict-suite behavior. |
+| Verdict-suite runner | `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the runner, its commands, and its outputs are untouched by this slice. |
+| Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the slice follows the documented spine; it changes no governance process or claim. |
+| Hermes core patch | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 Hermes integration doc remains current; its V2 migration delta is owned by the harness/adapter slices that change that surface, not by the contract slice. |
+| Hermes patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the Hermes core patch row; no Hermes surface changes in this slice. |
 
 `HANDOFF` preserves slice 110's ownership of global current-state wording; it
-is not a no-impact finding. The exact candidate cannot hand off until both rows
-and every exact path's validation/delta are recorded in ordinary handoff evidence.
+is not a no-impact finding. Documents under `docs/archive/` are dated
+historical records outside the freshness surface and receive no row. Every
+`NO_IMPACT` row above must be re-verified against the exact candidate diff and
+recorded with its reviewed path and concrete rationale in
+`evidence/v2/contract/handoff.md`; the table entry alone is not evidence. The
+exact candidate cannot hand off until every row's validation or delta is
+recorded in ordinary handoff evidence.
 
 ## Owner Handoff
 
