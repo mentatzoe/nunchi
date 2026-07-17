@@ -85,9 +85,9 @@ events, honest coverage, and no social ledger.
 the valid scene matrix and rejects every enumerated identity, order, reference,
 coverage, V1, and forbidden-field case.
 
-- [ ] T006 [US1] Define `I-010A AttentionRequestV2@1` with distinct actor mentions, `mentions_room`, and host-only continuation metadata in `schemas/v2/attention-request.schema.json`
-- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) including duplicate-ID, timestamp-order, and trigger-membership relational red cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change
-- [ ] T008 [US1] Record exact-self (S01), native-relation (S02), bounded-context/gap (S03), budget (S15), projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
+- [X] T006 [US1] Define `I-010A AttentionRequestV2@1` with distinct actor mentions, `mentions_room`, and host-only continuation metadata in `schemas/v2/attention-request.schema.json`
+- [X] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) including duplicate-ID, timestamp-order, and trigger-membership relational red cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change
+- [X] T008 [US1] Record exact-self (S01), native-relation (S02), bounded-context/gap (S03), budget (S15), projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
 
 ## Phase 3: User Story 2 - Auditable Attention Decision (Priority: P1)
 

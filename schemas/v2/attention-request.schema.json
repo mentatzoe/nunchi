@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/attention-request.schema.json",
+  "title": "AttentionRequestV2",
+  "description": "I-010A AttentionRequestV2@1 — the bounded factual attention request and classifier projection: exact self binding, room identity, observed/referenced actors, ordered native events, one included trigger, honest coverage, positive budgets, and expansion capability booleans only. Host-only continuation authority (handle, binding, cursor, expiry) is forbidden here and lives in I-010D. Runtime-adapter-only semantic rules (cross-item ID uniqueness, timestamp-versus-order agreement, trigger membership, advice citations, fetch-time binding/expiry state, receipt-stage sequences) are documented in docs/contracts/nunchi-v2.md and enforced by the stdlib runtime adapter, not this schema.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relationTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_event_id", "resolved"],
+      "properties": {
+        "target_event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "resolved": {"type": "boolean"}
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "actor_id", "kind", "timestamp", "mentions", "mentions_room"],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "actor_id": {"$ref": "#/$defs/nonEmptyString"},
+        "kind": {"enum": ["message", "reply", "reaction", "membership", "thread"]},
+        "timestamp": {
+          "$comment": "null is an explicitly unknown platform fact, never inferred.",
+          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
+        },
+        "content": {"oneOf": [{"type": "string"}, {"const": null}]},
+        "reply_to": {"$ref": "#/$defs/relationTarget"},
+        "reaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["emoji", "target"],
+          "properties": {
+            "emoji": {"$ref": "#/$defs/nonEmptyString"},
+            "target": {"$ref": "#/$defs/relationTarget"}
+          }
+        },
+        "membership": {"enum": ["join", "leave", "unknown"]},
+        "thread_id": {"oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]},
+        "mentions": {
+          "$comment": "Actor-targeted mention IDs, distinct from mentions_room.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "mentions_room": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["kind"], "properties": {"kind": {"const": "reply"}}},
+          "then": {"required": ["reply_to"]},
+          "else": {"not": {"required": ["reply_to"]}}
+        },
+        {
+          "if": {"required": ["kind"], "properties": {"kind": {"const": "reaction"}}},
+          "then": {"required": ["reaction"]},
+          "else": {"not": {"required": ["reaction"]}}
+        },
+        {
+          "if": {"required": ["kind"], "properties": {"kind": {"const": "membership"}}},
+          "then": {"required": ["membership"]},
+          "else": {"not": {"required": ["membership"]}}
+        }
+      ]
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truncated", "gaps", "visibility", "continuity", "more_events"],
+      "properties": {
+        "truncated": {"type": "boolean"},
+        "gaps": {"enum": ["none", "known", "unknown"]},
+        "visibility": {"enum": ["complete", "partial", "unknown"]},
+        "continuity": {
+          "$comment": "Session-only continuity stays explicit; it is never upgraded to restart-safe by inference.",
+          "enum": ["restart-safe", "session-only", "unknown"]
+        },
+        "more_events": {
+          "$comment": "Transports that cannot know whether more events exist say 'unknown'.",
+          "enum": ["available", "none", "unknown"]
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_events", "max_bytes"],
+      "properties": {
+        "max_events": {"type": "integer", "minimum": 1},
+        "max_bytes": {"type": "integer", "minimum": 1}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "interface",
+    "version",
+    "request_id",
+    "self",
+    "room",
+    "actors",
+    "events",
+    "trigger_event_id",
+    "coverage",
+    "budgets",
+    "expansion"
+  ],
+  "properties": {
+    "interface": {"const": "AttentionRequestV2"},
+    "version": {"const": 1},
+    "request_id": {"$ref": "#/$defs/nonEmptyString"},
+    "self": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant_id", "actor_id", "attestation"],
+      "properties": {
+        "participant_id": {"$ref": "#/$defs/nonEmptyString"},
+        "actor_id": {
+          "$comment": "The exact current-surface binding; loose descriptors never establish authorship.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attestation": {"enum": ["transport", "host"]},
+        "loose": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "names": {"type": "array", "items": {"$ref": "#/$defs/nonEmptyString"}},
+            "role": {"type": "string"},
+            "description": {"type": "string"}
+          }
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["room_id", "continuity_scope"],
+      "properties": {
+        "room_id": {"$ref": "#/$defs/nonEmptyString"},
+        "continuity_scope": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "actors": {
+      "$comment": "The observed/referenced cast, never an inferred full roster.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actor_id", "relation"],
+        "properties": {
+          "actor_id": {"$ref": "#/$defs/nonEmptyString"},
+          "relation": {"enum": ["observed", "referenced"]},
+          "display_name": {"type": "string"}
+        }
+      }
+    },
+    "events": {
+      "$comment": "Authoritative array order is the ordering truth.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/event"}
+    },
+    "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "budgets": {"$ref": "#/$defs/budgets"},
+    "expansion": {
+      "$comment": "The classifier projection receives capability booleans only; the continuation handle, binding, cursor, expiry, and fetch authority are host-only (I-010D).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available"],
+      "properties": {
+        "available": {"type": "boolean"}
+      }
+    }
+  }
+}
