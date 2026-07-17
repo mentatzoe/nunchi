@@ -29,3 +29,17 @@
 **Decision reference**: `evidence/v2/contract/review-2026-07-17-v2-integrator.md`
 
 **Recorded by**: v2-integrator
+
+## Attempt 2 — HANDOFF_READY
+
+**Slice**: `010-v2-contract`
+
+**Status**: HANDOFF_READY
+
+**Candidate commit**: `001fdf85acd5098264c4975559c97114aa7278af`
+
+**Acceptance owner**: v2-integrator
+
+**Documentation freshness**: PASS
+
+**Packet paths**: evidence/v2/contract/handoff.md, evidence/v2/contract/README.md, evidence/v2/contract/slice-activation.md, evidence/v2/contract/slice-candidate.md, evidence/v2/contract/checklist-adjudication.md, evidence/v2/contract/attention-request.jsonl, evidence/v2/contract/attention-decision.jsonl, evidence/v2/contract/downstream.jsonl

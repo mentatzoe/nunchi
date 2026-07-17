@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `CONVERGED`
+**Slice state**: `HANDOFF_READY`
 
 **Program implementation authority**: `GRANTED`
 
