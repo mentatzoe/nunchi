@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `PLANNED`
+**Slice state**: `READY`
 
 **Program implementation authority**: `GRANTED`
 
