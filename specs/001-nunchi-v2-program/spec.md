@@ -7,7 +7,7 @@
 **Status at 2026-07-11 reset baseline**: READY — planning baseline accepted;
 implementation authority not granted
 
-**Program state**: READY
+**Program state**: DELIVERY
 
 **Program implementation authority**: `GRANTED`
 

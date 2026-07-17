@@ -14,7 +14,7 @@ and the requirements in this program specification.
 superseded only by immutable activation/acceptance evidence and append-only
 candidate/handoff attempts
 
-**Program state**: `READY`
+**Program state**: `DELIVERY`
 
 **Program implementation authority**: `GRANTED`
 

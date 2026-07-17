@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `READY`
+**Slice state**: `ACTIVE`
 
 **Execution status**: `DORMANT` while the slice remains `PLANNED`
 

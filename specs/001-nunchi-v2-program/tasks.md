@@ -24,7 +24,7 @@ establishes `READY` before the assigned participant moves the slice to `ACTIVE`
 `NOT_GRANTED`, assignment `UNASSIGNED`; the values below are live declarations,
 not the dated baseline
 
-**Program state**: `READY`
+**Program state**: `DELIVERY`
 
 **Program implementation authority**: `GRANTED`
 
