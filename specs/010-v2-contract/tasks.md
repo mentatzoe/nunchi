@@ -146,6 +146,33 @@ Every task below cites the checklist item(s) or amendment it traces to.
 - [X] T023 Add the control-plane read-boundary enforcement — a scanner helper in `tests/v2/contract/schema_helpers.py` plus its covering test beside the existing helper cases in `tests/v2/contract/test_attention_request.py` asserting that no file under `tests/v2/contract/` or `evals/v2/contract/` references a SpecKit-managed control-plane path (the slice-specification tree or the SpecKit configuration tree; the literal forbidden prefixes are embedded in the test itself), making explicit that the suite embeds its own copy of the FR-012 class vocabulary and no build or test path reads a SpecKit-managed file (CHK076)
 - [X] T024 Adjudicate CHK064–CHK076 against the refreshed artifacts and append per-item verdicts with evidence anchors to `evidence/v2/contract/checklist-adjudication.md` (append-only; the CHK018–CHK063 adjudication is never rewritten); for each sustained text gap, land the fix in the named SpecKit artifact in the same commit before check-off — CHK064 "tagged contract commit" wording in plan §Integration Strategy; CHK065 execution-status statement (fixed in this tasks refresh — verify and record); CHK066 restating or explicitly deferring to the spec's fixed per-class oracle treatment in plan §Contract validation commands; CHK071 a written ownership note for the absent umbrella scene IDs (S04, S10–S14); CHK073–CHK075 documentation-matrix consistency, per-row verifiability, and the written derivation/exhaustiveness claim in plan §Documentation Impact and Freshness — citing T020 (CHK067), T021 (CHK070), T022 (CHK069), and T023 (CHK076) as landed evidence, and recording CHK068 and CHK072 as consistency confirmations
 
+## Phase 7: Post-Rejection Correction (appended 2026-07-17)
+
+**Correction source**: the v2-integrator rejection of candidate
+`81483ce017eb834c5ab533556fa64cd62a8cf2aa` at packet commit
+`9f08124b43ba5beb73c50b876bde51e7b8a1633d`, recorded at
+`evidence/v2/contract/review-2026-07-17-v2-integrator.md` (blockers R1–R3);
+the spec's 2026-07-17 clarification session landed at `89aef07` (conditional
+FR-007 legacy-vector rule, closed FR-005 routing-audit set, schema-expressible
+per-record FR-010 stage-to-writer binding); the plan's §Post-Rejection
+Planning Decisions landed at `8fbc79d`; and the post-rejection formal reviewer
+gate CHK077–CHK096 appended at `95b22a1`. This phase is strictly append-only:
+completed tasks T001–T024, all prior task text, and every attempt-1 evidence
+record remain exactly as landed, and this refresh changes no header line.
+Every task below cites the blocker, clarified requirement, or checklist
+item(s) it traces to.
+
+- [ ] T025 Adjudicate the post-rejection gate's requirement-text items against the amended artifacts and, for each sustained text gap, land the fix in the named SpecKit artifact in the same commit before check-off — CHK077 an explicit spec §Control-Plane Boundary statement that the R1 repair in `tests/test_governance.py` is an in-scope ordinary rework output of this slice; CHK079 a written ownership note in plan §Integration Strategy that `v2-contract-owner` performs that shared governance-infrastructure edit for this rework with `v2-integrator` review at handoff; CHK084 the routing audit's cross-field rules in spec FR-005/FR-006 (when a margin counts as "applied" requiring the effective margin, when the trusted source is "present", and the valve/override-cause/transition legality combinations); CHK085 `reasons` fixed as a sibling ok-branch field never inside the routing-audit object; CHK086 one identical bypass exclusion set at every spec surface; CHK087 the closed stage-to-writer map written into spec FR-010 (`observation` → `observation-provider`, `attention` → `attention-engine`, `participant-host` → `participant-host`, `transport` → `transport`); CHK088 the permissive FR-007 side (a valid vector accompanying `WAKE`, `DEFER`, or a margin-retired `SUPPRESS` stays valid); CHK089 written attempt-2 evidence rework semantics (aggregate JSONL and the README manifest regenerate as current-attempt records; `handoff.md` and `checklist-adjudication.md` append per attempt; lifecycle attempt streams never rewrite); CHK090 "candidate commit" and "handoff packet commit" defined as distinct terms each carrying the green full-baseline obligation; CHK095 the R1 repair restated as a verifiable invariant with its named regression proof — appending the per-item text verdicts with evidence anchors to `evidence/v2/contract/checklist-adjudication.md` (append-only; earlier adjudications are never rewritten) and recording CHK091 (the appended `REJECTED` attempt already names the exact review record and candidate commit) and CHK096 (no new slice-directory file) as consistency confirmations
+- [ ] T026 [P] Repair the governance activation-path fixture (rejection R1; plan §Post-Rejection Planning Decisions, Decision R1) so `tests.test_governance.GovernanceBoundaryTests.test_authorized_contract_slice_can_reach_active_end_to_end` constructs its synthetic planning baseline independently of the repository's live slice state — replacing every live slice declaration and lifecycle record it stages, not only `PLANNED` ones — and add the CHK095 regression proof beside it in `tests/test_governance.py`: a case asserting the fixture's baseline stays green while live slice declarations are `ACTIVE` or `HANDOFF_READY`, then verify the full `python3 -m unittest` baseline green from the working tree
+- [ ] T027 [P] Rework `I-010B AttentionDecisionV2@1` in `schemas/v2/attention-decision.schema.json` to the clarified shape (rejection R2; FR-005/FR-007 as clarified at `89aef07`): the legacy verdict confidence vector optional on `status: ok` and required exactly when the classifier disposition is `SUPPRESS` while the routing audit reports the margin `active`; the closed routing audit recording the applied valve, override cause, margin status, effective margin when one applied, and trusted margin source when present, encoding the T025-landed CHK084 cross-field rules; `reasons` as a sibling ok-branch audit field; and the bypass branch excluding the full FR-005 set — so the review's two Draft 2020-12 probes (a valid `WAKE` with routing `margin_status`; a valid `WAKE` without a legacy vector) both validate
+- [ ] T028 [P] Rework the decision corpus and red tests to the conditional rule (rejection R2; CHK081, CHK083, CHK086, CHK088): in `evals/v2/contract/attention-decision/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change, add the decisive cases — margin-active candidate `SUPPRESS` without the vector red; `WAKE` and `DEFER` without the optional vector valid; `WAKE`, `DEFER`, and margin-retired `SUPPRESS` carrying a valid vector valid; illegal routing-audit cross-field combinations red per the T025 rules; bypass carrying a routing audit or legacy vector red — and supersede in writing T003's every-ok-decision framing in `tests/v2/contract/test_attention_decision.py` by re-keying its legacy-confidence red cases (including the sentinel-decoded non-finite ones) to the conditional FR-007 rule
+- [ ] T029 [P] Encode the per-record stage-to-writer binding (rejection R3; FR-010 as clarified at `89aef07`; CHK087) in `schemas/v2/attention-receipt.schema.json` per the T025-written closed map so a record attributing one stage to another stage's owner — including the review's forged `stage: observation` / `writer: transport` document — is invalid as a single document, and enforce the identical map in the individual stdlib validator `validate_attention_receipt` in `tests/v2/contract/schema_helpers.py`, while `validate_receipt_stream` retains the stream-level canonical-order, skipped-stage, earlier-stage-mutation, request-ID-correlation, and writer-ownership checks unchanged
+- [ ] T030 [P] Reclassify the cross-owner receipt case operationally (rejection R3; CHK082): in `evals/v2/contract/downstream/cases.jsonl` with its authoritative per-class `expected-counts.json` updated in the same change, move the per-record cross-owner red case into the schema-expressible partition asserting identical rejection from both validators, keep the multi-record stream checks in the runtime-adapter-only receipt-stage sequence class, and name each reclassified case and per-class count delta so the no-silent-shrink assertion trips loudly during the move rather than masking it, with the covering red test in `tests/v2/contract/test_context_and_receipt.py`
+- [ ] T031 Regenerate the attempt-2 aggregate evidence under the reworked corpus per the T025-landed CHK089 semantics: re-record `evidence/v2/contract/attention-decision.jsonl` (S05 governed suppression under the conditional FR-007 rule per CHK083, dual-DEFER S08, transition/error S09, bypass, S16) and `evidence/v2/contract/downstream.jsonl` (receipt stage/writer cases, S06, S07, binding, S15, S16, 010-V1) as current-attempt records through the T021-enforced five-field writer, record the disposition of the unchanged `evidence/v2/contract/attention-request.jsonl` explicitly, then refresh the twelve-scene manifest with post-rework per-class partition counts and both skip-regime counts in `evidence/v2/contract/README.md`, recording the exact pinned dual-validator command, the flagless governance check, and the full `python3 -m unittest` baseline result — the run whose green result the exact candidate commit must reproduce, with the packet-commit rerun owed at the handoff gate (CHK080) — beside the commands
+- [ ] T032 Re-execute every row of plan §Documentation Impact and Freshness against the attempt-2 candidate diff (CHK092): re-validate the `UPDATE` `docs/contracts/nunchi-v2.md` so it documents the conditional FR-007 vector rule, the closed routing-audit set, and the per-record FR-010 stage-to-writer binding alongside the five `@1` interfaces and the FR-012 runtime-adapter-only rules (CHK094); re-verify each `NO_IMPACT` rationale sequenced after the T026 repair so the `AGENTS.md` green-baseline claim is true at the verified commit (CHK093); re-route each named `HANDOFF` delta including `README.md` to its accepting owner; and append the attempt-2 documentation section to `evidence/v2/contract/handoff.md` without rewriting the attempt-1 sections
+- [ ] T033 Complete the CHK077–CHK096 adjudication by appending the implementation-cited verdicts to `evidence/v2/contract/checklist-adjudication.md` (append-only; T025's text verdicts and all earlier adjudications are never rewritten): CHK078 fixed by this Phase 7 append; CHK080 via T031's recorded baseline obligation; CHK081 and CHK083 via T028 and T031; CHK082 via T030; CHK092–CHK094 via T032; CHK095 via T026's landed regression proof — each verdict citing its landed task, file, and record anchors, and checking off each gate item in the requirements checklist only when its fix is verifiably on disk
+- [ ] T034 Append the attempt-2 proposed packet input to `evidence/v2/contract/handoff.md` after T032's documentation section, per T019's authoritative SC-005 enumeration: both defined commits (the exact candidate commit and the handoff packet commit, each carrying the green full-offline-baseline obligation per CHK090, the packet-commit run performed at the handoff gate), the five interface versions and exact `schemas/v2/` paths, the reworked staged-receipt writer map, the dual-validator pin and post-rework results over the shared corpus, the corpus revision with the unchanged downstream adapter obligation, the regenerated scene-to-record manifest, the updated rejected-case inventory, migration/provenance notes naming `evidence/v2/contract/review-2026-07-17-v2-integrator.md` and its three resolved blockers (CHK091), documentation dispositions/validation/reviewer from T032, and known limitations — the later convergence, documentation-freshness, and handoff gates, not this checkbox, establish lifecycle state
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -170,6 +197,16 @@ Every task below cites the checklist item(s) or amendment it traces to.
   surface: T017's existing row-by-row execution already covers the refreshed
   matrix, including the `AGENTS.md` and `CLAUDE.md` `NO_IMPACT` rows added at
   `e4ada5c`.
+- Rejection-rework phase: T025 precedes T027 and T029 (their schema shapes
+  encode the CHK084 cross-field rules and CHK087 writer map T025 lands) and
+  precedes T033. T026 has no file overlap with any other chain and may run
+  throughout. T027 precedes T028's green dual-validator check-off and T029
+  precedes T030's (red cases may be authored first). T026–T030 precede T031;
+  T031 precedes T032 (the CHK093 sequencing puts `NO_IMPACT` re-verification
+  after the R1 repair); T025–T032 precede T033; T032 and T033 precede T034.
+  The attempt-2 sections of `evidence/v2/contract/handoff.md` append in the
+  same documentation-then-packet order as T017→T019, after the attempt-1
+  sections and never rewriting them.
 
 ## Parallel Opportunities
 
@@ -179,6 +216,10 @@ Every task below cites the checklist item(s) or amendment it traces to.
 - T012–T014 target separate schema files under the same sole owner.
 - T022 (downstream corpus) is parallel to the T020→T021→T023 harness chain;
   T024 waits for all four.
+- T026 (governance fixture) is parallel to both rework families; the
+  decision family (T027→T028) and the receipt family (T029→T030) touch
+  disjoint schema files, corpus directories, and test files and run in
+  parallel with each other after T025.
 
 ## Implementation Strategy
 
@@ -201,3 +242,19 @@ do not let a dependent implementation silently define the shared interface.
   refresh gate: completed history (checked tasks, evidence records, prior
   attempt streams) is preserved unchanged, and every appended task is
   traceable to its named correction source.
+- Phase 7 is the append-only correction for the v2-integrator rejection of
+  candidate `81483ce017eb834c5ab533556fa64cd62a8cf2aa`: completed history
+  (checked tasks, attempt-1 evidence sections, the rejected candidate and
+  handoff attempts) is preserved unchanged, this refresh edits no header
+  line, and every appended task traces to blocker R1/R2/R3, a requirement
+  clarified at `89aef07`, or a CHK077–CHK096 gate item.
+- Attempt-2 evidence semantics (CHK089, written by T025): the aggregate JSONL
+  files and the README manifest regenerate as current-attempt records;
+  `evidence/v2/contract/handoff.md` and
+  `evidence/v2/contract/checklist-adjudication.md` append per attempt; the
+  lifecycle candidate/handoff attempt streams append and never rewrite.
+- The closed stage-to-writer vocabulary is `observation` →
+  `observation-provider`, `attention` → `attention-engine`,
+  `participant-host` → `participant-host`, `transport` → `transport`; T025
+  writes it into spec FR-010 and T029 encodes it in the public schema and the
+  individual stdlib validator.
