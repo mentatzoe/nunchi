@@ -30,6 +30,11 @@ before `ACTIVE` or any implementation checkbox
 `Accepted dependencies: none`, `Dependency commits: none`, and
 `Dependency acceptance references: none`.
 
+**Task manifest**: Run
+`python3 scripts/check_governance.py --task-manifest specs/010-v2-contract`
+and copy its exact `Initial task IDs` / `Initial tasks SHA256` into activation,
+then its `Completed task IDs` / `Tasks SHA256` into each candidate attempt.
+
 **Candidate evidence**: `evidence/v2/contract/slice-candidate.md` (for
 `CONVERGED`; absent while `PLANNED`)
 
@@ -113,9 +118,9 @@ records correlated by request ID.
 
 ## Phase 5: Documentation and Packet Inputs
 
-- [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md` for the later workflow gate
+- [ ] T017 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, re-verify each `NO_IMPACT` rationale against the exact candidate diff with its reviewed path, route each named `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/contract/handoff.md` for the later workflow gate
 - [ ] T018 Run the exact offline dual-validator command, run `python3 scripts/check_governance.py` with no flags (boundary-only SC-006 verification; `--check-cli` is the separate pinned-CLI check), and create the S-ID-to-JSONL-record manifest covering all twelve scene rows (S01, S02, S03, S05, S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) in `evidence/v2/contract/README.md`
-- [ ] T019 Prepare the proposed packet input with exact commit, commands, interface versions, validator pin/results, receipt writer map, evidence manifest, provenance, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/contract/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
+- [ ] T019 Prepare the proposed packet input with the exact commit, commands, five interface versions and exact `schemas/v2/` paths, dual-validator pin/results over the shared corpus, staged-receipt writer map, scene-to-record evidence manifest, rejected-case inventory, migration/provenance notes, documentation dispositions/validation/reviewer, and known limitations in `evidence/v2/contract/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
 
 ## Dependencies & Execution Order
 
