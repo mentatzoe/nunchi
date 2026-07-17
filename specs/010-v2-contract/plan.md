@@ -156,19 +156,25 @@ absence is loud, and the pinned command above remains the sole complete
 dual-validator run. No silent skips. The suite loads each case once and
 runs it through both the Draft 2020-12 oracle and the stdlib runtime-validation
 adapter, honoring the FR-012 partition: schema-expressible cases assert
-identical results from both validators; semantic/relational cases (cross-item
-ID uniqueness, timestamp-versus-order agreement, cross-document advice
-citations, trigger membership, fetch-time binding/expiry state, and
-receipt-stage sequence rules) assert through the runtime adapter with the oracle expecting
-valid or skipping by explicit class, and per-class counts asserted. The 010 handoff owns the schemas, corpus, oracle result, and adapter
+identical results from both validators; semantic/relational cases assert
+through the runtime adapter with the oracle treatment fixed per class exactly
+as spec FR-012 states — the four document-shaped relational classes
+(cross-item ID uniqueness, timestamp-versus-order agreement, cross-document
+advice citations, trigger membership) are oracle-expected-valid, because each
+document is schema-valid in isolation, and the two behavioral/sequence classes
+(fetch-time binding/expiry state, receipt-stage sequence rules) are
+oracle-class-skipped, because there is no single document to validate — with
+per-class counts asserted. No other class-to-treatment mapping is permitted. The 010 handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
 its own handoff.
 
 ## Integration Strategy
 
 **Integration order**: 010 lands first. Slices 020 and 030 each independently
-accept and record the tagged contract commit in parallel (per-consumer
-acceptance references, never a shared acceptance). Slice 040 begins only after 010, 020, and 030 have
+accept and record the exact contract commit in parallel (per-consumer
+acceptance references, never a shared acceptance; the accepted identifier is
+the exact full commit named by the T019 packet — no git tag is required or
+implied). Slice 040 begins only after 010, 020, and 030 have
 landed their handoffs.
 
 **Worktree/branch**: future isolated worktree `.worktrees/v2-contract/` on
@@ -199,6 +205,18 @@ failing case, and known impact on other consumers — followed by re-analysis.
 | S16 No registry or ledger | All five interfaces | Reply-bearing and handled/open/owed/permission fields fail validation. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | 010-Preattention-bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | 010-V1 Breaking rejection | CLI/core-neutral fixtures | V1 envelopes are rejected with no translation bridge. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
+
+The six umbrella parity scenes absent from this table — written here in the
+hyphenated form S-04 and S-10 through S-14 because this plan's literal scene
+tokens are machine-derived into the activation enumeration — are owned by
+other slices per the program plan's parity scene table in
+`specs/001-nunchi-v2-program/plan.md`: false-suppression scars (S-04) by
+slices `020`/`030`/`050`–`100`/`110`; no send-time social gate (S-10) by
+`040`/`060`–`100`/`110`; transport hygiene (S-11) and adapter equivalence
+(S-13) by `020`/`050`/`090`/`100`/`110`; installed provenance (S-12) by
+`050`–`110`; and the mixed-harness room (S-14) by `050`–`100`/`110`. Slice
+`010` contributes no row to them, so their absence here is scene ownership,
+not a coverage gap.
 
 Reusable corpus assets are partitioned per interface family at exactly
 `evals/v2/contract/attention-request/`,
@@ -296,9 +314,18 @@ documentation remain separately addressable ordinary artifacts.
 | Verdict-suite requirements | `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the verdict-suite data-model row; no verdict-suite requirement changes in this slice. |
 | Verdict-suite evaluation | `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 corpus and its claims are untouched; this slice adds `evals/v2/contract/` beside it without changing verdict-suite behavior. |
 | Verdict-suite runner | `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the runner, its commands, and its outputs are untouched by this slice. |
-| Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the slice follows the documented spine; it changes no governance process or claim. |
+| Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the candidate diff contains no change under `docs/governance/`, no change to `scripts/check_governance.py` or its checks, and no change to any documented governance command or gate; the doc's claims stay verifiably true against the diff. |
 | Hermes core patch | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 Hermes integration doc remains current; its V2 migration delta is owned by the harness/adapter slices that change that surface, not by the contract slice. |
 | Hermes patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the Hermes core patch row; no Hermes surface changes in this slice. |
+
+**Inventory derivation**: the reviewed set is exhaustive over `README.md`,
+the root guidance documents (`AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`), and
+every Markdown file under `docs/**` excluding the dated historical records
+under `docs/archive/`. At the 2026-07-17 refresh that inventory is 17
+existing files plus the one slice-created `docs/contracts/nunchi-v2.md`,
+matching the 18 rows above one-to-one; a reviewer can re-derive it with
+`ls *.md` plus `find docs -name '*.md' | grep -v archive` and verify no
+ordinary document is silently omitted.
 
 `HANDOFF` preserves slice 110's ownership of global current-state wording; it
 is not a no-impact finding. Documents under `docs/archive/` are dated

@@ -61,3 +61,32 @@ CHK060 PASS — handoff.md append-only ordering; distinct from slice-handoff.md.
 CHK061 PASS — SC-005 carries the T019-authoritative note.
 CHK062 PASS — nunchi-v2.md validation covers the semantic rules.
 CHK063 PASS — partition vocabulary control-plane; counts live in ordinary paths.
+
+# Reviewer adjudication — post-e4ada5c refresh gate (CHK064–CHK076)
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Adjudicated on**: 2026-07-17, in the implement step of bound run
+`speckit-010-20260717T081350382670Z` (T024)
+
+**Method**: each item answered strictly against the refreshed spec.md
+(`16cccb7` amendments), plan.md (`e4ada5c` refresh plus this commit's
+fixes), tasks.md (`7e17db9` correction phase), and the landed correction
+artifacts at `e52c9a4`/`cc2441e`. Sustained text gaps are fixed in the named
+SpecKit artifact in the same commit as this record, before check-off.
+
+## Verdicts
+
+CHK064 SUSTAINED, fixed — plan §Integration Strategy said "tagged contract commit" while the spec interface summary and T019 require only the exact commit; reworded in this commit to "exact contract commit" with an explicit no-git-tag clarification, matching spec and packet.
+CHK065 PASS after tasks refresh — the tasks header now carries an explicit "Execution status: EXECUTABLE" statement conditioned on the `ACTIVE` state (added at `7e17db9`); verified present alongside the retained `PLANNED`-dormancy rule.
+CHK066 SUSTAINED, fixed — plan §Contract validation commands permitted "expecting valid or skipping by explicit class" without the class-to-treatment mapping; restated in this commit exactly per spec FR-012 (four document-shaped classes oracle-expected-valid, two behavioral/sequence classes oracle-class-skipped, no other mapping permitted).
+CHK067 PASS via T020 — `assert_corpus_inventory()` runs on every corpus load and fails loudly on a wholly missing or unregistered corpus directory or a missing cases.jsonl/expected-counts.json; red-path tests cover all three failure shapes (landed at `e52c9a4`).
+CHK068 PASS — FR-007 permanence (field required for all of `@1`; removal is a breaking `@2` edit), the Assumptions' breaking-edit contract (owner handoff + dependent re-analysis), and the independently gated margin retirement are mutually consistent; no reading permits dropping the field at `@1` once margin evidence lands, because retirement gates the margin policy, not the evidence field.
+CHK069 PASS via T022 — the downstream corpus now names the complete refreshed FR-010 coverage: full canonical stream (DWN-S06-301), prefix-partials awaiting later stages (DWN-S06-302), awaiting-transport contributed prefix (DWN-S06-308, appended at `e52c9a4` with counts updated in the same change), S07 silence ending at participant-host (DWN-S07-301), out-of-order (DWN-S06-304), skipped-stage (DWN-S06-305), earlier-stage mutation (DWN-S06-303), cross-owner writer (DWN-S06-306), and uncorrelated request ID (DWN-S06-307), verified under the pinned dual-validator command.
+CHK070 PASS via T021 — the shared evidence writer enforces all five mandatory fields (`scene_id`, `case_id`, validator identity, expected, observed) and refuses any record missing one; the landed attention-request (72), attention-decision (94), and downstream (122) records were re-verified conformant before T011/T016 check-off (landed at `e52c9a4`, ordering recorded at `cc2441e`).
+CHK071 SUSTAINED, fixed — no artifact stated where the absent umbrella scenes are owned; plan §Acceptance Scenes and Evidence now records S04 and S10–S14 ownership per the program plan's parity scene table, so absence reads as ownership, not a coverage gap.
+CHK072 PASS — T018's twelve enumerated rows and the plan scene table carry the identical scene-ID set (S01–S03, S05–S09, S15, S16, 010-Preattention-bypass, 010-V1), and the manifest obligation (scene ID to JSONL file and record IDs, observed per-class partition counts, both skip-regime counts, beside commands and results) is stated measurably enough to reject an incomplete README.
+CHK073 PASS — every spec-named documentation surface has exactly one plan row with the same disposition (README HANDOFF; nunchi-v2 UPDATE; CHANGELOG/STABILITY/integration/adapters/channel-adapter-v1/v2-selected-design HANDOFF), and the ten `NO_IMPACT` rows cover documents the spec's affected-docs claim never names, so they complement rather than contradict it.
+CHK074 SUSTAINED in part, fixed — nine rationales were already candidate-diff-verifiable facts; the execution-spine row's "the slice follows the documented spine" clause was intention, reworded in this commit to concrete diff-checkable facts (no change under `docs/governance/`, to the governance script/checks, or to any documented governance command or gate).
+CHK075 SUSTAINED, fixed — the matrix now states its inventory derivation: exhaustive over README.md, root guidance documents, and docs/** minus docs/archive/, 17 existing files plus the slice-created contract doc matching the 18 rows one-to-one, with the re-derivation commands named.
+CHK076 PASS via T023 — `scan_control_plane_references()` plus its covering test assert no file under the test or corpus trees references a SpecKit-managed control-plane path, and the FR-012 class vocabulary is asserted embedded in the harness, never read from a SpecKit file at build or test time (landed at `e52c9a4`).
