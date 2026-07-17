@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `ACTIVE`
+**Slice state**: `CONVERGED`
 
 **Program implementation authority**: `GRANTED`
 
