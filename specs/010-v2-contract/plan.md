@@ -126,8 +126,8 @@ per-file validation or handoff delta.
   `schemas/v2/participant-wake.schema.json`, including non-social source
   `PREATTENTION_BYPASS` without advice.
 - `I-010D ContextContinuationV2@1` at
-  `schemas/v2/context-continuation.schema.json`; handle, binding, cursor, and
-  fetch authority are host-only. The classifier projection receives coverage
+  `schemas/v2/context-continuation.schema.json`; handle, binding, cursor,
+  expiry values, and fetch authority are host-only. The classifier projection receives coverage
   and expansion capability booleans only.
 - `I-010E AttentionReceiptV2@1` at
   `schemas/v2/attention-receipt.schema.json`, an immutable staged-record union
@@ -165,8 +165,9 @@ its own handoff.
 
 ## Integration Strategy
 
-**Integration order**: 010 lands first. Slices 020 and 030 consume the tagged
-contract commit in parallel. Slice 040 begins only after 010, 020, and 030 have
+**Integration order**: 010 lands first. Slices 020 and 030 each independently
+accept and record the tagged contract commit in parallel (per-consumer
+acceptance references, never a shared acceptance). Slice 040 begins only after 010, 020, and 030 have
 landed their handoffs.
 
 **Worktree/branch**: future isolated worktree `.worktrees/v2-contract/` on
@@ -294,7 +295,9 @@ recorded in ordinary handoff evidence.
 `v2-contract-owner` must hand off the exact commit, five interface versions and
 paths, Draft/runtime validator results over the same corpus, exact offline
 command, scene-to-record evidence manifest, staged-receipt writer map,
-rejected-case inventory, migration/provenance notes, and known limitations.
+rejected-case inventory, migration/provenance notes, documentation
+dispositions/validation/reviewer, and known limitations (T019's enumeration
+is authoritative).
 Acceptance by a dependent owner does not transfer schema ownership.
 
 ## Complexity Tracking

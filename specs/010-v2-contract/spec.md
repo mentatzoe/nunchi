@@ -179,7 +179,10 @@ participant outcomes and binding failures.
 
 - Invalid (FR-003): duplicate event IDs within one request/continuity scope,
   and timestamps that disagree with authoritative array order. Valid but
-  tricky: identical text with distinct native IDs.
+  tricky: identical text with distinct native IDs. Non-finite confidence red
+  cases use an encoded sentinel (string `"NaN"`/`"Infinity"` in the JSONL case
+  envelope, decoded by the corpus loader) because strict JSON forbids
+  non-finite literals.
 - Missing referenced actors, a trigger absent from `events`, unresolved
   relation targets, and transports that cannot know whether more events exist.
 - Empty or non-positive budgets, out-of-range margins, non-finite confidence
@@ -320,10 +323,12 @@ participant outcomes and binding failures.
 - **SC-004**: Schema deletion or an incompatible interface edit causes a
   deterministic contract test failure before slices 020, 030, or 040 can
   integrate.
-- **SC-005**: The owner handoff names all five interface versions, exact schema
-  paths, validator versions and commands, scene-to-record manifest, receipt
-  stage ownership, evidence references, and known limitations with no unresolved
-  ownership ambiguity.
+- **SC-005**: The owner handoff names the exact commit, all five interface
+  versions and exact schema paths, validator versions/commands and results,
+  scene-to-record manifest, receipt stage ownership, rejected-case inventory,
+  migration/provenance notes, documentation dispositions/validation/reviewer,
+  evidence references, and known limitations with no unresolved ownership
+  ambiguity.
 - **SC-006**: A repository-boundary check finds zero product schemas, tests,
   fixtures, evaluation assets, evidence, or product documentation under this
   SpecKit directory.
@@ -354,7 +359,9 @@ participant outcomes and binding failures.
   `docs/architecture/v2-selected-design.md` to accepting
   `v2-integrator` for the atomic current-state update.
 - **Handoff evidence**: `evidence/v2/contract/handoff.md` records both
-  dispositions, exact reviewed paths, validation, reviewer, and accepted delta.
+  dispositions, exact reviewed paths, validation, reviewer, and accepted delta
+  (documentation/packet inputs — a different file from the lifecycle attempt
+  stream `slice-handoff.md` declared above).
 
 ## Explicit Exclusions
 
