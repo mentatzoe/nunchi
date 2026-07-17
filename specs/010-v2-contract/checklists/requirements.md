@@ -41,3 +41,59 @@ measurable, and bounded before slice activation is accepted
 - All items are checked because the specification presently satisfies these
   requirement-quality tests. They do not claim that any V2 schema or product
   behavior has been implemented.
+
+## Formal Reviewer Gate (appended 2026-07-17)
+
+**Purpose**: Requirement-quality gate for the formal reviewer covering scope,
+parity, interface, evidence, documentation freshness, and control-plane
+boundary requirements. These items test what the slice artifacts say — their
+completeness, clarity, consistency, and measurability — not whether any
+implementation works. They are appended unchecked for the reviewer's pass and
+do not alter the checked baseline above.
+
+### Scope Requirement Quality
+
+- [ ] CHK018 Is the split between this planning baseline's outputs (control-plane artifacts only) and authorized-implementation outputs (schemas, tests, evals, evidence, product docs) stated identically in spec, plan, and tasks, with no artifact class assigned to both sides? [Consistency, Spec §Control-Plane Boundary; Plan §Summary; Tasks §Notes]
+- [ ] CHK019 Is every item in the exclusions list traceable to a named later owner or decision (slices 020/030/040 ownership, release/promotion decisions), so a reviewer can distinguish "excluded and owned elsewhere" from "unplanned anywhere"? [Traceability, Spec §Explicit Exclusions]
+- [ ] CHK020 Are the downstream start conditions quantified the same way everywhere — 020/030 only after each consumer separately accepts the T019-derived packet, 040 additionally after the 020/030 handoffs — with no looser wording in the plan than in the task graph? [Consistency, Plan §Integration Strategy; Tasks §Dependencies & Execution Order]
+- [ ] CHK021 Is the procedure a dependent slice must follow to request a contract change specified beyond "explicit return handoff and re-analysis" — or is the required content of that return handoff unspecified? [Gap, Plan §Integration Strategy; Spec §Explicit Exclusions]
+
+### Parity Requirement Quality
+
+- [ ] CHK022 Is dual-validator parity defined measurably — one corpus, each case loaded once, identical expected results through both the Draft 2020-12 oracle and the stdlib runtime adapter — with the baseline skip-accounting rule (explicit counted skips, no silent skips, loud failure only under the pinned offline command) stated consistently across spec, plan, and T001? [Measurability, Spec §FR-012; Plan §Contract validation commands; Tasks T001]
+- [ ] CHK023 Do the requirements pin how downstream runtime owners inherit the conformance corpus — which corpus revision, verified before each owner's own handoff, recorded where — or is cross-slice corpus versioning unaddressed? [Gap, Plan §Contract validation commands; Tasks §Dependencies & Execution Order]
+- [ ] CHK024 Is SC-002's "byte-for-byte at the semantic field level" internally coherent and objectively testable — do the requirements define what preservation means under JSON re-serialization (key order, whitespace, unicode escapes)? [Ambiguity, Spec §SC-002]
+- [ ] CHK025 Do the requirements keep parity-claim boundaries explicit — a green contract suite proves mechanics only, and the classifier-DEFER/margin-DEFER transition remains independently evidence-gated rather than a schema-compatibility fact? [Clarity, Tasks §Notes; Plan §Technical Context]
+- [ ] CHK026 Can the final integrator reject an interface mismatch deterministically from the written criteria alone — exact `@1` versions, exact `schemas/v2/` paths, and SC-004's deterministic failure on deletion or incompatible edit? [Measurability, Spec §SC-004; Plan §Produces]
+
+### Interface Requirement Quality
+
+- [ ] CHK027 Does each of I-010A through I-010E appear with the same name, version, schema path, and owning task across the spec interface summary, plan produces list, and tasks T006/T009/T012–T014, with none missing or renamed? [Traceability, Spec §Interface Summary; Plan §Produces; Tasks T006–T014]
+- [ ] CHK028 Are breaking-edit rules for the `@1` versions complete — explicit owner handoff plus dependent re-analysis — and consistent with sole-owner editing of `schemas/v2/**` until handoff acceptance? [Consistency, Spec §Assumptions; Plan §Integration Strategy]
+- [ ] CHK029 Is the classifier projection's permitted content written as a closed enumeration (coverage and expansion capability booleans only), so any additional field is decidably a host-secret leak rather than arguably allowed? [Clarity, Spec §FR-004, §FR-009]
+- [ ] CHK030 Is the FR-013 cross-slice reference to the attention engine's advice contract (030 FR-005) exact enough — slice, requirement ID, and rule content restated locally — for a reviewer to detect drift between the two artifacts? [Traceability, Spec §FR-013]
+- [ ] CHK031 Is the decision union closed and mutually exclusive in writing — only `ok`/`bypass`/`error` statuses, branch-specific field sets that cannot co-occur, and bypass explicitly not a successful disposition pairing? [Completeness, Spec §FR-005–FR-006]
+- [ ] CHK032 Are receipt-stage writer obligations specified per stage — append only one's own stage, never mutate prior or fill future stages — together with explicit unknown/unavailable values, so a violating record is identifiable from the requirement text alone? [Completeness, Spec §FR-010]
+
+### Evidence Requirement Quality
+
+- [ ] CHK033 Does every scene row name a concrete ordinary evidence target and required observation, and does every scene ID cited by tasks T002–T018 (S01–S03, S05–S09, S15, S16, 010-Preattention-bypass, 010-V1) appear in the plan's scene table exactly once? [Traceability, Plan §Acceptance Scenes and Evidence; Tasks T002–T018]
+- [ ] CHK034 Are the mandatory aggregate-record fields (`scene_id`, stable `case_id`, validator identity, expected result, observed result) and the README manifest's coverage of all twelve scene rows stated measurably? [Measurability, Plan §Acceptance Scenes and Evidence; Tasks T018]
+- [ ] CHK035 Do spec SC-005, the plan owner-handoff section, and task T019 enumerate the same handoff-packet contents — or do items such as the rejected-case inventory, migration/provenance notes, and documentation dispositions appear in some lists but not others? [Conflict, Spec §SC-005; Plan §Owner Handoff; Tasks T019]
+- [ ] CHK036 Are lifecycle evidence artifacts (activation, candidate, handoff, acceptance) and contract-run evidence (JSONL results, README manifest) kept distinct, each with an exact ordinary path and writer, and none under a SpecKit-managed path? [Consistency, Spec §Control-Plane Boundary; Plan §Project Structure]
+- [ ] CHK037 Is the evidence-sufficiency rule explicit that a table entry or checked task box is not evidence — ordinary handoff evidence must record reviewed paths, rationale, commands, and results? [Clarity, Plan §Documentation Impact and Freshness; Constitution §VI]
+
+### Documentation Freshness Requirement Quality
+
+- [ ] CHK038 Does every documentation-impact row carry exactly one disposition with an owning task, and either validation steps (`UPDATE`), a concrete rationale (`NO_IMPACT`), or an exact claim delta plus accepting owner (`HANDOFF`), with no directory wildcards or generic rows? [Completeness, Plan §Documentation Impact and Freshness]
+- [ ] CHK039 Are the `NO_IMPACT` rationales written so they can be re-verified against the exact candidate diff, with the re-verification obligation and its recording location (`evidence/v2/contract/handoff.md`) stated? [Measurability, Plan §Documentation Impact and Freshness]
+- [ ] CHK040 Is the `UPDATE`/`HANDOFF` split consistent with ownership — `UPDATE` only for the slice-owned `docs/contracts/nunchi-v2.md`, `HANDOFF` with accepting owner `v2-integrator` for integrator-owned current-state wording including `README.md`, and no `HANDOFF` for a slice-owned document? [Consistency, Plan §Documentation Impact and Freshness]
+- [ ] CHK041 Is the documentation freshness surface bounded in writing — `docs/archive/` excluded as dated history — so a reviewer can classify an unlisted document as either a matrix gap or legitimately out of scope? [Coverage, Plan §Documentation Impact and Freshness]
+- [ ] CHK042 Do the spec documentation-freshness section and the plan matrix agree on the affected-file inventory — every spec-named `HANDOFF`/`UPDATE` surface has exactly one matching plan row, and plan-only `NO_IMPACT` rows remain consistent with the spec's affected-docs claim? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+
+### Control-Plane Boundary Requirement Quality
+
+- [ ] CHK043 Is the slice-directory inventory a written closed allowlist (spec.md, plan.md, tasks.md, checklists/requirements.md, "no other file or directory"), with the enforcing boundary check named by its exact flagless command in T018? [Measurability, Plan §Project Structure; Spec §SC-006; Tasks T018]
+- [ ] CHK044 Are the constitutionally disabled SpecKit outputs (`data-model.md`, `contracts/`, `quickstart.md`) absent from every planned output list, with interface detail explicitly labeled a planning summary rather than an embedded product contract? [Consistency, Plan §Slice Interfaces; Constitution §VII]
+- [ ] CHK045 Do the requirements keep governance lifecycle state (`PLANNED` through `ACCEPTED`) out of runtime, classifier, receipt, and social state — no contract field, fixture, or evidence record is required to carry slice-lifecycle facts? [Coverage, Spec §Control-Plane Boundary; Constitution §Program and Slice Lifecycle Gates]
+- [ ] CHK046 Is the dev/test-only `jsonschema==4.26.0` constraint stated consistently at every dependency claim — spec assumptions, plan technical context, tasks notes, and the `docs/INSTALL.md` `NO_IMPACT` rationale — with no wording that permits it as a runtime or install dependency? [Consistency, Spec §Assumptions; Plan §Technical Context; Tasks §Notes]
