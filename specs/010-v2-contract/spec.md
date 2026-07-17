@@ -80,6 +80,30 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   named downstream owners and `v2-integrator`. Dependent owners do not edit these
   contracts silently.
 
+## Clarifications
+
+### Session 2026-07-17
+
+- Q: Does `I-010B` require the legacy verdict confidence vector on every
+  `status: ok` decision, or conditionally? → A: Per the selected design
+  (`c834e8c`), the vector is optional on the ok branch and required exactly
+  when the classifier disposition is `SUPPRESS` while the routing audit
+  reports the margin `active`; this supersedes the earlier every-ok-decision
+  requirement rejected in
+  `evidence/v2/contract/review-2026-07-17-v2-integrator.md` (R2).
+- Q: What must the `status: ok` routing audit contain? → A: The selected
+  design's closed audit set — the applied valve (`none`, `classifier-defer`,
+  `margin-defer`, or `policy-defer`), the override cause (`none`, `margin`,
+  `suppression-disabled`, or `recoverability-unproven`), the margin status
+  (`active` or `retired`), the effective margin when one applied, and the
+  trusted margin source when present — plus `reasons` retained as ok-branch
+  audit material that never enters the participant turn (R2).
+- Q: Where is the receipt stage-to-writer binding enforced? → A: In the
+  public per-record contract: each stage names its single directly observing
+  owner as writer, a cross-owner record is invalid as a single document in
+  both validators (schema-expressible), and the runtime stream-level
+  ordering/immutability checks remain in addition (R3).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Exchange a Truthful Attention Request (Priority: P1)
@@ -188,6 +212,9 @@ participant outcomes and binding failures.
 - Empty or non-positive budgets, out-of-range margins, non-finite confidence
   values, extra legacy confidence keys, expired continuation handles, and cursor
   reuse across bindings.
+- Invalid (FR-007): a candidate `SUPPRESS` whose routing audit reports the
+  margin `active` but that carries no legacy confidence vector. Valid: a
+  `WAKE` or `DEFER` decision without the optional vector.
 - Invalid (FR-013/FR-011): advice on `DEFER` or `SUPPRESS`, advice citing
   nonexistent events, and any reply-bearing or social-ledger field in a public
   contract.
@@ -197,7 +224,9 @@ participant outcomes and binding failures.
 - A continuation handle, binding, cursor, or opaque host secret appearing in the
   classifier projection even though expansion capability booleans may appear.
 - A receipt writer mutating an earlier stage, filling a later owner's stage, or
-  replacing unknown/unavailable with an invented outcome.
+  replacing unknown/unavailable with an invented outcome; a single receipt
+  record attributing its stage to another stage's owner is invalid on its own
+  (FR-010), not merely at stream level.
 - Session-only continuity and unknown event visibility must remain explicit;
   neither is upgraded to restart-safe or unavailable by inference.
 
@@ -227,20 +256,32 @@ participant outcomes and binding failures.
 - **FR-005**: The slice MUST define `I-010B AttentionDecisionV2@1` as a tagged
   host-facing union with `status: ok`, `status: bypass`, and `status: error`.
   The ok branch contains classifier/effective dispositions, `WAKE`-only grounded advice (FR-013),
-  evidence IDs, classifier audit, and routing audit; the bypass branch contains
-  exactly cause `preattention-disabled` with no classifier or effective
-  disposition; the error branch remains operational and separate.
+  reasons retained as audit material that never enters the participant turn,
+  evidence IDs, classifier audit, optional legacy verdict confidence evidence
+  (FR-007), and a closed routing audit recording the applied valve (`none`,
+  `classifier-defer`, `margin-defer`, or `policy-defer`), the override cause
+  (`none`, `margin`, `suppression-disabled`, or `recoverability-unproven`),
+  the margin status (`active` or `retired`), the effective margin when one
+  applied, and the trusted margin source when present. The bypass branch
+  contains exactly cause `preattention-disabled` with no classifier or
+  effective disposition, classifier audit, reasons, evidence, legacy
+  confidence vector, routing audit, or advice; the error branch remains
+  operational and separate.
 - **FR-006**: Allowed successful disposition transitions MUST be limited to
   `SUPPRESS→SUPPRESS`, `SUPPRESS→DEFER`, `WAKE→WAKE`, and `DEFER→DEFER`; every
   other `status: ok` pairing MUST take the operational-error path. Bypass is not
   a successful disposition pairing and MUST NOT fabricate a model judgment.
-- **FR-007**: Legacy verdict confidence evidence is required on every
-  `status: ok` decision at `@1` (the evidence-field requirement is permanent
-  for the major version — margin retirement itself stays independently
-  evidence-gated per Constitution V — and removing the field is a breaking
-  `@2` edit) and MUST
-  contain exactly `PASS`, `ACK`, `ASK`, and `SPEAK` with finite values in
-  `[0,1]`; malformed evidence MUST NOT support suppression.
+- **FR-007**: Legacy verdict confidence evidence is optional on a
+  `status: ok` decision and MUST be required exactly when the classifier
+  disposition is `SUPPRESS` while the routing audit reports the margin
+  `active`; a candidate suppression without that valid vector MUST NOT
+  validate. When present the vector MUST contain exactly `PASS`, `ACK`,
+  `ASK`, and `SPEAK` with finite values in `[0,1]`; malformed evidence MUST
+  take the operational-error path and MUST NOT support suppression. The
+  optional field, its exact four-key shape, and this conditional requirement
+  are fixed for the `@1` major version: margin retirement flips only the
+  reported margin status under later evidence per Constitution V and is not a
+  schema edit, while removing or reshaping the field is a breaking `@2` edit.
 - **FR-008**: The slice MUST define `I-010C ParticipantWakeV2@1` so facts,
   coverage, continuation, attention source, and optional advice remain
   separate, and no intermediate admission answer or composed reply is part of
@@ -262,7 +303,11 @@ participant outcomes and binding failures.
   receipt — for example one awaiting its transport stage, or an S07 silence
   outcome ending at participant-host — is valid-in-progress. Each owner
   appends only its own stage and MUST NOT mutate prior records or fill future
-  stages. Unknown and
+  stages. The stage-to-writer binding is part of the public per-record
+  contract: each stage names its single directly observing owner as writer,
+  and a record attributing one stage to another stage's owner is invalid as a
+  single document in both validators, independent of the runtime stream-level
+  ordering and immutability checks. Unknown and
   unavailable remain explicit. The attention-stage record keeps classifier
   outcome, effective routing, policy provenance, and operational error separate;
   bypass records `classifier_not_invoked` and its trusted bypass provenance.
