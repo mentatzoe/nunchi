@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Contract
 
-**Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17; post-rejection R1/R2/R3 alignment to the clarified spec, same day) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/010-v2-contract/spec.md`
 
@@ -68,7 +68,9 @@ planning baseline creates no product behavior.
 
 **Testing**: stdlib `unittest`, one deterministic conformance corpus run through
 both `jsonschema==4.26.0` and the explicit stdlib runtime validator, and
-repository governance checks
+repository governance checks; the full offline baseline `python3 -m unittest`
+must pass from the exact candidate commit and from the exact handoff packet
+commit (the R1 rejection basis)
 
 **Target Platform**: All in-tree core, CLI, adapter, and harness consumers
 
@@ -80,11 +82,24 @@ complete offline in well under a minute); fixture suites remain deterministic an
 
 **Constraints**: Atomic V2 replacement; no V1 bridge; exact self binding; no
 social ledger or reply prose; transition margin remains independently gated;
-opaque continuation authority never reaches the classifier; receipt stages are
-immutable and singly written
+the legacy verdict confidence vector is optional on `status: ok` and required
+exactly for a margin-active candidate `SUPPRESS` (FR-007); opaque continuation
+authority never reaches the classifier; receipt stages are immutable and singly
+written, with the stage-to-writer binding part of the public per-record
+contract (FR-010)
 
 **Scale/Scope**: Five canonical interfaces consumed by ten downstream slices,
 culminating in one final parity integration
+
+This refresh follows the first candidate's rejection recorded at
+`evidence/v2/contract/review-2026-07-17-v2-integrator.md` and the spec's
+2026-07-17 clarification session. It aligns the I-010B and I-010E planning
+summaries with the conditional FR-007 legacy-vector rule and closed FR-005
+routing-audit set (R2) and the schema-expressible FR-010 per-record
+stage-to-writer binding (R3), and names the exact R1 governance-fixture repair
+target so the full offline baseline is green from the next handoff packet
+commit. Rework lands only through the new bound delivery run; the rejected
+attempt stream is preserved unchanged.
 
 ## Constitution Check
 
@@ -104,7 +119,10 @@ Post-design re-check: PASS. Interface summaries remain planning prose; no
 `data-model.md`, `contracts/`, `quickstart.md`, schema, fixture, test, evidence,
 or product documentation is created here. The documentation-impact matrix names
 each reviewed ordinary document individually with a per-file disposition and
-per-file validation or handoff delta.
+per-file validation or handoff delta. The 2026-07-17 post-rejection alignment
+restates — and defers to — the clarified spec: the conditional FR-007 vector,
+the closed FR-005 routing audit, and the schema-expressible FR-010
+stage-to-writer binding introduce no new gate exposure.
 
 ## Slice Interfaces
 
@@ -119,9 +137,18 @@ per-file validation or handoff delta.
   `schemas/v2/attention-request.schema.json`.
 - `I-010B AttentionDecisionV2@1` at
   `schemas/v2/attention-decision.schema.json`: `status: ok` carries one of the
-  four allowed classifier/effective pairs, `status: bypass` carries cause
-  `preattention-disabled` and no classifier/effective disposition, and
-  `status: error` remains operational.
+  four allowed classifier/effective pairs; `reasons` retained as ok-branch
+  audit material that never enters the participant turn; an optional legacy
+  verdict confidence vector that is required exactly when the classifier
+  disposition is `SUPPRESS` while the routing audit reports the margin
+  `active` (FR-007, superseding the rejected every-ok-decision requirement);
+  and a closed routing audit recording the applied valve (`none`,
+  `classifier-defer`, `margin-defer`, or `policy-defer`), the override cause
+  (`none`, `margin`, `suppression-disabled`, or `recoverability-unproven`),
+  the margin status (`active` or `retired`), the effective margin when one
+  applied, and the trusted margin source when present. `status: bypass`
+  carries cause `preattention-disabled` and no classifier/effective
+  disposition, and `status: error` remains operational.
 - `I-010C ParticipantWakeV2@1` at
   `schemas/v2/participant-wake.schema.json`, including non-social source
   `PREATTENTION_BYPASS` without advice.
@@ -132,8 +159,14 @@ per-file validation or handoff delta.
 - `I-010E AttentionReceiptV2@1` at
   `schemas/v2/attention-receipt.schema.json`, an immutable staged-record union
   for `observation`, `attention`, `participant-host`, and `transport`, correlated
-  by request ID. Each stage owner appends only its stage; bypass attention records
-  set `classifier_not_invoked` and carry trusted bypass provenance.
+  by request ID. Each stage owner appends only its stage, and the
+  stage-to-writer binding is part of the public per-record contract: each stage
+  names its single directly observing owner as writer, and a record attributing
+  one stage to another stage's owner is invalid as a single document in both
+  validators (FR-010, closing the rejected cross-owner attestation gap), in
+  addition to the runtime stream-level ordering and immutability checks. Bypass
+  attention records set `classifier_not_invoked` and carry trusted bypass
+  provenance.
 
 These target paths are outputs of authorized slice implementation. Interface
 details here are planning summaries only.
@@ -164,9 +197,54 @@ advice citations, trigger membership) are oracle-expected-valid, because each
 document is schema-valid in isolation, and the two behavioral/sequence classes
 (fetch-time binding/expiry state, receipt-stage sequence rules) are
 oracle-class-skipped, because there is no single document to validate — with
-per-class counts asserted. No other class-to-treatment mapping is permitted. The 010 handoff owns the schemas, corpus, oracle result, and adapter
+per-class counts asserted. No other class-to-treatment mapping is permitted.
+Per the clarified FR-010, a single receipt record attributing its stage to
+another stage's owner is a schema-expressible red case asserting identical
+rejection from both validators; the runtime-adapter-only receipt-stage
+sequence class covers the multi-record stream checks (canonical order, skipped
+stages, earlier-stage mutation, request-ID correlation, and stream-level
+writer ownership), where no single document exists to validate. The 010
+handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
 its own handoff.
+
+## Post-Rejection Planning Decisions (2026-07-17)
+
+Rejection source: `evidence/v2/contract/review-2026-07-17-v2-integrator.md`
+for candidate `81483ce017eb834c5ab533556fa64cd62a8cf2aa` at packet commit
+`9f08124b43ba5beb73c50b876bde51e7b8a1633d`. Each blocker resolves to one
+planning decision; the delivery tasks step appends the matching correction
+tasks without rewriting completed history.
+
+- **Decision (R2)**: I-010B makes the legacy verdict confidence vector
+  optional on `status: ok`, required exactly for a candidate `SUPPRESS` whose
+  routing audit reports the margin `active`, and closes the routing audit to
+  the selected five-fact set with `reasons` retained as ok-branch audit
+  material. **Rationale**: the selected design at `c834e8c` and the spec's
+  2026-07-17 clarification session define this shape; the rejected schema
+  required the vector on every ok decision and admitted only `route` and
+  `override_cause`. **Alternatives considered**: keeping the every-ok-decision
+  vector requirement — rejected by the integrator as unable to represent a
+  valid `WAKE` without a legacy vector or a routing audit with
+  `margin_status`.
+- **Decision (R3)**: the I-010E stage-to-writer binding is encoded in the
+  public per-record contract so a cross-owner record fails both the Draft
+  2020-12 oracle and the individual stdlib validator, while stream-level
+  ordering/immutability checks remain in addition. **Rationale**: the selected
+  contract requires each immutable stage to be singly attested by its directly
+  observing owner; owner enforcement that lived only in the stream validator
+  accepted forged individual records. **Alternatives considered**:
+  stream-only enforcement — rejected because a single forged document
+  validated in isolation.
+- **Decision (R1)**: repair the
+  `tests/test_governance.py` activation-path fixture so it constructs its
+  synthetic planning baseline independently of the repository's live slice
+  state, then require the full offline baseline green from the exact handoff
+  packet commit, not only the candidate commit. **Rationale**: the rejected
+  packet commit failed `python3 -m unittest` because the fixture replaced only
+  `PLANNED` declarations and inherited the live `HANDOFF_READY` records.
+  **Alternatives considered**: rerunning the baseline only at the candidate
+  commit — rejected; the handoff gate covers the packet commit itself.
 
 ## Integration Strategy
 
@@ -196,7 +274,7 @@ failing case, and known impact on other consumers — followed by re-analysis.
 | S01 Exact self and alias collision | Contract fixtures | Alias collision never establishes authorship; exact actor binding remains decisive. | `evidence/v2/contract/attention-request.jsonl` |
 | S02 Native relations | Contract fixtures | Actor-targeted mentions and `mentions_room` remain distinct; native order and other literal relations survive. | `evidence/v2/contract/attention-request.jsonl` |
 | S03 Bounded context and tail | Request/continuation fixtures | Trigger, coverage, already-observed tail, host-only continuation, and classifier-safe expansion flags are representable without an eager history dump. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
-| S05 Governed suppression | Decision fixtures | Suppression legitimacy and policy widening are explicit; missing legitimacy cannot validate a hard stop. | `evidence/v2/contract/attention-decision.jsonl` |
+| S05 Governed suppression | Decision fixtures | Suppression legitimacy follows the conditional FR-007 rule: a margin-active candidate `SUPPRESS` validates only with the valid legacy vector, a `WAKE` or `DEFER` without the optional vector stays valid, and policy widening remains explicit. | `evidence/v2/contract/attention-decision.jsonl` |
 | S08 Dual DEFER valves | Decision fixtures | Classifier-DEFER and margin-DEFER remain distinct and separately auditable. | `evidence/v2/contract/attention-decision.jsonl` |
 | S09 Operational error | Decision fixtures | Invalid transitions and malformed evidence validate only as tagged error. | `evidence/v2/contract/attention-decision.jsonl` |
 | S06 WAKE/bypass contribution | Wake/receipt fixtures | WAKE and `PREATTENTION_BYPASS` wake packets validate with distinct attention sources (no advice on bypass), and a participant-host stage can record a direct contribution act tied to the same request ID. | `evidence/v2/contract/downstream.jsonl` |
@@ -293,6 +371,7 @@ documentation remain separately addressable ordinary artifacts.
 | Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/attention-request/`, `evals/v2/contract/attention-decision/`, `evals/v2/contract/downstream/` (each: `cases.jsonl` + per-class `expected-counts.json`) | US1–US3 |
 | Evidence | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl`, `evidence/v2/contract/README.md`, `evidence/v2/contract/handoff.md`, plus the declared lifecycle records | Cross-cutting |
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
+| Governance-fixture repair (rejection R1) | `tests/test_governance.py` (synthetic activation baseline constructed independently of live slice state) | Cross-cutting |
 | Product implementation | none in this slice | Excluded |
 
 ## Documentation Impact and Freshness
@@ -300,7 +379,7 @@ documentation remain separately addressable ordinary artifacts.
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
 | Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording, plus the exact new dual-validator test command and dev/test-only `jsonschema==4.26.0` dependency wording, only in the atomic candidate. |
-| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, the FR-012 runtime-adapter-only semantic rules, links, and examples against both validators. |
+| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, the conditional FR-007 legacy-vector rule and closed routing-audit set, the per-record FR-010 stage-to-writer binding, the FR-012 runtime-adapter-only semantic rules, links, and examples against both validators. |
 | Release/change history | `CHANGELOG.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the breaking-change entry naming I-010A-E `@1`, the five exact `schemas/v2/*.schema.json` paths, supersession of the V1 `PASS/ACK/ASK/SPEAK` request/verdict contract with no translation bridge, and the pinned dual-validator command, only in the atomic candidate. |
 | Contract stability tiers | `docs/STABILITY.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace the V1 contract stability rows with the five `@1` interface versions and their breaking-cutover status, keeping the classifier-DEFER/margin-DEFER transition described as independently evidence-gated, not schema compatibility. |
 | Integration lifecycle | `docs/integration.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 request/verdict flow wording with the request → decision (`ok`/`bypass`/`error`) → wake → continuation → receipt lifecycle, including the non-social `preattention-disabled` bypass and the tagged operational ERROR path. |
@@ -310,11 +389,11 @@ documentation remain separately addressable ordinary artifacts.
 | Operator installation | `docs/INSTALL.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: install flow and installed artifacts are unchanged; this slice adds schemas, tests, evals, evidence, and one new doc only, and `jsonschema==4.26.0` stays dev/test-only behind the pinned `uv run --offline --with` command, never entering runtime or install dependencies. |
 | Agent execution guidance | `AGENTS.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: its test and runtime claims remain true — `python3 -m unittest` stays the green stdlib offline baseline (oracle-dependent cases skip loudly with asserted counts), the runtime stays dependency-free, and its V2-program wording (V1 current until `CUTOVER_VERIFIED`) is unchanged by this additive slice; cutover-time current-state wording is owned by the atomic candidate, not this slice. |
 | Claude execution guidance | `CLAUDE.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: its "standard-library runtime core" and `python3 -m unittest` claims remain accurate because `jsonschema==4.26.0` is dev/test-only behind the pinned offline command and never enters runtime dependencies; grounding sequence, governance commands, and workflow bindings are untouched by this slice. |
-| Verdict-suite data model | `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 verdict-suite data model remains current truth; I-010B embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` confidence-vector shape as transition evidence (FR-007) without changing any verdict-suite artifact or claim. |
+| Verdict-suite data model | `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 verdict-suite data model remains current truth; I-010B embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK` confidence-vector shape as optional, conditionally required transition evidence (FR-007) without changing any verdict-suite artifact or claim. |
 | Verdict-suite requirements | `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the verdict-suite data-model row; no verdict-suite requirement changes in this slice. |
 | Verdict-suite evaluation | `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 corpus and its claims are untouched; this slice adds `evals/v2/contract/` beside it without changing verdict-suite behavior. |
 | Verdict-suite runner | `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the runner, its commands, and its outputs are untouched by this slice. |
-| Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the candidate diff contains no change under `docs/governance/`, no change to `scripts/check_governance.py` or its checks, and no change to any documented governance command or gate; the doc's claims stay verifiably true against the diff. |
+| Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the candidate diff contains no change under `docs/governance/`, no change to `scripts/check_governance.py` or its checks, and no change to any documented governance command or gate; the rejection-R1 repair touches only the `tests/test_governance.py` fixture's synthetic baseline construction, which this doc does not document, so its claims stay verifiably true against the diff. |
 | Hermes core patch | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 Hermes integration doc remains current; its V2 migration delta is owned by the harness/adapter slices that change that surface, not by the contract slice. |
 | Hermes patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the Hermes core patch row; no Hermes surface changes in this slice. |
 
