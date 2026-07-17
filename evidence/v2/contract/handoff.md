@@ -291,3 +291,221 @@ shapes; 7 `HANDOFF` deltas re-routed to accepting owner `v2-integrator`;
 10 `NO_IMPACT` rationales re-verified CONFIRMED against the attempt-2
 diff, with the baseline-health rows sequenced after the R1 repair. No row
 is unresolved.
+
+## Proposed handoff packet input — attempt 2 (T034)
+
+Appended after the attempt-2 documentation section, in the same
+documentation-then-packet order as T017→T019, without rewriting any
+earlier section. T019's enumeration remains authoritative for the SC-005
+packet inventory; the later convergence, documentation-freshness, and
+handoff gates — not the T034 checkbox — establish lifecycle state.
+
+**Prepared by**: cc-session-1 (assigned `v2-contract-owner`), 2026-07-17,
+in the implement step of bound run `speckit-010-20260717T163451669036Z`.
+
+### The two defined commits (CHK090)
+
+Per spec SC-005, the packet distinguishes two terms, each independently
+carrying the green full-offline-baseline (`python3 -m unittest`)
+obligation:
+
+- **Candidate commit**:
+  `2ab95be81e193d01b91ff078decfc586cf4bf357` on branch `v2/contract`
+  (worktree `.worktrees/v2-contract/`) — the exact rework-complete code
+  tree: all five schemas at their clarified shapes, the contract test
+  suite, the three corpora with authoritative per-class counts, the
+  regenerated aggregate evidence and manifest, the completed
+  CHK077–CHK096 adjudication, and the slice-owned contract
+  documentation. The full offline baseline recorded in
+  `evidence/v2/contract/README.md` (1225 tests, OK, 11 skipped) is the
+  run this commit must — and does — reproduce.
+- **Handoff packet commit**: the exact commit at which this completed
+  packet evidence is delivered, pinned when the handoff gate appends the
+  attempt-2 `HANDOFF_READY` record to
+  `evidence/v2/contract/slice-handoff.md`. The full offline baseline is
+  rerun green from that exact commit at the handoff gate (the R1
+  rejection basis; this obligation is owed there, not discharged here).
+
+### Interface inventory (versions and exact paths)
+
+| Interface | Version | Exact path |
+|---|---|---|
+| `I-010A AttentionRequestV2` | `@1` | `schemas/v2/attention-request.schema.json` |
+| `I-010B AttentionDecisionV2` | `@1` | `schemas/v2/attention-decision.schema.json` |
+| `I-010C ParticipantWakeV2` | `@1` | `schemas/v2/participant-wake.schema.json` |
+| `I-010D ContextContinuationV2` | `@1` | `schemas/v2/context-continuation.schema.json` |
+| `I-010E AttentionReceiptV2` | `@1` | `schemas/v2/attention-receipt.schema.json` |
+
+Only `v2-contract-owner` edits `schemas/v2/**`; breaking edits land as
+`@2` through an explicit owner handoff plus dependent re-analysis. The
+`@1` shapes are the post-rejection clarified ones: I-010B carries the
+conditional FR-007 legacy vector and the closed valve-based routing
+audit; I-010E carries the per-record stage-to-writer binding.
+
+### Commands and results (2026-07-17, at the candidate commit's tree)
+
+| Command | Result |
+|---|---|
+| `uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 167 tests, OK, 0 skipped (the sole complete dual-validator run) |
+| `python3 -m unittest` (repository baseline, full suite) | 1225 tests, OK, 11 skipped (8 pre-existing V1 + 3 counted `baseline-oracle-absence`) |
+| `python3 scripts/check_governance.py` (boundary-only, SC-006) | `governance boundary: OK (SpecKit 0.12.11)` |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence` | 72 + 122 + 124 records, 0 mismatched |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence` | all records carry the five mandatory fields |
+
+### Dual-validator pin and post-rework results over the shared corpus
+
+The Draft 2020-12 oracle is dev/test-only `jsonschema==4.26.0` (any other
+version is treated as an absent oracle); the runtime side is the explicit
+stdlib adapter in `tests/v2/contract/schema_helpers.py`. Both validators
+consumed the identical decoded post-rework corpus (159 cases; 133
+schema-expressible with identical expected results from both validators —
+including the reclassified per-record cross-owner receipt case — and 26
+runtime-adapter-only across the six semantic/relational classes with the
+fixed per-class oracle treatment). Observed per-class partition counts
+and both separately named skip regimes (`oracle-class-skip`: 16 cases;
+`baseline-oracle-absence`: 143 oracle-side checks) are recorded in
+`evidence/v2/contract/README.md` and match every corpus's authoritative
+`expected-counts.json`.
+
+### Corpus revision and downstream adapter obligation
+
+The shared conformance corpus revision is the exact candidate commit
+above (`2ab95be81e193d01b91ff078decfc586cf4bf357`), covering
+`evals/v2/contract/attention-request/` (unchanged by the rework),
+`evals/v2/contract/attention-decision/` (reworked to the conditional
+FR-007 shape, 61 cases), and `evals/v2/contract/downstream/`
+(reclassified per R3, 62 cases) — each `cases.jsonl` plus
+`expected-counts.json`. **Obligation (unchanged)**: each downstream
+runtime owner must pass its own stdlib runtime-validation adapter over
+this identical corpus revision — including the six runtime-adapter-only
+semantic rule classes — before its own handoff.
+
+### Staged-receipt writer map (reworked per R3)
+
+| Stage | Sole appending owner |
+|---|---|
+| `observation` | `observation-provider` |
+| `attention` | `attention-engine` |
+| `participant-host` | `participant-host` |
+| `transport` | `transport` |
+
+This closed map is now part of the public per-record contract (spec
+FR-010): it is encoded in `schemas/v2/attention-receipt.schema.json` and
+the individual stdlib validator, so a record attributing one stage to
+another stage's owner is invalid as a single document in both validators.
+Stages remain immutable and append-only in canonical order; a
+prefix-partial receipt is valid-in-progress; the stream-level
+canonical-order, skipped-stage, earlier-stage-mutation,
+request-ID-correlation, and writer-ownership checks remain in the
+runtime-adapter-only receipt-stage sequence class in addition.
+
+### Scene-to-record evidence manifest (regenerated)
+
+`evidence/v2/contract/README.md` (regenerated by T031 as the
+current-attempt record) maps all twelve scene rows (S01, S02, S03, S05,
+S06, S07, S08, S09, S15, S16, 010-Preattention-bypass, 010-V1) to their
+JSONL files and record IDs, verified exhaustive and exact against the 159
+post-rework evidence cases, and names the unchanged-file disposition for
+`attention-request.jsonl` and the T030 reclassification deltas.
+
+### Rejected-case inventory (updated)
+
+109 of the 159 corpus cases are expected-invalid red cases, every one
+enumerated in its corpus `cases.jsonl` and present in the evidence files
+and manifest: attention-request 26 (23 schema-expressible; 1 each
+id-uniqueness, timestamp-order, trigger-membership), attention-decision
+45 (44 schema-expressible, including the conditional-FR-007 and
+routing-audit cross-field reds; 1 advice-citation), downstream 38 (28
+schema-expressible, including the reclassified per-record cross-owner
+receipt case DWN-S06-306; 1 id-uniqueness; 4 binding-expiry; 5
+receipt-sequence). They cover invalid identity, reference, order,
+coverage, budget, transition, routing-audit cross-field,
+conditional-confidence, bypass-contamination, host-secret leakage,
+binding/expiry, receipt-stage sequence, per-record cross-owner
+attestation, reply-field, social-ledger, and V1-envelope cases; 100%
+reject (SC-001, 0 mismatches).
+
+### Migration and provenance notes (CHK091)
+
+- This is the attempt-2 packet following the rejection of candidate
+  `81483ce017eb834c5ab533556fa64cd62a8cf2aa` at packet commit
+  `9f08124b43ba5beb73c50b876bde51e7b8a1633d`, recorded at
+  `evidence/v2/contract/review-2026-07-17-v2-integrator.md` and bound
+  into the appended `REJECTED` attempt in
+  `evidence/v2/contract/slice-handoff.md`. Its three blockers are
+  resolved in this candidate: **R1** — the governance activation fixture
+  now builds its synthetic baseline independently of live slice state,
+  with the named regression proof green (T026); **R2** — I-010B carries
+  the selected design's optional/conditional legacy vector and closed
+  routing audit, with corpus, dual-validator, documentation, and evidence
+  aligned (T027/T028/T031/T032); **R3** — the I-010E stage-to-writer
+  binding is encoded per record in the public schema and individual
+  stdlib validator, with the negative corpus case reclassified as
+  schema-expressible and stream-level checks preserved (T029/T030).
+- No V1 translation bridge exists or is permitted (FR-011): V1 envelopes,
+  reply-bearing fields, inferred-roster claims, and
+  handled/open/owed/permission state reject in every contract.
+- V1 remains the current product until the atomic V2 merge is verified on
+  `main`; these contracts create no V2 runtime behavior.
+- `legacy_confidence` embeds the legacy `PASS`/`ACK`/`ASK`/`SPEAK`
+  verdict vocabulary as transition evidence only; it is optional on
+  `status: ok` and required exactly for a margin-active candidate
+  `SUPPRESS` (FR-007 as clarified); the optional field, its exact shape,
+  and the conditional requirement are fixed for `@1`, and margin
+  retirement remains independently evidence-gated.
+- Provenance: implemented under program authority
+  `evidence/governance/v2-implementation-authorization.md` (all eleven
+  slices enumerated), activation
+  `evidence/v2/contract/slice-activation.md` (`READY` at `16cccb7`),
+  assignment `evidence/governance/assignments/cc-session-1-v2-contract-owner-2026-07-16.md`,
+  within bound runs `speckit-010-20260717T003300631902Z`
+  (analysis/readiness), `speckit-010-20260717T081350382670Z` (rejected
+  attempt-1 delivery), and `speckit-010-20260717T163451669036Z` (this
+  post-rejection delivery).
+- Runtime provenance: Python 3.11+ stdlib-only runtime;
+  `jsonschema==4.26.0` is dev/test-only behind the pinned offline command
+  and never enters runtime dependencies.
+
+### Documentation dispositions, validation, and reviewer
+
+Recorded in full as the attempt-2 documentation section above (T032): 1
+slice-owned `UPDATE` re-validated against the clarified shapes
+(`docs/contracts/nunchi-v2.md`), 7 `HANDOFF` deltas re-routed to
+accepting owner `v2-integrator`, 10 `NO_IMPACT` rationales re-verified
+CONFIRMED against the attempt-2 diff with the baseline-health rows
+sequenced after the R1 repair; reviewer cc-session-1.
+
+### Known limitations
+
+- A green contract suite proves contract mechanics, not social judgment
+  quality; social correctness claims require the downstream slices'
+  replay and live acceptance scenes.
+- The Draft 2020-12 oracle cannot express the six semantic/relational
+  rule classes; they bind only through each consumer's stdlib adapter, so
+  the downstream adapter obligation above is load-bearing, not advisory.
+- With the per-record stage-to-writer binding now schema-expressible, the
+  stream-level writer-ownership check in `validate_receipt_stream` is
+  reached only through its per-record validation of each stream record;
+  the stream-level check is retained as defense-in-depth and the
+  reclassified corpus keeps a red stream case (`DWN-S06-309`) covering it.
+- Strict JSON cannot carry non-finite literals: corpus red cases use the
+  reserved sentinel strings decoded once by the loader. An in-process
+  non-finite float constructed by a consumer never appears on the wire,
+  so runtime adapters must enforce the finite confidence and
+  effective-margin rules themselves (the schema's contradictory-bounds
+  clauses cover only decoded instances).
+- The pinned offline command requires `jsonschema==4.26.0` already
+  present in the operator's uv cache; `--offline` fails rather than
+  fetching; running it generates an untracked `uv.lock` at the repo root
+  (delete to restore a clean tree).
+- Schema `$id` values use the placeholder domain `nunchi.invalid` pending
+  any future canonical-host decision (identifiers only, never
+  dereferenced).
+- The umbrella parity scenes S04 and S10 through S14 are owned by other
+  slices (see the plan's scene-ownership note); this packet claims no
+  coverage of them.
+- The seven `HANDOFF` documentation deltas apply only in the atomic
+  candidate; until cutover the affected documents intentionally retain
+  their V1 current-state wording.
+- The handoff-packet-commit baseline rerun is owed at the handoff gate
+  and cannot be discharged by this packet input (CHK080/CHK090).
