@@ -421,14 +421,48 @@ def load_expected_counts(corpus: str) -> dict[str, dict[str, int]]:
     return counts
 
 
+def assert_corpus_inventory(evals_dir: Path = EVALS_DIR) -> None:
+    """Assert the closed on-disk corpus inventory (CHK067).
+
+    The set of subdirectories of ``evals/v2/contract/`` must equal exactly
+    the registered ``CORPUS_NAMES``, and each registered directory must hold
+    ``cases.jsonl`` and its authoritative ``expected-counts.json``. A wholly
+    missing or unregistered corpus directory therefore fails loudly here —
+    on every corpus load — rather than passing vacuously under per-directory
+    count assertions that iterate only over directories found.
+    """
+    if not evals_dir.is_dir():
+        raise CorpusError(f"corpus root {evals_dir} is not a directory")
+    observed = sorted(entry.name for entry in evals_dir.iterdir() if entry.is_dir())
+    registered = sorted(CORPUS_NAMES)
+    if observed != registered:
+        missing = sorted(set(registered) - set(observed))
+        unregistered = sorted(set(observed) - set(registered))
+        raise CorpusError(
+            "the on-disk corpus inventory must equal exactly the registered "
+            f"corpus set {registered}; missing: {missing or 'none'}, "
+            f"unregistered: {unregistered or 'none'}"
+        )
+    for name in registered:
+        for filename in ("cases.jsonl", "expected-counts.json"):
+            if not (evals_dir / name / filename).is_file():
+                raise CorpusError(
+                    f"registered corpus {name!r} is missing its required "
+                    f"{filename}; each corpus directory must hold cases.jsonl "
+                    "and its authoritative expected-counts.json"
+                )
+
+
 def load_corpus(corpus: str) -> list[CorpusCase]:
     """Load one corpus directory, decode sentinels once, and assert counts.
 
-    The per-class counts in ``expected-counts.json`` are authoritative and
+    The full on-disk inventory is asserted closed first (CHK067), then the
+    per-class counts in ``expected-counts.json`` are authoritative and
     must be updated in the same change as any corpus edit; a mismatch fails
     loudly here, naming the corpus, class, and both counts, so neither
     partition can silently shrink.
     """
+    assert_corpus_inventory()
     path = EVALS_DIR / corpus / "cases.jsonl"
     expected_counts = load_expected_counts(corpus)
     cases: list[CorpusCase] = []
@@ -1558,6 +1592,64 @@ EVIDENCE_FILES = {
     "downstream": "downstream.jsonl",
 }
 
+# The five mandatory aggregate-record fields (plan §Acceptance Scenes and
+# Evidence; CHK070): scene_id, stable case_id, validator identity, expected
+# result, and observed result. The writer refuses any record missing one.
+MANDATORY_EVIDENCE_FIELDS = ("scene_id", "case_id", "validator", "expected", "observed")
+
+
+class EvidenceError(AssertionError):
+    """An aggregate evidence record violates the mandatory-field shape."""
+
+
+def enforce_evidence_record(record: Any, context: str) -> None:
+    """Refuse any aggregate evidence record missing a mandatory field."""
+    if not isinstance(record, dict):
+        raise EvidenceError(f"{context}: evidence record must be an object")
+    missing = [
+        field
+        for field in MANDATORY_EVIDENCE_FIELDS
+        if not isinstance(record.get(field), str) or not record.get(field)
+    ]
+    if missing:
+        raise EvidenceError(
+            f"{context}: evidence record is missing mandatory field(s) "
+            f"{missing}; every aggregate JSONL record must carry all of "
+            f"{list(MANDATORY_EVIDENCE_FIELDS)}"
+        )
+
+
+def verify_evidence_file(path: Path) -> int:
+    """Enforce the mandatory shape on every record of one landed evidence
+    file, returning the number of records verified."""
+    count = 0
+    with path.open(encoding="utf-8") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+            record = json.loads(raw_line)
+            enforce_evidence_record(record, f"{path.name}:{line_number}")
+            count += 1
+    if count == 0:
+        raise EvidenceError(f"{path.name}: evidence file contains no records")
+    return count
+
+
+def verify_evidence() -> int:
+    """Re-verify every landed aggregate evidence file (T021)."""
+    status = 0
+    for filename in EVIDENCE_FILES.values():
+        path = EVIDENCE_DIR / filename
+        try:
+            count = verify_evidence_file(path)
+        except (OSError, ValueError, EvidenceError) as failure:
+            print(f"{filename}: FAIL — {failure}", file=sys.stderr)
+            status = 1
+        else:
+            print(f"{filename}: {count} records carry all mandatory fields")
+    return status
+
 
 def evidence_records(corpus: str, oracle_validators: dict[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -1606,6 +1698,8 @@ def write_evidence() -> int:
     failures = 0
     for corpus, filename in EVIDENCE_FILES.items():
         records = evidence_records(corpus, oracle_validators)
+        for record in records:
+            enforce_evidence_record(record, f"{filename} ({record.get('case_id')})")
         path = EVIDENCE_DIR / filename
         with path.open("w", encoding="utf-8") as handle:
             for record in records:
@@ -1623,6 +1717,41 @@ def write_evidence() -> int:
                 file=sys.stderr,
             )
     return 1 if failures else 0
+
+
+# ---------------------------------------------------------------------------
+# Control-plane read boundary (CHK076): the suite and corpus embed their own
+# copy of the FR-012 class vocabulary and never read a SpecKit-managed file
+# ---------------------------------------------------------------------------
+
+TESTS_DIR = REPO_ROOT / "tests" / "v2" / "contract"
+
+
+def scan_control_plane_references(
+    prefixes: tuple[str, ...],
+    roots: tuple[Path, ...] = (TESTS_DIR, EVALS_DIR),
+) -> list[str]:
+    """Scan the test and corpus trees for control-plane path references.
+
+    Returns ``path:line: content`` for every line under ``roots`` whose
+    text contains one of the forbidden ``prefixes``. The covering test owns
+    the prefix tuple; it builds each prefix by compile-time concatenation
+    so its own declaration is never a contiguous forbidden token.
+    """
+    hits: list[str] = []
+    for root in roots:
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or "__pycache__" in path.parts:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if any(prefix in line for prefix in prefixes):
+                    relative = path.relative_to(REPO_ROOT)
+                    hits.append(f"{relative}:{line_number}: {line.strip()}")
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -2029,9 +2158,17 @@ def main(argv: list[str] | None = None) -> int:
         help="run the corpus through both validators and write the aggregate "
         "JSONL evidence records under evidence/v2/contract/",
     )
+    parser.add_argument(
+        "--verify-evidence",
+        action="store_true",
+        help="re-verify every landed aggregate evidence file against the "
+        "mandatory five-field record shape (T021/CHK070)",
+    )
     args = parser.parse_args(argv)
     if args.write_evidence:
         return write_evidence()
+    if args.verify_evidence:
+        return verify_evidence()
     parser.print_help()
     return 0
 

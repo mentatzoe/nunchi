@@ -12,18 +12,25 @@ social-ledger rejection (S16, 010-V1). The corpus suite runs the
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from tests.v2.contract import schema_helpers as helpers
 from tests.v2.contract.schema_helpers import (
     ContractCorpusMixin,
+    CorpusError,
+    EvidenceError,
     NumberToken,
+    assert_corpus_inventory,
     assert_schema_verdict,
     check_id_uniqueness,
     check_timestamp_order,
     check_trigger_membership,
+    enforce_evidence_record,
     make_request,
     preservation_failure,
+    scan_control_plane_references,
     semantic_equal,
     token_parse,
     validate_attention_request,
@@ -296,6 +303,119 @@ class SentinelDecodeCases(unittest.TestCase):
         self.assertEqual(float("inf"), values[1])
         self.assertEqual(float("-inf"), values[2])
         self.assertEqual("text", values[3])
+
+
+class CorpusInventoryCases(unittest.TestCase):
+    """T020/CHK067: the on-disk corpus inventory is closed and asserted at
+    load time, so a wholly missing or unregistered corpus directory fails
+    loudly rather than passing vacuously."""
+
+    @staticmethod
+    def _stage_registered_corpora(root: Path) -> None:
+        for name in helpers.CORPUS_NAMES:
+            directory = root / name
+            directory.mkdir()
+            (directory / "cases.jsonl").write_text("", encoding="utf-8")
+            (directory / "expected-counts.json").write_text("{}", encoding="utf-8")
+
+    def test_real_inventory_is_exactly_the_registered_set(self):
+        assert_corpus_inventory()
+
+    def test_wholly_missing_corpus_directory_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._stage_registered_corpora(root)
+            downstream = root / "downstream"
+            for child in downstream.iterdir():
+                child.unlink()
+            downstream.rmdir()
+            with self.assertRaisesRegex(CorpusError, "missing: \\['downstream'\\]"):
+                assert_corpus_inventory(root)
+
+    def test_unregistered_corpus_directory_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._stage_registered_corpora(root)
+            (root / "orphan-corpus").mkdir()
+            with self.assertRaisesRegex(CorpusError, "unregistered: \\['orphan-corpus'\\]"):
+                assert_corpus_inventory(root)
+
+    def test_registered_corpus_missing_counts_file_fails_loudly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._stage_registered_corpora(root)
+            (root / "attention-decision" / "expected-counts.json").unlink()
+            with self.assertRaisesRegex(CorpusError, "expected-counts.json"):
+                assert_corpus_inventory(root)
+
+
+class EvidenceRecordShapeCases(unittest.TestCase):
+    """T021/CHK070: the shared evidence writer refuses any aggregate record
+    missing one of the five mandatory fields."""
+
+    COMPLETE = {
+        "scene_id": "S01",
+        "case_id": "REQ-S01-001",
+        "validator": helpers.ADAPTER_VALIDATOR_ID,
+        "expected": "valid",
+        "observed": "valid",
+    }
+
+    def test_complete_record_is_accepted(self):
+        enforce_evidence_record(dict(self.COMPLETE), "test")
+
+    def test_each_missing_mandatory_field_is_refused(self):
+        for field in helpers.MANDATORY_EVIDENCE_FIELDS:
+            with self.subTest(field=field):
+                record = dict(self.COMPLETE)
+                del record[field]
+                with self.assertRaisesRegex(EvidenceError, field):
+                    enforce_evidence_record(record, "test")
+
+    def test_empty_mandatory_field_is_refused(self):
+        record = dict(self.COMPLETE)
+        record["scene_id"] = ""
+        with self.assertRaises(EvidenceError):
+            enforce_evidence_record(record, "test")
+
+    def test_landed_evidence_files_carry_all_mandatory_fields(self):
+        for filename in helpers.EVIDENCE_FILES.values():
+            path = helpers.EVIDENCE_DIR / filename
+            if not path.is_file():
+                continue
+            with self.subTest(evidence=filename):
+                self.assertGreater(helpers.verify_evidence_file(path), 0)
+
+
+class ControlPlaneReadBoundaryCases(unittest.TestCase):
+    """T023/CHK076: no file under the test or corpus trees references a
+    SpecKit-managed control-plane path; the suite embeds its own copy of the
+    FR-012 class vocabulary and no build or test path reads a SpecKit file."""
+
+    # The forbidden prefixes are owned here, joined at compile time so this
+    # declaration is never itself a contiguous control-plane token (the
+    # repository governance scan and this suite's own scanner must flag real
+    # references, not this list): the slice-specification tree and the
+    # SpecKit configuration tree.
+    FORBIDDEN_PREFIXES = ("spec" "s/", ".spec" "ify/")
+
+    def test_no_test_or_corpus_file_reads_a_control_plane_path(self):
+        hits = scan_control_plane_references(self.FORBIDDEN_PREFIXES)
+        self.assertEqual(
+            [],
+            hits,
+            "tests/v2/contract/ and evals/v2/contract/ must not reference "
+            "SpecKit-managed control-plane paths",
+        )
+
+    def test_partition_vocabulary_is_embedded_not_read(self):
+        # The closed FR-012 vocabulary lives in the harness itself.
+        self.assertEqual(
+            ("schema-expressible", "id-uniqueness", "timestamp-order",
+             "advice-citation", "trigger-membership", "binding-expiry",
+             "receipt-sequence"),
+            helpers.ALL_CLASSES,
+        )
 
 
 if __name__ == "__main__":
