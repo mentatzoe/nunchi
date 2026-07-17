@@ -67,8 +67,8 @@ beginning the first checkbox.
 
 ## Phase 1: Contract Harness
 
-- [ ] T001 Create shared `Draft202012Validator` and stdlib-runtime corpus adapters pinned to dev/test-only `jsonschema==4.26.0` — the stdlib adapter always runs under the repo baseline; oracle absence yields explicit counted skips there and a loud failure only under the pinned dual-validator command — in `tests/v2/contract/schema_helpers.py`
-- [ ] T002 [P] Add red request cases for exact identity (S01), actor mentions versus `mentions_room` (S02), classifier-safe continuation projection and bounded tail (S03), non-positive budgets (S15), and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
+- [ ] T001 Create shared `Draft202012Validator` and stdlib-runtime corpus adapters — implementing the FR-012 expressiveness partition (dual-validator vs runtime-adapter-only case classes, per-class counts asserted) — pinned to dev/test-only `jsonschema==4.26.0` — the stdlib adapter always runs under the repo baseline; oracle absence yields explicit counted skips there and a loud failure only under the pinned dual-validator command — in `tests/v2/contract/schema_helpers.py`
+- [ ] T002 [P] Add red request cases for exact identity (S01), actor mentions versus `mentions_room` (S02), duplicate event IDs and timestamp-versus-order disagreement (runtime-adapter-only) with the valid identical-text-distinct-ID case, classifier-safe continuation projection and bounded tail (S03), non-positive budgets (S15), and V1-envelope/reply-bearing/social-ledger rejection (S16, 010-V1) in `tests/v2/contract/test_attention_request.py`
 - [ ] T003 [P] Add red ok/error/bypass decision cases — including forbidden classifier fields on `preattention-disabled` legacy-confidence-vector constraints (exactly the four `PASS`/`ACK`/`ASK`/`SPEAK` keys, finite values in [0,1], extra keys forbidden), and FR-013 advice red cases (advice on `DEFER`/`SUPPRESS`, advice citing nonexistent event IDs) — in `tests/v2/contract/test_attention_decision.py`
 - [ ] T004 [P] Add red wake-source cases including advice-free `PREATTENTION_BYPASS` (010-Preattention-bypass), FR-013 advice-source violations, and non-positive participant budgets (S15) in `tests/v2/contract/test_participant_wake.py`
 - [ ] T005 [P] Add red host-secret leakage, binding, immutable-stage, writer-ownership, and explicit unknown/unavailable cases in `tests/v2/contract/test_context_and_receipt.py`
@@ -83,7 +83,7 @@ the valid scene matrix and rejects every enumerated identity, order, reference,
 coverage, V1, and forbidden-field case.
 
 - [ ] T006 [US1] Define `I-010A AttentionRequestV2@1` with distinct actor mentions, `mentions_room`, and host-only continuation metadata in `schemas/v2/attention-request.schema.json`
-- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl`
+- [ ] T007 [P] [US1] Add request and classifier-projection conformance cases (S01, S02, S03) including duplicate-ID and timestamp-order relational red cases — proving opaque continuation fields never reach the classifier — plus V1-envelope and social-ledger red cases (S16, 010-V1), in `evals/v2/contract/attention-request/cases.jsonl`
 - [ ] T008 [US1] Record exact-self (S01), native-relation (S02), bounded-context/gap (S03), budget (S15), projection, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-request.jsonl`
 
 ## Phase 3: User Story 2 - Auditable Attention Decision (Priority: P1)
@@ -97,7 +97,7 @@ four ok pairs validate, malformed transition evidence cannot support
 suppression, and bypass validates only without a classifier/effective result.
 
 - [ ] T009 [US2] Define `I-010B AttentionDecisionV2@1` ok/error/bypass union with exact `preattention-disabled` constraints in `schemas/v2/attention-decision.schema.json`
-- [ ] T010 [P] [US2] Add transition (S09), governed-suppression (S05), dual-DEFER (S08), bypass (010-Preattention-bypass), malformed-output, FR-013 advice-rule, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl`
+- [ ] T010 [P] [US2] Add — partitioned per FR-012 — transition (S09), governed-suppression (S05), dual-DEFER (S08), bypass (010-Preattention-bypass), malformed-output, FR-013 advice-rule, and reply-bearing/social-ledger rejection cases (S16) for both validators in `evals/v2/contract/attention-decision/cases.jsonl`
 - [ ] T011 [US2] Record governed-suppression (S05), dual-DEFER (S08), transition/error (S09), bypass (010-Preattention-bypass), and S16 rejection results with mandatory `scene_id` in `evidence/v2/contract/attention-decision.jsonl`
 
 ## Phase 4: User Story 3 - Participant Wake, Continuation, and Receipt (Priority: P2)
@@ -114,7 +114,7 @@ records correlated by request ID.
 - [ ] T013 [P] [US3] Define host-only handle/binding/cursor semantics for `I-010D ContextContinuationV2@1` in `schemas/v2/context-continuation.schema.json`
 - [ ] T014 [P] [US3] Define immutable request-correlated observation/attention/participant-host/transport stage records and bypass provenance for `I-010E AttentionReceiptV2@1` in `schemas/v2/attention-receipt.schema.json`
 - [ ] T015 [P] [US3] Add bypass wake (S06 contribution), participant-silence (S07), host-only binding, immutable receipt-stage, unknown/unavailable, and V1-envelope/reply-field/social-ledger rejection cases in `evals/v2/contract/downstream/cases.jsonl`
-- [ ] T016 [US3] Record wake (S06), silence (S07), binding, staged-receipt, and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/downstream.jsonl`
+- [ ] T016 [US3] Record wake (S06), silence (S07), binding, staged-receipt, bypass-provenance (010-Preattention-bypass), and S16/010-V1 rejection results with mandatory `scene_id` in `evidence/v2/contract/downstream.jsonl`
 
 ## Phase 5: Documentation and Packet Inputs
 

@@ -231,10 +231,11 @@ participant outcomes and binding failures.
   `SUPPRESS→SUPPRESS`, `SUPPRESS→DEFER`, `WAKE→WAKE`, and `DEFER→DEFER`; every
   other `status: ok` pairing MUST take the operational-error path. Bypass is not
   a successful disposition pairing and MUST NOT fabricate a model judgment.
-- **FR-007**: While the protective transition margin is active, legacy verdict
-  confidence evidence MUST contain exactly `PASS`, `ACK`, `ASK`, and `SPEAK`
-  with finite values in `[0,1]`; malformed evidence MUST NOT support
-  suppression.
+- **FR-007**: Legacy verdict confidence evidence is required on every
+  `status: ok` decision at `@1` (the protective transition margin is active for
+  the whole major version; retirement is a breaking `@2` edit) and MUST
+  contain exactly `PASS`, `ACK`, `ASK`, and `SPEAK` with finite values in
+  `[0,1]`; malformed evidence MUST NOT support suppression.
 - **FR-008**: The slice MUST define `I-010C ParticipantWakeV2@1` so facts,
   coverage, continuation, attention source, and optional advice remain
   separate, and no intermediate admission answer or composed reply is part of
@@ -257,6 +258,19 @@ participant outcomes and binding failures.
 - **FR-011**: V2 contracts MUST reject V1 envelopes, reply-bearing fields,
   inferred-roster claims, and handled/open/owed/permission state; no V1
   translation bridge is permitted.
+- **FR-012**: Every contract MUST have deterministic ordinary-path tests,
+  acceptance scenes, evidence targets, version ownership, and a documented
+  handoff; no product artifact may live in this slice directory. JSON Schema
+  Draft 2020-12 is the portable test oracle through dev/test-only
+  `jsonschema==4.26.0`; runtime validation remains explicit Python-stdlib code,
+  and the same conformance corpus MUST exercise both validators. The corpus is
+  partitioned by expressiveness: schema-expressible cases carry identical
+  expected results for both validators; semantic and relational cases —
+  cross-item ID uniqueness, timestamp-versus-order agreement, cross-document
+  advice citations, trigger membership, fetch-time binding/expiry state, and
+  receipt-stage sequence rules — are runtime-adapter-only, with the oracle
+  either expecting valid or skipping by explicit class. Per-class case counts
+  MUST be asserted loudly so neither partition can silently shrink.
 - **FR-013**: Advice validity follows the attention engine's contract (030
   FR-005: `SUPPRESS` and `DEFER` carry no participant advice). On the `I-010B`
   ok branch, `advice` MUST be present only when the classifier disposition is
@@ -265,12 +279,6 @@ participant outcomes and binding failures.
   `I-010C`, `advice` MUST be present only when `source` is `WAKE`; `DEFER`,
   `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because no
   classifier advice exists for those sources.
-- **FR-012**: Every contract MUST have deterministic ordinary-path tests,
-  acceptance scenes, evidence targets, version ownership, and a documented
-  handoff; no product artifact may live in this slice directory. JSON Schema
-  Draft 2020-12 is the portable test oracle through dev/test-only
-  `jsonschema==4.26.0`; runtime validation remains explicit Python-stdlib code,
-  and the same conformance corpus MUST exercise both validators.
 
 ### Key Entities
 
@@ -296,9 +304,15 @@ participant outcomes and binding failures.
 - **SC-001**: One ordinary-path contract suite validates all five canonical
   interfaces and rejects 100% of enumerated invalid identity, reference,
   transition, bypass, confidence, host-secret leakage, binding, receipt-stage,
-  reply-field, and social-ledger cases through both validators.
+  reply-field, and social-ledger cases — schema-expressible cases through both
+  validators with identical expected results, semantic/relational cases through
+  the stdlib runtime adapter (FR-012 partition), with per-class counts
+  asserted.
 - **SC-002**: Every valid request fixture preserves the supplied event order and
-  exact actor/event references byte-for-byte at the semantic field level.
+  exact actor/event references at the semantic field level: parsed field
+  values compare equal as exact strings/numbers and event-array order is
+  preserved; raw-byte serialization (key order, whitespace, unicode escapes,
+  numeric formatting) is out of scope.
 - **SC-003**: Every `status: ok` decision fixture matches one of exactly four
   permitted classifier/effective pairs; every other ok pair validates only as
   operational error; and every bypass fixture has no classifier/effective

@@ -155,7 +155,11 @@ skipped only under that baseline, with an explicit skip count asserted so
 absence is loud, and the pinned command above remains the sole complete
 dual-validator run. No silent skips. The suite loads each case once and
 runs it through both the Draft 2020-12 oracle and the stdlib runtime-validation
-adapter. The 010 handoff owns the schemas, corpus, oracle result, and adapter
+adapter, honoring the FR-012 partition: schema-expressible cases assert
+identical results from both validators; semantic/relational cases (cross-item
+uniqueness, order agreement, cross-document citations, fetch-time state,
+stage sequences) assert through the runtime adapter with the oracle expecting
+valid or skipping by explicit class, and per-class counts asserted. The 010 handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
 its own handoff.
 
@@ -172,8 +176,10 @@ branch `v2/contract`
 `v2-integrator`
 
 **Conflict ownership**: only `v2-contract-owner` edits `schemas/v2/**` until
-the handoff is accepted. A dependent slice proposes
-contract changes through an explicit return handoff and re-analysis.
+the handoff is accepted. A dependent slice proposes contract changes through
+an explicit return handoff — naming the requesting slice and owner, the exact
+schema paths and `@` versions, the proposed delta, the motivating scene or
+failing case, and known impact on other consumers — followed by re-analysis.
 
 ## Acceptance Scenes and Evidence
 
@@ -189,8 +195,8 @@ contract changes through an explicit return handoff and re-analysis.
 | S07 Participant silence | Wake/receipt fixtures | An invoked participant that sends nothing is representable as a distinct staged outcome — separate from suppression and from non-invocation — with no handled/owed/obligation field validating anywhere. | `evidence/v2/contract/downstream.jsonl` |
 | S15 Context budget | Request/wake fixtures | Independent attention and participant event/byte budgets are explicit and positive. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 | S16 No registry or ledger | All five interfaces | Reply-bearing and handled/open/owed/permission fields fail validation. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
-| 010-Preattention bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
-| 010-V1 Breaking rejection | CLI/core-neutral fixtures | V1 envelopes are rejected with no translation bridge. | `evidence/v2/contract/attention-request.jsonl` |
+| 010-Preattention-bypass | Decision/wake/receipt fixtures | Bypass invokes no classifier, produces `PREATTENTION_BYPASS`, and appends provenance without fabricating a social result. | `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl` |
+| 010-V1 Breaking rejection | CLI/core-neutral fixtures | V1 envelopes are rejected with no translation bridge. | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/downstream.jsonl` |
 
 Reusable fixtures and their runner target `evals/v2/contract/`; deterministic
 tests target `tests/v2/contract/`. Every aggregate JSONL evidence record MUST
