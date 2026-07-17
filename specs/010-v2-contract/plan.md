@@ -245,6 +245,14 @@ tasks without rewriting completed history.
   `PLANNED` declarations and inherited the live `HANDOFF_READY` records.
   **Alternatives considered**: rerunning the baseline only at the candidate
   commit — rejected; the handoff gate covers the packet commit itself.
+  **Verifiable invariant, not a one-off description**: the fixture MUST
+  replace every live slice declaration and lifecycle record it stages — not
+  only `PLANNED` ones — so its synthetic baseline is independent of the
+  repository's live slice state, and the named regression proof
+  `tests.test_governance.GovernanceBoundaryTests.test_activation_fixture_is_independent_of_live_slice_state`
+  MUST keep that baseline green while live slice declarations read `ACTIVE`
+  or `HANDOFF_READY`; a partially decoupled fixture that passes only by
+  coincidence of the current live state fails this proof.
 
 ## Integration Strategy
 
@@ -266,6 +274,15 @@ the handoff is accepted. A dependent slice proposes contract changes through
 an explicit return handoff — naming the requesting slice and owner, the exact
 schema paths and `@` versions, the proposed delta, the motivating scene or
 failing case, and known impact on other consumers — followed by re-analysis.
+
+**Shared governance-infrastructure edit (rejection R1)**:
+`tests/test_governance.py` is repository governance infrastructure, not part
+of the `schemas/v2/**`/`tests/v2/contract/` surface the sole-owner conflict
+rule above covers. For this rework, `v2-contract-owner` performs that edit
+itself, as an in-scope ordinary rework output of this slice (spec
+§Control-Plane Boundary), and `v2-integrator` reviews the edit at handoff as
+part of the packet; no other lane edits that file during this slice, so the
+R1 fix cannot become an unowned cross-lane edit.
 
 ## Acceptance Scenes and Evidence
 
@@ -307,6 +324,22 @@ contain `scene_id`, stable `case_id`, validator identity, expected result, and
 observed result. `evidence/v2/contract/README.md` is the exact manifest mapping
 each S ID and slice-specific scene to its JSONL file and record IDs. Evidence
 records commands and results, not embedded product payloads in this plan.
+
+Attempt rework semantics for contract-run evidence (the lifecycle streams'
+append-only rule does not cover these files, so the rule is written here):
+after a rejection changes the corpus or schemas, the aggregate JSONL files
+(`attention-request.jsonl`, `attention-decision.jsonl`, `downstream.jsonl`)
+and the manifest `evidence/v2/contract/README.md` regenerate in place as
+current-attempt records; `evidence/v2/contract/handoff.md` and
+`evidence/v2/contract/checklist-adjudication.md` append one section per
+attempt and never rewrite an earlier attempt's sections; the lifecycle
+candidate/handoff attempt streams (`slice-candidate.md`, `slice-handoff.md`)
+append and never rewrite. A next packet therefore never cites attempt-one
+aggregate results as current: the regenerated files are the current
+attempt's records, an evidence file left unchanged by the rework is named
+with an explicit disposition in the manifest, and superseded attempt-one
+aggregate results remain recoverable from git history at the rejected
+candidate commit.
 
 ## Project Structure
 
@@ -371,7 +404,7 @@ documentation remain separately addressable ordinary artifacts.
 | Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/attention-request/`, `evals/v2/contract/attention-decision/`, `evals/v2/contract/downstream/` (each: `cases.jsonl` + per-class `expected-counts.json`) | US1–US3 |
 | Evidence | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl`, `evidence/v2/contract/README.md`, `evidence/v2/contract/handoff.md`, plus the declared lifecycle records | Cross-cutting |
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
-| Governance-fixture repair (rejection R1) | `tests/test_governance.py` (synthetic activation baseline constructed independently of live slice state) | Cross-cutting |
+| Governance-fixture repair (rejection R1) | `tests/test_governance.py` (synthetic activation baseline constructed independently of live slice state; invariant proven by the named live-state regression test in §Post-Rejection Planning Decisions, Decision R1) | Cross-cutting |
 | Product implementation | none in this slice | Excluded |
 
 ## Documentation Impact and Freshness

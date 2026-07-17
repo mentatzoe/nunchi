@@ -59,6 +59,12 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   tests under `tests/v2/contract/`, evaluation material under `evals/v2/`,
   evidence under `evidence/v2/contract/`, and product contract documentation
   under `docs/contracts/`.
+- The rejection-R1 repair to the governance activation-path fixture in
+  `tests/test_governance.py` is an in-scope ordinary rework output of this
+  slice: it is repository test infrastructure at an ordinary path, named with
+  its owning lane in plan §Ordinary Repository Targets and §Integration
+  Strategy, and a reviewer applying this scope statement alone must classify
+  that edit as in-scope for this slice's rework.
 - This planning baseline creates no schemas, tests, evaluation assets,
   evidence, product documentation, or V2 runtime behavior.
 - While the slice is `PLANNED`, every task remains `DORMANT` and the repository
@@ -97,7 +103,8 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   `suppression-disabled`, or `recoverability-unproven`), the margin status
   (`active` or `retired`), the effective margin when one applied, and the
   trusted margin source when present — plus `reasons` retained as ok-branch
-  audit material that never enters the participant turn (R2).
+  audit material that never enters the participant turn (a sibling ok-branch
+  field, never a member of the routing-audit object) (R2).
 - Q: Where is the receipt stage-to-writer binding enforced? → A: In the
   public per-record contract: each stage names its single directly observing
   owner as writer, a cross-owner record is invalid as a single document in
@@ -167,7 +174,8 @@ the portable schema and stdlib runtime validator.
 4. **Given** trusted policy with preattention disabled, **When** the host-facing
    decision is formed, **Then** `status: bypass` with cause
    `preattention-disabled` is valid only without classifier/effective
-   disposition, classifier audit, advice, reasons, or model evidence.
+   disposition, classifier audit, reasons, evidence, legacy confidence
+   vector, routing audit, or advice (the identical FR-005 exclusion set).
 
 ---
 
@@ -214,11 +222,15 @@ participant outcomes and binding failures.
   reuse across bindings.
 - Invalid (FR-007): a candidate `SUPPRESS` whose routing audit reports the
   margin `active` but that carries no legacy confidence vector. Valid: a
-  `WAKE` or `DEFER` decision without the optional vector.
+  `WAKE` or `DEFER` decision without the optional vector; equally valid: a
+  `WAKE`, `DEFER`, or margin-retired `SUPPRESS` decision carrying a
+  well-formed vector — presence never invalidates an ok decision.
 - Invalid (FR-013/FR-011): advice on `DEFER` or `SUPPRESS`, advice citing
   nonexistent events, and any reply-bearing or social-ledger field in a public
   contract.
-- A bypass carrying classifier/effective disposition or advice; a
+- A bypass carrying any member of the identical FR-005 exclusion set —
+  classifier/effective disposition, classifier audit, reasons, evidence,
+  legacy confidence vector, routing audit, or advice; a
   `PREATTENTION_BYPASS` wake without a matching trusted bypass decision; or an
   attention receipt that fails to mark `classifier_not_invoked`.
 - A continuation handle, binding, cursor, or opaque host secret appearing in the
@@ -262,20 +274,47 @@ participant outcomes and binding failures.
   `classifier-defer`, `margin-defer`, or `policy-defer`), the override cause
   (`none`, `margin`, `suppression-disabled`, or `recoverability-unproven`),
   the margin status (`active` or `retired`), the effective margin when one
-  applied, and the trusted margin source when present. The bypass branch
+  applied, and the trusted margin source when present. `reasons` is a
+  required sibling ok-branch field — an array of audit strings, possibly
+  empty — and never a member of the routing-audit object. The routing
+  audit's conditional facts are closed per combination, not only per field:
+  a margin counts as **applied** exactly when the applied valve is
+  `margin-defer`, and exactly then the effective margin (a finite number in
+  `(0, 1]`) MUST be present and is forbidden on every other valve; the
+  trusted margin source counts as **present** only on a margin-applied
+  decision whose margin width was supplied by a trusted source, so
+  `margin_source` MAY appear only when the valve is `margin-defer` (optional
+  there, because a margin may apply from local configuration without a
+  trusted source) and is forbidden on every other valve. Valve and override
+  cause pair exactly: valves `none` and `classifier-defer` require override
+  cause `none`; valve `margin-defer` requires override cause `margin` and
+  margin status `active` (a retired margin cannot apply); valve
+  `policy-defer` requires override cause `suppression-disabled` or
+  `recoverability-unproven`. The margin status is recorded on every ok
+  decision. The bypass branch
   contains exactly cause `preattention-disabled` with no classifier or
   effective disposition, classifier audit, reasons, evidence, legacy
   confidence vector, routing audit, or advice; the error branch remains
   operational and separate.
 - **FR-006**: Allowed successful disposition transitions MUST be limited to
   `SUPPRESS→SUPPRESS`, `SUPPRESS→DEFER`, `WAKE→WAKE`, and `DEFER→DEFER`; every
-  other `status: ok` pairing MUST take the operational-error path. Bypass is not
+  other `status: ok` pairing MUST take the operational-error path. The four
+  permitted pairs map onto the applied valve exactly: `WAKE→WAKE` and
+  `SUPPRESS→SUPPRESS` carry valve `none` (no widening valve applied; the
+  classifier disposition stands), `DEFER→DEFER` carries valve
+  `classifier-defer`, and `SUPPRESS→DEFER` carries valve `margin-defer` or
+  `policy-defer`. Valve `none` therefore never co-occurs with a widened
+  disposition: effective `DEFER` requires valve `classifier-defer`,
+  `margin-defer`, or `policy-defer`. Bypass is not
   a successful disposition pairing and MUST NOT fabricate a model judgment.
 - **FR-007**: Legacy verdict confidence evidence is optional on a
   `status: ok` decision and MUST be required exactly when the classifier
   disposition is `SUPPRESS` while the routing audit reports the margin
   `active`; a candidate suppression without that valid vector MUST NOT
-  validate. When present the vector MUST contain exactly `PASS`, `ACK`,
+  validate. The permissive side is symmetric and decidable: a well-formed
+  vector MAY accompany any `status: ok` decision — `WAKE`, `DEFER`, or a
+  margin-retired `SUPPRESS` — and its presence never invalidates the
+  decision. When present the vector MUST contain exactly `PASS`, `ACK`,
   `ASK`, and `SPEAK` with finite values in `[0,1]`; malformed evidence MUST
   take the operational-error path and MUST NOT support suppression. The
   optional field, its exact four-key shape, and this conditional requirement
@@ -304,10 +343,13 @@ participant outcomes and binding failures.
   outcome ending at participant-host — is valid-in-progress. Each owner
   appends only its own stage and MUST NOT mutate prior records or fill future
   stages. The stage-to-writer binding is part of the public per-record
-  contract: each stage names its single directly observing owner as writer,
-  and a record attributing one stage to another stage's owner is invalid as a
-  single document in both validators, independent of the runtime stream-level
-  ordering and immutability checks. Unknown and
+  contract, and its closed map is written here: the single directly
+  observing owner for each stage is `observation` → `observation-provider`,
+  `attention` → `attention-engine`, `participant-host` → `participant-host`,
+  and `transport` → `transport`; that four-entry writer vocabulary is
+  closed. A record attributing one stage to another stage's owner is
+  invalid as a single document in both validators, independent of the
+  runtime stream-level ordering and immutability checks. Unknown and
   unavailable remain explicit. The attention-stage record keeps classifier
   outcome, effective routing, policy provenance, and operational error separate;
   bypass records `classifier_not_invoked` and its trusted bypass provenance.
@@ -383,7 +425,12 @@ participant outcomes and binding failures.
 - **SC-004**: Schema deletion or an incompatible interface edit causes a
   deterministic contract test failure before slices 020, 030, or 040 can
   integrate.
-- **SC-005**: The owner handoff names the exact commit, all five interface
+- **SC-005**: The owner handoff distinguishes and names two commits as
+  distinct terms: the **candidate commit** — the exact code tree under
+  review — and the **handoff packet commit** — the exact tree containing
+  the completed packet evidence. The full offline baseline
+  `python3 -m unittest` MUST be green from each of the two commits
+  independently. The handoff further names all five interface
   versions and exact schema paths, validator versions/commands and results,
   scene-to-record manifest, receipt stage ownership, rejected-case inventory,
   migration/provenance notes, documentation dispositions/validation/reviewer,
