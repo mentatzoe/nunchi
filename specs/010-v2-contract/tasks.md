@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Execution status**: stated by reference, never as a fixed state claim —
 unchecked tasks execute only inside a bound `run speckit` run for this slice
@@ -400,6 +400,44 @@ four rejected candidate/handoff attempt streams — is preserved unchanged.
   section to `evidence/v2/contract/handoff.md`; and return the header
   **Slice state** to `ACTIVE` on this same commit.
 
+## Phase 12: Attempt-5 Rejection Rework (R11)
+
+**Correction source**: `evidence/v2/contract/review-2026-07-18-v2-integrator-attempt-5.md`,
+rejecting candidate `1709c714717cd2735da2e9e08487fe8f02f2b930` at packet
+`b9ccace4e35ec78f80f73c69d70184e39f99528b`. R7 through R10 are CLEARED by
+that review and need no rework. It found one new defect: a malformed
+(unhashable) or duplicate `handle_id`/`direction` in the request or an
+issued state raises `TypeError` from a bare dictionary-key operation
+instead of returning a validation error, and a duplicate issued
+`handle_id` with a conflicting `bound_to` silently resolves last-write-wins
+instead of rejecting. Per the decision's required rework path, this phase
+performs the correction by direct edit rather than a new bound
+`run speckit`; completed history — checked tasks T001–T048, every evidence
+record, and all five rejected candidate/handoff attempt streams — is
+preserved unchanged.
+
+- [X] T049 Fix R11 against the exact findings in
+  `review-2026-07-18-v2-integrator-attempt-5.md`: in
+  `tests/v2/contract/schema_helpers.py`, make `validate_continuation_fetch`
+  build its issued-handle index from only validated non-empty string
+  `handle_id` values (never an array/object), track and reject a duplicate
+  `handle_id` across issued states (removing it from the index rather than
+  silently keeping the last-seen capability), and return early — without
+  ever using the raw value as a dictionary key — the moment the request's
+  own `handle_id` is not a non-empty string or its `direction` is not one
+  of the three selected values (`validate_context_continuation` already
+  reports the correct message for both). Add the seven named unit probes to
+  `tests/v2/contract/test_context_and_receipt.py` (`FetchTimeBindingCases`:
+  array/object request `handle_id`, array/object request `direction`,
+  array/object issued `handle_id`, duplicate conflicting `handle_id`) and
+  the matching five invalid `binding-expiry` corpus cases to
+  `evals/v2/contract/downstream/cases.jsonl` with `expected-counts.json`
+  updated in the same change; regenerate all three aggregate evidence files
+  and the README manifest through the T021-enforced five-field writer;
+  append the attempt-6 documentation section to
+  `evidence/v2/contract/handoff.md`; and return the header **Slice state**
+  to `ACTIVE` on this same commit.
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -468,6 +506,10 @@ four rejected candidate/handoff attempt streams — is preserved unchanged.
   same `validate_continuation_fetch` function T047 introduced) and has no
   other upstream dependency; its evidence-regeneration and `Slice state`
   sub-steps run last, after the full dual-validator baseline is green.
+- Rejection-rework phase (attempt 5 → 6): T049 depends on T048 (it edits the
+  same `validate_continuation_fetch` function) and has no other upstream
+  dependency; its evidence-regeneration and `Slice state` sub-steps run
+  last, after the full dual-validator baseline is green.
 
 ## Parallel Opportunities
 
@@ -581,4 +623,18 @@ do not let a dependent implementation silently define the shared interface.
   rule applies — all three aggregate JSONL files and the README manifest
   regenerate as current-attempt records, and `evidence/v2/contract/
   handoff.md` appends a new section without rewriting the attempt-1/2/3/4
+  sections.
+- Phase 12 is the rework for the v2-integrator rejection of the attempt-5
+  candidate `1709c714717cd2735da2e9e08487fe8f02f2b930` at packet commit
+  `b9ccace4e35ec78f80f73c69d70184e39f99528b` (R11): R7 through R10 are
+  CLEARED and need no rework; completed history — checked tasks
+  T001–T048, all five rejected attempt streams, and every prior evidence
+  section — is preserved unchanged. The header **Slice state** line
+  returns to `ACTIVE` on the same commit as T049's fix, and a new
+  attempt-6 candidate/handoff entry is appended once verification is
+  green.
+- Attempt-6 evidence semantics (T049): the same per-attempt regeneration
+  rule applies — all three aggregate JSONL files and the README manifest
+  regenerate as current-attempt records, and `evidence/v2/contract/
+  handoff.md` appends a new section without rewriting the attempt-1/2/3/4/5
   sections.

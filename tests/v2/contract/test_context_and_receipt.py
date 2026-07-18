@@ -204,6 +204,61 @@ class FetchTimeBindingCases(unittest.TestCase):
         errors = validate_continuation_fetch(payload)
         self.assertTrue(any("not comparable" in error for error in errors), errors)
 
+    def test_array_request_handle_id_returns_error_not_raise(self):
+        # Rejection R11: a malformed (unhashable) request handle_id must
+        # never become a dictionary key.
+        payload = make_fetch_payload()
+        payload["request"]["handle_id"] = []
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("handle_id" in error for error in errors), errors)
+
+    def test_object_request_handle_id_returns_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["request"]["handle_id"] = {}
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("handle_id" in error for error in errors), errors)
+
+    def test_array_request_direction_returns_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["request"]["direction"] = []
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("direction" in error for error in errors), errors)
+
+    def test_object_request_direction_returns_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["request"]["direction"] = {}
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("direction" in error for error in errors), errors)
+
+    def test_array_issued_handle_id_returns_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["issued"][0]["handle_id"] = []
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("handle_id" in error for error in errors), errors)
+
+    def test_object_issued_handle_id_returns_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["issued"][0]["handle_id"] = {}
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("handle_id" in error for error in errors), errors)
+
+    def test_duplicate_issued_handle_id_with_conflicting_binding_rejects(self):
+        # A host-issued opaque handle cannot be exactly bound to two
+        # different contexts; duplicate identities must reject rather than
+        # acquire order-dependent (last-write-wins) meaning (rejection R11).
+        payload = make_fetch_payload()
+        conflicting = dict(payload["issued"][0])
+        conflicting["bound_to"] = {
+            "participant_id": "someone-else",
+            "room_id": "999",
+            "continuity_scope_id": "discord:room:999#2026-07",
+            "trigger_event_id": "e-other",
+        }
+        payload["issued"].append(conflicting)
+        payload["host_context"] = dict(conflicting["bound_to"])
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("duplicate" in error or "ambiguous" in error for error in errors), errors)
+
 
 class ContinuityScopeCollisionCases(unittest.TestCase):
     """FR-003/FR-009: a continuation page whose event IDs collide with the

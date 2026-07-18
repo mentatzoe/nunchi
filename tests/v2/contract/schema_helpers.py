@@ -1638,7 +1638,11 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     cursor must be minted under that same handle (cross-binding cursor reuse
     rejects). A known, unexpired handle alone does not establish correct
     binding or bounded authorization — every one of those facts is checked
-    explicitly against the issued capability.
+    explicitly against the issued capability. A malformed (non-string) or
+    duplicate ``handle_id``/``direction`` must return a validation error and
+    never become — or collide as — a dictionary key (rejection R11); JSON
+    arrays and objects are unhashable Python values, and one opaque handle
+    can carry only one exact capability and binding.
     """
     errors = _Errors()
     request = payload.get("request")
@@ -1653,22 +1657,50 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     if fetch_time is None:
         return list(errors) + ["fetch.fetch_time: must be an ISO 8601 timestamp"]
 
+    # Validate every issued state as the complete selected ContextContinuation
+    # capability (rejection R10), and index only validated non-empty string
+    # handle IDs — a malformed or duplicate handle_id must never become (or
+    # collide as) a dictionary key (rejection R11).
+    by_handle: dict[str, dict[str, Any]] = {}
+    duplicate_handles: set[str] = set()
     for issued_state in issued_states:
         if not isinstance(issued_state, dict):
             errors.append("fetch.issued[]: each issued state must be an object")
             continue
-        label = issued_state.get("handle_id", "?")
+        raw_handle_id = issued_state.get("handle_id")
+        label = raw_handle_id if _non_empty_string(raw_handle_id) else "?"
         capability = {key: value for key, value in issued_state.items() if key != "cursors"}
         _check_continuation(errors, f"fetch.issued[{label!r}]", capability)
         if "cursors" in issued_state and not isinstance(issued_state["cursors"], list):
             errors.add(f"fetch.issued[{label!r}].cursors", "must be an array")
+        if _non_empty_string(raw_handle_id):
+            if raw_handle_id in by_handle:
+                duplicate_handles.add(raw_handle_id)
+                del by_handle[raw_handle_id]
+            elif raw_handle_id in duplicate_handles:
+                pass
+            else:
+                by_handle[raw_handle_id] = issued_state
+    for duplicate in sorted(duplicate_handles):
+        errors.append(
+            f"fetch.issued: duplicate handle_id {duplicate!r} across issued "
+            "states; one opaque handle must bind to exactly one capability"
+        )
 
-    by_handle = {
-        issued_state.get("handle_id"): issued_state
-        for issued_state in issued_states
-        if isinstance(issued_state, dict)
-    }
+    # A malformed public request handle_id or direction is already reported
+    # by validate_context_continuation above; it must not be turned into a
+    # dictionary key here (rejection R11).
     handle_id = request.get("handle_id")
+    direction = request.get("direction")
+    if not _non_empty_string(handle_id) or direction not in ("before", "after", "around"):
+        return list(errors)
+    if handle_id in duplicate_handles:
+        errors.append(
+            f"handle_id: {handle_id!r} is ambiguous: multiple issued states "
+            "declare this handle_id, so no single exact capability applies"
+        )
+        return list(errors)
+
     state = by_handle.get(handle_id)
     if state is None:
         errors.append(f"handle_id: {handle_id!r} was never issued for this continuity scope")
