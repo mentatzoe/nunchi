@@ -32,26 +32,26 @@ class WakeSourceCases(unittest.TestCase):
 
     def test_missing_source_rejects(self):
         doc = make_wake()
-        del doc["source"]
+        del doc["attention"]["source"]
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_missing_observation_rejects(self):
+    def test_missing_materialized_facts_reject(self):
+        # The wake packet materializes self/room/actors/events/trigger/
+        # coverage directly (FR-014), not a wrapped observation reference.
         doc = make_wake()
-        del doc["observation"]
+        del doc["self"]
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_observation_must_be_a_valid_request(self):
+    def test_malformed_materialized_self_rejects(self):
         doc = make_wake()
-        del doc["observation"]["self"]
+        del doc["self"]["actor_id"]
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_v1_envelope_observation_rejects(self):
+    def test_v1_shaped_stray_fields_reject(self):
         doc = make_wake(
-            observation={
-                "trigger": {"id": "trigger-speak", "content": "please implement"},
-                "context": [],
-                "agent": {"id": "turnaware-vigil"},
-            }
+            trigger={"id": "trigger-speak", "content": "please implement"},
+            context=[],
+            agent={"id": "turnaware-vigil"},
         )
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
@@ -60,30 +60,32 @@ class WakeAdviceCases(unittest.TestCase):
     """FR-013: advice appears only on ``source: WAKE`` packets."""
 
     def test_wake_source_with_advice_is_valid(self):
-        doc = make_wake("WAKE", advice=make_advice())
+        doc = make_wake("WAKE", advice=[make_advice()])
         assert_schema_verdict(self, "participant-wake", doc, "valid")
 
     def test_bypass_wake_is_advice_free(self):
         # 010-Preattention-bypass: no classifier ran, so no advice exists.
-        doc = make_wake("PREATTENTION_BYPASS", advice=make_advice())
+        doc = make_wake("PREATTENTION_BYPASS", advice=[make_advice()])
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
     def test_defer_wake_is_advice_free(self):
-        doc = make_wake("DEFER", advice=make_advice())
+        doc = make_wake("DEFER", advice=[make_advice()])
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
     def test_error_fallback_wake_is_advice_free(self):
-        doc = make_wake("ERROR_FALLBACK", advice=make_advice())
+        doc = make_wake("ERROR_FALLBACK", advice=[make_advice()])
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_wake_advice_citations_are_checked_against_the_observation(self):
+    def test_wake_advice_citations_are_checked_against_its_own_events(self):
         # Runtime-adapter-only: the packet is schema-valid in isolation while
-        # the citation references no observed event (FR-013).
-        doc = make_wake("WAKE", advice=make_advice(evidence_event_ids=["e-ghost"]))
+        # the citation references no observed event (FR-013). The wake
+        # materializes its own events, so citations are checked against
+        # the packet itself.
+        doc = make_wake("WAKE", advice=[make_advice(evidence_event_ids=["e-ghost"])])
         assert_schema_verdict(self, "participant-wake", doc, "valid")
-        self.assertTrue(check_advice_citations(doc, doc["observation"]))
-        grounded = make_wake("WAKE", advice=make_advice(evidence_event_ids=["e1"]))
-        self.assertEqual([], check_advice_citations(grounded, grounded["observation"]))
+        self.assertTrue(check_advice_citations(doc, doc))
+        grounded = make_wake("WAKE", advice=[make_advice(evidence_event_ids=["e1"])])
+        self.assertEqual([], check_advice_citations(grounded, grounded))
 
 
 class WakeBudgetCases(unittest.TestCase):
@@ -91,18 +93,19 @@ class WakeBudgetCases(unittest.TestCase):
 
     def test_zero_participant_event_budget_rejects(self):
         doc = make_wake()
-        doc["budgets"]["max_events"] = 0
+        doc["coverage"]["max_events"] = 0
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
     def test_negative_participant_byte_budget_rejects(self):
         doc = make_wake()
-        doc["budgets"]["max_bytes"] = -5
+        doc["coverage"]["max_bytes"] = -5
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
-    def test_missing_participant_budgets_reject(self):
+    def test_missing_participant_budgets_are_optional(self):
         doc = make_wake()
-        del doc["budgets"]
-        assert_schema_verdict(self, "participant-wake", doc, "invalid")
+        del doc["coverage"]["max_events"]
+        del doc["coverage"]["max_bytes"]
+        assert_schema_verdict(self, "participant-wake", doc, "valid")
 
 
 class WakeLedgerRejectionCases(unittest.TestCase):

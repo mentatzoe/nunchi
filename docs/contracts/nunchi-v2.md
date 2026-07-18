@@ -10,6 +10,14 @@ program slices. V1 remains the current product until the atomic V2 merge is
 verified on `main`; nothing in this document claims the V2 lifecycle is the
 running product today.
 
+**Field-level authority**: the selected Aleph Vault design at `c834e8c`
+(`projects/shared/nunchi/technical-design.md`) is the field-level naming and
+shape authority for all five interfaces (FR-014); the program-canonical
+interface names and versions (`I-010A`–`I-010E` at `@1`) are this slice's own
+vocabulary layered over that same field inventory. A document the selected
+design declares valid that either validator rejects is a contract defect,
+never resolved by narrowing the corpus.
+
 **Machine-readable contracts** (JSON Schema Draft 2020-12):
 
 | Interface | Version | Schema path |
@@ -20,13 +28,15 @@ running product today.
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@1` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 
-Every document carries the envelope fields `interface` (the exact interface
-name), `version` (the number `1`), and a non-empty `request_id` that
-correlates the request, decision, wake, continuation, and receipt records
-for one attention pass. All five contracts are closed: an unexpected
-property rejects. V1 envelopes, reply-bearing fields, inferred-roster
-claims, and `handled`/`open`/`owed`/permission ledger state reject
-everywhere; there is no V1 translation bridge (FR-011).
+Only the request carries an explicit generation tag, `schema_version: 2`
+(the design's own field; there is no separate `interface`/`version`
+envelope pair on any of the five documents — that was an attempt-2 local
+invention the selected design does not carry). A non-empty `request_id`
+correlates the request, decision, wake, and receipt records for one
+attention pass. All five contracts are closed: an unexpected property
+rejects. V1 envelopes, reply-bearing fields, inferred-roster claims, and
+`handled`/`open`/`owed`/permission ledger state reject everywhere; there is
+no V1 translation bridge (FR-011).
 
 ## The lifecycle at a glance
 
@@ -46,49 +56,60 @@ composed reply, an admission meta-answer, or a social permission ledger.
 A truthful attention request represents:
 
 - **Exact self binding** — `self.participant_id` plus one exact
-  `self.actor_id` with `attestation` of `transport` or `host` (FR-002).
-  Optional `self.loose` names/role/description never establish authorship;
-  an alias collision with another observed actor is representable without
-  becoming an identity claim.
-- **Room and continuity scope** — `room.room_id` and
-  `room.continuity_scope`.
-- **Observed/referenced actors** — the observed cast only, never an
-  inferred full roster.
-- **Ordered native events** — array order is authoritative. Each event
-  carries a stable `event_id`, `actor_id`, `kind`
-  (`message`/`reply`/`reaction`/`membership`/`thread`), a timestamp that is
-  a non-empty string or explicitly `null` (unknown), literal kind-keyed
-  relation facts (`reply_to`, `reaction`, `membership` appear exactly on
-  their own kind), actor-targeted `mentions`, and the separate boolean
-  `mentions_room` (FR-003).
+  `self.actor_id`, transport- or host-attested (FR-002). Optional
+  `self.names`/`role`/`description` are flat loose descriptors that never
+  establish authorship; an alias collision with another observed actor is
+  representable without becoming an identity claim.
+- **Room facts** — `room.platform`, `room.id`, `room.continuity_scope_id`,
+  optional `room.name` and `room.kind` (`group`/`direct`/`unknown`).
+- **The actor map** — `actors` is an object keyed by opaque actor ID (not
+  an array), value `{display_name?, kind?}`; the observed/referenced cast
+  only, never an inferred full roster.
+- **The typed event union** — array order is authoritative. Every event
+  carries `id` and `type`; `message` events add `author_id`, optional
+  `timestamp`, `text`, optional `reply_to_event_id`/`thread_root_event_id`,
+  `mentioned_actor_ids`, and `mentions_room`; `reaction` events add
+  `author_id`, `target_event_id`, `reaction`, and `operation`
+  (`add`/`remove`); `membership` events add `scope`
+  (`{kind: room/thread/space/unknown, id}`), `subject_actor_id`, optional
+  `caused_by_actor_id`, and `change` (`join`/`leave`) (FR-003, FR-014).
 - **One included trigger** — `trigger_event_id` must name an event in
   `events` (runtime-adapter-only rule; see the partition below).
-- **Honest coverage** — `truncated`, `gaps`, `visibility`, `continuity`,
-  and `more_events` with explicit `unknown` members; `session-only`
-  continuity and unknown visibility are never upgraded by inference.
-- **Positive budgets** — independent `max_events` and `max_bytes`, each an
-  integer `>= 1` (S15).
-- **Expansion capability booleans only** — `expansion.available` is the
-  entire classifier-visible continuation surface. The continuation handle,
-  binding, cursor, expiry, and any other opaque fetch authority are
-  host-only and reject inside a request (FR-004).
+- **Honest coverage** — `has_more_before`/`has_more_after` (boolean or
+  `null` when unknowable), `has_gaps`, `truncated_by` (subset of
+  `events`/`bytes`/`age`), `continuity` (`restart-safe`/`session-only`/
+  `unknown`), `has_restart_gap`, optional `max_events`/`max_bytes`/
+  `max_age_seconds` budgets (each a positive integer, S15), and optional
+  per-event-type `event_visibility`. `session-only` continuity and unknown
+  visibility are never upgraded by inference.
+- **Optional continuation capability** — the wire document MAY carry the
+  full `continuation` object (`handle_id`, exact `bound_to`
+  `{participant_id, room_id, continuity_scope_id, trigger_event_id}`,
+  `can_fetch_before`/`can_fetch_after`/`can_fetch_around_event`,
+  `max_events_per_fetch`/`max_bytes_per_fetch`, optional `expires_at`) —
+  the selected design's own example embeds it, so the schema does not
+  forbid it (FR-014). The classifier-facing host-secret exclusion (FR-004)
+  is enforced where the classifier is actually invoked: the runtime path
+  that constructs the model-facing projection redacts `continuation` down
+  to coverage plus expansion-capability booleans before that call. This is
+  a runtime-adapter-only behavior, not a schema constraint.
 
 ## I-010B AttentionDecisionV2@1
 
 A tagged host-facing union on `status`:
 
 - **`status: ok`** — carries `classifier_disposition`,
-  `effective_disposition`, the closed `routing` audit (below), the
+  `effective_disposition`, the closed `routing_audit` (below), the
   required sibling `reasons` audit field (an array of audit strings,
   possibly empty, that never enters the participant turn and is never a
-  member of the routing-audit object), `evidence_event_ids`,
-  `classifier_audit` (model, optional `prompt_sha256`, optional
-  `latency_ms`), the optional conditional `legacy_confidence` vector
-  (FR-007, below), and optional WAKE-only `advice`. Exactly four
-  classifier/effective pairs validate, each mapped onto its applied valve
-  (FR-006):
+  member of the routing-audit object), `evidence_event_ids`, `classifier`
+  (`{name, provider?, model?}`), the optional conditional
+  `legacy_verdict_confidences` vector (FR-007, below), and optional
+  WAKE-only `attention_advice` (an array of `{note, evidence_event_ids}`,
+  not a single object). Exactly four classifier/effective pairs validate,
+  each mapped onto its applied valve (FR-006):
 
-  | Transition | Applied valve | `override_cause` | `advice` |
+  | Transition | Applied valve | `override_cause` | `attention_advice` |
   |---|---|---|---|
   | `WAKE -> WAKE` | `none` | `none` | allowed (FR-013) |
   | `DEFER -> DEFER` | `classifier-defer` | `none` | forbidden |
@@ -99,10 +120,10 @@ A tagged host-facing union on `status`:
   widened suppression preserves its exact valve and override cause (S05).
   Every other pairing must be reported on the error branch — malformed
   evidence never supports suppression (S09).
-- **`routing` (the closed FR-005 audit set)** — a closed object recording
-  the applied `valve` (`none`, `classifier-defer`, `margin-defer`, or
-  `policy-defer`), the `override_cause` (`none`, `margin`,
-  `suppression-disabled`, or `recoverability-unproven`), the
+- **`routing_audit` (the closed FR-005 audit set)** — a closed object
+  recording the applied `valve` (`none`, `classifier-defer`,
+  `margin-defer`, or `policy-defer`), the `override_cause` (`none`,
+  `margin`, `suppression-disabled`, or `recoverability-unproven`), the
   `margin_status` (`active` or `retired`, recorded on every ok decision),
   the `effective_margin`, and the trusted `margin_source`. The
   cross-field rules are part of the contract: a margin counts as
@@ -114,7 +135,7 @@ A tagged host-facing union on `status`:
   decision (optional there); valves `none`/`classifier-defer` pair with
   override cause `none`, and `policy-defer` pairs with
   `suppression-disabled` or `recoverability-unproven`.
-- **`legacy_confidence` (FR-007, conditional)** — optional on
+- **`legacy_verdict_confidences` (FR-007, conditional)** — optional on
   `status: ok` and required exactly when the classifier disposition is
   `SUPPRESS` while the routing audit reports the margin `active`; a
   margin-active candidate suppression without a valid vector does not
@@ -126,55 +147,74 @@ A tagged host-facing union on `status`:
   margin retirement flips only the reported margin status under later
   evidence and is not a schema edit, while removing or reshaping the
   field is a breaking `@2` edit.
-- **`status: bypass`** — exactly `cause: "preattention-disabled"` and the
-  envelope, nothing else. The full FR-005 exclusion set applies
+- **`status: bypass`** — exactly `cause: "preattention-disabled"` and
+  `request_id`, nothing else. The full FR-005 exclusion set applies
   identically everywhere: no classifier/effective disposition, classifier
   audit, reasons, evidence, legacy confidence vector, routing audit, or
   advice. Bypass is non-social and fabricates no model judgment.
-- **`status: error`** — the operational branch: `error.kind` is one of
+- **`status: error`** — the operational branch: `error.code` is one of
   `malformed-model-output`, `invalid-transition`,
   `invalid-legacy-confidence`, `provider-failure`, `runtime-failure`, with
-  optional `detail`.
+  optional `detail`. `request_id` is optional on both the pre-validation
+  and post-validation branches (a pre-validation error may occur before a
+  request ID is assignable); an optional `classifier` audit is present
+  only when the error occurred after classifier invocation (FR-005,
+  FR-014).
 
 ## I-010C ParticipantWakeV2@1
 
-The normal-turn input: `source` (`WAKE`, `DEFER`, `ERROR_FALLBACK`, or the
-non-social `PREATTENTION_BYPASS`), the embedded factual `observation`
-(a complete `AttentionRequestV2` document), participant `budgets`, and
-optional `advice`. Advice is valid only when `source` is `WAKE`; `DEFER`,
+The normal-turn input materializes `self`, `room`, `actors`, `events`,
+`trigger_event_id`, `coverage`, and optional `continuation` directly —
+the same field shapes as `AttentionRequestV2` — not a wrapped
+`observation` reference or classifier projection (FR-014). A separate
+`attention` object carries the explicit `source` (`WAKE`, `DEFER`,
+`ERROR_FALLBACK`, or the non-social `PREATTENTION_BYPASS`) and, only when
+`source` is `WAKE`, optional `advice` (an array of `{note,
+evidence_event_ids}`) and optional `evidence_event_ids`. `DEFER`,
 `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
-no classifier advice exists for those sources (FR-008/FR-013). The
-contract contains no admission meta-question and no composed reply.
+no classifier advice exists for those sources (FR-008/FR-013). There is no
+separate participant "budgets" field — the wake's own `coverage` (computed
+when the packet was materialized for the participant) carries the
+independent participant event/byte budget (S15). The contract contains no
+admission meta-question and no composed reply.
 
 ## I-010D ContextContinuationV2@1
 
-Two document kinds under one interface:
+The continuation capability itself lives on `I-010A`/`I-010C`'s
+`continuation` field; this interface covers only the fetch request/page
+pair that capability authorizes — a `oneOf` over two bare shapes with no
+`interface`/`version`/`kind` envelope (FR-014):
 
-- **`kind: fetch-request`** — `handle`, full `binding` (participant, room,
-  continuity scope, trigger), `cursor` (opaque string or `null`),
-  `expires_at`, and positive `budgets`.
-- **`kind: fetch-page`** — `handle`, ordered native `events` (same event
-  shape as the request), `cursor_next` (or `null`), and returned
-  `coverage`.
+- **Fetch request** — `request_id`, `handle_id`, `direction`
+  (`before`/`after`/`around`), `anchor_event_id` (defaults to the trigger
+  for `before`/`after`, required for `around`), optional opaque `cursor`,
+  and positive `max_events`/`max_bytes`.
+- **Fetch page** — `request_id`, `handle_id`, `room_id`,
+  `continuity_scope_id`, `direction`, `anchor_event_id`, the actor map,
+  ordered typed `events` (same union as the request), returned
+  `coverage`, and optional opaque `next_cursor` (absent means the binding
+  is exhausted).
 
-Handles, bindings, cursors, expiry values, and fetch credentials are
-host-only and forbidden from the classifier projection; the classifier sees
-coverage and expansion capability booleans only (FR-004/FR-009). Binding
-validation happens at fetch time — see the runtime-adapter-only rules
-below.
+Handles, cursors, and fetch credentials are host-only and forbidden from
+the classifier projection; the classifier sees coverage and expansion
+capability booleans only (FR-004/FR-009). A fetch request carries no
+inline binding fields — a handle is permanently bound to its issuing
+continuation capability, so a known, unexpired handle is by construction
+the correct binding; binding/expiry validation happens at fetch time —
+see the runtime-adapter-only rules below.
 
 ## I-010E AttentionReceiptV2@1
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
 transport` (FR-010). Each record names its `stage`, its `writer`, and a
-stage-shaped `body`:
+stage-shaped `body` carrying the selected telemetry (FR-014):
 
 | Stage | Owning writer | Body |
 |---|---|---|
-| `observation` | `observation-provider` | `event_count`, `visibility` |
-| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `policy_provenance`) or operational error (`error_kind`, `detail`) or bypass (`classifier_not_invoked: true`, `bypass_provenance`) — three mutually exclusive shapes |
-| `participant-host` | `participant-host` | `outcome: contributed` (with `action_ref`) or `outcome: silence` |
+| `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count`, `coverage`, `included_event_ids` |
+| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`) or operational error (`error: {code, detail?}`) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
+| `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count`, `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
 
 The stage-to-writer binding is part of the public per-record contract
@@ -189,10 +229,10 @@ transport stage, or a participant-silence outcome ending at
 `participant-host` — is valid-in-progress. Each owner appends only its own
 stage, never mutates a prior record, and never fills a future stage.
 Participant silence (S07) stays distinct from model suppression (which ends
-the stream at `attention`) and from non-invocation. Unknown and unavailable
-remain explicit outcomes; a bypass attention record marks
-`classifier_not_invoked: true` and carries its trusted
-`bypass_provenance` (`policy: "preattention-disabled"`, `attested_by`).
+the stream at `attention`) and from non-invocation; the observed outcome is
+`sent`/`silent`/`unknown`, never a handled/owed social state. A bypass
+attention record marks `classifier_not_invoked: true` and carries its
+trusted `cause`/`policy_provenance`.
 
 ## Validation model (FR-012)
 
@@ -206,7 +246,11 @@ conformance corpus exercises both validators:
   `evals/v2/contract/downstream/`, each holding `cases.jsonl` and its
   authoritative per-class `expected-counts.json` (updated in the same
   change as any corpus edit; counts are asserted loudly, and the on-disk
-  corpus directory inventory is asserted closed at load time).
+  corpus directory inventory is asserted closed at load time). The corpus
+  also carries the FR-014 authority-conformance class: named cases drawn
+  verbatim or field-complete from the selected design at `c834e8c`,
+  schema-expressible and counted as their own manifest-tracked subset —
+  never a fourth oracle-treatment class (CHK099).
 - **Runner**: the `tests/v2/contract/` suite. The stdlib
   runtime-validation adapter lives in
   `tests/v2/contract/schema_helpers.py`.
@@ -228,7 +272,7 @@ treatment:
 
 | Partition class | Validators | Oracle treatment |
 |---|---|---|
-| `schema-expressible` | both | identical expected result |
+| `schema-expressible` (incl. the authority-conformance subset) | both | identical expected result |
 | `id-uniqueness` | runtime adapter | expected-valid (document-shaped) |
 | `timestamp-order` | runtime adapter | expected-valid (document-shaped) |
 | `advice-citation` | runtime adapter | expected-valid (document-shaped) |
@@ -254,17 +298,20 @@ every runtime consumer must enforce them in its stdlib adapter:
    authoritative; non-null parseable timestamps must not contradict it
    (non-decreasing). An explicitly `null` or unparseable timestamp is
    exempt as an unknown platform fact.
-3. **Cross-document advice citations** (FR-013): every
-   `advice.evidence_event_ids` entry must name an event supplied in the
-   request (for a wake packet, in its embedded observation); a citation of
-   a nonexistent event rejects.
+3. **Cross-document advice citations** (FR-013): every advice
+   `evidence_event_ids` entry — on a decision's `attention_advice` items or
+   a wake's `attention.advice` items/`attention.evidence_event_ids` — must
+   name an event supplied in the correlated request (for a wake, its own
+   materialized events); a citation of a nonexistent event rejects.
 4. **Trigger membership** (FR-003): `trigger_event_id` must name an event
    present in `events`.
 5. **Fetch-time binding/expiry state** (FR-004/FR-009): a fetch validates
-   only if the handle was issued for the continuity scope, is unexpired at
-   fetch time, the binding is identical to the issued binding, and any
-   cursor was minted under the same handle/binding; expired handles and
-   cross-binding cursor reuse reject as binding-validation failures.
+   only if its `handle_id` was issued for the continuity scope and is
+   unexpired at fetch time, and any cursor was minted under that same
+   handle; expired handles and cross-handle cursor reuse reject as
+   binding-validation failures. The fetch request carries no inline
+   binding fields to cross-check separately — a known, unexpired handle is
+   by construction bound correctly.
 6. **Receipt-stage sequence rules** (FR-010): one request ID per stream,
    canonical stage order as a prefix, each stage appended at most once,
    and stream-level writer ownership. These are the multi-record checks;
@@ -273,31 +320,31 @@ every runtime consumer must enforce them in its stdlib adapter:
 
 ## Examples
 
-A minimal valid `AttentionRequestV2` document:
+The selected design's own example attention request, which validates
+verbatim (FR-014, `REQ-AUTH-001` in the authority-conformance corpus):
 
 ```json
 {
-  "interface": "AttentionRequestV2",
-  "version": 1,
-  "request_id": "req-0100",
-  "self": {"participant_id": "vigil", "actor_id": "discord:9001", "attestation": "transport"},
-  "room": {"room_id": "discord:room:42", "continuity_scope": "discord:room:42#2026-07"},
-  "actors": [{"actor_id": "discord:1001", "relation": "observed"}],
+  "schema_version": 2,
+  "request_id": "discord:room:152:event:203",
+  "self": {"participant_id": "vigil", "actor_id": "discord:user:149", "names": ["Vigil", "Codex"], "role": "participant"},
+  "room": {"platform": "discord", "id": "152", "continuity_scope_id": "discord:channel:152", "name": "nunchi-room", "kind": "group"},
+  "actors": {
+    "discord:user:149": {"display_name": "Vigil", "kind": "bot"},
+    "discord:user:42": {"display_name": "Zoe", "kind": "human"}
+  },
   "events": [
-    {
-      "event_id": "e1",
-      "actor_id": "discord:1001",
-      "kind": "message",
-      "timestamp": "2026-07-17T01:00:00Z",
-      "content": "hey @Vigil can you take the deploy?",
-      "mentions": ["discord:9001"],
-      "mentions_room": false
-    }
+    {"id": "discord:message:201", "type": "message", "author_id": "discord:user:42", "timestamp": "2026-07-11T12:00:00Z", "text": "Could you review the latest flow?", "mentioned_actor_ids": [], "mentions_room": false},
+    {"id": "discord:message:203", "type": "message", "author_id": "discord:user:42", "timestamp": "2026-07-11T12:01:00Z", "text": "Vigil, especially the participant wake.", "reply_to_event_id": "discord:message:201", "thread_root_event_id": "discord:message:201", "mentioned_actor_ids": ["discord:user:149"], "mentions_room": false}
   ],
-  "trigger_event_id": "e1",
-  "coverage": {"truncated": false, "gaps": "none", "visibility": "complete", "continuity": "session-only", "more_events": "unknown"},
-  "budgets": {"max_events": 50, "max_bytes": 65536},
-  "expansion": {"available": false}
+  "trigger_event_id": "discord:message:203",
+  "coverage": {"max_events": 2, "max_bytes": 4096, "max_age_seconds": 86400, "has_more_before": true, "has_more_after": false, "has_gaps": false, "truncated_by": ["events"], "continuity": "restart-safe", "has_restart_gap": false},
+  "continuation": {
+    "handle_id": "ctx:discord:152:203",
+    "bound_to": {"participant_id": "vigil", "room_id": "152", "continuity_scope_id": "discord:channel:152", "trigger_event_id": "discord:message:203"},
+    "can_fetch_before": true, "can_fetch_after": false, "can_fetch_around_event": true,
+    "max_events_per_fetch": 20, "max_bytes_per_fetch": 32768
+  }
 }
 ```
 
@@ -307,17 +354,15 @@ rule):
 
 ```json
 {
-  "interface": "AttentionDecisionV2",
-  "version": 1,
-  "request_id": "req-0100",
   "status": "ok",
+  "request_id": "req-0100",
   "classifier_disposition": "SUPPRESS",
   "effective_disposition": "SUPPRESS",
-  "routing": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+  "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
   "reasons": ["no direct address and no open question"],
   "evidence_event_ids": ["e1"],
-  "classifier_audit": {"model": "openrouter/example-model"},
-  "legacy_confidence": {"PASS": 0.8, "ACK": 0.1, "ASK": 0.05, "SPEAK": 0.05}
+  "classifier": {"name": "nunchi-classifier"},
+  "legacy_verdict_confidences": {"PASS": 0.8, "ACK": 0.1, "ASK": 0.05, "SPEAK": 0.05}
 }
 ```
 
@@ -326,17 +371,15 @@ routing audit records its effective width):
 
 ```json
 {
-  "interface": "AttentionDecisionV2",
-  "version": 1,
-  "request_id": "req-0102",
   "status": "ok",
+  "request_id": "req-0102",
   "classifier_disposition": "SUPPRESS",
   "effective_disposition": "DEFER",
-  "routing": {"valve": "margin-defer", "override_cause": "margin", "margin_status": "active", "effective_margin": 0.12},
+  "routing_audit": {"valve": "margin-defer", "override_cause": "margin", "margin_status": "active", "effective_margin": 0.12},
   "reasons": ["candidate suppression inside the protective margin"],
   "evidence_event_ids": ["e1"],
-  "classifier_audit": {"model": "openrouter/example-model"},
-  "legacy_confidence": {"PASS": 0.55, "ACK": 0.2, "ASK": 0.15, "SPEAK": 0.1}
+  "classifier": {"name": "nunchi-classifier"},
+  "legacy_verdict_confidences": {"PASS": 0.55, "ACK": 0.2, "ASK": 0.15, "SPEAK": 0.1}
 }
 ```
 
@@ -344,10 +387,8 @@ A non-social preattention bypass:
 
 ```json
 {
-  "interface": "AttentionDecisionV2",
-  "version": 1,
-  "request_id": "req-0101",
   "status": "bypass",
+  "request_id": "req-0101",
   "cause": "preattention-disabled"
 }
 ```
@@ -356,12 +397,18 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 
 ```json
 {
-  "interface": "AttentionReceiptV2",
-  "version": 1,
   "request_id": "req-0100",
   "stage": "participant-host",
   "writer": "participant-host",
-  "body": {"outcome": "silence"}
+  "body": {
+    "wake_source": "WAKE",
+    "packet_event_count": 3,
+    "packet_byte_count": 512,
+    "delivered_event_ids": ["e1", "e2", "e3"],
+    "expansion_calls": 0,
+    "invoked": true,
+    "outcome": "silent"
+  }
 }
 ```
 
@@ -369,9 +416,9 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 
 `@1` is the first V2 execution version. A breaking edit requires an
 explicit owner handoff and dependent re-analysis and lands as `@2`; the
-optional `legacy_confidence` field, its exact four-key shape, and its
-conditional margin-active-suppression requirement are permanent for `@1`
-(FR-007) — margin retirement flips only the reported `margin_status`,
+optional `legacy_verdict_confidences` field, its exact four-key shape, and
+its conditional margin-active-suppression requirement are permanent for
+`@1` (FR-007) — margin retirement flips only the reported `margin_status`,
 never the schema. The slice 010 handoff packet names the exact contract
 commit and corpus revision; each downstream runtime owner must pass its own
 stdlib adapter over the identical corpus revision before its own handoff.

@@ -2,74 +2,53 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/context-continuation.schema.json",
   "title": "ContextContinuationV2",
-  "description": "I-010D ContextContinuationV2@1 — host-only bounded context expansion: the fetch-request shape (opaque handle, exact binding, opaque cursor, expiry, positive budgets) and the fetch-page shape (authoritative-order events, opaque next cursor, returned coverage). Handles, bindings, cursors, expiry values, and fetch credentials are host-only and forbidden from the classifier projection (I-010A). Fetch-time binding/expiry validation, cross-binding cursor reuse, and the continuation-page/originating-request duplicate-ID merge-identity rule are runtime-adapter-only (FR-012).",
+  "description": "I-010D ContextContinuationV2@1 — host-only bounded context expansion, encoding the design's ContextFetch/ContextPage shapes verbatim (FR-014, c834e8c): the directional anchor-bearing fetch request (opaque handle, direction, anchor, opaque cursor, positive per-fetch budgets) and the identity-bearing fetch page (room and continuity-scope identity, direction, anchor, actor map, authoritative-order events, returned coverage, opaque next cursor). The continuation capability itself (`handle_id`, exact `bound_to`, before/after/around fetch capabilities, per-fetch caps, optional expiry) is defined on I-010A/`attention-request.schema.json#/$defs/continuation`; this schema covers only the fetch request/page pair the capability authorizes. Handles, cursors, and fetch credentials are host-only and forbidden from the classifier projection. Fetch-time binding/expiry validation, cross-binding cursor reuse, and the continuation-page/originating-request duplicate-ID merge-identity rule are runtime-adapter-only (FR-012).",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "binding": {
-      "$comment": "Every fetch is bound to participant, room, continuity scope, and trigger; a fetch that changes any of them is rejected at fetch time.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["participant_id", "room_id", "continuity_scope", "trigger_event_id"],
-      "properties": {
-        "participant_id": {"$ref": "#/$defs/nonEmptyString"},
-        "room_id": {"$ref": "#/$defs/nonEmptyString"},
-        "continuity_scope": {"$ref": "#/$defs/nonEmptyString"},
-        "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"}
-      }
-    },
+    "direction": {"enum": ["before", "after", "around"]},
     "fetchRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "interface",
-        "version",
-        "kind",
-        "request_id",
-        "handle",
-        "binding",
-        "cursor",
-        "expires_at",
-        "budgets"
-      ],
+      "required": ["request_id", "handle_id", "direction", "max_events", "max_bytes"],
       "properties": {
-        "interface": {"const": "ContextContinuationV2"},
-        "version": {"const": 1},
-        "kind": {"const": "fetch-request"},
         "request_id": {"$ref": "#/$defs/nonEmptyString"},
-        "handle": {"$ref": "#/$defs/nonEmptyString"},
-        "binding": {"$ref": "#/$defs/binding"},
-        "cursor": {
-          "$comment": "Opaque; null starts from the binding's beginning.",
-          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
+        "handle_id": {"$ref": "#/$defs/nonEmptyString"},
+        "direction": {"$ref": "#/$defs/direction"},
+        "anchor_event_id": {
+          "$comment": "Defaults to the trigger for before/after and is required for around (enforced below).",
+          "$ref": "#/$defs/nonEmptyString"
         },
-        "expires_at": {"$ref": "#/$defs/nonEmptyString"},
-        "budgets": {
-          "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/budgets"
+        "cursor": {
+          "$comment": "Opaque; absent starts from the binding's beginning.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "max_events": {"type": "integer", "minimum": 1},
+        "max_bytes": {"type": "integer", "minimum": 1}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["direction"], "properties": {"direction": {"const": "around"}}},
+          "then": {"required": ["anchor_event_id"]}
         }
-      }
+      ]
     },
     "fetchPage": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "interface",
-        "version",
-        "kind",
-        "request_id",
-        "handle",
-        "events",
-        "cursor_next",
-        "coverage"
-      ],
+      "required": ["request_id", "handle_id", "room_id", "continuity_scope_id", "direction", "anchor_event_id", "actors", "events", "coverage"],
       "properties": {
-        "interface": {"const": "ContextContinuationV2"},
-        "version": {"const": 1},
-        "kind": {"const": "fetch-page"},
         "request_id": {"$ref": "#/$defs/nonEmptyString"},
-        "handle": {"$ref": "#/$defs/nonEmptyString"},
+        "handle_id": {"$ref": "#/$defs/nonEmptyString"},
+        "room_id": {"$ref": "#/$defs/nonEmptyString"},
+        "continuity_scope_id": {"$ref": "#/$defs/nonEmptyString"},
+        "direction": {"$ref": "#/$defs/direction"},
+        "anchor_event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "actors": {
+          "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/actorMap"
+        },
         "events": {
           "$comment": "Authoritative order; exact merge identity against the originating request is runtime-adapter-only.",
           "type": "array",
@@ -77,12 +56,12 @@
             "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/event"
           }
         },
-        "cursor_next": {
-          "$comment": "Opaque; null means the binding is exhausted.",
-          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
-        },
         "coverage": {
           "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"
+        },
+        "next_cursor": {
+          "$comment": "Opaque; absent means the binding is exhausted.",
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     }

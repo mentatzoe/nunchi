@@ -136,7 +136,6 @@ ERROR_KINDS = (
     "provider-failure",
     "runtime-failure",
 )
-EVENT_KINDS = ("message", "reply", "reaction", "membership", "thread")
 ROUTING_VALVES = ("none", "classifier-defer", "margin-defer", "policy-defer")
 OVERRIDE_CAUSES = (
     "none",
@@ -536,10 +535,6 @@ def _is_integer(value: Any) -> bool:
     return isinstance(value, float) and math.isfinite(value) and value.is_integer()
 
 
-def _is_version_one(value: Any) -> bool:
-    return _is_number(value) and value == 1
-
-
 def _non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and len(value) >= 1
 
@@ -574,234 +569,253 @@ def _check_enum(errors: _Errors, path: str, value: Any, allowed: tuple[str, ...]
         errors.add(path, f"must be one of {allowed}")
 
 
-def _check_envelope(
-    errors: _Errors, doc: dict[str, Any], interface: str
-) -> None:
-    if doc.get("interface") != interface or not isinstance(doc.get("interface"), str):
-        errors.add("interface", f"must be the exact string {interface!r}")
-    if not _is_version_one(doc.get("version")):
-        errors.add("version", "must be the number 1")
-    _check_nes(errors, "request_id", doc.get("request_id"))
-
-
-def _check_relation_target(errors: _Errors, path: str, value: Any) -> None:
-    if not _check_closed_object(
-        errors, path, value, ("target_event_id", "resolved"), ("target_event_id", "resolved")
-    ):
+def _check_actor(errors: _Errors, path: str, value: Any) -> None:
+    if not _check_closed_object(errors, path, value, (), ("display_name", "kind")):
         return
-    if "target_event_id" in value:
-        _check_nes(errors, f"{path}.target_event_id", value["target_event_id"])
-    if "resolved" in value and not isinstance(value["resolved"], bool):
-        errors.add(f"{path}.resolved", "must be a boolean")
+    if "display_name" in value and not isinstance(value["display_name"], str):
+        errors.add(f"{path}.display_name", "must be a string")
+    if "kind" in value:
+        _check_enum(errors, f"{path}.kind", value["kind"], ("human", "bot", "unknown"))
 
 
-def _check_event(errors: _Errors, path: str, event: Any) -> None:
+def _check_actor_map(errors: _Errors, path: str, value: Any) -> None:
+    if not isinstance(value, dict):
+        errors.add(path, "must be an object mapping actor ID to actor")
+        return
+    for actor_id, actor in value.items():
+        _check_actor(errors, f"{path}[{actor_id!r}]", actor)
+
+
+def _check_message_event(errors: _Errors, path: str, event: dict[str, Any]) -> None:
     allowed = (
-        "event_id",
-        "actor_id",
-        "kind",
-        "timestamp",
-        "content",
-        "reply_to",
-        "reaction",
-        "membership",
-        "thread_id",
-        "mentions",
-        "mentions_room",
+        "id", "type", "author_id", "timestamp", "text",
+        "reply_to_event_id", "thread_root_event_id", "mentioned_actor_ids", "mentions_room",
     )
-    required = ("event_id", "actor_id", "kind", "timestamp", "mentions", "mentions_room")
+    required = ("id", "type", "author_id", "text", "mentioned_actor_ids", "mentions_room")
     if not _check_closed_object(errors, path, event, required, allowed):
         return
-    if "event_id" in event:
-        _check_nes(errors, f"{path}.event_id", event["event_id"])
-    if "actor_id" in event:
-        _check_nes(errors, f"{path}.actor_id", event["actor_id"])
-    kind = event.get("kind")
-    if "kind" in event:
-        _check_enum(errors, f"{path}.kind", kind, EVENT_KINDS)
+    _check_nes(errors, f"{path}.id", event.get("id"))
+    _check_nes(errors, f"{path}.author_id", event.get("author_id"))
     if "timestamp" in event:
         timestamp = event["timestamp"]
         if timestamp is not None and not _non_empty_string(timestamp):
             errors.add(f"{path}.timestamp", "must be a non-empty string or null")
-    if "content" in event:
-        content = event["content"]
-        if content is not None and not isinstance(content, str):
-            errors.add(f"{path}.content", "must be a string or null")
-    if "thread_id" in event:
-        thread_id = event["thread_id"]
-        if thread_id is not None and not _non_empty_string(thread_id):
-            errors.add(f"{path}.thread_id", "must be a non-empty string or null")
-    if "mentions" in event:
-        mentions = event["mentions"]
-        if not isinstance(mentions, list):
-            errors.add(f"{path}.mentions", "must be an array of actor IDs")
+    if "text" in event and not isinstance(event["text"], str):
+        errors.add(f"{path}.text", "must be a string")
+    if "reply_to_event_id" in event:
+        _check_nes(errors, f"{path}.reply_to_event_id", event["reply_to_event_id"])
+    if "thread_root_event_id" in event:
+        _check_nes(errors, f"{path}.thread_root_event_id", event["thread_root_event_id"])
+    if "mentioned_actor_ids" in event:
+        mentioned = event["mentioned_actor_ids"]
+        if not isinstance(mentioned, list):
+            errors.add(f"{path}.mentioned_actor_ids", "must be an array of actor IDs")
         else:
-            for index, mention in enumerate(mentions):
-                _check_nes(errors, f"{path}.mentions[{index}]", mention)
+            for index, actor_id in enumerate(mentioned):
+                _check_nes(errors, f"{path}.mentioned_actor_ids[{index}]", actor_id)
     if "mentions_room" in event and not isinstance(event["mentions_room"], bool):
         errors.add(f"{path}.mentions_room", "must be a boolean")
-    # Kind-keyed relation facts: present exactly on their own kind.
-    if kind == "reply":
-        if "reply_to" not in event:
-            errors.add(f"{path}.reply_to", "required when kind is 'reply'")
-    elif "reply_to" in event:
-        errors.add(f"{path}.reply_to", "only allowed when kind is 'reply'")
-    if kind == "reaction":
-        if "reaction" not in event:
-            errors.add(f"{path}.reaction", "required when kind is 'reaction'")
-    elif "reaction" in event:
-        errors.add(f"{path}.reaction", "only allowed when kind is 'reaction'")
-    if kind == "membership":
-        if "membership" not in event:
-            errors.add(f"{path}.membership", "required when kind is 'membership'")
-    elif "membership" in event:
-        errors.add(f"{path}.membership", "only allowed when kind is 'membership'")
-    if "reply_to" in event and kind == "reply":
-        _check_relation_target(errors, f"{path}.reply_to", event["reply_to"])
-    if "reaction" in event and kind == "reaction":
-        reaction = event["reaction"]
-        if _check_closed_object(
-            errors, f"{path}.reaction", reaction, ("emoji", "target"), ("emoji", "target")
-        ):
-            if "emoji" in reaction:
-                _check_nes(errors, f"{path}.reaction.emoji", reaction["emoji"])
-            if "target" in reaction:
-                _check_relation_target(errors, f"{path}.reaction.target", reaction["target"])
-    if "membership" in event and kind == "membership":
-        _check_enum(errors, f"{path}.membership", event["membership"], ("join", "leave", "unknown"))
+
+
+def _check_reaction_event(errors: _Errors, path: str, event: dict[str, Any]) -> None:
+    allowed = ("id", "type", "author_id", "timestamp", "target_event_id", "reaction", "operation")
+    required = ("id", "type", "author_id", "target_event_id", "reaction", "operation")
+    if not _check_closed_object(errors, path, event, required, allowed):
+        return
+    _check_nes(errors, f"{path}.id", event.get("id"))
+    _check_nes(errors, f"{path}.author_id", event.get("author_id"))
+    if "timestamp" in event:
+        timestamp = event["timestamp"]
+        if timestamp is not None and not _non_empty_string(timestamp):
+            errors.add(f"{path}.timestamp", "must be a non-empty string or null")
+    _check_nes(errors, f"{path}.target_event_id", event.get("target_event_id"))
+    _check_nes(errors, f"{path}.reaction", event.get("reaction"))
+    if "operation" in event:
+        _check_enum(errors, f"{path}.operation", event["operation"], ("add", "remove"))
+
+
+def _check_membership_event(errors: _Errors, path: str, event: dict[str, Any]) -> None:
+    allowed = ("id", "type", "timestamp", "scope", "subject_actor_id", "caused_by_actor_id", "change")
+    required = ("id", "type", "scope", "subject_actor_id", "change")
+    if not _check_closed_object(errors, path, event, required, allowed):
+        return
+    _check_nes(errors, f"{path}.id", event.get("id"))
+    if "timestamp" in event:
+        timestamp = event["timestamp"]
+        if timestamp is not None and not _non_empty_string(timestamp):
+            errors.add(f"{path}.timestamp", "must be a non-empty string or null")
+    scope = event.get("scope")
+    if "scope" in event and _check_closed_object(
+        errors, f"{path}.scope", scope, ("kind", "id"), ("kind", "id")
+    ):
+        if "kind" in scope:
+            _check_enum(
+                errors, f"{path}.scope.kind", scope["kind"], ("room", "thread", "space", "unknown")
+            )
+        if "id" in scope:
+            _check_nes(errors, f"{path}.scope.id", scope["id"])
+    _check_nes(errors, f"{path}.subject_actor_id", event.get("subject_actor_id"))
+    if "caused_by_actor_id" in event:
+        _check_nes(errors, f"{path}.caused_by_actor_id", event["caused_by_actor_id"])
+    if "change" in event:
+        _check_enum(errors, f"{path}.change", event["change"], ("join", "leave"))
+
+
+def _check_event(errors: _Errors, path: str, event: Any) -> None:
+    if not isinstance(event, dict):
+        errors.add(path, "must be an object")
+        return
+    event_type = event.get("type")
+    if event_type == "message":
+        _check_message_event(errors, path, event)
+    elif event_type == "reaction":
+        _check_reaction_event(errors, path, event)
+    elif event_type == "membership":
+        _check_membership_event(errors, path, event)
+    else:
+        errors.add(f"{path}.type", "must be one of ('message', 'reaction', 'membership')")
 
 
 def _check_coverage(errors: _Errors, path: str, value: Any) -> None:
-    fields = ("truncated", "gaps", "visibility", "continuity", "more_events")
-    if not _check_closed_object(errors, path, value, fields, fields):
+    required = (
+        "has_more_before", "has_more_after", "has_gaps",
+        "truncated_by", "continuity", "has_restart_gap",
+    )
+    allowed = required + ("max_events", "max_bytes", "max_age_seconds", "event_visibility")
+    if not _check_closed_object(errors, path, value, required, allowed):
         return
-    if "truncated" in value and not isinstance(value["truncated"], bool):
-        errors.add(f"{path}.truncated", "must be a boolean")
-    if "gaps" in value:
-        _check_enum(errors, f"{path}.gaps", value["gaps"], ("none", "known", "unknown"))
-    if "visibility" in value:
-        _check_enum(
-            errors, f"{path}.visibility", value["visibility"], ("complete", "partial", "unknown")
-        )
+    for name in ("max_events", "max_bytes", "max_age_seconds"):
+        if name in value:
+            amount = value[name]
+            if not _is_integer(amount):
+                errors.add(f"{path}.{name}", "must be an integer")
+            elif amount < 1:
+                errors.add(f"{path}.{name}", "must be a positive budget (>= 1)")
+    for name in ("has_more_before", "has_more_after", "has_restart_gap"):
+        if name in value and value[name] is not None and not isinstance(value[name], bool):
+            errors.add(f"{path}.{name}", "must be a boolean or null")
+    if "has_gaps" in value and not isinstance(value["has_gaps"], bool):
+        errors.add(f"{path}.has_gaps", "must be a boolean")
+    if "truncated_by" in value:
+        truncated_by = value["truncated_by"]
+        if not isinstance(truncated_by, list):
+            errors.add(f"{path}.truncated_by", "must be an array")
+        else:
+            for index, item in enumerate(truncated_by):
+                _check_enum(errors, f"{path}.truncated_by[{index}]", item, ("events", "bytes", "age"))
     if "continuity" in value:
         _check_enum(
-            errors,
-            f"{path}.continuity",
-            value["continuity"],
+            errors, f"{path}.continuity", value["continuity"],
             ("restart-safe", "session-only", "unknown"),
         )
-    if "more_events" in value:
-        _check_enum(
-            errors,
-            f"{path}.more_events",
-            value["more_events"],
-            ("available", "none", "unknown"),
-        )
+    if "event_visibility" in value:
+        visibility = value["event_visibility"]
+        if not isinstance(visibility, dict):
+            errors.add(f"{path}.event_visibility", "must be an object mapping event type to visibility")
+        else:
+            for key, item in visibility.items():
+                _check_enum(
+                    errors, f"{path}.event_visibility[{key!r}]", item,
+                    ("history-and-live", "live-only", "unavailable", "unknown"),
+                )
 
 
-def _check_budgets(errors: _Errors, path: str, value: Any) -> None:
-    fields = ("max_events", "max_bytes")
+def _check_continuation_binding(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("participant_id", "room_id", "continuity_scope_id", "trigger_event_id")
     if not _check_closed_object(errors, path, value, fields, fields):
         return
     for name in fields:
-        if name not in value:
-            continue
-        amount = value[name]
-        if not _is_integer(amount):
-            errors.add(f"{path}.{name}", "must be an integer")
-        elif amount < 1:
-            errors.add(f"{path}.{name}", "must be a positive event/byte budget (>= 1)")
+        if name in value:
+            _check_nes(errors, f"{path}.{name}", value[name])
+
+
+def _check_continuation(errors: _Errors, path: str, value: Any) -> None:
+    required = (
+        "handle_id", "bound_to", "can_fetch_before", "can_fetch_after",
+        "can_fetch_around_event", "max_events_per_fetch", "max_bytes_per_fetch",
+    )
+    allowed = required + ("expires_at",)
+    if not _check_closed_object(errors, path, value, required, allowed):
+        return
+    if "handle_id" in value:
+        _check_nes(errors, f"{path}.handle_id", value["handle_id"])
+    if "bound_to" in value:
+        _check_continuation_binding(errors, f"{path}.bound_to", value["bound_to"])
+    for name in ("can_fetch_before", "can_fetch_after", "can_fetch_around_event"):
+        if name in value and not isinstance(value[name], bool):
+            errors.add(f"{path}.{name}", "must be a boolean")
+    for name in ("max_events_per_fetch", "max_bytes_per_fetch"):
+        if name in value:
+            amount = value[name]
+            if not _is_integer(amount):
+                errors.add(f"{path}.{name}", "must be an integer")
+            elif amount < 1:
+                errors.add(f"{path}.{name}", "must be a positive budget (>= 1)")
+    if "expires_at" in value:
+        _check_nes(errors, f"{path}.expires_at", value["expires_at"])
 
 
 def validate_attention_request(doc: Any) -> list[str]:
     """Mirror of schemas/v2/attention-request.schema.json (I-010A)."""
     errors = _Errors()
-    allowed = (
-        "interface",
-        "version",
-        "request_id",
-        "self",
-        "room",
-        "actors",
-        "events",
-        "trigger_event_id",
-        "coverage",
-        "budgets",
-        "expansion",
+    required = (
+        "schema_version", "request_id", "self", "room",
+        "actors", "events", "trigger_event_id", "coverage",
     )
-    if not _check_closed_object(errors, "request", doc, allowed, allowed):
+    allowed = required + ("continuation",)
+    if not _check_closed_object(errors, "request", doc, required, allowed):
         return list(errors)
-    _check_envelope(errors, doc, "AttentionRequestV2")
+    if doc.get("schema_version") != 2:
+        errors.add("schema_version", "must be the number 2")
+    _check_nes(errors, "request_id", doc.get("request_id"))
 
     self_binding = doc.get("self")
     if "self" in doc and _check_closed_object(
-        errors,
-        "self",
-        self_binding,
-        ("participant_id", "actor_id", "attestation"),
-        ("participant_id", "actor_id", "attestation", "loose"),
+        errors, "self", self_binding,
+        ("participant_id", "actor_id"),
+        ("participant_id", "actor_id", "names", "role", "description"),
     ):
         if "participant_id" in self_binding:
             _check_nes(errors, "self.participant_id", self_binding["participant_id"])
         if "actor_id" in self_binding:
             _check_nes(errors, "self.actor_id", self_binding["actor_id"])
-        if "attestation" in self_binding:
-            _check_enum(
-                errors, "self.attestation", self_binding["attestation"], ("transport", "host")
-            )
-        if "loose" in self_binding:
-            loose = self_binding["loose"]
-            if _check_closed_object(
-                errors, "self.loose", loose, (), ("names", "role", "description")
-            ):
-                if "names" in loose:
-                    names = loose["names"]
-                    if not isinstance(names, list):
-                        errors.add("self.loose.names", "must be an array")
-                    else:
-                        for index, name in enumerate(names):
-                            _check_nes(errors, f"self.loose.names[{index}]", name)
-                if "role" in loose and not isinstance(loose["role"], str):
-                    errors.add("self.loose.role", "must be a string")
-                if "description" in loose and not isinstance(loose["description"], str):
-                    errors.add("self.loose.description", "must be a string")
+        if "names" in self_binding:
+            names = self_binding["names"]
+            if not isinstance(names, list):
+                errors.add("self.names", "must be an array")
+            else:
+                for index, name in enumerate(names):
+                    if not isinstance(name, str):
+                        errors.add(f"self.names[{index}]", "must be a string")
+        if "role" in self_binding and not isinstance(self_binding["role"], str):
+            errors.add("self.role", "must be a string")
+        if "description" in self_binding and not isinstance(self_binding["description"], str):
+            errors.add("self.description", "must be a string")
 
     room = doc.get("room")
     if "room" in doc and _check_closed_object(
-        errors, "room", room, ("room_id", "continuity_scope"), ("room_id", "continuity_scope")
+        errors, "room", room,
+        ("platform", "id", "continuity_scope_id"),
+        ("platform", "id", "continuity_scope_id", "name", "kind"),
     ):
-        if "room_id" in room:
-            _check_nes(errors, "room.room_id", room["room_id"])
-        if "continuity_scope" in room:
-            _check_nes(errors, "room.continuity_scope", room["continuity_scope"])
+        if "platform" in room:
+            _check_nes(errors, "room.platform", room["platform"])
+        if "id" in room:
+            _check_nes(errors, "room.id", room["id"])
+        if "continuity_scope_id" in room:
+            _check_nes(errors, "room.continuity_scope_id", room["continuity_scope_id"])
+        if "name" in room and not isinstance(room["name"], str):
+            errors.add("room.name", "must be a string")
+        if "kind" in room:
+            _check_enum(errors, "room.kind", room["kind"], ("group", "direct", "unknown"))
 
-    actors = doc.get("actors")
     if "actors" in doc:
-        if not isinstance(actors, list):
-            errors.add("actors", "must be an array of observed/referenced actors")
-        else:
-            for index, actor in enumerate(actors):
-                path = f"actors[{index}]"
-                if _check_closed_object(
-                    errors,
-                    path,
-                    actor,
-                    ("actor_id", "relation"),
-                    ("actor_id", "relation", "display_name"),
-                ):
-                    if "actor_id" in actor:
-                        _check_nes(errors, f"{path}.actor_id", actor["actor_id"])
-                    if "relation" in actor:
-                        _check_enum(
-                            errors, f"{path}.relation", actor["relation"], ("observed", "referenced")
-                        )
-                    if "display_name" in actor and not isinstance(actor["display_name"], str):
-                        errors.add(f"{path}.display_name", "must be a string")
+        _check_actor_map(errors, "actors", doc["actors"])
 
     events = doc.get("events")
     if "events" in doc:
         if not isinstance(events, list):
-            errors.add("events", "must be an array of native events")
+            errors.add("events", "must be an array of typed events")
         elif len(events) < 1:
             errors.add("events", "must contain at least one event")
         else:
@@ -812,15 +826,8 @@ def validate_attention_request(doc: Any) -> list[str]:
         _check_nes(errors, "trigger_event_id", doc["trigger_event_id"])
     if "coverage" in doc:
         _check_coverage(errors, "coverage", doc["coverage"])
-    if "budgets" in doc:
-        _check_budgets(errors, "budgets", doc["budgets"])
-
-    expansion = doc.get("expansion")
-    if "expansion" in doc and _check_closed_object(
-        errors, "expansion", expansion, ("available",), ("available",)
-    ):
-        if "available" in expansion and not isinstance(expansion["available"], bool):
-            errors.add("expansion.available", "must be a boolean")
+    if "continuation" in doc:
+        _check_continuation(errors, "continuation", doc["continuation"])
     return list(errors)
 
 
@@ -835,13 +842,13 @@ def _check_confidence(errors: _Errors, path: str, value: Any) -> None:
         errors.add(path, "must be a finite number within [0, 1]")
 
 
-def _check_advice(errors: _Errors, path: str, value: Any) -> None:
+def _check_attention_advice(errors: _Errors, path: str, value: Any) -> None:
     if not _check_closed_object(
-        errors, path, value, ("summary", "evidence_event_ids"), ("summary", "evidence_event_ids")
+        errors, path, value, ("note", "evidence_event_ids"), ("note", "evidence_event_ids")
     ):
         return
-    if "summary" in value:
-        _check_nes(errors, f"{path}.summary", value["summary"])
+    if "note" in value:
+        _check_nes(errors, f"{path}.note", value["note"])
     if "evidence_event_ids" in value:
         cited = value["evidence_event_ids"]
         if not isinstance(cited, list) or len(cited) < 1:
@@ -849,6 +856,25 @@ def _check_advice(errors: _Errors, path: str, value: Any) -> None:
         else:
             for index, event_id in enumerate(cited):
                 _check_nes(errors, f"{path}.evidence_event_ids[{index}]", event_id)
+
+
+def _check_attention_advice_list(errors: _Errors, path: str, value: Any) -> None:
+    if not isinstance(value, list):
+        errors.add(path, "must be an array of attention-advice objects")
+        return
+    for index, advice in enumerate(value):
+        _check_attention_advice(errors, f"{path}[{index}]", advice)
+
+
+def _check_classifier_audit(errors: _Errors, path: str, value: Any) -> None:
+    if not _check_closed_object(errors, path, value, ("name",), ("name", "provider", "model")):
+        return
+    if "name" in value:
+        _check_nes(errors, f"{path}.name", value["name"])
+    if "provider" in value:
+        _check_nes(errors, f"{path}.provider", value["provider"])
+    if "model" in value:
+        _check_nes(errors, f"{path}.model", value["model"])
 
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -899,7 +925,7 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
     """
     if not _check_closed_object(
         errors,
-        "routing",
+        "routing_audit",
         routing,
         ("valve", "override_cause", "margin_status"),
         ("valve", "override_cause", "margin_status", "effective_margin", "margin_source"),
@@ -907,37 +933,37 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
         return None
     valve = routing.get("valve")
     if "valve" in routing:
-        _check_enum(errors, "routing.valve", valve, ROUTING_VALVES)
+        _check_enum(errors, "routing_audit.valve", valve, ROUTING_VALVES)
     if "override_cause" in routing:
-        _check_enum(errors, "routing.override_cause", routing["override_cause"], OVERRIDE_CAUSES)
+        _check_enum(errors, "routing_audit.override_cause", routing["override_cause"], OVERRIDE_CAUSES)
     if "margin_status" in routing:
-        _check_enum(errors, "routing.margin_status", routing["margin_status"], MARGIN_STATUSES)
+        _check_enum(errors, "routing_audit.margin_status", routing["margin_status"], MARGIN_STATUSES)
     if "effective_margin" in routing:
         margin = routing["effective_margin"]
         if not _is_number(margin):
-            errors.add("routing.effective_margin", "must be a number")
+            errors.add("routing_audit.effective_margin", "must be a number")
         elif not math.isfinite(margin) or not (0.0 < float(margin) <= 1.0):
             errors.add(
-                "routing.effective_margin", "must be a finite number within (0, 1]"
+                "routing_audit.effective_margin", "must be a finite number within (0, 1]"
             )
     if "margin_source" in routing:
-        _check_nes(errors, "routing.margin_source", routing["margin_source"])
+        _check_nes(errors, "routing_audit.margin_source", routing["margin_source"])
 
     if valve == "margin-defer":
         if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "margin":
             errors.add(
-                "routing.override_cause",
+                "routing_audit.override_cause",
                 "valve margin-defer requires override cause 'margin'",
             )
         if routing.get("margin_status") in MARGIN_STATUSES and routing["margin_status"] != "active":
             errors.add(
-                "routing.margin_status",
+                "routing_audit.margin_status",
                 "valve margin-defer requires margin status 'active'; a retired "
                 "margin cannot apply",
             )
         if "effective_margin" not in routing:
             errors.add(
-                "routing.effective_margin",
+                "routing_audit.effective_margin",
                 "required: a margin applied exactly when the valve is "
                 "margin-defer, and the applied margin must record its "
                 "effective width",
@@ -945,7 +971,7 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
     elif valve in ("none", "classifier-defer"):
         if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "none":
             errors.add(
-                "routing.override_cause",
+                "routing_audit.override_cause",
                 f"valve {valve!r} requires override cause 'none'",
             )
     elif valve == "policy-defer":
@@ -954,19 +980,19 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
             "recoverability-unproven",
         ):
             errors.add(
-                "routing.override_cause",
+                "routing_audit.override_cause",
                 "valve policy-defer requires override cause "
                 "'suppression-disabled' or 'recoverability-unproven'",
             )
     if valve != "margin-defer":
         if "effective_margin" in routing:
             errors.add(
-                "routing.effective_margin",
+                "routing_audit.effective_margin",
                 "forbidden: no margin applied unless the valve is margin-defer",
             )
         if "margin_source" in routing:
             errors.add(
-                "routing.margin_source",
+                "routing_audit.margin_source",
                 "forbidden: the trusted margin source may appear only on a "
                 "margin-applied (valve margin-defer) decision",
             )
@@ -975,26 +1001,20 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
 
 def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     errors = _Errors()
-    allowed = (
-        "interface",
-        "version",
-        "request_id",
+    required = (
         "status",
+        "request_id",
         "classifier_disposition",
         "effective_disposition",
-        "routing",
+        "routing_audit",
         "reasons",
         "evidence_event_ids",
-        "classifier_audit",
-        "legacy_confidence",
-        "advice",
+        "classifier",
     )
-    required = tuple(
-        name for name in allowed if name not in ("legacy_confidence", "advice")
-    )
+    allowed = required + ("legacy_verdict_confidences", "attention_advice")
     if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
-    _check_envelope(errors, doc, "AttentionDecisionV2")
+    _check_nes(errors, "request_id", doc.get("request_id"))
 
     classifier = doc.get("classifier_disposition")
     effective = doc.get("effective_disposition")
@@ -1003,9 +1023,9 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     if "effective_disposition" in doc:
         _check_enum(errors, "effective_disposition", effective, DISPOSITIONS)
 
-    routing = doc.get("routing")
+    routing = doc.get("routing_audit")
     valve = None
-    if "routing" in doc:
+    if "routing_audit" in doc:
         valve = _check_routing_audit(errors, routing)
 
     if "reasons" in doc:
@@ -1024,37 +1044,19 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
             for index, event_id in enumerate(cited):
                 _check_nes(errors, f"evidence_event_ids[{index}]", event_id)
 
-    audit = doc.get("classifier_audit")
-    if "classifier_audit" in doc and _check_closed_object(
-        errors,
-        "classifier_audit",
-        audit,
-        ("model",),
-        ("model", "prompt_sha256", "latency_ms"),
-    ):
-        if "model" in audit:
-            _check_nes(errors, "classifier_audit.model", audit["model"])
-        if "prompt_sha256" in audit:
-            digest = audit["prompt_sha256"]
-            if not isinstance(digest, str) or not _SHA256_PATTERN.search(digest):
-                errors.add("classifier_audit.prompt_sha256", "must be a 64-char lowercase hex digest")
-        if "latency_ms" in audit:
-            latency = audit["latency_ms"]
-            if not _is_number(latency):
-                errors.add("classifier_audit.latency_ms", "must be a number")
-            elif latency < 0:
-                errors.add("classifier_audit.latency_ms", "must be >= 0")
+    if "classifier" in doc:
+        _check_classifier_audit(errors, "classifier", doc["classifier"])
 
-    confidences = doc.get("legacy_confidence")
-    if "legacy_confidence" in doc and _check_closed_object(
-        errors, "legacy_confidence", confidences, VERDICT_KEYS, VERDICT_KEYS
+    confidences = doc.get("legacy_verdict_confidences")
+    if "legacy_verdict_confidences" in doc and _check_closed_object(
+        errors, "legacy_verdict_confidences", confidences, VERDICT_KEYS, VERDICT_KEYS
     ):
         for key in VERDICT_KEYS:
             if key in confidences:
-                _check_confidence(errors, f"legacy_confidence.{key}", confidences[key])
+                _check_confidence(errors, f"legacy_verdict_confidences.{key}", confidences[key])
 
-    if "advice" in doc:
-        _check_advice(errors, "advice", doc["advice"])
+    if "attention_advice" in doc:
+        _check_attention_advice_list(errors, "attention_advice", doc["attention_advice"])
 
     # FR-007 conditional requirement: the legacy vector is required exactly
     # when the classifier disposition is SUPPRESS while the routing audit
@@ -1064,10 +1066,10 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         classifier == "SUPPRESS"
         and isinstance(routing, dict)
         and routing.get("margin_status") == "active"
-        and "legacy_confidence" not in doc
+        and "legacy_verdict_confidences" not in doc
     ):
         errors.add(
-            "legacy_confidence",
+            "legacy_verdict_confidences",
             "required: a margin-active candidate SUPPRESS must carry the "
             "legacy verdict confidence vector (FR-007)",
         )
@@ -1085,13 +1087,13 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         else:
             if valve is not None and valve not in rule["valves"]:
                 errors.add(
-                    "routing.valve",
+                    "routing_audit.valve",
                     f"transition {classifier}->{effective} requires the applied "
                     f"valve in {rule['valves']}",
                 )
-            if not rule["advice"] and "advice" in doc:
+            if not rule["advice"] and "attention_advice" in doc:
                 errors.add(
-                    "advice",
+                    "attention_advice",
                     "only allowed when the classifier disposition is WAKE (FR-013)",
                 )
     return list(errors)
@@ -1099,10 +1101,10 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
 
 def _validate_decision_bypass(doc: dict[str, Any]) -> list[str]:
     errors = _Errors()
-    fields = ("interface", "version", "request_id", "status", "cause")
+    fields = ("status", "request_id", "cause")
     if not _check_closed_object(errors, "decision", doc, fields, fields):
         return list(errors)
-    _check_envelope(errors, doc, "AttentionDecisionV2")
+    _check_nes(errors, "request_id", doc.get("request_id"))
     if "cause" in doc and doc["cause"] != "preattention-disabled":
         errors.add("cause", "must be exactly 'preattention-disabled'")
     return list(errors)
@@ -1110,55 +1112,98 @@ def _validate_decision_bypass(doc: dict[str, Any]) -> list[str]:
 
 def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
     errors = _Errors()
-    fields = ("interface", "version", "request_id", "status", "error")
-    if not _check_closed_object(errors, "decision", doc, fields, fields):
+    required = ("status", "error")
+    allowed = required + ("request_id", "classifier")
+    if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
-    _check_envelope(errors, doc, "AttentionDecisionV2")
+    if "request_id" in doc:
+        _check_nes(errors, "request_id", doc["request_id"])
     error = doc.get("error")
     if "error" in doc and _check_closed_object(
-        errors, "error", error, ("kind",), ("kind", "detail")
+        errors, "error", error, ("code",), ("code", "detail")
     ):
-        if "kind" in error:
-            _check_enum(errors, "error.kind", error["kind"], ERROR_KINDS)
+        if "code" in error:
+            _check_enum(errors, "error.code", error["code"], ERROR_KINDS)
         if "detail" in error and not isinstance(error["detail"], str):
             errors.add("error.detail", "must be a string")
+    if "classifier" in doc:
+        _check_classifier_audit(errors, "classifier", doc["classifier"])
     return list(errors)
 
 
 def validate_participant_wake(doc: Any) -> list[str]:
     """Mirror of schemas/v2/participant-wake.schema.json (I-010C)."""
     errors = _Errors()
-    allowed = ("interface", "version", "request_id", "source", "observation", "advice", "budgets")
-    required = ("interface", "version", "request_id", "source", "observation", "budgets")
+    required = ("request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention")
+    allowed = required + ("continuation",)
     if not _check_closed_object(errors, "wake", doc, required, allowed):
         return list(errors)
-    _check_envelope(errors, doc, "ParticipantWakeV2")
-    source = doc.get("source")
-    if "source" in doc:
-        _check_enum(errors, "source", source, WAKE_SOURCES)
-    if "observation" in doc:
-        for message in validate_attention_request(doc["observation"]):
-            errors.add("observation", message)
-    if "budgets" in doc:
-        _check_budgets(errors, "budgets", doc["budgets"])
-    if "advice" in doc:
-        _check_advice(errors, "advice", doc["advice"])
-        if source != "WAKE":
+    _check_nes(errors, "request_id", doc.get("request_id"))
+
+    if "self" in doc and _check_closed_object(
+        errors, "self", doc["self"],
+        ("participant_id", "actor_id"),
+        ("participant_id", "actor_id", "names", "role", "description"),
+    ):
+        self_binding = doc["self"]
+        if "participant_id" in self_binding:
+            _check_nes(errors, "self.participant_id", self_binding["participant_id"])
+        if "actor_id" in self_binding:
+            _check_nes(errors, "self.actor_id", self_binding["actor_id"])
+    if "room" in doc and _check_closed_object(
+        errors, "room", doc["room"],
+        ("platform", "id", "continuity_scope_id"),
+        ("platform", "id", "continuity_scope_id", "name", "kind"),
+    ):
+        room = doc["room"]
+        if "platform" in room:
+            _check_nes(errors, "room.platform", room["platform"])
+        if "id" in room:
+            _check_nes(errors, "room.id", room["id"])
+        if "continuity_scope_id" in room:
+            _check_nes(errors, "room.continuity_scope_id", room["continuity_scope_id"])
+    if "actors" in doc:
+        _check_actor_map(errors, "actors", doc["actors"])
+    events = doc.get("events")
+    if "events" in doc:
+        if not isinstance(events, list):
+            errors.add("events", "must be an array of typed events")
+        elif len(events) < 1:
+            errors.add("events", "must contain at least one event")
+        else:
+            for index, event in enumerate(events):
+                _check_event(errors, f"events[{index}]", event)
+    if "trigger_event_id" in doc:
+        _check_nes(errors, "trigger_event_id", doc["trigger_event_id"])
+    if "coverage" in doc:
+        _check_coverage(errors, "coverage", doc["coverage"])
+    if "continuation" in doc:
+        _check_continuation(errors, "continuation", doc["continuation"])
+
+    attention = doc.get("attention")
+    source = None
+    if "attention" in doc and _check_closed_object(
+        errors, "attention", attention, ("source",), ("source", "advice", "evidence_event_ids")
+    ):
+        source = attention.get("source")
+        if "source" in attention:
+            _check_enum(errors, "attention.source", source, WAKE_SOURCES)
+        if "advice" in attention:
+            _check_attention_advice_list(errors, "attention.advice", attention["advice"])
+        if "evidence_event_ids" in attention:
+            cited = attention["evidence_event_ids"]
+            if not isinstance(cited, list):
+                errors.add("attention.evidence_event_ids", "must be an array of event IDs")
+            else:
+                for index, event_id in enumerate(cited):
+                    _check_nes(errors, f"attention.evidence_event_ids[{index}]", event_id)
+        if source != "WAKE" and ("advice" in attention or "evidence_event_ids" in attention):
             errors.add(
-                "advice",
+                "attention.advice",
                 "only allowed when source is 'WAKE' (FR-013): DEFER, "
                 "ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free",
             )
     return list(errors)
-
-
-def _check_binding(errors: _Errors, path: str, value: Any) -> None:
-    fields = ("participant_id", "room_id", "continuity_scope", "trigger_event_id")
-    if not _check_closed_object(errors, path, value, fields, fields):
-        return
-    for name in fields:
-        if name in value:
-            _check_nes(errors, f"{path}.{name}", value[name])
 
 
 def validate_context_continuation(doc: Any) -> list[str]:
@@ -1166,92 +1211,104 @@ def validate_context_continuation(doc: Any) -> list[str]:
     errors = _Errors()
     if not isinstance(doc, dict):
         return ["continuation: must be an object"]
-    kind = doc.get("kind")
-    if kind == "fetch-request":
-        fields = (
-            "interface",
-            "version",
-            "kind",
-            "request_id",
-            "handle",
-            "binding",
-            "cursor",
-            "expires_at",
-            "budgets",
+    if "actors" in doc or "coverage" in doc:
+        # ContextPage: identity-bearing, carries actors/events/coverage.
+        required = (
+            "request_id", "handle_id", "room_id", "continuity_scope_id",
+            "direction", "anchor_event_id", "actors", "events", "coverage",
         )
-        if not _check_closed_object(errors, "continuation", doc, fields, fields):
+        allowed = required + ("next_cursor",)
+        if not _check_closed_object(errors, "continuation", doc, required, allowed):
             return list(errors)
-        _check_envelope(errors, doc, "ContextContinuationV2")
-        if "handle" in doc:
-            _check_nes(errors, "handle", doc["handle"])
-        if "binding" in doc:
-            _check_binding(errors, "binding", doc["binding"])
-        if "cursor" in doc:
-            cursor = doc["cursor"]
-            if cursor is not None and not _non_empty_string(cursor):
-                errors.add("cursor", "must be a non-empty string or null")
-        if "expires_at" in doc:
-            _check_nes(errors, "expires_at", doc["expires_at"])
-        if "budgets" in doc:
-            _check_budgets(errors, "budgets", doc["budgets"])
-        return list(errors)
-    if kind == "fetch-page":
-        fields = (
-            "interface",
-            "version",
-            "kind",
-            "request_id",
-            "handle",
-            "events",
-            "cursor_next",
-            "coverage",
-        )
-        if not _check_closed_object(errors, "continuation", doc, fields, fields):
-            return list(errors)
-        _check_envelope(errors, doc, "ContextContinuationV2")
-        if "handle" in doc:
-            _check_nes(errors, "handle", doc["handle"])
+        if "request_id" in doc:
+            _check_nes(errors, "request_id", doc["request_id"])
+        if "handle_id" in doc:
+            _check_nes(errors, "handle_id", doc["handle_id"])
+        if "room_id" in doc:
+            _check_nes(errors, "room_id", doc["room_id"])
+        if "continuity_scope_id" in doc:
+            _check_nes(errors, "continuity_scope_id", doc["continuity_scope_id"])
+        if "direction" in doc:
+            _check_enum(errors, "direction", doc["direction"], ("before", "after", "around"))
+        if "anchor_event_id" in doc:
+            _check_nes(errors, "anchor_event_id", doc["anchor_event_id"])
+        if "actors" in doc:
+            _check_actor_map(errors, "actors", doc["actors"])
         if "events" in doc:
             events = doc["events"]
             if not isinstance(events, list):
-                errors.add("events", "must be an array of native events")
+                errors.add("events", "must be an array of typed events")
             else:
                 for index, event in enumerate(events):
                     _check_event(errors, f"events[{index}]", event)
-        if "cursor_next" in doc:
-            cursor = doc["cursor_next"]
-            if cursor is not None and not _non_empty_string(cursor):
-                errors.add("cursor_next", "must be a non-empty string or null")
         if "coverage" in doc:
             _check_coverage(errors, "coverage", doc["coverage"])
+        if "next_cursor" in doc:
+            _check_nes(errors, "next_cursor", doc["next_cursor"])
         return list(errors)
-    errors.add("kind", "must be exactly one of 'fetch-request', 'fetch-page'")
+    # ContextFetch: directional anchor-bearing fetch request.
+    required = ("request_id", "handle_id", "direction", "max_events", "max_bytes")
+    allowed = required + ("anchor_event_id", "cursor")
+    if not _check_closed_object(errors, "continuation", doc, required, allowed):
+        return list(errors)
+    if "request_id" in doc:
+        _check_nes(errors, "request_id", doc["request_id"])
+    if "handle_id" in doc:
+        _check_nes(errors, "handle_id", doc["handle_id"])
+    direction = doc.get("direction")
+    if "direction" in doc:
+        _check_enum(errors, "direction", direction, ("before", "after", "around"))
+    if "anchor_event_id" in doc:
+        _check_nes(errors, "anchor_event_id", doc["anchor_event_id"])
+    elif direction == "around":
+        errors.add("anchor_event_id", "required when direction is 'around'")
+    if "cursor" in doc:
+        _check_nes(errors, "cursor", doc["cursor"])
+    for name in ("max_events", "max_bytes"):
+        if name in doc:
+            amount = doc[name]
+            if not _is_integer(amount):
+                errors.add(name, "must be an integer")
+            elif amount < 1:
+                errors.add(name, "must be a positive budget (>= 1)")
     return list(errors)
 
 
 def _check_observation_body(errors: _Errors, path: str, value: Any) -> None:
-    fields = ("event_count", "visibility")
-    if not _check_closed_object(errors, path, value, fields, fields):
+    required = ("schema_version", "trigger_event_id", "continuity_scope_id", "event_count", "byte_count", "coverage", "included_event_ids")
+    if not _check_closed_object(errors, path, value, required, required):
         return
-    if "event_count" in value:
-        count = value["event_count"]
-        if not _is_integer(count):
-            errors.add(f"{path}.event_count", "must be an integer")
-        elif count < 0:
-            errors.add(f"{path}.event_count", "must be >= 0")
-    if "visibility" in value:
-        _check_enum(
-            errors, f"{path}.visibility", value["visibility"], ("complete", "partial", "unknown")
-        )
+    if value.get("schema_version") != 2:
+        errors.add(f"{path}.schema_version", "must be the number 2")
+    if "trigger_event_id" in value:
+        _check_nes(errors, f"{path}.trigger_event_id", value["trigger_event_id"])
+    if "continuity_scope_id" in value:
+        _check_nes(errors, f"{path}.continuity_scope_id", value["continuity_scope_id"])
+    for name in ("event_count", "byte_count"):
+        if name in value:
+            count = value[name]
+            if not _is_integer(count):
+                errors.add(f"{path}.{name}", "must be an integer")
+            elif count < 0:
+                errors.add(f"{path}.{name}", "must be >= 0")
+    if "coverage" in value:
+        _check_coverage(errors, f"{path}.coverage", value["coverage"])
+    if "included_event_ids" in value:
+        cited = value["included_event_ids"]
+        if not isinstance(cited, list):
+            errors.add(f"{path}.included_event_ids", "must be an array of event IDs")
+        else:
+            for index, event_id in enumerate(cited):
+                _check_nes(errors, f"{path}.included_event_ids[{index}]", event_id)
 
 
 def _attention_body_variant(value: Any) -> str | None:
     """Which of the three mutually exclusive attention outcomes this is."""
     if not isinstance(value, dict):
         return None
-    if "error_kind" in value:
+    if "error" in value:
         return "error"
-    if "classifier_not_invoked" in value or "bypass_provenance" in value:
+    if "classifier_not_invoked" in value:
         return "bypass"
     return "classifier"
 
@@ -1262,7 +1319,7 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
         errors.add(path, "must be an object")
         return
     if variant == "classifier":
-        fields = ("classifier_disposition", "effective_disposition", "policy_provenance")
+        fields = ("classifier_disposition", "effective_disposition", "classifier", "evidence_event_ids", "routing_audit")
         if not _check_closed_object(errors, path, value, fields, fields):
             return
         if "classifier_disposition" in value:
@@ -1273,52 +1330,63 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
             _check_enum(
                 errors, f"{path}.effective_disposition", value["effective_disposition"], DISPOSITIONS
             )
-        if "policy_provenance" in value:
-            _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
+        if "classifier" in value:
+            _check_classifier_audit(errors, f"{path}.classifier", value["classifier"])
+        if "evidence_event_ids" in value:
+            cited = value["evidence_event_ids"]
+            if not isinstance(cited, list):
+                errors.add(f"{path}.evidence_event_ids", "must be an array of event IDs")
+            else:
+                for index, event_id in enumerate(cited):
+                    _check_nes(errors, f"{path}.evidence_event_ids[{index}]", event_id)
+        if "routing_audit" in value:
+            _check_routing_audit(errors, value["routing_audit"])
         return
     if variant == "error":
-        if not _check_closed_object(errors, path, value, ("error_kind",), ("error_kind", "detail")):
+        if not _check_closed_object(errors, path, value, ("error",), ("error",)):
             return
-        if "error_kind" in value:
-            _check_enum(errors, f"{path}.error_kind", value["error_kind"], ERROR_KINDS)
-        if "detail" in value and not isinstance(value["detail"], str):
-            errors.add(f"{path}.detail", "must be a string")
+        error = value.get("error")
+        if _check_closed_object(errors, f"{path}.error", error, ("code",), ("code", "detail")):
+            if "code" in error:
+                _check_enum(errors, f"{path}.error.code", error["code"], ERROR_KINDS)
+            if "detail" in error and not isinstance(error["detail"], str):
+                errors.add(f"{path}.error.detail", "must be a string")
         return
-    fields = ("classifier_not_invoked", "bypass_provenance")
+    fields = ("classifier_not_invoked", "cause", "policy_provenance")
     if not _check_closed_object(errors, path, value, fields, fields):
         return
     if "classifier_not_invoked" in value and value["classifier_not_invoked"] is not True:
         errors.add(f"{path}.classifier_not_invoked", "must be exactly true on a bypass record")
-    if "bypass_provenance" in value:
-        provenance = value["bypass_provenance"]
-        if _check_closed_object(
-            errors,
-            f"{path}.bypass_provenance",
-            provenance,
-            ("policy", "attested_by"),
-            ("policy", "attested_by"),
-        ):
-            if "policy" in provenance and provenance["policy"] != "preattention-disabled":
-                errors.add(
-                    f"{path}.bypass_provenance.policy", "must be exactly 'preattention-disabled'"
-                )
-            if "attested_by" in provenance:
-                _check_nes(errors, f"{path}.bypass_provenance.attested_by", provenance["attested_by"])
+    if "cause" in value and value["cause"] != "preattention-disabled":
+        errors.add(f"{path}.cause", "must be exactly 'preattention-disabled'")
+    if "policy_provenance" in value:
+        _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
 
 
 def _check_participant_host_body(errors: _Errors, path: str, value: Any) -> None:
-    if not _check_closed_object(errors, path, value, ("outcome",), ("outcome", "action_ref")):
+    fields = ("wake_source", "packet_event_count", "packet_byte_count", "delivered_event_ids", "expansion_calls", "invoked", "outcome")
+    if not _check_closed_object(errors, path, value, fields, fields):
         return
-    outcome = value.get("outcome")
+    if "wake_source" in value:
+        _check_enum(errors, f"{path}.wake_source", value["wake_source"], WAKE_SOURCES)
+    for name in ("packet_event_count", "packet_byte_count", "expansion_calls"):
+        if name in value:
+            amount = value[name]
+            if not _is_integer(amount):
+                errors.add(f"{path}.{name}", "must be an integer")
+            elif amount < 0:
+                errors.add(f"{path}.{name}", "must be >= 0")
+    if "delivered_event_ids" in value:
+        cited = value["delivered_event_ids"]
+        if not isinstance(cited, list):
+            errors.add(f"{path}.delivered_event_ids", "must be an array of event IDs")
+        else:
+            for index, event_id in enumerate(cited):
+                _check_nes(errors, f"{path}.delivered_event_ids[{index}]", event_id)
+    if "invoked" in value and not isinstance(value["invoked"], bool):
+        errors.add(f"{path}.invoked", "must be a boolean")
     if "outcome" in value:
-        _check_enum(errors, f"{path}.outcome", outcome, ("contributed", "silence"))
-    if outcome == "contributed":
-        if "action_ref" not in value:
-            errors.add(f"{path}.action_ref", "required when outcome is 'contributed'")
-    elif "action_ref" in value:
-        errors.add(f"{path}.action_ref", "only allowed when outcome is 'contributed'")
-    if "action_ref" in value and outcome == "contributed":
-        _check_nes(errors, f"{path}.action_ref", value["action_ref"])
+        _check_enum(errors, f"{path}.outcome", value["outcome"], ("sent", "silent", "unknown"))
 
 
 def _check_transport_body(errors: _Errors, path: str, value: Any) -> None:
@@ -1352,10 +1420,10 @@ def validate_attention_receipt(doc: Any) -> list[str]:
     ``validate_receipt_stream``.
     """
     errors = _Errors()
-    fields = ("interface", "version", "request_id", "stage", "writer", "body")
+    fields = ("request_id", "stage", "writer", "body")
     if not _check_closed_object(errors, "receipt", doc, fields, fields):
         return list(errors)
-    _check_envelope(errors, doc, "AttentionReceiptV2")
+    _check_nes(errors, "request_id", doc.get("request_id"))
     stage = doc.get("stage")
     if "stage" in doc:
         _check_enum(errors, "stage", stage, RECEIPT_STAGES)
@@ -1396,9 +1464,9 @@ def _event_ids(doc: dict[str, Any]) -> list[str]:
     if not isinstance(events, list):
         return []
     return [
-        event["event_id"]
+        event["id"]
         for event in events
-        if isinstance(event, dict) and isinstance(event.get("event_id"), str)
+        if isinstance(event, dict) and isinstance(event.get("id"), str)
     ]
 
 
@@ -1475,23 +1543,34 @@ def check_trigger_membership(doc: dict[str, Any]) -> list[str]:
     return []
 
 
+def _advice_citations(advice_doc: dict[str, Any]) -> list[str]:
+    """Collect every evidence-event-ID citation from either advice shape:
+    a decision's ``attention_advice`` array, or a wake's ``attention.advice``
+    array plus its sibling ``attention.evidence_event_ids``."""
+    cited: list[str] = []
+    for item in advice_doc.get("attention_advice") or []:
+        if isinstance(item, dict) and isinstance(item.get("evidence_event_ids"), list):
+            cited.extend(e for e in item["evidence_event_ids"] if isinstance(e, str))
+    attention = advice_doc.get("attention")
+    if isinstance(attention, dict):
+        for item in attention.get("advice") or []:
+            if isinstance(item, dict) and isinstance(item.get("evidence_event_ids"), list):
+                cited.extend(e for e in item["evidence_event_ids"] if isinstance(e, str))
+        cited.extend(e for e in attention.get("evidence_event_ids") or [] if isinstance(e, str))
+    return cited
+
+
 def check_advice_citations(
     advice_doc: dict[str, Any], request_doc: dict[str, Any]
 ) -> list[str]:
     """Cross-document advice citations: every advice evidence citation must
     reference an event ID supplied in the request (FR-013)."""
-    advice = advice_doc.get("advice")
-    if not isinstance(advice, dict):
-        return []
-    cited = advice.get("evidence_event_ids")
-    if not isinstance(cited, list):
-        return []
     known = set(_event_ids(request_doc))
     return [
         f"advice.evidence_event_ids: citation {event_id!r} references no event "
         "supplied in the request"
-        for event_id in cited
-        if isinstance(event_id, str) and event_id not in known
+        for event_id in _advice_citations(advice_doc)
+        if event_id not in known
     ]
 
 
@@ -1499,17 +1578,19 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     """Fetch-time binding/expiry state (runtime-adapter-only, behavioral).
 
     ``payload`` carries the host's fetch context: ``fetch_time``, the
-    ``issued`` handle states (each with ``handle``, ``binding``,
-    ``expires_at``, and the ``cursors`` minted under that binding), and the
-    incoming fetch ``request`` document. The request document itself must
-    be schema-valid, the handle known and unexpired at fetch time, the
-    binding identical to the issued binding, and any cursor minted under
-    the same handle/binding (cross-binding cursor reuse rejects).
+    ``issued`` handle states (each with ``handle_id``, ``expires_at``, and
+    the ``cursors`` minted under that handle), and the incoming fetch
+    ``request`` document. The request document itself must be schema-valid,
+    its handle known and unexpired at fetch time, and any cursor minted
+    under that same handle (cross-binding cursor reuse rejects). The fetch
+    request carries no inline binding fields (FR-014); a handle is
+    permanently bound to its issuing continuation capability, so a known,
+    unexpired handle is by construction the correct binding.
     """
     errors: list[str] = []
     request = payload.get("request")
     errors.extend(validate_context_continuation(request))
-    if not isinstance(request, dict) or request.get("kind") != "fetch-request":
+    if not isinstance(request, dict) or "max_events" not in request:
         errors.append("fetch.request: must be a fetch-request document")
         return errors
     issued_states = payload.get("issued")
@@ -1520,27 +1601,22 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
         return errors + ["fetch.fetch_time: must be an ISO 8601 timestamp"]
 
     by_handle = {
-        state.get("handle"): state
+        state.get("handle_id"): state
         for state in issued_states
         if isinstance(state, dict)
     }
-    handle = request.get("handle")
-    state = by_handle.get(handle)
+    handle_id = request.get("handle_id")
+    state = by_handle.get(handle_id)
     if state is None:
-        errors.append(f"handle: {handle!r} was never issued for this continuity scope")
+        errors.append(f"handle_id: {handle_id!r} was never issued for this continuity scope")
         return errors
     expires_at = _parse_timestamp(state.get("expires_at"))
     if expires_at is None:
         errors.append("fetch.issued.expires_at: must be an ISO 8601 timestamp")
     elif fetch_time > expires_at:
         errors.append(
-            f"handle: {handle!r} expired at {state.get('expires_at')} and is "
+            f"handle_id: {handle_id!r} expired at {state.get('expires_at')} and is "
             "rejected at fetch time (binding-validation failure)"
-        )
-    if request.get("binding") != state.get("binding"):
-        errors.append(
-            "binding: fetch changes participant, room, continuity scope, or "
-            "trigger binding and is rejected"
         )
     cursor = request.get("cursor")
     if cursor is not None:
@@ -1548,7 +1624,7 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
         minted = minted if isinstance(minted, list) else []
         if cursor not in minted:
             other = sorted(
-                str(other_state.get("handle"))
+                str(other_state.get("handle_id"))
                 for other_state in issued_states
                 if isinstance(other_state, dict)
                 and other_state is not state
@@ -1557,11 +1633,11 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
             )
             if other:
                 errors.append(
-                    f"cursor: {cursor!r} was minted under binding of handle "
+                    f"cursor: {cursor!r} was minted under handle "
                     f"{other[0]!r}; cursor reuse across bindings is rejected"
                 )
             else:
-                errors.append(f"cursor: {cursor!r} was never minted for handle {handle!r}")
+                errors.append(f"cursor: {cursor!r} was never minted for handle {handle_id!r}")
     return errors
 
 
@@ -1644,9 +1720,9 @@ def adapter_errors(case: CorpusCase) -> list[str]:
         errors.extend(check_trigger_membership(case.document))
     elif case.partition == "advice-citation":
         if case.document is not None:
-            # A wake packet embeds its observation, so the citation rule is
-            # checked against the embedded request events.
-            errors.extend(check_advice_citations(case.document, case.document.get("observation", {})))
+            # A wake packet materializes its own events, so the citation
+            # rule is checked against its own top-level event array.
+            errors.extend(check_advice_citations(case.document, case.document))
         else:
             docs = {entry["schema"]: entry["document"] for entry in case.documents}
             errors.extend(
@@ -1873,83 +1949,66 @@ def scan_control_plane_references(
 # ---------------------------------------------------------------------------
 
 _BASE_REQUEST = {
-    "interface": "AttentionRequestV2",
-    "version": 1,
+    "schema_version": 2,
     "request_id": "req-0001",
     "self": {
         "participant_id": "vigil",
         "actor_id": "discord:9001",
-        "attestation": "transport",
-        "loose": {
-            "names": ["Vigil", "Aether"],
-            "role": "developer",
-            "description": "resident coding agent",
-        },
+        "names": ["Vigil", "Aether"],
+        "role": "developer",
+        "description": "resident coding agent",
     },
-    "room": {"room_id": "discord:room:42", "continuity_scope": "discord:room:42#2026-07"},
-    "actors": [
-        {"actor_id": "discord:1001", "relation": "observed", "display_name": "Zoe"},
-        {"actor_id": "discord:2002", "relation": "observed", "display_name": "Vigil"},
-        {"actor_id": "discord:3003", "relation": "referenced", "display_name": "Sol"},
-    ],
+    "room": {"platform": "discord", "id": "42", "continuity_scope_id": "discord:room:42#2026-07"},
+    "actors": {
+        "discord:1001": {"display_name": "Zoe", "kind": "human"},
+        "discord:2002": {"display_name": "Vigil", "kind": "bot"},
+        "discord:3003": {"display_name": "Sol", "kind": "bot"},
+    },
     "events": [
         {
-            "event_id": "e1",
-            "actor_id": "discord:1001",
-            "kind": "message",
+            "id": "e1",
+            "type": "message",
+            "author_id": "discord:1001",
             "timestamp": "2026-07-17T01:00:00Z",
-            "content": "hey @Vigil can you take the deploy?",
-            "mentions": ["discord:9001"],
+            "text": "hey @Vigil can you take the deploy?",
+            "mentioned_actor_ids": ["discord:9001"],
             "mentions_room": False,
         },
         {
-            "event_id": "e2",
-            "actor_id": "discord:2002",
-            "kind": "message",
+            "id": "e2",
+            "type": "message",
+            "author_id": "discord:2002",
             "timestamp": "2026-07-17T01:00:05Z",
-            "content": "I can take it",
-            "mentions": [],
+            "text": "I can take it",
+            "mentioned_actor_ids": [],
             "mentions_room": False,
         },
         {
-            "event_id": "e3",
-            "actor_id": "discord:1001",
-            "kind": "message",
+            "id": "e3",
+            "type": "message",
+            "author_id": "discord:1001",
             "timestamp": "2026-07-17T01:00:10Z",
-            "content": "@here deploy starting",
-            "mentions": [],
+            "text": "@here deploy starting",
+            "mentioned_actor_ids": [],
             "mentions_room": True,
         },
     ],
     "trigger_event_id": "e3",
     "coverage": {
-        "truncated": False,
-        "gaps": "none",
-        "visibility": "complete",
+        "has_more_before": False,
+        "has_more_after": False,
+        "has_gaps": False,
+        "truncated_by": [],
         "continuity": "session-only",
-        "more_events": "unknown",
+        "has_restart_gap": False,
+        "max_events": 50,
+        "max_bytes": 65536,
     },
-    "budgets": {"max_events": 50, "max_bytes": 65536},
-    "expansion": {"available": True},
 }
 
 _BASE_ADVICE = {
-    "summary": "Zoe addressed the participant directly about the deploy.",
+    "note": "Zoe addressed the participant directly about the deploy.",
     "evidence_event_ids": ["e1"],
-}
-
-_BASE_BINDING = {
-    "participant_id": "vigil",
-    "room_id": "discord:room:42",
-    "continuity_scope": "discord:room:42#2026-07",
-    "trigger_event_id": "e3",
-}
-
-_OTHER_BINDING = {
-    "participant_id": "vigil",
-    "room_id": "discord:room:77",
-    "continuity_scope": "discord:room:77#2026-07",
-    "trigger_event_id": "e9",
 }
 
 
@@ -1999,21 +2058,19 @@ def make_decision_ok(
     **overrides: Any,
 ) -> dict[str, Any]:
     doc = {
-        "interface": "AttentionDecisionV2",
-        "version": 1,
-        "request_id": "req-0001",
         "status": "ok",
+        "request_id": "req-0001",
         "classifier_disposition": classifier,
         "effective_disposition": effective,
-        "routing": make_routing(valve),
+        "routing_audit": make_routing(valve),
         "reasons": ["directly addressed about the deploy"],
         "evidence_event_ids": ["e1", "e3"],
-        "classifier_audit": {
-            "model": "openrouter/test-model",
-            "prompt_sha256": "0f" * 32,
-            "latency_ms": 412.5,
+        "classifier": {
+            "name": "nunchi-classifier",
+            "provider": "openrouter",
+            "model": "test-model",
         },
-        "legacy_confidence": {"PASS": 0.05, "ACK": 0.1, "ASK": 0.15, "SPEAK": 0.7},
+        "legacy_verdict_confidences": {"PASS": 0.05, "ACK": 0.1, "ASK": 0.15, "SPEAK": 0.7},
     }
     doc.update(overrides)
     return doc
@@ -2021,54 +2078,53 @@ def make_decision_ok(
 
 def make_decision_bypass(**overrides: Any) -> dict[str, Any]:
     doc = {
-        "interface": "AttentionDecisionV2",
-        "version": 1,
-        "request_id": "req-0002",
         "status": "bypass",
+        "request_id": "req-0002",
         "cause": "preattention-disabled",
     }
     doc.update(overrides)
     return doc
 
 
-def make_decision_error(kind: str = "malformed-model-output", **overrides: Any) -> dict[str, Any]:
+def make_decision_error(code: str = "malformed-model-output", **overrides: Any) -> dict[str, Any]:
     doc = {
-        "interface": "AttentionDecisionV2",
-        "version": 1,
-        "request_id": "req-0003",
         "status": "error",
-        "error": {"kind": kind, "detail": "classifier output failed validation"},
+        "request_id": "req-0003",
+        "error": {"code": code, "detail": "classifier output failed validation"},
     }
     doc.update(overrides)
     return doc
 
 
-def make_wake(source: str = "WAKE", advice: dict[str, Any] | None = None, **overrides: Any) -> dict[str, Any]:
-    doc = {
-        "interface": "ParticipantWakeV2",
-        "version": 1,
-        "request_id": "req-0001",
-        "source": source,
-        "observation": make_request(),
-        "budgets": {"max_events": 30, "max_bytes": 32768},
-    }
+def make_wake(source: str = "WAKE", advice: list[dict[str, Any]] | None = None, **overrides: Any) -> dict[str, Any]:
+    request = make_request()
+    attention: dict[str, Any] = {"source": source}
     if advice is not None:
-        doc["advice"] = advice
+        attention["advice"] = advice
+        attention["evidence_event_ids"] = sorted(
+            {event_id for item in advice for event_id in item.get("evidence_event_ids", [])}
+        )
+    doc = {
+        "request_id": request["request_id"],
+        "self": request["self"],
+        "room": request["room"],
+        "actors": request["actors"],
+        "events": request["events"],
+        "trigger_event_id": request["trigger_event_id"],
+        "coverage": request["coverage"],
+        "attention": attention,
+    }
     doc.update(overrides)
     return doc
 
 
 def make_fetch_request(**overrides: Any) -> dict[str, Any]:
     doc = {
-        "interface": "ContextContinuationV2",
-        "version": 1,
-        "kind": "fetch-request",
         "request_id": "req-0001",
-        "handle": "cont-7f3a",
-        "binding": _deep_copy(_BASE_BINDING),
-        "cursor": None,
-        "expires_at": "2026-07-17T02:00:00Z",
-        "budgets": {"max_events": 20, "max_bytes": 16384},
+        "handle_id": "cont-7f3a",
+        "direction": "before",
+        "max_events": 20,
+        "max_bytes": 16384,
     }
     doc.update(overrides)
     return doc
@@ -2076,30 +2132,33 @@ def make_fetch_request(**overrides: Any) -> dict[str, Any]:
 
 def make_fetch_page(**overrides: Any) -> dict[str, Any]:
     doc = {
-        "interface": "ContextContinuationV2",
-        "version": 1,
-        "kind": "fetch-page",
         "request_id": "req-0001",
-        "handle": "cont-7f3a",
+        "handle_id": "cont-7f3a",
+        "room_id": "42",
+        "continuity_scope_id": "discord:room:42#2026-07",
+        "direction": "before",
+        "anchor_event_id": "e3",
+        "actors": {"discord:1001": {"display_name": "Zoe", "kind": "human"}},
         "events": [
             {
-                "event_id": "e0",
-                "actor_id": "discord:1001",
-                "kind": "message",
+                "id": "e0",
+                "type": "message",
+                "author_id": "discord:1001",
                 "timestamp": "2026-07-17T00:59:00Z",
-                "content": "earlier context before the bounded tail",
-                "mentions": [],
+                "text": "earlier context before the bounded tail",
+                "mentioned_actor_ids": [],
                 "mentions_room": False,
             }
         ],
-        "cursor_next": "cur-2",
         "coverage": {
-            "truncated": True,
-            "gaps": "known",
-            "visibility": "partial",
+            "has_more_before": True,
+            "has_more_after": False,
+            "has_gaps": True,
+            "truncated_by": ["events"],
             "continuity": "session-only",
-            "more_events": "available",
+            "has_restart_gap": False,
         },
+        "next_cursor": "cur-2",
     }
     doc.update(overrides)
     return doc
@@ -2110,14 +2169,12 @@ def make_fetch_payload(**overrides: Any) -> dict[str, Any]:
         "fetch_time": "2026-07-17T01:30:00Z",
         "issued": [
             {
-                "handle": "cont-7f3a",
-                "binding": _deep_copy(_BASE_BINDING),
+                "handle_id": "cont-7f3a",
                 "expires_at": "2026-07-17T02:00:00Z",
                 "cursors": ["cur-1", "cur-2"],
             },
             {
-                "handle": "cont-9b2c",
-                "binding": _deep_copy(_OTHER_BINDING),
+                "handle_id": "cont-9b2c",
                 "expires_at": "2026-07-17T04:00:00Z",
                 "cursors": ["cur-x1"],
             },
@@ -2129,21 +2186,44 @@ def make_fetch_payload(**overrides: Any) -> dict[str, Any]:
 
 
 _STAGE_BODIES = {
-    "observation": {"event_count": 3, "visibility": "complete"},
+    "observation": {
+        "schema_version": 2,
+        "trigger_event_id": "e3",
+        "continuity_scope_id": "discord:room:42#2026-07",
+        "event_count": 3,
+        "byte_count": 512,
+        "coverage": {
+            "has_more_before": False,
+            "has_more_after": False,
+            "has_gaps": False,
+            "truncated_by": [],
+            "continuity": "session-only",
+            "has_restart_gap": False,
+        },
+        "included_event_ids": ["e1", "e2", "e3"],
+    },
     "attention": {
         "classifier_disposition": "WAKE",
         "effective_disposition": "WAKE",
-        "policy_provenance": "profiles/default@2026-07",
+        "classifier": {"name": "nunchi-classifier"},
+        "evidence_event_ids": ["e1", "e3"],
+        "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
     },
-    "participant-host": {"outcome": "contributed", "action_ref": "discord:msg:555"},
+    "participant-host": {
+        "wake_source": "WAKE",
+        "packet_event_count": 3,
+        "packet_byte_count": 512,
+        "delivered_event_ids": ["e1", "e2", "e3"],
+        "expansion_calls": 0,
+        "invoked": True,
+        "outcome": "sent",
+    },
     "transport": {"delivery": "sent", "detail": "discord:msg:555"},
 }
 
 
 def make_receipt(stage: str, writer: str | None = None, body: dict[str, Any] | None = None, **overrides: Any) -> dict[str, Any]:
     doc = {
-        "interface": "AttentionReceiptV2",
-        "version": 1,
         "request_id": "req-0001",
         "stage": stage,
         "writer": writer if writer is not None else RECEIPT_WRITER_MAP[stage],

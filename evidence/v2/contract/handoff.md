@@ -292,6 +292,82 @@ shapes; 7 `HANDOFF` deltas re-routed to accepting owner `v2-integrator`;
 diff, with the baseline-health rows sequenced after the R1 repair. No row
 is unresolved.
 
+## Documentation dispositions — attempt 3 (T043)
+
+Appended after the attempt-1 and attempt-2 sections without rewriting them
+(CHK089, generalized by T035's CHK107 fix). This section re-executes every
+row of plan §Documentation Impact and Freshness against the attempt-3
+candidate diff (CHK108), re-scans every `HANDOFF` delta for a superseded
+local field name or narrowed-shape claim (CHK109), and re-runs the
+inventory-derivation check against this diff (CHK120).
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Reviewed on**: 2026-07-18, directly in the `v2-contract-owner` worktree
+(not via a bound `run speckit` invocation).
+
+**Inventory-derivation re-check (CHK120)**: `ls *.md` plus
+`find docs -name '*.md' | grep -v archive` against the attempt-3 tree
+yields the identical 18 files (4 root + 14 `docs/**`) as the attempt-2
+inventory — no doc file was added or removed outside the eighteen
+already-listed rows.
+
+**Candidate diff basis**: `git diff --name-only
+5383e9f3a5e9c20c08ab54395f4ff370128f03de..` (the rejected attempt-2 packet
+commit to the attempt-3 tree). The ordinary-path delta touches only all
+five `schemas/v2/*.schema.json` files, `tests/v2/contract/` (the stdlib
+adapter and all four test files), `evals/v2/contract/{attention-request,
+attention-decision,downstream}/`, `evidence/v2/contract/`, and
+`docs/contracts/nunchi-v2.md`, plus the slice's own SpecKit planning
+artifacts. No file under `src/`, `scripts/`, `docs/governance/`,
+`docs/integrations/`, `docs/evaluations/`, or the repository root
+documentation set is modified.
+
+### UPDATE (slice-owned), re-validated (CHK108)
+
+| Reviewed path | Disposition | Result |
+|---|---|---|
+| `docs/contracts/nunchi-v2.md` | `UPDATE` (re-validated) | Fully reworked to the R4 selected-design fidelity shapes: `schema_version: 2` replacing the invented `interface`/`version` envelope; the actor map; the typed message/reaction/membership event union; the full coverage field inventory; the representable (not forbidden) `continuation` capability with the classifier-facing redaction moved to runtime (FR-004 correction); `routing_audit`/`classifier`/`legacy_verdict_confidences`/`attention_advice` naming; the materialized wake packet; the bare `ContextFetch`/`ContextPage` shapes; and the reworked four-stage receipt telemetry (`schema_version` on observation, flattened bypass fields, `sent`/`silent`/`unknown` outcomes) — alongside the FR-012 authority-conformance corpus class and runtime-adapter-only rules. All five embedded JSON examples (the design's verbatim example request, governed suppression, margin-widened deferral, bypass, silence receipt) validate under both the pinned Draft 2020-12 oracle and the stdlib runtime adapter (validated 2026-07-18, 0 failures); all relative links resolve and none targets a SpecKit-managed path. |
+
+### HANDOFF (accepting owner: `v2-integrator`), re-routed, re-scanned for superseded names (CHK109)
+
+All seven attempt-1/attempt-2 `HANDOFF` rows re-verified and re-routed
+unchanged in scope — `README.md`, `CHANGELOG.md`, `docs/STABILITY.md`,
+`docs/integration.md`, `docs/adapters.md`,
+`docs/contracts/channel-adapter-v1.md`,
+`docs/architecture/v2-selected-design.md` — each still routing its exact
+delta to `v2-integrator` for the atomic current-state update only. Each
+row's delta text was scanned against the R4 field renames
+(`routing`→`routing_audit`, `classifier_audit`→`classifier`,
+`legacy_confidence`→`legacy_verdict_confidences`,
+`advice`→`attention_advice`, dropped `interface`/`version` envelope): none
+of the seven rows names a local field at that level of detail (they
+reference interface IDs, versions, `schemas/v2/*.schema.json` paths,
+statuses, and commands only), so none embeds a superseded name or
+narrowed-shape claim; no row text requires editing. The accepting owner
+and atomic-candidate-only application are unchanged.
+
+### NO_IMPACT, re-verified against the attempt-3 diff
+
+| Reviewed path | Disposition | Re-verification result |
+|---|---|---|
+| `docs/INSTALL.md` | `NO_IMPACT` | CONFIRMED — the R4 rework diff changes no install flow or installed artifact; `jsonschema==4.26.0` still appears only behind the pinned `uv run --offline --with` dev/test command. |
+| `AGENTS.md` | `NO_IMPACT` | CONFIRMED — `python3 -m unittest` is the green stdlib offline baseline at this tree (run 2026-07-18, post-rework: 1222 tests, OK, 11 skipped — 8 pre-existing V1 plus 3 counted contract oracle-absence skips; the 1225→1222 delta is three deliberate test consolidations for fields removed by the primary-source correction, not a coverage loss); the runtime stays dependency-free; the V2-program wording (V1 current until `CUTOVER_VERIFIED`) is unchanged. |
+| `CLAUDE.md` | `NO_IMPACT` | CONFIRMED — the "standard-library runtime core" and `python3 -m unittest` claims stay accurate: the rework adds no runtime dependency and does not modify grounding sequence, governance commands, or workflow bindings. |
+| `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | CONFIRMED — no verdict-suite artifact changes in the diff; I-010B's `legacy_verdict_confidences` still embeds the identical `PASS`/`ACK`/`ASK`/`SPEAK` four-key vocabulary as optional, conditionally required transition evidence (FR-007) — only the wrapping field name changed, not the verdict-suite claim. |
+| `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | CONFIRMED — same diff basis; no verdict-suite requirement file or claim changes. |
+| `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | CONFIRMED — the V1 corpus under `evals/verdict_suite/` is untouched by the rework diff. |
+| `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | CONFIRMED — the runner, its commands, and its outputs are untouched by the diff. |
+| `docs/governance/execution-spine.md` | `NO_IMPACT` | CONFIRMED — the rework diff contains no change under `docs/governance/`, none to `scripts/check_governance.py` or its checks, and none to any documented governance command or gate. |
+| `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | CONFIRMED — no Hermes surface file changes in the rework diff. |
+| `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | CONFIRMED — same diff basis as the Hermes core patch row. |
+
+**Result (attempt 3)**: 1 `UPDATE` fully reworked to the R4 field
+inventory; 7 `HANDOFF` deltas re-routed and re-scanned for superseded
+names (none found); 10 `NO_IMPACT` rationales re-verified CONFIRMED
+against the attempt-3 diff; inventory-derivation re-checked (18/18, no
+drift). No row is unresolved.
+
 ## Proposed handoff packet input — attempt 2 (T034)
 
 Appended after the attempt-2 documentation section, in the same

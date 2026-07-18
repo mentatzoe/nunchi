@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import unittest
 
+from tests.v2.contract import schema_helpers as helpers
 from tests.v2.contract.schema_helpers import (
     RECEIPT_STAGES,
     RECEIPT_WRITER_MAP,
@@ -41,33 +42,34 @@ class DownstreamCorpusSuite(ContractCorpusMixin, unittest.TestCase):
 
 
 class ContinuationShapeCases(unittest.TestCase):
-    """FR-009: host-only request and page shapes."""
+    """FR-009: host-only fetch-request and fetch-page shapes."""
 
     def test_fetch_request_and_page_validate(self):
         assert_schema_verdict(self, "context-continuation", make_fetch_request(), "valid")
         assert_schema_verdict(self, "context-continuation", make_fetch_page(), "valid")
 
-    def test_kind_union_is_closed(self):
-        doc = make_fetch_request(kind="fetch-stream")
+    def test_malformed_shape_matching_neither_union_member_rejects(self):
+        assert_schema_verdict(self, "context-continuation", {"handle_id": "cont-7f3a"}, "invalid")
+
+    def test_missing_handle_id_rejects(self):
+        doc = make_fetch_request()
+        del doc["handle_id"]
         assert_schema_verdict(self, "context-continuation", doc, "invalid")
 
-    def test_missing_binding_rejects(self):
-        doc = make_fetch_request()
-        del doc["binding"]
+    def test_around_direction_requires_anchor_event_id(self):
+        doc = make_fetch_request(direction="around")
         assert_schema_verdict(self, "context-continuation", doc, "invalid")
-
-    def test_partial_binding_rejects(self):
-        doc = make_fetch_request()
-        del doc["binding"]["trigger_event_id"]
-        assert_schema_verdict(self, "context-continuation", doc, "invalid")
+        doc["anchor_event_id"] = "e3"
+        assert_schema_verdict(self, "context-continuation", doc, "valid")
 
     def test_non_positive_fetch_budgets_reject(self):
         doc = make_fetch_request()
-        doc["budgets"]["max_events"] = 0
+        doc["max_events"] = 0
         assert_schema_verdict(self, "context-continuation", doc, "invalid")
 
-    def test_exhausted_page_uses_null_cursor(self):
-        doc = make_fetch_page(cursor_next=None)
+    def test_exhausted_page_omits_next_cursor(self):
+        doc = make_fetch_page()
+        del doc["next_cursor"]
         assert_schema_verdict(self, "context-continuation", doc, "valid")
 
     def test_page_returns_coverage(self):
@@ -77,11 +79,12 @@ class ContinuationShapeCases(unittest.TestCase):
 
 
 class HostSecretLeakageCases(unittest.TestCase):
-    """FR-004/FR-009: continuation authority never reaches the classifier."""
+    """FR-004/FR-009: continuation authority never reaches the classifier
+    as a stray top-level field; the full `continuation` capability is
+    legitimately representable on the wire document (FR-014)."""
 
-    def test_request_projection_with_host_secrets_rejects(self):
+    def test_stray_top_level_host_secret_fields_reject(self):
         for field, value in (
-            ("continuation", {"handle": "cont-7f3a", "cursor": "cur-1"}),
             ("continuation_handle", "cont-7f3a"),
             ("binding", {"participant_id": "vigil"}),
             ("cursor", "cur-1"),
@@ -91,14 +94,17 @@ class HostSecretLeakageCases(unittest.TestCase):
                 doc = make_request(**{field: value})
                 assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_wake_observation_with_host_secrets_rejects(self):
+    def test_wake_with_incomplete_continuation_rejects(self):
         doc = make_wake()
-        doc["observation"]["continuation"] = {"handle": "cont-7f3a"}
+        doc["continuation"] = {"handle_id": "cont-7f3a"}
         assert_schema_verdict(self, "participant-wake", doc, "invalid")
 
 
 class FetchTimeBindingCases(unittest.TestCase):
-    """FR-012 ``binding-expiry`` class: behavioral, runtime-adapter-only."""
+    """FR-012 ``binding-expiry`` class: behavioral, runtime-adapter-only.
+    A fetch request carries no inline binding fields (FR-014); a handle is
+    permanently bound to its issuing continuation capability, so a known,
+    unexpired handle is by construction the correct binding."""
 
     def test_fresh_fetch_with_minted_cursor_passes(self):
         payload = make_fetch_payload()
@@ -112,16 +118,8 @@ class FetchTimeBindingCases(unittest.TestCase):
 
     def test_unknown_handle_rejects(self):
         payload = make_fetch_payload()
-        payload["request"]["handle"] = "cont-forged"
+        payload["request"]["handle_id"] = "cont-forged"
         self.assertTrue(validate_continuation_fetch(payload))
-
-    def test_changed_binding_rejects(self):
-        # US3 scenario 2: a fetch changing participant, room, continuity
-        # scope, or trigger binding is rejected.
-        payload = make_fetch_payload()
-        payload["request"]["binding"]["room_id"] = "discord:room:77"
-        errors = validate_continuation_fetch(payload)
-        self.assertTrue(any("binding" in error for error in errors), errors)
 
     def test_cross_binding_cursor_reuse_rejects(self):
         payload = make_fetch_payload()
@@ -142,7 +140,7 @@ class ContinuityScopeCollisionCases(unittest.TestCase):
     def test_colliding_page_rejects_in_runtime_adapter_only(self):
         request = make_request()
         page = make_fetch_page()
-        page["events"][0]["event_id"] = "e1"
+        page["events"][0]["id"] = "e1"
         # Both documents are schema-valid in isolation (oracle-expected-valid).
         assert_schema_verdict(self, "attention-request", request, "valid")
         assert_schema_verdict(self, "context-continuation", page, "valid")
@@ -180,12 +178,14 @@ class ReceiptRecordCases(unittest.TestCase):
             body={
                 "classifier_disposition": "WAKE",
                 "effective_disposition": "WAKE",
-                "policy_provenance": "profiles/default@2026-07",
-                "error_kind": "provider-failure",
+                "classifier": {"name": "nunchi-classifier"},
+                "evidence_event_ids": ["e1"],
+                "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+                "error": {"code": "provider-failure"},
             },
         )
         assert_schema_verdict(self, "attention-receipt", mixed, "invalid")
-        error = make_receipt("attention", body={"error_kind": "provider-failure"})
+        error = make_receipt("attention", body={"error": {"code": "provider-failure"}})
         assert_schema_verdict(self, "attention-receipt", error, "valid")
 
     def test_bypass_attention_record_carries_trusted_provenance(self):
@@ -193,33 +193,34 @@ class ReceiptRecordCases(unittest.TestCase):
         # with no fabricated model judgment.
         body = {
             "classifier_not_invoked": True,
-            "bypass_provenance": {"policy": "preattention-disabled", "attested_by": "host:vigil"},
+            "cause": "preattention-disabled",
+            "policy_provenance": "host:vigil",
         }
         assert_schema_verdict(self, "attention-receipt", make_receipt("attention", body=body), "valid")
         missing_flag = make_receipt(
             "attention",
-            body={"bypass_provenance": {"policy": "preattention-disabled", "attested_by": "host:vigil"}},
+            body={"cause": "preattention-disabled", "policy_provenance": "host:vigil"},
         )
         assert_schema_verdict(self, "attention-receipt", missing_flag, "invalid")
         wrong_policy = make_receipt(
             "attention",
             body={
                 "classifier_not_invoked": True,
-                "bypass_provenance": {"policy": "operator-mute", "attested_by": "host:vigil"},
+                "cause": "operator-mute",
+                "policy_provenance": "host:vigil",
             },
         )
         assert_schema_verdict(self, "attention-receipt", wrong_policy, "invalid")
 
     def test_participant_silence_is_a_distinct_staged_outcome(self):
         # S07: silence is neither suppression nor non-invocation.
-        silence = make_receipt("participant-host", body={"outcome": "silence"})
+        base_body = dict(helpers._STAGE_BODIES["participant-host"])
+        silence = make_receipt("participant-host", body={**base_body, "outcome": "silent"})
         assert_schema_verdict(self, "attention-receipt", silence, "valid")
         contributed = make_receipt("participant-host")
         assert_schema_verdict(self, "attention-receipt", contributed, "valid")
-        silent_with_action = make_receipt(
-            "participant-host", body={"outcome": "silence", "action_ref": "discord:msg:1"}
-        )
-        assert_schema_verdict(self, "attention-receipt", silent_with_action, "invalid")
+        unknown = make_receipt("participant-host", body={**base_body, "outcome": "unknown"})
+        assert_schema_verdict(self, "attention-receipt", unknown, "valid")
 
     def test_transport_unknown_and_unavailable_are_explicit(self):
         for delivery in ("unknown", "unavailable"):
@@ -230,7 +231,8 @@ class ReceiptRecordCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-receipt", invented, "invalid")
 
     def test_social_ledger_in_receipt_body_rejects(self):
-        doc = make_receipt("participant-host", body={"outcome": "silence", "handled": False})
+        base_body = dict(helpers._STAGE_BODIES["participant-host"])
+        doc = make_receipt("participant-host", body={**base_body, "handled": False})
         assert_schema_verdict(self, "attention-receipt", doc, "invalid")
 
     def test_v1_envelope_rejects_as_receipt(self):
@@ -276,8 +278,9 @@ class ReceiptSequenceCases(unittest.TestCase):
     def test_silence_stream_ends_at_participant_host(self):
         # S07: an invoked participant that sends nothing is a prefix ending
         # at the participant-host stage.
+        base_body = dict(helpers._STAGE_BODIES["participant-host"])
         stream = make_receipt_stream(3)
-        stream[2] = make_receipt("participant-host", body={"outcome": "silence"})
+        stream[2] = make_receipt("participant-host", body={**base_body, "outcome": "silent"})
         self.assertEqual([], validate_receipt_stream(stream))
 
     def test_suppression_stream_ends_at_attention(self):
@@ -287,7 +290,9 @@ class ReceiptSequenceCases(unittest.TestCase):
             body={
                 "classifier_disposition": "SUPPRESS",
                 "effective_disposition": "SUPPRESS",
-                "policy_provenance": "profiles/default@2026-07",
+                "classifier": {"name": "nunchi-classifier"},
+                "evidence_event_ids": ["e1"],
+                "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
             },
         )
         self.assertEqual([], validate_receipt_stream(stream))
@@ -300,14 +305,16 @@ class ReceiptSequenceCases(unittest.TestCase):
             "attention",
             body={
                 "classifier_not_invoked": True,
-                "bypass_provenance": {"policy": "preattention-disabled", "attested_by": "host:vigil"},
+                "cause": "preattention-disabled",
+                "policy_provenance": "host:vigil",
             },
         )
         self.assertEqual([], validate_receipt_stream(stream))
 
     def test_mutating_an_earlier_stage_rejects(self):
         stream = make_receipt_stream(2)
-        mutation = make_receipt("observation", body={"event_count": 99, "visibility": "complete"})
+        base_body = dict(helpers._STAGE_BODIES["observation"])
+        mutation = make_receipt("observation", body={**base_body, "event_count": 99})
         errors = validate_receipt_stream(stream + [mutation])
         self.assertTrue(any("append-only" in error for error in errors), errors)
 

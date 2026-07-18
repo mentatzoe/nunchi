@@ -299,9 +299,16 @@ participant outcomes and binding failures.
 - **FR-004**: Coverage and continuation requirements MUST bound event and byte
   access, expose truncation, gaps, visibility, and restart continuity honestly,
   and bind every fetch to participant, room, continuity scope, and trigger. The
-  handle, binding, cursor, expiry values, and opaque continuation metadata MUST be host-only;
-  the classifier projection MAY receive coverage and expansion capability
-  booleans but MUST NOT receive those host secrets.
+  `I-010A` wire document MAY carry the full `continuation` capability (handle,
+  binding, cursor budgets, and expiry) alongside honest coverage — the design's
+  own example attention request embeds it, so a schema forbidding the field
+  would reject a document the selected design declares valid (FR-014). The
+  host-secret exclusion is enforced where the classifier is actually invoked:
+  the runtime path that constructs the model-facing projection MUST redact
+  `continuation` down to coverage plus expansion-capability booleans before
+  that call; this redaction is a runtime-adapter-only behavioral rule, not a
+  schema-expressible one, since the wire schema legitimately carries the full
+  capability for host/evidence use.
 - **FR-005**: The slice MUST define `I-010B AttentionDecisionV2@1` as a tagged
   host-facing union with `status: ok`, `status: bypass`, and `status: error`.
   The ok branch contains classifier/effective dispositions, `WAKE`-only grounded advice (FR-013),

@@ -2,39 +2,62 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
   "title": "ParticipantWakeV2",
-  "description": "I-010C ParticipantWakeV2@1 — the normal participant turn input: an explicit attention source (WAKE, DEFER, ERROR_FALLBACK, or non-social PREATTENTION_BYPASS), the factual observation (a full I-010A document), independent positive participant budgets, and optional attention advice that appears only on source WAKE (FR-013). No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "description": "I-010C ParticipantWakeV2@1 — the normal participant turn input, materializing self, room, actors, events, trigger, coverage, and optional host-only continuation authority directly (not a wrapped classifier projection), with a separate `attention` object carrying the explicit source (WAKE, DEFER, ERROR_FALLBACK, or non-social PREATTENTION_BYPASS) and optional grounded advice that appears only on source WAKE (FR-013, FR-014, c834e8c). No admission meta-answer, composed reply, or social ledger is part of the contract.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
+    },
+    "attention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "$comment": "PREATTENTION_BYPASS is a lifecycle fact, not a social judgment.",
+          "enum": ["WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
+        },
+        "advice": {
+          "type": "array",
+          "items": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/attentionAdvice"}
+        },
+        "evidence_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "FR-013: DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
+          "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["advice"]},
+                {"required": ["evidence_event_ids"]}
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["interface", "version", "request_id", "source", "observation", "budgets"],
+  "required": ["request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention"],
   "properties": {
-    "interface": {"const": "ParticipantWakeV2"},
-    "version": {"const": 1},
     "request_id": {"$ref": "#/$defs/nonEmptyString"},
-    "source": {
-      "$comment": "PREATTENTION_BYPASS is a lifecycle fact, not a social judgment.",
-      "enum": ["WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
+    "self": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/self"},
+    "room": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/room"},
+    "actors": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/actorMap"},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/event"}
     },
-    "observation": {
-      "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json"
-    },
-    "advice": {
-      "$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/advice"
-    },
-    "budgets": {
-      "$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/budgets"
-    }
-  },
-  "allOf": [
-    {
-      "$comment": "FR-013: DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
-      "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
-      "else": {"not": {"required": ["advice"]}}
-    }
-  ]
+    "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
+    "coverage": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"},
+    "continuation": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/continuation"},
+    "attention": {"$ref": "#/$defs/attention"}
+  }
 }

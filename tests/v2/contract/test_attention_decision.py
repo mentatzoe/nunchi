@@ -81,7 +81,7 @@ class TransitionMatrixCases(unittest.TestCase):
     def test_missing_routing_cannot_validate_a_hard_stop(self):
         # S05: missing legitimacy evidence cannot support suppression.
         doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none")
-        del doc["routing"]
+        del doc["routing_audit"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_widening_preserves_exact_valve_and_cause(self):
@@ -93,7 +93,7 @@ class TransitionMatrixCases(unittest.TestCase):
 
     def test_widened_suppression_with_cause_none_rejects(self):
         doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        doc["routing"]["override_cause"] = "none"
+        doc["routing_audit"]["override_cause"] = "none"
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_dual_defer_valves_stay_distinct(self):
@@ -105,7 +105,7 @@ class TransitionMatrixCases(unittest.TestCase):
 
     def test_classifier_defer_cannot_carry_an_override_cause(self):
         doc = make_decision_ok("DEFER", "DEFER", "classifier-defer")
-        doc["routing"]["override_cause"] = "margin"
+        doc["routing_audit"]["override_cause"] = "margin"
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
 
@@ -115,12 +115,12 @@ class RoutingAuditCases(unittest.TestCase):
 
     def test_margin_applied_requires_the_effective_margin(self):
         doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        del doc["routing"]["effective_margin"]
+        del doc["routing_audit"]["effective_margin"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_a_retired_margin_cannot_apply(self):
         doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        doc["routing"]["margin_status"] = "retired"
+        doc["routing_audit"]["margin_status"] = "retired"
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_effective_margin_forbidden_when_no_margin_applied(self):
@@ -132,35 +132,35 @@ class RoutingAuditCases(unittest.TestCase):
                     "policy-defer": ("SUPPRESS", "DEFER"),
                 }[valve]
                 doc = make_decision_ok(pair[0], pair[1], valve)
-                doc["routing"]["effective_margin"] = 0.12
+                doc["routing_audit"]["effective_margin"] = 0.12
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_margin_source_only_on_a_margin_applied_decision(self):
         allowed = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        allowed["routing"]["margin_source"] = "trusted:profiles/default@2026-07"
+        allowed["routing_audit"]["margin_source"] = "trusted:profiles/default@2026-07"
         assert_schema_verdict(self, "attention-decision", allowed, "valid")
         forbidden = make_decision_ok()
-        forbidden["routing"]["margin_source"] = "trusted:profiles/default@2026-07"
+        forbidden["routing_audit"]["margin_source"] = "trusted:profiles/default@2026-07"
         assert_schema_verdict(self, "attention-decision", forbidden, "invalid")
 
     def test_valve_and_override_cause_pair_exactly(self):
         wrong_none = make_decision_ok()
-        wrong_none["routing"]["override_cause"] = "margin"
+        wrong_none["routing_audit"]["override_cause"] = "margin"
         assert_schema_verdict(self, "attention-decision", wrong_none, "invalid")
         wrong_policy = make_decision_ok("SUPPRESS", "DEFER", "policy-defer")
-        wrong_policy["routing"]["override_cause"] = "margin"
+        wrong_policy["routing_audit"]["override_cause"] = "margin"
         assert_schema_verdict(self, "attention-decision", wrong_policy, "invalid")
 
     def test_margin_status_is_always_recorded(self):
         doc = make_decision_ok()
-        del doc["routing"]["margin_status"]
+        del doc["routing_audit"]["margin_status"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_out_of_range_effective_margin_rejects(self):
         for value in (0, -0.1, 1.5):
             with self.subTest(value=value):
                 doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-                doc["routing"]["effective_margin"] = value
+                doc["routing_audit"]["effective_margin"] = value
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_reasons_is_a_required_sibling_field(self):
@@ -170,7 +170,7 @@ class RoutingAuditCases(unittest.TestCase):
 
     def test_reasons_never_lives_inside_the_routing_audit(self):
         doc = make_decision_ok()
-        doc["routing"]["reasons"] = ["misplaced audit material"]
+        doc["routing_audit"]["reasons"] = ["misplaced audit material"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_empty_reasons_stays_valid_audit_material(self):
@@ -192,28 +192,28 @@ class LegacyConfidenceCases(unittest.TestCase):
         # The decisive R2 red case: a margin-active candidate SUPPRESS
         # without the vector cannot validate.
         doc = self._margin_active_suppression()
-        del doc["legacy_confidence"]
+        del doc["legacy_verdict_confidences"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_wake_and_defer_without_the_optional_vector_stay_valid(self):
         wake = make_decision_ok()
-        del wake["legacy_confidence"]
+        del wake["legacy_verdict_confidences"]
         assert_schema_verdict(self, "attention-decision", wake, "valid")
         defer = make_decision_ok("DEFER", "DEFER", "classifier-defer")
-        del defer["legacy_confidence"]
+        del defer["legacy_verdict_confidences"]
         assert_schema_verdict(self, "attention-decision", defer, "valid")
 
     def test_margin_retired_suppression_without_vector_stays_valid(self):
         doc = self._margin_active_suppression()
-        doc["routing"]["margin_status"] = "retired"
-        del doc["legacy_confidence"]
+        doc["routing_audit"]["margin_status"] = "retired"
+        del doc["legacy_verdict_confidences"]
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_vector_presence_never_invalidates_an_ok_decision(self):
         # CHK088: the permissive side — a well-formed vector may accompany
         # WAKE, DEFER, or a margin-retired SUPPRESS.
         retired = self._margin_active_suppression()
-        retired["routing"]["margin_status"] = "retired"
+        retired["routing_audit"]["margin_status"] = "retired"
         for doc in (
             make_decision_ok(),
             make_decision_ok("DEFER", "DEFER", "classifier-defer"),
@@ -225,29 +225,29 @@ class LegacyConfidenceCases(unittest.TestCase):
         # SUPPRESS->DEFER via margin-defer implies margin active, so the
         # candidate-SUPPRESS vector requirement applies.
         doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
-        del doc["legacy_confidence"]
+        del doc["legacy_verdict_confidences"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_missing_key_rejects(self):
         doc = self._margin_active_suppression()
-        del doc["legacy_confidence"]["ASK"]
+        del doc["legacy_verdict_confidences"]["ASK"]
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_extra_key_rejects(self):
         doc = self._margin_active_suppression()
-        doc["legacy_confidence"]["MUMBLE"] = 0.2
+        doc["legacy_verdict_confidences"]["MUMBLE"] = 0.2
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_out_of_range_values_reject(self):
         for value in (1.5, -0.1, 2, -1):
             with self.subTest(value=value):
                 doc = self._margin_active_suppression()
-                doc["legacy_confidence"]["SPEAK"] = value
+                doc["legacy_verdict_confidences"]["SPEAK"] = value
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_boundary_values_are_on_scale(self):
         doc = self._margin_active_suppression()
-        doc["legacy_confidence"] = {"PASS": 0, "ACK": 1, "ASK": 0.0, "SPEAK": 1.0}
+        doc["legacy_verdict_confidences"] = {"PASS": 0, "ACK": 1, "ASK": 0.0, "SPEAK": 1.0}
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_sentinel_decoded_non_finite_values_cannot_support_suppression(self):
@@ -258,21 +258,21 @@ class LegacyConfidenceCases(unittest.TestCase):
         for sentinel in ("NaN", "Infinity", "-Infinity"):
             with self.subTest(sentinel=sentinel):
                 doc = self._margin_active_suppression()
-                doc["legacy_confidence"]["SPEAK"] = sentinel
+                doc["legacy_verdict_confidences"]["SPEAK"] = sentinel
                 decoded = decode_non_finite(doc)
-                self.assertIsInstance(decoded["legacy_confidence"]["SPEAK"], float)
+                self.assertIsInstance(decoded["legacy_verdict_confidences"]["SPEAK"], float)
                 assert_schema_verdict(self, "attention-decision", decoded, "invalid")
 
     def test_malformed_present_vector_rejects_even_where_optional(self):
         # Present-but-malformed evidence rejects on every ok decision, not
         # only where the vector is required.
         doc = make_decision_ok()
-        doc["legacy_confidence"]["PASS"] = True
+        doc["legacy_verdict_confidences"]["PASS"] = True
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_string_confidence_rejects(self):
         doc = self._margin_active_suppression()
-        doc["legacy_confidence"]["ACK"] = "0.5"
+        doc["legacy_verdict_confidences"]["ACK"] = "0.5"
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
 
@@ -281,29 +281,29 @@ class AdviceRuleCases(unittest.TestCase):
     citation must reference a request-supplied event ID."""
 
     def test_wake_with_grounded_advice_is_valid(self):
-        doc = make_decision_ok(advice=make_advice())
+        doc = make_decision_ok(attention_advice=[make_advice()])
         assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_advice_on_classifier_defer_rejects(self):
-        doc = make_decision_ok("DEFER", "DEFER", "classifier-defer", advice=make_advice())
+        doc = make_decision_ok("DEFER", "DEFER", "classifier-defer", attention_advice=[make_advice()])
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_advice_on_suppression_rejects(self):
-        doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none", advice=make_advice())
+        doc = make_decision_ok("SUPPRESS", "SUPPRESS", "none", attention_advice=[make_advice()])
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_advice_on_widened_defer_rejects(self):
         # The key is the classifier disposition, not the effective one.
-        doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer", advice=make_advice())
+        doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer", attention_advice=[make_advice()])
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_advice_without_citations_rejects(self):
-        doc = make_decision_ok(advice={"summary": "ungrounded", "evidence_event_ids": []})
+        doc = make_decision_ok(attention_advice=[{"note": "ungrounded", "evidence_event_ids": []}])
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_advice_citing_nonexistent_event_is_runtime_adapter_only(self):
         request = make_request()
-        decision = make_decision_ok(advice=make_advice(evidence_event_ids=["e-ghost"]))
+        decision = make_decision_ok(attention_advice=[make_advice(evidence_event_ids=["e-ghost"])])
         # Each document is schema-valid in isolation (oracle-expected-valid).
         assert_schema_verdict(self, "attention-request", request, "valid")
         assert_schema_verdict(self, "attention-decision", decision, "valid")
@@ -311,7 +311,7 @@ class AdviceRuleCases(unittest.TestCase):
 
     def test_advice_citing_supplied_events_passes_the_relational_check(self):
         request = make_request()
-        decision = make_decision_ok(advice=make_advice(evidence_event_ids=["e1", "e3"]))
+        decision = make_decision_ok(attention_advice=[make_advice(evidence_event_ids=["e1", "e3"])])
         self.assertEqual([], check_advice_citations(decision, request))
 
 
@@ -328,12 +328,12 @@ class BypassBranchCases(unittest.TestCase):
         forbidden = {
             "classifier_disposition": "WAKE",
             "effective_disposition": "WAKE",
-            "classifier_audit": {"model": "openrouter/test-model"},
-            "advice": make_advice(),
+            "classifier": {"name": "nunchi-classifier"},
+            "attention_advice": [make_advice()],
             "reasons": ["should not exist"],
-            "legacy_confidence": {"PASS": 0.1, "ACK": 0.2, "ASK": 0.3, "SPEAK": 0.4},
+            "legacy_verdict_confidences": {"PASS": 0.1, "ACK": 0.2, "ASK": 0.3, "SPEAK": 0.4},
             "evidence_event_ids": ["e1"],
-            "routing": make_routing(),
+            "routing_audit": make_routing(),
         }
         for field, value in forbidden.items():
             with self.subTest(field=field):

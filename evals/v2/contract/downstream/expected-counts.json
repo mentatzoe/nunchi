@@ -1,6 +1,6 @@
 {
   "schema-expressible": {
-    "valid": 16,
+    "valid": 22,
     "invalid": 28
   },
   "id-uniqueness": {
@@ -21,7 +21,7 @@
   },
   "binding-expiry": {
     "valid": 1,
-    "invalid": 4
+    "invalid": 3
   },
   "receipt-sequence": {
     "valid": 6,

@@ -50,9 +50,9 @@ class ExactIdentityRedCases(unittest.TestCase):
         # contract keeps authorship bound to exact actor IDs, so the
         # collision is representable without becoming an identity claim.
         doc = make_request()
-        self.assertEqual("Vigil", doc["actors"][1]["display_name"])
-        self.assertIn("Vigil", doc["self"]["loose"]["names"])
-        self.assertNotEqual(doc["self"]["actor_id"], doc["actors"][1]["actor_id"])
+        self.assertEqual("Vigil", doc["actors"]["discord:2002"]["display_name"])
+        self.assertIn("Vigil", doc["self"]["names"])
+        self.assertNotIn(doc["self"]["actor_id"], doc["actors"])
         assert_schema_verdict(self, "attention-request", doc, "valid")
 
     def test_missing_exact_actor_binding_rejects(self):
@@ -65,21 +65,10 @@ class ExactIdentityRedCases(unittest.TestCase):
         doc["self"]["actor_id"] = ""
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_missing_attestation_rejects(self):
-        # FR-002: the exact binding must be transport- or host-attested.
-        doc = make_request()
-        del doc["self"]["attestation"]
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
-
-    def test_alias_attestation_rejects(self):
-        doc = make_request()
-        doc["self"]["attestation"] = "alias"
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
-
     def test_loose_descriptors_cannot_substitute_for_exact_binding(self):
         doc = make_request()
         del doc["self"]["actor_id"]
-        doc["self"]["loose"]["names"] = ["Vigil", "turnaware-vigil"]
+        doc["self"]["names"] = ["Vigil", "turnaware-vigil"]
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
 
@@ -88,7 +77,7 @@ class MentionRelationRedCases(unittest.TestCase):
 
     def test_actor_mentions_and_room_mention_are_distinct_fields(self):
         doc = make_request()
-        self.assertEqual(["discord:9001"], doc["events"][0]["mentions"])
+        self.assertEqual(["discord:9001"], doc["events"][0]["mentioned_actor_ids"])
         self.assertFalse(doc["events"][0]["mentions_room"])
         self.assertTrue(doc["events"][2]["mentions_room"])
         assert_schema_verdict(self, "attention-request", doc, "valid")
@@ -100,7 +89,7 @@ class MentionRelationRedCases(unittest.TestCase):
 
     def test_mentions_must_be_actor_id_array(self):
         doc = make_request()
-        doc["events"][0]["mentions"] = "everyone"
+        doc["events"][0]["mentioned_actor_ids"] = "everyone"
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
     def test_missing_mentions_room_rejects(self):
@@ -108,21 +97,23 @@ class MentionRelationRedCases(unittest.TestCase):
         del doc["events"][2]["mentions_room"]
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_reply_relation_requires_target_and_kind_agreement(self):
+    def test_reply_to_event_id_is_a_literal_relation(self):
         doc = make_request()
-        doc["events"][1]["kind"] = "reply"
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
-        doc["events"][1]["reply_to"] = {"target_event_id": "e1", "resolved": True}
+        doc["events"][1]["reply_to_event_id"] = "e1"
         assert_schema_verdict(self, "attention-request", doc, "valid")
 
     def test_unresolved_relation_target_is_representable(self):
-        # A trigger whose relation target is outside the bounded projection
-        # stays valid with honest gap coverage (spec US1 scenario 2).
+        # A reply relation whose target is outside the bounded projection
+        # stays schema-valid with honest gap coverage (spec US1 scenario 2);
+        # resolving it against the included events is runtime-adapter-only.
         doc = make_request()
-        doc["events"][2]["kind"] = "reply"
-        doc["events"][2]["reply_to"] = {"target_event_id": "e-outside", "resolved": False}
-        doc["coverage"]["gaps"] = "known"
-        doc["coverage"]["visibility"] = "partial"
+        doc["events"][2]["reply_to_event_id"] = "e-outside"
+        doc["coverage"]["has_gaps"] = True
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+
+    def test_thread_root_event_id_is_a_literal_relation(self):
+        doc = make_request()
+        doc["events"][1]["thread_root_event_id"] = "e1"
         assert_schema_verdict(self, "attention-request", doc, "valid")
 
 
@@ -132,13 +123,13 @@ class RelationalRuntimeOnlyCases(unittest.TestCase):
 
     def test_duplicate_event_ids_reject_in_runtime_adapter_only(self):
         doc = make_request()
-        doc["events"][1]["event_id"] = "e1"
+        doc["events"][1]["id"] = "e1"
         assert_schema_verdict(self, "attention-request", doc, "valid")
         self.assertTrue(check_id_uniqueness(doc))
 
     def test_identical_text_with_distinct_ids_is_valid(self):
         doc = make_request()
-        doc["events"][1]["content"] = doc["events"][0]["content"]
+        doc["events"][1]["text"] = doc["events"][0]["text"]
         assert_schema_verdict(self, "attention-request", doc, "valid")
         self.assertEqual([], check_id_uniqueness(doc))
 
@@ -164,35 +155,56 @@ class RelationalRuntimeOnlyCases(unittest.TestCase):
 
 
 class ClassifierProjectionRedCases(unittest.TestCase):
-    """S03: coverage and expansion capability booleans only; host-only
-    continuation authority never reaches the classifier projection."""
+    """S03: honest coverage and the full continuation capability are
+    representable on the wire document (FR-014); the classifier-facing
+    redaction of host secrets happens at runtime, not in this schema."""
 
     def test_bounded_tail_with_honest_coverage_is_valid(self):
         doc = make_request()
-        doc["coverage"]["truncated"] = True
-        doc["coverage"]["gaps"] = "known"
-        doc["coverage"]["visibility"] = "partial"
-        doc["coverage"]["more_events"] = "available"
+        doc["coverage"] = {
+            "has_more_before": True,
+            "has_more_after": False,
+            "has_gaps": True,
+            "truncated_by": ["events"],
+            "continuity": "session-only",
+            "has_restart_gap": False,
+        }
         assert_schema_verdict(self, "attention-request", doc, "valid")
 
-    def test_continuation_object_in_projection_rejects(self):
+    def test_continuation_object_is_representable(self):
+        # The design's own example embeds the full continuation capability
+        # in the request; a schema forbidding it would reject a document
+        # the selected design declares valid (FR-014).
         doc = make_request()
-        doc["continuation"] = {"handle": "cont-7f3a", "cursor": "cur-1"}
+        doc["continuation"] = {
+            "handle_id": "ctx:discord:42:e3",
+            "bound_to": {
+                "participant_id": "vigil",
+                "room_id": "42",
+                "continuity_scope_id": "discord:room:42#2026-07",
+                "trigger_event_id": "e3",
+            },
+            "can_fetch_before": True,
+            "can_fetch_after": False,
+            "can_fetch_around_event": True,
+            "max_events_per_fetch": 20,
+            "max_bytes_per_fetch": 32768,
+        }
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+
+    def test_stray_top_level_handle_field_rejects(self):
+        doc = make_request()
+        doc["handle_id"] = "cont-7f3a"
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_continuation_handle_field_rejects(self):
+    def test_host_secret_inside_coverage_rejects(self):
         doc = make_request()
-        doc["continuation_handle"] = "cont-7f3a"
+        doc["coverage"]["handle_id"] = "cont-7f3a"
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_host_secret_inside_expansion_rejects(self):
+    def test_incomplete_continuation_rejects(self):
         doc = make_request()
-        doc["expansion"]["handle"] = "cont-7f3a"
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
-
-    def test_expansion_capability_is_boolean_only(self):
-        doc = make_request()
-        doc["expansion"]["available"] = "cont-7f3a"
+        doc["continuation"] = {"handle_id": "cont-7f3a"}
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
 
@@ -201,23 +213,21 @@ class BudgetRedCases(unittest.TestCase):
 
     def test_zero_event_budget_rejects(self):
         doc = make_request()
-        doc["budgets"]["max_events"] = 0
+        doc["coverage"]["max_events"] = 0
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
     def test_negative_byte_budget_rejects(self):
         doc = make_request()
-        doc["budgets"]["max_bytes"] = -1
+        doc["coverage"]["max_bytes"] = -1
         assert_schema_verdict(self, "attention-request", doc, "invalid")
 
-    def test_missing_budgets_reject(self):
+    def test_missing_budgets_are_optional(self):
+        # max_events/max_bytes/max_age_seconds are optional coverage facts
+        # (FR-014); their absence is honest, not invalid.
         doc = make_request()
-        del doc["budgets"]
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
-
-    def test_partial_budgets_reject(self):
-        doc = make_request()
-        del doc["budgets"]["max_bytes"]
-        assert_schema_verdict(self, "attention-request", doc, "invalid")
+        del doc["coverage"]["max_events"]
+        del doc["coverage"]["max_bytes"]
+        assert_schema_verdict(self, "attention-request", doc, "valid")
 
 
 class LedgerAndV1RejectionCases(unittest.TestCase):
