@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACCEPTED`
 
 **Execution status**: stated by reference, never as a fixed state claim —
 unchecked tasks execute only inside a bound `run speckit` run for this slice
