@@ -264,3 +264,57 @@ future canonical-host decision (identifiers only, never dereferenced); the
 because every issued handle state is now validated as the complete
 selected `ContextContinuation` capability rather than read opportunistically
 field-by-field.
+
+## Attempt 6 — CONVERGED
+
+**Slice**: `010-v2-contract`
+
+**Status**: CONVERGED
+
+**Candidate commit**: `bff6b463a44c1b9066fc654691042f9550da6c64`
+
+**Tasks complete**: YES
+
+**Completed task IDs**: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013, T014, T015, T016, T017, T018, T019, T020, T021, T022, T023, T024, T025, T026, T027, T028, T029, T030, T031, T032, T033, T034, T035, T036, T037, T038, T039, T040, T041, T042, T043, T044, T045, T046, T047, T048, T049
+
+**Tasks SHA256**: aab8dbc3d648255e3600ce1c3e6d602e3eb161875923c484358a5997b259c9b8
+
+**Verification commands / results**: PASS — `python3 -m unittest` — 1249
+tests, OK, 11 skipped (8 pre-existing + 3 counted oracle-absent classes per
+the FR-012 skip regime); `uv run --offline --with 'jsonschema==4.26.0'
+python -m unittest discover -s tests/v2/contract -p 'test_*.py'` — 191
+tests, OK, 0 skipped; `python3 scripts/check_governance.py --check-cli` —
+boundary + CLI OK; each of the six attempt-5 R11 probes re-verified
+directly against the fixed tree — an array/object request `handle_id` or
+`direction`, and an array/object issued `handle_id`, all return a
+validation error instead of raising `TypeError`; a duplicate issued
+`handle_id` with a conflicting `bound_to` rejects rather than resolving
+last-write-wins — converge assessment — 0 missing / 0 partial / 0
+contradicts / 0 unrequested beyond the T049 append itself.
+
+**Interface versions**: I-010A AttentionRequestV2@1, I-010B
+AttentionDecisionV2@1, I-010C ParticipantWakeV2@1, I-010D
+ContextContinuationV2@1, I-010E AttentionReceiptV2@1 — at the five exact
+`schemas/v2/*.schema.json` paths (no schema file changed this attempt; R11
+is entirely a `tests/v2/contract/schema_helpers.py` runtime-adapter fix;
+`@1` retained per the FR-011 pre-acceptance rework rule).
+
+**Evidence paths**: evidence/v2/contract/attention-request.jsonl,
+evidence/v2/contract/attention-decision.jsonl,
+evidence/v2/contract/downstream.jsonl, evidence/v2/contract/README.md,
+evidence/v2/contract/checklist-adjudication.md,
+evidence/v2/contract/handoff.md, evidence/v2/contract/slice-activation.md
+
+**Known limitations**: semantic/relational invalid classes are
+runtime-adapter-only per the FR-012 expressiveness partition (the Draft
+2020-12 oracle cannot express them); plain-baseline runs skip the three
+oracle-dependent classes with counted, asserted skips; downstream consumers
+must pass the identical corpus revision named in the T049 packet input
+before their own handoffs; running the pinned uv command generates an
+untracked `uv.lock` at the repo root (delete to restore a clean tree);
+schema $id values use the placeholder domain `nunchi.invalid` pending any
+future canonical-host decision (identifiers only, never dereferenced); the
+`binding-expiry` invalid coverage widens from 13 to 18 cases this attempt
+because a malformed or duplicate handle identity now returns a validation
+error at every lookup site instead of only being caught for well-typed,
+unique identities.

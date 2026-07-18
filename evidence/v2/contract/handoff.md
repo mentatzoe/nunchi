@@ -1289,3 +1289,167 @@ slice-owned `UPDATE` corrected for the retired-claim residue
   candidate.
 - The handoff-packet-commit baseline rerun is owed at the handoff gate
   and cannot be discharged by this packet input.
+
+## Documentation dispositions — attempt 6 (T049)
+
+Appended after the attempt-1/2/3/4/5 sections without rewriting them. This
+section re-executes every row of plan §Documentation Impact and Freshness
+against the attempt-6 candidate diff.
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Reviewed on**: 2026-07-18, directly in the `v2-contract-owner` worktree
+(not via a bound `run speckit` invocation, per the attempt-3/4/5
+rejections' required rework paths).
+
+**Candidate diff basis**: `git diff --name-only
+b9ccace4e35ec78f80f73c69d70184e39f99528b..bff6b463a44c1b9066fc654691042f9550da6c64`
+(the rejected attempt-5 packet commit to the attempt-6 candidate). The
+ordinary-path delta touches only `tests/v2/contract/schema_helpers.py`,
+`tests/v2/contract/test_context_and_receipt.py`,
+`evals/v2/contract/downstream/`, and `evidence/v2/contract/downstream.jsonl`,
+plus the slice's own SpecKit planning artifacts (`Slice state` transitions
+and the new T049). No schema file and no product documentation file is
+modified this attempt.
+
+### UPDATE / HANDOFF / NO_IMPACT
+
+All eighteen rows (1 `UPDATE`, 7 `HANDOFF`, 10 `NO_IMPACT`) from the
+attempt-5 documentation section are unchanged in disposition: this
+attempt's R11 fix is entirely a runtime-adapter defensive-programming
+correction (safe dictionary-key handling) with no field-level, interface,
+or documentation-visible change, so `docs/contracts/nunchi-v2.md` needs no
+edit this attempt. `AGENTS.md`'s baseline-count claim re-verified at 1249
+tests, OK, 11 skipped (the 1242→1249 delta is 7 new unit tests for the R11
+probes, not a coverage loss).
+
+**Result (attempt 6)**: 1 `UPDATE` unchanged (no edit needed); 7 `HANDOFF`
+deltas unchanged; 10 `NO_IMPACT` rationales re-verified CONFIRMED. No row
+is unresolved.
+
+## Proposed handoff packet input — attempt 6 (T049)
+
+Appended after the attempt-6 documentation section, in the same
+documentation-then-packet order as prior attempts, without rewriting any
+earlier section.
+
+**Prepared by**: cc-session-1 (assigned `v2-contract-owner`), 2026-07-18,
+directly in the `v2-contract-owner` worktree, per the attempt-3/4/5
+rejections' explicit required rework paths.
+
+### The two defined commits
+
+- **Candidate commit**: `bff6b463a44c1b9066fc654691042f9550da6c64` on
+  branch `v2/contract` (worktree `.worktrees/v2-contract/`) — the exact
+  tree fixing R11: `validate_continuation_fetch` builds its issued-handle
+  index from only validated non-empty string `handle_id` values, rejects
+  duplicate `handle_id` entries instead of resolving them last-write-wins,
+  and returns early — never using a raw request `handle_id`/`direction` as
+  a dictionary key — when either fails the type check
+  `validate_context_continuation` already reports. R7 through R10 are
+  unchanged from the CLEARED attempt-5 candidate. The full offline baseline
+  recorded in `evidence/v2/contract/README.md` (1249 tests, OK, 11 skipped)
+  is the run this commit must — and does — reproduce.
+- **Handoff packet commit**: not yet pinned; recorded here once it exists,
+  per the established operational rule.
+
+### Interface inventory (versions and exact paths)
+
+Unchanged from attempt 4 — no schema file is touched this attempt:
+
+| Interface | Version | Exact path |
+|---|---|---|
+| `I-010A AttentionRequestV2` | `@1` | `schemas/v2/attention-request.schema.json` |
+| `I-010B AttentionDecisionV2` | `@1` | `schemas/v2/attention-decision.schema.json` |
+| `I-010C ParticipantWakeV2` | `@1` | `schemas/v2/participant-wake.schema.json` |
+| `I-010D ContextContinuationV2` | `@1` | `schemas/v2/context-continuation.schema.json` |
+| `I-010E AttentionReceiptV2` | `@1` | `schemas/v2/attention-receipt.schema.json` |
+
+### Commands and results (2026-07-18, at the candidate commit's tree)
+
+| Command | Result |
+|---|---|
+| `uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 191 tests, OK, 0 skipped (the sole complete dual-validator run) |
+| `python3 -m unittest` (repository baseline, full suite) | 1249 tests, OK, 11 skipped (8 pre-existing V1 + 3 counted `baseline-oracle-absence`) |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence` | 98 + 132 + 174 records, 0 mismatched |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence` | all records carry the five mandatory fields |
+
+### Dual-validator pin and results over the shared corpus
+
+Both validators consumed the identical decoded post-rework corpus (202
+cases; 152 schema-expressible — unchanged from attempt 4 — and 50
+runtime-adapter-only across the seven semantic/relational classes, with
+`binding-expiry` widening from 15 to 20). Observed per-class partition
+counts and both separately named skip regimes (`oracle-class-skip`: 31
+cases; `baseline-oracle-absence`: 171 oracle-side checks) are recorded in
+`evidence/v2/contract/README.md` and match every corpus's authoritative
+`expected-counts.json`.
+
+### Corpus revision and downstream adapter obligation
+
+The shared conformance corpus revision is the exact candidate commit above
+(`bff6b463a44c1b9066fc654691042f9550da6c64`); only
+`evals/v2/contract/downstream/` changed this attempt (87 cases, up from
+82). **Obligation (unchanged)**: each downstream runtime owner must pass
+its own stdlib runtime-validation adapter over this identical corpus
+revision before its own handoff.
+
+### Scene-to-record evidence manifest (regenerated)
+
+`evidence/v2/contract/README.md` (regenerated by T049) maps all twelve
+scene rows to their JSONL files and record IDs, verified exhaustive and
+exact against the 202 post-rework evidence cases (cross-checked
+case-ID-for-case-ID against the three corpora; zero missing, zero spurious
+entries).
+
+### Migration and provenance notes
+
+- This is the attempt-6 packet following the rejection of candidate
+  `1709c714717cd2735da2e9e08487fe8f02f2b930` at packet commit
+  `b9ccace4e35ec78f80f73c69d70184e39f99528b`, recorded at
+  `evidence/v2/contract/review-2026-07-18-v2-integrator-attempt-5.md` and
+  bound into the appended `REJECTED` attempt in
+  `evidence/v2/contract/slice-handoff.md`. R7 through R10 were CLEARED by
+  that review and needed no rework; its one blocker is resolved in this
+  candidate: **R11** — a malformed (unhashable) or duplicate
+  `handle_id`/`direction` now returns a validation error rather than
+  raising, and duplicate issued identities reject rather than resolving
+  last-write-wins.
+- No V1 translation bridge exists or is permitted (FR-011). V1 remains the
+  current product until the atomic V2 merge is verified on `main`.
+- Provenance: implemented under program authority
+  `evidence/governance/v2-implementation-authorization.md` (all eleven
+  slices enumerated), activation
+  `evidence/v2/contract/slice-activation.md` (`READY` at `16cccb7`),
+  assignment `evidence/governance/assignments/cc-session-1-v2-contract-owner-2026-07-16.md`.
+  This attempt was completed directly in the owner worktree rather than
+  through a bound `run speckit` invocation, per the attempt-3/4/5
+  rejections' explicit required rework paths.
+- Runtime provenance: Python 3.11+ stdlib-only runtime;
+  `jsonschema==4.26.0` is dev/test-only behind the pinned offline command
+  and never enters runtime dependencies.
+
+### Documentation dispositions, validation, and reviewer
+
+Recorded in full as the attempt-6 documentation section above: all
+eighteen rows unchanged in disposition (1 `UPDATE` needing no edit, 7
+`HANDOFF` unchanged, 10 `NO_IMPACT` re-verified CONFIRMED); reviewer
+cc-session-1.
+
+### Known limitations
+
+- A green contract suite proves contract mechanics, not social judgment
+  quality.
+- The Draft 2020-12 oracle cannot express the seven semantic/relational
+  rule classes; they bind only through each consumer's stdlib adapter.
+- The pinned offline command requires `jsonschema==4.26.0` already
+  present in the operator's uv cache; running it generates an untracked
+  `uv.lock` at the repo root (delete to restore a clean tree).
+- Schema `$id` values use the placeholder domain `nunchi.invalid`.
+- The umbrella parity scenes S04 and S10 through S14 are owned by other
+  slices; this packet claims no coverage of them.
+- The seven `HANDOFF` documentation deltas apply only in the atomic
+  candidate.
+- The handoff-packet-commit baseline rerun is owed at the handoff gate
+  and cannot be discharged by this packet input.
