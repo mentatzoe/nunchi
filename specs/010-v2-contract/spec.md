@@ -111,6 +111,35 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   both validators (schema-expressible), and the runtime stream-level
   ordering/immutability checks remain in addition (R3).
 
+### Session 2026-07-18
+
+- Q: May an `@1` schema satisfy the functional requirements with locally
+  named or narrowed shapes? → A: No. The selected design at `c834e8c` is the
+  field-level naming and shape authority for all five interfaces;
+  representative selected-design documents, including the design's example
+  attention request, MUST validate. Local renames or narrowings — for
+  example `routing` for `routing_audit`, `legacy_confidence` for
+  `legacy_verdict_confidences`, a generic event shape instead of the typed
+  message/reaction/membership union, collapsed coverage enums, or a
+  mandatory request ID on the error branch — are contract defects
+  (attempt-2 rejection R4; FR-014).
+- Q: Does a corpus that is self-consistent with the shipped schemas
+  establish conformance? → A: No. The corpus MUST contain
+  authority-conformance cases drawn from the selected design; they fail
+  against the narrowed attempt-2 shapes and pass after the schema repair
+  (R4 rework path; FR-012, SC-001).
+- Q: Which commit identities must agree in a delivered handoff packet? →
+  A: The lifecycle candidate entry, the handoff attempt entry, the packet
+  input in `evidence/v2/contract/handoff.md`, and the recorded corpus
+  revision name one identical exact candidate commit, and the actual
+  handoff packet commit is recorded once it exists; a placeholder or
+  divergent commit identity in a delivered packet blocks acceptance (R5;
+  SC-005).
+- Q: How does the task graph state execution status without contradicting
+  lifecycle evidence at a packet commit? → A: By reference to the slice
+  declarations and lifecycle evidence, never as a hard-coded
+  state-specific claim that a later transition falsifies (R6; SC-005).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Exchange a Truthful Attention Request (Priority: P1)
@@ -241,6 +270,11 @@ participant outcomes and binding failures.
   (FR-010), not merely at stream level.
 - Session-only continuity and unknown event visibility must remain explicit;
   neither is upgraded to restart-safe or unavailable by inference.
+- Invalid as a contract (FR-014): an `@1` schema or runtime adapter that
+  rejects a representative selected-design document — the design's example
+  attention request, a typed reaction or membership event, a directional
+  anchored fetch, a selected wake packet, or a selected receipt stage. The
+  defect is in the contract and is never resolved by narrowing the corpus.
 
 ## Requirements
 
@@ -374,7 +408,13 @@ participant outcomes and binding failures.
   (fetch-time binding/expiry state, receipt-stage sequence rules) are
   oracle-class-skipped, because there is no single document to validate.
   Per-class case counts MUST be asserted loudly so neither partition can
-  silently shrink.
+  silently shrink. The corpus MUST also contain authority-conformance cases
+  drawn from the selected design (FR-014): the design's example attention
+  request validates verbatim as a schema-expressible valid case, and named
+  cases cover the complete typed event, coverage, continuation
+  capability/fetch/page, participant-wake, decision, and four-stage receipt
+  field inventories. A corpus that is merely self-consistent with narrower
+  schemas does not establish conformance.
 - **FR-013**: Advice validity follows the attention engine's contract (030
   FR-005: `SUPPRESS` and `DEFER` carry no participant advice). On the `I-010B`
   ok branch, `advice` MUST be present only when the classifier disposition is
@@ -383,6 +423,35 @@ participant outcomes and binding failures.
   `I-010C`, `advice` MUST be present only when `source` is `WAKE`; `DEFER`,
   `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because no
   classifier advice exists for those sources.
+- **FR-014**: The selected Vault design at `c834e8c` — its target attention
+  request, target attention response, participant wake contract, and staged
+  receipt sections — is the field-level naming and shape authority for every
+  `@1` interface; the program-canonical interface names and versions
+  (`I-010A`–`I-010E` at `@1`) remain this slice's vocabulary for those same
+  documents. Schemas MUST encode the selected field inventory rather than a
+  narrowed local shape: the room platform/id/continuity-scope/name/kind
+  facts and the actor map; the typed message, reaction, and membership
+  event union with reaction `add`/`remove` operation and literal membership
+  scope, subject actor, and optional causal actor; the coverage facts
+  (`has_more_before`, `has_more_after`, `has_gaps`, `truncated_by`,
+  `continuity`, `has_restart_gap`, and optional per-event-type visibility);
+  the continuation capability (`handle_id`, exact `bound_to`,
+  before/after/around fetch capabilities, per-fetch caps, optional expiry)
+  with directional anchor-bearing fetch and identity-bearing page shapes;
+  the wake packet materializing self, room, actors, events, trigger,
+  coverage, optional host-only continuation authority, and a separate
+  `attention` object; the decision field names `routing_audit` and
+  `legacy_verdict_confidences`, a classifier audit naming the classifier
+  with optional provider and model, and an optional request ID on a
+  pre-validation error; and the four receipt stages' telemetry —
+  observation request/schema/trigger/continuity IDs, snapshot sizes,
+  coverage, and included event IDs; attention classifier identity,
+  evidence, and transition-valve facts or the bypass fact with trusted
+  provenance; participant-host wake source, packet sizes, delivered event
+  IDs, expansion calls, and invocation and `sent`/`silent`/`unknown`
+  outcome; transport hygiene and routing/send facts. A document the
+  selected design declares valid that either validator rejects is a
+  contract defect, not a corpus error.
 
 ### Key Entities
 
@@ -411,7 +480,8 @@ participant outcomes and binding failures.
   reply-field, and social-ledger cases — schema-expressible cases through both
   validators with identical expected results, semantic/relational cases through
   the stdlib runtime adapter (FR-012 partition), with per-class counts
-  asserted.
+  asserted — and accepts 100% of the FR-014 authority-conformance cases,
+  including the selected design's example attention request.
 - **SC-002**: Every valid request fixture preserves the supplied event order and
   exact actor/event references at the semantic field level: parsed field
   values compare equal — strings as exact strings, numbers by exact decimal
@@ -435,7 +505,18 @@ participant outcomes and binding failures.
   scene-to-record manifest, receipt stage ownership, rejected-case inventory,
   migration/provenance notes, documentation dispositions/validation/reviewer,
   evidence references, and known limitations with no unresolved ownership
-  ambiguity (T019's enumeration is the authoritative packet list).
+  ambiguity (T019's enumeration is the authoritative packet list). Commit
+  identity is single-valued across the packet: the lifecycle candidate
+  entry, the handoff attempt entry, the packet input in
+  `evidence/v2/contract/handoff.md`, and the recorded corpus revision MUST
+  name the identical exact candidate commit, with the actual handoff packet
+  commit recorded in the same terms once it exists; a placeholder,
+  future-valued, or divergent commit identity anywhere in a delivered
+  packet blocks acceptance. The slice declarations, lifecycle evidence, and
+  the task graph's execution-status wording MUST agree at the packet
+  commit: the task graph states execution status by reference to the slice
+  declarations and lifecycle evidence, never as a hard-coded
+  state-specific claim that a later transition falsifies.
 - **SC-006**: A repository-boundary check finds zero product schemas, tests,
   fixtures, evaluation assets, evidence, or product documentation under this
   SpecKit directory.
