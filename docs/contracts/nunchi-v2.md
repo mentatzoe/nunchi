@@ -202,10 +202,11 @@ pair that capability authorizes — a `oneOf` over two bare shapes with no
 Handles, cursors, and fetch credentials are host-only and forbidden from
 the classifier projection; the classifier sees coverage and expansion
 capability booleans only (FR-004/FR-009). A fetch request carries no
-inline binding fields — a handle is permanently bound to its issuing
-continuation capability, so a known, unexpired handle is by construction
-the correct binding; binding/expiry validation happens at fetch time —
-see the runtime-adapter-only rules below.
+inline binding fields — the host's actual call context is compared
+independently against the issuing continuation capability's exact
+`bound_to` at fetch time (rejection R10); a known, unexpired handle alone
+does not establish correct binding or bounded authorization — see the
+runtime-adapter-only rules below.
 
 ## I-010E AttentionReceiptV2@1
 

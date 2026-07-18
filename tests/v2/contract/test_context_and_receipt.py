@@ -163,6 +163,47 @@ class FetchTimeBindingCases(unittest.TestCase):
         errors = validate_continuation_fetch(payload)
         self.assertTrue(any("max_bytes" in error and "exceeds" in error for error in errors), errors)
 
+    def test_valid_no_expiry_capability_passes(self):
+        # The selected design's own example continuation carries no
+        # expires_at member (rejection R10 attempt-4 finding): absence is
+        # valid, not a validation failure.
+        payload = make_fetch_payload()
+        del payload["issued"][0]["expires_at"]
+        self.assertEqual([], validate_continuation_fetch(payload))
+
+    def test_missing_required_capability_field_rejects(self):
+        payload = make_fetch_payload()
+        del payload["issued"][0]["max_events_per_fetch"]
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("max_events_per_fetch" in error for error in errors), errors)
+
+    def test_mistyped_capability_cap_rejects(self):
+        payload = make_fetch_payload()
+        payload["issued"][0]["max_events_per_fetch"] = "20"
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("max_events_per_fetch" in error for error in errors), errors)
+
+    def test_mistyped_direction_flag_rejects(self):
+        payload = make_fetch_payload()
+        payload["issued"][0]["can_fetch_before"] = "yes"
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("can_fetch_before" in error for error in errors), errors)
+
+    def test_incomplete_binding_on_both_sides_still_rejects(self):
+        # Two equally incomplete objects must not pass the equality check
+        # by virtue of matching each other (rejection R10 attempt-4 finding).
+        payload = make_fetch_payload()
+        del payload["issued"][0]["bound_to"]["participant_id"]
+        del payload["host_context"]["participant_id"]
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("participant_id" in error for error in errors), errors)
+
+    def test_mixed_timezone_aware_and_naive_timestamps_return_error_not_raise(self):
+        payload = make_fetch_payload()
+        payload["issued"][0]["expires_at"] = "2026-07-17T02:00:00"
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("not comparable" in error for error in errors), errors)
+
 
 class ContinuityScopeCollisionCases(unittest.TestCase):
     """FR-003/FR-009: a continuation page whose event IDs collide with the

@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Execution status**: stated by reference, never as a fixed state claim —
 unchecked tasks execute only inside a bound `run speckit` run for this slice
@@ -355,6 +355,51 @@ is preserved unchanged.
   the attempt-4 documentation section to `evidence/v2/contract/handoff.md`;
   and return the header **Slice state** to `ACTIVE` on this same commit.
 
+## Phase 11: Attempt-4 Rejection Rework (R10 completion)
+
+**Correction source**: `evidence/v2/contract/review-2026-07-18-v2-integrator-attempt-4.md`,
+rejecting candidate `0596d14c0579b0ad2530c4e273729dcc274f7034` at packet
+`aa396ffebb552aeee91fd1b6a32a22538b2564c6`. R7, R8, and R9 are CLEARED by
+that review and need no rework; R10 is only PARTIALLY CLEARED — the new
+fetch checks compare a well-formed issued-state fixture correctly, but the
+adapter never validates that the issued state is itself a complete, typed
+`ContextContinuation` capability, and mishandles the selected optional
+`expires_at`. Per the decision's required rework path, this phase performs
+the correction by direct edit rather than a new bound `run speckit`;
+completed history — checked tasks T001–T047, every evidence record, and all
+four rejected candidate/handoff attempt streams — is preserved unchanged.
+
+- [X] T048 Complete R10 against the exact findings in
+  `review-2026-07-18-v2-integrator-attempt-4.md`: in
+  `tests/v2/contract/schema_helpers.py`, make `validate_continuation_fetch`
+  pass every issued handle state (minus its host-only `cursors` list)
+  through the existing `_check_continuation` capability validator, so a
+  missing or mistyped `handle_id`/`bound_to`/`can_fetch_before`/
+  `can_fetch_after`/`can_fetch_around_event`/`max_events_per_fetch`/
+  `max_bytes_per_fetch` rejects instead of being silently skipped by the
+  binding/direction/cap comparisons; validate `host_context` through the
+  existing `_check_continuation_binding` validator as the same closed
+  four-field shape before comparing it against `bound_to` for exact
+  equality, so two equally incomplete objects cannot pass by matching each
+  other; only parse and compare `expires_at` when the key is present
+  (the selected design's own member is optional — its absence is valid,
+  not a missing-timestamp error); and wrap the `fetch_time`-versus-
+  `expires_at` comparison so a `TypeError` from mixed timezone-aware/naive
+  values returns a validation error instead of raising. Add the six named
+  unit probes to `tests/v2/contract/test_context_and_receipt.py`
+  (`FetchTimeBindingCases`) and the matching valid-no-expiry plus six
+  invalid `binding-expiry` corpus cases (missing/mistyped binding field,
+  missing/mistyped direction flag, missing/mistyped cap, mixed-timezone
+  comparison) to `evals/v2/contract/downstream/cases.jsonl` with
+  `expected-counts.json` updated in the same change; correct the retired
+  "a known, unexpired handle is by construction bound correctly" claim
+  remaining in `docs/contracts/nunchi-v2.md`'s `I-010D` section (the
+  runtime-adapter-only rules list was already corrected by T047); regenerate
+  all three aggregate evidence files and the README manifest through the
+  T021-enforced five-field writer; append the attempt-5 documentation
+  section to `evidence/v2/contract/handoff.md`; and return the header
+  **Slice state** to `ACTIVE` on this same commit.
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -419,6 +464,10 @@ is preserved unchanged.
   `tests/v2/contract/schema_helpers.py`, and may be worked in any order —
   but its evidence-regeneration and `Slice state` sub-steps run last, after
   all four fixes land and the full dual-validator baseline is green.
+- Rejection-rework phase (attempt 4 → 5): T048 depends on T047 (it edits the
+  same `validate_continuation_fetch` function T047 introduced) and has no
+  other upstream dependency; its evidence-regeneration and `Slice state`
+  sub-steps run last, after the full dual-validator baseline is green.
 
 ## Parallel Opportunities
 
@@ -520,3 +569,16 @@ do not let a dependent implementation silently define the shared interface.
   `evidence/v2/contract/handoff.md` and
   `evidence/v2/contract/checklist-adjudication.md` append a new section
   without rewriting the attempt-1/2/3 sections.
+- Phase 11 is the rework for the v2-integrator rejection of the attempt-4
+  candidate `0596d14c0579b0ad2530c4e273729dcc274f7034` at packet commit
+  `aa396ffebb552aeee91fd1b6a32a22538b2564c6` (R10 partially cleared): R7,
+  R8, and R9 are CLEARED and need no rework; completed history — checked
+  tasks T001–T047, all four rejected attempt streams, and every prior
+  evidence section — is preserved unchanged. The header **Slice state**
+  line returns to `ACTIVE` on the same commit as T048's fix, and a new
+  attempt-5 candidate/handoff entry is appended once verification is green.
+- Attempt-5 evidence semantics (T048): the same per-attempt regeneration
+  rule applies — all three aggregate JSONL files and the README manifest
+  regenerate as current-attempt records, and `evidence/v2/contract/
+  handoff.md` appends a new section without rewriting the attempt-1/2/3/4
+  sections.

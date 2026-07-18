@@ -24,8 +24,8 @@
     "invalid": 1
   },
   "binding-expiry": {
-    "valid": 1,
-    "invalid": 7
+    "valid": 2,
+    "invalid": 13
   },
   "receipt-sequence": {
     "valid": 6,

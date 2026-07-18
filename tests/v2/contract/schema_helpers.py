@@ -1616,63 +1616,91 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     """Fetch-time binding/expiry state (runtime-adapter-only, behavioral).
 
     ``payload`` carries the host's fetch context: ``fetch_time``, the
-    ``host_context`` this fetch call is actually being made under
-    (``participant_id``, ``room_id``, ``continuity_scope_id``,
-    ``trigger_event_id``), the ``issued`` handle states — each carrying its
-    full continuation capability (``handle_id``, exact ``bound_to``,
-    ``can_fetch_before``/``can_fetch_after``/``can_fetch_around_event``,
-    ``max_events_per_fetch``/``max_bytes_per_fetch``, ``expires_at``, and the
-    ``cursors`` minted under that handle) — and the incoming fetch
-    ``request`` document. The request document itself must be schema-valid;
-    its handle must be known and unexpired at fetch time; the capability's
-    exact ``bound_to`` must match the host's actual call context; the
-    requested direction must be authorized by that capability; the requested
-    ``max_events``/``max_bytes`` must not exceed the capability's issued
-    caps; and any cursor must be minted under that same handle (cross-binding
-    cursor reuse rejects). A known, unexpired handle alone does not establish
-    correct binding or bounded authorization (rejection R10) — every one of
-    those facts is checked explicitly against the issued capability.
+    ``host_context`` this fetch call is actually being made under (the exact
+    closed four-field binding shape — ``participant_id``, ``room_id``,
+    ``continuity_scope_id``, ``trigger_event_id``), the ``issued`` handle
+    states — each the complete selected ``ContextContinuation`` capability
+    (``handle_id``, exact ``bound_to``, ``can_fetch_before``/
+    ``can_fetch_after``/``can_fetch_around_event``,
+    ``max_events_per_fetch``/``max_bytes_per_fetch``, optional
+    ``expires_at``) plus the host-only ``cursors`` minted under that handle —
+    and the incoming fetch ``request`` document. Every issued state is
+    validated as that complete capability (rejection R10: a missing or
+    mistyped required member must reject, not be silently skipped by the
+    binding/direction/cap comparisons downstream); ``host_context`` is
+    validated as the identical closed binding shape before being compared
+    for exact equality against the capability's ``bound_to``; ``expires_at``
+    is optional per the selected design and is parsed/compared only when
+    present, with an incomparable timestamp pair (e.g. mixed timezone-aware/
+    naive values) returned as a validation error rather than raised; the
+    requested direction must be authorized by the capability; the requested
+    ``max_events``/``max_bytes`` must not exceed its issued caps; and any
+    cursor must be minted under that same handle (cross-binding cursor reuse
+    rejects). A known, unexpired handle alone does not establish correct
+    binding or bounded authorization — every one of those facts is checked
+    explicitly against the issued capability.
     """
-    errors: list[str] = []
+    errors = _Errors()
     request = payload.get("request")
     errors.extend(validate_context_continuation(request))
     if not isinstance(request, dict) or "max_events" not in request:
         errors.append("fetch.request: must be a fetch-request document")
-        return errors
+        return list(errors)
     issued_states = payload.get("issued")
     if not isinstance(issued_states, list):
-        return errors + ["fetch.issued: must list the host's issued handle states"]
+        return list(errors) + ["fetch.issued: must list the host's issued handle states"]
     fetch_time = _parse_timestamp(payload.get("fetch_time"))
     if fetch_time is None:
-        return errors + ["fetch.fetch_time: must be an ISO 8601 timestamp"]
+        return list(errors) + ["fetch.fetch_time: must be an ISO 8601 timestamp"]
+
+    for issued_state in issued_states:
+        if not isinstance(issued_state, dict):
+            errors.append("fetch.issued[]: each issued state must be an object")
+            continue
+        label = issued_state.get("handle_id", "?")
+        capability = {key: value for key, value in issued_state.items() if key != "cursors"}
+        _check_continuation(errors, f"fetch.issued[{label!r}]", capability)
+        if "cursors" in issued_state and not isinstance(issued_state["cursors"], list):
+            errors.add(f"fetch.issued[{label!r}].cursors", "must be an array")
 
     by_handle = {
-        state.get("handle_id"): state
-        for state in issued_states
-        if isinstance(state, dict)
+        issued_state.get("handle_id"): issued_state
+        for issued_state in issued_states
+        if isinstance(issued_state, dict)
     }
     handle_id = request.get("handle_id")
     state = by_handle.get(handle_id)
     if state is None:
         errors.append(f"handle_id: {handle_id!r} was never issued for this continuity scope")
-        return errors
+        return list(errors)
 
     host_context = payload.get("host_context")
+    _check_continuation_binding(errors, "fetch.host_context", host_context)
     bound_to = state.get("bound_to")
-    if not isinstance(bound_to, dict) or not isinstance(host_context, dict) or host_context != bound_to:
+    if isinstance(host_context, dict) and isinstance(bound_to, dict) and host_context != bound_to:
         errors.append(
             f"handle_id: {handle_id!r} is bound to {bound_to!r} but the host "
             f"call context is {host_context!r} (exact-binding mismatch)"
         )
 
-    expires_at = _parse_timestamp(state.get("expires_at"))
-    if expires_at is None:
-        errors.append("fetch.issued.expires_at: must be an ISO 8601 timestamp")
-    elif fetch_time > expires_at:
-        errors.append(
-            f"handle_id: {handle_id!r} expired at {state.get('expires_at')} and is "
-            "rejected at fetch time (binding-validation failure)"
-        )
+    if "expires_at" in state:
+        expires_at = _parse_timestamp(state.get("expires_at"))
+        if expires_at is None:
+            errors.append("fetch.issued.expires_at: must be an ISO 8601 timestamp")
+        else:
+            try:
+                expired = fetch_time > expires_at
+            except TypeError:
+                errors.append(
+                    "fetch.issued.expires_at: fetch_time and expires_at are not "
+                    "comparable (mixed timezone-aware/naive timestamps)"
+                )
+            else:
+                if expired:
+                    errors.append(
+                        f"handle_id: {handle_id!r} expired at {state.get('expires_at')} and is "
+                        "rejected at fetch time (binding-validation failure)"
+                    )
 
     direction = request.get("direction")
     direction_capability = {
@@ -1718,7 +1746,7 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
                 )
             else:
                 errors.append(f"cursor: {cursor!r} was never minted for handle {handle_id!r}")
-    return errors
+    return list(errors)
 
 
 def validate_receipt_stream(records: Any) -> list[str]:
