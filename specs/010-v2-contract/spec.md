@@ -273,8 +273,11 @@ participant outcomes and binding failures.
 - Invalid as a contract (FR-014): an `@1` schema or runtime adapter that
   rejects a representative selected-design document — the design's example
   attention request, a typed reaction or membership event, a directional
-  anchored fetch, a selected wake packet, or a selected receipt stage. The
-  defect is in the contract and is never resolved by narrowing the corpus.
+  anchored fetch, a selected wake packet, a selected decision document (a
+  valid `WAKE` with a `margin-defer` routing audit, and a valid `WAKE`
+  without a legacy verdict confidence vector), or a selected receipt stage.
+  The defect is in the contract and is never resolved by narrowing the
+  corpus.
 
 ## Requirements
 
@@ -329,7 +332,13 @@ participant outcomes and binding failures.
   contains exactly cause `preattention-disabled` with no classifier or
   effective disposition, classifier audit, reasons, evidence, legacy
   confidence vector, routing audit, or advice; the error branch remains
-  operational and separate.
+  operational and separate, containing exactly an `error` object with `code`
+  and `detail`, an optional request ID (optional because a pre-validation
+  error may occur before a request ID is assignable), and an optional
+  classifier audit (present only when the error occurred after classifier
+  invocation) — this is the complete error-branch field inventory; the
+  request-ID field's optionality covers both the pre-validation and
+  post-validation error cases identically, not only the pre-validation one.
 - **FR-006**: Allowed successful disposition transitions MUST be limited to
   `SUPPRESS→SUPPRESS`, `SUPPRESS→DEFER`, `WAKE→WAKE`, and `DEFER→DEFER`; every
   other `status: ok` pairing MUST take the operational-error path. The four
@@ -413,7 +422,11 @@ participant outcomes and binding failures.
   request validates verbatim as a schema-expressible valid case, and named
   cases cover the complete typed event, coverage, continuation
   capability/fetch/page, participant-wake, decision, and four-stage receipt
-  field inventories. A corpus that is merely self-consistent with narrower
+  field inventories. Authority-conformance cases are a named manifest-counted
+  class inside the schema-expressible partition, carrying the identical
+  dual-validator expected-results treatment every schema-expressible case
+  carries; they are never a fourth oracle-treatment class alongside the three
+  FR-012 already fixes. A corpus that is merely self-consistent with narrower
   schemas does not establish conformance.
 - **FR-013**: Advice validity follows the attention engine's contract (030
   FR-005: `SUPPRESS` and `DEFER` carry no participant advice). On the `I-010B`

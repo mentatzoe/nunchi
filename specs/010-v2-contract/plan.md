@@ -432,9 +432,10 @@ tests target `tests/v2/contract/`. Each family's `cases.jsonl` also carries
 its named FR-014 authority-conformance cases — the selected design's example
 attention request verbatim in the attention-request family, and complete
 field-inventory cases in every family — recorded under the scene IDs the
-family's rows above already carry, counted as their own class in
-`expected-counts.json`, and flagged as authority cases in the manifest so
-the class cannot silently shrink. Every aggregate JSONL evidence record MUST
+family's rows above already carry, as schema-expressible valid cases counted
+as their own class in `expected-counts.json` — never a new partition class
+with its own oracle treatment — and flagged as authority cases in the
+manifest so the class cannot silently shrink. Every aggregate JSONL evidence record MUST
 contain `scene_id`, stable `case_id`, validator identity, expected result, and
 observed result. `evidence/v2/contract/README.md` is the exact manifest mapping
 each S ID and slice-specific scene to its JSONL file and record IDs. Evidence
@@ -515,7 +516,7 @@ documentation remain separately addressable ordinary artifacts.
 | Artifact class | Implementation target path(s) | Owning task/story |
 |---|---|---|
 | Machine-readable contracts | `schemas/v2/*.schema.json` | US1–US3 |
-| Contract tests | `tests/v2/contract/test_*.py` | US1–US3 |
+| Contract tests | `tests/v2/contract/test_*.py`, `tests/v2/contract/schema_helpers.py` | US1–US3 |
 | Evaluation corpus (run by the tests/v2/contract suite) | `evals/v2/contract/attention-request/`, `evals/v2/contract/attention-decision/`, `evals/v2/contract/downstream/` (each: `cases.jsonl` + per-class `expected-counts.json`) | US1–US3 |
 | Evidence | `evidence/v2/contract/attention-request.jsonl`, `evidence/v2/contract/attention-decision.jsonl`, `evidence/v2/contract/downstream.jsonl`, `evidence/v2/contract/README.md`, `evidence/v2/contract/handoff.md`, plus the declared lifecycle records | Cross-cutting |
 | Product contract docs | `docs/contracts/nunchi-v2.md` | Cross-cutting |
