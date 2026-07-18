@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-request.schema.json",
   "title": "AttentionRequestV2",
-  "description": "I-010A AttentionRequestV2@1 — the bounded factual attention request and classifier projection, encoding the selected design's field inventory verbatim (FR-014, c834e8c): exact self binding, room platform/id/continuity-scope/name/kind facts, the observed/referenced actor map, the typed message/reaction/membership event union, honest coverage facts, and optional host-only continuation capability. Host-only continuation authority (handle, binding, cursor, expiry, fetch capabilities) is forbidden from the classifier projection and lives only under `continuation`. Runtime-adapter-only semantic rules (cross-item ID uniqueness, timestamp-versus-order agreement, trigger membership, advice citations, fetch-time binding/expiry state, receipt-stage sequences) are documented in docs/contracts/nunchi-v2.md and enforced by the stdlib runtime adapter, not this schema.",
+  "description": "I-010A AttentionRequestV2@1 — the bounded factual attention request and classifier projection, encoding the selected design's field inventory verbatim (FR-014, c834e8c): exact self binding, room platform/id/continuity-scope/name/kind facts, the observed/referenced actor map, the typed message/reaction/membership event union, honest coverage facts, and optional host-only continuation capability. Host-only continuation authority (handle, binding, cursor, expiry, fetch capabilities) is forbidden from the classifier projection and lives only under `continuation`. Runtime-adapter-only semantic rules (cross-item ID uniqueness, timestamp-versus-order agreement, trigger membership, actor-map reference integrity, advice citations, fetch-time binding/expiry state, receipt-stage sequences) are documented in docs/contracts/nunchi-v2.md and enforced by the stdlib runtime adapter, not this schema.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -17,8 +17,9 @@
       }
     },
     "actorMap": {
-      "$comment": "The observed/referenced cast keyed by opaque actor ID, never a complete room roster.",
+      "$comment": "The observed/referenced cast keyed by opaque actor ID, never a complete room roster. An empty-string key is never a valid opaque ID (schema-expressible); that self.actor_id and every typed-event actor reference must resolve to a key present here is a runtime-adapter-only cross-reference rule (rejection R8) — Draft 2020-12 cannot express dynamic key membership.",
       "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
       "additionalProperties": {"$ref": "#/$defs/actor"}
     },
     "membershipScope": {
@@ -39,8 +40,8 @@
         "type": {"const": "message"},
         "author_id": {"$ref": "#/$defs/nonEmptyString"},
         "timestamp": {
-          "$comment": "null is an explicitly unknown platform fact, never inferred.",
-          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
+          "$comment": "Optional (FR-014/c834e8c: timestamp?: string); an unknown platform fact is represented by omission, never by an explicit null (rejection R7 removes the locally added null variant).",
+          "$ref": "#/$defs/nonEmptyString"
         },
         "text": {"type": "string"},
         "reply_to_event_id": {"$ref": "#/$defs/nonEmptyString"},
@@ -61,9 +62,7 @@
         "id": {"$ref": "#/$defs/nonEmptyString"},
         "type": {"const": "reaction"},
         "author_id": {"$ref": "#/$defs/nonEmptyString"},
-        "timestamp": {
-          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
-        },
+        "timestamp": {"$ref": "#/$defs/nonEmptyString"},
         "target_event_id": {"$ref": "#/$defs/nonEmptyString"},
         "reaction": {"$ref": "#/$defs/nonEmptyString"},
         "operation": {"enum": ["add", "remove"]}
@@ -76,9 +75,7 @@
       "properties": {
         "id": {"$ref": "#/$defs/nonEmptyString"},
         "type": {"const": "membership"},
-        "timestamp": {
-          "oneOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": null}]
-        },
+        "timestamp": {"$ref": "#/$defs/nonEmptyString"},
         "scope": {"$ref": "#/$defs/membershipScope"},
         "subject_actor_id": {"$ref": "#/$defs/nonEmptyString"},
         "caused_by_actor_id": {"$ref": "#/$defs/nonEmptyString"},

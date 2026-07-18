@@ -59,12 +59,15 @@ A truthful attention request represents:
   `self.actor_id`, transport- or host-attested (FR-002). Optional
   `self.names`/`role`/`description` are flat loose descriptors that never
   establish authorship; an alias collision with another observed actor is
-  representable without becoming an identity claim.
+  representable without becoming an identity claim. `self.actor_id` must
+  resolve to a key in `actors` (runtime-adapter-only; rejection R8).
 - **Room facts** — `room.platform`, `room.id`, `room.continuity_scope_id`,
   optional `room.name` and `room.kind` (`group`/`direct`/`unknown`).
 - **The actor map** — `actors` is an object keyed by opaque actor ID (not
   an array), value `{display_name?, kind?}`; the observed/referenced cast
-  only, never an inferred full roster.
+  only, never an inferred full roster. Every typed event's actor reference
+  must resolve to a key here too (runtime-adapter-only; rejection R8) — a
+  reference absent from the map is a dangling opaque string.
 - **The typed event union** — array order is authoritative. Every event
   carries `id` and `type`; `message` events add `author_id`, optional
   `timestamp`, `text`, optional `reply_to_event_id`/`thread_root_event_id`,
@@ -152,14 +155,15 @@ A tagged host-facing union on `status`:
   identically everywhere: no classifier/effective disposition, classifier
   audit, reasons, evidence, legacy confidence vector, routing audit, or
   advice. Bypass is non-social and fabricates no model judgment.
-- **`status: error`** — the operational branch: `error.code` is one of
+- **`status: error`** — the operational branch: the complete error object is
+  `{code, detail}`, both required (FR-005, FR-014). `code` is the authority's
+  open string — not a locally narrowed enum; example values in use include
   `malformed-model-output`, `invalid-transition`,
-  `invalid-legacy-confidence`, `provider-failure`, `runtime-failure`, with
-  optional `detail`. `request_id` is optional on both the pre-validation
-  and post-validation branches (a pre-validation error may occur before a
-  request ID is assignable); an optional `classifier` audit is present
-  only when the error occurred after classifier invocation (FR-005,
-  FR-014).
+  `invalid-legacy-confidence`, `provider-failure`, and `runtime-failure`, but
+  any non-empty string is schema-valid. `request_id` is optional on both the
+  pre-validation and post-validation branches (a pre-validation error may
+  occur before a request ID is assignable); an optional `classifier` audit is
+  present only when the error occurred after classifier invocation.
 
 ## I-010C ParticipantWakeV2@1
 
@@ -213,7 +217,7 @@ stage-shaped `body` carrying the selected telemetry (FR-014):
 | Stage | Owning writer | Body |
 |---|---|---|
 | `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count`, `coverage`, `included_event_ids` |
-| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`) or operational error (`error: {code, detail?}`) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
+| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`) or operational error (`error: {code, detail}`, both required) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
 | `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count`, `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
 
@@ -277,6 +281,7 @@ treatment:
 | `timestamp-order` | runtime adapter | expected-valid (document-shaped) |
 | `advice-citation` | runtime adapter | expected-valid (document-shaped) |
 | `trigger-membership` | runtime adapter | expected-valid (document-shaped) |
+| `actor-reference-integrity` | runtime adapter | expected-valid (document-shaped) |
 | `binding-expiry` | runtime adapter | class-skipped (behavioral) |
 | `receipt-sequence` | runtime adapter | class-skipped (behavioral) |
 
@@ -295,9 +300,10 @@ every runtime consumer must enforce them in its stdlib adapter:
    continuation page whose event IDs collide with its originating request
    rejects at fetch time under the exact merge-identity rule.
 2. **Timestamp-versus-order agreement** (FR-003): the event array order is
-   authoritative; non-null parseable timestamps must not contradict it
-   (non-decreasing). An explicitly `null` or unparseable timestamp is
-   exempt as an unknown platform fact.
+   authoritative; parseable timestamps must not contradict it
+   (non-decreasing). An omitted or unparseable timestamp is exempt as an
+   unknown platform fact — the authority represents unknown timestamp by
+   omission, not `null` (rejection R7).
 3. **Cross-document advice citations** (FR-013): every advice
    `evidence_event_ids` entry — on a decision's `attention_advice` items or
    a wake's `attention.advice` items/`attention.evidence_event_ids` — must
@@ -305,14 +311,32 @@ every runtime consumer must enforce them in its stdlib adapter:
    materialized events); a citation of a nonexistent event rejects.
 4. **Trigger membership** (FR-003): `trigger_event_id` must name an event
    present in `events`.
-5. **Fetch-time binding/expiry state** (FR-004/FR-009): a fetch validates
-   only if its `handle_id` was issued for the continuity scope and is
-   unexpired at fetch time, and any cursor was minted under that same
-   handle; expired handles and cross-handle cursor reuse reject as
-   binding-validation failures. The fetch request carries no inline
-   binding fields to cross-check separately — a known, unexpired handle is
-   by construction bound correctly.
-6. **Receipt-stage sequence rules** (FR-010): one request ID per stream,
+5. **Actor-map reference integrity** (FR-002/FR-003, rejection R8/R9):
+   `self.actor_id` and every typed event's actor reference — message/
+   reaction `author_id`, message `mentioned_actor_ids`, membership
+   `subject_actor_id` and optional `caused_by_actor_id` — must resolve to a
+   key present in `actors`; a reference absent from the actor map is a
+   dangling opaque string, not a valid binding, and rejects. One shared
+   validator enforces this identically on `AttentionRequestV2` and
+   `ParticipantWakeV2`, which materialize the identical `self`/`actors`/
+   `events` field shapes — not a partial, per-schema reimplementation.
+6. **Fetch-time binding/expiry state** (FR-004/FR-009, rejection R10): a
+   fetch validates only if its `handle_id` was issued for the continuity
+   scope and is unexpired at fetch time; its issued capability's exact
+   `bound_to` (`participant_id`, `room_id`, `continuity_scope_id`,
+   `trigger_event_id`) matches the host's actual call context; the
+   requested `direction` is authorized by that capability's
+   `can_fetch_before`/`can_fetch_after`/`can_fetch_around_event` flag; the
+   requested `max_events`/`max_bytes` do not exceed the capability's issued
+   `max_events_per_fetch`/`max_bytes_per_fetch` caps; and any cursor was
+   minted under that same handle. Expired handles, an exact-binding
+   mismatch, an unauthorized direction, a cap overrun, and cross-handle
+   cursor reuse all reject as binding-validation failures. The fetch
+   request itself carries no inline binding fields (FR-014) — the host call
+   context is compared against the capability's `bound_to` independently;
+   a known, unexpired handle alone does not establish correct binding or
+   bounded authorization.
+7. **Receipt-stage sequence rules** (FR-010): one request ID per stream,
    canonical stage order as a prefix, each stage appended at most once,
    and stream-level writer ownership. These are the multi-record checks;
    the per-record stage-to-writer binding itself is schema-expressible

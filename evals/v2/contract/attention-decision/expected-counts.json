@@ -1,6 +1,6 @@
 {
   "schema-expressible": {
-    "valid": 19,
+    "valid": 20,
     "invalid": 44
   },
   "id-uniqueness": {
@@ -16,6 +16,10 @@
     "invalid": 1
   },
   "trigger-membership": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "actor-reference-integrity": {
     "valid": 0,
     "invalid": 0
   },

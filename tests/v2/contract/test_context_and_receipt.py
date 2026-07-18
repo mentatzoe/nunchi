@@ -102,9 +102,12 @@ class HostSecretLeakageCases(unittest.TestCase):
 
 class FetchTimeBindingCases(unittest.TestCase):
     """FR-012 ``binding-expiry`` class: behavioral, runtime-adapter-only.
-    A fetch request carries no inline binding fields (FR-014); a handle is
-    permanently bound to its issuing continuation capability, so a known,
-    unexpired handle is by construction the correct binding."""
+    A fetch request carries no inline binding fields (FR-014); the host's
+    actual call context is compared against the issued capability's exact
+    ``bound_to`` independently. A known, unexpired handle alone does not
+    establish correct binding or bounded authorization (rejection R10) —
+    exact binding, direction authorization, and cap enforcement are each
+    checked explicitly against the issued capability."""
 
     def test_fresh_fetch_with_minted_cursor_passes(self):
         payload = make_fetch_payload()
@@ -131,6 +134,34 @@ class FetchTimeBindingCases(unittest.TestCase):
         payload = make_fetch_payload()
         payload["request"]["cursor"] = "cur-forged"
         self.assertTrue(validate_continuation_fetch(payload))
+
+    def test_host_context_mismatched_against_bound_to_rejects(self):
+        # Rejection R10: a known, unexpired handle used outside its exact
+        # bound context (participant/room/continuity-scope/trigger) must
+        # not be treated as correct by construction.
+        payload = make_fetch_payload()
+        payload["host_context"]["room_id"] = "999"
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("exact-binding mismatch" in error for error in errors), errors)
+
+    def test_unauthorized_direction_rejects(self):
+        # cont-7f3a's issued capability declares can_fetch_after: false.
+        payload = make_fetch_payload()
+        payload["request"]["direction"] = "after"
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("not authorized" in error for error in errors), errors)
+
+    def test_max_events_cap_overrun_rejects(self):
+        payload = make_fetch_payload()
+        payload["request"]["max_events"] = 21
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("max_events" in error and "exceeds" in error for error in errors), errors)
+
+    def test_max_bytes_cap_overrun_rejects(self):
+        payload = make_fetch_payload()
+        payload["request"]["max_bytes"] = 16385
+        errors = validate_continuation_fetch(payload)
+        self.assertTrue(any("max_bytes" in error and "exceeds" in error for error in errors), errors)
 
 
 class ContinuityScopeCollisionCases(unittest.TestCase):
@@ -181,12 +212,17 @@ class ReceiptRecordCases(unittest.TestCase):
                 "classifier": {"name": "nunchi-classifier"},
                 "evidence_event_ids": ["e1"],
                 "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
-                "error": {"code": "provider-failure"},
+                "error": {"code": "provider-failure", "detail": "classifier output failed validation"},
             },
         )
         assert_schema_verdict(self, "attention-receipt", mixed, "invalid")
-        error = make_receipt("attention", body={"error": {"code": "provider-failure"}})
+        error = make_receipt(
+            "attention",
+            body={"error": {"code": "provider-failure", "detail": "classifier output failed validation"}},
+        )
         assert_schema_verdict(self, "attention-receipt", error, "valid")
+        missing_detail = make_receipt("attention", body={"error": {"code": "provider-failure"}})
+        assert_schema_verdict(self, "attention-receipt", missing_detail, "invalid")
 
     def test_bypass_attention_record_carries_trusted_provenance(self):
         # 010-Preattention-bypass: classifier_not_invoked plus provenance,

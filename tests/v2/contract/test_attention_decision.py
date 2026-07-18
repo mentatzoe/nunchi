@@ -362,10 +362,20 @@ class ErrorBranchCases(unittest.TestCase):
             with self.subTest(kind=kind):
                 assert_schema_verdict(self, "attention-decision", make_decision_error(kind), "valid")
 
-    def test_unknown_error_kind_rejects(self):
+    def test_arbitrary_string_code_validates(self):
+        # code is the authority's open string (FR-014, rejection R7) — not a
+        # locally narrowed enum.
         assert_schema_verdict(
-            self, "attention-decision", make_decision_error("social-suppression"), "invalid"
+            self, "attention-decision", make_decision_error("transport-timeout"), "valid"
         )
+
+    def test_error_missing_detail_rejects(self):
+        doc = make_decision_error()
+        del doc["error"]["detail"]
+        assert_schema_verdict(self, "attention-decision", doc, "invalid")
+
+    def test_error_empty_code_rejects(self):
+        assert_schema_verdict(self, "attention-decision", make_decision_error(""), "invalid")
 
     def test_error_branch_cannot_carry_dispositions(self):
         # Malformed transition evidence must not fabricate suppression.

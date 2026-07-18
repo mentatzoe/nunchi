@@ -1,7 +1,7 @@
 {
   "schema-expressible": {
-    "valid": 22,
-    "invalid": 28
+    "valid": 23,
+    "invalid": 29
   },
   "id-uniqueness": {
     "valid": 1,
@@ -19,9 +19,13 @@
     "valid": 0,
     "invalid": 0
   },
+  "actor-reference-integrity": {
+    "valid": 1,
+    "invalid": 1
+  },
   "binding-expiry": {
     "valid": 1,
-    "invalid": 3
+    "invalid": 7
   },
   "receipt-sequence": {
     "valid": 6,

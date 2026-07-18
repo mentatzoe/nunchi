@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Program implementation authority**: `GRANTED`
 
@@ -244,8 +244,10 @@ participant outcomes and binding failures.
   cases use an encoded sentinel (string `"NaN"`/`"Infinity"`/`"-Infinity"` in the JSONL case
   envelope, decoded by the corpus loader) because strict JSON forbids
   non-finite literals.
-- Missing referenced actors, a trigger absent from `events`, unresolved
-  relation targets, and transports that cannot know whether more events exist.
+- Missing referenced actors (FR-002/FR-003: self or any typed event actor
+  reference absent from `actors` rejects, on both `AttentionRequestV2` and
+  `ParticipantWakeV2`), a trigger absent from `events`, unresolved relation
+  targets, and transports that cannot know whether more events exist.
 - Empty or non-positive budgets, out-of-range margins, non-finite confidence
   values, extra legacy confidence keys, expired continuation handles, and cursor
   reuse across bindings.
@@ -289,20 +291,41 @@ participant outcomes and binding failures.
   honest coverage, and optional continuation.
 - **FR-002**: Exact `self.actor_id` MUST be transport- or host-attested and
   separate from loose names, role, and description; loose descriptors MUST NOT
-  establish authorship.
+  establish authorship. `self.actor_id` MUST resolve to a key present in the
+  actor map (rejection R8); a self reference absent from `actors` is a
+  dangling opaque string, not a valid binding — a runtime-adapter-only rule
+  (FR-012's `actor-reference-integrity` class), since Draft 2020-12 cannot
+  express dynamic key membership against a sibling object.
 - **FR-003**: Event requirements MUST preserve authoritative array order,
   stable IDs that are unique within one request and continuity scope
   (duplicate event IDs reject), literal
   message/reply/thread/reaction/membership facts, distinct actor-targeted
   mention IDs and `mentions_room`, and explicitly unknown or unresolved
-  platform facts.
+  platform facts. Every typed event's actor reference — message/reaction
+  `author_id`, message `mentioned_actor_ids`, membership `subject_actor_id`
+  and optional `caused_by_actor_id` — MUST resolve to a key present in the
+  actor map (rejection R8); a reference absent from `actors` rejects under
+  the same `actor-reference-integrity` runtime-adapter-only class as FR-002's
+  self binding. `ParticipantWakeV2` materializes the identical `self`,
+  `actors`, and `events` field shapes and is bound by the identical rule
+  (rejection R9): one shared runtime-adapter validator, not a partial
+  reimplementation per schema.
 - **FR-004**: Coverage and continuation requirements MUST bound event and byte
   access, expose truncation, gaps, visibility, and restart continuity honestly,
   and bind every fetch to participant, room, continuity scope, and trigger. The
   `I-010A` wire document MAY carry the full `continuation` capability (handle,
   binding, cursor budgets, and expiry) alongside honest coverage — the design's
   own example attention request embeds it, so a schema forbidding the field
-  would reject a document the selected design declares valid (FR-014). The
+  would reject a document the selected design declares valid (FR-014). A fetch
+  MUST validate only when its handle is known and unexpired AND its exact
+  bound context (participant, room, continuity scope, trigger) matches the
+  host's actual call context, the requested direction is authorized by that
+  capability's per-direction (`can_fetch_before`/`can_fetch_after`/
+  `can_fetch_around_event`) flags, and the requested event/byte budgets do not
+  exceed the capability's issued per-fetch caps — fetch limits are capped by
+  both the request and the issued capability (rejection R10; a known,
+  unexpired handle alone does not establish correct binding or bounded
+  authorization). The
   host-secret exclusion is enforced where the classifier is actually invoked:
   the runtime path that constructs the model-facing projection MUST redact
   `continuation` down to coverage plus expansion-capability booleans before
@@ -415,15 +438,18 @@ participant outcomes and binding failures.
   partitioned by expressiveness: schema-expressible cases carry identical
   expected results for both validators; semantic and relational cases —
   cross-item ID uniqueness, timestamp-versus-order agreement, cross-document
-  advice citations, trigger membership, fetch-time binding/expiry state, and
-  receipt-stage sequence rules — are runtime-adapter-only. The oracle
-  treatment is fixed per class: document-shaped relational cases (cross-item
-  ID uniqueness, timestamp-versus-order agreement, cross-document advice
-  citations, trigger membership) are oracle-expected-valid, because each
-  document is schema-valid in isolation; behavioral and sequence classes
-  (fetch-time binding/expiry state, receipt-stage sequence rules) are
-  oracle-class-skipped, because there is no single document to validate.
-  Per-class case counts MUST be asserted loudly so neither partition can
+  advice citations, trigger membership, actor-map reference integrity,
+  fetch-time binding/expiry state, and receipt-stage sequence rules — are
+  runtime-adapter-only. The oracle treatment is fixed per class:
+  document-shaped relational cases (cross-item ID uniqueness,
+  timestamp-versus-order agreement, cross-document advice citations, trigger
+  membership, actor-map reference integrity — self and every typed event
+  actor reference resolving to a key in `actors`, rejection R8/R9) are
+  oracle-expected-valid, because each document is schema-valid in isolation;
+  behavioral and sequence classes (fetch-time binding/expiry state,
+  receipt-stage sequence rules) are oracle-class-skipped, because there is no
+  single document to validate. Per-class case counts MUST be asserted loudly
+  so neither partition can
   silently shrink. The corpus MUST also contain authority-conformance cases
   drawn from the selected design (FR-014): the design's example attention
   request validates verbatim as a schema-expressible valid case, and named

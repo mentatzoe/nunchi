@@ -1,7 +1,7 @@
 {
   "schema-expressible": {
     "valid": 11,
-    "invalid": 23
+    "invalid": 25
   },
   "id-uniqueness": {
     "valid": 1,
@@ -18,6 +18,10 @@
   "trigger-membership": {
     "valid": 1,
     "invalid": 1
+  },
+  "actor-reference-integrity": {
+    "valid": 1,
+    "invalid": 6
   },
   "binding-expiry": {
     "valid": 0,

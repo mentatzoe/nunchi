@@ -200,7 +200,7 @@
       }
     },
     "error": {
-      "$comment": "The tagged operational branch: malformed output, illegal pairings, and invalid legacy confidence land here and cannot fabricate a social suppression. request_id is optional on both the pre-validation and post-validation branches (a pre-validation error may occur before a request ID is assignable); classifier is optional and present only when the error occurred after classifier invocation.",
+      "$comment": "The tagged operational branch: malformed output, illegal pairings, and invalid legacy confidence land here and cannot fabricate a social suppression. request_id is optional on both the pre-validation and post-validation branches (a pre-validation error may occur before a request ID is assignable); classifier is optional and present only when the error occurred after classifier invocation. code is the authority's open string (FR-014, rejection R7) — not a locally narrowed enum; detail is required (the authority's complete error object is {code, detail}, both required).",
       "type": "object",
       "additionalProperties": false,
       "required": ["status", "error"],
@@ -210,17 +210,9 @@
         "error": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["code"],
+          "required": ["code", "detail"],
           "properties": {
-            "code": {
-              "enum": [
-                "malformed-model-output",
-                "invalid-transition",
-                "invalid-legacy-confidence",
-                "provider-failure",
-                "runtime-failure"
-              ]
-            },
+            "code": {"$ref": "#/$defs/nonEmptyString"},
             "detail": {"type": "string"}
           }
         },

@@ -2,7 +2,7 @@
 
 **Input**: `specs/010-v2-contract/spec.md` and `specs/010-v2-contract/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Execution status**: stated by reference, never as a fixed state claim —
 unchecked tasks execute only inside a bound `run speckit` run for this slice
@@ -287,6 +287,74 @@ CHK item it closes.
   and checking off each gate item in the requirements checklist only when its
   fix is verifiably on disk.
 
+## Phase 10: Attempt-3 Rejection Rework (R7–R10)
+
+**Correction source**: `evidence/v2/contract/review-2026-07-18-v2-integrator-attempt-3.md`,
+rejecting candidate `7f9e81460d570e078c4bcbacb138f81c1b291455` on four
+uncovered contract/runtime defects (R7 CRITICAL, R8 CRITICAL, R9 HIGH, R10
+HIGH). Per the decision's required rework path and Zoe's direction for this
+attempt, this phase performs the correction by direct edit rather than a new
+bound `run speckit`; completed history — checked tasks T001–T046, every
+evidence record, and all three rejected candidate/handoff attempt streams —
+is preserved unchanged.
+
+- [X] T047 Fix rejection R7–R10 against the exact findings in
+  `review-2026-07-18-v2-integrator-attempt-3.md` and, for each, land the fix
+  in the named artifact in the same commit before check-off — R7 encode
+  `error.code` as the authority's open non-empty string (removing the local
+  five-value enum and the `ERROR_KINDS` constant) and require `detail`
+  (`required: ["code", "detail"]`) in `schemas/v2/attention-decision.schema.json`'s
+  and `schemas/v2/attention-receipt.schema.json`'s error variants and their
+  stdlib mirrors in `tests/v2/contract/schema_helpers.py`
+  (`_validate_decision_error`, `_check_attention_body`); remove the locally
+  added nullable event `timestamp` (`oneOf` with `const: null`) from
+  `schemas/v2/attention-request.schema.json`'s three typed-event definitions
+  and the matching `is not None` adapter branches, since the authority
+  represents unknown timestamp by omission only; rework every corpus case,
+  red test (`test_attention_decision.py`, `test_attention_request.py`,
+  `test_context_and_receipt.py`), and `docs/contracts/nunchi-v2.md` passage
+  that assumed the closed enum, the optional `detail`, or the nullable
+  timestamp. R8 add `check_actor_reference_integrity` to
+  `tests/v2/contract/schema_helpers.py` as a new document-shaped relational
+  FR-012 partition class `actor-reference-integrity` (oracle-expected-valid,
+  alongside `id-uniqueness`/`timestamp-order`/`advice-citation`/
+  `trigger-membership`) enforcing that `self.actor_id` and every typed
+  event's actor reference (`author_id`, `mentioned_actor_ids`,
+  `subject_actor_id`, `caused_by_actor_id`) resolve to a key in `actors`; add
+  `propertyNames` to `attention-request.schema.json`'s `actorMap` def
+  (schema-expressible empty-key rejection) and the matching `_check_actor_map`
+  adapter check; fix the `_BASE_REQUEST` fixture and
+  `test_valid_request_with_alias_collision_stays_valid`, both of which
+  omitted the self actor from its own `actors` map; add named valid/invalid
+  corpus cases for self, author, mention, reaction, subject, and
+  causal-actor references in `evals/v2/contract/attention-request/cases.jsonl`
+  and `evals/v2/contract/downstream/cases.jsonl` with `expected-counts.json`
+  updated in the same change. R9 extract `_check_self`/`_check_room` shared
+  helper functions in `tests/v2/contract/schema_helpers.py` covering every
+  nested optional field (`self.names`/`role`/`description`,
+  `room.name`/`room.kind`) and call them from both
+  `validate_attention_request` and `validate_participant_wake` in place of
+  the wake validator's partial reimplementation; add negative oracle/adapter
+  parity cases for the previously-uncovered nested fields. R10 extend
+  `validate_continuation_fetch`'s `issued` handle-state shape and the
+  `make_fetch_payload` fixture with the full issued continuation capability
+  (`bound_to`, `can_fetch_before`/`can_fetch_after`/`can_fetch_around_event`,
+  `max_events_per_fetch`/`max_bytes_per_fetch`) and a `host_context` field
+  carrying the host's actual call context; compare `host_context` against
+  the capability's exact `bound_to`, check the requested `direction` against
+  its per-direction flag, and check the requested `max_events`/`max_bytes`
+  against the issued caps — replacing the retired "a known, unexpired handle
+  is by construction bound correctly" claim in the adapter docstring, spec
+  FR-004, and `docs/contracts/nunchi-v2.md`; add binding-mismatch,
+  unauthorized-direction, and both cap-overrun red cases to
+  `evals/v2/contract/downstream/cases.jsonl` (`binding-expiry` partition)
+  and `tests/v2/contract/test_context_and_receipt.py`. After all four fixes
+  land: amend spec FR-002/FR-003/FR-004/FR-012 and the Edge Cases list for
+  the corrected contract; regenerate all three aggregate evidence files and
+  the README manifest through the T021-enforced five-field writer; append
+  the attempt-4 documentation section to `evidence/v2/contract/handoff.md`;
+  and return the header **Slice state** to `ACTIVE` on this same commit.
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -343,6 +411,14 @@ CHK item it closes.
   no spec/plan text fix and close entirely through T042–T044, not through
   T046 or T035. T046 has no other upstream dependency and blocks nothing
   outside Phase 8.
+- Rejection-rework phase (attempt 3 → 4): T047 has no upstream dependency
+  within this task graph — its four fixes (R7, R8, R9, R10) target disjoint
+  schema/adapter/corpus/test surfaces within `schemas/v2/attention-decision
+  .schema.json`, `schemas/v2/attention-receipt.schema.json`,
+  `schemas/v2/attention-request.schema.json`, and
+  `tests/v2/contract/schema_helpers.py`, and may be worked in any order —
+  but its evidence-regeneration and `Slice state` sub-steps run last, after
+  all four fixes land and the full dual-validator baseline is green.
 
 ## Parallel Opportunities
 
@@ -429,3 +505,18 @@ do not let a dependent implementation silently define the shared interface.
   T035–T038, T039, T041, T042, and T043 plus plan §Ordinary Repository
   Targets — none of it completed history — rather than adding new
   implementation surface; every fix traces to a named CHK112–CHK121 item.
+- Phase 10 is the rework for the v2-integrator rejection of the attempt-3
+  candidate `7f9e81460d570e078c4bcbacb138f81c1b291455` at packet commit
+  `6fa3996fd7cf92cd6157945245136a8c55cb69cc` (blockers R7–R10): completed
+  history — checked tasks T001–T046, all three rejected attempt streams, and
+  every prior evidence section — is preserved unchanged. Per the decision's
+  required rework path, this phase corrects the artifacts directly rather
+  than restarting bound-workflow scaffolding; the header **Slice state** line
+  returns to `ACTIVE` on the same commit as T047's fixes, and a new attempt-4
+  candidate/handoff entry is appended once verification is green.
+- Attempt-4 evidence semantics (T047): the same per-attempt regeneration
+  rule as attempts 2 and 3 applies — all three aggregate JSONL files and the
+  README manifest regenerate as current-attempt records, and
+  `evidence/v2/contract/handoff.md` and
+  `evidence/v2/contract/checklist-adjudication.md` append a new section
+  without rewriting the attempt-1/2/3 sections.

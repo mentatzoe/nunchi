@@ -53,17 +53,9 @@
             "error": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["code"],
+              "required": ["code", "detail"],
               "properties": {
-                "code": {
-                  "enum": [
-                    "malformed-model-output",
-                    "invalid-transition",
-                    "invalid-legacy-confidence",
-                    "provider-failure",
-                    "runtime-failure"
-                  ]
-                },
+                "code": {"$ref": "#/$defs/nonEmptyString"},
                 "detail": {"type": "string"}
               }
             }

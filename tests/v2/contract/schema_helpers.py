@@ -15,9 +15,10 @@ membership and per-class counts live only in ordinary paths):
 
 * ``schema-expressible`` — identical expected results from both validators.
 * Document-shaped relational classes — ``id-uniqueness``,
-  ``timestamp-order``, ``advice-citation``, ``trigger-membership`` — are
-  runtime-adapter-only; the oracle validates each document in isolation and
-  expects it valid, because each document is schema-valid on its own.
+  ``timestamp-order``, ``advice-citation``, ``trigger-membership``,
+  ``actor-reference-integrity`` — are runtime-adapter-only; the oracle
+  validates each document in isolation and expects it valid, because each
+  document is schema-valid on its own.
 * Behavioral/sequence classes — ``binding-expiry``, ``receipt-sequence`` —
   are runtime-adapter-only and oracle-class-skipped, because there is no
   single document for the oracle to validate.
@@ -110,6 +111,7 @@ ORACLE_VALID_CLASSES = (
     "timestamp-order",
     "advice-citation",
     "trigger-membership",
+    "actor-reference-integrity",
 )
 ORACLE_SKIP_CLASSES = ("binding-expiry", "receipt-sequence")
 ALL_CLASSES = (SCHEMA_EXPRESSIBLE,) + ORACLE_VALID_CLASSES + ORACLE_SKIP_CLASSES
@@ -129,13 +131,6 @@ NON_FINITE_SENTINELS = {
 DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
 WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
-ERROR_KINDS = (
-    "malformed-model-output",
-    "invalid-transition",
-    "invalid-legacy-confidence",
-    "provider-failure",
-    "runtime-failure",
-)
 ROUTING_VALVES = ("none", "classifier-defer", "margin-defer", "policy-defer")
 OVERRIDE_CAUSES = (
     "none",
@@ -583,6 +578,8 @@ def _check_actor_map(errors: _Errors, path: str, value: Any) -> None:
         errors.add(path, "must be an object mapping actor ID to actor")
         return
     for actor_id, actor in value.items():
+        if not _non_empty_string(actor_id):
+            errors.add(f"{path}[{actor_id!r}]", "actor ID key must be a non-empty string")
         _check_actor(errors, f"{path}[{actor_id!r}]", actor)
 
 
@@ -597,9 +594,7 @@ def _check_message_event(errors: _Errors, path: str, event: dict[str, Any]) -> N
     _check_nes(errors, f"{path}.id", event.get("id"))
     _check_nes(errors, f"{path}.author_id", event.get("author_id"))
     if "timestamp" in event:
-        timestamp = event["timestamp"]
-        if timestamp is not None and not _non_empty_string(timestamp):
-            errors.add(f"{path}.timestamp", "must be a non-empty string or null")
+        _check_nes(errors, f"{path}.timestamp", event["timestamp"])
     if "text" in event and not isinstance(event["text"], str):
         errors.add(f"{path}.text", "must be a string")
     if "reply_to_event_id" in event:
@@ -625,9 +620,7 @@ def _check_reaction_event(errors: _Errors, path: str, event: dict[str, Any]) -> 
     _check_nes(errors, f"{path}.id", event.get("id"))
     _check_nes(errors, f"{path}.author_id", event.get("author_id"))
     if "timestamp" in event:
-        timestamp = event["timestamp"]
-        if timestamp is not None and not _non_empty_string(timestamp):
-            errors.add(f"{path}.timestamp", "must be a non-empty string or null")
+        _check_nes(errors, f"{path}.timestamp", event["timestamp"])
     _check_nes(errors, f"{path}.target_event_id", event.get("target_event_id"))
     _check_nes(errors, f"{path}.reaction", event.get("reaction"))
     if "operation" in event:
@@ -641,9 +634,7 @@ def _check_membership_event(errors: _Errors, path: str, event: dict[str, Any]) -
         return
     _check_nes(errors, f"{path}.id", event.get("id"))
     if "timestamp" in event:
-        timestamp = event["timestamp"]
-        if timestamp is not None and not _non_empty_string(timestamp):
-            errors.add(f"{path}.timestamp", "must be a non-empty string or null")
+        _check_nes(errors, f"{path}.timestamp", event["timestamp"])
     scope = event.get("scope")
     if "scope" in event and _check_closed_object(
         errors, f"{path}.scope", scope, ("kind", "id"), ("kind", "id")
@@ -659,6 +650,55 @@ def _check_membership_event(errors: _Errors, path: str, event: dict[str, Any]) -
         _check_nes(errors, f"{path}.caused_by_actor_id", event["caused_by_actor_id"])
     if "change" in event:
         _check_enum(errors, f"{path}.change", event["change"], ("join", "leave"))
+
+
+def _check_self(errors: _Errors, path: str, value: Any) -> None:
+    """Shared ``self`` validator (FR-002), reused by every materializing
+    schema (AttentionRequestV2 and ParticipantWakeV2 carry the identical
+    field shape verbatim; rejection R9 requires one shared mirror)."""
+    if not _check_closed_object(
+        errors, path, value,
+        ("participant_id", "actor_id"),
+        ("participant_id", "actor_id", "names", "role", "description"),
+    ):
+        return
+    if "participant_id" in value:
+        _check_nes(errors, f"{path}.participant_id", value["participant_id"])
+    if "actor_id" in value:
+        _check_nes(errors, f"{path}.actor_id", value["actor_id"])
+    if "names" in value:
+        names = value["names"]
+        if not isinstance(names, list):
+            errors.add(f"{path}.names", "must be an array")
+        else:
+            for index, name in enumerate(names):
+                if not isinstance(name, str):
+                    errors.add(f"{path}.names[{index}]", "must be a string")
+    if "role" in value and not isinstance(value["role"], str):
+        errors.add(f"{path}.role", "must be a string")
+    if "description" in value and not isinstance(value["description"], str):
+        errors.add(f"{path}.description", "must be a string")
+
+
+def _check_room(errors: _Errors, path: str, value: Any) -> None:
+    """Shared ``room`` validator, reused by every materializing schema
+    (rejection R9)."""
+    if not _check_closed_object(
+        errors, path, value,
+        ("platform", "id", "continuity_scope_id"),
+        ("platform", "id", "continuity_scope_id", "name", "kind"),
+    ):
+        return
+    if "platform" in value:
+        _check_nes(errors, f"{path}.platform", value["platform"])
+    if "id" in value:
+        _check_nes(errors, f"{path}.id", value["id"])
+    if "continuity_scope_id" in value:
+        _check_nes(errors, f"{path}.continuity_scope_id", value["continuity_scope_id"])
+    if "name" in value and not isinstance(value["name"], str):
+        errors.add(f"{path}.name", "must be a string")
+    if "kind" in value:
+        _check_enum(errors, f"{path}.kind", value["kind"], ("group", "direct", "unknown"))
 
 
 def _check_event(errors: _Errors, path: str, event: Any) -> None:
@@ -769,45 +809,10 @@ def validate_attention_request(doc: Any) -> list[str]:
         errors.add("schema_version", "must be the number 2")
     _check_nes(errors, "request_id", doc.get("request_id"))
 
-    self_binding = doc.get("self")
-    if "self" in doc and _check_closed_object(
-        errors, "self", self_binding,
-        ("participant_id", "actor_id"),
-        ("participant_id", "actor_id", "names", "role", "description"),
-    ):
-        if "participant_id" in self_binding:
-            _check_nes(errors, "self.participant_id", self_binding["participant_id"])
-        if "actor_id" in self_binding:
-            _check_nes(errors, "self.actor_id", self_binding["actor_id"])
-        if "names" in self_binding:
-            names = self_binding["names"]
-            if not isinstance(names, list):
-                errors.add("self.names", "must be an array")
-            else:
-                for index, name in enumerate(names):
-                    if not isinstance(name, str):
-                        errors.add(f"self.names[{index}]", "must be a string")
-        if "role" in self_binding and not isinstance(self_binding["role"], str):
-            errors.add("self.role", "must be a string")
-        if "description" in self_binding and not isinstance(self_binding["description"], str):
-            errors.add("self.description", "must be a string")
-
-    room = doc.get("room")
-    if "room" in doc and _check_closed_object(
-        errors, "room", room,
-        ("platform", "id", "continuity_scope_id"),
-        ("platform", "id", "continuity_scope_id", "name", "kind"),
-    ):
-        if "platform" in room:
-            _check_nes(errors, "room.platform", room["platform"])
-        if "id" in room:
-            _check_nes(errors, "room.id", room["id"])
-        if "continuity_scope_id" in room:
-            _check_nes(errors, "room.continuity_scope_id", room["continuity_scope_id"])
-        if "name" in room and not isinstance(room["name"], str):
-            errors.add("room.name", "must be a string")
-        if "kind" in room:
-            _check_enum(errors, "room.kind", room["kind"], ("group", "direct", "unknown"))
+    if "self" in doc:
+        _check_self(errors, "self", doc.get("self"))
+    if "room" in doc:
+        _check_room(errors, "room", doc.get("room"))
 
     if "actors" in doc:
         _check_actor_map(errors, "actors", doc["actors"])
@@ -1120,10 +1125,10 @@ def _validate_decision_error(doc: dict[str, Any]) -> list[str]:
         _check_nes(errors, "request_id", doc["request_id"])
     error = doc.get("error")
     if "error" in doc and _check_closed_object(
-        errors, "error", error, ("code",), ("code", "detail")
+        errors, "error", error, ("code", "detail"), ("code", "detail")
     ):
         if "code" in error:
-            _check_enum(errors, "error.code", error["code"], ERROR_KINDS)
+            _check_nes(errors, "error.code", error["code"])
         if "detail" in error and not isinstance(error["detail"], str):
             errors.add("error.detail", "must be a string")
     if "classifier" in doc:
@@ -1140,28 +1145,10 @@ def validate_participant_wake(doc: Any) -> list[str]:
         return list(errors)
     _check_nes(errors, "request_id", doc.get("request_id"))
 
-    if "self" in doc and _check_closed_object(
-        errors, "self", doc["self"],
-        ("participant_id", "actor_id"),
-        ("participant_id", "actor_id", "names", "role", "description"),
-    ):
-        self_binding = doc["self"]
-        if "participant_id" in self_binding:
-            _check_nes(errors, "self.participant_id", self_binding["participant_id"])
-        if "actor_id" in self_binding:
-            _check_nes(errors, "self.actor_id", self_binding["actor_id"])
-    if "room" in doc and _check_closed_object(
-        errors, "room", doc["room"],
-        ("platform", "id", "continuity_scope_id"),
-        ("platform", "id", "continuity_scope_id", "name", "kind"),
-    ):
-        room = doc["room"]
-        if "platform" in room:
-            _check_nes(errors, "room.platform", room["platform"])
-        if "id" in room:
-            _check_nes(errors, "room.id", room["id"])
-        if "continuity_scope_id" in room:
-            _check_nes(errors, "room.continuity_scope_id", room["continuity_scope_id"])
+    if "self" in doc:
+        _check_self(errors, "self", doc.get("self"))
+    if "room" in doc:
+        _check_room(errors, "room", doc.get("room"))
     if "actors" in doc:
         _check_actor_map(errors, "actors", doc["actors"])
     events = doc.get("events")
@@ -1346,9 +1333,9 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
         if not _check_closed_object(errors, path, value, ("error",), ("error",)):
             return
         error = value.get("error")
-        if _check_closed_object(errors, f"{path}.error", error, ("code",), ("code", "detail")):
+        if _check_closed_object(errors, f"{path}.error", error, ("code", "detail"), ("code", "detail")):
             if "code" in error:
-                _check_enum(errors, f"{path}.error.code", error["code"], ERROR_KINDS)
+                _check_nes(errors, f"{path}.error.code", error["code"])
             if "detail" in error and not isinstance(error["detail"], str):
                 errors.add(f"{path}.error.detail", "must be a string")
         return
@@ -1471,8 +1458,8 @@ def _event_ids(doc: dict[str, Any]) -> list[str]:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
-    """Parse an ISO 8601 timestamp; unparseable values are treated like an
-    explicitly unknown (null) timestamp and exempted from the order rule."""
+    """Parse an ISO 8601 timestamp; an omitted or unparseable value is
+    treated as unknown and exempted from the order rule."""
     if not isinstance(value, str):
         return None
     try:
@@ -1543,6 +1530,57 @@ def check_trigger_membership(doc: dict[str, Any]) -> list[str]:
     return []
 
 
+def _event_actor_references(event: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Every typed actor-ID field an event may carry, by exact field name
+    (FR-014): message/reaction ``author_id`` and message
+    ``mentioned_actor_ids``; membership ``subject_actor_id`` and optional
+    ``caused_by_actor_id``."""
+    event_type = event.get("type")
+    refs: list[tuple[str, Any]] = []
+    if event_type in ("message", "reaction"):
+        refs.append(("author_id", event.get("author_id")))
+    if event_type == "message":
+        mentioned = event.get("mentioned_actor_ids")
+        if isinstance(mentioned, list):
+            for index, actor_id in enumerate(mentioned):
+                refs.append((f"mentioned_actor_ids[{index}]", actor_id))
+    if event_type == "membership":
+        refs.append(("subject_actor_id", event.get("subject_actor_id")))
+        if "caused_by_actor_id" in event:
+            refs.append(("caused_by_actor_id", event.get("caused_by_actor_id")))
+    return refs
+
+
+def check_actor_reference_integrity(doc: dict[str, Any]) -> list[str]:
+    """Actor-map reference integrity (rejection R8): ``self.actor_id`` and
+    every typed event's actor references — author, structured mention
+    target, reaction author, membership subject/causal actor — must resolve
+    to a key present in ``actors``. The selected design's actor map is the
+    observed/referenced cast; a reference absent from it is a dangling
+    opaque string, not a valid binding. Document-shaped and runtime-adapter
+    -only: Draft 2020-12 cannot express dynamic key membership against a
+    sibling object."""
+    errors: list[str] = []
+    actors = doc.get("actors")
+    if not isinstance(actors, dict):
+        return errors
+    self_binding = doc.get("self")
+    if isinstance(self_binding, dict):
+        actor_id = self_binding.get("actor_id")
+        if isinstance(actor_id, str) and actor_id not in actors:
+            errors.append(f"self.actor_id: {actor_id!r} is absent from actors")
+    events = doc.get("events")
+    if not isinstance(events, list):
+        return errors
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            continue
+        for field, actor_id in _event_actor_references(event):
+            if isinstance(actor_id, str) and actor_id not in actors:
+                errors.append(f"events[{index}].{field}: {actor_id!r} is absent from actors")
+    return errors
+
+
 def _advice_citations(advice_doc: dict[str, Any]) -> list[str]:
     """Collect every evidence-event-ID citation from either advice shape:
     a decision's ``attention_advice`` array, or a wake's ``attention.advice``
@@ -1578,14 +1616,22 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     """Fetch-time binding/expiry state (runtime-adapter-only, behavioral).
 
     ``payload`` carries the host's fetch context: ``fetch_time``, the
-    ``issued`` handle states (each with ``handle_id``, ``expires_at``, and
-    the ``cursors`` minted under that handle), and the incoming fetch
-    ``request`` document. The request document itself must be schema-valid,
-    its handle known and unexpired at fetch time, and any cursor minted
-    under that same handle (cross-binding cursor reuse rejects). The fetch
-    request carries no inline binding fields (FR-014); a handle is
-    permanently bound to its issuing continuation capability, so a known,
-    unexpired handle is by construction the correct binding.
+    ``host_context`` this fetch call is actually being made under
+    (``participant_id``, ``room_id``, ``continuity_scope_id``,
+    ``trigger_event_id``), the ``issued`` handle states — each carrying its
+    full continuation capability (``handle_id``, exact ``bound_to``,
+    ``can_fetch_before``/``can_fetch_after``/``can_fetch_around_event``,
+    ``max_events_per_fetch``/``max_bytes_per_fetch``, ``expires_at``, and the
+    ``cursors`` minted under that handle) — and the incoming fetch
+    ``request`` document. The request document itself must be schema-valid;
+    its handle must be known and unexpired at fetch time; the capability's
+    exact ``bound_to`` must match the host's actual call context; the
+    requested direction must be authorized by that capability; the requested
+    ``max_events``/``max_bytes`` must not exceed the capability's issued
+    caps; and any cursor must be minted under that same handle (cross-binding
+    cursor reuse rejects). A known, unexpired handle alone does not establish
+    correct binding or bounded authorization (rejection R10) — every one of
+    those facts is checked explicitly against the issued capability.
     """
     errors: list[str] = []
     request = payload.get("request")
@@ -1610,6 +1656,15 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
     if state is None:
         errors.append(f"handle_id: {handle_id!r} was never issued for this continuity scope")
         return errors
+
+    host_context = payload.get("host_context")
+    bound_to = state.get("bound_to")
+    if not isinstance(bound_to, dict) or not isinstance(host_context, dict) or host_context != bound_to:
+        errors.append(
+            f"handle_id: {handle_id!r} is bound to {bound_to!r} but the host "
+            f"call context is {host_context!r} (exact-binding mismatch)"
+        )
+
     expires_at = _parse_timestamp(state.get("expires_at"))
     if expires_at is None:
         errors.append("fetch.issued.expires_at: must be an ISO 8601 timestamp")
@@ -1618,6 +1673,31 @@ def validate_continuation_fetch(payload: dict[str, Any]) -> list[str]:
             f"handle_id: {handle_id!r} expired at {state.get('expires_at')} and is "
             "rejected at fetch time (binding-validation failure)"
         )
+
+    direction = request.get("direction")
+    direction_capability = {
+        "before": "can_fetch_before",
+        "after": "can_fetch_after",
+        "around": "can_fetch_around_event",
+    }.get(direction)
+    if direction_capability is not None and not state.get(direction_capability):
+        errors.append(
+            f"direction: {direction!r} is not authorized by handle_id "
+            f"{handle_id!r}'s issued capability ({direction_capability} is not true)"
+        )
+
+    for field, cap_field in (
+        ("max_events", "max_events_per_fetch"),
+        ("max_bytes", "max_bytes_per_fetch"),
+    ):
+        requested = request.get(field)
+        cap = state.get(cap_field)
+        if isinstance(requested, int) and isinstance(cap, int) and requested > cap:
+            errors.append(
+                f"{field}: requested {requested} exceeds handle_id {handle_id!r}'s "
+                f"issued cap of {cap} ({cap_field})"
+            )
+
     cursor = request.get("cursor")
     if cursor is not None:
         minted = state.get("cursors")
@@ -1718,6 +1798,8 @@ def adapter_errors(case: CorpusCase) -> list[str]:
         errors.extend(check_timestamp_order(case.document))
     elif case.partition == "trigger-membership":
         errors.extend(check_trigger_membership(case.document))
+    elif case.partition == "actor-reference-integrity":
+        errors.extend(check_actor_reference_integrity(case.document))
     elif case.partition == "advice-citation":
         if case.document is not None:
             # A wake packet materializes its own events, so the citation
@@ -1960,6 +2042,7 @@ _BASE_REQUEST = {
     },
     "room": {"platform": "discord", "id": "42", "continuity_scope_id": "discord:room:42#2026-07"},
     "actors": {
+        "discord:9001": {"display_name": "Vigil", "kind": "bot"},
         "discord:1001": {"display_name": "Zoe", "kind": "human"},
         "discord:2002": {"display_name": "Vigil", "kind": "bot"},
         "discord:3003": {"display_name": "Sol", "kind": "bot"},
@@ -2164,17 +2247,43 @@ def make_fetch_page(**overrides: Any) -> dict[str, Any]:
     return doc
 
 
+_FETCH_BOUND_TO = {
+    "participant_id": "vigil",
+    "room_id": "42",
+    "continuity_scope_id": "discord:room:42#2026-07",
+    "trigger_event_id": "e3",
+}
+
+
 def make_fetch_payload(**overrides: Any) -> dict[str, Any]:
     payload = {
         "fetch_time": "2026-07-17T01:30:00Z",
+        "host_context": dict(_FETCH_BOUND_TO),
         "issued": [
             {
                 "handle_id": "cont-7f3a",
+                "bound_to": dict(_FETCH_BOUND_TO),
+                "can_fetch_before": True,
+                "can_fetch_after": False,
+                "can_fetch_around_event": True,
+                "max_events_per_fetch": 20,
+                "max_bytes_per_fetch": 16384,
                 "expires_at": "2026-07-17T02:00:00Z",
                 "cursors": ["cur-1", "cur-2"],
             },
             {
                 "handle_id": "cont-9b2c",
+                "bound_to": {
+                    "participant_id": "vigil",
+                    "room_id": "999",
+                    "continuity_scope_id": "discord:room:999#2026-07",
+                    "trigger_event_id": "e-other",
+                },
+                "can_fetch_before": True,
+                "can_fetch_after": True,
+                "can_fetch_around_event": True,
+                "max_events_per_fetch": 50,
+                "max_bytes_per_fetch": 65536,
                 "expires_at": "2026-07-17T04:00:00Z",
                 "cursors": ["cur-x1"],
             },

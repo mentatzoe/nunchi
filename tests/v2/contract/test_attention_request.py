@@ -24,6 +24,7 @@ from tests.v2.contract.schema_helpers import (
     NumberToken,
     assert_corpus_inventory,
     assert_schema_verdict,
+    check_actor_reference_integrity,
     check_id_uniqueness,
     check_timestamp_order,
     check_trigger_membership,
@@ -49,10 +50,13 @@ class ExactIdentityRedCases(unittest.TestCase):
         # Another observed actor displays the same loose name as self; the
         # contract keeps authorship bound to exact actor IDs, so the
         # collision is representable without becoming an identity claim.
+        # self's own exact actor_id is present in actors (rejection R8) and
+        # distinct from the colliding actor's ID.
         doc = make_request()
         self.assertEqual("Vigil", doc["actors"]["discord:2002"]["display_name"])
         self.assertIn("Vigil", doc["self"]["names"])
-        self.assertNotIn(doc["self"]["actor_id"], doc["actors"])
+        self.assertIn(doc["self"]["actor_id"], doc["actors"])
+        self.assertNotEqual(doc["self"]["actor_id"], "discord:2002")
         assert_schema_verdict(self, "attention-request", doc, "valid")
 
     def test_missing_exact_actor_binding_rejects(self):
@@ -139,9 +143,11 @@ class RelationalRuntimeOnlyCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-request", doc, "valid")
         self.assertTrue(check_timestamp_order(doc))
 
-    def test_explicitly_unknown_timestamp_is_exempt_from_order_rule(self):
+    def test_omitted_timestamp_is_exempt_from_order_rule(self):
+        # Unknown timestamp is represented by omission, not `null`
+        # (rejection R7); the authority's event union has no null variant.
         doc = make_request()
-        doc["events"][1]["timestamp"] = None
+        del doc["events"][1]["timestamp"]
         assert_schema_verdict(self, "attention-request", doc, "valid")
         self.assertEqual([], check_timestamp_order(doc))
 
@@ -152,6 +158,73 @@ class RelationalRuntimeOnlyCases(unittest.TestCase):
 
     def test_trigger_present_in_events_passes(self):
         self.assertEqual([], check_trigger_membership(make_request()))
+
+    def test_self_actor_id_present_in_actors_passes(self):
+        self.assertEqual([], check_actor_reference_integrity(make_request()))
+
+    def test_self_actor_id_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        # Rejection R8: a dangling self reference is schema-valid in
+        # isolation (Draft 2020-12 cannot express dynamic key membership)
+        # but the runtime adapter's relational rule rejects it.
+        doc = make_request()
+        del doc["actors"][doc["self"]["actor_id"]]
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_mentioned_actor_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        doc = make_request()
+        doc["events"][0]["mentioned_actor_ids"] = ["discord:ghost"]
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_message_author_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        doc = make_request()
+        doc["events"][0]["author_id"] = "discord:ghost"
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_reaction_author_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        doc = make_request()
+        doc["events"][1] = {
+            "id": "e2",
+            "type": "reaction",
+            "author_id": "discord:ghost",
+            "target_event_id": "e1",
+            "reaction": "🚀",
+            "operation": "add",
+        }
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_membership_subject_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        doc = make_request()
+        doc["events"][1] = {
+            "id": "e2",
+            "type": "membership",
+            "scope": {"kind": "room", "id": "42"},
+            "subject_actor_id": "discord:ghost",
+            "change": "join",
+        }
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_membership_causal_actor_absent_from_actors_rejects_in_runtime_adapter_only(self):
+        doc = make_request()
+        doc["events"][1] = {
+            "id": "e2",
+            "type": "membership",
+            "scope": {"kind": "room", "id": "42"},
+            "subject_actor_id": doc["self"]["actor_id"],
+            "caused_by_actor_id": "discord:ghost",
+            "change": "join",
+        }
+        assert_schema_verdict(self, "attention-request", doc, "valid")
+        self.assertTrue(check_actor_reference_integrity(doc))
+
+    def test_empty_actor_map_key_rejects(self):
+        doc = make_request()
+        doc["actors"][""] = {"display_name": "ghost", "kind": "unknown"}
+        assert_schema_verdict(self, "attention-request", doc, "invalid")
 
 
 class ClassifierProjectionRedCases(unittest.TestCase):
@@ -422,8 +495,8 @@ class ControlPlaneReadBoundaryCases(unittest.TestCase):
         # The closed FR-012 vocabulary lives in the harness itself.
         self.assertEqual(
             ("schema-expressible", "id-uniqueness", "timestamp-order",
-             "advice-citation", "trigger-membership", "binding-expiry",
-             "receipt-sequence"),
+             "advice-citation", "trigger-membership", "actor-reference-integrity",
+             "binding-expiry", "receipt-sequence"),
             helpers.ALL_CLASSES,
         )
 
