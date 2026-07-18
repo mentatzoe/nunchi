@@ -211,6 +211,82 @@ traces to.
 - [ ] T044 Complete the CHK097–CHK111 adjudication by appending the implementation-cited verdicts to `evidence/v2/contract/checklist-adjudication.md` (append-only; T035's text verdicts and all earlier adjudications are never rewritten): CHK097 and CHK106 via this Phase 8 append and the reworded referential header; CHK098 by classifying every attempt-3 diff hunk against the bounded rework surface; CHK099–CHK101 via the T036–T038 landed authority classes and recorded red runs; CHK102–CHK104 via the T035 text fixes and the T039–T041 landed schemas; CHK105 via the T035-landed operational rule and T045's packet obligation; CHK107 via T042's regenerated records and explicit dispositions; CHK108–CHK109 via T043; CHK110 via T042's flagged manifest provenance; CHK111 by re-running the SC-006 boundary check — each verdict citing its landed task, file, and record anchors, and checking off each gate item in the requirements checklist only when its fix is verifiably on disk
 - [ ] T045 Append the attempt-3 proposed packet input to `evidence/v2/contract/handoff.md` after T043's documentation section, per T019's authoritative SC-005 enumeration as amended at `a183469`: single-valued commit identity (rejection R5) — the lifecycle candidate entry, the handoff attempt entry, this packet input, and the recorded corpus revision name the identical exact candidate commit, the actual handoff packet commit is recorded per the T035-landed CHK105 operational rule once it exists, and no placeholder, future-valued, or divergent identity appears anywhere in the delivered packet — with both defined commits carrying the green full-offline-baseline obligation (the packet-commit run performed at the handoff gate); the five interface versions and exact `schemas/v2/` paths; the staged-receipt writer map; the dual-validator pin and post-repair results over the shared corpus including the authority-class results and the CHK101 red-run record; the corpus revision with the unchanged downstream adapter obligation; the regenerated scene-to-record manifest; the updated rejected-case inventory; migration/provenance notes naming `evidence/v2/contract/review-2026-07-17-v2-integrator-attempt-2.md` and its three resolved blockers R4–R6; documentation dispositions/validation/reviewer from T043; and known limitations — verifying the task graph's referential execution-status wording agrees with the slice declarations and lifecycle evidence at the packet commit (rejection R6) — the later convergence, documentation-freshness, and handoff gates, not this checkbox, establish lifecycle state
 
+## Phase 9: Task-Graph Text-Fidelity Correction (appended 2026-07-18, post-CHK112–CHK121)
+
+**Correction source**: the formal reviewer's task-graph text-fidelity
+addendum CHK112–CHK121, appended to
+`specs/010-v2-contract/checklists/requirements.md` after `93f25a2` under
+"Formal Reviewer Gate — Attempt-3 Task-Graph Addendum." That gate tests only
+the written text of Phase 8's T035–T045 and the plan sections they cite —
+completeness, clarity, consistency, and measurability as an instruction set —
+never whether T035–T045 have been executed; the still-pending CHK097–CHK111
+gate and T035's disposition of it are untouched and not reopened here. This
+phase is strictly append-only at the level of completed history: tasks
+T001–T034 remain checked and exactly as landed, and no evidence record or
+attempt stream is rewritten. Because CHK112–CHK121 target the still-unchecked
+text of T035–T043 and one plan.md table row — none of it completed history —
+this phase's single task lands its fixes directly into those pending lines
+and the cited plan section when executed, rather than layering a second
+adjudication task above unrelated artifacts. Every fix below cites the exact
+CHK item it closes.
+
+- [ ] T046 Adjudicate CHK112–CHK121 against the Phase 8 task-graph text and
+  the plan sections it cites and, for each sustained gap, land the fix in the
+  named artifact in the same commit before check-off — CHK112 add a
+  disposition clause to T035 stating that CHK108, CHK109, and CHK110 require
+  no spec/plan text fix and close entirely through the T042–T044
+  implementation/evidence tasks, so their absence from T035's per-item list
+  is not read as an unaddressed item; CHK113 add
+  `tests/v2/contract/schema_helpers.py` to plan §Ordinary Repository
+  Targets' "Contract tests" row alongside `tests/v2/contract/test_*.py`, so
+  the shared adapter file T012–T014, T020–T023, and T039–T041 all edit has a
+  matching artifact-class row; CHK114 add a decidable classification rule to
+  T035's adjudication clause — a CHK item requires a landed text fix when the
+  cited spec/plan section does not yet contain, verbatim, the wording the
+  item's question describes as of this task graph's authoring commit; it
+  requires only a consistency confirmation when that exact wording already
+  exists at that commit — removing adjudicator discretion from the
+  classification; CHK116 reword T036, T037, and T038 so each names the exact
+  attempt-2 packet commit `5383e9f3a5e9c20c08ab54395f4ff370128f03de` (the
+  rejected pre-repair tree) as the red-run baseline in place of "a named
+  pre-repair tree," so the red-then-green obligation is reproducible from the
+  written instruction alone; CHK117 reword T040 so its request-ID clause
+  defers the complete pre-validation and post-validation error-branch
+  inventory — not only the pre-validation half — to the T035-landed CHK103
+  rule, so T040 cannot be read as fixing "optional on a pre-validation error"
+  as the whole rule while leaving the post-validation case silently
+  unaddressed; CHK118 reword T039's event-union clause to drop the locally
+  introduced `kind: reply|thread` and "universally required author/mention
+  fields" phrasing — neither appears in FR-014's enumeration — replacing it
+  with FR-014's own typed message/reaction/membership wording verbatim, and
+  expand T041's continuation-capability clause to name `handle_id`, exact
+  `bound_to`, before/after/around fetch capabilities, per-fetch caps, and
+  optional expiry in full rather than the shortened "selected continuation
+  capability" paraphrase, so no task carries a field-level claim FR-014 does
+  not itself make; CHK119 reword T042 so the CHK101 red-run per-family
+  failing counts are named as a specific manifest field —
+  `red_run_failing_count` recorded beside each family's green partition-count
+  row in the twelve-scene manifest table in `evidence/v2/contract/README.md`
+  — replacing the descriptive "beside the green results" phrase; CHK120 add
+  a clause to T043 requiring the inventory-derivation check (`ls *.md` plus
+  `find docs -name '*.md' | grep -v archive`) to be re-run against the
+  attempt-3 diff in addition to re-validating the eighteen already-listed
+  rows, so a doc file added or removed outside those paths has a detecting
+  task; CHK121 reword T042 so the authority-case provenance flag is a named
+  manifest field — `authority_source_commit: c834e8c` recorded on each
+  authority-flagged record in `evidence/v2/contract/README.md` — replacing
+  the descriptive "flagged... with its pinned provenance" phrase — appending
+  the per-item text verdicts with evidence anchors to
+  `evidence/v2/contract/checklist-adjudication.md` (append-only; T025's and
+  T035's text verdicts and all earlier adjudications are never rewritten),
+  recording CHK115 (T035's CHK099 disposition already names both plan
+  §Contract validation commands and §Acceptance Scenes and Evidence as
+  needing the identical schema-expressible-partition wording, so the
+  alignment this item asks for is already scoped by an existing fix
+  commitment; no separate fix required here) as a consistency confirmation,
+  and checking off each gate item in the requirements checklist only when its
+  fix is verifiably on disk.
+
 ## Dependencies & Execution Order
 
 - T001 precedes T002–T005. Red tests T002–T005 may then proceed in parallel.
@@ -258,6 +334,15 @@ traces to.
   attempt-3 sections of `evidence/v2/contract/handoff.md` append in the
   same documentation-then-packet order as prior attempts, after the
   attempt-2 sections and never rewriting them.
+- Task-graph text-fidelity phase: T046 corrects the still-unchecked text of
+  T035, T036, T037, T038, T039, T040, T041, T042, and T043, plus one plan.md
+  row, before any of them may be worked. Its task ID is highest in
+  authorship order, but its execution precedes T035–T045 entirely — this
+  override is stated explicitly because CHK112 asks that the disposition of
+  CHK108–CHK110 be explicit in this section too: those three items require
+  no spec/plan text fix and close entirely through T042–T044, not through
+  T046 or T035. T046 has no other upstream dependency and blocks nothing
+  outside Phase 8.
 
 ## Parallel Opportunities
 
@@ -337,3 +422,10 @@ do not let a dependent implementation silently define the shared interface.
   file left unchanged an explicit manifest disposition; attempt 3 re-records
   `evidence/v2/contract/attention-request.jsonl` because R4 re-enters every
   corpus family.
+- Phase 9 is the append-only correction for the task-graph text-fidelity gate
+  CHK112–CHK121: completed history (checked tasks T001–T034, every evidence
+  record, both rejected attempt streams) is preserved unchanged; T046 is the
+  sole appended task, and its execution amends the still-pending text of
+  T035–T038, T039, T041, T042, and T043 plus plan §Ordinary Repository
+  Targets — none of it completed history — rather than adding new
+  implementation surface; every fix traces to a named CHK112–CHK121 item.

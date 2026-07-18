@@ -300,3 +300,44 @@ rewrite it.
 
 - [ ] CHK110 Is it explicit that authority-conformance cases are embedded ordinary-path corpus copies with pinned provenance — drawn from the design at `c834e8c` and flagged as authority cases in the evidence manifest — so the "verbatim" claim is verifiable from repository artifacts alone and no build or test path reads the external design document or a SpecKit-managed path at run time? [Clarity, Traceability, Spec §FR-012, §FR-014; Plan §Acceptance Scenes and Evidence; Constitution §VII]
 - [ ] CHK111 Do the attempt-2 rejection additions keep the slice directory's closed allowlist intact — the R4–R6 analysis, clarifications, and decisions live in spec/plan prose, with the review record and future rework evidence under `evidence/v2/contract/` and no new file under the slice directory — so the SC-006 boundary check still passes without a carve-out? [Consistency, Plan §Project Structure; Spec §SC-006, §Control-Plane Boundary]
+
+## Formal Reviewer Gate — Attempt-3 Task-Graph Addendum (appended 2026-07-18, post-`93f25a2`)
+
+**Purpose**: Requirement-quality gate for the formal reviewer covering scope,
+parity, interface, evidence, documentation freshness, and control-plane
+boundary requirements, now applied to Phase 8's appended attempt-3 correction
+tasks T035–T045 (landed at `93f25a2`) against the amended spec (`a183469`),
+plan (`6d1fdeb`), and the still-unadjudicated CHK097–CHK111 gate (`b395acf`).
+These items test the written task-graph text only — its completeness,
+clarity, consistency, and measurability as an instruction set for the next
+delivery run — never whether T035–T045 have been executed. They are appended
+unchecked for the reviewer's pass; adjudicated CHK verdicts above, including
+the still-pending CHK097–CHK111 items, are not reopened or restated.
+
+### Scope Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK112 Do the task-graph text and Dependencies section make it explicit that CHK108, CHK109, and CHK110 require no spec/plan text fix and are instead closed entirely by implementation/evidence tasks (T042–T044) — since T035's own per-item disposition list names every other CHK097–CHK111 item but omits these three — so a reviewer does not read their absence from T035 as an unaddressed item? [Completeness, Tasks T035, T042–T044]
+- [ ] CHK113 Is `tests/v2/contract/schema_helpers.py` — the shared stdlib request/decision/downstream adapter that T012–T014, T020–T023, and T039–T041 all edit — named anywhere in plan §Ordinary Repository Targets, whose "Contract tests" row enumerates only the `tests/v2/contract/test_*.py` glob, so the file every schema-rework task actually touches has no matching artifact-class row? [Gap, Plan §Ordinary Repository Targets; Tasks T012–T014, T020–T023, T039–T041]
+- [ ] CHK114 Is the boundary between a CHK097–CHK111 item requiring a landed text fix and one requiring only a "consistency confirmation" written as a decidable rule, or does T035 leave that classification to adjudicator judgment — a live risk since the plan text CHK099 and CHK102 test (§Contract validation commands, §Produces) was already amended at `a183469`/`6d1fdeb`, before the gate itself was appended at `b395acf`? [Clarity, Tasks T035]
+
+### Parity Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK115 Does plan §Acceptance Scenes and Evidence's authority-case description — "counted as their own class in `expected-counts.json`" — carry the same "schema-expressible" qualifier that §Contract validation commands states for the identical fact, or does the exact CHK099 ambiguity (a manifest-count class read as a new partition-oracle class) remain live in one of the two sections T035 is tasked to align? [Consistency, Plan §Acceptance Scenes and Evidence, §Contract validation commands; Tasks T035]
+- [ ] CHK116 Is "a named pre-repair tree" (T036–T038's red-run baseline for the authority cases against the attempt-2 schemas) actually named anywhere in the task text — for example the attempt-2 packet commit `5383e9f3a5e9c20c08ab54395f4ff370128f03de` — or is the red-run evidence's baseline point left to the executor's choice, making the "decisive" claim unreproducible from the written instruction alone? [Measurability, Tasks T036–T038]
+
+### Interface Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK117 Do T040 or any other artifact state whether a post-validation `I-010B` error carries the request ID — T040 names only "the request ID optional on a pre-validation error," and neither spec FR-005 nor FR-014 addresses the post-validation case — so CHK103's open question remains unresolved in the very task meant to consume its answer? [Gap, Spec §FR-005, §FR-014; Tasks T040]
+- [ ] CHK118 Do T039–T041's field-inventory summaries reproduce the full field lists spec FR-014 and plan §Produces enumerate per interface, or do they paraphrase a shorter list and rely on the reader to cross-check FR-014/§Produces separately — the same class of locally narrowed, task-text-only shape that produced rejection R4 when it happened at the schema level? [Consistency, Spec §FR-014; Plan §Produces; Tasks T039–T041]
+
+### Evidence Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK119 Is the record, field, or manifest location where T042's "per-family failing counts" sit "beside the green results" specified — the same JSONL record, a sibling `README.md` manifest column, or a separate section — or is "beside" descriptive prose a reviewer cannot mechanically verify present or absent? [Measurability, Tasks T042]
+
+### Documentation Freshness Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK120 Does T043's "re-execute every row of plan §Documentation Impact and Freshness" also require re-running the matrix's stated inventory-derivation check (`ls *.md` plus `find docs -name '*.md' | grep -v archive`) against the attempt-3 diff, or only re-validating the eighteen rows already listed — so an attempt-3 doc file added or removed outside those eighteen paths would have no task requiring its detection? [Gap, Plan §Documentation Impact and Freshness; Tasks T043]
+
+### Control-Plane Boundary Requirement Quality (attempt-3 task graph)
+
+- [ ] CHK121 Is the field or format of the "pinned `c834e8c` provenance" flag T042 must attach to authority-conformance cases in the `README.md` manifest specified anywhere, or is "flagged... with its pinned provenance" descriptive language without a named field — leaving CHK110's "verifiable from repository artifacts alone" claim unable to be mechanically checked against the written instruction? [Clarity, Plan §Acceptance Scenes and Evidence; Tasks T042]
