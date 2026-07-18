@@ -200,3 +200,35 @@ CHK118 SUSTAINED, fixed — T039 (this commit) now reproduces FR-014's own event
 CHK119 SUSTAINED, fixed — T042 (this commit) now names the manifest field `red_run_failing_count`, recorded beside each family's green partition-count row in `evidence/v2/contract/README.md`, replacing the descriptive "beside the green results" phrase.
 CHK120 SUSTAINED, fixed — T043 (this commit) now requires re-running the inventory-derivation check (`ls *.md` plus `find docs -name '*.md' | grep -v archive`) against the attempt-3 diff, in addition to re-validating the eighteen already-listed rows.
 CHK121 SUSTAINED, fixed — T042 (this commit) now names the manifest field `authority_source_commit: c834e8c`, recorded on each authority-flagged record in `evidence/v2/contract/README.md`, replacing the descriptive "flagged... with its pinned provenance" phrase.
+
+# Reviewer adjudication — attempt-3 rework gate, implementation items (T044)
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Adjudicated on**: 2026-07-18, directly in the `v2-contract-owner`
+worktree, against the landed implementation commit `7f9e814`.
+
+**Method**: each implementation-dependent CHK097–CHK111 item verified
+against the landed correction commit of this attempt — `7f9e814`, which
+carries T036–T043 (all five schema reworks, the stdlib adapter, all four
+test files, all three corpora with the FR-014 authority-conformance class,
+regenerated evidence, the reworked `docs/contracts/nunchi-v2.md`, and the
+attempt-3 documentation dispositions) — with each verdict citing its
+landed task, file, and record anchors. Each gate item is checked off in
+the requirements checklist only with its fix verifiably on disk. This
+section is append-only; every earlier adjudication above is unchanged.
+
+## Verdicts (implementation)
+
+CHK099 PASS via T036–T038+T042 — the authority-conformance class is not just described in text but actually landed as schema-expressible cases: `evals/v2/contract/{attention-request,attention-decision,downstream}/cases.jsonl` carry 14 `*-AUTH-*` cases inside the `schema-expressible` partition (never a separate partition value — `expected-counts.json` has no fourth class), and `evidence/v2/contract/README.md`'s authority table confirms all 14 pass under both validators at `7f9e814`.
+CHK100 PASS via T036–T038 — the closed minimum authority-case inventory is landed identically to FR-012/FR-014/Edge Cases: request-family cases cover the example request, typed reaction, typed membership, and full coverage (`REQ-AUTH-001`–`004`); decision-family cases cover margin status, vector-optional WAKE, and both error-branch request-ID cases (`DEC-AUTH-001`–`004`); downstream-family cases cover the anchored fetch, identity-bearing page, materialized wake, and all three non-transport receipt stages (`DWN-AUTH-001`–`006`).
+CHK101 PASS via T042 — the red-then-green obligation is decidable and recorded: `evidence/v2/contract/README.md`'s authority table names a `red_run_failing_count` for every case, measured by checking out the attempt-2 packet commit's schemas (`5383e9f3a5e9c20c08ab54395f4ff370128f03de`) into an isolated scratch tree and running each authority document through a real Draft 2020-12 validator built from those exact files — not a described obligation, an executed one — alongside the green result at `7f9e814` (`write-evidence`: 0 mismatched).
+CHK102 PASS via T035's consistency confirmation (unchanged by implementation): each `schemas/v2/*.schema.json` file's description field and the plan §Produces bullet it mirrors both cite FR-014/`c834e8c` at the point of enumeration; landed schemas at `7f9e814` match this.
+CHK103 PASS via T040 landed — `schemas/v2/attention-decision.schema.json`'s `error` `$def` requires exactly `code` with optional `detail`, and `classifier` is optional; `request_id` is a top-level optional property on the `error` variant, covering both pre- and post-validation branches identically (verified: `DEC-AUTH-003` and `DEC-AUTH-004` in the corpus exercise both cases, 0 validator errors at `7f9e814`).
+CHK104 PASS via T035's consistency confirmation (unchanged by implementation).
+CHK105 PASS via T035's consistency confirmation (unchanged by implementation); T045's packet input below carries the same single-valued commit identity forward.
+CHK107 PASS via T042 — all three aggregate JSONL files were regenerated in place as current-attempt records (not selectively; R4 re-entered every corpus family, so `attention-request.jsonl` was re-recorded too, unlike the attempt-2 disposition), the manifest names the current attempt-3 counts, and no evidence file was left with a stale attempt-2 disposition.
+CHK108 PASS via T043 — `docs/contracts/nunchi-v2.md`'s `UPDATE` was re-validated against the attempt-3 candidate diff (landed at `7f9e814`); all five embedded JSON examples verified against both validators, 0 failures.
+CHK109 PASS via T043 — all seven `HANDOFF` rows were re-scanned against the R4 field renames; none embeds a superseded local field name or narrowed-shape claim (they reference interface IDs, versions, and paths only), so no row required editing.
+CHK110 PASS via T042 — `evidence/v2/contract/README.md`'s authority table names `authority_source_commit: c834e8c` on every one of the 14 authority records, verifiable from the manifest alone with no build or test path reading the external design document at run time.
+CHK111 PASS via re-running the SC-006 boundary check — `python3 scripts/check_governance.py` reports `governance boundary: OK` at `7f9e814`; `specs/010-v2-contract/` still contains exactly `spec.md`, `plan.md`, `tasks.md`, and `checklists/requirements.md`.

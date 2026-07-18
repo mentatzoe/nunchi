@@ -93,3 +93,58 @@ before their own handoffs; running the pinned uv command generates an
 untracked `uv.lock` at the repo root (delete to restore a clean tree);
 schema $id values use the placeholder domain `nunchi.invalid` pending any
 future canonical-host decision (identifiers only, never dereferenced).
+
+## Attempt 3 — CONVERGED
+
+**Slice**: `010-v2-contract`
+
+**Status**: CONVERGED
+
+**Candidate commit**: `7f9e81460d570e078c4bcbacb138f81c1b291455`
+
+**Tasks complete**: YES
+
+**Completed task IDs**: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013, T014, T015, T016, T017, T018, T019, T020, T021, T022, T023, T024, T025, T026, T027, T028, T029, T030, T031, T032, T033, T034, T035, T036, T037, T038, T039, T040, T041, T042, T043, T044, T045, T046
+
+**Tasks SHA256**: 3001cefc6fd5fba395e4db5d75151479c0bea9bf625a3b55dd2924ebfcff6db7
+
+**Verification commands / results**: PASS — `python3 -m unittest` — 1222 tests, OK,
+11 skipped (8 pre-existing + 3 counted oracle-absent classes per the FR-012
+skip regime); `uv run --offline --with 'jsonschema==4.26.0' python -m
+unittest discover -s tests/v2/contract -p 'test_*.py'` — 164 tests, OK, 0
+skipped (full dual-validator corpus including all 14 FR-014
+authority-conformance cases); `python3 scripts/check_governance.py` —
+boundary OK; the design's own example attention request and every other
+authority-conformance document verified verbatim/field-complete against
+both validators (0 failures); converge assessment — 0 missing / 0 partial
+/ 0 contradicts / 0 unrequested, no tasks appended beyond the T046
+checklist-driven append already reflected above.
+
+**Interface versions**: I-010A AttentionRequestV2@1, I-010B
+AttentionDecisionV2@1, I-010C ParticipantWakeV2@1, I-010D
+ContextContinuationV2@1, I-010E AttentionReceiptV2@1 — at the five exact
+`schemas/v2/*.schema.json` paths (all five reworked in place to the
+selected-design field inventory for rejection finding R4; `@1` retained
+per the FR-011 pre-acceptance rework rule).
+
+**Evidence paths**: evidence/v2/contract/attention-request.jsonl,
+evidence/v2/contract/attention-decision.jsonl,
+evidence/v2/contract/downstream.jsonl, evidence/v2/contract/README.md,
+evidence/v2/contract/checklist-adjudication.md,
+evidence/v2/contract/handoff.md, evidence/v2/contract/slice-activation.md
+
+**Known limitations**: semantic/relational invalid classes are
+runtime-adapter-only per the FR-012 expressiveness partition (the Draft
+2020-12 oracle cannot express them); plain-baseline runs skip the three
+oracle-dependent classes with counted, asserted skips; downstream consumers
+must pass the identical corpus revision named in the T045 packet input
+before their own handoffs; running the pinned uv command generates an
+untracked `uv.lock` at the repo root (delete to restore a clean tree);
+schema $id values use the placeholder domain `nunchi.invalid` pending any
+future canonical-host decision (identifiers only, never dereferenced); the
+`binding-expiry` invalid coverage narrows from 4 to 3 cases because
+`ContextFetch` carries no inline binding field to cross-check under the
+selected design (not a silent shrink — see the T045 packet's known
+limitations); the classifier-facing redaction of `I-010A`'s optional
+`continuation` field is enforced at the runtime layer, not the wire
+schema.
