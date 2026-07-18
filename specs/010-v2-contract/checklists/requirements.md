@@ -250,3 +250,53 @@ it.
 
 - [x] CHK095 Is the R1 repair stated as a verifiable boundary invariant — "constructs its synthetic planning baseline independently of the repository's live slice state" — with a named regression proof (the baseline stays green while live slices are `ACTIVE` or `HANDOFF_READY`), or is it a one-off description under which a partially decoupled fixture could pass again by coincidence of the current live state? [Measurability, Plan §Post-Rejection Planning Decisions, §Ordinary Repository Targets]
 - [x] CHK096 Do the post-rejection additions keep the slice directory's closed allowlist intact — rejection analysis, decision rationale, and correction planning live in plan prose and ordinary evidence paths, with no new file under the slice directory and the review record itself under `evidence/v2/contract/` — so the SC-006 boundary check still passes without a carve-out? [Consistency, Plan §Project Structure; Spec §SC-006, §Control-Plane Boundary]
+
+## Formal Reviewer Gate — Attempt-2 Rejection Alignment Addendum (appended 2026-07-18, post-`6d1fdeb`)
+
+**Purpose**: Extend the formal reviewer gate to the artifacts as amended after
+the second candidate's rejection
+(`evidence/v2/contract/review-2026-07-17-v2-integrator-attempt-2.md`, blockers
+R4–R6): the spec's 2026-07-18 clarification session (FR-014 selected-design
+field-inventory fidelity, the FR-012 authority-conformance corpus class, the
+SC-005 single-valued commit identity, and the referential task-graph
+execution-status rule) and the plan's attempt-2 §Post-Rejection Planning
+Decisions. These items test the amended requirement text only — scope, parity,
+interface, evidence, documentation freshness, and control-plane boundary
+quality — not any implementation. They are appended unchecked for the
+reviewer's pass; adjudicated CHK verdicts above are not reopened. Where an item
+cites a completed task's text, the task is append-only history: the question is
+whether the promised correction tasks supersede it in writing, never whether to
+rewrite it.
+
+### Scope Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK097 Are the promised attempt-3 correction tasks ("the new bound delivery run appends the matching correction tasks without rewriting completed history") specified precisely enough — at least one traceable task per blocker R4/R5/R6, naming target schema/adapter/corpus/evidence files and the decisive red-then-green obligations, including the integrator's stdlib-adapter probes that exposed the narrowed shapes — or does the current graph (ending at T034, appended for the R1–R3 rejection) leave the required correction-task content unwritten in every artifact? [Gap, Plan §Post-Rejection Planning Decisions (2026-07-18, attempt 2); Tasks §Phase 7]
+- [ ] CHK098 Is the attempt-3 rework surface bounded in writing — R4 re-enters all five `schemas/v2/` files, the stdlib runtime adapter, every corpus family, and the slice-owned contract doc, while R5/R6 constrain evidence and task-graph wording only — so a reviewer can classify any attempt-3 diff hunk as in-scope rework or as scope creep needing its own authority? [Completeness, Plan §Post-Rejection Planning Decisions (2026-07-18, attempt 2), §Constitution Check]
+
+### Parity Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK099 Is the authority-conformance class's position in the FR-012 expressiveness partition decided in writing — the spec fixes the design's example attention request as a schema-expressible valid case while the plan counts authority cases "as their own class" flagged in the manifest — or can an implementer read "their own class" as a new partition class with an unspecified oracle treatment, contradicting the plan's rule that no other class-to-treatment mapping is permitted? [Ambiguity, Spec §FR-012; Plan §Contract validation commands, §Acceptance Scenes and Evidence]
+- [ ] CHK100 Is the minimum authority-case inventory closed and stated identically — FR-012's named coverage list (complete typed event, coverage, continuation capability/fetch/page, participant-wake, decision, and four-stage receipt field inventories), the FR-014 Edge-Case representative-document list (example request, typed reaction or membership event, directional anchored fetch, selected wake packet, selected receipt stage), and the plan's per-family placement — so a reviewer can decide a delivered authority class complete or incomplete without re-deriving the list from the design? [Consistency, Measurability, Spec §FR-012, §FR-014, §Edge Cases; Plan §Acceptance Scenes and Evidence]
+- [ ] CHK101 Is "fail against the narrowed attempt-2 shapes and pass after the schema repair" decidable as an obligation — must the attempt-3 candidate evidence the red state against the attempt-2 schemas, or only the green authority-case results against the repaired schemas — or is the red-then-green wording rationale prose a reviewer cannot accept or reject a packet against? [Ambiguity, Spec §Clarifications (2026-07-18), §FR-012; Plan §Contract validation commands]
+
+### Interface Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK102 Do the spec FR-014 and plan §Produces field-inventory enumerations agree per interface — the plan's I-010D adds page identity/direction/anchor/actor-map detail beyond FR-014's "identity-bearing page shapes," and its I-010C adds the "not a wrapped classifier projection" gloss — and is the tie-break for any divergence (the design at `c834e8c`) stated where the enumerations appear, so neither local list is read as the narrower or wider authority? [Consistency, Spec §FR-014; Plan §Produces]
+- [ ] CHK103 Is the error-branch shape decidable beyond the one named fact — FR-014 fixes an optional request ID on a pre-validation error, but no requirement states the remaining error-branch inventory or whether a post-validation error must carry the request ID — or is that residual explicitly deferred to the selected design in writing? [Gap, Spec §FR-005, §FR-014]
+- [ ] CHK104 Are the named attempt-2 narrowing defects (`routing`, `legacy_confidence`, generic event shape, collapsed coverage enums, mandatory error request ID) written as examples of a general rule — any local rename or narrowing is a contract defect adjudicated against the design's field inventory — so a rename absent from the example list is still decidably a defect rather than arguably allowed? [Clarity, Spec §Clarifications (2026-07-18), §FR-014]
+
+### Evidence Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK105 Are the four commit-identity locations enumerated identically at every statement (spec clarification, SC-005, plan Decision R5, plan §Owner Handoff), and is the recording of the handoff packet commit specified operationally — which file and attempt entry record it "once it exists," given that the packet commit cannot name itself from inside its own tree — so a delivered packet can be scanned deterministically for placeholder, future-valued, or divergent identities? [Measurability, Gap, Spec §SC-005; Plan §Owner Handoff, §Post-Rejection Planning Decisions (2026-07-18, attempt 2)]
+- [ ] CHK106 Does the task-graph header itself satisfy the R6 referential rule — the Execution status line still opens with the hard-coded state-specific clause "`EXECUTABLE` — the slice is `ACTIVE`," the wording pattern Decision R6's rejected alternative (re-editing a hard-coded state line at each transition) describes — and is it decidable which header lines are transition-updated declarations versus never-edited referential statements, so agreement at a packet commit is verifiable? [Conflict, Tasks §header; Plan §Post-Rejection Planning Decisions (2026-07-18, attempt 2); Spec §SC-005]
+- [ ] CHK107 Do the written contract-run evidence rework semantics generalize to every later attempt — aggregate JSONL files and the README manifest regenerate as current-attempt records, `handoff.md` and `checklist-adjudication.md` append one section per attempt, and an evidence file left unchanged receives an explicit manifest disposition — noting that R4 touches every corpus family, so the attempt-2 "unchanged `attention-request.jsonl`" disposition cannot carry forward unexamined? [Consistency, Plan §Acceptance Scenes and Evidence; Tasks §Notes]
+
+### Documentation Freshness Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK108 Is re-execution of the documentation matrix for the attempt-3 candidate required in writing — completed T032 validated `docs/contracts/nunchi-v2.md` against the R2/R3 shapes, while the matrix row now also names the FR-014 selected-design field inventory and authority-conformance corpus class — or does no appended task make the doc revalidate against the repaired shapes and re-verify every `NO_IMPACT` rationale against the attempt-3 diff? [Gap, Plan §Documentation Impact and Freshness; Tasks T032]
+- [ ] CHK109 Do the routed `HANDOFF` deltas remain accurate under the repaired FR-014 shapes — does any README/CHANGELOG/stability/integration/adapter/supersession row embed a superseded local field name or narrowed-shape claim, or does each name only interface IDs, versions, paths, statuses, and commands the repair leaves true — so no accepting owner receives a delta the attempt-3 candidate falsifies? [Consistency, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness]
+
+### Control-Plane Boundary Requirement Quality (attempt-2 rejection)
+
+- [ ] CHK110 Is it explicit that authority-conformance cases are embedded ordinary-path corpus copies with pinned provenance — drawn from the design at `c834e8c` and flagged as authority cases in the evidence manifest — so the "verbatim" claim is verifiable from repository artifacts alone and no build or test path reads the external design document or a SpecKit-managed path at run time? [Clarity, Traceability, Spec §FR-012, §FR-014; Plan §Acceptance Scenes and Evidence; Constitution §VII]
+- [ ] CHK111 Do the attempt-2 rejection additions keep the slice directory's closed allowlist intact — the R4–R6 analysis, clarifications, and decisions live in spec/plan prose, with the review record and future rework evidence under `evidence/v2/contract/` and no new file under the slice directory — so the SC-006 boundary check still passes without a carve-out? [Consistency, Plan §Project Structure; Spec §SC-006, §Control-Plane Boundary]
