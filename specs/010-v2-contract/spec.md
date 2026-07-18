@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `ACTIVE`
+**Slice state**: `HANDOFF_READY`
 
 **Program implementation authority**: `GRANTED`
 
