@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Contract
 
-**Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17; post-rejection R1/R2/R3 alignment to the clarified spec, same day) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17; post-rejection R1/R2/R3 alignment to the clarified spec, same day; post-rejection R4/R5/R6 selected-design-fidelity alignment 2026-07-18) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/010-v2-contract/spec.md`
 
@@ -86,7 +86,9 @@ the legacy verdict confidence vector is optional on `status: ok` and required
 exactly for a margin-active candidate `SUPPRESS` (FR-007); opaque continuation
 authority never reaches the classifier; receipt stages are immutable and singly
 written, with the stage-to-writer binding part of the public per-record
-contract (FR-010)
+contract (FR-010); the selected design at `c834e8c` is the field-level naming
+and shape authority for every `@1` interface, so schemas encode the selected
+field inventory rather than a narrowed local shape (FR-014)
 
 **Scale/Scope**: Five canonical interfaces consumed by ten downstream slices,
 culminating in one final parity integration
@@ -100,6 +102,22 @@ stage-to-writer binding (R3), and names the exact R1 governance-fixture repair
 target so the full offline baseline is green from the next handoff packet
 commit. Rework lands only through the new bound delivery run; the rejected
 attempt stream is preserved unchanged.
+
+The attempt-2 candidate was in turn rejected at
+`evidence/v2/contract/review-2026-07-17-v2-integrator-attempt-2.md`, and the
+spec's 2026-07-18 clarification session encodes that decision: the five public
+`@1` schemas must encode the selected design's field inventory rather than
+narrowed local shapes (R4; FR-014); the corpus must carry
+authority-conformance cases drawn from the selected design, which fail against
+the narrowed attempt-2 shapes and pass after the schema repair (R4 rework
+path; FR-012, SC-001); the delivered packet must name one identical exact
+candidate commit across the lifecycle candidate entry, the handoff attempt
+entry, the packet input, and the recorded corpus revision (R5; SC-005); and
+the task graph must state execution status by reference to the slice
+declarations and lifecycle evidence, never as a hard-coded state-specific
+claim (R6; SC-005). This third refresh aligns the plan with those
+clarifications. Rework again lands only through a new bound delivery run;
+both rejected attempt streams are preserved unchanged.
 
 ## Constitution Check
 
@@ -122,7 +140,11 @@ each reviewed ordinary document individually with a per-file disposition and
 per-file validation or handoff delta. The 2026-07-17 post-rejection alignment
 restates — and defers to — the clarified spec: the conditional FR-007 vector,
 the closed FR-005 routing audit, and the schema-expressible FR-010
-stage-to-writer binding introduce no new gate exposure.
+stage-to-writer binding introduce no new gate exposure. The 2026-07-18
+attempt-2 alignment likewise defers to the clarified spec: FR-014
+selected-design fidelity binds the schemas more tightly to the pinned higher
+authority at `c834e8c`, and the R5/R6 packet-consistency rules constrain
+evidence and task-graph wording only; no new gate exposure is introduced.
 
 ## Slice Interfaces
 
@@ -134,7 +156,15 @@ stage-to-writer binding introduce no new gate exposure.
 ### Produces
 
 - `I-010A AttentionRequestV2@1` at
-  `schemas/v2/attention-request.schema.json`.
+  `schemas/v2/attention-request.schema.json`, encoding the selected field
+  inventory (FR-014): the room platform/id/continuity-scope/name/kind facts
+  and the actor map; the typed message, reaction, and membership event union
+  with reaction `add`/`remove` operation and literal membership scope,
+  subject actor, and optional causal actor; and the coverage facts
+  (`has_more_before`, `has_more_after`, `has_gaps`, `truncated_by`,
+  `continuity`, `has_restart_gap`, and optional per-event-type visibility).
+  A generic event shape or collapsed coverage enums are contract defects,
+  and the design's example attention request validates verbatim.
 - `I-010B AttentionDecisionV2@1` at
   `schemas/v2/attention-decision.schema.json`: `status: ok` carries one of the
   four allowed classifier/effective pairs; `reasons` retained as ok-branch
@@ -148,12 +178,25 @@ stage-to-writer binding introduce no new gate exposure.
   the margin status (`active` or `retired`), the effective margin when one
   applied, and the trusted margin source when present. `status: bypass`
   carries cause `preattention-disabled` and no classifier/effective
-  disposition, and `status: error` remains operational.
+  disposition, and `status: error` remains operational. The public field
+  names are the selected `routing_audit` and `legacy_verdict_confidences`,
+  the classifier audit names the classifier with optional provider and
+  model, and the request ID on a pre-validation error is optional (FR-014,
+  superseding the rejected `routing`/`legacy_confidence` local shapes and
+  the mandatory error request ID).
 - `I-010C ParticipantWakeV2@1` at
   `schemas/v2/participant-wake.schema.json`, including non-social source
-  `PREATTENTION_BYPASS` without advice.
+  `PREATTENTION_BYPASS` without advice. The wake packet materializes self,
+  room, actors, events, trigger, coverage, optional host-only continuation
+  authority for the woken participant, and a separate `attention` object
+  (FR-014), not a wrapped classifier projection.
 - `I-010D ContextContinuationV2@1` at
-  `schemas/v2/context-continuation.schema.json`; handle, binding, cursor,
+  `schemas/v2/context-continuation.schema.json`, defining the selected
+  continuation capability (`handle_id`, exact `bound_to`, before/after/around
+  fetch capabilities, per-fetch caps, optional expiry) with directional
+  anchor-bearing fetch shapes and pages that carry room and continuity-scope
+  identity, direction, anchor, actor map, and page binding (FR-014); handle,
+  binding, cursor,
   expiry values, and fetch authority are host-only. The classifier projection receives coverage
   and expansion capability booleans only.
 - `I-010E AttentionReceiptV2@1` at
@@ -166,7 +209,13 @@ stage-to-writer binding introduce no new gate exposure.
   validators (FR-010, closing the rejected cross-owner attestation gap), in
   addition to the runtime stream-level ordering and immutability checks. Bypass
   attention records set `classifier_not_invoked` and carry trusted bypass
-  provenance.
+  provenance. Each stage carries the selected telemetry (FR-014): observation
+  request/schema/trigger/continuity IDs, snapshot sizes, coverage, and
+  included event IDs; attention classifier identity, evidence, and
+  transition-valve facts or the bypass fact with trusted provenance;
+  participant-host wake source, packet sizes, delivered event IDs, expansion
+  calls, and invocation and `sent`/`silent`/`unknown` outcome; transport
+  hygiene and routing/send facts.
 
 These target paths are outputs of authorized slice implementation. Interface
 details here are planning summaries only.
@@ -203,7 +252,17 @@ another stage's owner is a schema-expressible red case asserting identical
 rejection from both validators; the runtime-adapter-only receipt-stage
 sequence class covers the multi-record stream checks (canonical order, skipped
 stages, earlier-stage mutation, request-ID correlation, and stream-level
-writer ownership), where no single document exists to validate. The 010
+writer ownership), where no single document exists to validate. The corpus
+additionally carries the FR-014 authority-conformance cases drawn from the
+selected design at `c834e8c`: the design's example attention request
+validates verbatim as a schema-expressible valid case, and named cases cover
+the complete typed event, coverage, continuation capability/fetch/page,
+participant-wake, decision, and four-stage receipt field inventories. These
+cases fail against the narrowed attempt-2 shapes and pass after the schema
+repair; a corpus that is merely self-consistent with narrower schemas does
+not establish conformance (SC-001), and a document the selected design
+declares valid that either validator rejects is a contract defect, never
+resolved by narrowing the corpus. The 010
 handoff owns the schemas, corpus, oracle result, and adapter
 contract; each runtime owner must make its adapter pass the same corpus before
 its own handoff.
@@ -253,6 +312,56 @@ tasks without rewriting completed history.
   MUST keep that baseline green while live slice declarations read `ACTIVE`
   or `HANDOFF_READY`; a partially decoupled fixture that passes only by
   coincidence of the current live state fails this proof.
+
+## Post-Rejection Planning Decisions (2026-07-18, attempt 2)
+
+Rejection source:
+`evidence/v2/contract/review-2026-07-17-v2-integrator-attempt-2.md` for
+candidate `001fdf85acd5098264c4975559c97114aa7278af` at packet commit
+`5383e9f3a5e9c20c08ab54395f4ff370128f03de`. Each blocker resolves to one
+planning decision; the new bound delivery run appends the matching correction
+tasks without rewriting completed history.
+
+- **Decision (R4)**: all five `@1` schemas and the stdlib runtime adapter
+  encode the selected design's field-level naming and shape inventory exactly
+  as spec FR-014 enumerates it — the room facts and actor map; the typed
+  message/reaction/membership event union; the selected coverage facts; the
+  continuation capability with directional anchored fetch and
+  identity-bearing pages; the materialized wake packet with a separate
+  `attention` object; the decision field names `routing_audit` and
+  `legacy_verdict_confidences` with a classifier audit naming the classifier
+  with optional provider and model and an optional request ID on a
+  pre-validation error; and the four receipt stages' telemetry — and the
+  corpus gains the FR-012 authority-conformance cases, including the design's
+  example attention request verbatim. **Rationale**: the selected design at
+  `c834e8c` is the higher authority; the integrator's targeted stdlib-adapter
+  probes showed representative selected-design documents rejected by the
+  attempt-2 schemas, and a corpus self-consistent with the narrowed shapes
+  establishes nothing. **Alternatives considered**: keeping the locally
+  named/narrowed shapes and widening the corpus around them — rejected
+  because the defect is in the contract; narrowing or bending the corpus can
+  never resolve it (FR-014).
+- **Decision (R5)**: the delivered packet pins one commit identity — the
+  lifecycle candidate entry, the handoff attempt entry, the packet input in
+  `evidence/v2/contract/handoff.md`, and the recorded corpus revision name
+  the identical exact candidate commit, and the actual handoff packet commit
+  is recorded in the same terms once it exists; a placeholder, future-valued,
+  or divergent commit identity anywhere in a delivered packet blocks
+  acceptance. **Rationale**: the attempt-2 packet named three incompatible
+  commit identities; exact evidence identity is the acceptance boundary and
+  cannot be inferred from tree similarity (SC-005). **Alternatives
+  considered**: accepting byte-identical trees under differing commit names —
+  rejected by the integrator; identity is per-commit, not per-tree.
+- **Decision (R6)**: the task graph states execution status only by reference
+  to the slice declarations and lifecycle evidence — never as a hard-coded
+  state-specific claim that a later transition falsifies — so the task graph,
+  declarations, and lifecycle evidence agree at every packet commit.
+  **Rationale**: the attempt-2 packet shipped a task-graph claim that the
+  slice was mid-implementation inside a handoff-ready packet, false at the
+  packet commit and false again at every future handoff if left
+  state-specific. **Alternatives considered**: re-editing a hard-coded state
+  line at each transition — rejected as a recurring consistency hazard the
+  referential wording removes permanently.
 
 ## Integration Strategy
 
@@ -319,7 +428,13 @@ Reusable corpus assets are partitioned per interface family at exactly
 each holding `cases.jsonl` and its authoritative per-class
 `expected-counts.json`; the `tests/v2/contract/` suite is the corpus runner;
 deterministic
-tests target `tests/v2/contract/`. Every aggregate JSONL evidence record MUST
+tests target `tests/v2/contract/`. Each family's `cases.jsonl` also carries
+its named FR-014 authority-conformance cases — the selected design's example
+attention request verbatim in the attention-request family, and complete
+field-inventory cases in every family — recorded under the scene IDs the
+family's rows above already carry, counted as their own class in
+`expected-counts.json`, and flagged as authority cases in the manifest so
+the class cannot silently shrink. Every aggregate JSONL evidence record MUST
 contain `scene_id`, stable `case_id`, validator identity, expected result, and
 observed result. `evidence/v2/contract/README.md` is the exact manifest mapping
 each S ID and slice-specific scene to its JSONL file and record IDs. Evidence
@@ -412,7 +527,7 @@ documentation remain separately addressable ordinary artifacts.
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
 | Global current contract | `README.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 verdict/request wording with accepted I-010A-E and breaking-cutover wording, plus the exact new dual-validator test command and dev/test-only `jsonschema==4.26.0` dependency wording, only in the atomic candidate. |
-| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, the conditional FR-007 legacy-vector rule and closed routing-audit set, the per-record FR-010 stage-to-writer binding, the FR-012 runtime-adapter-only semantic rules, links, and examples against both validators. |
+| V2 contract reference | `docs/contracts/nunchi-v2.md` (created by this slice) | `UPDATE` | T017 / `v2-contract-owner` | Validate interface names/versions, bypass/error separation, the conditional FR-007 legacy-vector rule and closed routing-audit set, the per-record FR-010 stage-to-writer binding, the FR-012 runtime-adapter-only semantic rules, the FR-014 selected-design field inventory and authority-conformance corpus class, links, and examples against both validators. |
 | Release/change history | `CHANGELOG.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; add the breaking-change entry naming I-010A-E `@1`, the five exact `schemas/v2/*.schema.json` paths, supersession of the V1 `PASS/ACK/ASK/SPEAK` request/verdict contract with no translation bridge, and the pinned dual-validator command, only in the atomic candidate. |
 | Contract stability tiers | `docs/STABILITY.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace the V1 contract stability rows with the five `@1` interface versions and their breaking-cutover status, keeping the classifier-DEFER/margin-DEFER transition described as independently evidence-gated, not schema compatibility. |
 | Integration lifecycle | `docs/integration.md` | `HANDOFF` | T017 / `v2-contract-owner` | Accepting owner: `v2-integrator`; replace V1 request/verdict flow wording with the request → decision (`ok`/`bypass`/`error`) → wake → continuation → receipt lifecycle, including the non-social `preattention-disabled` bypass and the tagged operational ERROR path. |
@@ -433,9 +548,11 @@ documentation remain separately addressable ordinary artifacts.
 **Inventory derivation**: the reviewed set is exhaustive over `README.md`,
 the root guidance documents (`AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`), and
 every Markdown file under `docs/**` excluding the dated historical records
-under `docs/archive/`. At the 2026-07-17 refresh that inventory is 17
-existing files plus the one slice-created `docs/contracts/nunchi-v2.md`,
-matching the 18 rows above one-to-one; a reviewer can re-derive it with
+under `docs/archive/`. At the 2026-07-18 refresh that inventory is 18 files —
+17 pre-existing plus the slice-created `docs/contracts/nunchi-v2.md`, which
+now exists in the worktree from the prior attempts' authorized
+implementation — matching the 18 rows above one-to-one; a reviewer can
+re-derive it with
 `ls *.md` plus `find docs -name '*.md' | grep -v archive` and verify no
 ordinary document is silently omitted.
 
@@ -456,6 +573,17 @@ command, scene-to-record evidence manifest, staged-receipt writer map,
 rejected-case inventory, migration/provenance notes, documentation
 dispositions/validation/reviewer, and known limitations (T019's enumeration
 is authoritative).
+Per SC-005 the packet distinguishes and names the candidate commit and the
+handoff packet commit as distinct terms, with the full offline baseline
+`python3 -m unittest` green from each of the two commits independently, and
+commit identity is single-valued: the lifecycle candidate entry, the handoff
+attempt entry, the packet input in `evidence/v2/contract/handoff.md`, and the
+recorded corpus revision name the identical exact candidate commit, with the
+actual handoff packet commit recorded in the same terms once it exists; a
+placeholder or divergent identity in a delivered packet blocks acceptance
+(R5). The task graph's execution-status wording must agree with the slice
+declarations and lifecycle evidence at the packet commit by stating status by
+reference, never as a hard-coded state-specific claim (R6).
 Acceptance by a dependent owner does not transfer schema ownership.
 
 ## Complexity Tracking
