@@ -148,3 +148,63 @@ selected design (not a silent shrink — see the T045 packet's known
 limitations); the classifier-facing redaction of `I-010A`'s optional
 `continuation` field is enforced at the runtime layer, not the wire
 schema.
+
+## Attempt 4 — CONVERGED
+
+**Slice**: `010-v2-contract`
+
+**Status**: CONVERGED
+
+**Candidate commit**: `0596d14c0579b0ad2530c4e273729dcc274f7034`
+
+**Tasks complete**: YES
+
+**Completed task IDs**: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013, T014, T015, T016, T017, T018, T019, T020, T021, T022, T023, T024, T025, T026, T027, T028, T029, T030, T031, T032, T033, T034, T035, T036, T037, T038, T039, T040, T041, T042, T043, T044, T045, T046, T047
+
+**Tasks SHA256**: 4898165698dc127779e5798af5292ca48fd648f69164c8cd95969aa7947d767b
+
+**Verification commands / results**: PASS — `python3 -m unittest` — 1236
+tests, OK, 11 skipped (8 pre-existing + 3 counted oracle-absent classes per
+the FR-012 skip regime); `uv run --offline --with 'jsonschema==4.26.0'
+python -m unittest discover -s tests/v2/contract -p 'test_*.py'` — 178
+tests, OK, 0 skipped (full dual-validator corpus including the new
+`actor-reference-integrity` class); `python3 scripts/check_governance.py
+--check-cli` — boundary + CLI OK; each of the four rejection findings
+re-verified directly against the fixed tree — `{code, detail}` both
+required and `code` an open string on the decision and receipt error
+bodies; a self or event actor reference absent from `actors` rejects on
+both `AttentionRequestV2` and `ParticipantWakeV2`; the wake validator's
+nested optional fields (`self.names`/`role`/`description`,
+`room.name`/`room.kind`) now reject malformed values exactly like the
+request validator; a fetch's host context mismatch, unauthorized
+direction, or cap overrun against the issued capability rejects — converge
+assessment — 0 missing / 0 partial / 0 contradicts / 0 unrequested beyond
+the T047 append itself.
+
+**Interface versions**: I-010A AttentionRequestV2@1, I-010B
+AttentionDecisionV2@1, I-010C ParticipantWakeV2@1, I-010D
+ContextContinuationV2@1, I-010E AttentionReceiptV2@1 — at the five exact
+`schemas/v2/*.schema.json` paths (attention-decision, attention-receipt,
+and attention-request reworked in place for rejection findings R7 and R8;
+`@1` retained per the FR-011 pre-acceptance rework rule).
+
+**Evidence paths**: evidence/v2/contract/attention-request.jsonl,
+evidence/v2/contract/attention-decision.jsonl,
+evidence/v2/contract/downstream.jsonl, evidence/v2/contract/README.md,
+evidence/v2/contract/checklist-adjudication.md,
+evidence/v2/contract/handoff.md, evidence/v2/contract/slice-activation.md
+
+**Known limitations**: semantic/relational invalid classes are
+runtime-adapter-only per the FR-012 expressiveness partition (the Draft
+2020-12 oracle cannot express them), now including the new
+`actor-reference-integrity` class; plain-baseline runs skip the three
+oracle-dependent classes with counted, asserted skips; downstream consumers
+must pass the identical corpus revision named in the T047 packet input
+before their own handoffs; running the pinned uv command generates an
+untracked `uv.lock` at the repo root (delete to restore a clean tree);
+schema $id values use the placeholder domain `nunchi.invalid` pending any
+future canonical-host decision (identifiers only, never dereferenced); the
+`binding-expiry` invalid coverage widens from 3 to 7 cases because the
+issued capability's exact binding, direction authorization, and per-fetch
+caps are now checked explicitly (R10) rather than treating a known,
+unexpired handle as correct by construction.

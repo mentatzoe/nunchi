@@ -836,3 +836,281 @@ sequenced after the R1 repair; reviewer cc-session-1.
   their V1 current-state wording.
 - The handoff-packet-commit baseline rerun is owed at the handoff gate
   and cannot be discharged by this packet input (CHK080/CHK090).
+
+## Documentation dispositions — attempt 4 (T047)
+
+Appended after the attempt-1/2/3 sections without rewriting them. This
+section re-executes every row of plan §Documentation Impact and Freshness
+against the attempt-4 candidate diff.
+
+**Reviewer**: cc-session-1 (assigned `v2-contract-owner`)
+
+**Reviewed on**: 2026-07-18, directly in the `v2-contract-owner` worktree
+(not via a bound `run speckit` invocation, per the attempt-3 rejection's
+required rework path).
+
+**Candidate diff basis**: `git diff --name-only
+6fa3996fd7cf92cd6157945245136a8c55cb69cc..0596d14c0579b0ad2530c4e273729dcc274f7034`
+(the rejected attempt-3 packet commit to the attempt-4 candidate). The
+ordinary-path delta touches only `schemas/v2/attention-decision.schema.json`,
+`schemas/v2/attention-receipt.schema.json`,
+`schemas/v2/attention-request.schema.json`, `tests/v2/contract/` (the
+stdlib adapter and three test files), `evals/v2/contract/{attention-request,
+attention-decision,downstream}/`, `evidence/v2/contract/` (the three
+aggregate files, this file, and the append-only lifecycle streams), and
+`docs/contracts/nunchi-v2.md`, plus the slice's own SpecKit planning
+artifacts (`spec.md`, `plan.md`, `tasks.md`: `Slice state` transitions and
+the new T047). No file under `src/`, `scripts/`, `docs/governance/`,
+`docs/integrations/`, `docs/evaluations/`, or the repository root
+documentation set is modified.
+
+### UPDATE (slice-owned), re-validated
+
+| Reviewed path | Disposition | Result |
+|---|---|---|
+| `docs/contracts/nunchi-v2.md` | `UPDATE` (re-validated) | Corrected for R7–R10: `error.code` documented as the authority's open string with required `detail` (not a locally narrowed enum with optional `detail`); unknown event timestamp documented as omission-only (the local `null` variant removed); the new `actor-reference-integrity` runtime-adapter-only rule documented (self and every typed event actor reference must resolve to a key in `actors`) alongside the existing five; the fetch-time binding/expiry rule corrected to require exact `bound_to` comparison against the host call context, direction authorization, and cap enforcement — replacing the retired "a known, unexpired handle is by construction bound correctly" claim; the partition-class table gains `actor-reference-integrity`. All five embedded JSON examples still validate under both the pinned Draft 2020-12 oracle and the stdlib runtime adapter (validated 2026-07-18, 0 failures); all relative links resolve and none targets a SpecKit-managed path. |
+
+### HANDOFF (accepting owner: `v2-integrator`), re-routed
+
+All seven attempt-1/2/3 `HANDOFF` rows re-verified and re-routed unchanged
+in scope — `README.md`, `CHANGELOG.md`, `docs/STABILITY.md`,
+`docs/integration.md`, `docs/adapters.md`,
+`docs/contracts/channel-adapter-v1.md`,
+`docs/architecture/v2-selected-design.md` — each still routing its exact
+delta to `v2-integrator` for the atomic current-state update only. None of
+the seven rows names a field-level detail R7–R10 touch (they reference
+interface IDs, versions, `schemas/v2/*.schema.json` paths, statuses, and
+commands only), so none requires text editing this attempt. The accepting
+owner and atomic-candidate-only application are unchanged.
+
+### NO_IMPACT, re-verified against the attempt-4 diff
+
+| Reviewed path | Disposition | Re-verification result |
+|---|---|---|
+| `docs/INSTALL.md` | `NO_IMPACT` | CONFIRMED — the attempt-4 diff changes no install flow or installed artifact; `jsonschema==4.26.0` still appears only behind the pinned `uv run --offline --with` dev/test command. |
+| `AGENTS.md` | `NO_IMPACT` | CONFIRMED — `python3 -m unittest` is the green stdlib offline baseline at this tree (run 2026-07-18, post-rework: 1236 tests, OK, 11 skipped — 8 pre-existing V1 plus 3 counted contract oracle-absence skips; the 1222→1236 delta is 14 new unit tests added for the R7/R8/R10 probes, not a coverage loss); the runtime stays dependency-free; the V2-program wording (V1 current until `CUTOVER_VERIFIED`) is unchanged. |
+| `CLAUDE.md` | `NO_IMPACT` | CONFIRMED — the "standard-library runtime core" and `python3 -m unittest` claims stay accurate: the rework adds no runtime dependency and does not modify grounding sequence, governance commands, or workflow bindings. |
+| `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | CONFIRMED — no verdict-suite artifact changes in the diff. |
+| `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | CONFIRMED — same diff basis; no verdict-suite requirement file or claim changes. |
+| `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | CONFIRMED — the V1 corpus under `evals/verdict_suite/` is untouched by the diff. |
+| `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | CONFIRMED — the runner, its commands, and its outputs are untouched by the diff. |
+| `docs/governance/execution-spine.md` | `NO_IMPACT` | CONFIRMED — the diff contains no change under `docs/governance/`, none to `scripts/check_governance.py` or its checks, and none to any documented governance command or gate. |
+| `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | CONFIRMED — no Hermes surface file changes in the diff. |
+| `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | CONFIRMED — same diff basis as the Hermes core patch row. |
+
+**Result (attempt 4)**: 1 `UPDATE` corrected for R7–R10; 7 `HANDOFF` deltas
+re-routed to accepting owner `v2-integrator` (none requiring text edits
+this attempt); 10 `NO_IMPACT` rationales re-verified CONFIRMED against the
+attempt-4 diff. No row is unresolved.
+
+## Proposed handoff packet input — attempt 4 (T047)
+
+Appended after the attempt-4 documentation section, in the same
+documentation-then-packet order as prior attempts, without rewriting any
+earlier section. T019's enumeration remains authoritative for the SC-005
+packet inventory; the later convergence, documentation-freshness, and
+handoff gates — not this checkbox — establish lifecycle state.
+
+**Prepared by**: cc-session-1 (assigned `v2-contract-owner`), 2026-07-18,
+directly in the `v2-contract-owner` worktree, per the attempt-3 rejection's
+explicit required rework path and Zoe's direction not to restart
+bound-workflow scaffolding for this correction.
+
+### The two defined commits (CHK090)
+
+Per spec SC-005, the packet distinguishes two terms, each independently
+carrying the green full-offline-baseline (`python3 -m unittest`)
+obligation. Both terms name the identical exact commit throughout this
+packet, the lifecycle candidate entry, and the recorded corpus revision:
+
+- **Candidate commit**: `0596d14c0579b0ad2530c4e273729dcc274f7034` on
+  branch `v2/contract` (worktree `.worktrees/v2-contract/`) — the exact
+  rework-complete code tree fixing rejection R7–R10: `error.code` as the
+  authority's open string with required `detail` on the decision and
+  receipt schemas and their stdlib mirrors; the nullable event `timestamp`
+  removed; the new `actor-reference-integrity` runtime-adapter-only
+  partition class enforcing self and every typed event actor reference
+  against `actors`; the wake validator sharing `_check_self`/`_check_room`
+  with the request validator; and `validate_continuation_fetch` checking
+  exact binding, direction authorization, and cap enforcement against the
+  issued capability. The full offline baseline recorded in
+  `evidence/v2/contract/README.md` (1236 tests, OK, 11 skipped) is the run
+  this commit must — and does — reproduce.
+- **Handoff packet commit**: not yet pinned; recorded here in the same
+  terms once it exists, per the established operational rule
+  (`evidence/v2/contract/handoff.md` records it — this file — at the
+  handoff gate, since the packet commit cannot name itself from inside its
+  own tree). The full offline baseline is owed as a rerun from that exact
+  commit at the handoff gate.
+
+### Interface inventory (versions and exact paths)
+
+| Interface | Version | Exact path |
+|---|---|---|
+| `I-010A AttentionRequestV2` | `@1` | `schemas/v2/attention-request.schema.json` |
+| `I-010B AttentionDecisionV2` | `@1` | `schemas/v2/attention-decision.schema.json` |
+| `I-010C ParticipantWakeV2` | `@1` | `schemas/v2/participant-wake.schema.json` |
+| `I-010D ContextContinuationV2` | `@1` | `schemas/v2/context-continuation.schema.json` |
+| `I-010E AttentionReceiptV2` | `@1` | `schemas/v2/attention-receipt.schema.json` |
+
+Only `v2-contract-owner` edits `schemas/v2/**`; breaking edits land as
+`@2` through an explicit owner handoff plus dependent re-analysis. The
+`@1` shapes are now the R7–R10-corrected ones: `error.code` an open
+non-empty string with required `detail` on `AttentionDecisionV2` and
+`AttentionReceiptV2`; the event union's `timestamp` field with no `null`
+variant on `AttentionRequestV2`; the actor map's `propertyNames` rejecting
+an empty key.
+
+### Commands and results (2026-07-18, at the candidate commit's tree)
+
+| Command | Result |
+|---|---|
+| `uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 178 tests, OK, 0 skipped (the sole complete dual-validator run) |
+| `python3 -m unittest` (repository baseline, full suite) | 1236 tests, OK, 11 skipped (8 pre-existing V1 + 3 counted `baseline-oracle-absence`) |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence` | 98 + 132 + 150 records, 0 mismatched |
+| `uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence` | all records carry the five mandatory fields |
+
+### Dual-validator pin and post-rework results over the shared corpus
+
+The Draft 2020-12 oracle is dev/test-only `jsonschema==4.26.0` (any other
+version is treated as an absent oracle); the runtime side is the explicit
+stdlib adapter in `tests/v2/contract/schema_helpers.py`. Both validators
+consumed the identical decoded post-rework corpus (190 cases; 152
+schema-expressible with identical expected results from both validators —
+including 19 FR-014 authority-conformance cases — and 38
+runtime-adapter-only across the now-seven semantic/relational classes,
+including the new `actor-reference-integrity` class, with the fixed
+per-class oracle treatment). Observed per-class partition counts, the
+authority-class table, and both separately named skip regimes
+(`oracle-class-skip`: 19 cases; `baseline-oracle-absence`: 171 oracle-side
+checks) are recorded in `evidence/v2/contract/README.md` and match every
+corpus's authoritative `expected-counts.json`.
+
+### Corpus revision and downstream adapter obligation
+
+The shared conformance corpus revision is the exact candidate commit above
+(`0596d14c0579b0ad2530c4e273729dcc274f7034`), covering
+`evals/v2/contract/attention-request/` (49 cases, including 6 authority
+cases and the new `actor-reference-integrity` class), `evals/v2/contract/
+attention-decision/` (66 cases, including 5 authority cases), and
+`evals/v2/contract/downstream/` (75 cases, including 8 authority cases and
+the widened `binding-expiry`/new `actor-reference-integrity` classes) —
+each `cases.jsonl` plus `expected-counts.json`. **Obligation (unchanged)**:
+each downstream runtime owner must pass its own stdlib runtime-validation
+adapter over this identical corpus revision — including all seven
+runtime-adapter-only semantic rule classes — before its own handoff.
+
+### Staged-receipt writer map (unchanged)
+
+| Stage | Sole appending owner |
+|---|---|
+| `observation` | `observation-provider` |
+| `attention` | `attention-engine` |
+| `participant-host` | `participant-host` |
+| `transport` | `transport` |
+
+Unchanged this attempt; stages remain immutable and append-only in
+canonical order.
+
+### Scene-to-record evidence manifest (regenerated)
+
+`evidence/v2/contract/README.md` (regenerated by T047 as the
+current-attempt record) maps all twelve scene rows to their JSONL files
+and record IDs, verified exhaustive and exact against the 190 post-rework
+evidence cases (cross-checked case-ID-for-case-ID against the three
+corpora; zero missing, zero spurious entries), names the authority class
+with its `red_run_failing_count` field (measured against
+`7f9e81460d570e078c4bcbacb138f81c1b291455` for the 5 new authority cases,
+against `5383e9f3a5e9c20c08ab54395f4ff370128f03de` for the 14 carried
+forward), and re-records all three aggregate files as current-attempt
+records.
+
+### Rejected-case inventory (updated)
+
+Exactly 190 minus the schema-expressible-valid and relational-valid counts
+are expected-invalid red cases; the exact per-corpus/per-class breakdown is
+recorded in `evidence/v2/contract/README.md`'s partition-count table. New
+this attempt: `actor-reference-integrity` (9 cases: 7 request, 2
+downstream — 2 valid, 7 invalid) covering self/author/mention/reaction/
+subject/causal-actor reference absence and one wake-packet parity case;
+`binding-expiry` widens from 3 to 7 invalid cases covering host-context
+mismatch, unauthorized direction, and both cap-overrun probes (R10); the
+decision and downstream `schema-expressible` classes each gain one
+missing-`detail` red case and one arbitrary-open-code green case (R7).
+
+### Migration and provenance notes
+
+- This is the attempt-4 packet following the rejection of candidate
+  `7f9e81460d570e078c4bcbacb138f81c1b291455` at packet commit
+  `6fa3996fd7cf92cd6157945245136a8c55cb69cc`, recorded at
+  `evidence/v2/contract/review-2026-07-18-v2-integrator-attempt-3.md` and
+  bound into the appended `REJECTED` attempt in
+  `evidence/v2/contract/slice-handoff.md`. Its four blockers are resolved
+  in this candidate: **R7** — `error.code`/`detail` and the event
+  `timestamp` field now match the authority exactly; **R8** — actor-map
+  reference integrity is enforced by a new runtime-adapter-only class with
+  explicit valid/invalid corpus cases for every named reference kind; **R9**
+  — the wake validator shares its self/room checks with the request
+  validator instead of partially reimplementing them; **R10** — the issued
+  continuation capability's exact binding, direction authorization, and
+  per-fetch caps are checked explicitly against the host call context and
+  the fetch request.
+- No V1 translation bridge exists or is permitted (FR-011): V1 envelopes,
+  reply-bearing fields, inferred-roster claims, and
+  handled/open/owed/permission state reject in every contract.
+- V1 remains the current product until the atomic V2 merge is verified on
+  `main`; these contracts create no V2 runtime behavior.
+- Provenance: implemented under program authority
+  `evidence/governance/v2-implementation-authorization.md` (all eleven
+  slices enumerated), activation
+  `evidence/v2/contract/slice-activation.md` (`READY` at `16cccb7`),
+  assignment `evidence/governance/assignments/cc-session-1-v2-contract-owner-2026-07-16.md`.
+  This attempt was completed directly in the owner worktree rather than
+  through a bound `run speckit` invocation, per the attempt-3 rejection's
+  explicit required rework path ("do not restart bound-workflow
+  scaffolding merely to perform the correction") and Zoe's direction for
+  this attempt.
+- Runtime provenance: Python 3.11+ stdlib-only runtime;
+  `jsonschema==4.26.0` is dev/test-only behind the pinned offline command
+  and never enters runtime dependencies.
+
+### Documentation dispositions, validation, and reviewer
+
+Recorded in full as the attempt-4 documentation section above: 1
+slice-owned `UPDATE` corrected for R7–R10 (`docs/contracts/nunchi-v2.md`),
+7 `HANDOFF` deltas re-routed to accepting owner `v2-integrator` (none
+requiring text edits), 10 `NO_IMPACT` rationales re-verified CONFIRMED
+against the attempt-4 diff; reviewer cc-session-1.
+
+### Known limitations
+
+- A green contract suite proves contract mechanics, not social judgment
+  quality; social correctness claims require the downstream slices'
+  replay and live acceptance scenes.
+- The Draft 2020-12 oracle cannot express the seven semantic/relational
+  rule classes; they bind only through each consumer's stdlib adapter, so
+  the downstream adapter obligation above is load-bearing, not advisory.
+- Strict JSON cannot carry non-finite literals: corpus red cases use the
+  reserved sentinel strings decoded once by the loader.
+- The pinned offline command requires `jsonschema==4.26.0` already
+  present in the operator's uv cache; `--offline` fails rather than
+  fetching; running it generates an untracked `uv.lock` at the repo root
+  (delete to restore a clean tree).
+- Schema `$id` values use the placeholder domain `nunchi.invalid` pending
+  any future canonical-host decision (identifiers only, never
+  dereferenced).
+- The umbrella parity scenes S04 and S10 through S14 are owned by other
+  slices; this packet claims no coverage of them.
+- The seven `HANDOFF` documentation deltas apply only in the atomic
+  candidate; until cutover the affected documents intentionally retain
+  their V1 current-state wording.
+- The handoff-packet-commit baseline rerun is owed at the handoff gate
+  and cannot be discharged by this packet input.
+- The five new authority-conformance cases (REQ-AUTH-005/006, DEC-AUTH-005,
+  DWN-AUTH-007/008) are regression guards measured against the rejected
+  attempt-3 candidate, not the original attempt-2 baseline; four show a
+  `red_run_failing_count` of `0` because the attempt-3 defect was a false
+  *accept* (too permissive) rather than a false *reject* — the absence of
+  an error under the old schema is itself the measured defect, detailed in
+  `evidence/v2/contract/README.md`.
