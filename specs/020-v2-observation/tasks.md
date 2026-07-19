@@ -790,15 +790,53 @@ the implementation and make every static completion receipt reproducible.
 - [ ] T087 Add a committed, owner-scoped static secret scanner with documented
   high-confidence matchers and explicit `--base`/`--head` range; replace the
   unreproducible Phase 17 row with its exact invocation and output
-- [ ] T088 Regenerate manifest/handoff evidence, restore planning PASS only
-  after the complete matrix is green, record T001–T088 identity, and obtain a
-  fresh immutable independent review before candidate attempt 2
+- [ ] T088 Regenerate manifest/handoff evidence for T083–T087 with exact
+  hard-cap, merge-identity, and scanner receipts; retain planning BLOCKED until
+  the concurrent/resource extension and complete matrix also close
 
 ### Phase 18 dependencies
 
 - T083/T084, T085/T086, and T087 are independent correction lanes.
-- T088 depends on T084, T086, and T087 GREEN evidence and is the final blocker.
+- T088 depends on T084, T086, and T087 GREEN evidence.
 
 **Checkpoint**: no accepted snapshot exceeds hard bytes, no continuation page
 overlaps its originating request, and static completion evidence is exactly
 reproducible from the candidate tree.
+
+## Phase 18 extension: Shared Atomicity and Linear Cursor Replay
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase18-concurrency-resource-2026-07-19.md`,
+findings S020-A6-01 HIGH and S020-A6-02 MEDIUM/resource-security.
+
+- [ ] T089 Add deterministic barrier-controlled RED tests proving concurrent
+  issue obeys `max_handles`, concurrent fresh fetch obeys the active-cursor
+  limit, a one-shot cursor has exactly one successful consumer, fetch/revoke and
+  ingest/fetch interleavings are linearizable, and no raw exception or state
+  resurrection escapes
+- [ ] T090 Add one provider-owned shared `threading.RLock` and serialize complete
+  ingest/snapshot/receipt/issue/fetch/revoke transitions across every
+  `ContinuationProvider` wrapper while preserving exact-expiry cleanup and all
+  accepted wire shapes
+- [ ] T091 Add RED operation-count and retention-frontier tests proving one-item
+  pagination at N and 2N grows near-linearly, cursor replay does not copy/scan the
+  full deque/remainder, the event-by-ID map remains retention-bounded, evicted-ID
+  replacements reject, successor cursors share one immutable tuple, and
+  exhaustion reclaims state
+- [ ] T092 Add a retention-coupled event-by-ID map and lazy page resolution with
+  an O(1) prefix-eviction frontier check, preserving monotonic-generation,
+  contiguous-window, authoritative-order, side-coverage, and hard-cap semantics
+- [ ] T093 Add deterministic atomicity/resource eval evidence, regenerate every
+  aggregate and handoff, restore planning PASS only after the complete matrix is
+  green, record T001–T093 identity, and obtain one fresh immutable independent
+  review covering all Phase 18 findings before candidate attempt 2
+
+### Phase 18 extension dependencies
+
+- T090 depends on T089 RED; T092 depends on T091 RED.
+- T089/T090 and T091/T092 may proceed independently after T083–T087 lanes.
+- T093 depends on T088, T090, and T092 and is the only final convergence blocker.
+
+**Extended checkpoint**: provider and continuation state transitions are
+linearizable across threads/wrappers, one-shot and hard-limit claims hold under
+contention, and a complete one-event cursor chain performs O(N) cumulative work.
