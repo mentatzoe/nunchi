@@ -671,9 +671,9 @@ every earlier matrix as an accurate historical receipt.
 
 **Non-blocking follow-up**: `ContinuationProvider` still retains issued
 capabilities in `_capabilities`, minted cursor strings in each handle's
-`_cursors` set, monotonic counters in `_cursor_sequences`, and the
-corresponding direction/anchor/remaining-identity bindings in `_cursor_windows`
-for the lifetime of the in-memory provider. Phase 12 fixes cursor
+`_cursors` set, and the corresponding fixed-window bindings in
+`_around_cursor_windows` (including remaining event identities) for the lifetime
+of the in-memory provider. Phase 12 fixes cursor
 progression and truthful cap attribution; it does not add expiry-driven cleanup
 or a size bound to those bookkeeping collections, and this packet makes no
 bounded-bookkeeping claim. Production host owners must add lifecycle pruning or
@@ -754,8 +754,10 @@ Final verification matrix:
 | `git diff --check` | clean, exit 0 |
 
 The evidence manifest now totals 39 rows: 9 + 7 + 16 + 4 + 3. The unbounded
-in-memory cursor/capability bookkeeping limitation above remains explicit; Phase 14
-changes correctness under retention, not lifecycle pruning.
+in-memory cursor/capability bookkeeping limitation above remains explicit. At
+this candidate it comprises `_capabilities`, `_cursors`, `_cursor_sequences`, and
+`_cursor_windows`; Phase 14 changes correctness under retention, not lifecycle
+pruning.
 
 H020-A2-01 is closed. This evidence permits a fresh convergence and candidate-attempt-2
 review; it does not accept the slice or authorize integration, cutover, deployment,
