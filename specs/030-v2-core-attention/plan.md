@@ -95,9 +95,15 @@ policy, and one evidence-backed prompt/model configuration
 
 ## Planning Decisions
 
-No open clarification items remain. The selected Vault design, accepted
-I-010A/B/E contracts, constitution, and current ordinary-path V1 seams resolve
-the slice's implementation choices without reopening product decisions.
+No slice-local clarification items remain. Two cross-owner readiness blockers
+do: accepted I-010B `@1` cannot serialize the selected zero-inclusive active
+margin, and the program-owned canonical registry still declares I-010E `@1`
+after accepted amendment A1 established `@2`. They are recorded at
+`evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md`
+and `evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`.
+Until their owning lanes resolve them and fresh bound analysis reports zero
+CRITICAL/HIGH findings, this plan remains `PLANNED` and no activation evidence
+or implementation task is permitted.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -209,11 +215,14 @@ the slice's implementation choices without reopening product decisions.
 - **Decision**: After accepted I-010A and binding validation, but before bypass
   or provider routing, count every supplied event kind against
   `policy.attention_max_events` and measure the classifier-visible projection
-  against `policy.attention_max_bytes`. Projection bytes are the UTF-8 length
-  of canonical JSON with sorted object keys, no insignificant whitespace, and
-  direct non-ASCII characters, after removing host-only continuation authority
-  and retaining only factual coverage and expansion-availability booleans;
-  provider framing is excluded. Equality is valid. Optional I-010A
+  against `policy.attention_max_bytes`. The internal projection removes the
+  complete host-only `continuation` object and inserts exactly
+  `expansion_available: {before, after, around_event}`. Those strict booleans
+  copy the three continuation `can_fetch_*` values or are all `false` when no
+  continuation exists; every other I-010A field, including coverage, remains
+  unchanged. Projection bytes are the UTF-8 length of canonical JSON with
+  sorted object keys, no insignificant whitespace, and direct non-ASCII
+  characters; provider framing is excluded. Equality is valid. Optional I-010A
   `coverage.max_events` and `coverage.max_bytes` may be absent or no greater
   than the matching trusted caps; a larger declaration or actual overage is
   operational ERROR with zero classifier calls and the normal request-ID-
@@ -280,9 +289,10 @@ the slice's implementation choices without reopening product decisions.
   scalar count, and binary findings for supplied-event grounding,
   attention-relevance explanation, absence of a proposed reply/first-person
   draft, and absence of an imperative telling the participant what to say or
-  do. Handoff requires every field to pass across deterministic and required
-  three-family records; the semantic fields are explicit owner adjudication,
-  not runtime social rules.
+  do. Citation resolution is the deterministic first field; the latter three
+  semantic fields are explicitly adjudicated by `v2-core-owner`, not runtime
+  social rules. Handoff requires every field to pass across deterministic and
+  required three-family records.
 - **Rationale**: This makes the evidence gate reproducible without narrowing
   I-010B or turning deterministic validation into a conversational judge.
 - **Alternatives considered**: An undefined “brief” review, model self-grading,
@@ -319,6 +329,12 @@ the slice's implementation choices without reopening product decisions.
   it in `error.detail`. Each either ignores current accepted contract truth or
   violates authority and ownership.
 
+Amendment A1 remains accepted for exactly those receipt changes. It does not
+resolve the later-discovered I-010B zero-margin conflict, and it does not update
+the program owner's canonical interface registry. Those independent blockers
+remain owned and recorded at the two evidence paths named at the start of
+Planning Decisions.
+
 ### Bypass, operational error, and CLI parity
 
 - **Decision**: Return trusted preattention-disabled bypass with zero classifier
@@ -326,9 +342,13 @@ the slice's implementation choices without reopening product decisions.
   0/1/2/3 CLI process contract recorded below. The shared wake default remains
   mandatory until the complete operator configuration is descriptor-secure,
   closed-shape and value valid, single-source, and exactly bound to a schema-
-  valid request. Raw or partially validated `NO_WAKE` has no authority; a
-  request-ID-bearing configuration/request/binding error may be written through
-  an independently valid sink only without the I-010E override pair. Once the
+  valid request. No config-derived sink is eligible until the outer config file
+  itself passes descriptor security and duplicate-free JSON parsing. Raw or
+  partially validated `NO_WAKE` has no authority; only after that source
+  boundary may a request-ID-bearing configuration/request/binding error be
+  written through an independently secure sink, without the I-010E override
+  pair. Missing, unreadable, unsafe, invalid-JSON, or duplicate-key config
+  constructs no sink and emits no receipt. Once the
   trust boundary passes, `NO_WAKE` applies to later budget, provider, malformed-
   model, runtime, or sink-invocation error; receiptable instances use the exact
   paired `wake_action: "NO_WAKE"` and `policy_provenance` fields.
@@ -366,12 +386,16 @@ the slice's implementation choices without reopening product decisions.
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
 | Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 | Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
+| Selected zero-width margin / accepted I-010B | BLOCKED | Selected policy permits active margin `0`, but I-010B `@1` rejects the required applied `effective_margin: 0`; resolution belongs to `v2-contract-owner`. |
+| Program canonical I-010E registry | BLOCKED | The program-owned interface registry still says I-010E `@1`; `v2-program-owner` must synchronize it to accepted `@2`. |
 
-Post-design re-check: PASS, subject to the fresh bound cross-artifact analysis
-and readiness evidence. The accepted receipt amendment, independently green
-staging strategy, and exact CLI configuration/sink surface resolve the prior
-findings. No `data-model.md`, local contract, quickstart, schema, test, corpus,
-evidence, or product documentation is created here.
+Post-design re-check: BLOCKED on the two cross-owner findings above. All
+slice-owned findings from the fresh analysis are resolved in this planning
+revision, but READY still requires a later fresh bound analysis with zero
+CRITICAL/HIGH findings.
+Because this is a planning-only revision, no `data-model.md`, local contract,
+quickstart, schema, test, corpus, evidence payload, or product documentation is
+created here.
 
 ## Slice Interfaces
 
@@ -434,6 +458,20 @@ The three-family attempts live at
 not-yet-executed protocol lives at
 `evidence/v2/attention/defer-canary/protocol.md`.
 
+The exact model-comparison matrix is every committed row in
+`evals/v2/attention/suppression-scars/cases.jsonl` crossed with the incumbent
+Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3 families (unless
+Zoe durably substitutes a family). Each case preregisters `case_id`, canonical
+`scene_id`, contract-valid `request`, and `expected_attention` as `ATTEND` or
+`NOT_ATTEND`. Mistaken suppression is effective `SUPPRESS` over `ATTEND` cases;
+missed suppression is non-`SUPPRESS` over `NOT_ATTEND` cases; wake volume is
+non-`SUPPRESS` over all cases. Direct classifier DEFER and margin DEFER are
+reported separately but both count as non-suppression. Family disagreement is
+case IDs with more than one direct classifier disposition across the three
+valid family results divided by all case IDs. Missing or duplicate family/case
+results make the matrix incomplete and block handoff rather than changing a
+denominator.
+
 ## CLI Process Contract
 
 | Input/result class | stdout | stderr | Exit |
@@ -450,15 +488,38 @@ validation follows schema/binding validation before bypass or classifier use,
 so config failure wins a combined failure and all such validation failures exit
 3. Request-schema/configuration/binding failure precedes the full trusted-policy
 boundary and therefore always uses wake default. A valid sink records such an
-error only when a valid request ID is assignable; for a config error its
-`receipt_sink` member must independently pass the closed security/shape checks,
-and the resulting receipt omits both override fields. Trusted-budget validation
+error only when a valid request ID is assignable. For a config error, the outer
+config source must first pass descriptor security and duplicate-free JSON
+parsing; only then may its `receipt_sink` member independently pass its closed
+shape and directory-security checks. Missing, unreadable, unsafe, invalid-JSON,
+or duplicate-key config never directs a write. The resulting default-path
+receipt omits both override fields. Trusted-budget validation
 occurs after the boundary and may therefore use a validated `NO_WAKE` policy.
 Otherwise no receipt or ID is fabricated.
 
+I-030A generates a stable, closed code/cause-detail set without narrowing the
+schema-level open I-010B `code`: `configuration-error` / `trusted configuration
+invalid`, `request-validation-error` / `attention request invalid`,
+`attention-budget-error` / `attention budget exceeded`, `provider-timeout` /
+`attention provider timed out`, `provider-error` / `attention provider failed`,
+`malformed-model-output` / `classifier output invalid`, `invalid-transition` /
+`attention transition invalid`, `invalid-legacy-confidence` / `legacy
+confidence vector invalid`, `runtime-error` / `attention runtime failed`, and
+`receipt-sink-failure` / `attention receipt sink failed`. An offered I-010E
+error record carries only its exact cause pair because it cannot attest its own
+persistence. After the sole sink attempt, the returned I-010B error appends
+exactly `; receipt_persistence=<persisted|not-persisted|unknown>` to the safe
+cause detail. A sink failure replaces the returned cause with
+`receipt-sink-failure` and its observed non-persistence value; it never triggers
+a second receipt attempt. No fixed detail exposes a path, credential, provider
+payload, configuration value, or receipt provenance.
+
 Core and CLI must also prove that host-only continuation handles, binding
 tokens, cursors, and expiry values never enter the classifier projection. The
-model may see factual coverage and expansion-availability booleans only; the
+model sees the exact top-level
+`expansion_available: {before, after, around_event}` strict-boolean object only;
+all values are false without continuation and otherwise copy the three
+continuation `can_fetch_*` flags. The
 original bound I-010A continuation capability remains available downstream to
 040. I-030A does not consume I-010D fetch request/page objects.
 
@@ -521,7 +582,7 @@ layer that could survive the atomic cutover.
 
 | Artifact class | Exact ordinary target path | Owning task/story |
 |---|---|---|
-| Attention orchestration | `src/nunchi/core.py` | T007, T012, T020 / US1–US3 |
+| Attention orchestration | `src/nunchi/core.py` | T007, T012 / US1–US2 |
 | Classifier/provider/prompt | `src/nunchi/classifiers.py` | T006 / US1 |
 | Runtime models and audit | `src/nunchi/models.py` | T008, T013 / US1–US2 |
 | Runtime validation/policy | `src/nunchi/schema.py` | T011, T018 / US2–US3 |
@@ -541,7 +602,7 @@ layer that could survive the atomic cutover.
 | S06/S09/030-CLI parity results | `evidence/v2/attention/core-cli-parity.jsonl` | T022 / US3 |
 | Three-family comparison | `evidence/v2/attention/model-comparison/results.jsonl` | T023 / cross-cutting |
 | Downstream canary protocol | `evidence/v2/attention/defer-canary/protocol.md` | T024 / cross-cutting |
-| Handoff packet input | `evidence/v2/attention/handoff.md` | T025–T026 / cross-cutting |
+| Handoff packet input | `evidence/v2/attention/handoff.md` | T020, T025–T026 / US3 and cross-cutting |
 | Evidence/command manifest | `evidence/v2/attention/README.md` | T026 / cross-cutting |
 | Candidate verification record | `evidence/v2/attention/verification.md` | T027 / cross-cutting |
 | Attention/operator guide | `docs/attention/v2.md` | T025 / cross-cutting |
@@ -593,6 +654,7 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Claim surface | Exact reviewed ordinary path | Disposition | Owning task/lane | Validation, rationale, or exact handoff delta |
 |---|---|---|---|---|
 | Global product and CLI state | `README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace V1 verdict/core/CLI claims and examples with accepted I-030A `SUPPRESS`/`WAKE`/`DEFER`, trusted bypass, separate ERROR, dual-valve, and 0/1/2/3 process behavior while preserving verification-pending wording. |
+| Global evidence index | `evidence/README.md` | `UPDATE` | T025 / `v2-core-owner` | Add the exact `evidence/v2/attention/` component-record scope, commands/manifest link, evidence grade, candidate binding, and explicit non-cutover/non-current boundary while preserving the immutable/history rules; validate every link and claim against the candidate. |
 | Release history | `CHANGELOG.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; add the exact accepted 030 commit, breaking core/CLI contract delta, active-margin status, evidence links, and limitations in the atomic cutover entry. |
 | Installation and executable claims | `docs/INSTALL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace V1 `nunchi-channel`/configuration assumptions with the accepted V2 CLI, model/policy inputs, installed-runtime provenance, and no-V1-residue instructions at cutover. |
 | Public stability contract | `docs/STABILITY.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 request/verdict/process promise with accepted I-010A/B/E plus I-030A, explicitly retaining the active transition margin and breaking-version boundary. |
@@ -624,9 +686,9 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
 
-Matrix scope audit (2026-07-19): the 31 unique rows above enumerate all 30
+Matrix scope audit (2026-07-19): the 32 unique rows above enumerate all 31
 current Markdown claim surfaces and the future slice-owned
-`docs/attention/v2.md` individually: 5 `UPDATE`, 14 `NO_IMPACT`, and 12
+`docs/attention/v2.md` individually: 6 `UPDATE`, 14 `NO_IMPACT`, and 12
 `HANDOFF`. Every disposition is attached to one exact file; no grouped
 multi-file disposition substitutes for an exact path.
 

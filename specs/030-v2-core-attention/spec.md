@@ -34,6 +34,12 @@ remains the only current public behavior.
 
 **Assigned participant / source**: codex-session-1 — evidence/governance/assignments/codex-session-1-v2-core-owner-2026-07-16.md
 
+The named assignment MUST be a non-symlink durable record containing exactly
+one `Assignee`, `Lane`, `Assigned by`, ISO `Assigned on`, and durable
+`Authority reference`; a non-Zoe assigner additionally requires
+`Delegated by: Zoe` and a durable `Delegation reference`. Assignment neither grants program
+implementation authority nor establishes slice readiness or activation.
+
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/030-v2-core-attention`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/030-v2-core-attention`
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
@@ -62,9 +68,23 @@ unchanged. New candidate and handoff attempts append without rewriting history.
 - Authorized slice implementation targets `src/nunchi/`; deterministic tests
   target `tests/v2/attention/`, replay assets `evals/v2/attention/`, evidence
   `evidence/v2/attention/`, and product documentation `docs/attention/`.
+- Conflicts MUST resolve in this order: the Zoe-selected Aleph Vault design at
+  `c834e8c`; the constitution; `AGENTS.md` and `CLAUDE.md`; the umbrella and
+  bound-slice control plane; then ordinary-path source, schemas, tests, evals,
+  evidence, and docs for what is currently implemented and proven. Higher
+  authority controls the selected target; ordinary-path artifacts control
+  current implementation truth. A conflict requiring a selected-design change
+  returns to Zoe and the owning lane rather than being decided inside slice 030.
 - This planning baseline creates no schema, prompt, classifier, provider call,
   CLI behavior, test, replay corpus, evidence, product documentation, or V2
   runtime behavior.
+- Build, test, evaluation, documentation, packaging, release, and runtime
+  commands MUST NOT depend on `.specify/`, `specs/`, or either installed
+  SpecKit skill tree.
+- Program authority, assignment, dependency acceptance, slice lifecycle, and
+  handoff/acceptance facts are repository governance only. They MUST NOT become
+  runtime or conversation state, classifier input, receipt fields, a participant
+  roster, a handled/open or obligation ledger, or a memory service.
 - The current V1 implementation and its `PASS / ACK / ASK / SPEAK` contract
   remain implementation truth through atomic integration and exact-main
   verification; V2 becomes current only when the program reaches
@@ -87,9 +107,18 @@ represents the explicit error-policy override only as paired
 `wake_action: "NO_WAKE"` plus `policy_provenance`; the default `WAKE` path
 omits that pair. This consumer independently accepts the exact amendment at
 `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`. The earlier
-consumer acceptance and blocker records are not rewritten. Slice 030 remains
-`PLANNED` only until the fresh bound planning analysis and remaining readiness
-prerequisites pass; implementation tasks remain dormant meanwhile.
+consumer acceptance and blocker records are not rewritten.
+
+Fresh bound analysis subsequently found a separate selected-design/I-010B
+conflict: a zero-width active margin is permitted by the design but cannot be
+represented by accepted I-010B `@1`. The immutable current blocker is
+`evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md`.
+It also found the program-owned canonical interface registry still declaring
+I-010E `@1`; that separate ownership blocker is recorded at
+`evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`.
+Slice 030 therefore remains `PLANNED`, its implementation tasks remain dormant,
+and no activation record may be written until both cross-owner findings are
+resolved and fresh analysis reports zero CRITICAL/HIGH findings.
 
 ## Interface Summary
 
@@ -281,11 +310,17 @@ non-receiptable and MUST NOT fabricate one.
   attention budget. Every message, reaction, and membership event counts once;
   `len(request.events)` MUST be at most `policy.attention_max_events`. The
   classifier-visible projection is the I-010A request with host-only
-  `continuation` authority removed and only its factual coverage plus
-  expansion-availability booleans retained as required by FR-018; its byte
-  length is computed before provider framing as UTF-8 JSON with object keys
-  sorted, no insignificant whitespace, and non-ASCII characters emitted
-  directly. That length MUST be at most `policy.attention_max_bytes`.
+  `continuation` authority removed. In its place the internal projection MUST
+  contain exactly one top-level `expansion_available` object with exactly the
+  boolean keys `before`, `after`, and `around_event`. When continuation is
+  present those values copy `can_fetch_before`, `can_fetch_after`, and
+  `can_fetch_around_event`; when continuation is absent all three are `false`.
+  No handle, binding, cursor, expiry, fetch cap, or source is retained. Every
+  other I-010A field, including factual `coverage`, is preserved unchanged.
+  The projection byte length is computed before provider framing as UTF-8 JSON
+  with object keys sorted, no insignificant whitespace, and non-ASCII
+  characters emitted directly. That length MUST be at most
+  `policy.attention_max_bytes`.
   Equality is valid. Optional `request.coverage.max_events` and
   `request.coverage.max_bytes` MAY be absent or lower than/equal to their
   matching trusted caps; either declaration above its matching trusted cap is
@@ -312,8 +347,14 @@ non-receiptable and MUST NOT fabricate one.
   with no group/other permission bits; all later receipt operations are
   relative to that held directory descriptor. JSON duplicate keys are invalid. No inline JSON,
   per-field flags, fallback environment variables, or request members are
-  configuration sources. A missing/unreadable/unsafe file, missing/extra key,
-  duplicate key, or any nested validation failure is configuration `ERROR`;
+  configuration sources. No config-derived value, including `receipt_sink`, is
+  eligible until the outer configuration file itself passes descriptor
+  security. A missing, unreadable, unsafe, symlinked, non-regular, invalid-JSON,
+  or duplicate-key file therefore constructs no sink and emits no receipt. Once
+  that source boundary passes and a duplicate-free JSON object exists, its
+  closed `receipt_sink` member may be validated and securely constructed
+  independently of failures in another nested member or the outer closed-shape
+  check. A missing/extra key or any nested validation failure is configuration `ERROR`;
   there is no source merge or precedence rule. Policy
   `participant_id` and recoverability `participant_id` MUST both equal
   `request.self.participant_id`; recoverability `continuity_scope_id` MUST equal
@@ -325,9 +366,12 @@ non-receiptable and MUST NOT fabricate one.
   above. Missing, unreadable, unsafe, malformed, conflicting, request-invalid,
   or binding-invalid input therefore always uses the shared `WAKE` default;
   raw or partially validated `NO_WAKE` never grants silence authority. If such
-  a failure still has an assignable valid request ID and an independently valid
-  constructed sink under the CLI precedence rules, its error receipt omits both
-  `wake_action` and `policy_provenance`. A fully validated and bound `NO_WAKE`
+  a failure occurs after the outer source boundary, has an assignable valid
+  request ID, and has an independently valid securely constructed sink under
+  the CLI precedence rules, its error receipt omits both `wake_action` and
+  `policy_provenance`. Request-schema and binding failures may likewise use
+  that already constructed sink. Otherwise the failure is non-receiptable and
+  MUST NOT fabricate one. A fully validated and bound `NO_WAKE`
   policy does apply to later trusted-budget, provider, timeout, malformed-model,
   runtime, or sink-invocation errors; when the error itself is receiptable, the
   receipt carries the accepted paired override fields.
@@ -352,9 +396,36 @@ non-receiptable and MUST NOT fabricate one.
   the exact sink outcome in its off-surface error fact. The configuration file,
   credentials, filesystem path, and sink source never enter classifier input,
   stdout, stderr, decision data, or receipt body.
-- **FR-002**: The model instruction MUST be participant-shaped, sparse, and
-  limited to whether the supplied event is worth waking for now; it MUST NOT
-  encode a speaker algorithm, response obligation rubric, or reply composition.
+  I-030A generates only these stable error-code/cause-detail pairs, while
+  I-010B's schema-level `code` remains an open non-empty string:
+  `configuration-error` / `trusted configuration invalid`,
+  `request-validation-error` / `attention request invalid`,
+  `attention-budget-error` / `attention budget exceeded`,
+  `provider-timeout` / `attention provider timed out`,
+  `provider-error` / `attention provider failed`,
+  `malformed-model-output` / `classifier output invalid`,
+  `invalid-transition` / `attention transition invalid`,
+  `invalid-legacy-confidence` / `legacy confidence vector invalid`,
+  `runtime-error` / `attention runtime failed`, and
+  `receipt-sink-failure` / `attention receipt sink failed`.
+  An offered I-010E error record uses the exact cause pair and cannot claim its
+  own persistence. The returned I-010B error appends exactly
+  `; receipt_persistence=<persisted|not-persisted|unknown>` to the safe cause
+  detail after the one sink attempt. If that attempt fails, the returned error
+  is the `receipt-sink-failure` pair with the observed `not-persisted` or
+  `unknown` value; no second receipt attempt occurs. These fixed details MUST
+  expose no path, credential, provider payload, configuration value, or receipt
+  provenance.
+- **FR-002**: The model instruction MUST tell the classifier to read the factual
+  snapshot as the participant described by the request's classifier-safe
+  `self` facts, not as a generic traffic controller, and decide only whether the
+  supplied event is worth waking that participant for now. It MUST request
+  `SUPPRESS` only when confident the participant would not want to attend,
+  `WAKE` when they likely would, and `DEFER` when uncertain; it MUST require
+  grounding in observed events and forbid invented missing facts and reply
+  composition. This is the complete meaning of participant-shaped and sparse:
+  the instruction MUST NOT add a speaker algorithm, address/topology rule,
+  response-obligation rubric, or participant move command.
 - **FR-003**: One valid request MUST produce one logical model judgment.
   Trusted `classifier_config.max_retries` is required and MUST be an integer
   from `0` through `2`, so one judgment has at most three transport attempts;
@@ -376,14 +447,22 @@ non-receiptable and MUST NOT fabricate one.
   resolve to supplied events; the note describes why attention may matter; it
   contains no proposed reply quotation or first-person drafted response; and it
   contains no imperative telling the participant what to say or do. The
-  assigned `v2-core-owner` is the recorded adjudicator, and any failed field is
-  a failed advice case. Count/length/citation checks are deterministic; the two
-  semantic fields remain explicit human evidence, not a social heuristic.
+  first field is deterministic citation resolution. The assigned
+  `v2-core-owner` is the recorded adjudicator for the remaining three semantic
+  fields, and any failed field is a failed advice case. Count, length, and the
+  first citation field are deterministic; the three semantic fields remain
+  explicit human evidence, not a runtime social heuristic.
   These are prompt/evidence criteria only: runtime validation MUST NOT reject or
   truncate otherwise I-010B-valid advice solely for item count or length.
 - **FR-006**: Social suppression MUST require exact participant authorization,
-  recoverability eligibility supplied as trusted capability, cheap uncertainty,
-  and inspectable/revocable operator delegation.
+  recoverability eligibility supplied as the trusted, exactly bound FR-001
+  capability, cheap uncertainty, and inspectable/revocable operator delegation.
+  Here, cheap uncertainty means uncertainty returns classifier `DEFER` or
+  `WAKE` and never effective suppression; inspectable means effective policy,
+  model, and their sources are present in the allowed decision/receipt audit;
+  revocable means trusted `social_suppression_enabled: false` widens candidate
+  suppression to `DEFER` without changing transport delivery; and
+  recoverability ineligibility likewise widens only to `DEFER`.
 - **FR-007**: Effective policy, provider endpoint, credentials, model, budgets,
   error action, suppression enablement, transition margin, and configuration
   source MUST be operator-owned and MUST NOT be redirected by room input.
@@ -456,8 +535,24 @@ non-receiptable and MUST NOT fabricate one.
   retirement claims. The
   multi-model matrix MUST include the incumbent Gemini 3.1 Flash Lite family,
   frontier GPT-5.5 family, and open-weight Qwen3 family unless Zoe explicitly
-  overrides the set; each run MUST record the exact provider model ID, provider,
-  endpoint class, date, prompt/config identity, and any override provenance.
+  overrides the set; each run MUST record canonical scene and corpus/fixture
+  identity, the exact provider model ID, provider, endpoint class, date,
+  prompt/config identity, effective-policy source, invocation command, result,
+  and any override provenance.
+  The exact required provider matrix is the Cartesian product of those three
+  families and every committed case in
+  `evals/v2/attention/suppression-scars/cases.jsonl`; each row MUST contain a
+  unique `case_id`, canonical `scene_id`, contract-valid `request`, and
+  preregistered owner label `expected_attention: ATTEND | NOT_ATTEND`. For each
+  family, mistaken-suppression rate is effective `SUPPRESS` on `ATTEND` cases
+  divided by all `ATTEND` cases; missed-suppression rate is non-`SUPPRESS` on
+  `NOT_ATTEND` cases divided by all `NOT_ATTEND` cases; wake volume is
+  non-`SUPPRESS` over all cases. Direct classifier `DEFER` and margin-derived
+  `DEFER` are reported separately and both count as non-suppression/wake.
+  Family disagreement is the number of case IDs with more than one distinct
+  classifier disposition across the three valid family results divided by all
+  case IDs. Missing or duplicate family/case results make the matrix incomplete
+  rather than changing a denominator.
   This comparison is descriptive and non-gating for social-quality rates:
   mistaken suppressions, missed suppressions, wake volume, and family
   disagreement MUST be recorded and carried as limitations, but no local rate
@@ -465,9 +560,17 @@ non-receiptable and MUST NOT fabricate one.
   blocks if a required family/corpus run is absent, provenance is incomplete,
   advice adherence is below FR-005's criterion, or mechanics fail to route an
   invalid/unsafe result to `DEFER` or operational `ERROR` as specified.
-- **FR-015**: The owner MUST hand off the exact commit, I-030A version,
-  commands/results, prompt/model and effective-policy provenance, evidence,
-  margin status, and known limitations to every downstream owner.
+- **FR-015**: The owner MUST hand off the exact commit; consumed I-010A/B/E and
+  produced I-030A versions; complete commands/results; prompt/model and
+  effective-policy provenance; deterministic, replay, three-family, and
+  false-suppression evidence; the preregistered downstream canary protocol;
+  active-margin state; exact documentation dispositions, validations, reviewer,
+  and routed deltas; rejected claims; known limitations; and the slice-110
+  publication/deletion delta. The packet MUST name `v2-wake-owner`, the owners
+  of slices `060` through `110`, and `v2-integrator` individually, and state
+  that every dependent still owes separate acceptance of the exact commit and
+  packet before its own activation. Delivery does not fabricate recipient
+  acceptance or unavailable live participant evidence.
 - **FR-016**: No product implementation, schema, test, corpus, evidence,
   runtime asset, or product documentation may be created under this SpecKit
   slice.
@@ -614,25 +717,42 @@ non-receiptable and MUST NOT fabricate one.
 
 - **`README.md` disposition**: `HANDOFF` exact I-030A disposition, bypass,
   operational ERROR, CLI, and dual-DEFER claim deltas to `v2-integrator`.
-- **Affected ordinary docs**: `UPDATE` `docs/attention/v2.md`,
+- **`UPDATE` inventory**: `docs/attention/v2.md`, `evidence/README.md`,
   `docs/contracts/verdict-suite-data-model-v1.md`,
   `docs/contracts/verdict-suite-requirements-v1.md`,
   `docs/evaluations/verdict-suite.md`, and
   `docs/evaluations/verdict-suite-runner.md`, preserving V1 scar evidence while
-  naming its V2 role. `HANDOFF` exact result, CLI/error, disposition, bypass,
-  dual-DEFER, and supersession deltas for `CHANGELOG.md`, `docs/STABILITY.md`,
-  `docs/integration.md`, `docs/INSTALL.md`, `docs/adapters.md`,
-  `docs/contracts/channel-adapter-v1.md`, and
-  `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
-  `NO_IMPACT` `integrations/mcp-discord/README.md` and
-  `integrations/mcp-discord/DESIGN.md`: both remain gate-neutral transport
-  references and do not consume I-030A; the exact candidate-specific rationale
-  and reviewer are recorded in ordinary handoff evidence. `HANDOFF` the
-  surface-specific lifecycle delta for `integrations/hermes/README.md` to
-  accepting `v2-hermes-owner`,
-  `integrations/claude-code/README.md` and
-  `integrations/claude-code/DEFER_EVAL.md` to accepting `v2-claude-owner`, and
-  `integrations/codex/README.md` to accepting `v2-codex-owner`.
+  naming its V2 role.
+- **`NO_IMPACT` inventory**: `docs/archive/v1/README.md`,
+  `docs/archive/v1/admission-classifier/contract.md`,
+  `docs/archive/v1/admission-classifier/data-model.md`,
+  `docs/archive/v1/admission-classifier/quickstart.md`,
+  `docs/archive/v1/core-cli/contract.md`,
+  `docs/archive/v1/core-cli/data-model.md`,
+  `docs/archive/v1/core-cli/quickstart.md`, `docs/contracts/nunchi-v2.md`,
+  `docs/governance/execution-spine.md`,
+  `docs/integrations/hermes-core-patch.md`,
+  `docs/integrations/hermes-core-patch-test-plan.md`,
+  `integrations/claude-code/transport-patch/README.md`,
+  `integrations/mcp-discord/DESIGN.md`, and
+  `integrations/mcp-discord/README.md`. Each path retains the exact per-file
+  rationale in plan section Documentation Impact and Freshness; T025 MUST test
+  that rationale against the candidate and record the reviewer and ordinary
+  handoff evidence rather than treating this inventory as proof.
+- **`HANDOFF` inventory**: `README.md`, `CHANGELOG.md`, `docs/INSTALL.md`,
+  `docs/STABILITY.md`, `docs/adapters.md`,
+  `docs/architecture/v2-selected-design.md`,
+  `docs/contracts/channel-adapter-v1.md`, `docs/integration.md`,
+  `integrations/claude-code/DEFER_EVAL.md`,
+  `integrations/claude-code/README.md`, `integrations/codex/README.md`, and
+  `integrations/hermes/README.md`. Each path uses the exact claim delta and
+  accepting owner in plan section Documentation Impact and Freshness:
+  integrator-owned cross-surface files go to `v2-integrator`; Claude, Codex,
+  and Hermes files go to their named surface owners. No `HANDOFF` row is a
+  no-impact finding or a slice-owned documentation escape.
+- **Inventory invariant**: the spec, plan matrix, and T025 MUST retain the same
+  32 exact paths and one disposition per path: 6 `UPDATE`, 14 `NO_IMPACT`, and
+  12 `HANDOFF`.
 - **Handoff evidence**: `evidence/v2/attention/handoff.md` records the exact
   reviewed paths, dispositions, delta, validation, and reviewer.
 
@@ -645,5 +765,8 @@ non-receiptable and MUST NOT fabricate one.
   tests establish social correctness.
 - No deterministic mention, reply, topology, apparent-resolution, class-address,
   relevance, or completion-corroboration social rule.
+- No program authority, assignment, dependency acceptance, lifecycle, handoff,
+  or acceptance fact enters I-030A, I-010A/B/E, classifier input, operational
+  receipts, runtime configuration, or any social-memory structure.
 - No edits to 010-owned schemas; requested contract changes return to
   `v2-contract-owner`.
