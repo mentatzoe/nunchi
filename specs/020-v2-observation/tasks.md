@@ -3,7 +3,7 @@
 **Input**: `specs/020-v2-observation/spec.md` and
 `specs/020-v2-observation/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Execution status**: stated by reference rather than as a fixed transition claim —
 unchecked tasks execute only inside this slice's bound `run speckit` run while
@@ -490,3 +490,59 @@ nor its new eval case exercises.
 **Checkpoint**: every `around` fetch — truncated by window boundary, by cap
 before the anchor, or by cap after the anchor — reports `has_more_before`/
 `has_more_after` that match which side actually has unserved events.
+
+## Phase 12: Attempt-1 Integrator Rejection — Continuation Progress and Cause Honesty
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-v2-integrator-attempt-1.md`, findings
+H020-A1-01 HIGH and M020-A1-02 MEDIUM, against rejected candidate
+`7b00bcaa4a2b8af12b6eb71bf6d8b098f4cfeba7`.
+
+**Purpose**: ensure every minted continuation cursor progresses or exhausts,
+and every capped page names the actual event/byte stop cause before candidate
+attempt 2 is proposed.
+
+- [ ] T055 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py`
+  and a matching adversarial case in
+  `evals/v2/observation/continuation/cases.jsonl` that fetch `around` e1–e5
+  anchored at e3 with an event cap of 2, follow the minted same-handle,
+  same-direction cursor, and reject any page-2 event overlap, repeated cursor,
+  or failure to exhaust after the remaining fixed-window event, reproducing
+  H020-A1-01
+- [ ] T056 Make `ContinuationProvider.fetch` consume a validated `around`
+  cursor as the next scan position, preserve the original anchor-bound fixed
+  window and authoritative ordering, emit no duplicate event IDs across the
+  page sequence, and make T055 plus all existing direction-binding,
+  before/after/around, cap, expiry, and coverage tests pass without weakening
+  H020-01 or T054
+- [ ] T057 Add RED continuation-fetch tests and adversarial eval cases proving
+  `coverage.truncated_by` reports exactly `events` for event-only truncation,
+  exactly `bytes` for byte-only truncation, and both causes when both stop
+  conditions are simultaneously true, reproducing M020-A1-02
+- [ ] T058 Track event-cap and byte-cap stop causes independently from
+  `next_index` in `ContinuationProvider.fetch`, return their truthful stable
+  cause list, and make T057 plus snapshot/continuation schema, budget, and
+  evidence tests pass without changing accepted I-010D wire shape or cap
+  enforcement
+- [ ] T059 Regenerate continuation and aggregate evidence, append an attempt-1
+  rejection supersession to `evidence/v2/observation/handoff.md` with T055–T058
+  RED→GREEN receipts and the final T001–T059 manifest identity, rerun the
+  complete observation/corpus/eval/full-suite/verdict/governance/task-manifest/
+  diff-check matrix, restore the two blocked `plan.md` constitution rows to
+  PASS only on exact GREEN evidence, and record the existing unbounded
+  bookkeeping sets as non-blocking follow-up scope rather than silently
+  claiming they are bounded
+
+### Phase 12 dependencies
+
+- T055 must fail before T056 is accepted.
+- T057 must fail before T058 is accepted.
+- T056 and T058 may share one implementation pass only after both RED classes
+  are captured; neither may weaken T047–T050 or T054.
+- T059 is last and blocks `/speckit-converge`, candidate attempt 2, and handoff
+  attempt 2.
+
+**Checkpoint**: every continuation cursor progresses or exhausts, cap-cause
+coverage names what actually stopped the page, all 59 tasks are complete, and
+the append-only evidence distinguishes rejected attempt 1 from the new
+candidate tree.

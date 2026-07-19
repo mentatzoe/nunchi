@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
 **Program implementation authority**: `GRANTED`
 
@@ -99,6 +99,18 @@ complete rerun of the full T053 verification matrix are recorded in
 (T054)" section against final full-manifest task IDs T001–T054, SHA256
 `b305267271aed22a83c98c3a95e8f967edfbe080115d9ee58d6a99eacaca4536`.
 
+The assigned `v2-integrator` rejected attempt 1 after independently
+reproducing two continuation defects against candidate
+`7b00bcaa4a2b8af12b6eb71bf6d8b098f4cfeba7`: an `around` fetch minted a
+cursor but ignored it on replay, returning the same events and same cursor
+forever (H020-A1-01 HIGH), and every capped continuation fetch reported
+`truncated_by: ["events"]` even when a byte cap was the actual stop cause
+(M020-A1-02 MEDIUM). The durable decision is
+`evidence/v2/observation/review-2026-07-19-v2-integrator-attempt-1.md` and the
+append-only rejection is in `evidence/v2/observation/slice-handoff.md`.
+Phase 12 (T055–T059) is the complete correction owed before candidate attempt
+2; the original activation is retained and the slice returns to `ACTIVE`.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -139,19 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements; Phase 11 (T054) closed the `around`-fetch `has_more_before` truthfulness defect (F1 CRITICAL) against this gate — RED→GREEN proof and rerun evidence are recorded in `evidence/v2/observation/handoff.md`'s "Phase 11 convergence supersession (T054)" section. |
+| Truthful identity/observation | BLOCKED (T055–T058) | Exact self, native relations, bounded context, unknowns, and continuity remain primary requirements; attempt-1 review proved that `around` cursor replay does not progress and byte-cap truncation is mislabeled. This row returns to PASS only after the Phase 12 RED→GREEN corrections and evidence land. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence remain distinct from downstream live-surface proof; T054's false-negative before-side coverage is closed with a RED→GREEN test, a matching adversarial eval case (`CONT-S03-007`), and the Phase 11 supersession's complete rerun matrix. |
+| Evidence before claims | BLOCKED (T055–T059) | Shared/reference replay, budget, recoverability, restart, and capability evidence remain distinct from downstream live-surface proof; attempt-1 evidence omitted around-cursor progression and reported the wrong cap cause. This row returns to PASS only when those gaps and the superseding attempt-2 matrix are recorded. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
-Post-design re-check: PASS. No prohibited SpecKit output is planned. This
-planning pass originally recorded the Phase 11 (T054) correction without
-closing it; T054 is now implemented and verified (RED→GREEN test, adversarial
-eval case, and complete rerun matrix in `evidence/v2/observation/handoff.md`'s
-"Phase 11 convergence supersession (T054)" section), so every gate above
-reflects the current, closed state of this candidate.
+Post-design re-check: PASS for scope and control-plane structure; implementation
+truthfulness and evidence remain explicitly BLOCKED by T055–T059. No prohibited
+SpecKit output is planned, and no candidate-attempt-2 or handoff claim is valid
+until those tasks close.
 
 ## Slice Interfaces
 

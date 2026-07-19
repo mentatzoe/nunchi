@@ -21,3 +21,19 @@
 **Tasks SHA256**: b305267271aed22a83c98c3a95e8f967edfbe080115d9ee58d6a99eacaca4536
 
 **Review boundary**: packet is ready for independent v2-integrator review. This record does not accept the slice or authorize integration, cutover, deployment, release, or promotion.
+
+## Attempt 1 — REJECTED
+
+**Slice**: `020-v2-observation`
+
+**Status**: REJECTED
+
+**Candidate commit**: `7b00bcaa4a2b8af12b6eb71bf6d8b098f4cfeba7`
+
+**Rejected by**: v2-integrator
+
+**Rejected on**: 2026-07-19
+
+**Decision reference**: evidence/v2/observation/review-2026-07-19-v2-integrator-attempt-1.md
+
+**Recorded by**: v2-integrator
