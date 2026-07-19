@@ -165,7 +165,8 @@ evidence and task-graph wording only; no new gate exposure is introduced.
   `continuity`, `has_restart_gap`, and optional per-event-type visibility).
   A generic event shape or collapsed coverage enums are contract defects,
   and the design's example attention request validates verbatim.
-- `I-010B AttentionDecisionV2@1` at
+- `I-010B AttentionDecisionV2@2` (amended post-acceptance from `@1`; FR-005
+  amendment A2) at
   `schemas/v2/attention-decision.schema.json`: `status: ok` carries one of the
   four allowed classifier/effective pairs; `reasons` retained as ok-branch
   audit material that never enters the participant turn; an optional legacy

@@ -920,7 +920,8 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
     """The closed FR-005 routing audit with its per-combination rules.
 
     A margin counts as applied exactly on valve ``margin-defer``: the
-    effective margin (finite, in (0, 1]) is then required and forbidden on
+    effective margin (finite, in [0, 1] — @2 amendment A2, the accepted @1
+    shape wrongly used (0, 1]) is then required and forbidden on
     every other valve, the override cause must be ``margin``, and the
     margin status must be ``active`` (a retired margin cannot apply). The
     trusted margin source may appear only on that margin-applied decision.
@@ -947,9 +948,9 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
         margin = routing["effective_margin"]
         if not _is_number(margin):
             errors.add("routing_audit.effective_margin", "must be a number")
-        elif not math.isfinite(margin) or not (0.0 < float(margin) <= 1.0):
+        elif not math.isfinite(margin) or not (0.0 <= float(margin) <= 1.0):
             errors.add(
-                "routing_audit.effective_margin", "must be a finite number within (0, 1]"
+                "routing_audit.effective_margin", "must be a finite number within [0, 1]"
             )
     if "margin_source" in routing:
         _check_nes(errors, "routing_audit.margin_source", routing["margin_source"])
