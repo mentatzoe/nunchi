@@ -1222,11 +1222,15 @@ P28-H1 through P28-H4 and the stale scanner-documentation finding.
 - [X] T158 Register every rejection record as immutable from introduction, pin the
   disclosed `80c1de2` recovery bytes from `abad8d85`, reject deletion/unregistered
   additions/rewrites, and correct the scanner docstring's removed suppression claim
-- [ ] T159 Reconcile the valid product/evaluation mechanisms from parallel
+- [X] T159 Reconcile the valid product/evaluation mechanisms from parallel
   `3e38a70` without importing its unsupported lifecycle claim or weakening the
   `abad8d85` governance/rejection history; update the current packet/plan/evidence,
   rerun the complete matrix, exact-scan the whole activation range, and
   freeze/push one immutable T001–T160 review object
+  - Preparation `901aaed47e8d7173df4a0a8788ed69e3cecdb44f` passed the exact
+    `fc60858a3810e2f53d9574cce1eb9589bd19b55b..901aaed47e8d7173df4a0a8788ed69e3cecdb44f`
+    four-matcher scan across 90 changed files and 14,942 additions; final-object
+    push and self-scan are bound externally because the object cannot contain them.
 - [ ] T160 Obtain fresh independent implementation and governance reviews of that
   exact object; fix every CRITICAL/HIGH blocker before closing T103 or creating
   candidate-attempt-2 or handoff lifecycle records

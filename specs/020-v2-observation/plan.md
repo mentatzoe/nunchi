@@ -169,22 +169,22 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T158 plus the implemented reconciliation portion of T159 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps for every returned snapshot/page event, normalized restart-gap truth, final-page validation, deterministic relation priority, disclosed packet-history corruption with enforced recovery baselines, exact closed host context, an all-changed-path scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request/handle-ID uniqueness, one-shot provider-issued receipt attestation from stable private documents, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, candidate-bound exact task identity, shared supersession truth, and immutable registered rejection evidence. |
+| Truthful identity/observation | PASS | T083–T159 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps for every returned snapshot/page event, normalized restart-gap truth, final-page validation, deterministic relation priority, disclosed packet-history corruption with enforced recovery baselines, exact closed host context, an all-changed-path scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request/handle-ID uniqueness, one-shot provider-issued receipt attestation from stable private documents, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, candidate-bound exact task identity, contradiction-safe shared supersession truth, and byte-immutable registered rejection evidence. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T159–T160) | Phase 28 RED/GREEN proves malformed-task rejection, candidate-attempt-2 lineage/graph binding, shared supersession authority, immutable rejection-history enforcement, and selective parallel-lineage product/eval reconciliation locally. T159 must finish immutable freeze and whole-range exact scanning of the final object; T160 must obtain fresh exact-object implementation and governance reviews. |
+| Evidence before claims | BLOCKED (T160) | Phase 28 RED/GREEN proves malformed-task rejection, candidate-attempt-2 lineage/graph binding, contradiction-safe shared supersession authority, byte-immutable rejection-history enforcement, and selective parallel-lineage product/eval reconciliation. T159's preparation object and whole-range exact scan are bound below; final-object push/self-scan are external receipts. T160 must obtain fresh exact-object implementation and governance reviews. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 28 T159–T160. Runtime, ordering,
+Post-design re-check: BLOCKED on Phase 28 T160. Runtime, ordering,
 input, corpus-byte, request/handle uniqueness, stable receipt authority,
 caller-memory, early-resource, continuation/comparator authority, relation-gap,
 restart-gap and final-page-evaluation truth, deterministic relation priority,
 lifetime timestamp, exact T001–T160 task authority, candidate-lineage binding,
 shared supersession truth, all-path scanning, packet recovery-baseline integrity,
 and immutable rejection-history enforcement are locally GREEN. The complete
-exact-tree matrix, new immutable object, exact whole-range scan, and fresh
-independent implementation/governance verdicts remain required. This status
+matrix and preparation-object whole-range scan are GREEN; fresh exact-object
+implementation/governance verdicts remain required. This status
 grants no acceptance or cutover authority.
 
 ## Slice Interfaces

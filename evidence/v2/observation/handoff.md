@@ -1415,3 +1415,19 @@ assertions. Its other stale-artifact/count findings were closed by regenerating
 39 non-duplicate adversarial rows and rerunning the 1,467-test matrix. Because
 the reviewed working tree moved, this verdict authorizes no lifecycle advance;
 fresh review must target an immutable successor SHA.
+
+### Phase 28 T159 preparation freeze and exact scan
+
+**Preparation commit**: `901aaed47e8d7173df4a0a8788ed69e3cecdb44f`
+
+**Tree**: `3c6599fec6c60d2f1e2b3f11afdfb6c767728804`
+
+**Parent**: `6c3b89ef030cfa8bebdc5f206f899569e4e7c813`
+
+The exact all-path scan from activation start
+`fc60858a3810e2f53d9574cce1eb9589bd19b55b` through the preparation commit was
+CLEAN across 90 changed files and 14,942 additions with all four matchers. T159
+is closed in the metadata successor that binds this receipt. The successor's own
+SHA, push, and post-commit scan are necessarily external receipts. T160 and T103
+remain open; no candidate-attempt-2, handoff, acceptance, integration, release,
+promotion, deployment, or cutover authority is established.

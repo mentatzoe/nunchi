@@ -125,7 +125,17 @@ resolved by regenerating 39 non-duplicate rows and rerunning the final matrix.
 The review grants no approval because its target moved; only a later immutable
 object can receive an authoritative verdict.
 
-## Staged matrix before immutable freeze (T159)
+## Preparation freeze and exact scan (T159)
+
+**Preparation commit**: `901aaed47e8d7173df4a0a8788ed69e3cecdb44f`
+
+**Tree**: `3c6599fec6c60d2f1e2b3f11afdfb6c767728804`
+
+**Parent**: `6c3b89ef030cfa8bebdc5f206f899569e4e7c813`
+**Exact activation-range scan**: CLEAN — base
+`fc60858a3810e2f53d9574cce1eb9589bd19b55b`, head
+`901aaed47e8d7173df4a0a8788ed69e3cecdb44f`, 90 changed files, 14,942
+additions, four matchers.
 
 | Command / lane | Result |
 |---|---|
@@ -142,13 +152,13 @@ object can receive an authoritative verdict.
 | Bandit over changed governance/task/scanner/product/eval scripts | clean; 0 findings |
 | governance CLI | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
 | task graph | T001–T160; normalized SHA-256 `7733ed9894f44a063db1a6dcad7c4c79f0d64256b2054c5041c92d3baff84d32` |
-| literal task state after T158 closure | total 160; checked 157; superseded T107/T112/T119/T124/T131/T140/T146/T153; open T103/T159/T160 |
+| literal task state after T159 closure | total 160; checked 158; superseded T107/T112/T119/T124/T131/T140/T146/T153; open T103/T160 |
 | working-tree `git diff --check` | clean |
 
-T159 remains open until this evidence and plan/packet updates are in the final
-tree, the final-tree verification rerun is green, the immutable successor is
-committed and pushed, and the exact all-path activation-range scan is run against
-that commit. The commit/tree/parent and post-commit scan receipt must be bound
-externally because a Git object cannot contain its own identity. T103 and T160
-remain review gates. Nothing here establishes `CONVERGED`, `HANDOFF_READY`,
-acceptance, integration, deployment, release, promotion, or cutover authority.
+T159 closes through the two-step freeze: the preparation object above is fully
+verified and exact-scanned, while this metadata successor binds that receipt.
+The successor's own SHA, push, and post-commit scan must remain external because
+a Git object cannot contain evidence of its own identity or publication. T103
+and T160 remain review gates. Nothing here establishes `CONVERGED`,
+`HANDOFF_READY`, acceptance, integration, deployment, release, promotion, or
+cutover authority.
