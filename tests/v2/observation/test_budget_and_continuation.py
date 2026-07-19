@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import unittest
 
-from nunchi.observation import ContinuationError, ContinuationProvider, validate_context_continuation
+from nunchi.observation import (
+    ContinuationError,
+    ContinuationProvider,
+    serialized_byte_size,
+    validate_context_continuation,
+)
 from tests.v2.observation.helpers import FIXTURE_ACTORS, make_message, make_provider, seed_room
 
 
@@ -195,6 +200,30 @@ class TestFetchDocuments(unittest.TestCase):
         page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
         self.assertFalse(page["coverage"]["has_more_before"])
         self.assertFalse(page["coverage"]["has_more_after"])
+
+    def test_around_fetch_cap_truncated_strictly_before_anchor_reports_has_more_before(self):
+        # F1 CRITICAL (Phase 11, convergence-phase11-2026-07-19.md): the
+        # ascending window scan can truncate at a candidate index strictly
+        # before anchor_index, e.g. e1..e5, anchor e3 (index 2), a radius
+        # wide enough to reach both buffer edges (around_window_start == 0)
+        # but a byte cap sized to admit only e1. The old
+        # ``has_more_before = around_window_start > 0`` formula ignored this
+        # cap-based truncation and reported False even though e2, a genuine
+        # before-anchor event, was never served.
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        one_event_bytes = serialized_byte_size(provider._events[0])
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=one_event_bytes,
+        )
+        request = {
+            "request_id": "req-x", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e3", "max_events": 6, "max_bytes": one_event_bytes,
+        }
+        page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+        self.assertEqual([event["id"] for event in page["events"]], ["e1"])
+        self.assertTrue(page["coverage"]["has_more_before"])  # e2 was never served
+        self.assertTrue(page["coverage"]["has_more_after"])  # e3 (anchor)..e5 were never served either
 
     def test_around_fetch_requires_anchor(self):
         provider, continuation, capability, host_context = self._issued()

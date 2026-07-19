@@ -452,7 +452,7 @@ CRITICAL, reproduced live against the completed T001–T053 candidate tree at
 "truthful side-specific `around` coverage" fix that neither its new unit test
 nor its new eval case exercises.
 
-- [ ] T054 Fix a false-negative `has_more_before` in `ContinuationProvider.fetch`'s
+- [X] T054 Fix a false-negative `has_more_before` in `ContinuationProvider.fetch`'s
   `around` branch in `src/nunchi/observation.py`: `has_more_before =
   around_window_start > 0` ignores cap-based truncation that lands at a
   candidate index strictly before `anchor_index`, so a per-fetch event/byte

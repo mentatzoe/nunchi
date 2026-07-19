@@ -1199,12 +1199,19 @@ class ContinuationProvider:
         else:
             page_events_ordered = page_events
             # L020-01: truthful side-specific coverage instead of two nulls.
-            # The ascending window scan can only truncate the after side
-            # mid-loop; the before side is incomplete only when the radius
-            # window itself did not reach the start of the buffer. Either
-            # side is also incomplete when the fixed radius window ends
-            # before the buffer's own edge, independent of any cap.
-            has_more_before = around_window_start > 0
+            # Either side is incomplete when the fixed radius window ends
+            # before the buffer's own edge, independent of any cap. On top
+            # of that: the ascending scan can also cut off before it ever
+            # reaches anchor_index (e.g. a tight byte cap admits only the
+            # first one or two candidates) — that always leaves the anchor
+            # itself and everything after it unserved too, so any cap
+            # truncation within the window (``next_index is not None``)
+            # always implies more-after. F1 CRITICAL (Phase 11): a cap that
+            # truncates strictly before anchor_index additionally leaves a
+            # genuine before-anchor event unserved, which the window-only
+            # ``around_window_start > 0`` check alone missed.
+            cap_truncated_before_anchor = next_index is not None and next_index < anchor_index
+            has_more_before = around_window_start > 0 or cap_truncated_before_anchor
             has_more_after = next_index is not None or around_window_end < len(events)
 
         next_cursor = None

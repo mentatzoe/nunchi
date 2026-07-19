@@ -495,3 +495,87 @@ been checked complete).
 Every discovered test count above is nonzero and reproduces the "Complete
 current re-run" table exactly. All T039–T052 correction receipts above are
 verified current. This candidate is ready for `/speckit-converge`.
+
+## Phase 11 convergence supersession (T054)
+
+**Correction source**: `evidence/v2/observation/convergence-phase11-2026-07-19.md`,
+finding F1 CRITICAL, reproduced live against the completed T001–T053
+candidate tree at `77a94cf1f56e70d1f0a79631ee9efba0b6e74a62`, cited by
+`specs/020-v2-observation/tasks.md` Phase 11.
+
+This section appends a current-state supersession over the "Complete current
+re-run" and "T053 final verification receipt" tables above. It does not edit
+that historical text — T001–T053 remain exactly as originally recorded, per
+the plan's Rejection/rework contract and the tasks.md Correction and
+Rejection Preservation section.
+
+### The defect and the fix
+
+`ContinuationProvider.fetch`'s `around` branch derived `has_more_before`
+from the fixed radius window boundary alone
+(`has_more_before = around_window_start > 0`), ignoring cap-based
+truncation of the ascending candidate scan at an index strictly before
+`anchor_index`. Reproduction: 5 events `e1`–`e5`, anchor `e3` at index 2,
+`max_events_per_fetch=6` (radius 3, `around_window_start=0`,
+`around_window_end=5`), `max_bytes_per_fetch` sized to admit only `e1` —
+the page served only `['e1']` yet reported `has_more_before: False` even
+though `e2`, a genuine before-anchor event, was never served.
+
+The fix tracks whether the cap-truncation index (`next_index`) landed
+strictly before `anchor_index` and ORs that fact into `has_more_before`,
+alongside the existing `around_window_start > 0` window-boundary check:
+
+```python
+cap_truncated_before_anchor = next_index is not None and next_index < anchor_index
+has_more_before = around_window_start > 0 or cap_truncated_before_anchor
+```
+
+`has_more_after`'s formula (`next_index is not None or around_window_end <
+len(events)`) did not change: any cap truncation within the ascending
+window scan — whether the truncation index lands before, at, or after
+`anchor_index` — always leaves at least the anchor-or-later portion of the
+window unserved (the scan proceeds in ascending order from
+`around_window_start`, so a truncation index `< anchor_index` means the
+scan never even reached `anchor_index`), so `next_index is not None`
+already implied `has_more_after` correctly in every case, including this
+reproduction (`has_more_after: True` was already accurate before and after
+the fix).
+
+### T054 receipt
+
+| Check | Result |
+|---|---|
+| RED regression test (pre-fix) | `test_around_fetch_cap_truncated_strictly_before_anchor_reports_has_more_before` in `tests/v2/observation/test_budget_and_continuation.py` — `AssertionError: False is not true` on `has_more_before` |
+| GREEN regression test (post-fix) | Same test — passes; page serves `['e1']`, `has_more_before: True`, `has_more_after: True` |
+| Existing `around` coverage unweakened | `test_truncated_around_fetch_reports_truthful_side_specific_coverage` and `test_untruncated_around_fetch_reports_no_more_on_either_side` (T049/T050) still pass unchanged |
+| Adversarial eval case | `CONT-S03-007` in `evals/v2/observation/continuation/cases.jsonl`, result recorded in `evidence/v2/observation/continuation.jsonl` (`PASS`, `has_more_before: true`, `has_more_after: true`) |
+| Documentation | No wording change owed in `docs/observation/v2.md` per `plan.md`'s Documentation Impact and Freshness row for T054 — the existing "`has_more_before`/`has_more_after` report honest boundary omission" claim already states the target truthful behavior this fix conforms to |
+
+### Final full-manifest SHA (T001–T054)
+
+| Manifest | Task IDs | SHA256 |
+|---|---|---|
+| Activation prefix (immutable) | T001–T038 | `c261de490e30e8e6c447dc5b204e463003f21cf38b69ca03c1895e58b00b6d31` (unchanged; see Phase 10 section above) |
+| Final full manifest (this candidate) | T001–T054 | `b305267271aed22a83c98c3a95e8f967edfbe080115d9ee58d6a99eacaca4536`, via `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation`, run 2026-07-19 (supersedes the Phase 10 section's T001–T053 digest `a21f4b76259e60b044770b3b8f4af1240da30132c2ec4a81ee8c9f8bd43b3a9b`, which remains an accurate historical record of that intermediate manifest) |
+
+### Complete T053-matrix re-run (2026-07-19, T001–T054 candidate tree)
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 100 tests, OK, 0 skipped (+1 over the Phase 10 table: T054's new regression test) |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 5 suites, 32 rows, 0 FAIL (`identity-and-hygiene.jsonl`: 9; `budget-sweep.jsonl`: 7; `continuation.jsonl`: 9 (+1, `CONT-S03-007`); `s05-recoverability.jsonl`: 4; `s13-equivalence.jsonl`: 3) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK, 0 failures (202/202 corpus cases still accounted for; corpus revision unchanged) |
+| `PYTHONPATH=src python3 -m unittest` (repository baseline, full suite) | 1349 tests, OK, 4 skipped in the owner-side convergence verification environment (+1 test over the Phase 10 table, exactly T054's new regression; no failures) |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixture(s) discovered (unchanged) |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | Full manifest T001–T054; SHA256 `b305267271aed22a83c98c3a95e8f967edfbe080115d9ee58d6a99eacaca4536` (see table above) |
+| `git diff --check` | clean (no whitespace errors), exit 0 |
+
+Every discovered test count above is nonzero. This table is the current
+authoritative re-run result; the Phase 10 and T036 tables remain as accurate
+historical records of their respective candidate trees and are not edited.
+
+F1 CRITICAL is closed. The plan.md Constitution Check rows "Truthful
+identity/observation" and "Evidence before claims", both marked
+`BLOCKED (T054)`, return to `PASS` as of this candidate — see the
+corresponding plan.md update accompanying this section.

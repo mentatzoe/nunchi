@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19; Phase 11 residual around-fetch truthfulness correction binding, 2026-07-19) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19; Phase 11 residual around-fetch truthfulness correction binding, 2026-07-19; Phase 11 (T054) implemented and closed, 2026-07-19) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -80,14 +80,24 @@ after-side-only signal and derives `has_more_before` from the fixed radius
 window boundary alone (`around_window_start > 0`); a per-fetch event/byte cap
 that truncates the scan at a candidate index strictly before `anchor_index`
 therefore still reports `has_more_before: False` even though a genuine
-unserved before-anchor event exists. This is bound as Phase 11 (T054) in
-`tasks.md`, remains unchecked and unimplemented as of this planning pass, and
-must track which side of `anchor_index` a cap actually truncated at — in
-addition to, not instead of, the existing window-boundary checks — before a
-new candidate is proposed. The finding is durably recorded at
-`evidence/v2/observation/convergence-phase11-2026-07-19.md` against exact
-candidate commit `77a94cf1f56e70d1f0a79631ee9efba0b6e74a62`; T054 is the sole
-implementation/evidence correction owed by that record.
+unserved before-anchor event exists. This was bound as Phase 11 (T054) in
+`tasks.md`, unchecked and unimplemented as of the planning pass that recorded
+it, and required tracking which side of `anchor_index` a cap actually
+truncated at — in addition to, not instead of, the existing window-boundary
+checks — before a new candidate could be proposed. The finding is durably
+recorded at `evidence/v2/observation/convergence-phase11-2026-07-19.md`
+against exact candidate commit `77a94cf1f56e70d1f0a79631ee9efba0b6e74a62`.
+
+T054 is now implemented and closed: `has_more_before` ORs the
+window-boundary check with a new `cap_truncated_before_anchor` term
+(`next_index is not None and next_index < anchor_index`); `has_more_after`'s
+formula is unchanged because any cap truncation within the ascending window
+scan already always left the anchor-or-later portion unserved. A RED→GREEN
+regression test, a matching adversarial eval case (`CONT-S03-007`), and a
+complete rerun of the full T053 verification matrix are recorded in
+`evidence/v2/observation/handoff.md`'s "Phase 11 convergence supersession
+(T054)" section against final full-manifest task IDs T001–T054, SHA256
+`b305267271aed22a83c98c3a95e8f967edfbe080115d9ee58d6a99eacaca4536`.
 
 ## Technical Context
 
@@ -129,17 +139,19 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS (open correction) | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements; Phase 11 (T054) binds a still-open `around`-fetch `has_more_before` truthfulness defect (F1 CRITICAL) against this gate and remains unimplemented as of this plan. |
+| Truthful identity/observation | PASS | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements; Phase 11 (T054) closed the `around`-fetch `has_more_before` truthfulness defect (F1 CRITICAL) against this gate — RED→GREEN proof and rerun evidence are recorded in `evidence/v2/observation/handoff.md`'s "Phase 11 convergence supersession (T054)" section. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS (open correction) | Shared/reference replay, budget, recoverability, restart, and capability evidence are distinct from downstream live-surface proof; the same Phase 11 (T054) finding is an open evidence-accuracy gap (a truncated `around` page can under-report a genuine unserved before-anchor event) until it lands and is verified. |
+| Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence remain distinct from downstream live-surface proof; T054's false-negative before-side coverage is closed with a RED→GREEN test, a matching adversarial eval case (`CONT-S03-007`), and the Phase 11 supersession's complete rerun matrix. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
 Post-design re-check: PASS. No prohibited SpecKit output is planned. This
-planning pass records the Phase 11 (T054) correction; it does not close it —
-the gates above reflect a PASS for the plan itself alongside an explicit open
-implementation defect the plan is not authorized to fix.
+planning pass originally recorded the Phase 11 (T054) correction without
+closing it; T054 is now implemented and verified (RED→GREEN test, adversarial
+eval case, and complete rerun matrix in `evidence/v2/observation/handoff.md`'s
+"Phase 11 convergence supersession (T054)" section), so every gate above
+reflects the current, closed state of this candidate.
 
 ## Slice Interfaces
 
