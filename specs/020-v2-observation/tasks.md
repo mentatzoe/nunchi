@@ -411,8 +411,8 @@ prevents the wrong name from silently returning.
 **Correction sources**:
 `evidence/v2/observation/pre-review-2026-07-19-sr-critic.md` and
 `evidence/v2/observation/convergence-2026-07-19.md` findings H020-01 HIGH,
-M020-01 through M020-04 MEDIUM, and L020-01 LOW. The accepted upstream version
-rebind is recorded separately in
+M020-01 through M020-04 MEDIUM, L020-01 LOW, and D020-01 RESOLVED. The accepted
+upstream version rebind is recorded separately in
 `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`.
 
 **Purpose**: Close the independently reproduced cursor defect, finish truthful
