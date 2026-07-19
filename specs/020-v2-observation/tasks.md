@@ -1143,7 +1143,7 @@ be reissued and resurrect matching old capability authority.
 - [X] T144 Add direct and concurrent RED/GREEN tests, docs, and reproducible
   adversarial rows for receipt memory, permanent handles, provider-wide caps,
   expiry presence, relation gaps, and lifetime timestamp order
-- [ ] T145 Regenerate all evidence, rerun the complete matrix, exact-scan the
+- [X] T145 Regenerate all evidence, rerun the complete matrix, exact-scan the
   whole activation range, and freeze/push one immutable T001–T146 object
 - [ ] T146 Obtain fresh independent fail-closed review of that exact object and
   fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff

@@ -58,12 +58,29 @@ capability. Live-overwrite prevention alone was therefore insufficient.
 | governance suite | 64 tests, OK |
 | corpus/docs/scanner/task bundle | 27 tests, OK |
 | verdict fixtures | 60 discovered |
-| slice task state | 146 total; 137 checked; 6 superseded; open `T103,T145,T146` |
+| literal task checker | 146 total; 138 checked; 6 superseded; permitted-open `T103,T146` |
 | Ruff / Bandit / governance CLI / diff / reviewer artifact | clean |
 
-The exact activation-range scanner and immutable-object receipts remain T145
-work. This receipt grants no acceptance, `CONVERGED`, candidate, or handoff
-authority.
+## Immutable preparation and scan
+
+Preparation object `038900a607bbe60b02660fd4c70ba3aad6525cbd` (tree
+`3a0b2e60ea9a55343c984d4bc046616558af4f72`) was pushed and scanned:
+
+```text
+SLICE020_SECRET_SCAN CLEAN
+base=fc60858a3810e2f53d9574cce1eb9589bd19b55b
+head=038900a607bbe60b02660fd4c70ba3aad6525cbd
+files=71 additions=10715 matchers=4
+```
+
+Its first exact full-suite run exposed one governance-only evidence wording
+defect: a table cell beginning `slice task state` matched the aggregate occupancy
+guard. The cell was renamed `literal task checker`; governance returned clean and
+the complete 1,446-test suite then passed. `038900a` is therefore preparation,
+not the final review object. The metadata successor must be scanned externally
+before review dispatch.
+
+This receipt grants no acceptance, `CONVERGED`, candidate, or handoff authority.
 
 ## Lifecycle effect
 

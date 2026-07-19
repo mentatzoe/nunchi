@@ -14,7 +14,7 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
     def test_current_pre_review_state_is_literal_and_only_final_gates_are_open(self):
         state = evaluate_task_state(
             TASKS,
-            allowed_open=frozenset({"T103", "T145", "T146"}),
+            allowed_open=frozenset({"T103", "T146"}),
         )
         self.assertEqual(state.all_ids[0], "T001")
         self.assertEqual(state.all_ids[-1], "T146")
@@ -24,7 +24,7 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
         )
         self.assertEqual(
             state.open_ids,
-            frozenset({"T103", "T145", "T146"}),
+            frozenset({"T103", "T146"}),
         )
 
     def test_unexplained_unchecked_task_fails_closed(self):
