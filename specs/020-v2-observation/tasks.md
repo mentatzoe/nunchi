@@ -969,3 +969,39 @@ HIGH H4, reproduced against the current post-Phase-20 tree.
 **Checkpoint**: equivalent means every semantic request/page fact agrees or has
 one explicit capability explanation; order, one-sided facts, actors, and
 coverage can never disappear from comparison.
+
+## Phase 22: Provider Attestation and Fail-Closed Input Order
+
+**Correction source**: independent Codex review of exact object
+`cd8917c56f0d051f52cdba68c177d45e7a9f1103`, adjudicated against the
+post-Phase-21 tree in
+`evidence/v2/observation/convergence-phase22-provider-attestation-2026-07-19.md`.
+
+- [X] T113 Preserve and reproduce the stale review against the current tree;
+  separate live receipt/timestamp/unroutable/constructor/corpus mechanisms from
+  already-closed findings and history-free archive artifacts
+- [ ] T114 Add RED then GREEN tests for bounded provider-issued request
+  attestation: exact request/document match, one receipt only, duplicate and
+  fabricated rejection, mutation non-consumption, and returned-copy isolation
+- [ ] T115 Reject timestamp-order regressions before retained provider state
+  mutates; add invalid-input non-poisoning and valid equal/undated coverage
+- [ ] T116 Enforce the exact closed `unroutable` transport shape and eagerly
+  validate constructor self/room/visibility facts before mutable state exists
+- [ ] T117 Pin a deterministic digest over all three accepted attempt-6 corpus
+  files and add byte-drift/mutation regressions, not merely revision-string and
+  case-count assertions
+- [ ] T118 Regenerate evidence and rerun the complete test/eval/security/
+  governance matrix plus non-bypassable exact whole-slice scan; commit and push
+  a new immutable T001–T119 object
+- [ ] T119 Obtain a fresh independent fail-closed review of that exact object;
+  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+
+### Phase 22 dependencies
+
+- T114–T117 depend on T113 and may proceed independently after their RED cases.
+- T118 depends on T114–T117; T119 depends on T118 and supersedes T112/T107 as
+  the sole final convergence review.
+
+**Checkpoint**: the provider attests only an exact snapshot it issued, once;
+malformed ordering/transport/configuration is rejected before state mutation;
+accepted corpus identity is byte-verifiable.
