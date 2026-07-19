@@ -3,7 +3,7 @@
 **Input**: `specs/020-v2-observation/spec.md` and
 `specs/020-v2-observation/plan.md`
 
-**Slice state**: `CONVERGED`
+**Slice state**: `HANDOFF_READY`
 
 **Execution status**: stated by reference rather than as a fixed transition claim —
 unchecked tasks execute only inside this slice's bound `run speckit` run while
