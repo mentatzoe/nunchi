@@ -33,6 +33,10 @@ HISTORICAL_EVIDENCE_HASHES = {
     Path(
         "evidence/governance/slice-lifecycle-amendment-2026-07-11.md"
     ): "626fb11347d50e343b533db163bde8df8eb1e3242b91a013e3f6532d597ba808",
+    Path(
+        "evidence/v2/observation/"
+        "rejection-evidence-history-integrity-incident-2026-07-19.md"
+    ): "e8be2bda8ef79a3c294cf1f39c32ff5818bee55dbdb89dd6552d67660714e9cd",
 }
 PROGRAM_STATES = (
     "PLANNING",
@@ -1407,7 +1411,7 @@ def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
     checkbox_lines = [
         (line_number, line)
         for line_number, line in enumerate(tasks_text.splitlines(), 1)
-        if re.match(r"^- \[[^]]*\]\s+T?\d", line)
+        if re.match(r"^- \[[^]]*\]", line)
     ]
     entries = _task_entries(tasks_text)
     if len(entries) != len(checkbox_lines):
@@ -1456,15 +1460,83 @@ def _candidate_task_completion_errors(
     return errors
 
 
-SLICE_TASK_POLICIES: dict[str, tuple[int, tuple[frozenset[str], ...]]] = {
-    "020-v2-observation": (
-        153,
-        (
-            frozenset({"T103", "T152", "T153"}),
-            frozenset({"T103", "T153"}),
+@dataclass(frozen=True)
+class SliceTaskPolicy:
+    terminal: int
+    active_open_options: tuple[frozenset[str], ...]
+    superseded_by: tuple[tuple[str, str], ...] = ()
+    candidate_policy_baseline: str | None = None
+    candidate_policy_from_attempt: int = 2
+
+
+SLICE_TASK_POLICIES: dict[str, SliceTaskPolicy] = {
+    "020-v2-observation": SliceTaskPolicy(
+        terminal=160,
+        active_open_options=(
+            frozenset(
+                {
+                    "T103",
+                    "T154",
+                    "T155",
+                    "T156",
+                    "T157",
+                    "T158",
+                    "T159",
+                    "T160",
+                }
+            ),
+            frozenset({"T103", "T159", "T160"}),
+            frozenset({"T103", "T160"}),
         ),
+        superseded_by=(
+            ("T107", "T153"),
+            ("T112", "T153"),
+            ("T119", "T153"),
+            ("T124", "T153"),
+            ("T131", "T153"),
+            ("T140", "T153"),
+            ("T146", "T153"),
+            ("T153", "T160"),
+        ),
+        candidate_policy_baseline="abad8d85e8150bfd2716ab77ebb3791827591bf1",
     ),
 }
+
+
+_CANONICAL_TASK_START = re.compile(r"^- \[[ Xx]\] (T\d{3})\b", re.MULTILINE)
+
+
+def _task_blocks(tasks_text: str) -> dict[str, str]:
+    starts = list(_CANONICAL_TASK_START.finditer(tasks_text))
+    return {
+        match.group(1): tasks_text[
+            match.start() : starts[index + 1].start()
+            if index + 1 < len(starts)
+            else len(tasks_text)
+        ]
+        for index, match in enumerate(starts)
+    }
+
+
+def _candidate_slice_task_policy_errors(
+    dirname: str,
+    tasks_text: str,
+    *,
+    attempt_number: int,
+    policy_baseline_is_ancestor: bool,
+) -> list[str]:
+    """Bind successor candidates to the exact reviewed task-policy lineage."""
+
+    policy = SLICE_TASK_POLICIES.get(dirname)
+    if policy is None or attempt_number < policy.candidate_policy_from_attempt:
+        return []
+    errors = _slice_task_policy_errors(dirname, tasks_text, "CONVERGED")
+    if policy.candidate_policy_baseline and not policy_baseline_is_ancestor:
+        errors.append(
+            f"{dirname}: candidate attempt {attempt_number} must descend policy "
+            f"baseline {policy.candidate_policy_baseline}"
+        )
+    return errors
 
 
 def _slice_task_policy_errors(
@@ -1477,7 +1549,8 @@ def _slice_task_policy_errors(
         return []
     if slice_state not in {"ACTIVE", "CONVERGED", "HANDOFF_READY", "ACCEPTED"}:
         return []
-    terminal, active_open_options = policy
+    terminal = policy.terminal
+    active_open_options = policy.active_open_options
     try:
         entries = _validated_task_entries(tasks_text)
     except ValueError as exc:
@@ -1504,6 +1577,63 @@ def _slice_task_policy_errors(
     elif slice_state in {"CONVERGED", "HANDOFF_READY", "ACCEPTED"} and unchecked:
         errors.append(
             f"{dirname}/tasks.md: {slice_state} requires every task literally checked"
+        )
+
+    blocks = _task_blocks(tasks_text)
+    expected_superseded = dict(policy.superseded_by)
+    observed_superseded: dict[str, str] = {}
+    for task_id, block in blocks.items():
+        targets = re.findall(r"\bsuperseded\s+by\s+(T\d{3})\b", block, re.IGNORECASE)
+        if len(targets) > 1:
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {task_id} must name one exact successor"
+            )
+        elif targets:
+            observed_superseded[task_id] = targets[0].upper()
+    for historical_gate, successor in policy.superseded_by:
+        block = blocks.get(historical_gate, "")
+        if historical_gate not in completed:
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {historical_gate} must be literally checked"
+            )
+        if observed_superseded.get(historical_gate) != successor:
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {historical_gate} must name "
+                f"exact successor {successor}"
+            )
+        if successor not in ids:
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {historical_gate} names absent "
+                f"successor {successor}"
+            )
+        if int(successor[1:]) <= int(historical_gate[1:]):
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {historical_gate} successor "
+                f"{successor} must be later in the task graph"
+            )
+        retains_rejection = re.search(
+            r"\b(?:not approved|unapproved|remains rejected)\b",
+            block,
+            re.IGNORECASE,
+        )
+        negates_rejection = re.search(
+            r"\b(?:no longer|not)\s+(?:(?:still|remains?)\s+)?"
+            r"(?:rejected|unapproved|not approved)\b",
+            block,
+            re.IGNORECASE,
+        )
+        asserts_approval = re.search(
+            r"(?<!not )\bapproved\b", block, re.IGNORECASE
+        )
+        if not retains_rejection or negates_rejection or asserts_approval:
+            errors.append(
+                f"{dirname}/tasks.md: superseded gate {historical_gate} must retain "
+                "rejected/not-approved semantics"
+            )
+    if observed_superseded != expected_superseded:
+        errors.append(
+            f"{dirname}/tasks.md: supersession keys/targets must be exactly "
+            f"{expected_superseded}; observed {observed_superseded}"
         )
     return errors
 
@@ -1682,6 +1812,21 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
         return None
 
 
+def _git_bytes(root: Path, *args: str) -> subprocess.CompletedProcess[bytes] | None:
+    """Run fixed Git argv without text decoding or newline translation."""
+
+    try:
+        return subprocess.run(  # nosec B603 B607
+            ["git", "-C", str(root), *args],
+            check=False,
+            capture_output=True,
+            text=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _git_commit_exists(root: Path, commit: str) -> bool:
     """Fail closed unless *commit* exists in a real Git worktree."""
 
@@ -1737,6 +1882,13 @@ def _git_file_text(root: Path, commit: str, relative: Path) -> str | None:
     if completed is None or completed.returncode != 0:
         return None
     return completed.stdout.replace("\r\n", "\n")
+
+
+def _git_file_bytes(root: Path, commit: str, relative: Path) -> bytes | None:
+    completed = _git_bytes(root, "show", f"{commit}:{relative.as_posix()}")
+    if completed is None or completed.returncode != 0:
+        return None
+    return completed.stdout
 
 
 def _git_path_exists_at_commit(root: Path, commit: str, relative: Path) -> bool:
@@ -1847,7 +1999,170 @@ def _git_path_history_errors_since(
     return sorted(set(errors))
 
 
+def _git_path_immutable_since(
+    root: Path, relative: Path, *, baseline: str
+) -> list[str]:
+    """Require one path to remain byte-identical from a disclosed recovery baseline."""
+
+    if not _git_commit_exists(root, baseline):
+        return [f"{relative}: immutable recovery baseline {baseline} does not exist"]
+    if not _git_is_ancestor(root, baseline, "HEAD"):
+        return [
+            f"{relative}: immutable recovery baseline {baseline} is not an ancestor of HEAD"
+        ]
+    baseline_bytes = _git_file_bytes(root, baseline, relative)
+    if baseline_bytes is None:
+        return [f"{relative}: immutable recovery baseline {baseline} lacks the record"]
+    path = root / relative
+    if not path.is_file() or not _repo_path_is_safe(root, relative):
+        return [f"{relative}: immutable recovery-baseline record is missing or unsafe"]
+
+    history = _git(
+        root,
+        "log",
+        "--format=%H",
+        "--reverse",
+        f"{baseline}..HEAD",
+        "--",
+        relative.as_posix(),
+    )
+    if history is None or history.returncode != 0:
+        return [f"{relative}: cannot replay immutable recovery-baseline history"]
+
+    errors: list[str] = []
+    for commit in (line for line in history.stdout.splitlines() if line):
+        revision = _git_file_bytes(root, commit, relative)
+        if revision != baseline_bytes:
+            errors.append(
+                f"{relative}: changed after immutable recovery baseline {baseline} "
+                f"at {commit}"
+            )
+    if path.read_bytes() != baseline_bytes:
+        errors.append(
+            f"{relative}: working tree changed after immutable recovery baseline {baseline}"
+        )
+    return sorted(set(errors))
+
+
+def _git_path_immutable_from_introduction(root: Path, relative: Path) -> list[str]:
+    """Require exact bytes from the path's first commit through the working tree."""
+
+    history = _git(root, "log", "--format=%H", "--reverse", "--", relative.as_posix())
+    if history is None or history.returncode != 0:
+        return [f"{relative}: cannot replay immutable rejection history"]
+    commits = [line for line in history.stdout.splitlines() if line]
+    path = root / relative
+    if not commits:
+        return []
+    if not path.is_file() or not _repo_path_is_safe(root, relative):
+        return [f"{relative}: committed immutable rejection record is missing or unsafe"]
+
+    introduction = _git_file_bytes(root, commits[0], relative)
+    if introduction is None:
+        return [f"{relative}: immutable rejection record is absent at introduction"]
+
+    errors: list[str] = []
+    for commit in commits:
+        revision = _git_file_bytes(root, commit, relative)
+        if revision is None:
+            errors.append(f"{relative}: immutable rejection record was deleted at {commit}")
+        elif revision != introduction:
+            errors.append(f"{relative}: immutable rejection record was rewritten at {commit}")
+    if path.read_bytes() != introduction:
+        errors.append(f"{relative}: working tree rewrites immutable rejection record")
+    return sorted(set(errors))
+
+
 SLICE020_HANDOFF_RECOVERY_BASELINE = "a49313a5354259346e1089e759184b9f08735b37"
+
+SLICE020_REJECTION_RECOVERY_BASELINE = "abad8d85e8150bfd2716ab77ebb3791827591bf1"
+SLICE020_RECOVERED_REJECTION_PATH = Path(
+    "evidence/v2/observation/review-2026-07-19-80c1de2-late-rejection.md"
+)
+REJECTION_EVIDENCE_HASHES = {
+    Path(
+        "evidence/v2/observation/review-2026-07-19-5562004-binding-rejection.md"
+    ): "f92bfe05102216c0237e81a29ae964438354baa8bf72f2edf542219a83d7d389",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-5562004-late-rejection.md"
+    ): "c1efb0c70023a86ae53a93c4fad15a51a34d4669d129750bdc19a8c847b6f22c",
+    SLICE020_RECOVERED_REJECTION_PATH:
+        "6062ce5a1937314d5e74b4460cdf69985966953da58844fed2b309ca918b5015",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-a49313a-governance-rejection.md"
+    ): "54cbabacb9b85f398a1cc8284a9859a0a7b81a3a063fbd2a0804e05da05afb40",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-abad8d85-dual-rejection.md"
+    ): "3326342bd33986cfce22292b22161f9b8e6ab00e0b66030c3bb669d38002afdd",
+    Path(
+        "evidence/v2/observation/"
+        "review-2026-07-19-candidate-2-preparation-rejection.md"
+    ): "f4aeb0326cb5e01b67b9546b4504035c1a6ffe9ee7684d3520ab3d38a643ccf3",
+    Path(
+        "evidence/v2/observation/"
+        "review-2026-07-19-phase28-precommit-moving-tree-rejection.md"
+    ): "cb07e8c40129d322a4345ca1e4afecf66e97430b86050d0e5447da66a86849f5",
+    Path(
+        "evidence/v2/observation/"
+        "review-2026-07-19-phase25-hermes-22a0a1a-rejection.md"
+    ): "724bd20255c17da04d70ad7c52cd3622f7c58705beea385b205ae1fe0d52d544",
+    Path(
+        "evidence/v2/observation/"
+        "review-2026-07-19-phase26-hermes-2b10abb-rejection.md"
+    ): "d0576f76c022ebf887528dc16e0d45e27e371fb23d2ccc228f7f345666d71b33",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-cd8917c-codex-rejection.md"
+    ): "731002b1bbc956d75f6e904437e497ccd5e4f59068fc81cfc11cd13687e92210",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-f38a4fe-late-rejection.md"
+    ): "9014a164553493e0746fe2d08f5b0b35c2cdf92e350b008ef934c7a449706340",
+    Path(
+        "evidence/v2/observation/review-2026-07-19-ff3c5a2-rejection.md"
+    ): "0e5a5856129de0e751ce97e8d4e98dd6befb31583f8a63724d7a994ed4f7cb99",
+}
+REGISTERED_REJECTION_EVIDENCE = frozenset(REJECTION_EVIDENCE_HASHES)
+
+
+def check_rejection_evidence_history(root: Path) -> list[str]:
+    """Reject unregistered, deleted, or rewritten independent rejection records."""
+
+    evidence_root = root / "evidence" / "v2"
+    observed = frozenset(
+        path.relative_to(root)
+        for path in evidence_root.glob("**/review-*-rejection.md")
+        if path.is_file()
+    )
+    errors: list[str] = []
+    for relative in sorted(observed - REGISTERED_REJECTION_EVIDENCE):
+        errors.append(f"{relative}: rejection evidence is not registered as immutable")
+    for relative in sorted(REGISTERED_REJECTION_EVIDENCE - observed):
+        errors.append(f"{relative}: registered rejection evidence is missing")
+    for relative in sorted(REGISTERED_REJECTION_EVIDENCE & observed):
+        if not _repo_path_is_safe(root, relative, require_file=True):
+            errors.append(f"{relative}: registered rejection evidence path is unsafe")
+            continue
+        try:
+            observed_digest = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        except OSError as exc:
+            errors.append(f"{relative}: cannot read registered rejection evidence ({exc})")
+            continue
+        expected_digest = REJECTION_EVIDENCE_HASHES[relative]
+        if observed_digest != expected_digest:
+            errors.append(
+                f"{relative}: rejection evidence bytes must match registered SHA-256 "
+                f"{expected_digest}; observed {observed_digest}"
+            )
+        if relative == SLICE020_RECOVERED_REJECTION_PATH:
+            errors.extend(
+                _git_path_immutable_since(
+                    root,
+                    relative,
+                    baseline=SLICE020_REJECTION_RECOVERY_BASELINE,
+                )
+            )
+        else:
+            errors.extend(_git_path_immutable_from_introduction(root, relative))
+    return sorted(set(errors))
 
 
 def check_recovered_append_only_packets(root: Path) -> list[str]:
@@ -2376,6 +2691,22 @@ def _slice_lifecycle_evidence_errors(
                         committed_tasks,
                         tasks_complete=tasks_complete,
                         completed_task_ids=_clean_metadata(record, "Completed task IDs"),
+                    )
+                )
+                policy = SLICE_TASK_POLICIES[dirname]
+                policy_baseline_is_ancestor = bool(
+                    policy.candidate_policy_baseline
+                    and _git_commit_exists(root, commit)
+                    and _git_commit_exists(root, policy.candidate_policy_baseline)
+                    and _git_is_ancestor(root, policy.candidate_policy_baseline, commit)
+                )
+                errors.extend(
+                    f"{prefix}: {error}"
+                    for error in _candidate_slice_task_policy_errors(
+                        dirname,
+                        committed_tasks,
+                        attempt_number=attempt,
+                        policy_baseline_is_ancestor=policy_baseline_is_ancestor,
                     )
                 )
             elif _clean_metadata(record, "Completed task IDs") != _expected_task_ids:
@@ -3411,30 +3742,22 @@ def check_program(root: Path) -> list[str]:
                 activation_exists,
             )
         )
-        task_numbers: list[int] = []
-        for line_number, line in enumerate(tasks_text.splitlines(), 1):
-            if not line.startswith(("- [ ] T", "- [x] T", "- [X] T")):
-                continue
-            normalized_line = re.sub(r"^- \[[xX]\]", "- [ ]", line)
-            match = TASK_LINE.fullmatch(normalized_line)
-            if not match:
-                errors.append(
-                    f"{feature.relative_to(root)}/tasks.md:{line_number}: invalid task format"
-                )
-                continue
-            task_numbers.append(int(match.group(1)))
+        try:
+            task_entries = _validated_task_entries(tasks_text)
+        except ValueError as exc:
+            errors.append(f"{feature.relative_to(root)}/tasks.md: {exc}")
+            task_entries = ()
+        normalized_line_numbers = {
+            re.sub(r"^- \[[xX]\]", "- [ ]", line).rstrip(): line_number
+            for line_number, line in enumerate(tasks_text.splitlines(), 1)
+        }
+        for _task_id, normalized_line in task_entries:
             if MANAGED_REFERENCE.search(normalized_line):
+                line_number = normalized_line_numbers.get(normalized_line, 0)
                 errors.append(
-                    f"{feature.relative_to(root)}/tasks.md:{line_number}: product task targets managed path"
+                    f"{feature.relative_to(root)}/tasks.md:{line_number}: "
+                    "product task targets managed path"
                 )
-        if not task_numbers:
-            errors.append(
-                f"{feature.relative_to(root)}/tasks.md: slice must have a nonempty task manifest"
-            )
-        if task_numbers != list(range(1, len(task_numbers) + 1)):
-            errors.append(
-                f"{feature.relative_to(root)}/tasks.md: T identifiers must be sequential from T001"
-            )
 
         observed_interfaces = set(INTERFACE_ID.findall(combined))
         all_interface_ids.update(observed_interfaces)
@@ -4044,6 +4367,7 @@ def validate(root: Path, *, include_cli: bool = False) -> list[str]:
     errors.extend(check_active_execution_language(root))
     errors.extend(check_runtime_dependencies(root))
     errors.extend(check_recovered_append_only_packets(root))
+    errors.extend(check_rejection_evidence_history(root))
     if include_cli:
         errors.extend(check_cli(root))
     return sorted(set(errors))
@@ -4061,7 +4385,22 @@ def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]
     task_path = root / task_relative
     if not _repo_path_is_safe(root, task_relative, require_file=True):
         raise ValueError("bound slice tasks.md is missing or unsafe")
-    entries = _validated_task_entries(task_path.read_text(encoding="utf-8"))
+    task_text = task_path.read_text(encoding="utf-8")
+    entries = _validated_task_entries(task_text)
+    policy = SLICE_TASK_POLICIES.get(Path(slice_directory).name)
+    if policy is not None:
+        state_match = re.search(
+            r"^\*\*Slice state\*\*: `(ACTIVE|CONVERGED|HANDOFF_READY|ACCEPTED)`$",
+            task_text,
+            re.MULTILINE,
+        )
+        if state_match is None:
+            raise ValueError("bound slice tasks.md has no valid Slice state declaration")
+        policy_errors = _slice_task_policy_errors(
+            Path(slice_directory).name, task_text, state_match.group(1)
+        )
+        if policy_errors:
+            raise ValueError(policy_errors[0])
     task_ids, digest = _task_manifest(entries)
     return task_ids, digest
 

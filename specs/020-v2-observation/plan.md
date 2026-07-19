@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19; Phase 11 residual around-fetch truthfulness correction binding, 2026-07-19; Phase 11 (T054) implemented and closed, 2026-07-19; Phase 12 attempt-1 integrator-rejection rework bound, 2026-07-19; documentation-impact matrix split to one row per exact file with its single accepting owner, 2026-07-19) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19; Phase 11 residual around-fetch truthfulness correction binding, 2026-07-19; Phase 11 (T054) implemented and closed, 2026-07-19; Phase 12 attempt-1 integrator-rejection rework bound, 2026-07-19; documentation-impact matrix split to one row per exact file with its single accepting owner, 2026-07-19; Phase 28 candidate-bound task and rejection-authority correction, 2026-07-19) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -111,6 +111,24 @@ append-only rejection is in `evidence/v2/observation/slice-handoff.md`.
 Phase 12 (T055–T059) is the complete correction owed before candidate attempt
 2; the original activation is retained and the slice returns to `ACTIVE`.
 
+Phase 27 exact object `abad8d85e8150bfd2716ab77ebb3791827591bf1`
+was subsequently rejected by both independent implementation and governance
+review. Phase 28 (T154–T160) preserves those verdicts and closes four authority
+gaps before any candidate attempt 2: every top-level checkbox row is canonical
+or rejected; the candidate commit itself must carry the exact T001–T160 graph
+and descend `abad8d85`; shared lifecycle owns the complete supersession chain
+and rejected/not-approved semantics; and every rejection record is registered
+immutable, with the disclosed `80c1de2` rewrite pinned from recovery baseline
+`abad8d85`. T159 also reconciles only the valid product/evaluation mechanisms
+from parallel lineage `3e38a70`: caller-memory receipt coverage already met by
+the stronger private-issued-document path, relation-gap truth for every returned
+snapshot/page event, normalized host-attested restart-gap truth, final mutated
+S13 page validation, and deterministic reply-before-thread relation priority.
+Its review artifacts are preserved, while its unsupported `HANDOFF_READY`,
+candidate-attempt, and handoff lifecycle records are not imported. The slice
+remains `ACTIVE`; no existing candidate or handoff record is revived by this
+correction.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -151,21 +169,23 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T151 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps, disclosed packet-history corruption with a new enforced recovery baseline, exact closed host context, an all-changed-path scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request/handle-ID uniqueness, one-shot provider-issued receipt attestation from stable private documents, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and shared lifecycle-bound literal task truth. |
+| Truthful identity/observation | PASS | T083–T158 plus the implemented reconciliation portion of T159 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps for every returned snapshot/page event, normalized restart-gap truth, final-page validation, deterministic relation priority, disclosed packet-history corruption with enforced recovery baselines, exact closed host context, an all-changed-path scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request/handle-ID uniqueness, one-shot provider-issued receipt attestation from stable private documents, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, candidate-bound exact task identity, shared supersession truth, and immutable registered rejection evidence. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T152–T153) | Phase 27 RED/GREEN proves shared literal completion, exact terminal task identity, all-path scanner scope, and recovery-baseline packet integrity locally. T152 must settle the complete matrix and immutable scan; T153 must obtain fresh exact-object implementation and governance reviews. |
+| Evidence before claims | BLOCKED (T159–T160) | Phase 28 RED/GREEN proves malformed-task rejection, candidate-attempt-2 lineage/graph binding, shared supersession authority, immutable rejection-history enforcement, and selective parallel-lineage product/eval reconciliation locally. T159 must finish immutable freeze and whole-range exact scanning of the final object; T160 must obtain fresh exact-object implementation and governance reviews. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 27 T152–T153. Runtime, ordering,
+Post-design re-check: BLOCKED on Phase 28 T159–T160. Runtime, ordering,
 input, corpus-byte, request/handle uniqueness, stable receipt authority,
 caller-memory, early-resource, continuation/comparator authority, relation-gap,
-lifetime timestamp, shared literal task authority, all-path scanning, and
-recovery-baseline packet integrity are locally GREEN. The complete exact-tree
-matrix, new immutable object, exact whole-range scan, and fresh independent
-implementation/governance verdicts remain required. This status grants no
-acceptance or cutover authority.
+restart-gap and final-page-evaluation truth, deterministic relation priority,
+lifetime timestamp, exact T001–T160 task authority, candidate-lineage binding,
+shared supersession truth, all-path scanning, packet recovery-baseline integrity,
+and immutable rejection-history enforcement are locally GREEN. The complete
+exact-tree matrix, new immutable object, exact whole-range scan, and fresh
+independent implementation/governance verdicts remain required. This status
+grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

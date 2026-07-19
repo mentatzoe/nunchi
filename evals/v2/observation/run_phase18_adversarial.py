@@ -1,4 +1,4 @@
-"""Reproducible Phase 18/23/25/26 authority and resource evidence.
+"""Reproducible Phase 18/23/25/26/28 authority and resource evidence.
 
 This runner executes the deterministic barrier-controlled regression cases and
 emits one JSONL row per mechanism plus explicit N/2N deque-visit metrics.
@@ -30,6 +30,8 @@ from tests.v2.observation.test_continuation_authority import (
     TestReceiptCallerMemoryAuthority,
     TestRelationGapTruth,
 )
+from tests.v2.observation.test_eval_scenes import TestEvalScenesAllPass
+from tests.v2.observation.test_recoverability import TestKnownGapVariant
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = REPO_ROOT / "evidence/v2/observation/phase18-adversarial.jsonl"
@@ -68,6 +70,11 @@ CASES = (
     ("P26-RECEIPT-001", TestReceiptCallerMemoryAuthority, "test_receipt_attests_private_issued_document_after_caller_mutation"),
     ("P26-RECEIPT-002", TestReceiptCallerMemoryAuthority, "test_receipt_copy_failure_does_not_consume_pending_authority"),
     ("P26-TIME-001", TestLifetimeTimestampWatermark, "test_undated_eviction_cannot_erase_parseable_time_order"),
+    ("P28-RECON-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_nearby_returned_relation_target_absence_is_reported_as_a_gap"),
+    ("P28-RECON-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_continuation_reports_relation_gaps_for_every_returned_event"),
+    ("P28-RECON-RESTART-001", TestKnownGapVariant, "test_known_gap_variant_reports_the_dropped_tail_honestly"),
+    ("P28-RECON-EVAL-001", TestEvalScenesAllPass, "test_equivalence_validates_final_pages_at_comparison_seam"),
+    ("P28-RECON-ORDER-001", TestSharedContinuationAuthorityAndRelationGaps, "test_capped_trigger_relation_priority_is_hash_seed_independent"),
 )
 
 

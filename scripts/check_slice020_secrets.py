@@ -14,9 +14,9 @@ Matcher set (deliberately high confidence):
 3. GitHub ``gh[pousr]_`` tokens with at least 20 token characters.
 4. Long quoted values assigned to explicit key/secret/token variable names.
 
-The literal marker ``slice020-secret-fixture`` suppresses only its own added
-source line. It exists solely for synthetic detector fixtures; production and
-evidence lines have no broad path- or file-level allowlist.
+The scanner recognizes no fixture marker or source-line exemption. Synthetic
+detector fixtures construct matcher-shaped values dynamically so the scanner's
+own committed source remains subject to the same all-path policy.
 """
 
 from __future__ import annotations

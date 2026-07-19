@@ -1356,3 +1356,62 @@ Git object cannot contain its own identity or post-commit scanner receipt. T103
 and T153 remain the only final review/umbrella gates. Nothing here establishes
 `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
 promotion, or cutover authority.
+
+## Phase 28 candidate-bound authority and selective lineage reconciliation (T154–T160)
+
+**Date**: 2026-07-19
+**Rejected source**: `abad8d85e8150bfd2716ab77ebb3791827591bf1`
+**Parallel product source**: `3e38a70d634093a26ffbb6c460b9cf51fb81636b`
+**Merge base**: `22a0a1ab9a996e82ec625ce73e301023889209e4`
+**Current state**: `ACTIVE`; no candidate-attempt-2 or handoff authority
+
+Two independent reviews rejected `abad8d85`; their combined exact findings are
+preserved in `review-2026-07-19-abad8d85-dual-rejection.md`. Phase 28 closes the
+reported task/candidate/supersession/rejection-history authority gaps while
+preserving the disclosed historical `80c1de2` rewrite from recovery baseline
+`abad8d85` rather than laundering it away.
+
+`3e38a70` is not a descendant of the rejected governance lineage. Its
+`HANDOFF_READY`, candidate-attempt-2, and handoff claims were therefore not
+imported. Its exact Phase 25–27 review artifacts were preserved, and only the
+validated product/evaluation mechanisms were carried: returned-event and
+continuation relation-gap truth, normalized restart-gap truth, final mutated S13
+page validation, deterministic relation priority, and matching tests/docs/eval
+rows. The stronger private-issued receipt authority and permanent fixed-memory
+handle non-reuse from the `abad8d85` lineage remain intact.
+
+Pre-correction governance/task-state RED: 77 tests, 10 failures, 4 errors.
+Selective-reconciliation RED: 28 tests, 10 failures, 2 errors. Both focused
+commands are now GREEN. Final pre-freeze matrix after packet updates:
+
+| Gate | Result |
+|---|---|
+| full repository | 1,467 tests, OK; 4 optional-integration skips |
+| Observation discovery | 207 tests, OK |
+| governance + literal task state | 80 tests, OK |
+| static scanner | 6 tests, OK |
+| aggregate evidence | 53 rows, 0 FAIL |
+| adversarial evidence | 39 rows, 0 FAIL |
+| corpus conformance | 6 tests; 202/202; exact framed digest GREEN |
+| executable docs | 14 tests, OK |
+| Ruff / expanded Bandit / governance CLI / diff check | clean |
+| task graph | T001–T160; SHA-256 `7733ed9894f44a063db1a6dcad7c4c79f0d64256b2054c5041c92d3baff84d32` |
+| literal task state | checked 157; open T103/T159/T160; eight historical review gates superseded |
+
+T159 remains open until the final tree is reverified, frozen, pushed, and scanned
+as an immutable object. T160 and T103 remain fresh exact-object review gates.
+Nothing here establishes `CONVERGED`, `HANDOFF_READY`, acceptance, integration,
+deployment, release, promotion, or cutover authority.
+
+### Phase 28 moving-tree precommit rejection
+
+The read-only working-tree review in
+`review-2026-07-19-phase28-precommit-moving-tree-rejection.md` is preserved as a
+rejection, not converted into approval. It found one novel authority defect:
+supersession text could contain the required negative phrase while negating it
+and asserting current approval. The exact attack is now a RED→GREEN regression;
+shared policy rejects negated rejection language and positive approval
+assertions. Its other stale-artifact/count findings were closed by regenerating
+39 non-duplicate adversarial rows and rerunning the 1,467-test matrix. Because
+the reviewed working tree moved, this verdict authorizes no lifecycle advance;
+fresh review must target an immutable successor SHA.

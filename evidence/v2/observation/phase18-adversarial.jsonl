@@ -31,4 +31,9 @@
 {"case_id": "P26-RECEIPT-001", "detail": "", "result": "PASS", "test": "TestReceiptCallerMemoryAuthority.test_receipt_attests_private_issued_document_after_caller_mutation"}
 {"case_id": "P26-RECEIPT-002", "detail": "", "result": "PASS", "test": "TestReceiptCallerMemoryAuthority.test_receipt_copy_failure_does_not_consume_pending_authority"}
 {"case_id": "P26-TIME-001", "detail": "", "result": "PASS", "test": "TestLifetimeTimestampWatermark.test_undated_eviction_cannot_erase_parseable_time_order"}
+{"case_id": "P28-RECON-GAP-001", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_nearby_returned_relation_target_absence_is_reported_as_a_gap"}
+{"case_id": "P28-RECON-GAP-002", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_continuation_reports_relation_gaps_for_every_returned_event"}
+{"case_id": "P28-RECON-RESTART-001", "detail": "", "result": "PASS", "test": "TestKnownGapVariant.test_known_gap_variant_reports_the_dropped_tail_honestly"}
+{"case_id": "P28-RECON-EVAL-001", "detail": "", "result": "PASS", "test": "TestEvalScenesAllPass.test_equivalence_validates_final_pages_at_comparison_seam"}
+{"case_id": "P28-RECON-ORDER-001", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_capped_trigger_relation_priority_is_hash_seed_independent"}
 {"case_id": "P18-RESOURCE-METRICS", "deque_visits_2n": 0, "deque_visits_n": 0, "detail": "cursor replay excludes fresh-page setup and counts retained-deque iteration", "linear_bound": 8, "n": 64, "result": "PASS", "two_n": 128}

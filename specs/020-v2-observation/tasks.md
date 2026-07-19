@@ -1207,23 +1207,26 @@ packet can be laundered into candidate or handoff authority.
 `evidence/v2/observation/review-2026-07-19-abad8d85-dual-rejection.md`,
 P28-H1 through P28-H4 and the stale scanner-documentation finding.
 
-- [ ] T154 Preserve both exact `abad8d85` rejection verdicts and independently
+- [X] T154 Preserve both exact `abad8d85` rejection verdicts and independently
   reproduce malformed TASK/T-space rows, missing/extra candidate terminal graphs,
   shared stale-successor acceptance, and rejection-record erasure with RED tests
-- [ ] T155 Make every top-level checkbox-shaped row in a bound tasks file either
+- [X] T155 Make every top-level checkbox-shaped row in a bound tasks file either
   canonical or a hard parse error; bind `--task-manifest` and the standalone
   diagnostic to exact Slice 020 policy as well as shared lifecycle validation
-- [ ] T156 Require candidate attempt 2 and later to descend the Phase 27 policy
+- [X] T156 Require candidate attempt 2 and later to descend the Phase 27 policy
   baseline and make the referenced candidate commit itself pass exact terminal,
   literal-completion, and supersession policy under `CONVERGED`
-- [ ] T157 Move the complete supersession chain into shared lifecycle policy:
+- [X] T157 Move the complete supersession chain into shared lifecycle policy:
   exact keys/targets, increasing target order, checked historical gate, and
   durable rejected/not-approved semantics; make the diagnostic consume that policy
-- [ ] T158 Register every rejection record as immutable from introduction, pin the
+- [X] T158 Register every rejection record as immutable from introduction, pin the
   disclosed `80c1de2` recovery bytes from `abad8d85`, reject deletion/unregistered
   additions/rewrites, and correct the scanner docstring's removed suppression claim
-- [ ] T159 Update current packet/plan/evidence, rerun the complete matrix, exact-scan
-  the whole activation range, and freeze/push one immutable T001–T160 review object
+- [ ] T159 Reconcile the valid product/evaluation mechanisms from parallel
+  `3e38a70` without importing its unsupported lifecycle claim or weakening the
+  `abad8d85` governance/rejection history; update the current packet/plan/evidence,
+  rerun the complete matrix, exact-scan the whole activation range, and
+  freeze/push one immutable T001–T160 review object
 - [ ] T160 Obtain fresh independent implementation and governance reviews of that
   exact object; fix every CRITICAL/HIGH blocker before closing T103 or creating
   candidate-attempt-2 or handoff lifecycle records

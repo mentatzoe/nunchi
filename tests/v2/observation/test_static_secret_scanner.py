@@ -53,6 +53,13 @@ class TestSlice020SecretScanner(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].matcher, "openai-style-key")
 
+    def test_scanner_docstring_declares_no_fixture_exemption(self):
+        from scripts import check_slice020_secrets
+
+        documentation = check_slice020_secrets.__doc__ or ""
+        self.assertIn("recognizes no fixture marker or source-line exemption", documentation)
+        self.assertNotIn("suppresses only its own added source line", documentation)
+
     def test_removed_secret_and_regex_matcher_source_are_not_findings(self):
         from scripts.check_slice020_secrets import scan_added_lines
 

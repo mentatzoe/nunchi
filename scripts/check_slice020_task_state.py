@@ -14,32 +14,31 @@ from pathlib import Path
 import re
 
 try:
-    from scripts.check_governance import _validated_task_entries
+    from scripts.check_governance import (
+        SLICE_TASK_POLICIES,
+        _literal_completed_task_ids,
+        _slice_task_policy_errors,
+        _validated_task_entries,
+    )
 except ModuleNotFoundError:  # direct ``python3 scripts/...`` execution
-    from check_governance import _validated_task_entries
+    from check_governance import (  # type: ignore[no-redef]
+        SLICE_TASK_POLICIES,
+        _literal_completed_task_ids,
+        _slice_task_policy_errors,
+        _validated_task_entries,
+    )
 
 
-TERMINAL_TASK_NUMBER = 153
+_POLICY = SLICE_TASK_POLICIES["020-v2-observation"]
+TERMINAL_TASK_NUMBER = _POLICY.terminal
 EXPECTED_IDS = tuple(f"T{number:03d}" for number in range(1, TERMINAL_TASK_NUMBER + 1))
-ACTIVE_OPEN_OPTIONS = (
-    frozenset({"T103", "T152", "T153"}),
-    frozenset({"T103", "T153"}),
-)
-SUPERSEDED_BY = {
-    "T107": "T153",
-    "T112": "T153",
-    "T119": "T153",
-    "T124": "T153",
-    "T131": "T153",
-    "T140": "T153",
-    "T146": "T153",
-}
+ACTIVE_OPEN_OPTIONS = _POLICY.active_open_options
+SUPERSEDED_BY = dict(_POLICY.superseded_by)
 _TASK_MARK = re.compile(r"^- \[([ Xx])\] (T\d{3})\b", re.MULTILINE)
 _SLICE_STATE = re.compile(
     r"^\*\*Slice state\*\*: `(ACTIVE|CONVERGED|HANDOFF_READY|ACCEPTED)`$",
     re.MULTILINE,
 )
-_TASK_START = re.compile(r"^- \[[ Xx]\] (T\d{3})\b", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -50,58 +49,32 @@ class TaskState:
     open_ids: frozenset[str]
 
 
-def _task_blocks(text: str) -> dict[str, str]:
-    starts = list(_TASK_START.finditer(text))
-    return {
-        match.group(1): text[
-            match.start() : starts[index + 1].start() if index + 1 < len(starts) else len(text)
-        ]
-        for index, match in enumerate(starts)
-    }
-
-
 def evaluate_task_state(path: Path) -> TaskState:
     text = path.read_text(encoding="utf-8")
     entries = _validated_task_entries(text)
     ids = tuple(task_id for task_id, _line in entries)
     if ids != EXPECTED_IDS:
-        raise ValueError("Slice 020 task manifest must contain exactly T001 through T153")
+        raise ValueError(
+            f"Slice 020 task manifest must contain exactly T001 through "
+            f"T{TERMINAL_TASK_NUMBER:03d}"
+        )
 
     marks = {task_id: mark for mark, task_id in _TASK_MARK.findall(text)}
     if tuple(marks) != EXPECTED_IDS:
         raise ValueError("literal task marks do not match the exact terminal manifest")
-    checked = frozenset(task_id for task_id, mark in marks.items() if mark.lower() == "x")
+    completed_text = _literal_completed_task_ids(text)
+    checked = frozenset(item for item in completed_text.split(", ") if item)
     unchecked = frozenset(EXPECTED_IDS) - checked
-
-    blocks = _task_blocks(text)
-    for historical_gate, successor in SUPERSEDED_BY.items():
-        block = blocks.get(historical_gate, "")
-        if historical_gate not in checked:
-            raise ValueError(f"superseded gate {historical_gate} must be literally checked")
-        if not re.search(
-            rf"superseded\s+by\s+{re.escape(successor)}\b", block, re.IGNORECASE
-        ):
-            raise ValueError(
-                f"superseded gate {historical_gate} must name exact successor {successor}"
-            )
-        if successor not in ids:
-            raise ValueError(
-                f"superseded gate {historical_gate} names absent successor {successor}"
-            )
 
     state_match = _SLICE_STATE.search(text)
     if state_match is None:
         raise ValueError("missing or invalid Slice state declaration")
     lifecycle_state = state_match.group(1)
-    expected_open_options = (
-        ACTIVE_OPEN_OPTIONS if lifecycle_state == "ACTIVE" else (frozenset(),)
+    policy_errors = _slice_task_policy_errors(
+        "020-v2-observation", text, lifecycle_state
     )
-    if unchecked not in expected_open_options:
-        raise ValueError(
-            f"{lifecycle_state} literal open task IDs must be one of "
-            f"{[sorted(option) for option in expected_open_options]}; "
-            f"observed {sorted(unchecked)}"
-        )
+    if policy_errors:
+        raise ValueError(policy_errors[0])
 
     return TaskState(
         all_ids=ids,

@@ -258,11 +258,14 @@ class TestFailClosedOrderingAndConfiguration(unittest.TestCase):
             "names": ["Vigil", 7],
             "room_kind": 7,
             "event_visibility": {"message": "bogus"},
+            "has_restart_gap": "yes",
         }
         for field, value in invalid_overrides.items():
             with self.subTest(field=field):
                 with self.assertRaises(ValueError):
                     make_provider(**{field: value})
+        with self.assertRaisesRegex(ValueError, "unknown continuity"):
+            make_provider(continuity="unknown", has_restart_gap=True)
 
 
 class TestNoSocialLedger(unittest.TestCase):

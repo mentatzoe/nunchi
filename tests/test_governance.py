@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import check_governance
 
@@ -879,6 +881,21 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             )
         )
+        contradictory_disposition = self._slice020_policy_tasks(complete=True).replace(
+            "exact object remains rejected",
+            "exact object no longer remains rejected and is now approved",
+        )
+        self.assertTrue(
+            any(
+                "rejected/not-approved semantics" in error
+                for error in check_governance._candidate_slice_task_policy_errors(
+                    "020-v2-observation",
+                    contradictory_disposition,
+                    attempt_number=2,
+                    policy_baseline_is_ancestor=True,
+                )
+            )
+        )
 
     def test_candidate_attempt_two_binds_policy_baseline_and_exact_commit_graph(self):
         complete = self._slice020_policy_tasks(complete=True)
@@ -915,6 +932,80 @@ class GovernanceBoundaryTests(unittest.TestCase):
                     attempt_number=2,
                     policy_baseline_is_ancestor=False,
                 )
+            )
+        )
+
+    def test_candidate_attempt_two_is_enforced_by_lifecycle_validator(self):
+        dirname = "020-v2-observation"
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        paths = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname]
+        complete = self._slice020_policy_tasks(complete=True)
+        stale = complete.replace(
+            "T153 Close historical gate explicitly superseded by T160",
+            "T153 Close historical gate explicitly superseded by T159",
+        )
+        complete_ids, complete_hash = self._task_fields(complete)
+        stale_ids, stale_hash = self._task_fields(stale)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            tasks = root / "specs" / dirname / "tasks.md"
+            tasks.parent.mkdir(parents=True)
+            tasks.write_text(complete, encoding="utf-8")
+            result_path = root / "evidence/v2/observation/results.json"
+            result_path.parent.mkdir(parents=True)
+            result_path.write_text("{}\n", encoding="utf-8")
+            first_commit = self._commit_all(root, "candidate attempt one")
+
+            tasks.write_text(stale, encoding="utf-8")
+            second_commit = self._commit_all(root, "candidate attempt two")
+
+            candidate = root / paths["candidate"]
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(
+                f"""# Candidate attempts
+**Slice**: `{dirname}`
+**Status**: CONVERGED
+**Candidate commit**: `{first_commit}`
+**Tasks complete**: YES
+**Completed task IDs**: {complete_ids}
+**Tasks SHA256**: {complete_hash}
+**Verification commands / results**: PASS — historical attempt
+**Interface versions**: I-020A at version 1
+**Evidence paths**: evidence/v2/observation/results.json
+**Known limitations**: rejected historical attempt
+
+**Slice**: `{dirname}`
+**Status**: CONVERGED
+**Candidate commit**: `{second_commit}`
+**Tasks complete**: YES
+**Completed task IDs**: {stale_ids}
+**Tasks SHA256**: {stale_hash}
+**Verification commands / results**: PASS — attempted successor
+**Interface versions**: I-020A at version 1
+**Evidence paths**: evidence/v2/observation/results.json
+**Known limitations**: exact review still required
+""",
+                encoding="utf-8",
+            )
+
+            errors = check_governance._slice_lifecycle_evidence_errors(
+                root,
+                dirname,
+                expected,
+                "ACTIVE",
+                "v2-observation-owner — delegated implementation authority",
+                self._slice020_policy_tasks(),
+            )
+
+        self.assertTrue(
+            any("attempt 2" in error and "policy baseline" in error for error in errors)
+        )
+        self.assertTrue(
+            any(
+                "attempt 2" in error and "superseded gate T153" in error
+                for error in errors
             )
         )
 
@@ -1196,6 +1287,15 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 ),
                 [],
             )
+            path.write_bytes(b"# REJECT\r\n")
+            self.assertTrue(
+                any(
+                    "working tree changed" in error
+                    for error in check_governance._git_path_immutable_since(
+                        root, relative, baseline=baseline
+                    )
+                )
+            )
             path.write_text("# REJECT\nrewritten\n", encoding="utf-8")
             self.assertTrue(
                 any(
@@ -1212,7 +1312,108 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             )
 
+    def test_rejection_history_is_byte_immutable_from_introduction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            relative = Path("evidence/v2/observation/review-test-rejection.md")
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"# REJECT\n")
+            self._commit_all(root, "introduce rejection")
+
+            self.assertEqual(
+                check_governance._git_path_immutable_from_introduction(root, relative),
+                [],
+            )
+            path.write_bytes(b"# REJECT\r\n")
+            self.assertTrue(
+                any(
+                    "working tree rewrites" in error
+                    for error in check_governance._git_path_immutable_from_introduction(
+                        root, relative
+                    )
+                )
+            )
+            path.write_bytes(b"# REJECT\nrewritten\n")
+            self._commit_all(root, "rewrite rejection")
+            self.assertTrue(
+                any(
+                    "was rewritten" in error
+                    for error in check_governance._git_path_immutable_from_introduction(
+                        root, relative
+                    )
+                )
+            )
+
+    def test_rejection_registry_rejects_rewrite_delete_and_unregistered_addition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            relative = Path("evidence/v2/observation/review-test-rejection.md")
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            content = b"# REJECT\n"
+            path.write_bytes(content)
+            self._commit_all(root, "introduce registered rejection")
+            hashes = {relative: hashlib.sha256(content).hexdigest()}
+
+            with (
+                patch.object(check_governance, "REJECTION_EVIDENCE_HASHES", hashes),
+                patch.object(
+                    check_governance,
+                    "REGISTERED_REJECTION_EVIDENCE",
+                    frozenset(hashes),
+                ),
+                patch.object(
+                    check_governance,
+                    "SLICE020_RECOVERED_REJECTION_PATH",
+                    Path("not-the-test-record.md"),
+                ),
+            ):
+                self.assertEqual(
+                    check_governance.check_rejection_evidence_history(root), []
+                )
+
+                extra = path.with_name("review-extra-rejection.md")
+                extra.write_bytes(b"# REJECT EXTRA\n")
+                self.assertTrue(
+                    any(
+                        "not registered" in error
+                        for error in check_governance.check_rejection_evidence_history(
+                            root
+                        )
+                    )
+                )
+                extra.unlink()
+
+                path.write_bytes(b"# REJECT\r\n")
+                self.assertTrue(
+                    any(
+                        "registered SHA-256" in error or "working tree rewrites" in error
+                        for error in check_governance.check_rejection_evidence_history(
+                            root
+                        )
+                    )
+                )
+                path.unlink()
+                self.assertTrue(
+                    any(
+                        "registered rejection evidence is missing" in error
+                        for error in check_governance.check_rejection_evidence_history(
+                            root
+                        )
+                    )
+                )
+
     def test_registered_rejection_evidence_history_is_clean(self):
+        self.assertIn(
+            Path(
+                "evidence/v2/observation/"
+                "rejection-evidence-history-integrity-incident-2026-07-19.md"
+            ),
+            check_governance.HISTORICAL_EVIDENCE_HASHES,
+        )
         self.assertEqual(check_governance.check_rejection_evidence_history(ROOT), [])
 
     def test_assignment_rejects_symlinked_ancestor(self):

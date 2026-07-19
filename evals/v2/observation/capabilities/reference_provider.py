@@ -59,13 +59,16 @@ class ReferenceProvider:
     def simulate_restart(self) -> None:
         """Rebuild the provider and replay whatever this variant recovers."""
         self.restart_count += 1
-        self.provider = ObservationProvider(**self._provider_kwargs)
         recovered_count = round(len(self.room_state.persisted) * self.backfill_fraction)
         recovered = self.room_state.persisted[:recovered_count]
         dropped = self.room_state.persisted[recovered_count:]
         self.known_gap_event_ids = {
             item["event"]["id"] for item in dropped if item.get("disposition") == "candidate-event"
         }
+        restart_kwargs = dict(self._provider_kwargs)
+        if self.continuity != "unknown":
+            restart_kwargs["has_restart_gap"] = bool(self.known_gap_event_ids)
+        self.provider = ObservationProvider(**restart_kwargs)
         for native_event_input in recovered:
             self.provider.ingest(native_event_input)
 

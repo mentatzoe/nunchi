@@ -23,7 +23,9 @@ implicit.
 - **Bounded snapshot (FR-006, FR-007)**: trigger, then exact relation
   closure, then nearby fill, under hard `max_events`/`max_bytes`/optional
   `max_age_seconds` caps, in authoritative (ingestion) order; `coverage`
-  reports every limit that actually excluded a candidate.
+  reports every limit that actually excluded a candidate, relation gaps from
+  every returned snapshot/page event, and host-attested restart loss on the
+  normalized wire rather than only in evaluator side state.
 - **Continuation (FR-008, FR-009)**: optional, host-owned, opaque,
   bound to participant/room/continuity-scope/trigger; a fetch request
   carries no inline binding fields, while the host context must exactly equal
@@ -69,14 +71,17 @@ implicit.
 Total: 53 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18/23/25/26 authority/resource evidence
+## Phase 18/23/25/26/28 authority/resource evidence
 
-`phase18-adversarial.jsonl` contains 34 deterministic PASS rows: five
+`phase18-adversarial.jsonl` contains 39 deterministic PASS rows: five
 barrier-controlled continuation atomicity cases, three retention-gap coverage
 cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
 four preserved Phase 25 provider-wide continuation-authority/relation-gap cases,
 fifteen Phase 26 comparator/permanent-handle/receipt/timestamp/direct-concurrency
-cases, plus one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
+cases, five selectively reconciled product/evaluation cases from the parallel
+`3e38a70` lineage (nearby/continuation relation gaps, normalized restart-gap
+truth, final-page validation, and hash-seed-independent relation
+priority), plus one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
 after initial window creation are 0 and 0; an over-limit fresh fetch also records
 zero retained-deque visits. Reproduce with:
 
@@ -84,18 +89,30 @@ zero retained-deque visits. Reproduce with:
 PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
 ```
 
-## Literal task-state evidence
+## Literal task-state and rejection-history evidence
 
 Shared governance preserves normalized checkbox-independent graph hashing while
-separately enforcing literal completion and the exact Slice 020 terminal
-manifest at lifecycle transitions. The slice-owned diagnostic uses the same
-canonical parser, has no caller-controlled open-task allowlist, validates every
-historical review successor, and reports checked, superseded, and open IDs:
+separately enforcing literal completion and the exact Slice 020 T001–T160
+terminal manifest at current and candidate lifecycle transitions. Candidate
+attempt 2 and later must descend rejected Phase 27 object `abad8d85` and the
+referenced commit itself must satisfy the exact `CONVERGED` graph policy. The
+complete T107/T112/T119/T124/T131/T140/T146→T153→T160 supersession chain,
+checked-gate state, increasing successor order, and durable rejected/not-approved
+semantics live in that shared policy. The slice-owned diagnostic imports the same
+policy and reports checked, superseded, and open IDs:
 
 ```sh
 python3 scripts/check_slice020_task_state.py \
   --tasks specs/020-v2-observation/tasks.md
 ```
+
+Every `review-*-rejection.md` record is explicitly registered and replayed as
+byte-immutable from introduction, with an exact SHA-256 pinned in source. The
+disclosed historical byte rewrite of
+`review-2026-07-19-80c1de2-late-rejection.md` is not erased: governance pins its
+exact recovery bytes from `abad8d85` and rejects deletion or any later change.
+Unregistered rejection additions fail the governance boundary, and the incident
+record describing the historical violation is itself hash-pinned.
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)
 
