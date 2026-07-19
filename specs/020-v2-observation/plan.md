@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19; Phase 11 residual around-fetch truthfulness correction binding, 2026-07-19) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -72,6 +72,23 @@ contract above. Durable correction sources are
 `evidence/v2/observation/convergence-2026-07-19.md` and
 `evidence/v2/observation/pre-review-2026-07-19-sr-critic.md`.
 
+A same-day post-T053 `/speckit-converge` re-run against the completed
+T001–T053 tree found one residual CRITICAL defect, F1, in the Phase 10
+(T049/T050) `around`-fetch side-coverage fix itself: `ContinuationProvider.fetch`
+tracks the ascending-scan cap-truncation index (`next_index`) as an
+after-side-only signal and derives `has_more_before` from the fixed radius
+window boundary alone (`around_window_start > 0`); a per-fetch event/byte cap
+that truncates the scan at a candidate index strictly before `anchor_index`
+therefore still reports `has_more_before: False` even though a genuine
+unserved before-anchor event exists. This is bound as Phase 11 (T054) in
+`tasks.md`, remains unchecked and unimplemented as of this planning pass, and
+must track which side of `anchor_index` a cap actually truncated at — in
+addition to, not instead of, the existing window-boundary checks — before a
+new candidate is proposed. The finding is durably recorded at
+`evidence/v2/observation/convergence-phase11-2026-07-19.md` against exact
+candidate commit `77a94cf1f56e70d1f0a79631ee9efba0b6e74a62`; T054 is the sole
+implementation/evidence correction owed by that record.
+
 ## Technical Context
 
 **Language/Version**: Python 3.11+
@@ -112,14 +129,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements. |
+| Truthful identity/observation | PASS (open correction) | Exact self, native relations, bounded context, unknowns, and continuity are primary requirements; Phase 11 (T054) binds a still-open `around`-fetch `has_more_before` truthfulness defect (F1 CRITICAL) against this gate and remains unimplemented as of this plan. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence are distinct from downstream live-surface proof. |
+| Evidence before claims | PASS (open correction) | Shared/reference replay, budget, recoverability, restart, and capability evidence are distinct from downstream live-surface proof; the same Phase 11 (T054) finding is an open evidence-accuracy gap (a truncated `around` page can under-report a genuine unserved before-anchor event) until it lands and is verified. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 
-Post-design re-check: PASS. No prohibited SpecKit output is planned.
+Post-design re-check: PASS. No prohibited SpecKit output is planned. This
+planning pass records the Phase 11 (T054) correction; it does not close it —
+the gates above reflect a PASS for the plan itself alongside an explicit open
+implementation defect the plan is not authorized to fix.
 
 ## Slice Interfaces
 
@@ -248,7 +268,7 @@ product module.
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
 | Global context/identity description | `README.md` | `HANDOFF` | T028, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
-| Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034, T039, T040, T044, T046, T052 / `v2-observation-owner` | Validate budgets, continuation authority, diagrams/links, and runnable examples against the accepted provider; explicitly cover `message`, `reaction`, and `membership` native event examples with honest-unavailability representation (T039); document the resolved exact-causation self-membership scope, `caused_by_actor_id == self.actor_id` retained versus passive `subject_actor_id` observed (T040); explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary for reference-variant consumers (T044); correct the "What this slice does not do" section to name the real `v2-core-owner` lane rather than the nonexistent `v2-attention-owner` (T046); and update the I-010E version citation from `@1` to accepted `@2`, noting `observationBody` is unchanged (T052). |
+| Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034, T039, T040, T044, T046, T052 / `v2-observation-owner`; T054 reviewed as evidence-backed `NO_IMPACT` for this path / `v2-observation-owner` | Validate budgets, continuation authority, diagrams/links, and runnable examples against the accepted provider; explicitly cover `message`, `reaction`, and `membership` native event examples with honest-unavailability representation (T039); document the resolved exact-causation self-membership scope, `caused_by_actor_id == self.actor_id` retained versus passive `subject_actor_id` observed (T040); explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary for reference-variant consumers (T044); correct the "What this slice does not do" section to name the real `v2-core-owner` lane rather than the nonexistent `v2-attention-owner` (T046); update the I-010E version citation from `@1` to accepted `@2`, noting `observationBody` is unchanged (T052); and Phase 11's T054 (`src/nunchi/observation.py`, `tests/v2/observation/test_budget_and_continuation.py`, `evals/v2/observation/continuation/cases.jsonl`, `evidence/v2/observation/continuation.jsonl`, `evidence/v2/observation/handoff.md`) needs no wording change here — the existing "`has_more_before`/`has_more_after` report honest boundary omission" claim already states the target truthful behavior; T054 only brings the implementation into conformance with it and carries its own evidence delta in `handoff.md`'s Phase 11 supersession, not in this document. |
 | Accepted 010 contract reference | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T034 plus 2026-07-19 dependency rebind / `v2-observation-owner` | Evidence-backed rationale: slice 020 consumes I-010A@1/I-010D@1 and accepted I-010E@2; `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md` proves the observation-stage definition byte-for-byte unchanged while the amendment affects only the separately owned attention stage. The slice-owned implementation needs no code change, but current handoff/docs citations must name `@2`. |
 | Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T029, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
 | Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T030–T034 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |

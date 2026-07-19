@@ -443,8 +443,10 @@ re-runnable command and final task identity.
 
 ## Phase 11: Convergence
 
-**Correction source**: `/speckit-converge` run 2026-07-19 (this run), finding
-F1 CRITICAL, reproduced live against the completed T001–T053 candidate tree.
+**Correction source**:
+`evidence/v2/observation/convergence-phase11-2026-07-19.md`, finding F1
+CRITICAL, reproduced live against the completed T001–T053 candidate tree at
+`77a94cf1f56e70d1f0a79631ee9efba0b6e74a62`.
 
 **Purpose**: Close a residual honesty defect in the Phase 10 (T049/T050)
 "truthful side-specific `around` coverage" fix that neither its new unit test
