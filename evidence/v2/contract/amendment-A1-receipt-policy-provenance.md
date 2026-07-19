@@ -2,8 +2,8 @@
 
 **Slice**: `010-v2-contract`
 
-**Status**: `PROPOSED` (revised candidate after A1-R1 correction; pending
-independent `v2-integrator` re-review)
+**Status**: `ACCEPTED` (revised A1-R1 candidate accepted by `v2-integrator`;
+the terminal attempt-6 slice acceptance remains unchanged)
 
 **Amended interface**: `I-010E AttentionReceiptV2` `@1` → `@2`
 
@@ -200,3 +200,25 @@ No other file changed; R7–R11 remain untouched.
   three corpora — zero missing, zero spurious (207/207).
 
 Requesting the same independent `v2-integrator` re-review.
+
+## Integrator re-review decision
+
+**Decision**: `ACCEPTED`
+
+**Accepted candidate**: `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`
+
+**Amendment record commit**: `6296316fd415e85762860569289016a675ab5d2d`
+
+**Accepted by**: `v2-integrator`
+
+**Accepted on**: 2026-07-19
+
+**Decision reference**:
+`evidence/v2/contract/review-2026-07-19-v2-integrator-amendment-A1-revised.md`
+
+The revised candidate closes A1-R1 exactly: `wake_action` is the closed
+`NO_WAKE` override discriminator in both validators; the default error body
+omits the pair; `WAKE`, other actions, and incomplete pairs reject; evidence
+and documentation are fresh; and R7–R11 remain cleared. This versioned
+amendment acceptance does not revoke or rewrite slice 010's terminal attempt-6
+acceptance and does not replace each dependent owner's separate acceptance.
