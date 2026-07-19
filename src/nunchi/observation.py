@@ -1175,7 +1175,8 @@ class ObservationProvider:
             total_bytes += size
             return True
 
-        relation_ids = set(self._relation_closure_ids(trigger))
+        relation_ids = self._relation_closure_ids(trigger)
+        relation_id_membership = set(relation_ids)
         for relation_id in relation_ids:
             relation_index = self._event_index.get(relation_id)
             if relation_index is not None:
@@ -1216,7 +1217,9 @@ class ObservationProvider:
                 continue
             inspected_relation_events.add(relation_event_id)
             for relation_id in self._relation_closure_ids(relation_event):
-                relation_ids.add(relation_id)
+                if relation_id not in relation_id_membership:
+                    relation_ids.append(relation_id)
+                    relation_id_membership.add(relation_id)
                 relation_index = self._event_index.get(relation_id)
                 if relation_index is not None and relation_index not in selected:
                     if try_add(relation_index):

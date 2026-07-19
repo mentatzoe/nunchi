@@ -1359,3 +1359,31 @@ T142–T147 are complete. T148 alone remains open for fresh independent review
 of the exact frozen successor. The slice remains `ACTIVE`; no acceptance,
 convergence, handoff readiness, integration, deployment, release, promotion,
 or cutover authority is claimed.
+
+## 27. Exact `2b10abb` rejection and Phase 27 activation
+
+Independent direct review rejected exact object
+`2b10abb0b9b7d4dff802e08b36030995263cf520`: S13 validated synthesized pages
+before a final mutation made one invalid at the comparison seam, and capped
+trigger relation selection depended on unordered set iteration across Python
+hash seeds. The exact report is preserved at
+`evidence/v2/observation/review-2026-07-19-phase26-hermes-2b10abb-rejection.md`.
+
+Phase 27 T149–T153 owns the correction. T149 is complete; T148 and T150–T153
+remain open. The prior Phase 26 verification remains accurate for its tested
+matrix but cannot authorize convergence because its S13 validity claim was
+false and its tests omitted cross-seed target priority. The slice remains
+`ACTIVE`, not `CONVERGED` or `HANDOFF_READY`.
+
+## 28. Phase 27 remediation matrix — exact review pending
+
+Both `2b10abb` findings are reproduced and closed. The exact RED/GREEN and
+matrix receipt is `evidence/v2/observation/convergence-phase27.md`: 189
+Observation tests, 53 aggregate rows, 25 adversarial rows, 19 corpus/docs tests,
+1438 full-repository tests with four optional skips, 60 fixtures, and clean
+Ruff/Bandit/scanner-regression/governance/task-state/diff gates.
+
+T148–T152 are complete. T153 alone remains open for fresh independent review
+of the exact frozen successor. The slice remains `ACTIVE`; no acceptance,
+convergence, handoff readiness, integration, deployment, release, promotion,
+or cutover authority is claimed.

@@ -9,6 +9,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import os
+from pathlib import Path
+import subprocess
+import sys
 from threading import Barrier
 import unittest
 from unittest.mock import patch
@@ -1382,6 +1386,33 @@ class TestSharedContinuationAuthorityAndRelationGaps(unittest.TestCase):
         self.assertEqual([event["id"] for event in snapshot["events"]], ["reply", "trigger"])
         self.assertTrue(snapshot["coverage"]["has_gaps"])
         self.assertIn("events", snapshot["coverage"]["truncated_by"])
+
+    def test_capped_trigger_relation_priority_is_hash_seed_independent(self):
+        script = """
+from tests.v2.observation.helpers import make_provider, make_message, seed_room
+p = make_provider()
+seed_room(p, [
+    make_message('reply-target', 'discord:1001', 'reply'),
+    make_message('thread-target', 'discord:1001', 'thread'),
+    make_message(
+        'trigger', 'discord:1001', 'trigger',
+        reply_to_event_id='reply-target', thread_root_event_id='thread-target',
+    ),
+])
+s = p.snapshot(trigger_event_id='trigger', max_events=2, max_bytes=8192)
+print(','.join(event['id'] for event in s['events']))
+"""
+        repo_root = Path(__file__).resolve().parents[3]
+        outputs = []
+        for seed in ("1", "2", "3", "4"):
+            env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED=seed)
+            env["PYTHONPATH"] = "src:."
+            outputs.append(
+                subprocess.check_output(
+                    [sys.executable, "-c", script], cwd=repo_root, env=env, text=True,
+                ).strip()
+            )
+        self.assertEqual(outputs, ["reply-target,trigger"] * 4)
 
     def test_continuation_reports_relation_gaps_for_every_returned_event(self):
         relation_events = [

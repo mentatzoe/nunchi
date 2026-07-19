@@ -154,11 +154,11 @@ parity claim
 | Truthful identity/observation | PASS | T083–T138 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-state truth. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T142–T148) | Direct immutable-object review rejected `22a0a1a` for receipt caller-memory TOCTOU, incomplete relation-gap truth, restart-gap side-channel evidence, and a false exact-range diff-clean claim. Phase 26 must close every finding, regenerate/freeze/scan, and obtain a new exact-object review. |
+| Evidence before claims | BLOCKED (T148–T153) | Exact-object review rejected `2b10abb` because S13 validated before final page mutation and relation-target priority depended on hash-set iteration. Phase 27 must close both findings, correct evidence, regenerate/freeze/scan, and obtain a new exact-object review. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
-| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; handoff attempt 2 is append-rejected and the slice is `ACTIVE` under Phase 26 correction. |
+| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; handoff attempt 2 is append-rejected and the slice is `ACTIVE` under Phase 27 correction. |
 
-Post-design re-check: BLOCKED on Phase 26 T142–T148. Runtime, scanner,
+Post-design re-check: BLOCKED on Phase 27 T148–T153. Runtime, scanner,
 ordering, input, corpus-byte, receipt-uniqueness, caller-memory, early-resource,
 continuation/comparator authority, relation-gap, lifetime timestamp, and
 slice-owned literal-state mechanisms from Phase 25 remain inputs, but direct

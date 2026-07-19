@@ -1141,7 +1141,7 @@ independent direct-probe review of exact immutable object `22a0a1a`.
   valid closed pages, and correct every affected evidence claim/count
 - [X] T147 Rerun the complete matrix plus activation-range `git diff --check`,
   exact whole-slice scan, task-state/governance gates, then freeze/push attempt 3
-- [ ] T148 Obtain fresh independent direct-probe review of that exact object;
+- [X] T148 Obtain fresh independent direct-probe review of that exact object;
   fix every CRITICAL/HIGH blocker before candidate or handoff attempt 3
 
 ### Phase 26 dependencies
@@ -1153,3 +1153,36 @@ independent direct-probe review of exact immutable object `22a0a1a`.
 **Checkpoint**: provider attestation never rereads caller memory; every returned
 literal relation and every known restart loss is disclosed on the wire; exact
 range hygiene is evidence-backed rather than inferred from a clean worktree.
+
+---
+
+## Phase 27 — Final-page validity and deterministic relation priority
+
+**Purpose**: preserve the exact `2b10abb` rejection, ensure S13 validates the
+actual post-mutation page passed to comparison, and make capped relation-target
+selection independent of Python hash randomization.
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-phase26-hermes-2b10abb-rejection.md`,
+independent exact-object review of `2b10abb0b9b7d4dff802e08b36030995263cf520`.
+
+- [X] T149 Preserve the exact rejection and bind both blocking MEDIUM findings
+  as Phase 27 while keeping every planning artifact `ACTIVE`
+- [X] T150 Add RED/GREEN comparison-seam validation: represent absent cursors
+  by field removal and validate both fully mutated S13 pages immediately before
+  `compare_pages()`
+- [X] T151 Add RED/GREEN cross-`PYTHONHASHSEED` relation-priority coverage and
+  preserve `_relation_closure_ids()` order with separate dedup membership
+- [X] T152 Correct Phase 26 evidence, rerun the complete matrix and exact scan,
+  then freeze/push a clean immutable T001–T153 successor
+- [ ] T153 Obtain fresh independent read-only review of that exact successor;
+  resolve every blocking finding before candidate or handoff attempt 3
+
+### Phase 27 dependencies
+
+- T150 and T151 depend on T149 and may proceed independently after RED.
+- T152 depends on T148 and T150–T151; T153 depends on T152.
+
+**Checkpoint**: comparison inputs are closed and valid at the actual comparison
+seam; identical events/budgets select identical relation targets across process
+hash seeds.

@@ -558,12 +558,12 @@ def run_equivalence() -> list[dict]:
 
             left = page_from(left, "left")
             right = page_from(right, "right")
+            _apply_document_mutations(left, case.get("left_page_mutations") or [])
+            _apply_document_mutations(right, case.get("right_page_mutations") or [])
             for page in (left, right):
                 page_errors = validate_context_continuation(page)
                 if page_errors:
                     raise ValueError(f"S13 synthesized invalid continuation page: {page_errors}")
-            _apply_document_mutations(left, case.get("left_page_mutations") or [])
-            _apply_document_mutations(right, case.get("right_page_mutations") or [])
             comparison = compare_pages(left, right, right_capability=right_capability)
         else:
             comparison = compare_requests(left, right, right_capability=right_capability)

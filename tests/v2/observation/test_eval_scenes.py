@@ -5,7 +5,9 @@ recorded scene fails the ordinary baseline, not just the evidence script."""
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+import evals.v2.observation.run_scenes as scene_runner
 from evals.v2.observation.run_scenes import (
     run_budget_sweep,
     run_continuation_attacks,
@@ -13,6 +15,7 @@ from evals.v2.observation.run_scenes import (
     run_identity_and_hygiene,
     run_recoverability,
 )
+from nunchi.observation import validate_context_continuation
 
 
 class TestEvalScenesAllPass(unittest.TestCase):
@@ -36,6 +39,19 @@ class TestEvalScenesAllPass(unittest.TestCase):
 
     def test_equivalence(self):
         self._assert_all_pass(run_equivalence())
+
+    def test_equivalence_validates_final_pages_at_comparison_seam(self):
+        comparison_errors = []
+        real_compare = scene_runner.compare_pages
+
+        def checked_compare(left, right, **kwargs):
+            comparison_errors.append(validate_context_continuation(left))
+            comparison_errors.append(validate_context_continuation(right))
+            return real_compare(left, right, **kwargs)
+
+        with patch.object(scene_runner, "compare_pages", checked_compare):
+            self._assert_all_pass(scene_runner.run_equivalence())
+        self.assertEqual(comparison_errors, [[], []])
 
 
 if __name__ == "__main__":

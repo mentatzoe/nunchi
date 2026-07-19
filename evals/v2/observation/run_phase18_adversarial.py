@@ -24,6 +24,7 @@ from tests.v2.observation.test_budget_and_continuation import (
     TestSharedContinuationAuthorityAndRelationGaps,
 )
 from tests.v2.observation.test_recoverability import TestKnownGapVariant
+from tests.v2.observation.test_eval_scenes import TestEvalScenesAllPass
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = REPO_ROOT / "evidence/v2/observation/phase18-adversarial.jsonl"
@@ -51,6 +52,8 @@ CASES = (
     ("P26-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_nearby_returned_relation_target_absence_is_reported_as_a_gap"),
     ("P26-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_continuation_reports_relation_gaps_for_every_returned_event"),
     ("P26-RESTART-001", TestKnownGapVariant, "test_known_gap_variant_reports_the_dropped_tail_honestly"),
+    ("P27-EVAL-001", TestEvalScenesAllPass, "test_equivalence_validates_final_pages_at_comparison_seam"),
+    ("P27-ORDER-001", TestSharedContinuationAuthorityAndRelationGaps, "test_capped_trigger_relation_priority_is_hash_seed_independent"),
 )
 
 

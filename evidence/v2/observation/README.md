@@ -64,13 +64,14 @@ implicit.
 Total: 53 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18/23/25/26 atomicity/resource evidence
+## Phase 18/23/25/26/27 atomicity/resource evidence
 
-`phase18-adversarial.jsonl` contains 23 deterministic PASS rows: five
+`phase18-adversarial.jsonl` contains 25 deterministic PASS rows: five
 barrier-controlled continuation atomicity cases, three retention-gap coverage
 cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
 four Phase 25 provider-wide continuation-authority/relation-gap cases, four
-Phase 26 receipt/relation/restart wire-truth cases, plus one
+Phase 26 receipt/relation/restart wire-truth cases, one Phase 27
+final-page-validity case, one cross-hash-seed relation-priority case, plus one
 explicit N=64/2N=128 replay metric row. The measured retained-deque visits
 after initial window creation are 0 and 0; an over-limit fresh fetch also records
 zero retained-deque visits. Reproduce with:
@@ -89,7 +90,7 @@ the shared oracle:
 ```sh
 python3 scripts/check_slice020_task_state.py \
   --tasks specs/020-v2-observation/tasks.md \
-  --allow-open T148
+  --allow-open T153
 ```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

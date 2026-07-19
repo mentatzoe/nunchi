@@ -52,3 +52,12 @@ Mechanisms reproduced:
 | generated reviewer checklist | absent |
 
 T142–T147 are complete. T148 remains open for a fresh independent read-only review of the frozen successor. This receipt does not claim acceptance, convergence, handoff readiness, integration, deployment, release, promotion, or cutover authority.
+
+## Phase 27 correction
+
+Independent review of `2b10abb` established that the S13 validity claim above
+was false at the actual comparison seam: final page mutations ran after
+validation. It also found hash-seed-dependent relation-target priority. The
+unmodified matrix above remains historical Phase 26 evidence, not convergence
+authority. Exact correction ownership and RED/GREEN evidence continue in Phase
+27 and `evidence/v2/observation/handoff.md` §27.
