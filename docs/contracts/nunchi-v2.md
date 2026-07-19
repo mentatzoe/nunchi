@@ -1,4 +1,4 @@
-# Nunchi V2 Contracts (I-010A–I-010E, version `@1`)
+# Nunchi V2 Contracts (I-010A–I-010D at `@1`, I-010E at `@2`)
 
 **Owner**: `v2-contract-owner` (slice `010`). Only this owner edits
 `schemas/v2/**`; a dependent slice requests changes through an explicit
@@ -13,8 +13,9 @@ running product today.
 **Field-level authority**: the selected Aleph Vault design at `c834e8c`
 (`projects/shared/nunchi/technical-design.md`) is the field-level naming and
 shape authority for all five interfaces (FR-014); the program-canonical
-interface names and versions (`I-010A`–`I-010E` at `@1`) are this slice's own
-vocabulary layered over that same field inventory. A document the selected
+interface names and versions (`I-010A`–`I-010D` at `@1`, `I-010E` at `@2`)
+are this slice's own vocabulary layered over that same field inventory. A
+document the selected
 design declares valid that either validator rejects is a contract defect,
 never resolved by narrowing the corpus.
 
@@ -26,7 +27,7 @@ never resolved by narrowing the corpus.
 | `I-010B AttentionDecisionV2` | `@1` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@1` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`
@@ -208,7 +209,7 @@ independently against the issuing continuation capability's exact
 does not establish correct binding or bounded authorization — see the
 runtime-adapter-only rules below.
 
-## I-010E AttentionReceiptV2@1
+## I-010E AttentionReceiptV2@2
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
@@ -218,9 +219,23 @@ stage-shaped `body` carrying the selected telemetry (FR-014):
 | Stage | Owning writer | Body |
 |---|---|---|
 | `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count`, `coverage`, `included_event_ids` |
-| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`) or operational error (`error: {code, detail}`, both required) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
+| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`, required `policy_provenance`) or operational error (`error: {code, detail}`, both required, plus `wake_action`/`policy_provenance` present together exactly when an explicit operator override to the shared `WAKE` default applied) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
 | `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count`, `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
+
+**`@2` amendment A1** (`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`,
+discovered during slice 030 planning after slice 010's `@1` acceptance): the
+selected design at `c834e8c` requires the effective policy and its source to
+be inspectable in receipts, and an operator's explicit `NO_WAKE` override to
+the shared `WAKE` error-handling default to be separately receipted as
+operational failure policy, never as a social disposition. `@1` gave
+`policy_provenance` only to the trusted-bypass body and gave the error body
+no way to distinguish an operator override from an ordinary failure; `@2`
+adds the classifier-outcome body's required `policy_provenance` and the
+error body's conditional `wake_action`/`policy_provenance` pair. `@1`
+consumers must migrate to `@2` before consuming attention-stage receipts;
+`margin_source` on `routing_audit` remains scoped to the margin-defer valve
+and does not serve as general policy provenance.
 
 The stage-to-writer binding is part of the public per-record contract
 (FR-010): each stage names its single directly observing owner per the
