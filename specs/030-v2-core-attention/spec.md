@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `PLANNED`
+**Slice state**: `READY`
 
 **Program implementation authority**: `GRANTED`
 
@@ -145,13 +145,16 @@ and dispositioned for this bound slice at
 It remains owned by `v2-program-owner` but is not a slice-030 dependency or a
 CRITICAL/HIGH finding in this slice's requirements/task graph. Fresh bound
 analysis reports zero scoped CRITICAL/HIGH findings at
-`evidence/v2/attention/analysis-2026-07-19.md`. Activation nevertheless remains
-blocked because the governance validator requires dependency `010` to match the
-stale pre-amendment candidate in `evidence/v2/contract/slice-handoff.md` rather
-than exact accepted A2 candidate
-`26a6b531fa146ba1f1f5fcd1c4d191041b141301`; see
-`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`.
-Slice 030 remains `PLANNED` and dormant; no activation evidence exists.
+`evidence/v2/attention/analysis-2026-07-19.md`. The later activation-validator
+blocker remains immutable at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`
+and is superseded by
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-resolution.md`:
+the canonical amendment ledger now derives exact accepted A2 candidate
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`. Immutable activation evidence at
+`evidence/v2/attention/slice-activation.md` establishes `READY`; the task graph
+remains dormant until the assigned owner separately declares `ACTIVE` through
+a bound delivery run.
 
 ## Interface Summary
 

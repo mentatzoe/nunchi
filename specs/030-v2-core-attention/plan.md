@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `PLANNED`
+**Slice state**: `READY`
 
 **Program implementation authority**: `GRANTED`
 
@@ -109,14 +109,15 @@ graph. `v2-program-owner` must still synchronize the canonical registry with
 the accepted amendment provenance; `v2-core-owner` records but does not perform
 or claim that program-owned edit. Fresh bound analysis independently reports
 zero scoped CRITICAL/HIGH findings at
-`evidence/v2/attention/analysis-2026-07-19.md`. A separate activation-boundary
-failure remains open at
-`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`:
-the governance validator still compares dependency `010` with the original
-pre-amendment handoff candidate rather than accepted A2 candidate
-`26a6b531fa146ba1f1f5fcd1c4d191041b141301`. No immutable activation record may
-be written and no `READY` or `ACTIVE` declaration may be made until that
-program-level mismatch is resolved.
+`evidence/v2/attention/analysis-2026-07-19.md`. The separate activation-boundary
+failure at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`
+is superseded by the canonical accepted-amendment ledger and amendment-aware
+validator recorded at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-resolution.md`.
+Immutable activation evidence now binds dependency `010` to exact effective A2
+candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301` and establishes `READY`;
+neither that record nor planning declares `ACTIVE` or begins implementation.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -518,7 +519,7 @@ readiness analysis.
 | Atomic parity contract | PASS | Non-current `evaluate_v2`/`attention-v2` stage I-030A without calling V1; the complete V1 baseline stays green, and 110 alone removes V1 and staging names while publishing I-030A in one atomic candidate. |
 | Evidence before claims | PASS | Mechanics, replay, multi-model, canary, and margin evidence targets are separate. |
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
-| Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks execute only while the declaration and lifecycle evidence establish `ACTIVE`, and remain `DORMANT` at `PLANNED`. |
+| Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks execute only while the declaration and lifecycle evidence establish `ACTIVE`, and remain `DORMANT` at `READY`. |
 | Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
 | Selected zero-width margin / accepted I-010B | PASS | Accepted I-010B `@2` represents applied `effective_margin: 0`; this consumer accepted exact A2-R1 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301`. |
 | Program canonical interface registry | HANDOFF | `v2-program-owner` must synchronize I-010B/I-010E to accepted `@2`; the mismatch is explicitly scoped as a non-blocking owner handoff for slice 030 and is not claimed complete. |
@@ -526,10 +527,11 @@ readiness analysis.
 Post-design re-check: PASS for the bound slice. Slice-owned contract questions
 and exact dependency acceptance are resolved; the separately owned canonical
 program-registry mismatch remains an explicit non-blocking handoff. Fresh bound
-analysis is complete, but the separate dependency-validator mismatch recorded
+analysis is complete, and the separate dependency-validator mismatch recorded
 at
 `evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`
-prevents a truthful activation record and keeps the slice `PLANNED`.
+is superseded by the amendment-aware validator resolution and immutable
+activation record. Those facts establish `READY`, not `ACTIVE`.
 Because this is a planning-only revision, no `data-model.md`, local contract,
 quickstart, schema, test, corpus, evidence payload, or product documentation is
 created here.
