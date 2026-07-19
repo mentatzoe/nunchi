@@ -154,14 +154,15 @@ parity claim
 | Truthful identity/observation | PASS | T083–T117 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison, one-shot provider-issued receipt attestation, timestamp order, closed transport/configuration inputs, and accepted-corpus byte identity; 52 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T119) | T118 records a GREEN 164/52/11/1413 matrix with exact corpus digest and clean static/governance gates. The frozen object still requires an exact-range scan and fresh independent review under T119. |
+| Evidence before claims | BLOCKED (T121–T124) | Owner review rejected the Phase 22 object because bounded recent state allowed request-ID reuse and pending overflow invalidated an already-issued receipt promise. T121–T124 must establish permanent fixed-memory uniqueness, reject new work at capacity, rerun/freeze/scan, and obtain fresh review. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 22 T119. Runtime, scanner,
-comparator, provider-attestation, ordering, input, and corpus-byte mechanisms
-are locally GREEN. The immutable object, exact-range scan, and fresh independent
-verdict are still required. This status grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 23 T121–T124. Earlier runtime, scanner,
+comparator, ordering, input, and corpus-byte mechanisms remain locally GREEN,
+but request-ID uniqueness and pending receipt promises are open. A new immutable
+object, exact-range scan, and fresh independent verdict are required. This
+status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

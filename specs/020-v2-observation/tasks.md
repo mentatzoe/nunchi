@@ -1005,3 +1005,33 @@ post-Phase-21 tree in
 **Checkpoint**: the provider attests only an exact snapshot it issued, once;
 malformed ordering/transport/configuration is rejected before state mutation;
 accepted corpus identity is byte-verifiable.
+
+## Phase 23: Permanent Bounded Request-ID Uniqueness
+
+**Correction source**: owner adversarial review of Phase 22 exact object
+`d70f2fd006007a43a6303e66537327a48794e7ed`, preserved in
+`evidence/v2/observation/convergence-phase23-request-id-uniqueness-2026-07-19.md`.
+
+- [X] T120 Reproduce duplicate receipt request IDs after recent-attestation LRU
+  eviction and the pending-overflow loss of an already-issued request
+- [ ] T121 Add RED tests proving a request ID can never be reissued after
+  bounded recent-state eviction and proving the uniqueness structure itself is
+  fixed-size
+- [ ] T122 Implement fixed-memory, no-false-negative per-provider request-ID
+  non-reuse; conservative false positives fail closed rather than permitting a
+  duplicate receipt correlation ID
+- [ ] T123 Reject a new snapshot at the pending-attestation cap before return;
+  preserve every prior issued snapshot until its one rightful receipt is built
+- [ ] T124 Regenerate evidence and rerun the complete matrix and exact scanner,
+  freeze/push a new immutable object, and obtain fresh independent fail-closed
+  review before candidate attempt 2 or handoff
+
+### Phase 23 dependencies
+
+- T121 depends on T120; T122/T123 depend on T121 RED.
+- T124 depends on T122/T123 and supersedes T119/T112/T107 as the sole final
+  convergence review.
+
+**Checkpoint**: fixed memory may reject a never-before-seen request ID, but it
+must never forget and reaccept an issued ID; pending capacity never invalidates
+a receipt promise already returned to a caller.
