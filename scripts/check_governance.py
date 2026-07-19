@@ -1394,21 +1394,29 @@ def _effective_dependency_commit(
     """
 
     errors: list[str] = []
-    amendments_value = EXPECTED_LIFECYCLE_PATHS[upstream].get("amendments", "")
-    amendments_relative = Path(amendments_value) if amendments_value else None
-    if amendments_relative is None or not _repo_path_is_safe(
-        root, amendments_relative, require_file=True
-    ):
+    amendments_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["amendments"])
+    raw_path = root / amendments_relative
+    if not raw_path.exists() and not raw_path.is_symlink():
         return terminal_commit, errors
+    if not _repo_path_is_safe(root, amendments_relative, require_file=True):
+        return terminal_commit, [
+            f"{amendments_relative}: amendment ledger path is unsafe"
+        ]
     try:
-        text = (root / amendments_relative).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return terminal_commit, errors
+        text = raw_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return terminal_commit, [
+            f"{amendments_relative}: amendment ledger is unreadable ({exc})"
+        ]
     records = _lifecycle_records(text)
     if not records:
-        return terminal_commit, errors
+        return terminal_commit, [
+            f"{amendments_relative}: amendment ledger exists but has no attested "
+            "record"
+        ]
 
     seen_ids: set[str] = set()
+    interface_versions: dict[str, int] = {}
     previous_effective = terminal_commit
     effective_commit = terminal_commit
     for index, record in enumerate(records, 1):
@@ -1426,15 +1434,20 @@ def _effective_dependency_commit(
         prior_effective = _clean_metadata(record, "Prior effective commit")
         candidate = _clean_metadata(record, "Amendment candidate commit")
         decision = _clean_metadata(record, "Amendment decision commit")
-        for label, value in {
+        commit_fields = {
             "Prior effective commit": prior_effective,
             "Amendment candidate commit": candidate,
             "Amendment decision commit": decision,
-        }.items():
+        }
+        for label, value in commit_fields.items():
             if not re.fullmatch(r"[0-9a-f]{40}", value):
                 errors.append(f"{prefix}: {label} must be a full Git SHA")
             elif not _git_commit_exists(root, value):
                 errors.append(f"{prefix}: {label} does not exist in Git")
+        commits_exist = all(
+            re.fullmatch(r"[0-9a-f]{40}", value) and _git_commit_exists(root, value)
+            for value in commit_fields.values()
+        )
         if prior_effective != previous_effective:
             errors.append(
                 f"{prefix}: Prior effective commit must be {previous_effective!r} "
@@ -1442,20 +1455,27 @@ def _effective_dependency_commit(
                 "amendment's candidate)"
             )
         if (
-            candidate
-            and prior_effective
+            commits_exist
             and candidate != prior_effective
-            and _git_commit_exists(root, candidate)
-            and _git_commit_exists(root, prior_effective)
             and not _git_is_ancestor(root, prior_effective, candidate)
         ):
             errors.append(
                 f"{prefix}: Amendment candidate commit must descend from the "
                 "Prior effective commit"
             )
-        if not re.search(
-            r"I-\d{3}[A-Z]", _clean_metadata(record, "Amended interface")
+        if (
+            commits_exist
+            and decision != candidate
+            and not _git_is_ancestor(root, candidate, decision)
         ):
+            errors.append(
+                f"{prefix}: Amendment decision commit must descend from the "
+                "Amendment candidate commit"
+            )
+        interface_match = re.search(
+            r"I-\d{3}[A-Z]", _clean_metadata(record, "Amended interface")
+        )
+        if not interface_match:
             errors.append(f"{prefix}: missing concrete Amended interface")
         prior_version = _clean_metadata(record, "Prior interface version")
         new_version = _clean_metadata(record, "New interface version")
@@ -1470,19 +1490,74 @@ def _effective_dependency_commit(
                 f"{prefix}: New interface version must be exactly one version "
                 "above Prior interface version"
             )
+        if interface_match and prior_match:
+            interface_key = interface_match.group(0)
+            expected_prior = interface_versions.get(interface_key, 1)
+            if int(prior_match.group(1)) != expected_prior:
+                errors.append(
+                    f"{prefix}: Prior interface version for {interface_key} must "
+                    f"be @{expected_prior} (its last effective version)"
+                )
+            if new_match:
+                interface_versions[interface_key] = int(new_match.group(1))
         if _clean_metadata(record, "Accepted by") != "v2-integrator":
             errors.append(f"{prefix}: Accepted by must be 'v2-integrator'")
         if not re.fullmatch(
             r"\d{4}-\d{2}-\d{2}", _clean_metadata(record, "Accepted on")
         ):
             errors.append(f"{prefix}: Accepted on must be an ISO date")
-        for label in ("Decision reference", "Amendment record"):
-            reference_path = Path(_clean_metadata(record, label))
-            if not _repo_path_is_safe(root, reference_path, require_file=True):
-                errors.append(f"{prefix}: {label} must name an existing file")
+        decision_reference_path = Path(_clean_metadata(record, "Decision reference"))
+        if not _repo_path_is_safe(root, decision_reference_path, require_file=True):
+            errors.append(f"{prefix}: Decision reference must name an existing file")
+        amendment_record_value = _clean_metadata(record, "Amendment record")
+        amendment_record_path = Path(amendment_record_value)
+        if not _repo_path_is_safe(root, amendment_record_path, require_file=True):
+            errors.append(f"{prefix}: Amendment record must name an existing file")
+        elif commits_exist and decision:
+            amendment_record_text = _git_file_text(
+                root, decision, amendment_record_path
+            )
+            if amendment_record_text is None:
+                errors.append(
+                    f"{prefix}: Amendment record is absent from the Amendment "
+                    "decision commit"
+                )
+            else:
+                expected_decision_fields = {
+                    "Decision": "ACCEPTED",
+                    "Accepted candidate": candidate,
+                    "Accepted by": "v2-integrator",
+                }
+                for label, expected_value in expected_decision_fields.items():
+                    observed = _clean_metadata(
+                        amendment_record_text, label, last=True
+                    )
+                    if observed != expected_value:
+                        errors.append(
+                            f"{prefix}: Amendment record at the decision commit "
+                            f"must have {label} {expected_value!r}; observed "
+                            f"{observed!r}"
+                        )
+                referenced_decision = _clean_metadata(
+                    amendment_record_text, "Decision reference", last=True
+                )
+                if len(referenced_decision) < 10:
+                    errors.append(
+                        f"{prefix}: Amendment record at the decision commit is "
+                        "missing a durable Decision reference"
+                    )
         if candidate:
             previous_effective = candidate
             effective_commit = candidate
+    summary_match = re.search(
+        r"Current effective dependency commit\s*\n+\s*`([0-9a-f]{40})`", text
+    )
+    if summary_match and summary_match.group(1) != effective_commit:
+        errors.append(
+            f"{amendments_relative}: 'Current effective dependency commit' "
+            f"summary must be {effective_commit!r}; observed "
+            f"{summary_match.group(1)!r}"
+        )
     return effective_commit, errors
 
 
@@ -1991,7 +2066,7 @@ def _slice_lifecycle_evidence_errors(
     paths = EXPECTED_LIFECYCLE_PATHS[dirname]
     texts: dict[str, str] = {}
     activation_starting_commit = ""
-    for stage in ("activation", "candidate", "handoff", "acceptance"):
+    for stage in ("activation", "candidate", "handoff", "acceptance", "amendments"):
         relative = Path(paths[stage])
         path = root / relative
         if path.exists() and not _repo_path_is_safe(root, relative):
@@ -2006,7 +2081,7 @@ def _slice_lifecycle_evidence_errors(
             _git_path_history_errors(
                 root,
                 relative,
-                append_only=stage in {"candidate", "handoff"},
+                append_only=stage in {"candidate", "handoff", "amendments"},
             )
         )
 
@@ -2023,10 +2098,16 @@ def _slice_lifecycle_evidence_errors(
     candidate_present = "candidate" in texts
     handoff_present = "handoff" in texts
     acceptance_present = "acceptance" in texts
+    amendments_present = "amendments" in texts
     if slice_state == "READY" and (
         candidate_present or handoff_present or acceptance_present
     ):
         errors.append(f"{dirname}: READY permits only activation evidence")
+    if amendments_present and not acceptance_present:
+        errors.append(
+            f"{dirname}: an accepted-amendment ledger requires prior terminal "
+            "acceptance evidence"
+        )
     if slice_state == "ACTIVE":
         if candidate_present != handoff_present:
             errors.append(
