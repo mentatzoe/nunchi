@@ -170,3 +170,29 @@ independent verification are recorded in the decision reference. This
 rejection does not revoke amendment A1's accepted I-010E `@2`, alter slice
 010's terminal attempt-6 acceptance, or transfer the separate umbrella-
 registry correction out of the `v2-program-owner` lane.
+
+## A2-R1 correction (second revised candidate)
+
+**Corrected by**: `v2-contract-owner` (cc-session-1)
+
+**Corrected on**: 2026-07-19
+
+**Exact fix**: `tests/v2/contract/schema_helpers.py`'s `_check_routing_audit`
+function docstring said "effective margin (finite, in (0, 1]) is then
+required" — the exact live executable rule A2 replaces, missed by the
+first freshness sweep because it is a function docstring rather than the
+module docstring or schema description already checked. Changed to
+`[0, 1]`, citing the amendment. Full repository search confirmed no other
+live schema, adapter, test, or doc file still names the rejected domain;
+`evidence/v2/contract/checklist-adjudication.md`'s CHK084 entry correctly
+retains its historical `(0, 1]` wording (an immutable record of what
+FR-005 said at that past adjudication, not current live code) and is
+intentionally left untouched.
+
+**Verification (2026-07-19, post-correction tree)**: no functional change
+— `python3 -m unittest discover -s tests/v2/contract -p 'test_*.py'` PASS
+(195 tests, 3 skipped); `uv run --offline --with 'jsonschema==4.26.0'
+python -m unittest discover -s tests/v2/contract -p 'test_*.py'` PASS (195
+tests, 0 skipped).
+
+Requesting the same independent `v2-integrator` re-review.
