@@ -48,6 +48,30 @@ class TestExactSelfAndAliasCollision(unittest.TestCase):
         self.assertEqual(len(snapshot["events"]), 1)  # retained, not dropped
 
 
+class TestSelfCausedMembership(unittest.TestCase):
+    """FR-004 / D020-01: a membership event is exact-self-caused, and thus
+    ``self-retained-no-wake``, only when ``caused_by_actor_id`` matches
+    self; being the passive ``subject_actor_id`` is not self-causation."""
+
+    def test_self_caused_membership_is_retained_no_wake(self):
+        provider = make_provider()
+        event = make_membership("e1", "discord:1001", "join", caused_by_actor_id=FIXTURE_SELF_ACTOR_ID)
+        outcome = provider.ingest(candidate(event, actors=FIXTURE_ACTORS))
+        self.assertEqual(outcome, SELF_RETAINED_NO_WAKE)
+
+    def test_self_as_subject_with_other_cause_remains_observed(self):
+        provider = make_provider()
+        event = make_membership("e1", FIXTURE_SELF_ACTOR_ID, "join", caused_by_actor_id="discord:1001")
+        outcome = provider.ingest(candidate(event, actors=FIXTURE_ACTORS))
+        self.assertEqual(outcome, OBSERVED)
+
+    def test_self_as_subject_with_no_cause_remains_observed(self):
+        provider = make_provider()
+        event = make_membership("e1", FIXTURE_SELF_ACTOR_ID, "join")
+        outcome = provider.ingest(candidate(event, actors=FIXTURE_ACTORS))
+        self.assertEqual(outcome, OBSERVED)
+
+
 class TestNativeRelations(unittest.TestCase):
     """S02: actor-targeted mentions, room-wide mentions, replies, threads,
     reactions, and membership stay distinct literal facts."""

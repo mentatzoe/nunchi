@@ -95,7 +95,10 @@ def run_identity_and_hygiene() -> list[dict]:
 def run_budget_sweep() -> list[dict]:
     rows = []
     for case in _load("budgets"):
-        provider = ObservationProvider(**ROOM_KWARGS)
+        provider_kwargs = dict(ROOM_KWARGS)
+        if "event_visibility" in case:
+            provider_kwargs["event_visibility"] = case["event_visibility"]
+        provider = ObservationProvider(**provider_kwargs)
         for event in case["events"]:
             provider.ingest({
                 "delivery_id": f"delivery:{event['id']}", "disposition": "candidate-event",
@@ -117,6 +120,13 @@ def run_budget_sweep() -> list[dict]:
             overlap = set(included_ids) & set(case["expect_excluded_event_ids"])
             if overlap:
                 failures.append(f"expected-excluded ids present: {overlap}")
+        observed_event_visibility = request["coverage"].get("event_visibility")
+        if "expect_event_visibility" in case and observed_event_visibility != case["expect_event_visibility"]:
+            failures.append(
+                f"event_visibility {observed_event_visibility!r} != expected {case['expect_event_visibility']!r}"
+            )
+        if "event_visibility" not in case and "event_visibility" in request["coverage"]:
+            failures.append("event_visibility present in coverage but not configured on the provider")
         receipt = provider.build_observation_receipt(request)
         result = "PASS" if not failures else "FAIL"
         row = _snapshot_row(case, request, result=result, detail="; ".join(failures))
@@ -124,6 +134,7 @@ def run_budget_sweep() -> list[dict]:
         row["configured_max_bytes"] = case["max_bytes"]
         row["receipt_byte_count"] = receipt["body"]["byte_count"]
         row["included_event_ids"] = included_ids
+        row["event_visibility"] = observed_event_visibility
         rows.append(row)
     return rows
 
@@ -151,9 +162,13 @@ def run_continuation_attacks() -> list[dict]:
         outcome = None
         detail = ""
         dedup_violation = False
+        observed_has_more_before = None
+        observed_has_more_after = None
         try:
             page = continuation.fetch(request, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
             outcome = "accept"
+            observed_has_more_before = page["coverage"]["has_more_before"]
+            observed_has_more_after = page["coverage"]["has_more_after"]
             if case["expect"] == "accept-then-paginate" and "next_cursor" in page:
                 request2 = dict(request, request_id=f"req-{case['case_id']}-2", cursor=page["next_cursor"])
                 page2 = continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
@@ -162,15 +177,43 @@ def run_continuation_attacks() -> list[dict]:
                     dedup_violation = True
                     detail = f"exact-event dedup violated: {overlap}"
                 outcome = "accept-then-paginate"
+            elif case["expect"] == "reject-on-second-fetch" and "next_cursor" in page:
+                # H020-01 adversarial shape: the first fetch must succeed and
+                # mint a cursor, then a *second* fetch replaying that cursor
+                # under a different (case-supplied) direction must reject.
+                request2 = dict(
+                    case["second_fetch_request"],
+                    request_id=f"req-{case['case_id']}-2",
+                    handle_id=capability["handle_id"],
+                    cursor=page["next_cursor"],
+                )
+                try:
+                    continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
+                    outcome = "accept-then-paginate"  # second fetch wrongly succeeded
+                    detail = "cross-direction cursor replay was wrongly accepted"
+                except ContinuationError as exc2:
+                    outcome = "reject-on-second-fetch"
+                    detail = str(exc2)
         except ContinuationError as exc:
             outcome = "reject"
             detail = str(exc)
 
-        result = "PASS" if outcome == case["expect"] and not dedup_violation else "FAIL"
+        coverage_mismatch = False
+        if "expect_has_more_before" in case and observed_has_more_before != case["expect_has_more_before"]:
+            coverage_mismatch = True
+            detail = f"has_more_before {observed_has_more_before!r} != expected {case['expect_has_more_before']!r}"
+        if "expect_has_more_after" in case and observed_has_more_after != case["expect_has_more_after"]:
+            coverage_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"has_more_after {observed_has_more_after!r} != expected {case['expect_has_more_after']!r}"
+            )
+
+        result = "PASS" if outcome == case["expect"] and not dedup_violation and not coverage_mismatch else "FAIL"
         row = {
             "scene_id": case["scene_id"], "case_id": case["case_id"], "title": case["title"],
             "result": result, "expected": case["expect"], "observed": outcome, "detail": detail,
             "handle_id": capability["handle_id"],
+            "has_more_before": observed_has_more_before, "has_more_after": observed_has_more_after,
         }
         rows.append(row)
     return rows

@@ -352,12 +352,12 @@ a new bound `python3 scripts/run_slice_workflow.py run speckit
 specs/020-v2-observation` run rather than resuming the completed T001–T038
 delivery run.
 
-- [ ] T039 Document native `reaction` and `membership` event ingestion in `docs/observation/v2.md` — add a runnable example and description of literal relations (e.g. reaction `target_event_id`, membership operation) and honest-unavailability representation for both event kinds alongside the existing `message`-event coverage, and extend `tests/v2/observation/test_docs.py` to assert their presence, per FR-003 / plan.md Acceptance Scene S02 (partial)
-- [ ] T040 Add RED→GREEN coverage in `tests/v2/observation/test_provider.py` proving a membership event with `caused_by_actor_id == self.actor_id` is retained as `SELF_RETAINED_NO_WAKE`, while an event where self appears only as `subject_actor_id` remains ordinary `OBSERVED`; implement the exact-causation check in `src/nunchi/observation.py` and document the resolved scope in `docs/observation/v2.md`, per FR-004 and D020-01/M020-02 in `evidence/v2/observation/convergence-2026-07-19.md`
-- [ ] T041 Add RED→GREEN test/eval coverage proving configured `event_visibility` appears consistently in both `ObservationProvider.snapshot()` and `ContinuationProvider.fetch()` coverage (and is absent when unavailable); implement missing fetch propagation if the red test exposes it, then record exact outcomes in `evidence/v2/observation/budget-sweep.jsonl`, per FR-007 and M020-04 in `evidence/v2/observation/convergence-2026-07-19.md`
-- [ ] T042 Correct the inaccurate "four-line addition" diff-size claim for the `tests/test_governance.py` fix in `evidence/v2/observation/handoff.md`'s Known Limitations section to match the actual 9-insertion diff (`git diff --stat tests/test_governance.py`), per FR-013 / Constitution VI Evidence Before Claims (contradicts)
-- [ ] T043 Name `v2-wake-owner` (040), `v2-adapters-owner` (090), and `v2-security-owner` (100) as explicit recipients of the T038 handoff packet in `evidence/v2/observation/handoff.md`, consistent with `spec.md`'s declared `Feeds` list, per tasks.md Handoff Input Contract "recipients" element (partial)
-- [ ] T044 Explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary (what each means and how a consumer should read a `known-gap` result) in `docs/observation/v2.md`'s reference-variant section, per FR-011 / plan.md T026 "capability truth" (partial)
+- [X] T039 Document native `reaction` and `membership` event ingestion in `docs/observation/v2.md` — add a runnable example and description of literal relations (e.g. reaction `target_event_id`, membership operation) and honest-unavailability representation for both event kinds alongside the existing `message`-event coverage, and extend `tests/v2/observation/test_docs.py` to assert their presence, per FR-003 / plan.md Acceptance Scene S02 (partial)
+- [X] T040 Add RED→GREEN coverage in `tests/v2/observation/test_provider.py` proving a membership event with `caused_by_actor_id == self.actor_id` is retained as `SELF_RETAINED_NO_WAKE`, while an event where self appears only as `subject_actor_id` remains ordinary `OBSERVED`; implement the exact-causation check in `src/nunchi/observation.py` and document the resolved scope in `docs/observation/v2.md`, per FR-004 and D020-01/M020-02 in `evidence/v2/observation/convergence-2026-07-19.md`
+- [X] T041 Add RED→GREEN test/eval coverage proving configured `event_visibility` appears consistently in both `ObservationProvider.snapshot()` and `ContinuationProvider.fetch()` coverage (and is absent when unavailable); implement missing fetch propagation if the red test exposes it, then record exact outcomes in `evidence/v2/observation/budget-sweep.jsonl`, per FR-007 and M020-04 in `evidence/v2/observation/convergence-2026-07-19.md`
+- [X] T042 Correct the inaccurate "four-line addition" diff-size claim for the `tests/test_governance.py` fix in `evidence/v2/observation/handoff.md`'s Known Limitations section to match the actual 9-insertion diff (`git diff --stat tests/test_governance.py`), per FR-013 / Constitution VI Evidence Before Claims (contradicts)
+- [X] T043 Name `v2-wake-owner` (040), `v2-adapters-owner` (090), and `v2-security-owner` (100) as explicit recipients of the T038 handoff packet in `evidence/v2/observation/handoff.md`, consistent with `spec.md`'s declared `Feeds` list, per tasks.md Handoff Input Contract "recipients" element (partial)
+- [X] T044 Explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary (what each means and how a consumer should read a `known-gap` result) in `docs/observation/v2.md`'s reference-variant section, per FR-011 / plan.md T026 "capability truth" (partial)
 
 ## Phase 9: Plan-Correction — Downstream Handoff Recipient Naming Accuracy
 
@@ -376,7 +376,7 @@ recorded the wrong name before this correction existed and remain unedited
 per the Correction and Rejection Preservation contract above; this phase
 appends the fix rather than rewriting that history.
 
-- [ ] T045 Add a red assertion in `tests/v2/observation/test_docs.py` that
+- [X] T045 Add a red assertion in `tests/v2/observation/test_docs.py` that
   `docs/observation/v2.md`'s classifier-safe-projection/redaction paragraph
   (under "What this slice does not do") names the real `v2-core-owner` lane
   for the `I-010A` expansion-availability handoff to slice `030`, and never
@@ -384,7 +384,7 @@ appends the fix rather than rewriting that history.
   `evidence/v2/observation/handoff.md` contains zero literal
   `v2-attention-owner` occurrences and names `v2-core-owner`, per P020-01 and
   A020-F2 in `evidence/v2/observation/convergence-2026-07-19.md`
-- [ ] T046 Fix the incorrect downstream-recipient lane name
+- [X] T046 Fix the incorrect downstream-recipient lane name
   `v2-attention-owner` to the correct `v2-core-owner` in
   `docs/observation/v2.md` ("What this slice does not do" section) and
   `evidence/v2/observation/handoff.md` (`## Documentation dispositions
@@ -420,13 +420,13 @@ continuation coverage, supersede stale evidence claims without rewriting
 historical records, and bind the accepted I-010E `@2` amendment before a new
 candidate is proposed.
 
-- [ ] T047 Add RED regression tests in `tests/v2/observation/test_budget_and_continuation.py` and a named adversarial case in `evals/v2/observation/continuation/cases.jsonl` proving a cursor minted for `before` cannot be replayed as `after` (or vice versa) under the same handle and cannot return an event already served by the prior page, reproducing H020-01
-- [ ] T048 Make continuation cursors direction-bound in `src/nunchi/observation.py` (or reject an exact direction mismatch before page selection), preserve same-direction pagination, update serialized cursor evidence, and make T047 plus the complete continuation suite pass without weakening cross-handle/binding/expiry/cap checks
-- [ ] T049 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py` for truncated `around` fetches that require truthful boolean `has_more_before` and `has_more_after` side coverage instead of two nulls, reproducing L020-01
-- [ ] T050 Implement truthful side-specific `around` coverage in `src/nunchi/observation.py`, update the matching continuation eval/evidence rows, and make T049 plus all existing before/after/around budget and ordering tests pass
-- [ ] T051 Append a superseding convergence section to `evidence/v2/observation/handoff.md` that distinguishes the immutable T001–T038 activation-prefix SHA from the final full-manifest SHA, replaces the stale 11-skip current claim with the exact re-run result without rewriting the historical T038 text, and cites M020-01/M020-03 plus the exact commands used
-- [ ] T052 Update current slice-owned documentation and handoff/evidence citations from I-010E `@1` to accepted I-010E `@2`, cite exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`, integrator acceptance `30aba09f13a6752b4c24811da0d8ec772a9d9682`, and `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; preserve completed attempt-6 history and state explicitly that `observationBody` is unchanged and no implementation change was owed by the version rebind
-- [ ] T053 Run the complete observation tests, scene replay/evals, full repository suite, verdict fixture discovery, governance CLI, task-manifest check, and `git diff --check`; record exact nonzero counts/results and all T039–T052 correction receipts in the append-only current handoff section before convergence review
+- [X] T047 Add RED regression tests in `tests/v2/observation/test_budget_and_continuation.py` and a named adversarial case in `evals/v2/observation/continuation/cases.jsonl` proving a cursor minted for `before` cannot be replayed as `after` (or vice versa) under the same handle and cannot return an event already served by the prior page, reproducing H020-01
+- [X] T048 Make continuation cursors direction-bound in `src/nunchi/observation.py` (or reject an exact direction mismatch before page selection), preserve same-direction pagination, update serialized cursor evidence, and make T047 plus the complete continuation suite pass without weakening cross-handle/binding/expiry/cap checks
+- [X] T049 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py` for truncated `around` fetches that require truthful boolean `has_more_before` and `has_more_after` side coverage instead of two nulls, reproducing L020-01
+- [X] T050 Implement truthful side-specific `around` coverage in `src/nunchi/observation.py`, update the matching continuation eval/evidence rows, and make T049 plus all existing before/after/around budget and ordering tests pass
+- [X] T051 Append a superseding convergence section to `evidence/v2/observation/handoff.md` that distinguishes the immutable T001–T038 activation-prefix SHA from the final full-manifest SHA, replaces the stale 11-skip current claim with the exact re-run result without rewriting the historical T038 text, and cites M020-01/M020-03 plus the exact commands used
+- [X] T052 Update current slice-owned documentation and handoff/evidence citations from I-010E `@1` to accepted I-010E `@2`, cite exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`, integrator acceptance `30aba09f13a6752b4c24811da0d8ec772a9d9682`, and `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; preserve completed attempt-6 history and state explicitly that `observationBody` is unchanged and no implementation change was owed by the version rebind
+- [X] T053 Run the complete observation tests, scene replay/evals, full repository suite, verdict fixture discovery, governance CLI, task-manifest check, and `git diff --check`; record exact nonzero counts/results and all T039–T052 correction receipts in the append-only current handoff section before convergence review
 
 ### Phase 10 dependencies
 
@@ -440,3 +440,51 @@ candidate is proposed.
 delivery, all continuation coverage is truthful, I-010E `@2` is explicitly
 consumer-bound, and the append-only handoff's current section matches every
 re-runnable command and final task identity.
+
+## Phase 11: Convergence
+
+**Correction source**: `/speckit-converge` run 2026-07-19 (this run), finding
+F1 CRITICAL, reproduced live against the completed T001–T053 candidate tree.
+
+**Purpose**: Close a residual honesty defect in the Phase 10 (T049/T050)
+"truthful side-specific `around` coverage" fix that neither its new unit test
+nor its new eval case exercises.
+
+- [ ] T054 Fix a false-negative `has_more_before` in `ContinuationProvider.fetch`'s
+  `around` branch in `src/nunchi/observation.py`: `has_more_before =
+  around_window_start > 0` ignores cap-based truncation that lands at a
+  candidate index strictly before `anchor_index`, so a per-fetch event/byte
+  cap that cuts the scan off before reaching the anchor reports
+  `has_more_before: False` even though an unserved before-anchor event
+  remains (reproduced: 5 events e1–e5, anchor `e3` at index 2,
+  `max_events_per_fetch=6` giving radius 3 and `around_window_start=0`,
+  `max_bytes_per_fetch` sized to admit only `e1` — the page serves only
+  `['e1']` yet reports `has_more_before: False` although `e2`, a genuine
+  before-anchor event, was never served). Track whether the cap actually
+  truncated the scan at a candidate index `< anchor_index` (before-side) or
+  `>= anchor_index` (at-or-after-side), and OR that fact into
+  `has_more_before`/`has_more_after` respectively, alongside the existing
+  window-boundary checks (`around_window_start > 0` /
+  `around_window_end < len(events)`). Add a RED→GREEN regression test in
+  `tests/v2/observation/test_budget_and_continuation.py` reproducing the
+  exact scenario above (a cap-truncation index strictly less than
+  `anchor_index` while `around_window_start == 0`) and a matching
+  adversarial case in `evals/v2/observation/continuation/cases.jsonl` with
+  its result recorded in `evidence/v2/observation/continuation.jsonl`; append a
+  Phase 11 supersession to `evidence/v2/observation/handoff.md` recording the
+  final T001–T054 full-manifest SHA, the T054 receipt, and exact rerun results
+  for the complete T053 verification matrix so the act of appending T054 does
+  not leave the handoff stale, per FR-007, SC-002, Constitution III ("honest
+  coverage and gap facts"), Constitution VI, and plan.md Acceptance Scene S03
+  ("gaps are truthful") (contradicts)
+
+### Phase 11 dependencies
+
+- T054 must add a failing regression test before the fix, then pass it plus
+  the complete existing continuation/budget suite (including T047–T050's
+  cross-direction and side-specific coverage tests) without weakening any
+  existing binding/expiry/cap/dedup check.
+
+**Checkpoint**: every `around` fetch — truncated by window boundary, by cap
+before the anchor, or by cap after the anchor — reports `has_more_before`/
+`has_more_after` that match which side actually has unserved events.

@@ -695,8 +695,21 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
         if isinstance(requested, (int, float)) and isinstance(cap, (int, float)) and requested > cap:
             errors.append(f"{requested_field}={requested!r} exceeds the issued cap {cap_field}={cap!r}")
     cursor = request.get("cursor")
-    if cursor is not None and cursor not in (capability.get("cursors") or []):
-        errors.append(f"cursor {cursor!r} was not minted under handle {request.get('handle_id')!r}")
+    if cursor is not None:
+        if cursor not in (capability.get("cursors") or []):
+            errors.append(f"cursor {cursor!r} was not minted under handle {request.get('handle_id')!r}")
+        else:
+            # Cursors are minted as ``{handle_id}:{direction}:{index}``
+            # (H020-01): a cursor minted for one direction must never be
+            # replayable under a different direction, which would silently
+            # re-serve events the minting direction's page already returned.
+            cursor_parts = cursor.rsplit(":", 2)
+            cursor_direction = cursor_parts[1] if len(cursor_parts) == 3 else None
+            if cursor_direction is not None and cursor_direction != direction:
+                errors.append(
+                    f"cursor {cursor!r} was minted for direction {cursor_direction!r}; "
+                    f"it cannot be replayed under direction {direction!r}"
+                )
     return errors
 
 
@@ -823,6 +836,16 @@ class ObservationProvider:
         mechanical no-wake classes plus the ordinary observed case
         (FR-004). Never derives authorization or routing from payload
         content: ``authorized``/``reason`` must be supplied explicitly.
+
+        Exact self-causation (D020-01): an event is self-caused, and thus
+        ``self-retained-no-wake``, only when its own transport-attested
+        ``author_id`` matches ``self.actor_id`` (``message``/``reaction``),
+        or, for a ``membership`` event with no ``author_id``, when its
+        ``caused_by_actor_id`` exactly matches ``self.actor_id``. A
+        membership event where self appears only as ``subject_actor_id``
+        (acted upon, not acting) remains ordinary ``observed`` — being the
+        subject of another actor's action is not the participant's own
+        action.
         """
         if not isinstance(native_event_input, dict):
             raise ObservationInputError("native event input must be an object")
@@ -880,7 +903,10 @@ class ObservationProvider:
         self._events.append(event)
         self._reindex()
 
-        return SELF_RETAINED_NO_WAKE if event.get("author_id") == self.actor_id else OBSERVED
+        is_self_caused = event.get("author_id") == self.actor_id or (
+            event.get("type") == "membership" and event.get("caused_by_actor_id") == self.actor_id
+        )
+        return SELF_RETAINED_NO_WAKE if is_self_caused else OBSERVED
 
     def _reindex(self) -> None:
         self._event_index = {event["id"]: index for index, event in enumerate(self._events)}
@@ -1144,16 +1170,16 @@ class ContinuationProvider:
         cap_bytes = min(max_bytes, capability["max_bytes_per_fetch"])
 
         if direction == "before":
-            start = int(cursor.split(":", 1)[1]) if cursor else anchor_index - 1
+            start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index - 1
             candidate_indices = range(start, -1, -1)
         elif direction == "after":
-            start = int(cursor.split(":", 1)[1]) if cursor else anchor_index + 1
+            start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index + 1
             candidate_indices = range(start, len(events))
         else:  # around
             radius = max(1, cap_events // 2)
-            candidate_indices = list(
-                range(max(0, anchor_index - radius), min(len(events), anchor_index + radius + 1))
-            )
+            around_window_start = max(0, anchor_index - radius)
+            around_window_end = min(len(events), anchor_index + radius + 1)
+            candidate_indices = list(range(around_window_start, around_window_end))
 
         page_events: list[dict] = []
         total_bytes = 0
@@ -1168,12 +1194,25 @@ class ContinuationProvider:
             total_bytes += size
         if direction in ("before", "after"):
             page_events_ordered = list(reversed(page_events)) if direction == "before" else page_events
+            has_more_before = next_index is not None if direction == "before" else None
+            has_more_after = next_index is not None if direction == "after" else None
         else:
             page_events_ordered = page_events
+            # L020-01: truthful side-specific coverage instead of two nulls.
+            # The ascending window scan can only truncate the after side
+            # mid-loop; the before side is incomplete only when the radius
+            # window itself did not reach the start of the buffer. Either
+            # side is also incomplete when the fixed radius window ends
+            # before the buffer's own edge, independent of any cap.
+            has_more_before = around_window_start > 0
+            has_more_after = next_index is not None or around_window_end < len(events)
 
         next_cursor = None
         if next_index is not None:
-            next_cursor = f"{handle_id}:{next_index}"
+            # Direction-bound (H020-01): encoding ``direction`` into the
+            # cursor lets ``check_binding_expiry`` reject a cursor replayed
+            # under a different direction before any page is served.
+            next_cursor = f"{handle_id}:{direction}:{next_index}"
             self._cursors[handle_id].add(next_cursor)
             capability.setdefault("cursors", [])
             if next_cursor not in capability["cursors"]:
@@ -1194,8 +1233,8 @@ class ContinuationProvider:
             "actors": actors,
             "events": page_events_ordered,
             "coverage": {
-                "has_more_before": next_index is not None if direction == "before" else None,
-                "has_more_after": next_index is not None if direction == "after" else None,
+                "has_more_before": has_more_before,
+                "has_more_after": has_more_after,
                 "has_gaps": False,
                 "truncated_by": ["events"] if next_index is not None else [],
                 "continuity": self._provider.continuity,
@@ -1204,6 +1243,8 @@ class ContinuationProvider:
                 "max_bytes": cap_bytes,
             },
         }
+        if self._provider.event_visibility:
+            page["coverage"]["event_visibility"] = dict(self._provider.event_visibility)
         if next_cursor is not None:
             page["next_cursor"] = next_cursor
         page_errors = validate_context_continuation(page)

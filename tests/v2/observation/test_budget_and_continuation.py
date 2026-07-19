@@ -48,6 +48,42 @@ class TestHardBudgets(unittest.TestCase):
         self.assertEqual(snapshot["events"][0]["id"], "e3")
 
 
+class TestEventVisibilityCoverage(unittest.TestCase):
+    """FR-007 / M020-04: configured ``event_visibility`` must appear
+    consistently in both snapshot and continuation-fetch coverage, and stay
+    absent from both when unconfigured."""
+
+    def test_event_visibility_present_in_snapshot_coverage_when_configured(self):
+        provider, events = _room_with_events(3, provider=make_provider(event_visibility={"message": "history-and-live"}))
+        snapshot = provider.snapshot(trigger_event_id="e3", max_events=10, max_bytes=65536)
+        self.assertEqual(snapshot["coverage"]["event_visibility"], {"message": "history-and-live"})
+
+    def test_event_visibility_absent_from_snapshot_coverage_when_unconfigured(self):
+        provider, events = _room_with_events(3)
+        snapshot = provider.snapshot(trigger_event_id="e3", max_events=10, max_bytes=65536)
+        self.assertNotIn("event_visibility", snapshot["coverage"])
+
+    def test_event_visibility_present_in_fetch_page_coverage_when_configured(self):
+        provider, events = _room_with_events(3, provider=make_provider(event_visibility={"message": "history-and-live"}))
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=8192)
+        page = continuation.fetch(
+            {"request_id": "req-1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 5, "max_bytes": 8192},
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual(page["coverage"]["event_visibility"], {"message": "history-and-live"})
+
+    def test_event_visibility_absent_from_fetch_page_coverage_when_unconfigured(self):
+        provider, events = _room_with_events(3)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=8192)
+        page = continuation.fetch(
+            {"request_id": "req-1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 5, "max_bytes": 8192},
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertNotIn("event_visibility", page["coverage"])
+
+
 class TestRelationClosure(unittest.TestCase):
     def test_reply_relation_target_is_prioritized_over_nearby_fill(self):
         provider = make_provider()
@@ -129,6 +165,36 @@ class TestFetchDocuments(unittest.TestCase):
         self.assertEqual(validate_context_continuation(page), [])
         ids = [event["id"] for event in page["events"]]
         self.assertEqual(ids, sorted(ids, key=lambda x: int(x[1:])))
+
+    def test_truncated_around_fetch_reports_truthful_side_specific_coverage(self):
+        # L020-01: a truncated `around` page must report which side(s) have
+        # more, not two nulls. e1..e10, anchor e5 (index 4), radius window
+        # [e4, e5, e6] (indices 3-5) under a tight per-fetch cap leaves both
+        # e1-e3 (before) and e7-e10 (after) unserved.
+        provider, events = _room_with_events(10)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e5", max_events_per_fetch=3, max_bytes_per_fetch=8192)
+        request = {
+            "request_id": "req-x", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e5", "max_events": 3, "max_bytes": 8192,
+        }
+        page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+        self.assertIsInstance(page["coverage"]["has_more_before"], bool)
+        self.assertIsInstance(page["coverage"]["has_more_after"], bool)
+        self.assertTrue(page["coverage"]["has_more_before"])
+        self.assertTrue(page["coverage"]["has_more_after"])
+
+    def test_untruncated_around_fetch_reports_no_more_on_either_side(self):
+        provider, events = _room_with_events(3)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e2", max_events_per_fetch=100, max_bytes_per_fetch=65536)
+        request = {
+            "request_id": "req-x", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e2", "max_events": 100, "max_bytes": 65536,
+        }
+        page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+        self.assertFalse(page["coverage"]["has_more_before"])
+        self.assertFalse(page["coverage"]["has_more_after"])
 
     def test_around_fetch_requires_anchor(self):
         provider, continuation, capability, host_context = self._issued()
@@ -218,6 +284,43 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         }
         with self.assertRaises(ContinuationError):
             continuation.fetch(request, host_context=cap_b["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+
+    def test_cross_direction_cursor_replay_rejects(self):
+        # H020-01: a cursor minted by a 'before' fetch must not be
+        # replayable under 'after' for the same handle — that would return
+        # an event already served by the first page (e.g. ['e4', 'e5']
+        # followed by ['e3', 'e4']).
+        provider, events = _room_with_events(6)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e6", max_events_per_fetch=2, max_bytes_per_fetch=8192)
+        page1 = continuation.fetch(
+            {"request_id": "r1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 2, "max_bytes": 8192},
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z",
+        )
+        self.assertIn("next_cursor", page1)
+        request2 = {
+            "request_id": "r2", "handle_id": capability["handle_id"], "direction": "after",
+            "max_events": 2, "max_bytes": 8192, "cursor": page1["next_cursor"],
+        }
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(request2, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+
+    def test_same_direction_cursor_replay_still_paginates(self):
+        provider, events = _room_with_events(6)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(trigger_event_id="e6", max_events_per_fetch=2, max_bytes_per_fetch=8192)
+        page1 = continuation.fetch(
+            {"request_id": "r1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 2, "max_bytes": 8192},
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z",
+        )
+        request2 = {
+            "request_id": "r2", "handle_id": capability["handle_id"], "direction": "before",
+            "max_events": 2, "max_bytes": 8192, "cursor": page1["next_cursor"],
+        }
+        page2 = continuation.fetch(request2, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
+        ids_page1 = {event["id"] for event in page1["events"]}
+        ids_page2 = {event["id"] for event in page2["events"]}
+        self.assertEqual(ids_page1 & ids_page2, set())
 
     def test_cursor_replay_continues_without_duplication(self):
         provider, events = _room_with_events(6)
