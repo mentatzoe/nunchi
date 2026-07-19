@@ -638,3 +638,46 @@ only `around` cursors.
 **Checkpoint**: every continuation cursor direction is identity-bound across
 retention shifts or fails closed on eviction; no page overlaps, skips, or
 claims gap-free continuity after identity loss.
+
+## Phase 15: Bounded Cursor Lifecycle and Resource Safety
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase15-2026-07-19.md`, finding
+S020-A3-01 HIGH/security.
+
+**Purpose**: Preserve retention-safe immutable cursor identity without
+quadratic or never-pruned host bookkeeping.
+
+- [ ] T066 Add RED tests in
+  `tests/v2/observation/test_budget_and_continuation.py` proving a long
+  one-event-per-page chain retains one shared immutable event-ID window and at
+  most one active cursor for that sequence, consumed tokens reject as one-shot,
+  and exhaustion releases the sequence's active cursor state
+- [ ] T067 Replace copied remaining-ID suffixes in
+  `src/nunchi/observation.py` with a shared immutable ordered event-ID tuple plus
+  next-position metadata, consume incoming tokens only after a page validates,
+  and preserve all direction/anchor/fixed-window/retention/cap/order guarantees
+- [ ] T068 Add configurable global handle and per-handle active-cursor bounds,
+  explicit host `revoke()` cleanup, and expiry-triggered handle cleanup to
+  `ContinuationProvider`; add RED→GREEN tests for each rejection and cleanup
+  path without changing accepted I-010A/I-010D wire shapes
+- [ ] T069 Add a deterministic bounded-resource continuation case to
+  `evals/v2/observation/continuation/cases.jsonl`, extend
+  `evals/v2/observation/run_scenes.py` to assert retained handle/cursor/window
+  counts, and regenerate every aggregate evidence file plus the scene manifest
+- [ ] T070 Append a Phase 15 supersession to
+  `evidence/v2/observation/handoff.md`, restore the Constitution Check rows to
+  PASS only on exact GREEN evidence, rerun the complete
+  Observation/corpus/eval/full-suite/verdict/Ruff/security/governance/
+  task-manifest/diff matrix, and record the final T001–T070 task identity
+
+### Phase 15 dependencies
+
+- T066 and T068 RED coverage may be authored in parallel.
+- T067 depends on T066 RED; T068 implementation follows its own RED coverage.
+- T069 depends on T067–T068 GREEN behavior.
+- T070 is last and blocks convergence and candidate attempt 2.
+
+**Checkpoint**: cursor correctness state is linear in each immutable window,
+active cursors and handles are explicitly bounded, consumed/exhausted/expired/
+revoked state is reclaimed, and resource claims are evidence-backed.
