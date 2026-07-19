@@ -909,3 +909,31 @@ tree.
 no additional tenant/authority-shaped property is ignored, and only a fresh
 review of the final immutable tree may authorize candidate-attempt-2
 preparation.
+
+## Phase 20: Non-bypassable Static Scanner
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase20-scanner-bypass-2026-07-19.md`,
+owner review of immutable preparation `cd8917c`.
+
+- [X] T104 Add a RED probe proving an added production secret can bypass all
+  matchers by carrying the unrestricted `slice020-secret-fixture` marker;
+  reject `cd8917c` as a final candidate target
+- [ ] T105 Remove the runtime fixture-marker exemption entirely, construct
+  synthetic test tokens dynamically so scanner source scans cleanly, and add a
+  regression proving marker text never suppresses a real finding
+- [ ] T106 Regenerate static/evaluator evidence, rerun the complete matrix and
+  whole-slice exact-range scan, commit/push a new immutable preparation object,
+  and record the T001–T107 graph identity without claiming handoff
+- [ ] T107 Obtain a fresh independent fail-closed review of that exact immutable
+  object; only a blocker-free verdict may close T103/T107 and authorize
+  candidate-attempt-2 lifecycle records
+
+### Phase 20 dependencies
+
+- T105 depends on T104 RED.
+- T106 depends on T105 GREEN.
+- T107 depends on T106 and is the sole final convergence blocker.
+
+**Checkpoint**: no repository line can suppress a static finding by carrying a
+fixture marker; scanner test data is synthetic by construction, not exempt.
