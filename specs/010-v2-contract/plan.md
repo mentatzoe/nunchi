@@ -199,10 +199,10 @@ evidence and task-graph wording only; no new gate exposure is introduced.
   binding, cursor,
   expiry values, and fetch authority are host-only. The classifier projection receives coverage
   and expansion capability booleans only.
-- `I-010E AttentionReceiptV2@1` at
-  `schemas/v2/attention-receipt.schema.json`, an immutable staged-record union
-  for `observation`, `attention`, `participant-host`, and `transport`, correlated
-  by request ID. Each stage owner appends only its stage, and the
+- `I-010E AttentionReceiptV2@2` (amended post-acceptance from `@1`; FR-010
+  amendment A1) at `schemas/v2/attention-receipt.schema.json`, an immutable
+  staged-record union for `observation`, `attention`, `participant-host`,
+  and `transport`, correlated by request ID. Each stage owner appends only its stage, and the
   stage-to-writer binding is part of the public per-record contract: each stage
   names its single directly observing owner as writer, and a record attributing
   one stage to another stage's owner is invalid as a single document in both

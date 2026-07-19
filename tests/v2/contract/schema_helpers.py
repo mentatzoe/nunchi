@@ -1306,7 +1306,10 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
         errors.add(path, "must be an object")
         return
     if variant == "classifier":
-        fields = ("classifier_disposition", "effective_disposition", "classifier", "evidence_event_ids", "routing_audit")
+        fields = (
+            "classifier_disposition", "effective_disposition", "classifier",
+            "evidence_event_ids", "routing_audit", "policy_provenance",
+        )
         if not _check_closed_object(errors, path, value, fields, fields):
             return
         if "classifier_disposition" in value:
@@ -1328,9 +1331,12 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                     _check_nes(errors, f"{path}.evidence_event_ids[{index}]", event_id)
         if "routing_audit" in value:
             _check_routing_audit(errors, value["routing_audit"])
+        if "policy_provenance" in value:
+            _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
         return
     if variant == "error":
-        if not _check_closed_object(errors, path, value, ("error",), ("error",)):
+        allowed = ("error", "wake_action", "policy_provenance")
+        if not _check_closed_object(errors, path, value, ("error",), allowed):
             return
         error = value.get("error")
         if _check_closed_object(errors, f"{path}.error", error, ("code", "detail"), ("code", "detail")):
@@ -1338,6 +1344,20 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                 _check_nes(errors, f"{path}.error.code", error["code"])
             if "detail" in error and not isinstance(error["detail"], str):
                 errors.add(f"{path}.error.detail", "must be a string")
+        # wake_action/policy_provenance are present together exactly when an
+        # explicit operator override to the shared WAKE default applied (@2
+        # amendment A1); absence means the default WAKE behavior applied.
+        if "wake_action" in value or "policy_provenance" in value:
+            if "wake_action" not in value or "policy_provenance" not in value:
+                errors.add(
+                    f"{path}",
+                    "wake_action and policy_provenance must be present together "
+                    "(an explicit operator override) or both absent",
+                )
+            if "wake_action" in value:
+                _check_enum(errors, f"{path}.wake_action", value["wake_action"], ("WAKE", "NO_WAKE"))
+            if "policy_provenance" in value:
+                _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
         return
     fields = ("classifier_not_invoked", "cause", "policy_provenance")
     if not _check_closed_object(errors, path, value, fields, fields):
@@ -2377,6 +2397,7 @@ _STAGE_BODIES = {
         "classifier": {"name": "nunchi-classifier"},
         "evidence_event_ids": ["e1", "e3"],
         "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+        "policy_provenance": "trusted:profiles/default@2026-07",
     },
     "participant-host": {
         "wake_source": "WAKE",

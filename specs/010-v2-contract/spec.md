@@ -79,7 +79,8 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   - `I-010B AttentionDecisionV2@1`
   - `I-010C ParticipantWakeV2@1`
   - `I-010D ContextContinuationV2@1`
-  - `I-010E AttentionReceiptV2@1`
+  - `I-010E AttentionReceiptV2@2` (amended post-acceptance from `@1`; see FR-010
+    amendment A1)
 - **Integration handoff**: `v2-contract-owner` lands and versions the ordinary
   schemas and their deterministic contract tests, then hands the exact commit,
   verification commands, interface inventory, and known limitations to all
@@ -408,7 +409,7 @@ participant outcomes and binding failures.
   cursors, expiry values, and fetch credentials remain host-only and are
   forbidden from the classifier projection; an expired handle is rejected at
   fetch time as a binding-validation failure.
-- **FR-010**: The slice MUST define `I-010E AttentionReceiptV2@1` as immutable,
+- **FR-010**: The slice MUST define `I-010E AttentionReceiptV2@2` as immutable,
   append-only stage records for `observation`, `attention`, `participant-host`,
   and `transport`, correlated by request ID, in that canonical order
   (observation → attention → participant-host → transport). A prefix-partial
@@ -424,8 +425,22 @@ participant outcomes and binding failures.
   invalid as a single document in both validators, independent of the
   runtime stream-level ordering and immutability checks. Unknown and
   unavailable remain explicit. The attention-stage record keeps classifier
-  outcome, effective routing, policy provenance, and operational error separate;
-  bypass records `classifier_not_invoked` and its trusted bypass provenance.
+  outcome, effective routing, required policy provenance, and operational
+  error separate; an operational error additionally carries a `wake_action`/
+  `policy_provenance` pair present together exactly when an explicit
+  operator override to the shared `WAKE` default applied; bypass records
+  `classifier_not_invoked` and its trusted bypass provenance. **`@2`
+  amendment A1** (discovered during slice 030 planning after `@1`
+  acceptance; `evidence/v2/attention/dependency-010-post-acceptance-blocker.md`):
+  the selected design at `c834e8c` requires the effective policy and its
+  source to be inspectable in receipts and an operator's `NO_WAKE` override
+  to be separately receipted as operational failure policy; `@1` gave
+  `policy_provenance` only to the trusted-bypass body and gave the error
+  body no override-provenance field, and `margin_source` on `routing_audit`
+  is scoped to the margin-defer valve only and cannot serve as general
+  policy provenance. `@1` consumers MUST migrate to `@2` before consuming
+  attention-stage receipts; breaking edits require an explicit owner
+  handoff and dependent re-analysis (FR-014).
 - **FR-011**: V2 contracts MUST reject V1 envelopes, reply-bearing fields,
   inferred-roster claims, and handled/open/owed/permission state; no V1
   translation bridge is permitted.
@@ -472,10 +487,13 @@ participant outcomes and binding failures.
 - **FR-014**: The selected Vault design at `c834e8c` — its target attention
   request, target attention response, participant wake contract, and staged
   receipt sections — is the field-level naming and shape authority for every
-  `@1` interface; the program-canonical interface names and versions
-  (`I-010A`–`I-010E` at `@1`) remain this slice's vocabulary for those same
-  documents. Schemas MUST encode the selected field inventory rather than a
-  narrowed local shape: the room platform/id/continuity-scope/name/kind
+  interface at its exact current version; the program-canonical interface
+  names and versions (`I-010A`–`I-010D` at `@1`, `I-010E` at `@2` per FR-010
+  amendment A1) remain this slice's vocabulary for those same documents. A
+  later-discovered gap against the authority is resolved by an explicit
+  versioned amendment, never by narrowing the authority's own text. Schemas
+  MUST encode the selected field inventory rather than a narrowed local
+  shape: the room platform/id/continuity-scope/name/kind
   facts and the actor map; the typed message, reaction, and membership
   event union with reaction `add`/`remove` operation and literal membership
   scope, subject actor, and optional causal actor; the coverage facts

@@ -208,7 +208,7 @@ independently against the issuing continuation capability's exact
 does not establish correct binding or bounded authorization — see the
 runtime-adapter-only rules below.
 
-## I-010E AttentionReceiptV2@1
+## I-010E AttentionReceiptV2@2
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
@@ -218,9 +218,23 @@ stage-shaped `body` carrying the selected telemetry (FR-014):
 | Stage | Owning writer | Body |
 |---|---|---|
 | `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count`, `coverage`, `included_event_ids` |
-| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`) or operational error (`error: {code, detail}`, both required) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
+| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`, required `policy_provenance`) or operational error (`error: {code, detail}`, both required, plus `wake_action`/`policy_provenance` present together exactly when an explicit operator override to the shared `WAKE` default applied) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
 | `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count`, `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
+
+**`@2` amendment A1** (`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`,
+discovered during slice 030 planning after slice 010's `@1` acceptance): the
+selected design at `c834e8c` requires the effective policy and its source to
+be inspectable in receipts, and an operator's explicit `NO_WAKE` override to
+the shared `WAKE` error-handling default to be separately receipted as
+operational failure policy, never as a social disposition. `@1` gave
+`policy_provenance` only to the trusted-bypass body and gave the error body
+no way to distinguish an operator override from an ordinary failure; `@2`
+adds the classifier-outcome body's required `policy_provenance` and the
+error body's conditional `wake_action`/`policy_provenance` pair. `@1`
+consumers must migrate to `@2` before consuming attention-stage receipts;
+`margin_source` on `routing_audit` remains scoped to the margin-defer valve
+and does not serve as general policy provenance.
 
 The stage-to-writer binding is part of the public per-record contract
 (FR-010): each stage names its single directly observing owner per the

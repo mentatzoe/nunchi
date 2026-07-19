@@ -320,6 +320,45 @@ class ReceiptRecordCases(unittest.TestCase):
         missing_detail = make_receipt("attention", body={"error": {"code": "provider-failure"}})
         assert_schema_verdict(self, "attention-receipt", missing_detail, "invalid")
 
+    def test_classifier_outcome_requires_policy_provenance(self):
+        # @2 amendment A1 (c834e8c: "the effective policy and its source are
+        # inspectable in receipts"): required on every classifier-outcome
+        # attention body, not just the trusted-bypass variant.
+        doc = make_receipt("attention")
+        del doc["body"]["policy_provenance"]
+        assert_schema_verdict(self, "attention-receipt", doc, "invalid")
+
+    def test_error_operator_override_requires_both_wake_action_and_provenance(self):
+        # @2 amendment A1 (c834e8c: "NO_WAKE is an explicit operator
+        # override... receipted as operational failure policy"): wake_action
+        # and policy_provenance are present together or both absent.
+        ordinary = make_receipt(
+            "attention", body={"error": {"code": "provider-failure", "detail": "provider timeout"}}
+        )
+        assert_schema_verdict(self, "attention-receipt", ordinary, "valid")
+        overridden = make_receipt(
+            "attention",
+            body={
+                "error": {"code": "provider-failure", "detail": "provider timeout"},
+                "wake_action": "NO_WAKE",
+                "policy_provenance": "trusted:profiles/default@2026-07",
+            },
+        )
+        assert_schema_verdict(self, "attention-receipt", overridden, "valid")
+        only_action = make_receipt(
+            "attention",
+            body={"error": {"code": "provider-failure", "detail": "provider timeout"}, "wake_action": "NO_WAKE"},
+        )
+        assert_schema_verdict(self, "attention-receipt", only_action, "invalid")
+        only_provenance = make_receipt(
+            "attention",
+            body={
+                "error": {"code": "provider-failure", "detail": "provider timeout"},
+                "policy_provenance": "trusted:profiles/default@2026-07",
+            },
+        )
+        assert_schema_verdict(self, "attention-receipt", only_provenance, "invalid")
+
     def test_bypass_attention_record_carries_trusted_provenance(self):
         # 010-Preattention-bypass: classifier_not_invoked plus provenance,
         # with no fabricated model judgment.
@@ -425,6 +464,7 @@ class ReceiptSequenceCases(unittest.TestCase):
                 "classifier": {"name": "nunchi-classifier"},
                 "evidence_event_ids": ["e1"],
                 "routing_audit": {"valve": "none", "override_cause": "none", "margin_status": "active"},
+                "policy_provenance": "trusted:profiles/default@2026-07",
             },
         )
         self.assertEqual([], validate_receipt_stream(stream))
