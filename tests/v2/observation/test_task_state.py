@@ -27,6 +27,9 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
             "- [ ] TASK161 unresolved release blocker\n",
             "- [ ] T 161 hidden malformed task\n",
             "- [done] T161 malformed mark\n",
+            "* [X] T161 hidden alternate-bullet task\n",
+            "+ [ ] T161 hidden alternate-bullet task\n",
+            "  - [X] T161 hidden indented top-level task\n",
         ):
             with self.subTest(malformed=malformed), TemporaryDirectory() as directory:
                 path = Path(directory) / "tasks.md"
@@ -72,10 +75,16 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "superseded gate T153"):
                 evaluate_task_state(path)
             path.write_text(
-                original.replace("remains rejected", "was reviewed", 1),
+                original.replace(
+                    "Supersession disposition: REJECTED; authority: NONE.",
+                    "Supersession disposition: APPROVED; authority: GRANTED.",
+                    1,
+                ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "rejected/not-approved semantics"):
+            with self.assertRaisesRegex(
+                ValueError, "canonical rejected/no-authority disposition"
+            ):
                 evaluate_task_state(path)
 
 

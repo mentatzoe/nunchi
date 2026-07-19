@@ -1406,12 +1406,12 @@ def _task_manifest(entries: tuple[tuple[str, str], ...]) -> tuple[str, str]:
 
 
 def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
-    """Return a complete sequential manifest or fail on any checkbox-shaped line."""
+    """Return a manifest or reject every noncanonical top-level task-list row."""
 
     checkbox_lines = [
         (line_number, line)
         for line_number, line in enumerate(tasks_text.splitlines(), 1)
-        if re.match(r"^- \[[^]]*\]", line)
+        if re.match(r"^ {0,3}[-+*][ \t]+\[[^]\r\n]*\]", line)
     ]
     entries = _task_entries(tasks_text)
     if len(entries) != len(checkbox_lines):
@@ -1611,24 +1611,16 @@ def _slice_task_policy_errors(
                 f"{dirname}/tasks.md: superseded gate {historical_gate} successor "
                 f"{successor} must be later in the task graph"
             )
-        retains_rejection = re.search(
-            r"\b(?:not approved|unapproved|remains rejected)\b",
-            block,
-            re.IGNORECASE,
+        canonical_disposition = (
+            "Supersession disposition: REJECTED; authority: NONE."
         )
-        negates_rejection = re.search(
-            r"\b(?:no longer|not)\s+(?:(?:still|remains?)\s+)?"
-            r"(?:rejected|unapproved|not approved)\b",
-            block,
-            re.IGNORECASE,
+        disposition_lines = re.findall(
+            r"Supersession disposition:[^\r\n]*", block
         )
-        asserts_approval = re.search(
-            r"(?<!not )\bapproved\b", block, re.IGNORECASE
-        )
-        if not retains_rejection or negates_rejection or asserts_approval:
+        if disposition_lines != [canonical_disposition]:
             errors.append(
                 f"{dirname}/tasks.md: superseded gate {historical_gate} must retain "
-                "rejected/not-approved semantics"
+                "one exact canonical rejected/no-authority disposition"
             )
     if observed_superseded != expected_superseded:
         errors.append(
@@ -2102,6 +2094,10 @@ REJECTION_EVIDENCE_HASHES = {
         "evidence/v2/observation/"
         "review-2026-07-19-phase28-precommit-moving-tree-rejection.md"
     ): "cb07e8c40129d322a4345ca1e4afecf66e97430b86050d0e5447da66a86849f5",
+    Path(
+        "evidence/v2/observation/"
+        "review-2026-07-19-phase28-second-precommit-moving-tree-rejection.md"
+    ): "3dc48da732ad690af2c5c28ee0a9cc8f91dcb42bf7e2d8f63373c0849dd26047",
     Path(
         "evidence/v2/observation/"
         "review-2026-07-19-phase25-hermes-22a0a1a-rejection.md"

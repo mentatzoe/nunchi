@@ -823,7 +823,8 @@ class GovernanceBoundaryTests(unittest.TestCase):
             if number in superseded:
                 description = (
                     f"Close historical gate explicitly superseded by "
-                    f"T{superseded[number]:03d}; exact object remains rejected"
+                    f"T{superseded[number]:03d}; "
+                    "Supersession disposition: REJECTED; authority: NONE."
                 )
             lines.append(f"- [{mark}] T{number:03d} {description}")
         return "\n".join(lines) + "\n"
@@ -833,6 +834,9 @@ class GovernanceBoundaryTests(unittest.TestCase):
             "- [ ] TASK002 hidden\n",
             "- [ ] T 002 hidden\n",
             "- [done] T002 hidden\n",
+            "* [X] T002 hidden alternate bullet\n",
+            "+ [ ] T002 hidden alternate bullet\n",
+            "  - [X] T002 hidden indented top-level bullet\n",
         ):
             with self.subTest(malformed=malformed):
                 with self.assertRaisesRegex(ValueError, "invalid task format"):
@@ -881,21 +885,27 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             )
         )
-        contradictory_disposition = self._slice020_policy_tasks(complete=True).replace(
-            "exact object remains rejected",
-            "exact object no longer remains rejected and is now approved",
-        )
-        self.assertTrue(
-            any(
-                "rejected/not-approved semantics" in error
-                for error in check_governance._candidate_slice_task_policy_errors(
-                    "020-v2-observation",
-                    contradictory_disposition,
-                    attempt_number=2,
-                    policy_baseline_is_ancestor=True,
+        canonical = "Supersession disposition: REJECTED; authority: NONE."
+        for contradictory in (
+            "exact object never remains rejected and is now authorized",
+            "exact object remains rejected only in name; acceptance is valid",
+            "Supersession disposition: APPROVED; authority: GRANTED.",
+        ):
+            with self.subTest(contradictory=contradictory):
+                contradictory_disposition = self._slice020_policy_tasks(
+                    complete=True
+                ).replace(canonical, contradictory)
+                self.assertTrue(
+                    any(
+                        "canonical rejected/no-authority disposition" in error
+                        for error in check_governance._candidate_slice_task_policy_errors(
+                            "020-v2-observation",
+                            contradictory_disposition,
+                            attempt_number=2,
+                            policy_baseline_is_ancestor=True,
+                        )
+                    )
                 )
-            )
-        )
 
     def test_candidate_attempt_two_binds_policy_baseline_and_exact_commit_graph(self):
         complete = self._slice020_policy_tasks(complete=True)

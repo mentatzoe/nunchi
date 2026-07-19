@@ -933,6 +933,7 @@ owner review of immutable preparation `cd8917c`.
 - [X] T107 Close this historical review gate as explicitly superseded by T153;
   its exact immutable object was not approved and cannot authorize candidate or
   handoff lifecycle records
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 20 dependencies
 
@@ -963,6 +964,7 @@ HIGH H4, reproduced against the current post-Phase-20 tree.
 - [X] T112 Close this historical review gate as explicitly superseded by T153;
   its exact immutable object was not approved and cannot close T103 or authorize
   candidate attempt 2
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 21 dependencies
 
@@ -1001,6 +1003,7 @@ post-Phase-21 tree in
 - [X] T119 Close this historical review gate as explicitly superseded by T153;
   its exact object remains unapproved and every later CRITICAL/HIGH finding
   remains binding until the successor gate passes
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 22 dependencies
 
@@ -1031,6 +1034,7 @@ accepted corpus identity is byte-verifiable.
 - [X] T124 Close this historical combined freeze/review gate as explicitly
   superseded by T153; its exact object remains unapproved and cannot authorize
   candidate attempt 2 or handoff
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 23 dependencies
 
@@ -1072,6 +1076,7 @@ current remediation recorded in
 - [X] T131 Close this historical matrix/freeze/review gate as explicitly
   superseded by T153; its exact successor remains unapproved and cannot
   authorize candidate attempt 2 or handoff
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 24 dependencies
 
@@ -1116,6 +1121,7 @@ Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
 - [X] T140 Close this historical review gate as explicitly superseded by T153;
   its exact object remains unapproved and every CRITICAL/HIGH finding remains
   binding until the successor gate passes
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 25 dependencies
 
@@ -1153,6 +1159,7 @@ be reissued and resurrect matching old capability authority.
 - [X] T146 Close rejected Phase 26 review gate as explicitly superseded by T153;
   exact object `a49313a5354259346e1089e759184b9f08735b37` remains rejected and
   cannot authorize candidate attempt 2 or handoff
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 26 dependencies
 
@@ -1191,6 +1198,7 @@ HIGH-1 through HIGH-3 and the range-whitespace LOW finding.
 - [X] T153 Close rejected Phase 27 review gate as explicitly superseded by T160;
   exact object `abad8d85e8150bfd2716ab77ebb3791827591bf1` remains rejected
   and cannot close T103 or authorize candidate-attempt-2 or handoff records
+  Supersession disposition: REJECTED; authority: NONE.
 
 ### Phase 27 dependencies
 

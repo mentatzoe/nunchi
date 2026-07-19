@@ -1431,3 +1431,18 @@ is closed in the metadata successor that binds this receipt. The successor's own
 SHA, push, and post-commit scan are necessarily external receipts. T160 and T103
 remain open; no candidate-attempt-2, handoff, acceptance, integration, release,
 promotion, deployment, or cutover authority is established.
+
+### Phase 28 second moving-tree rejection and T160 repair
+
+The complete verdict is preserved at
+`review-2026-07-19-phase28-second-precommit-moving-tree-rejection.md`; it grants
+no approval. Its intermediate moving-tree/T159/diff observations were superseded
+when `b427342571d4fbc8b86549dad6dfbe181d3a4608` was pushed, verified remote-exact,
+and exact-scanned. Two newly demonstrated T160 blockers still applied to that
+object: alternate CommonMark checkbox bullets bypassed the manifest parser, and
+free-text rejection language admitted contradictory paraphrases. Both attacks
+are now RED→GREEN regressions. The shared parser rejects every noncanonical
+top-level `-`/`*`/`+` task-list row (including up to three leading spaces), and
+each superseded gate requires exactly one structured
+`Supersession disposition: REJECTED; authority: NONE.` line. T160 remains open
+until a new immutable repair successor receives fresh exact-object reviews.

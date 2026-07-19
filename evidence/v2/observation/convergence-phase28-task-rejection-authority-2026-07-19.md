@@ -162,3 +162,24 @@ a Git object cannot contain evidence of its own identity or publication. T103
 and T160 remain review gates. Nothing here establishes `CONVERGED`,
 `HANDOFF_READY`, acceptance, integration, deployment, release, promotion, or
 cutover authority.
+
+## Second moving-tree rejection and T160 repair
+
+The later read-only working-tree verdict preserved byte-for-byte at
+`review-2026-07-19-phase28-second-precommit-moving-tree-rejection.md` grants no
+approval. Its moving-object, T159, and trailing-whitespace observations describe
+an intermediate state already superseded by pushed/scanned `b427342`; two novel
+T160 blockers remained applicable to that object:
+
+1. `*`/`+` and up-to-three-space CommonMark task-list bullets could bypass the
+   canonical `- [ ] TNNN` manifest parser.
+2. Free-text rejection semantics admitted unbounded contradictory paraphrases.
+
+Both were reproduced RED. The shared parser now detects every top-level
+CommonMark task-list bullet and rejects every noncanonical row. Supersession
+authority no longer attempts natural-language sentiment parsing: every governed
+historical gate must carry exactly one structured line,
+`Supersession disposition: REJECTED; authority: NONE.` Tests cover alternate
+bullets, indented top-level bullets, missing/changed disposition, and both
+reported contradictory paraphrases. T160 remains open pending fresh reviews of
+the immutable repair successor.
