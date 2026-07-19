@@ -151,6 +151,23 @@ class TestTransportHygiene(unittest.TestCase):
         outcome = provider.ingest(unroutable("d2", "transport could not authorize this delivery"))
         self.assertEqual(outcome, UNROUTABLE)
 
+    def test_unroutable_rejects_any_candidate_only_or_unknown_field(self):
+        provider = make_provider()
+        base = unroutable("d2", "transport could not authorize this delivery")
+        contradictory_fields = {
+            "authorized": True,
+            "event": make_message("e1", "discord:1001", "candidate"),
+            "actors": FIXTURE_ACTORS,
+            "unknown": "silently ignored",
+        }
+        for field, value in contradictory_fields.items():
+            with self.subTest(field=field):
+                malformed = dict(base, **{field: value})
+                with self.assertRaises(ObservationInputError):
+                    provider.ingest(malformed)
+                self.assertEqual(len(provider._events), 0)
+                self.assertEqual(provider._unroutable_count, 0)
+
     def test_candidate_event_without_authorization_is_operational_error(self):
         provider = make_provider()
         event = make_message("e1", "discord:1001", "hello")
@@ -164,6 +181,70 @@ class TestTransportHygiene(unittest.TestCase):
         native_input = candidate(malformed_event, actors=FIXTURE_ACTORS)
         with self.assertRaises(ObservationInputError):
             provider.ingest(native_input)
+
+
+class TestFailClosedOrderingAndConfiguration(unittest.TestCase):
+    def test_decreasing_parseable_timestamp_rejects_before_state_mutation(self):
+        provider = make_provider()
+        later = candidate(
+            make_message("e1", "discord:1001", "later", timestamp="2026-07-19T00:00:02Z"),
+            delivery_id="ordered-d1",
+        )
+        earlier = candidate(
+            make_message("e2", "discord:1001", "earlier", timestamp="2026-07-19T00:00:01Z"),
+            delivery_id="ordered-d2",
+        )
+        provider.ingest(later)
+        with self.assertRaises(ObservationInputError):
+            provider.ingest(earlier)
+        self.assertEqual([event["id"] for event in provider._events], ["e1"])
+        self.assertNotIn("ordered-d2", provider._seen_delivery_ids)
+
+        corrected = candidate(
+            make_message("e2", "discord:1001", "corrected", timestamp="2026-07-19T00:00:03Z"),
+            delivery_id="ordered-d2",
+        )
+        self.assertEqual(provider.ingest(corrected), OBSERVED)
+
+    def test_equal_and_missing_timestamps_remain_valid(self):
+        provider = make_provider()
+        provider.ingest(candidate(
+            make_message("e1", "discord:1001", "one", timestamp="2026-07-19T00:00:01Z")
+        ))
+        provider.ingest(candidate(
+            make_message("e2", "discord:1001", "two", timestamp="2026-07-19T00:00:01Z")
+        ))
+        provider.ingest(candidate(make_message("e3", "discord:1001", "undated")))
+        snapshot = provider.snapshot(trigger_event_id="e3", max_events=10, max_bytes=65536)
+        self.assertEqual([event["id"] for event in snapshot["events"]], ["e1", "e2", "e3"])
+
+    def test_undated_event_cannot_hide_a_later_timestamp_regression(self):
+        provider = make_provider()
+        provider.ingest(candidate(
+            make_message("e1", "discord:1001", "later", timestamp="2026-07-19T00:00:02Z")
+        ))
+        provider.ingest(candidate(make_message("e2", "discord:1001", "undated")))
+        with self.assertRaises(ObservationInputError):
+            provider.ingest(candidate(
+                make_message("e3", "discord:1001", "earlier", timestamp="2026-07-19T00:00:01Z")
+            ))
+        self.assertEqual([event["id"] for event in provider._events], ["e1", "e2"])
+
+    def test_invalid_constructor_identity_room_or_visibility_rejects_eagerly(self):
+        invalid_overrides = {
+            "participant_id": "",
+            "actor_id": "",
+            "platform": "",
+            "room_id": "",
+            "continuity_scope_id": "",
+            "names": ["Vigil", 7],
+            "room_kind": 7,
+            "event_visibility": {"message": "bogus"},
+        }
+        for field, value in invalid_overrides.items():
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    make_provider(**{field: value})
 
 
 class TestNoSocialLedger(unittest.TestCase):

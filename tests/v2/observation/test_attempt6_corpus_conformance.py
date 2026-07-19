@@ -6,11 +6,17 @@ silently skipped."""
 
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
 
 from tests.v2.observation.contract_helpers import (
+    EVALS_DIR,
+    EXPECTED_CORPUS_SHA256,
     EXPECTED_CORPUS_REVISION,
     EXPECTED_TOTAL_CASES,
+    corpus_digest,
     run_all,
     summarize,
 )
@@ -58,10 +64,17 @@ class TestAttempt6CorpusConformance(unittest.TestCase):
                     f"class {klass!r} count drifted from the frozen accounting",
                 )
 
-    def test_corpus_revision_is_documented(self):
-        # The revision string is pinned in contract_helpers.py and reproduced
-        # in evidence; this test only guards against silently un-pinning it.
+    def test_corpus_revision_and_exact_bytes_are_pinned(self):
         self.assertEqual(len(EXPECTED_CORPUS_REVISION), 40)
+        self.assertEqual(corpus_digest(), EXPECTED_CORPUS_SHA256)
+
+    def test_any_corpus_byte_drift_changes_the_pinned_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "contract"
+            shutil.copytree(EVALS_DIR, copied)
+            target = copied / "attention-request" / "cases.jsonl"
+            target.write_bytes(target.read_bytes() + b"\n")
+            self.assertNotEqual(corpus_digest(copied), EXPECTED_CORPUS_SHA256)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ dedup. Slice-030 classifier projection behavior is out of scope here.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from evals.v2.observation.run_scenes import run_budget_sweep
@@ -23,7 +24,16 @@ from tests.v2.observation.helpers import make_message, make_provider, seed_room
 
 def _room_with_events(count: int, provider=None):
     provider = provider or make_provider()
-    events = [make_message(f"e{i}", "discord:1001", f"message {i}", timestamp=f"2026-07-17T01:00:{i:02d}Z") for i in range(1, count + 1)]
+    start = datetime(2026, 7, 17, 1, 0, 0, tzinfo=timezone.utc)
+    events = [
+        make_message(
+            f"e{i}",
+            "discord:1001",
+            f"message {i}",
+            timestamp=(start + timedelta(seconds=i)).isoformat().replace("+00:00", "Z"),
+        )
+        for i in range(1, count + 1)
+    ]
     seed_room(provider, events)
     return provider, events
 

@@ -980,17 +980,17 @@ post-Phase-21 tree in
 - [X] T113 Preserve and reproduce the stale review against the current tree;
   separate live receipt/timestamp/unroutable/constructor/corpus mechanisms from
   already-closed findings and history-free archive artifacts
-- [ ] T114 Add RED then GREEN tests for bounded provider-issued request
+- [X] T114 Add RED then GREEN tests for bounded provider-issued request
   attestation: exact request/document match, one receipt only, duplicate and
   fabricated rejection, mutation non-consumption, and returned-copy isolation
-- [ ] T115 Reject timestamp-order regressions before retained provider state
+- [X] T115 Reject timestamp-order regressions before retained provider state
   mutates; add invalid-input non-poisoning and valid equal/undated coverage
-- [ ] T116 Enforce the exact closed `unroutable` transport shape and eagerly
+- [X] T116 Enforce the exact closed `unroutable` transport shape and eagerly
   validate constructor self/room/visibility facts before mutable state exists
-- [ ] T117 Pin a deterministic digest over all three accepted attempt-6 corpus
+- [X] T117 Pin a deterministic digest over all three accepted attempt-6 corpus
   files and add byte-drift/mutation regressions, not merely revision-string and
   case-count assertions
-- [ ] T118 Regenerate evidence and rerun the complete test/eval/security/
+- [X] T118 Regenerate evidence and rerun the complete test/eval/security/
   governance matrix plus non-bypassable exact whole-slice scan; commit and push
   a new immutable T001–T119 object
 - [ ] T119 Obtain a fresh independent fail-closed review of that exact object;

@@ -1102,3 +1102,51 @@ T106/T112 remain open until this tree is committed, pushed, exact-scanned, and
 freshly reviewed. T103/T107 remain historical convergence blockers folded into
 that final review. Nothing here establishes `CONVERGED`, `HANDOFF_READY`,
 acceptance, integration, deployment, release, promotion, or cutover authority.
+
+## Phase 22 provider-attestation and input-order correction
+
+Independent Codex review of `cd8917c56f0d051f52cdba68c177d45e7a9f1103`
+reproduced receipt-authority, timestamp-order, contradictory-unroutable,
+constructor-validation, and corpus-byte-identity gaps. The full rejection and
+current adjudication are preserved in
+`review-2026-07-19-cd8917c-codex-rejection.md` and
+`convergence-phase22-provider-attestation-2026-07-19.md`.
+
+Current-tree RED accepted duplicate and fabricated receipts, emitted decreasing
+parseable timestamps, accepted `unroutable` with candidate-only fields, and
+retained an event under invalid visibility before snapshot failed. T114–T117
+close those mechanisms:
+
+- a bounded private deep copy ties each issued snapshot to one exact receipt;
+  duplicate, unknown, mutated, fabricated, and evicted requests fail closed;
+- failed mutation does not consume the rightful pending attestation;
+- decreasing parseable timestamps reject before state mutation, including
+  regressions separated by undated events;
+- `unroutable` accepts only `delivery_id`/`disposition`/`reason`;
+- constructor self/room/visibility facts validate before mutable state exists;
+- the exact accepted attempt-6 corpus is pinned by framed SHA-256
+  `1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f`,
+  and a one-byte mutation regression proves drift detection.
+
+The timestamp correction exposed one invalid stress fixture whose seconds field
+became non-clock data after 59. The fixture now generates real monotonic UTC
+timestamps with `datetime + timedelta`; the 64/128 linear-replay probe remains
+unchanged in meaning.
+
+Phase 22 matrix:
+
+| Command | Result |
+|---|---|
+| focused receipt/provider/corpus modules | 40 tests, OK |
+| Observation discovery | 164 tests, OK |
+| aggregate scenes | 52 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 8 equivalence) |
+| Phase 18 adversarial evaluator | 11 rows, 0 FAIL |
+| attempt-6 corpus conformance | 6 tests, 202/202 accounted for, exact digest GREEN |
+| full repository suite | 1413 tests, OK; 4 optional-integration skips |
+| verdict fixture discovery | 60 fixtures |
+| expanded Ruff / production Bandit / governance / task manifest / `git diff --check` / absent generated reviewer checklist | clean |
+
+T119 remains open for fresh independent review of the exact immutable object.
+T103/T107/T112 are historical review gates superseded by T119, not acceptance
+claims. Nothing here establishes `CONVERGED`, `HANDOFF_READY`, acceptance,
+integration, deployment, release, promotion, or cutover authority.

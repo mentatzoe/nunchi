@@ -15,6 +15,7 @@ checks — or *non-consumed* (I-010B ``attention-decision`` and I-010C
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,7 @@ CORPUS_NAMES = ("attention-request", "attention-decision", "downstream")
 # Pinned per plan/spec: the exact accepted 010 attempt-6 candidate commit
 # whose corpus revision this driver must reproduce byte-for-byte.
 EXPECTED_CORPUS_REVISION = "bff6b463a44c1b9066fc654691042f9550da6c64"
+EXPECTED_CORPUS_SHA256 = "1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f"
 EXPECTED_TOTAL_CASES = 202
 
 # I-010B (attention-decision) and I-010C (participant-wake) are never
@@ -54,6 +56,19 @@ ALL_SEVEN_CLASSES = (
 
 class CorpusError(AssertionError):
     pass
+
+
+def corpus_digest(root: Path = EVALS_DIR) -> str:
+    """Framed SHA-256 over the exact three accepted attempt-6 corpus files."""
+    digest = hashlib.sha256()
+    for name in sorted(CORPUS_NAMES):
+        relative = f"evals/v2/contract/{name}/cases.jsonl"
+        data = (root / name / "cases.jsonl").read_bytes()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
 
 
 @dataclass

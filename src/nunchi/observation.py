@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import math
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from copy import deepcopy
 from datetime import datetime, timezone
 from functools import wraps
@@ -814,11 +814,53 @@ class ObservationProvider:
         continuity: str = "session-only",
         retention_max_events: int = 2000,
         event_visibility: dict[str, str] | None = None,
+        max_pending_receipts: int = 1024,
     ) -> None:
         if continuity not in CONTINUITY_VALUES:
             raise ValueError(f"continuity must be one of {CONTINUITY_VALUES}")
         if not _is_positive_integer(retention_max_events):
             raise ValueError("retention_max_events must be a positive integer")
+        if not _is_positive_integer(max_pending_receipts):
+            raise ValueError("max_pending_receipts must be a positive integer")
+
+        constructor_errors = _Errors()
+        self_facts: dict[str, Any] = {
+            "participant_id": participant_id,
+            "actor_id": actor_id,
+        }
+        if names is not None:
+            self_facts["names"] = names
+        if role is not None:
+            self_facts["role"] = role
+        if description is not None:
+            self_facts["description"] = description
+        room_facts: dict[str, Any] = {
+            "platform": platform,
+            "id": room_id,
+            "continuity_scope_id": continuity_scope_id,
+        }
+        if room_name is not None:
+            room_facts["name"] = room_name
+        if room_kind is not None:
+            room_facts["kind"] = room_kind
+        coverage_facts: dict[str, Any] = {
+            "has_more_before": False,
+            "has_more_after": False,
+            "has_gaps": False,
+            "truncated_by": [],
+            "continuity": continuity,
+            "has_restart_gap": False if continuity != "unknown" else None,
+        }
+        if event_visibility is not None:
+            coverage_facts["event_visibility"] = event_visibility
+        _check_self(constructor_errors, "self", self_facts)
+        _check_room(constructor_errors, "room", room_facts)
+        _check_coverage(constructor_errors, "coverage", coverage_facts)
+        if constructor_errors:
+            raise ValueError(
+                f"invalid observation provider configuration: {list(constructor_errors)}"
+            )
+
         self.participant_id = participant_id
         self.actor_id = actor_id
         self.names = list(names) if names else None
@@ -843,6 +885,11 @@ class ObservationProvider:
         self._seen_delivery_ids: set[str] = set()
         self._evicted = False
         self._unroutable_count = 0
+        self._last_parseable_timestamp: datetime | None = None
+        self._last_parseable_event_id: str | None = None
+        self._max_pending_receipts = max_pending_receipts
+        self._pending_receipts: OrderedDict[str, dict] = OrderedDict()
+        self._attested_request_ids: OrderedDict[str, None] = OrderedDict()
 
     # -- identity -----------------------------------------------------
 
@@ -904,6 +951,13 @@ class ObservationProvider:
                 raise ObservationInputError(
                     "unroutable requires the transport-owned proof in 'reason'"
                 )
+            allowed_unroutable_fields = {"delivery_id", "disposition", "reason"}
+            unexpected = sorted(set(native_event_input) - allowed_unroutable_fields)
+            if unexpected:
+                raise ObservationInputError(
+                    "unroutable carries no candidate event or extra transport fields; "
+                    f"unexpected fields: {unexpected}"
+                )
             self._unroutable_count += 1
             return UNROUTABLE
 
@@ -924,11 +978,26 @@ class ObservationProvider:
                 f"candidate-event failed normalization (operational error): {list(errors)}"
             )
         event = deepcopy(event)
+        if not isinstance(event, dict):
+            raise ObservationInputError("candidate-event normalization did not produce an object")
         event_id = event["id"]
         if event_id in self._event_index:
             raise ObservationInputError(
                 f"event id {event_id!r} collides with an already-observed event "
                 "(cross-item ID uniqueness)"
+            )
+        current_timestamp = _parse_timestamp(
+            event.get("timestamp") if isinstance(event, dict) else None
+        )
+        if (
+            self._last_parseable_timestamp is not None
+            and current_timestamp is not None
+            and current_timestamp < self._last_parseable_timestamp
+        ):
+            raise ObservationInputError(
+                "candidate-event violates authoritative timestamp order "
+                "(operational error): parseable timestamp precedes the "
+                "previous parseable retained event"
             )
 
         actor_facts = native_event_input.get("actors") or {}
@@ -953,6 +1022,10 @@ class ObservationProvider:
             self._actors[actor_id] = merged
 
         evicted_event = self._events[0] if len(self._events) == self._events.maxlen else None
+        evicted_was_last_parseable = (
+            evicted_event is not None
+            and evicted_event["id"] == self._last_parseable_event_id
+        )
         if len(self._events) == self._events.maxlen:
             self._evicted = True
         if evicted_event is not None:
@@ -966,6 +1039,18 @@ class ObservationProvider:
         self._event_delivery_ids[event_id] = delivery_id
         self._seen_delivery_ids.add(delivery_id)
         self._events.append(event)
+        if current_timestamp is not None:
+            self._last_parseable_timestamp = current_timestamp
+            self._last_parseable_event_id = event_id
+        elif evicted_was_last_parseable:
+            self._last_parseable_timestamp = None
+            self._last_parseable_event_id = None
+            for retained_event in reversed(self._events):
+                retained_timestamp = _parse_timestamp(retained_event.get("timestamp"))
+                if retained_timestamp is not None:
+                    self._last_parseable_timestamp = retained_timestamp
+                    self._last_parseable_event_id = retained_event["id"]
+                    break
         self._reindex()
         referenced_actor_ids = {
             ref
@@ -1133,6 +1218,17 @@ class ObservationProvider:
         errors = validate_attention_request(document)
         if errors:
             raise ObservationInputError(f"assembled snapshot failed self-validation: {errors}")
+        issued_request_id = document["request_id"]
+        if (
+            issued_request_id in self._pending_receipts
+            or issued_request_id in self._attested_request_ids
+        ):
+            raise ObservationInputError(
+                f"request_id {issued_request_id!r} was already issued by this provider"
+            )
+        if len(self._pending_receipts) >= self._max_pending_receipts:
+            self._pending_receipts.popitem(last=False)
+        self._pending_receipts[issued_request_id] = deepcopy(document)
         return document
 
     # -- observation-stage receipt (FR-015) ----------------------------
@@ -1145,6 +1241,28 @@ class ObservationProvider:
         never adds an estimated-token field (token-proxy evidence stays
         separate, FR-015) and never mutates or completes another stage.
         """
+        if not isinstance(request, dict):
+            raise ObservationInputError("receipt request must be an object")
+        request_errors = validate_attention_request(request)
+        if request_errors:
+            raise ObservationInputError(
+                f"receipt request failed validation: {request_errors}"
+            )
+        request_id = request["request_id"]
+        if request_id in self._attested_request_ids:
+            raise ObservationInputError(
+                f"request_id {request_id!r} already has its observation receipt"
+            )
+        issued = self._pending_receipts.get(request_id)
+        if issued is None:
+            raise ObservationInputError(
+                f"request_id {request_id!r} is not a pending provider-issued snapshot"
+            )
+        if request != issued:
+            raise ObservationInputError(
+                f"request_id {request_id!r} does not exactly match its provider-issued snapshot"
+            )
+
         events = request["events"]
         body = {
             "schema_version": SCHEMA_VERSION,
@@ -1164,6 +1282,10 @@ class ObservationProvider:
         errors = validate_attention_receipt_record(record)
         if errors:
             raise ObservationInputError(f"assembled receipt failed self-validation: {errors}")
+        self._pending_receipts.pop(request_id)
+        self._attested_request_ids[request_id] = None
+        if len(self._attested_request_ids) > self._max_pending_receipts:
+            self._attested_request_ids.popitem(last=False)
         return record
 
 

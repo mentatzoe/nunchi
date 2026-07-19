@@ -4,6 +4,7 @@ operational-error treatment (T007)."""
 
 from __future__ import annotations
 
+from copy import deepcopy
 import unittest
 
 from nunchi.observation import ObservationInputError, validate_attention_receipt_record
@@ -77,15 +78,70 @@ class TestSinglyAttestedImmutableReceipt(unittest.TestCase):
         self.assertNotIn("classifier_disposition", body)
         self.assertNotIn("outcome", body)
 
-    def test_receipt_is_a_fresh_object_each_call_never_mutated_in_place(self):
+    def test_returned_receipt_is_isolated_from_later_receipts(self):
         provider = make_provider()
         event = make_message("e1", "discord:1001", "hi")
         seed_room(provider, [event])
-        snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
-        first = provider.build_observation_receipt(snapshot)
+        first_snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        second_snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        first = provider.build_observation_receipt(first_snapshot)
         first["body"]["event_count"] = 999  # mutate the returned copy
-        second = provider.build_observation_receipt(snapshot)
+        second = provider.build_observation_receipt(second_snapshot)
         self.assertEqual(second["body"]["event_count"], 1)
+
+    def test_exact_provider_issued_snapshot_can_be_attested_only_once(self):
+        provider = make_provider()
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        provider.build_observation_receipt(snapshot)
+        with self.assertRaises(ObservationInputError):
+            provider.build_observation_receipt(snapshot)
+
+    def test_fabricated_or_mutated_snapshot_is_rejected_without_consuming_original(self):
+        provider = make_provider()
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        mutated = deepcopy(snapshot)
+        mutated["events"][0]["text"] = "fabricated"
+        with self.assertRaises(ObservationInputError):
+            provider.build_observation_receipt(mutated)
+        receipt = provider.build_observation_receipt(snapshot)
+        self.assertEqual(receipt["request_id"], snapshot["request_id"])
+
+    def test_unknown_request_id_is_never_attested(self):
+        provider = make_provider()
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        snapshot = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        fabricated = deepcopy(snapshot)
+        fabricated["request_id"] = "never-issued"
+        with self.assertRaises(ObservationInputError):
+            provider.build_observation_receipt(fabricated)
+
+    def test_pending_attestations_are_bounded_and_oldest_fails_closed(self):
+        provider = make_provider(max_pending_receipts=2)
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        first = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        second = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        third = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        self.assertLessEqual(len(provider._pending_receipts), 2)
+        with self.assertRaises(ObservationInputError):
+            provider.build_observation_receipt(first)
+        provider.build_observation_receipt(second)
+        provider.build_observation_receipt(third)
+
+    def test_duplicate_caller_request_id_cannot_replace_pending_attestation(self):
+        provider = make_provider()
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        first = provider.snapshot(
+            trigger_event_id="e1", max_events=10, max_bytes=65536,
+            request_id="fixed-request-id",
+        )
+        with self.assertRaises(ObservationInputError):
+            provider.snapshot(
+                trigger_event_id="e1", max_events=10, max_bytes=65536,
+                request_id="fixed-request-id",
+            )
+        provider.build_observation_receipt(first)
 
 
 class TestOperationalErrorSeparation(unittest.TestCase):

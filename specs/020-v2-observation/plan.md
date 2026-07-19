@@ -151,19 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T111 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, and complete semantic comparison; 52 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
+| Truthful identity/observation | PASS | T083–T117 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison, one-shot provider-issued receipt attestation, timestamp order, closed transport/configuration inputs, and accepted-corpus byte identity; 52 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T114–T119) | Phase 21 closes the comparator oracle, but independent review reproduced live provider-attestation, timestamp-order, contradictory-unroutable, eager-constructor-validation, and corpus-byte-identity gaps. T114–T119 must close them, freeze/scan the final object, and obtain fresh independent review. |
+| Evidence before claims | BLOCKED (T119) | T118 records a GREEN 164/52/11/1413 matrix with exact corpus digest and clean static/governance gates. The frozen object still requires an exact-range scan and fresh independent review under T119. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 22 T114–T119. Earlier runtime, scanner,
-and comparator mechanisms remain locally GREEN, but provider-issued receipt
-attestation, timestamp-order enforcement, exact transport/configuration input,
-and corpus byte identity remain open. A new immutable pushed object, exact-range
-scan, and fresh independent verdict are required. This status grants no
-acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 22 T119. Runtime, scanner,
+comparator, provider-attestation, ordering, input, and corpus-byte mechanisms
+are locally GREEN. The immutable object, exact-range scan, and fresh independent
+verdict are still required. This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

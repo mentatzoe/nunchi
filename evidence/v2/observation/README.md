@@ -79,7 +79,10 @@ PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
 (T037)" carries the full accounting: 202 cases from the identical
 `bff6b463a44c1b9066fc654691042f9550da6c64` corpus revision, 100 consumed
 (0 mismatches), 102 explicitly non-consumed (`I-010B`/`I-010C`, never
-silently skipped). Reproduce with:
+silently skipped). T117 additionally verifies a framed SHA-256 over exact path,
+byte length, and bytes for all three files:
+`1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f`.
+Any single-byte drift changes the digest. Reproduce with:
 
 ```sh
 PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance
