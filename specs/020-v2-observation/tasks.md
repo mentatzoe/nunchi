@@ -1081,3 +1081,39 @@ current remediation recorded in
 **Checkpoint**: caller-owned memory is copied before validation, over-limit
 fresh fetches reject before retention work, and completion claims are grounded
 in literal committed checkboxes rather than normalized task identity.
+
+## Phase 25: Continuation Authority and Relation-Gap Truth
+
+**Correction source**: independent Codex read-only probes of exact object
+`80c1de2ed5941c1cc5d4e28ea3f13d84dc39b6d2`, reproduced unchanged on settled
+Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
+`evidence/v2/observation/convergence-phase25-continuation-authority-2026-07-19.md`.
+
+- [X] T132 Preserve and reproduce comparator expiry-presence loss, generated
+  handle overwrite, cross-wrapper cap bypass, and missing relation-gap coverage
+- [ ] T133 Add RED/GREEN request/page comparator coverage for expiry presence:
+  exact expiry clock values remain opaque, but absent versus present is a
+  semantic capability difference
+- [ ] T134 Add RED/GREEN generated-handle collision tests and implement bounded
+  retry/fail-closed issuance that never overwrites live capability authority
+- [ ] T135 Move continuation handle/cursor registries and limits into one
+  provider-owned shared state; identical-limit wrappers share the global cap
+  and mismatched-limit wrappers reject before use
+- [ ] T136 Add RED/GREEN relation-gap cases: unavailable reply/thread/reaction
+  targets set `has_gaps`, while known targets excluded by budgets retain the
+  actual `events`/`bytes`/`age` truncation cause
+- [ ] T137 Regenerate evidence and rerun the complete test/eval/security/
+  governance matrix plus exact whole-slice scan; freeze/push a new immutable
+  T001–T138 object
+- [ ] T138 Obtain fresh independent fail-closed review of that exact object and
+  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+
+### Phase 25 dependencies
+
+- T133–T136 depend on T132 and may proceed independently after RED.
+- T137 depends on T133–T136; T138 depends on T137 and supersedes T131/T124 as
+  the sole final convergence review.
+
+**Checkpoint**: capability presence is semantic, generated IDs never overwrite
+authority, provider-wide caps survive wrapper multiplicity, and unavailable
+literal relation targets are disclosed as gaps.
