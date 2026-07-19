@@ -15,7 +15,7 @@ class TestSlice020SecretScanner(unittest.TestCase):
     def test_added_secret_is_reported_without_echoing_secret_bytes(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
-        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # slice020-secret-fixture
         diff = (
             "diff --git a/src/nunchi/observation.py b/src/nunchi/observation.py\n"
             "--- a/src/nunchi/observation.py\n"
@@ -28,10 +28,24 @@ class TestSlice020SecretScanner(unittest.TestCase):
         self.assertEqual(findings[0].path, "src/nunchi/observation.py")
         self.assertNotIn(secret, findings[0].render())
 
+    def test_synthetic_fixture_marker_suppresses_only_its_added_line(self):
+        from scripts.check_slice020_secrets import scan_added_lines
+
+        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # slice020-secret-fixture
+        diff = (
+            "diff --git a/tests/v2/observation/test_fixture.py "
+            "b/tests/v2/observation/test_fixture.py\n"
+            "--- a/tests/v2/observation/test_fixture.py\n"
+            "+++ b/tests/v2/observation/test_fixture.py\n"
+            "@@ -1,0 +2 @@\n"
+            f'+API_KEY = "{secret}"  # slice020-secret-fixture\n'
+        )
+        self.assertEqual(scan_added_lines(diff), [])
+
     def test_removed_secret_and_regex_matcher_source_are_not_findings(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
-        removed = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
+        removed = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"  # slice020-secret-fixture
         diff = (
             "diff --git a/src/nunchi/observation.py b/src/nunchi/observation.py\n"
             "--- a/src/nunchi/observation.py\n"

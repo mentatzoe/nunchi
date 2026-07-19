@@ -12,6 +12,10 @@ Matcher set (deliberately high confidence):
 2. OpenAI-style ``sk-`` keys with at least 20 key characters.
 3. GitHub ``gh[pousr]_`` tokens with at least 20 token characters.
 4. Long quoted values assigned to explicit key/secret/token variable names.
+
+The literal marker ``slice020-secret-fixture`` suppresses only its own added
+source line. It exists solely for synthetic detector fixtures; production and
+evidence lines have no broad path- or file-level allowlist.
 """
 
 from __future__ import annotations
@@ -53,6 +57,7 @@ MATCHERS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
+FIXTURE_MARKER = "slice020-secret-fixture"
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,9 @@ def scan_added_lines(diff_text: str) -> list[Finding]:
             continue
         if raw_line.startswith("+") and not raw_line.startswith("+++"):
             added = raw_line[1:]
+            if FIXTURE_MARKER in added:
+                new_line += 1
+                continue
             for label, matcher in MATCHERS:
                 if matcher.search(added):
                     findings.append(Finding(path=path, line=new_line, matcher=label))
