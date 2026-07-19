@@ -348,6 +348,16 @@ non-receiptable and MUST NOT fabricate one.
   limit is a positive integer, `error_action` is `WAKE | NO_WAKE`, and the two
   transition-margin members are either both absent (retired) or both present
   with a finite margin in `[0,1]` and non-empty source (active).
+  Slice 030 validates `participant_max_events`, `participant_max_bytes`,
+  `fetch_max_events`, and `fetch_max_bytes` only as required positive-integer
+  members of the closed trusted policy; it MUST NOT enforce, transform, or use
+  them to change I-030A routing. Participant packet cap enforcement belongs to
+  slice 040, and continuation-fetch cap enforcement belongs to slice 020.
+  Slice 030 neither invokes those consumers nor forwards those values to the
+  classifier. For an otherwise identical request and policy, changing any of
+  those four members between valid positive integers MUST NOT change the
+  I-030A result or offered attention receipt; an invalid member makes the whole
+  policy configuration `ERROR` before bypass or provider use.
   After I-010A schema validation and trusted binding validation, but before
   preattention bypass or any classifier call, I-030A MUST enforce the trusted
   attention budget. Every message, reaction, and membership event counts once;

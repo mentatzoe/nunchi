@@ -279,7 +279,17 @@ does not let the response or offered receipt attest its own persistence.
 
 ### Trusted attention-budget boundary
 
-- **Decision**: After accepted I-010A and binding validation, but before bypass
+- **Decision**: Validate all six closed-policy budget members as positive
+  integers. Slice 030 enforces only `attention_max_events` and
+  `attention_max_bytes`: `participant_max_events`/`participant_max_bytes`
+  belong to slice 040's participant-packet boundary, while
+  `fetch_max_events`/`fetch_max_bytes` belong to slice 020's continuation-fetch
+  boundary. I-030A does not invoke those downstream consumers, project the
+  four values to the classifier, or use them to alter routing. Deterministic
+  oracles reject each invalid value before bypass/provider use and prove that
+  varying each field across valid positive integers leaves an otherwise
+  identical I-030A result and offered attention receipt unchanged.
+  After accepted I-010A and binding validation, but before bypass
   or provider routing, count every supplied event kind against
   `policy.attention_max_events` and measure the classifier-visible projection
   against `policy.attention_max_bytes`. The internal projection removes the
@@ -301,10 +311,12 @@ does not let the response or offered receipt attest its own persistence.
   operational ERROR with zero classifier calls and the normal request-ID-
   bearing receipt rule. I-030A never truncates, reorders, reassembles, or
   recalculates coverage.
-- **Rationale**: The trusted policy remains an enforceable cost/security cap
-  while slice 020 retains observation-assembly ownership. Allowing a stricter
-  declared coverage budget preserves honest upstream truncation without
-  requiring every adapter to assemble to the maximum allowed size.
+- **Rationale**: The one closed trusted policy remains completely validated,
+  while each independently configurable budget is enforced only by the owner
+  that materializes its data: 030 for attention projection, 040 for the
+  participant packet, and 020 for context fetch. Allowing a stricter declared
+  coverage budget preserves honest upstream truncation without requiring every
+  adapter to assemble to the maximum allowed size.
 - **Alternatives considered**: Silently truncating in core, requiring declared
   coverage limits to equal the trusted caps, accepting a looser declared limit
   when the current payload happens to fit, or measuring provider-specific

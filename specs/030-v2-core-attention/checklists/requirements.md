@@ -440,7 +440,8 @@ count remains current.
 
 **Purpose**: Independently review the requirement delta that closes the final
 scoped analysis findings: participant-host ownership, continuation retention,
-the concrete stdlib retry taxonomy, and conservative sink persistence.
+the concrete stdlib retry taxonomy, conservative sink persistence, and shared
+policy-cap ownership.
 
 **Depth**: Formal blocking review
 
@@ -452,7 +453,7 @@ reviewer under Zoe's explicit identity-separation waiver, durably copied at
 the aborted run's final scoped findings across spec, plan, and tasks, before a
 new bound planning run, activation, or implementation
 
-**Review status**: Complete. All 17 items were reviewed against the selected
+**Review status**: Complete. All 20 items were reviewed against the selected
 design, accepted I-010A/B/E versions, current stdlib transport seam, and slice
 ownership. No result is inherited from the earlier 164 items.
 
@@ -475,10 +476,13 @@ ownership. No result is inherited from the earlier 164 items.
 - [x] CHK179 Are zero-sleep boundaries measurable after success, a terminal non-retryable failure, and the final allowed failure for every `max_retries=0|1|2` case? [Measurability, Coverage, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T021]
 - [x] CHK180 Does the unchanged 47-path documentation matrix route the fixed retry cadence, ignored `Retry-After`, and no-sleep terminal boundaries into slice-owned `docs/attention/v2.md` and the `v2-integrator`-owned `docs/STABILITY.md` handoff? [Documentation, Traceability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–§T026]
 - [x] CHK181 Is Zoe's identity-separation waiver copied into durable slice-owned evidence with exact scope and non-authorizing limits before relying on the owner-conducted checklist? [Governance, Evidence, `evidence/v2/attention/identity-separation-waiver.md`; Tasks §Activation prerequisites]
+- [x] CHK182 Are all six policy cap fields validated as positive integers while only `attention_max_events`/`attention_max_bytes` are enforced by I-030A? [Clarity, Ownership, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T004, §T011]
+- [x] CHK183 Is downstream ownership explicit and consistent with the selected design: participant packet caps to slice 040 and continuation-fetch caps to slice 020, with no host or continuation-provider invocation by slice 030? [Ownership, Dependency, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T011]
+- [x] CHK184 Do deterministic requirements reject each invalid downstream-owned cap before bypass/provider use and prove valid variations cannot change an otherwise identical I-030A result or offered attention receipt? [Measurability, Safety, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T004]
 
 ## Formal Reviewer Final Scoped-Finding Notes
 
-- Mark CHK165–CHK181 complete only from the reconciled requirement text and
+- Mark CHK165–CHK184 complete only from the reconciled requirement text and
   cited authority; implementation success is not a substitute.
 - Any reintroduction of host-owned ParticipantWakeV2 behavior, request
   mutation, open-ended retry classification, or post-dispatch
@@ -486,6 +490,6 @@ ownership. No result is inherited from the earlier 164 items.
 - The program-interface registry remains the separately recorded non-blocking
   `v2-program-owner` handoff and is not reclassified by this gate.
 
-**2026-07-19 final scoped-finding result**: 17/17 fresh items pass; the complete
-requirements checklist is now 181/181. The task graph remains T001–T027 and
+**2026-07-19 final scoped-finding result**: 20/20 fresh items pass; the complete
+requirements checklist is now 184/184. The task graph remains T001–T027 and
 dormant until a separate READY activation record exists.
