@@ -294,6 +294,7 @@ EXPECTED_LIFECYCLE_PATHS = {
         "candidate": str(Path(activation).with_name("slice-candidate.md")),
         "handoff": str(Path(activation).with_name("slice-handoff.md")),
         "acceptance": str(Path(activation).with_name("slice-acceptance.md")),
+        "amendments": str(Path(activation).with_name("slice-amendments.md")),
     }
     for dirname, activation in EXPECTED_ACTIVATION_PATHS.items()
 }
@@ -1375,6 +1376,116 @@ def _lifecycle_records(text: str) -> tuple[str, ...]:
     )
 
 
+def _effective_dependency_commit(
+    root: Path,
+    upstream: str,
+    terminal_commit: str,
+) -> tuple[str, list[str]]:
+    """Resolve the exact commit a dependent slice must bind to for *upstream*.
+
+    A post-acceptance amendment (see the constitution's amendment procedure)
+    never appends to `slice-candidate.md`/`slice-handoff.md`/`slice-acceptance.md`
+    — those stay pinned to the terminal accepted candidate so an amendment
+    cannot reopen or reauthor the slice's own accepted lifecycle. Instead each
+    accepted amendment appends one record to a separate canonical
+    `slice-amendments.md` ledger. This validates that ledger's chain integrity
+    independently (never by parsing narrative `amendment-A*.md` prose) and
+    returns the commit downstream slices must now depend on.
+    """
+
+    errors: list[str] = []
+    amendments_value = EXPECTED_LIFECYCLE_PATHS[upstream].get("amendments", "")
+    amendments_relative = Path(amendments_value) if amendments_value else None
+    if amendments_relative is None or not _repo_path_is_safe(
+        root, amendments_relative, require_file=True
+    ):
+        return terminal_commit, errors
+    try:
+        text = (root / amendments_relative).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return terminal_commit, errors
+    records = _lifecycle_records(text)
+    if not records:
+        return terminal_commit, errors
+
+    seen_ids: set[str] = set()
+    previous_effective = terminal_commit
+    effective_commit = terminal_commit
+    for index, record in enumerate(records, 1):
+        prefix = f"{amendments_relative} record {index}"
+        if _clean_metadata(record, "Slice") != upstream:
+            errors.append(f"{prefix}: Slice must be {upstream!r}")
+        if _clean_metadata(record, "Status") != "ACCEPTED":
+            errors.append(f"{prefix}: Status must be 'ACCEPTED'")
+        amendment_id = _clean_metadata(record, "Amendment ID")
+        if not amendment_id:
+            errors.append(f"{prefix}: missing Amendment ID")
+        elif amendment_id in seen_ids:
+            errors.append(f"{prefix}: duplicate Amendment ID {amendment_id!r}")
+        seen_ids.add(amendment_id)
+        prior_effective = _clean_metadata(record, "Prior effective commit")
+        candidate = _clean_metadata(record, "Amendment candidate commit")
+        decision = _clean_metadata(record, "Amendment decision commit")
+        for label, value in {
+            "Prior effective commit": prior_effective,
+            "Amendment candidate commit": candidate,
+            "Amendment decision commit": decision,
+        }.items():
+            if not re.fullmatch(r"[0-9a-f]{40}", value):
+                errors.append(f"{prefix}: {label} must be a full Git SHA")
+            elif not _git_commit_exists(root, value):
+                errors.append(f"{prefix}: {label} does not exist in Git")
+        if prior_effective != previous_effective:
+            errors.append(
+                f"{prefix}: Prior effective commit must be {previous_effective!r} "
+                "(the terminal accepted candidate, or the immediately preceding "
+                "amendment's candidate)"
+            )
+        if (
+            candidate
+            and prior_effective
+            and candidate != prior_effective
+            and _git_commit_exists(root, candidate)
+            and _git_commit_exists(root, prior_effective)
+            and not _git_is_ancestor(root, prior_effective, candidate)
+        ):
+            errors.append(
+                f"{prefix}: Amendment candidate commit must descend from the "
+                "Prior effective commit"
+            )
+        if not re.search(
+            r"I-\d{3}[A-Z]", _clean_metadata(record, "Amended interface")
+        ):
+            errors.append(f"{prefix}: missing concrete Amended interface")
+        prior_version = _clean_metadata(record, "Prior interface version")
+        new_version = _clean_metadata(record, "New interface version")
+        prior_match = re.fullmatch(r"@(\d+)", prior_version)
+        new_match = re.fullmatch(r"@(\d+)", new_version)
+        if (
+            not prior_match
+            or not new_match
+            or int(new_match.group(1)) != int(prior_match.group(1)) + 1
+        ):
+            errors.append(
+                f"{prefix}: New interface version must be exactly one version "
+                "above Prior interface version"
+            )
+        if _clean_metadata(record, "Accepted by") != "v2-integrator":
+            errors.append(f"{prefix}: Accepted by must be 'v2-integrator'")
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}", _clean_metadata(record, "Accepted on")
+        ):
+            errors.append(f"{prefix}: Accepted on must be an ISO date")
+        for label in ("Decision reference", "Amendment record"):
+            reference_path = Path(_clean_metadata(record, label))
+            if not _repo_path_is_safe(root, reference_path, require_file=True):
+                errors.append(f"{prefix}: {label} must name an existing file")
+        if candidate:
+            previous_effective = candidate
+            effective_commit = candidate
+    return effective_commit, errors
+
+
 def _slice_ids(value: str | None) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -2096,13 +2207,19 @@ def _slice_lifecycle_evidence_errors(
             except (OSError, UnicodeDecodeError):
                 continue
             if upstream_records:
-                observed_commit = _clean_metadata(
+                terminal_commit = _clean_metadata(
                     upstream_records[-1], "Candidate commit"
                 )
-                if commit != observed_commit:
+                effective_commit, amendment_errors = _effective_dependency_commit(
+                    root, upstream, terminal_commit
+                )
+                errors.extend(amendment_errors)
+                if commit != effective_commit:
                     errors.append(
                         f"{relative}: dependency {dependency_id} commit must match "
-                        f"{upstream_path.relative_to(root)}"
+                        f"the effective accepted candidate for "
+                        f"{upstream_path.relative_to(root)} (including any accepted "
+                        "amendments recorded in its slice-amendments.md ledger)"
                     )
         analysis = _clean_metadata(activation, "Analysis result")
         if analysis != "PASS — zero CRITICAL/HIGH findings":

@@ -1297,6 +1297,278 @@ class GovernanceBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(check_governance._git_commit_exists(Path(tmp), "a" * 40))
 
+    def test_effective_dependency_commit_without_ledger_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sha = self._init_git_repo(root)
+            effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", sha
+            )
+            self.assertEqual(effective, sha)
+            self.assertEqual(errors, [])
+
+    def test_effective_dependency_commit_resolves_through_accepted_amendment_chain(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            a1_candidate = self._next_git_commit(root, "a1")
+            a2_candidate = self._next_git_commit(root, "a2")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{a1_candidate}`
+**Amendment decision commit**: `{a1_candidate}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+
+## Amendment A2
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A2
+**Status**: ACCEPTED
+**Amended interface**: I-010B
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{a1_candidate}`
+**Amendment candidate commit**: `{a2_candidate}`
+**Amendment decision commit**: `{a2_candidate}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+""",
+            )
+            effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertEqual(errors, [])
+            self.assertEqual(effective, a2_candidate)
+
+    def test_effective_dependency_commit_rejects_broken_prior_effective_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            stray = self._next_git_commit(root, "stray")
+            candidate = self._next_git_commit(root, "candidate")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{stray}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{candidate}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertTrue(
+                any("Prior effective commit must be" in error for error in errors)
+            )
+
+    def test_effective_dependency_commit_rejects_non_ancestor_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            later = self._next_git_commit(root, "later")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            # "Prior effective commit" is a strict descendant of the claimed
+            # "Amendment candidate commit" — candidate does not descend from it.
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{later}`
+**Amendment candidate commit**: `{base}`
+**Amendment decision commit**: `{base}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", later
+            )
+            self.assertTrue(
+                any("must descend from" in error for error in errors)
+            )
+
+    def test_effective_dependency_commit_rejects_non_accepted_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            candidate = self._next_git_commit(root, "candidate")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: REJECTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{candidate}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertTrue(any("Status must be 'ACCEPTED'" in error for error in errors))
+
+    def test_dependency_activation_requires_amended_effective_commit(self):
+        dirname = "030-v2-core-attention"
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        paths = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname]
+        assigned = "Codex — durable assignment decision 44"
+        tasks = "- [ ] T001 Work\n"
+        task_ids, task_hash = self._task_fields(tasks)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            amended = self._next_git_commit(root, "amended")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010B
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{amended}`
+**Amendment decision commit**: `{amended}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `seed.txt`
+""",
+            )
+            self._write_lifecycle_record(
+                root,
+                check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                    "handoff"
+                ],
+                f"""# Upstream handoff
+**Slice**: `010-v2-contract`
+**Status**: HANDOFF_READY
+**Candidate commit**: `{base}`
+""",
+            )
+
+            def activation_with(dependency_commit: str, reference: str) -> str:
+                self._write_lifecycle_record(
+                    root,
+                    reference,
+                    f"""# Accepted dependency 010
+**Consumer slice**: `{dirname}`
+**Upstream slice**: `010-v2-contract`
+**Candidate commit**: `{dependency_commit}`
+**Accepted by**: Codex
+**Accepted on**: 2026-07-19
+**Packet reference**: `evidence/v2/contract/slice-handoff.md`
+**Decision reference**: durable dependency acceptance 44
+""",
+                )
+                return f"""# Activation
+**Slice**: `{dirname}`
+**Status**: READY
+**Assigned participant / source**: {assigned}
+**Authority record**: `{check_governance.IMPLEMENTATION_AUTHORIZATION_PATH}`
+**Accepted dependencies**: 010
+**Dependency commits**: 010={dependency_commit}
+**Dependency acceptance references**: 010={reference}
+**Analysis result**: PASS — zero CRITICAL/HIGH findings
+**Branch**: `{expected["branch"]}`
+**Worktree**: `{expected["worktree"]}`
+**Starting commit**: `{base}`
+**Interfaces**: I-010B and I-030A
+**Acceptance scenes**: S06 as planned
+**Evidence targets**: evidence/v2/attention/results.json
+**Documentation scope**: README.md and docs/attention.md
+**Initial task IDs**: {task_ids}
+**Initial tasks SHA256**: {task_hash}
+"""
+
+            reference = "evidence/v2/attention/dependency-010-acceptance.md"
+
+            # Binding to the pre-amendment terminal commit must now fail: it
+            # would falsely consume the superseded interface version.
+            self._write_lifecycle_record(
+                root, paths["activation"], activation_with(base, reference)
+            )
+            stale_errors = check_governance._slice_lifecycle_evidence_errors(
+                root, dirname, expected, "READY", assigned, tasks
+            )
+            self.assertTrue(
+                any("dependency 010 commit must match" in error for error in stale_errors)
+            )
+
+            # Binding to the exact accepted amendment candidate must pass.
+            self._write_lifecycle_record(
+                root, paths["activation"], activation_with(amended, reference)
+            )
+            fresh_errors = check_governance._slice_lifecycle_evidence_errors(
+                root, dirname, expected, "READY", assigned, tasks
+            )
+            self.assertEqual(fresh_errors, [])
+
     def test_program_state_is_derived_from_slice_and_cutover_evidence(self):
         planned = {name: "PLANNED" for name in check_governance.EXPECTED_SLICES}
         self.assertEqual(
