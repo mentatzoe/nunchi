@@ -340,6 +340,10 @@ records. The task checkbox alone does not establish `CONVERGED`,
 
 ## Phase 8: Convergence
 
+**Correction source**: `evidence/v2/observation/convergence-2026-07-19.md`
+findings C020-01 HIGH, C020-02 HIGH, C020-03 HIGH, C020-04 MEDIUM,
+C020-05 MEDIUM, and C020-06 LOW.
+
 **Purpose**: Close gaps found by `/speckit-converge` between the accepted
 spec/plan/tasks and the completed T001–T038 candidate. Appending these tasks
 keeps the slice `ACTIVE`; per the Rejection/Rework contract and the
@@ -354,3 +358,50 @@ delivery run.
 - [ ] T042 Correct the inaccurate "four-line addition" diff-size claim for the `tests/test_governance.py` fix in `evidence/v2/observation/handoff.md`'s Known Limitations section to match the actual 9-insertion diff (`git diff --stat tests/test_governance.py`), per FR-013 / Constitution VI Evidence Before Claims (contradicts)
 - [ ] T043 Name `v2-wake-owner` (040), `v2-adapters-owner` (090), and `v2-security-owner` (100) as explicit recipients of the T038 handoff packet in `evidence/v2/observation/handoff.md`, consistent with `spec.md`'s declared `Feeds` list, per tasks.md Handoff Input Contract "recipients" element (partial)
 - [ ] T044 Explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary (what each means and how a consumer should read a `known-gap` result) in `docs/observation/v2.md`'s reference-variant section, per FR-011 / plan.md T026 "capability truth" (partial)
+
+## Phase 9: Plan-Correction — Downstream Handoff Recipient Naming Accuracy
+
+**Correction source**: `evidence/v2/observation/convergence-2026-07-19.md`
+findings P020-01 HIGH, A020-F1 HIGH, A020-F2 HIGH, and A020-F3 MEDIUM.
+
+**Purpose**: Close the naming defect identified by the 2026-07-19 plan.md
+replanning-pass correction to the Owner Handoff section, durably recorded as
+P020-01 in the correction source above. No owner lane named
+`v2-attention-owner` exists
+anywhere in the repository — confirmed against `README.md`,
+`specs/030-v2-core-attention/plan.md`, `specs/001-nunchi-v2-program/`, and
+`docs/governance/execution-spine.md`; slice `030`'s only accountable owner
+lane is `v2-core-owner`. T029 and T038's completed evidence/doc output
+recorded the wrong name before this correction existed and remain unedited
+per the Correction and Rejection Preservation contract above; this phase
+appends the fix rather than rewriting that history.
+
+- [ ] T045 Add a red assertion in `tests/v2/observation/test_docs.py` that
+  `docs/observation/v2.md`'s classifier-safe-projection/redaction paragraph
+  (under "What this slice does not do") names the real `v2-core-owner` lane
+  for the `I-010A` expansion-availability handoff to slice `030`, and never
+  the nonexistent `v2-attention-owner` name; in the same red test, assert that
+  `evidence/v2/observation/handoff.md` contains zero literal
+  `v2-attention-owner` occurrences and names `v2-core-owner`, per P020-01 and
+  A020-F2 in `evidence/v2/observation/convergence-2026-07-19.md`
+- [ ] T046 Fix the incorrect downstream-recipient lane name
+  `v2-attention-owner` to the correct `v2-core-owner` in
+  `docs/observation/v2.md` ("What this slice does not do" section) and
+  `evidence/v2/observation/handoff.md` (`## Documentation dispositions
+  (T028–T034)` → `### HANDOFF (accepting owner named per row...)` and
+  `### Documentation dispositions, validation, and reviewer`), until T045
+  passes, per P020-01 and A020-F2 in the correction source (no
+  `v2-attention-owner` lane exists; slice 030's owner lane is
+  `v2-core-owner` per `README.md` and `specs/030-v2-core-attention/plan.md`)
+
+### Phase 9 dependencies
+
+- T039 and T044 must complete before T045 begins because they share
+  `docs/observation/v2.md`; T045 then must fail before T046 is accepted.
+- T046 runs after T045 and after T043/T044 because it shares
+  `evidence/v2/observation/handoff.md` and documentation-recipient content.
+
+**Checkpoint**: `docs/observation/v2.md` and
+`evidence/v2/observation/handoff.md` name only real, currently declared
+owner lanes for every downstream handoff, and T045's regression assertion
+prevents the wrong name from silently returning.

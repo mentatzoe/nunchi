@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning pass, 2026-07-19) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -56,6 +56,15 @@ truthful, and supplies reusable recoverability/comparison scenes. Transport and
 harness slices bind their native surfaces later. Slice 020 stops at a tested
 I-020A handoff; 110 alone owns final parity and cutover. This planning baseline
 creates no product behavior.
+
+This replanning pass additionally governs the convergence-rework closing the
+T039-T044 gaps appended against the completed T001-T038 candidate: native
+`reaction`/`membership` documentation coverage, the FR-004 self-event scope for
+membership operations, FR-007 `event_visibility` coverage-field test evidence,
+and handoff-packet (`evidence/v2/observation/handoff.md`) accuracy and
+recipient completeness. The slice remains `ACTIVE`, retains its original
+activation, and proceeds through a new bound run to a new candidate/handoff
+attempt per the Rejection/rework contract above.
 
 ## Technical Context
 
@@ -141,7 +150,11 @@ alone owns classifier-safe projection/redaction in `src/nunchi/core.py`;
 **Worktree/branch**: future isolated worktree `.worktrees/v2-observation/` on
 branch `v2/observation`
 
-**Handoff to**: owners of slices `040` through `110` and `v2-integrator`
+**Handoff to**: `v2-wake-owner` (040), `v2-transport-owner` (050),
+`v2-hermes-owner` (060), `v2-claude-owner` (070), `v2-codex-owner` (080),
+`v2-adapters-owner` (090), `v2-security-owner` (100), and `v2-integrator`
+(110) — the exact set matching spec.md's declared `Feeds` list, never a
+generic "owners of slices 040 through 110" reference
 
 **Conflict ownership**: 020 alone owns `src/nunchi/observation.py` until
 handoff. It does not edit 010 schemas, native transport sources, harness
@@ -221,7 +234,7 @@ product module.
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
 | Global context/identity description | `README.md` | `HANDOFF` | T028, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
-| Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034 / `v2-observation-owner` | Validate budgets, capability truth, continuation authority, diagrams/links, and runnable examples against the accepted provider. |
+| Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034, T039, T044 / `v2-observation-owner` | Validate budgets, continuation authority, diagrams/links, and runnable examples against the accepted provider; explicitly cover `message`, `reaction`, and `membership` native event examples with honest-unavailability representation (T039), and explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary for reference-variant consumers (T044). |
 | Accepted 010 contract reference | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T034 / `v2-observation-owner` | Evidence-backed rationale: slice 020 consumes accepted I-010A/I-010D/I-010E unchanged; validate the documented closed shapes and record the result. |
 | Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T029, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
 | Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T030–T034 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |
@@ -235,9 +248,14 @@ The handoff must include exact commit, I-020A version, shared module, capability
 requirements, budget evidence, deterministic/recoverability commands and
 reference results, comparator contract, suppression-eligibility limitations,
 the accepted-I-010E token-field limitation, and explicit downstream proof
-instructions. It MUST also hand the I-010A expansion-availability input to
-`v2-attention-owner` while leaving classifier-safe projection/redaction wholly
-owned by slice 030. It MUST state that no actual
+instructions. It MUST name every recipient exactly — `v2-wake-owner` (040),
+`v2-transport-owner` (050), `v2-hermes-owner` (060), `v2-claude-owner` (070),
+`v2-codex-owner` (080), `v2-adapters-owner` (090), `v2-security-owner` (100),
+and `v2-integrator` (110) — matching spec.md's declared `Feeds` list, never a
+partial or generic subset. It MUST also hand the I-010A expansion-availability
+input to `v2-core-owner` (030, the umbrella-registered accountable owner lane
+for `030-v2-core-attention`) while leaving classifier-safe projection/
+redaction wholly owned by that same slice 030. It MUST state that no actual
 surface, restart-safety, or parity claim was completed by reference variants.
 Review does not transfer normalization ownership silently; 110 remains the sole
 final integration sink.
