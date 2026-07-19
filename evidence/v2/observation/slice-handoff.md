@@ -67,3 +67,19 @@ AttentionReceiptV2@2.
 **Review boundary**: packet is ready for independent `v2-integrator`
 acceptance review. This record does not accept the slice or authorize
 integration, cutover, deployment, release, or promotion.
+
+## Attempt 2 — REJECTED
+
+**Slice**: `020-v2-observation`
+
+**Status**: REJECTED
+
+**Candidate commit**: `22a0a1ab9a996e82ec625ce73e301023889209e4`
+
+**Rejected by**: v2-integrator
+
+**Rejected on**: 2026-07-19
+
+**Decision reference**: evidence/v2/observation/review-2026-07-19-phase25-hermes-22a0a1a-rejection.md
+
+**Recorded by**: v2-integrator

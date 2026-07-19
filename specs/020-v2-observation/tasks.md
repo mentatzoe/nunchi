@@ -3,11 +3,11 @@
 **Input**: `specs/020-v2-observation/spec.md` and
 `specs/020-v2-observation/plan.md`
 
-**Slice state**: `HANDOFF_READY`
+**Slice state**: `ACTIVE`
 
-**Execution status**: `DORMANT` — every planned task is resolved at
-`HANDOFF_READY`; any rejected handoff appends a rejection, returns the slice to
-`ACTIVE`, and binds a new delivery run rather than rewriting this history
+**Execution status**: `ACTIVE` for Phase 26 correction under this slice's bound
+delivery lane; previously completed and superseded task history remains
+append-only
 
 **Program implementation authority**: `GRANTED`
 
@@ -1120,3 +1120,36 @@ Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
 authority, provider-wide caps survive wrapper multiplicity, unavailable literal
 relation targets are disclosed as gaps, and the timestamp watermark survives
 retention eviction.
+
+## Phase 26: Complete Attestation and Coverage Truth
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-phase25-hermes-22a0a1a-rejection.md`,
+independent direct-probe review of exact immutable object `22a0a1a`.
+
+- [X] T141 Preserve the exact rejection, append-reject handoff attempt 2, return
+  all planning artifacts to `ACTIVE`, and bind the four findings as Phase 26
+- [X] T142 Add a public-method barrier RED test and copy receipt input exactly
+  once at entry; validate, compare, compute, and consume from only that copy
+- [X] T143 Add RED/GREEN snapshot coverage for unavailable and budget-excluded
+  relation targets referenced by every returned event, not only the trigger
+- [X] T144 Add RED/GREEN continuation coverage for missing and budget-excluded
+  reply/thread/reaction targets, preserving exact event/byte causes
+- [X] T145 Put known restart-gap truth into normalized reference snapshots and
+  change S05 to assert wire coverage rather than evaluator side-channel state
+- [X] T146 Repair exact-range whitespace, close the S13 page-fixture nit with
+  valid closed pages, and correct every affected evidence claim/count
+- [X] T147 Rerun the complete matrix plus activation-range `git diff --check`,
+  exact whole-slice scan, task-state/governance gates, then freeze/push attempt 3
+- [ ] T148 Obtain fresh independent direct-probe review of that exact object;
+  fix every CRITICAL/HIGH blocker before candidate or handoff attempt 3
+
+### Phase 26 dependencies
+
+- T142–T146 depend on T141 and may proceed independently after RED.
+- T147 depends on T142–T146; T148 depends on T147 and is the sole final
+  convergence review.
+
+**Checkpoint**: provider attestation never rereads caller memory; every returned
+literal relation and every known restart loss is disclosed on the wire; exact
+range hygiene is evidence-backed rather than inferred from a clean worktree.

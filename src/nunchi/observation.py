@@ -815,12 +815,18 @@ class ObservationProvider:
         room_name: str | None = None,
         room_kind: str | None = None,
         continuity: str = "session-only",
+        has_restart_gap: bool | None = None,
         retention_max_events: int = 2000,
         event_visibility: dict[str, str] | None = None,
         max_pending_receipts: int = 1024,
     ) -> None:
         if continuity not in CONTINUITY_VALUES:
             raise ValueError(f"continuity must be one of {CONTINUITY_VALUES}")
+        if has_restart_gap is not None and not isinstance(has_restart_gap, bool):
+            raise ValueError("has_restart_gap must be a boolean or null")
+        if continuity == "unknown" and has_restart_gap is not None:
+            raise ValueError("unknown continuity requires has_restart_gap=null")
+        resolved_restart_gap = None if continuity == "unknown" else bool(has_restart_gap)
         if not _is_positive_integer(retention_max_events):
             raise ValueError("retention_max_events must be a positive integer")
         if not _is_positive_integer(max_pending_receipts):
@@ -852,7 +858,7 @@ class ObservationProvider:
             "has_gaps": False,
             "truncated_by": [],
             "continuity": continuity,
-            "has_restart_gap": False if continuity != "unknown" else None,
+            "has_restart_gap": resolved_restart_gap,
         }
         if event_visibility is not None:
             coverage_facts["event_visibility"] = event_visibility
@@ -875,6 +881,7 @@ class ObservationProvider:
         self.room_name = room_name
         self.room_kind = room_kind
         self.continuity = continuity
+        self.has_restart_gap = resolved_restart_gap
         self.event_visibility = dict(event_visibility) if event_visibility else None
         self._lock = RLock()
 
@@ -1168,7 +1175,7 @@ class ObservationProvider:
             total_bytes += size
             return True
 
-        relation_ids = self._relation_closure_ids(trigger)
+        relation_ids = set(self._relation_closure_ids(trigger))
         for relation_id in relation_ids:
             relation_index = self._event_index.get(relation_id)
             if relation_index is not None:
@@ -1197,6 +1204,24 @@ class ObservationProvider:
         if after_index < len(events):
             has_more_after = True
 
+        # Every returned event—not only the trigger—carries literal relation
+        # authority. Resolve retained targets while budget remains and retain
+        # the complete relation-ID set for honest gap disclosure.
+        pending_relation_events = list(selected.values())
+        inspected_relation_events: set[str] = set()
+        while pending_relation_events:
+            relation_event = pending_relation_events.pop()
+            relation_event_id = relation_event["id"]
+            if relation_event_id in inspected_relation_events:
+                continue
+            inspected_relation_events.add(relation_event_id)
+            for relation_id in self._relation_closure_ids(relation_event):
+                relation_ids.add(relation_id)
+                relation_index = self._event_index.get(relation_id)
+                if relation_index is not None and relation_index not in selected:
+                    if try_add(relation_index):
+                        pending_relation_events.append(events[relation_index])
+
         included_indices = sorted(selected)
         included_events = [deepcopy(selected[index]) for index in included_indices]
         has_relation_gap = any(
@@ -1204,7 +1229,11 @@ class ObservationProvider:
             or relation_index not in selected
             for relation_id in relation_ids
         )
-        has_gaps = has_relation_gap or (self._evicted and included_indices[0] == 0)
+        has_gaps = (
+            has_relation_gap
+            or bool(self.has_restart_gap)
+            or (self._evicted and included_indices[0] == 0)
+        )
         if not has_gaps:
             has_gaps = any(
                 b - a > 1 for a, b in zip(included_indices, included_indices[1:])
@@ -1223,7 +1252,7 @@ class ObservationProvider:
             "has_gaps": has_gaps,
             "truncated_by": sorted(truncated_by),
             "continuity": self.continuity,
-            "has_restart_gap": False if self.continuity != "unknown" else None,
+            "has_restart_gap": self.has_restart_gap,
             "max_events": max_events,
             "max_bytes": max_bytes,
         }
@@ -1275,6 +1304,10 @@ class ObservationProvider:
         never adds an estimated-token field (token-proxy evidence stays
         separate, FR-015) and never mutates or completes another stage.
         """
+        try:
+            request = deepcopy(request)
+        except Exception as exc:
+            raise ObservationInputError("receipt request copy failed safely") from exc
         if not isinstance(request, dict):
             raise ObservationInputError("receipt request must be an object")
         request_errors = validate_attention_request(request)
@@ -1741,6 +1774,12 @@ class ContinuationProvider:
             actor_id: deepcopy(self._provider._actors.get(actor_id, {}))
             for actor_id in actor_ids
         }
+        page_event_ids = {event["id"] for event in page_events_ordered}
+        relation_gap = any(
+            relation_id not in page_event_ids
+            for event in page_events_ordered
+            for relation_id in self._provider._relation_closure_ids(event)
+        )
 
         page: dict[str, Any] = {
             "request_id": request["request_id"],
@@ -1754,10 +1793,14 @@ class ContinuationProvider:
             "coverage": {
                 "has_more_before": has_more_before,
                 "has_more_after": has_more_after,
-                "has_gaps": self._provider._evicted,
+                "has_gaps": (
+                    self._provider._evicted
+                    or bool(self._provider.has_restart_gap)
+                    or relation_gap
+                ),
                 "truncated_by": truncated_by,
                 "continuity": self._provider.continuity,
-                "has_restart_gap": False if self._provider.continuity != "unknown" else None,
+                "has_restart_gap": self._provider.has_restart_gap,
                 "max_events": cap_events,
                 "max_bytes": cap_bytes,
             },

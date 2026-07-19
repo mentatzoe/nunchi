@@ -1,11 +1,11 @@
 # Independent Phase 25 review — `22a0a1a`
 
-**Verdict**: APPROVE  
-**Target**: `22a0a1ab9a996e82ec625ce73e301023889209e4`  
-**Tree**: `ea186b389424f761a1cc5cbac8faac32f8c28484`  
+**Verdict**: APPROVE
+**Target**: `22a0a1ab9a996e82ec625ce73e301023889209e4`
+**Tree**: `ea186b389424f761a1cc5cbac8faac32f8c28484`
 **Reviewer**: independent Claude Opus, no-tools review of an exact Git-generated
 packet containing the full implementation, comparator, task-state checker, and
-complete Phase 25 diff.  
+complete Phase 25 diff.
 **Boundary**: review input only; not acceptance, integration, deployment,
 release, promotion, or cutover authority.
 

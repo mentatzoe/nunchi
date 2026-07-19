@@ -67,6 +67,8 @@ class TestSessionOnlyVariant(unittest.TestCase):
         ids = {ev["id"] for ev in snapshot["events"]}
         self.assertNotIn("e1", ids)  # not fabricated back into existence
         self.assertEqual(snapshot["coverage"]["continuity"], "session-only")
+        self.assertTrue(snapshot["coverage"]["has_gaps"])
+        self.assertIs(snapshot["coverage"]["has_restart_gap"], True)
         self.assertIn("e1", reference.known_gap_event_ids)
 
 
@@ -97,6 +99,13 @@ class TestKnownGapVariant(unittest.TestCase):
         reference.simulate_restart()
         self.assertTrue(reference.known_gap_event_ids)  # half the history is an honest gap
         self.assertLess(len(reference.provider._events), 4)
+        trigger = make_message("e5", "discord:1001", "after restart")
+        reference.ingest(candidate(trigger, actors=FIXTURE_ACTORS))
+        snapshot = reference.snapshot(
+            trigger_event_id="e5", max_events=10, max_bytes=65536,
+        )
+        self.assertTrue(snapshot["coverage"]["has_gaps"])
+        self.assertIs(snapshot["coverage"]["has_restart_gap"], True)
 
 
 class TestSuppressionEligibilityBoundary(unittest.TestCase):

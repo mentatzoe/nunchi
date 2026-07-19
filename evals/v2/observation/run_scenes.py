@@ -26,6 +26,7 @@ from nunchi.observation import (
     ObservationProvider,
     estimate_tokens,
     serialized_byte_size,
+    validate_context_continuation,
 )
 from evals.v2.observation.capabilities.reference_provider import make_reference_provider
 from evals.v2.observation.compare import compare_pages, compare_requests
@@ -477,13 +478,18 @@ def run_recoverability() -> list[dict]:
         for retained in case.get("expect_retained_ids", []):
             if retained not in included_ids:
                 failures.append(f"expected retained id {retained!r} missing")
-        for gapped in case.get("expect_gap_ids", []):
-            if gapped not in reference.known_gap_event_ids:
-                failures.append(f"expected known-gap id {gapped!r} not reported as a gap")
+        if case.get("expect_gap_ids"):
+            if request["coverage"]["has_gaps"] is not True:
+                failures.append("known restart loss was not disclosed as a coverage gap")
+            if request["coverage"]["has_restart_gap"] is not True:
+                failures.append("known restart loss was not disclosed on has_restart_gap")
         if "expect_has_restart_gap" in case and request["coverage"]["has_restart_gap"] != case["expect_has_restart_gap"]:
             failures.append("has_restart_gap did not match expectation")
-        if case.get("expect_gap_nonempty") and not reference.known_gap_event_ids:
-            failures.append("expected a non-empty known gap")
+        if case.get("expect_gap_nonempty"):
+            if request["coverage"]["has_gaps"] is not True:
+                failures.append("expected known gap missing from normalized coverage")
+            if request["coverage"]["has_restart_gap"] is not True:
+                failures.append("expected restart gap missing from normalized coverage")
         result = "PASS" if not failures else "FAIL"
         row = _snapshot_row(case, request, result=result, detail="; ".join(failures))
         row["variant"] = case["variant"]
@@ -540,8 +546,11 @@ def run_equivalence() -> list[dict]:
                 return {
                     "request_id": f"page-{suffix}",
                     "handle_id": f"opaque-handle-{suffix}",
+                    "room_id": request["room"]["id"],
+                    "continuity_scope_id": request["room"]["continuity_scope_id"],
                     "direction": "after",
                     "anchor_event_id": case["trigger_event_id"],
+                    "actors": request["actors"],
                     "events": request["events"],
                     "coverage": request["coverage"],
                     "next_cursor": f"opaque-cursor-{suffix}",
@@ -549,6 +558,10 @@ def run_equivalence() -> list[dict]:
 
             left = page_from(left, "left")
             right = page_from(right, "right")
+            for page in (left, right):
+                page_errors = validate_context_continuation(page)
+                if page_errors:
+                    raise ValueError(f"S13 synthesized invalid continuation page: {page_errors}")
             _apply_document_mutations(left, case.get("left_page_mutations") or [])
             _apply_document_mutations(right, case.get("right_page_mutations") or [])
             comparison = compare_pages(left, right, right_capability=right_capability)

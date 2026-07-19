@@ -1326,3 +1326,36 @@ Candidate attempt 2 and handoff attempt 2 are appended to
 `HANDOFF_READY` for independent `v2-integrator` acceptance review only. It does
 not accept the slice or authorize integration, cutover, deployment, release, or
 promotion.
+
+## Handoff attempt 2 rejection — direct probes supersede packet approval
+
+A delayed Hermes direct-probe review of the same exact candidate `22a0a1a`
+returned `REJECT`. It supersedes the packet-only Opus approval for lifecycle
+purposes and is preserved at:
+
+`evidence/v2/observation/review-2026-07-19-phase25-hermes-22a0a1a-rejection.md`
+
+The direct review reproduced two HIGH defects—receipt caller-memory TOCTOU and
+incomplete relation-gap truth—and two MEDIUM evidence/coverage defects—known
+restart gaps remaining side-channel-only and a failing exact activation-range
+`git diff --check`. Handoff attempt 2 is append-rejected, all planning artifacts
+return to `ACTIVE`, and Phase 26 T141–T148 own correction. The prior
+`HANDOFF_READY` statement above is historical and no longer current. Nothing in
+attempt 2 authorizes convergence, handoff, acceptance, integration, deployment,
+release, promotion, or cutover.
+
+## 26. Phase 26 remediation matrix — candidate freeze pending
+
+The four findings in the exact-object rejection are reproduced and remediated.
+The durable RED/GREEN and matrix receipt is
+`evidence/v2/observation/convergence-phase26.md`. Current verification is 187
+Observation tests, 53 aggregate rows, 23 adversarial rows, 13 docs tests, 1436
+full-repository tests with four optional skips, six corpus tests with 202/202
+accounted for and the established digest, 60 verdict fixtures, and clean
+Ruff/Bandit/scanner/governance/task-manifest/working-tree-diff/activation-range-
+diff checks.
+
+T142–T147 are complete. T148 alone remains open for fresh independent review
+of the exact frozen successor. The slice remains `ACTIVE`; no acceptance,
+convergence, handoff readiness, integration, deployment, release, promotion,
+or cutover authority is claimed.
