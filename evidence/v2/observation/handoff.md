@@ -974,3 +974,53 @@ remain useful as dated receipts, but neither their bytes nor every surrounding
 claim can be described as immutable. Future verification must cite the current
 superseding section and the relevant Git objects rather than infer append-only
 history from this packet’s prose.
+
+## Phase 18–19 immutable preparation receipt (T098–T103)
+
+Late review
+`evidence/v2/observation/review-2026-07-19-5562004-binding-rejection.md`
+rejected exact commit `55620049a4abd63672951ea2bd221558846fe1df` for two HIGH
+findings. Exact expiry was stale against Phase 17. The additional-property
+host-context finding reproduced on the current tree: a context containing
+`unexpected_tenant="other"` served event `e1`.
+
+T100 pinned two RED failures: the additional-property context was accepted on a
+fresh fetch and on a one-shot cursor replay. T101 now validates `host_context`
+with `_check_continuation_binding`, preserves detailed field mismatch errors,
+and requires complete dictionary equality with the issued closed `bound_to`
+object. Missing, malformed, wrong-valued, and additional properties reject
+before page or cursor state commits; the exact four-field context accepts.
+T102 adds deterministic case `CONT-S15-011` and executable documentation.
+
+Implementation commits:
+
+- `84d161f93fe0d36dd502998ce03888993b2ba5ef` — hard bytes, origin merge
+  identity, shared atomicity, linear replay, retention gaps, packet correction,
+  exact host binding, evaluator/docs/evidence, and Phase 18/19 task graph;
+- `1ac2ffe6836a9a674a9129364413d2c370082757` — explicit synthetic-secret
+  fixture marker and its regression coverage.
+
+The implementation staged-diff SHA256 before `84d161f` was
+`178df3a740d157670c76365d87b569ac3f531a3a284a069565e975b4d5493fd6`.
+
+### Complete preparation matrix
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 146 tests, OK |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 47 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 3 equivalence) |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial` | 11 rows, 0 FAIL; N=64/128 cursor replay retained-deque visits 0/0 after initial window creation |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; 202/202 cases accounted for, zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1395 tests, OK; 4 optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `ruff check ...` over all changed Python | clean, exit 0 |
+| `uvx bandit -q -r src/nunchi/observation.py evals/v2/observation/run_phase18_adversarial.py scripts/check_slice020_secrets.py` | clean, exit 0; 0 findings |
+| `python3 scripts/check_slice020_secrets.py --base 5e2380af3c9abda63ff55c61f3ef16491cd1776c --head 1ac2ffe6836a9a674a9129364413d2c370082757` | `SLICE020_SECRET_SCAN CLEAN`; 19 files, 1307 additions, 4 matchers |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T103 graph SHA256 `e0c0b49005566b2ab9c18e5789608d59eb416d324f4a9ec3c5aaa35c7a26b76e` |
+| `git diff --check` | clean, exit 0 |
+
+T083–T102 are locally complete. T103 remains BLOCKED pending commit/push of this
+receipt and one fresh independent fail-closed review of the exact immutable
+candidate. Nothing in this section accepts the slice or authorizes integration,
+cutover, deployment, release, promotion, or candidate-attempt-2 handoff.
