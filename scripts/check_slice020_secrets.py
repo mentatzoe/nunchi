@@ -2,9 +2,10 @@
 """Scan added Slice 020 diff lines for high-confidence secret signatures.
 
 The command requires an explicit committed ``--base``/``--head`` range and scans
-only Slice 020-owned implementation, test, evaluation, evidence, and scanner
-paths. Managed specification paths remain outside executable dependencies. It
-never prints matching source text or secret bytes.
+every added line in every changed repository path. A claimed whole-activation
+range therefore includes lifecycle-critical scripts, planning, shared tests,
+evidence, and implementation. It never prints matching source text or secret
+bytes.
 
 Matcher set (deliberately high confidence):
 
@@ -27,14 +28,6 @@ import re
 import subprocess  # nosec B404
 from typing import Sequence
 
-
-SLICE020_PATHS = (
-    "src/nunchi/observation.py",
-    "tests/v2/observation",
-    "evals/v2/observation",
-    "evidence/v2/observation",
-    "scripts/check_slice020_secrets.py",
-)
 
 MATCHERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -120,11 +113,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     head = _commit(args.head)
     diff = _git(
         "diff", "--no-ext-diff", "--unified=0", "--diff-filter=ACMR",
-        base, head, "--", *SLICE020_PATHS,
+        base, head,
     )
     changed_files_text = _git(
-        "diff", "--name-only", "--diff-filter=ACMR", base, head, "--",
-        *SLICE020_PATHS,
+        "diff", "--name-only", "--diff-filter=ACMR", base, head,
     )
     changed_files = [line for line in changed_files_text.splitlines() if line]
     added_lines = sum(

@@ -1,7 +1,10 @@
 # Slice 020 evidence manifest
 
-Scene-to-record manifest for `020-v2-observation`, generated at the same
-candidate tree as `evidence/v2/observation/handoff.md`. Every aggregate
+Scene-to-record manifest for `020-v2-observation`, generated with the current
+superseding section of `evidence/v2/observation/handoff.md`. The packet's
+historical rewrite incident and recovery baseline are recorded separately at
+`evidence/v2/observation/handoff-history-integrity-incident-2026-07-19.md`.
+Every aggregate
 JSONL row below carries a mandatory `scene_id`; this manifest maps every
 applicable scene from the plan's Acceptance Scenes and Evidence table to
 its exact records and reproduction command, so scene coverage is never
@@ -83,15 +86,15 @@ PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
 
 ## Literal task-state evidence
 
-The shared governance graph intentionally normalizes checkbox state for stable
-task identity. Slice 020 therefore uses a separate read-only checker that
-reports checked, explicitly superseded, and genuinely open IDs without editing
-the shared oracle:
+Shared governance preserves normalized checkbox-independent graph hashing while
+separately enforcing literal completion and the exact Slice 020 terminal
+manifest at lifecycle transitions. The slice-owned diagnostic uses the same
+canonical parser, has no caller-controlled open-task allowlist, validates every
+historical review successor, and reports checked, superseded, and open IDs:
 
 ```sh
 python3 scripts/check_slice020_task_state.py \
-  --tasks specs/020-v2-observation/tasks.md \
-  --allow-open T103,T146
+  --tasks specs/020-v2-observation/tasks.md
 ```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

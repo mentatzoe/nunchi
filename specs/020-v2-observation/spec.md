@@ -338,8 +338,11 @@ and limitation outcomes.
   `integrations/hermes/README.md` to accepting `v2-hermes-owner`,
   `integrations/claude-code/README.md` to accepting `v2-claude-owner`, and
   `integrations/codex/README.md` to accepting `v2-codex-owner`.
-- **Handoff evidence**: `evidence/v2/observation/handoff.md` records reviewed
-  paths, dispositions, exact delta, validation, and reviewer.
+- **Handoff evidence**: the current superseding section of
+  `evidence/v2/observation/handoff.md` records reviewed paths, dispositions,
+  exact delta, validation, and reviewer. Its pre-Phase-27 history is explicitly
+  not append-only; the incident and enforced recovery baseline are recorded at
+  `evidence/v2/observation/handoff-history-integrity-incident-2026-07-19.md`.
 
 ## Explicit Exclusions
 

@@ -1,9 +1,9 @@
 # Independent rejection — `80c1de2`
 
-**Target**: `80c1de2ed5941c1cc5d4e28ea3f13d84dc39b6d2`  
-**Verdict**: REJECT  
+**Target**: `80c1de2ed5941c1cc5d4e28ea3f13d84dc39b6d2`
+**Verdict**: REJECT
 **Review mode**: immutable Git-object reads and disposable detached probes; no
-shared-worktree or lifecycle writes.  
+shared-worktree or lifecycle writes.
 **Authority**: review input only; not acceptance, handoff, integration,
 deployment, release, promotion, or cutover authority.
 

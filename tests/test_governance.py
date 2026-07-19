@@ -782,6 +782,57 @@ class GovernanceBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid task format"):
                 check_governance.task_manifest_for_slice(root, "specs/010-v2-contract")
 
+    def test_literal_completed_task_ids_do_not_normalize_unchecked_rows(self):
+        tasks = "- [X] T001 Complete\n- [ ] T002 Still open\n"
+
+        self.assertEqual(
+            check_governance._literal_completed_task_ids(tasks),
+            "T001",
+        )
+        self.assertEqual(
+            check_governance._candidate_task_completion_errors(
+                tasks,
+                tasks_complete="YES",
+                completed_task_ids="T001, T002",
+            ),
+            [
+                "Tasks complete YES requires every committed task to be literally checked",
+                "Completed task IDs must be exactly 'T001'",
+            ],
+        )
+
+    def test_slice020_active_policy_requires_exact_terminal_and_open_gates(self):
+        lines = [
+            f"- [{' ' if number in {103, 153} else 'X'}] T{number:03d} task {number}"
+            for number in range(1, 154)
+        ]
+        tasks = "\n".join(lines) + "\n"
+        self.assertEqual(
+            check_governance._slice_task_policy_errors(
+                "020-v2-observation", tasks, "ACTIVE"
+            ),
+            [],
+        )
+        self.assertTrue(
+            any(
+                "exact terminal manifest" in error
+                for error in check_governance._slice_task_policy_errors(
+                    "020-v2-observation", "\n".join(lines[:-1]) + "\n", "ACTIVE"
+                )
+            )
+        )
+        false_transition = tasks.replace("- [ ] T103", "- [X] T103").replace(
+            "- [ ] T153", "- [X] T153"
+        )
+        self.assertTrue(
+            any(
+                "ACTIVE literal open task IDs" in error
+                for error in check_governance._slice_task_policy_errors(
+                    "020-v2-observation", false_transition, "ACTIVE"
+                )
+            )
+        )
+
     @staticmethod
     def _write_lifecycle_record(root: Path, relative: str, text: str) -> None:
         path = root / relative
@@ -999,6 +1050,36 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
 
         self.assertTrue(any("rewrote prior history" in error for error in errors))
+
+    def test_recovery_baseline_enforces_future_prefix_appends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            relative = Path("evidence/v2/observation/handoff.md")
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text("historically mutable packet\n", encoding="utf-8")
+            baseline = self._commit_all(root, "recovery baseline")
+
+            path.write_text(
+                "historically mutable packet\ntruthful append\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                check_governance._git_path_history_errors_since(
+                    root, relative, baseline=baseline
+                ),
+                [],
+            )
+
+            path.write_text("rewritten again\n", encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "recovery baseline" in error
+                    for error in check_governance._git_path_history_errors_since(
+                        root, relative, baseline=baseline
+                    )
+                )
+            )
 
     def test_assignment_rejects_symlinked_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:

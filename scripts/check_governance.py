@@ -8,7 +8,8 @@ import hashlib
 import json
 import os
 import re
-import subprocess
+# Subprocess use below is fixed argv only and never invokes a shell.
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -1405,7 +1406,7 @@ def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
     checkbox_lines = [
         (line_number, line)
         for line_number, line in enumerate(tasks_text.splitlines(), 1)
-        if re.match(r"^- \[[ xX]\]", line)
+        if re.match(r"^- \[[^]]*\]\s+T?\d", line)
     ]
     entries = _task_entries(tasks_text)
     if len(entries) != len(checkbox_lines):
@@ -1421,6 +1422,89 @@ def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
     if numbers != list(range(1, len(numbers) + 1)):
         raise ValueError("task IDs must be sequential from T001")
     return entries
+
+
+def _literal_completed_task_ids(tasks_text: str) -> str:
+    """Return only canonically parsed task IDs whose checkbox is literally checked."""
+
+    entries = _validated_task_entries(tasks_text)
+    marks = {
+        match.group(2): match.group(1)
+        for match in re.finditer(r"^- \[([ Xx])\] (T\d{3})\b", tasks_text, re.MULTILINE)
+    }
+    return ", ".join(
+        task_id for task_id, _line in entries if marks[task_id].lower() == "x"
+    )
+
+
+def _candidate_task_completion_errors(
+    tasks_text: str, *, tasks_complete: str, completed_task_ids: str
+) -> list[str]:
+    """Bind candidate completion claims to literal committed checkbox state."""
+
+    entries = _validated_task_entries(tasks_text)
+    all_ids, _digest = _task_manifest(entries)
+    literal_completed = _literal_completed_task_ids(tasks_text)
+    errors: list[str] = []
+    if tasks_complete == "YES" and literal_completed != all_ids:
+        errors.append(
+            "Tasks complete YES requires every committed task to be literally checked"
+        )
+    if completed_task_ids != literal_completed:
+        errors.append(f"Completed task IDs must be exactly {literal_completed!r}")
+    return errors
+
+
+SLICE_TASK_POLICIES: dict[str, tuple[int, tuple[frozenset[str], ...]]] = {
+    "020-v2-observation": (
+        153,
+        (
+            frozenset({"T103", "T152", "T153"}),
+            frozenset({"T103", "T153"}),
+        ),
+    ),
+}
+
+
+def _slice_task_policy_errors(
+    dirname: str, tasks_text: str, slice_state: str
+) -> list[str]:
+    """Enforce exact current graph/open gates for slices with a bound policy."""
+
+    policy = SLICE_TASK_POLICIES.get(dirname)
+    if policy is None:
+        return []
+    if slice_state not in {"ACTIVE", "CONVERGED", "HANDOFF_READY", "ACCEPTED"}:
+        return []
+    terminal, active_open_options = policy
+    try:
+        entries = _validated_task_entries(tasks_text)
+    except ValueError as exc:
+        return [f"{dirname}/tasks.md: invalid task graph ({exc})"]
+    expected_ids = tuple(f"T{number:03d}" for number in range(1, terminal + 1))
+    ids = tuple(task_id for task_id, _line in entries)
+    errors: list[str] = []
+    if ids != expected_ids:
+        errors.append(
+            f"{dirname}/tasks.md: exact terminal manifest must be T001 through "
+            f"T{terminal:03d}"
+        )
+        return errors
+    completed = frozenset(_literal_completed_task_ids(tasks_text).split(", "))
+    if completed == frozenset({""}):
+        completed = frozenset()
+    unchecked = frozenset(ids) - completed
+    if slice_state == "ACTIVE" and unchecked not in active_open_options:
+        errors.append(
+            f"{dirname}/tasks.md: ACTIVE literal open task IDs must be one of "
+            f"{[sorted(option) for option in active_open_options]}; "
+            f"observed {sorted(unchecked)}"
+        )
+    elif slice_state in {"CONVERGED", "HANDOFF_READY", "ACCEPTED"} and unchecked:
+        errors.append(
+            f"{dirname}/tasks.md: {slice_state} requires every task literally checked"
+        )
+    return errors
 
 
 def _implementation_authorization_state(root: Path) -> tuple[bool, list[str]]:
@@ -1585,7 +1669,8 @@ def _mapping_metadata(
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        return subprocess.run(
+        # Fixed git executable/argv; shell remains disabled.
+        return subprocess.run(  # nosec B603 B607
             ["git", "-C", str(root), *args],
             check=False,
             capture_output=True,
@@ -1714,6 +1799,66 @@ def _git_path_history_errors(
     return sorted(set(errors))
 
 
+def _git_path_history_errors_since(
+    root: Path, relative: Path, *, baseline: str
+) -> list[str]:
+    """Require prefix-only appends from an explicit recovery baseline onward."""
+
+    if not _git_commit_exists(root, baseline):
+        return [f"{relative}: recovery baseline {baseline} does not exist"]
+    if not _git_is_ancestor(root, baseline, "HEAD"):
+        return [f"{relative}: recovery baseline {baseline} is not an ancestor of HEAD"]
+    baseline_text = _git_file_text(root, baseline, relative)
+    if baseline_text is None:
+        return [f"{relative}: recovery baseline {baseline} lacks the packet"]
+    path = root / relative
+    if not path.is_file() or not _repo_path_is_safe(root, relative):
+        return [f"{relative}: recovery-baseline packet is missing or unsafe"]
+
+    history = _git(
+        root,
+        "log",
+        "--format=%H",
+        "--reverse",
+        f"{baseline}..HEAD",
+        "--",
+        relative.as_posix(),
+    )
+    if history is None or history.returncode != 0:
+        return [f"{relative}: cannot replay history after recovery baseline"]
+
+    errors: list[str] = []
+    previous = baseline_text
+    for commit in (line for line in history.stdout.splitlines() if line):
+        revision = _git_file_text(root, commit, relative)
+        if revision is None or not revision.startswith(previous):
+            errors.append(
+                f"{relative}: rewrite after recovery baseline {baseline} at {commit}"
+            )
+            if revision is None:
+                continue
+        previous = revision
+    current = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if not current.startswith(previous):
+        errors.append(
+            f"{relative}: working tree rewrites recovery baseline history instead of appending"
+        )
+    return sorted(set(errors))
+
+
+SLICE020_HANDOFF_RECOVERY_BASELINE = "a49313a5354259346e1089e759184b9f08735b37"
+
+
+def check_recovered_append_only_packets(root: Path) -> list[str]:
+    """Protect historically compromised packets from any further prefix rewrite."""
+
+    return _git_path_history_errors_since(
+        root,
+        Path("evidence/v2/observation/handoff.md"),
+        baseline=SLICE020_HANDOFF_RECOVERY_BASELINE,
+    )
+
+
 def _ordinary_evidence_path_errors(
     root: Path,
     relative_record: Path,
@@ -1831,6 +1976,7 @@ def _slice_lifecycle_evidence_errors(
     """Validate immutable or append-only evidence for the declared transition."""
 
     errors: list[str] = []
+    errors.extend(_slice_task_policy_errors(dirname, tasks_text, slice_state))
     paths = EXPECTED_LIFECYCLE_PATHS[dirname]
     texts: dict[str, str] = {}
     activation_starting_commit = ""
@@ -2196,7 +2342,8 @@ def _slice_lifecycle_evidence_errors(
                     f"{prefix}: Candidate commit must descend from the activation "
                     "Starting commit"
                 )
-            if _clean_metadata(record, "Tasks complete") != "YES":
+            tasks_complete = _clean_metadata(record, "Tasks complete")
+            if tasks_complete != "YES":
                 errors.append(f"{prefix}: Tasks complete must be 'YES'")
             committed_tasks = (
                 _git_file_text(
@@ -2218,12 +2365,22 @@ def _slice_lifecycle_evidence_errors(
                 except ValueError as exc:
                     errors.append(f"{prefix}: Candidate tasks.md is invalid ({exc})")
                     committed_task_entries = ()
-            expected_task_ids, expected_task_hash = _task_manifest(
+            _expected_task_ids, expected_task_hash = _task_manifest(
                 committed_task_entries
             )
-            if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
+            if committed_tasks is not None and dirname in SLICE_TASK_POLICIES:
+                errors.extend(
+                    f"{prefix}: {error}"
+                    for error in _candidate_task_completion_errors(
+                        committed_tasks,
+                        tasks_complete=tasks_complete,
+                        completed_task_ids=_clean_metadata(record, "Completed task IDs"),
+                    )
+                )
+            elif _clean_metadata(record, "Completed task IDs") != _expected_task_ids:
                 errors.append(
-                    f"{prefix}: Completed task IDs must be exactly {expected_task_ids!r}"
+                    f"{prefix}: Completed task IDs must be exactly "
+                    f"{_expected_task_ids!r}"
                 )
             if _clean_metadata(record, "Tasks SHA256") != expected_task_hash:
                 errors.append(
@@ -3840,7 +3997,8 @@ def check_cli(root: Path) -> list[str]:
     plain_env = {**os.environ, "NO_COLOR": "1"}
     plain_env.pop("FORCE_COLOR", None)
     try:
-        completed = subprocess.run(
+        # Fixed repository-pinned CLI invocation; shell remains disabled.
+        completed = subprocess.run(  # nosec B603 B607
             ["specify", "--version"],
             check=False,
             capture_output=True,
@@ -3855,7 +4013,8 @@ def check_cli(root: Path) -> list[str]:
     if completed.returncode != 0 or observed != expected:
         return [f"specify CLI must report {expected!r}; observed {observed!r}"]
     try:
-        tool_dir_result = subprocess.run(
+        # Fixed uv argv used only to verify the installed tool directory.
+        tool_dir_result = subprocess.run(  # nosec B603 B607
             ["uv", "tool", "dir"],
             check=False,
             capture_output=True,
@@ -3883,6 +4042,7 @@ def validate(root: Path, *, include_cli: bool = False) -> list[str]:
     errors.extend(check_central_state_artifacts(root))
     errors.extend(check_active_execution_language(root))
     errors.extend(check_runtime_dependencies(root))
+    errors.extend(check_recovered_append_only_packets(root))
     if include_cli:
         errors.extend(check_cli(root))
     return sorted(set(errors))
@@ -3924,12 +4084,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--task-manifest cannot be combined with --check-cli")
         try:
             task_ids, digest = task_manifest_for_slice(root, args.task_manifest)
+            task_text = (root / args.task_manifest / "tasks.md").read_text(
+                encoding="utf-8"
+            )
+            completed_ids = _literal_completed_task_ids(task_text)
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         print(f"**Initial task IDs**: {task_ids}")
         print(f"**Initial tasks SHA256**: {digest}")
-        print(f"**Completed task IDs**: {task_ids}")
+        print(f"**Completed task IDs**: {completed_ids}")
         print(f"**Tasks SHA256**: {digest}")
         return 0
     errors = validate(root, include_cli=args.check_cli)

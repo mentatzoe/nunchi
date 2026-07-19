@@ -1296,3 +1296,63 @@ immediately after freeze. T103 and T140 remain open for the final exact-object
 review and umbrella closure. No current statement claims
 `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
 promotion, or cutover authority.
+
+## Phase 27 authoritative packet correction
+
+The historical append-only claim is false for this ordinary packet. Git replay
+found four pre-recovery prefix rewrites, preserved without denial at
+`evidence/v2/observation/handoff-history-integrity-incident-2026-07-19.md`.
+The narrow lifecycle candidate/handoff streams remain the lifecycle authority.
+Shared governance now enforces prefix-only extension of this file from exact
+recovery baseline `a49313a5354259346e1089e759184b9f08735b37`; this section is
+an append to that baseline, not another rewrite.
+
+Independent governance review rejected exact Phase 26 object
+`a49313a5354259346e1089e759184b9f08735b37` for three HIGH findings:
+
+1. literal task completion was advisory and a false `CONVERGED` transition
+   passed shared governance;
+2. the claimed whole-range scanner omitted the slice-owned task checker and
+   other changed control-plane paths;
+3. this packet had been historically rewritten and ended at stale Phase 25
+   gate T140 while the reviewed graph ended at T146.
+
+The complete rejection is preserved at
+`evidence/v2/observation/review-2026-07-19-a49313a-governance-rejection.md`.
+Phase 27 closes those mechanisms by binding literal completion and exact T001–
+T153 identity into shared lifecycle governance, distinguishing normalized graph
+identity from completed IDs, truthfully closing prior review gates through T153
+supersession, scanning every changed repository path in the committed range,
+and enforcing append-only packet history from the recovery baseline.
+
+Current downstream documentation routing remains unchanged and names the real
+`v2-core-owner` for slice 030 plus `v2-wake-owner`, `v2-transport-owner`,
+`v2-hermes-owner`, `v2-claude-owner`, `v2-codex-owner`, `v2-adapters-owner`,
+`v2-security-owner`, and `v2-integrator` for their existing exact deltas.
+
+### Phase 27 verification state
+
+The RED reproductions and local correction receipts are recorded in
+`evidence/v2/observation/convergence-phase27-governance-integrity-2026-07-19.md`.
+
+| Command / control | Result |
+|---|---|
+| full repository | 1,452 tests, OK; 4 optional-integration skips |
+| Observation discovery | 200 tests, OK |
+| governance + scanner + literal-state group | 77 tests, OK |
+| aggregate and adversarial evidence | 53 standard rows + 34 adversarial rows; 0 FAIL |
+| attempt-6 corpus | 6 tests; 202/202 accounted for; exact framed digest GREEN |
+| executable docs | 14 tests, OK |
+| Ruff / expanded governance-script Bandit | clean; 0 findings |
+| governance CLI | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| task graph | T001–T153; normalized SHA-256 `aa5d1bd80107457b7846117603d366a8dcfc83bf9418e38254753d7222386dbf` |
+| literal task state | total 153; checked 151; superseded T107/T112/T119/T124/T131/T140/T146; open T103/T153 |
+| verdict fixture inventory | 60 |
+| final-tree `git diff --check` | clean |
+
+T152 is complete. The immutable SHA/tree/parent and exact all-path
+activation-range scan are bound externally immediately after freeze because a
+Git object cannot contain its own identity or post-commit scanner receipt. T103
+and T153 remain the only final review/umbrella gates. Nothing here establishes
+`CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
+promotion, or cutover authority.

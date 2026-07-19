@@ -89,12 +89,17 @@ and the limitation is handed to `v2-contract-owner` and `v2-integrator`.
 
 This is the initial dormant task graph; there is no slice-020 correction or
 rejection record to append from. Once activation freezes this manifest, an
-`ACTIVE` correction or recorded rejection must preserve every existing task and
-checkbox exactly and append only new sequential tasks. Each appended phase and
-task must cite the durable correction/review path and finding ID that requires
-it. A convergence-added graph or completed-handoff rejection starts a new bound
+`ACTIVE` correction or recorded rejection preserves every task ID and its
+historical intent, then appends only new sequential tasks. An unchecked obsolete
+final-review gate may be rewritten once as a literally checked supersession
+closure only after durable rejection/supersession evidence exists; its new text
+must name the successor gate and state that the historical object was not
+approved. Every other completed task remains untouched. Each appended phase and
+task cites the durable correction/review path and finding ID that requires it.
+A convergence-added graph or completed-handoff rejection starts a new bound
 `run speckit`; only a paused post-convergence fix with an unchanged graph may
-resume its current run. Candidate and handoff attempts remain append-only.
+resume its current run. Candidate and lifecycle handoff attempts remain
+append-only.
 
 ## Phase 1: Shared Test and Replay Setup
 
@@ -925,9 +930,9 @@ owner review of immutable preparation `cd8917c`.
 - [X] T106 Regenerate static/evaluator evidence, rerun the complete matrix and
   whole-slice exact-range scan, commit/push a new immutable preparation object,
   and record the T001–T107 graph identity without claiming handoff
-- [ ] T107 Obtain a fresh independent fail-closed review of that exact immutable
-  object; only a blocker-free verdict may close T103/T107 and authorize
-  candidate-attempt-2 lifecycle records
+- [X] T107 Close this historical review gate as explicitly superseded by T153;
+  its exact immutable object was not approved and cannot authorize candidate or
+  handoff lifecycle records
 
 ### Phase 20 dependencies
 
@@ -955,9 +960,9 @@ HIGH H4, reproduced against the current post-Phase-20 tree.
   explanations, and reports every other request/page difference
 - [X] T111 Extend S13 deterministic evidence and documentation with comparator
   completeness cases; regenerate aggregates and downstream handoff receipts
-- [ ] T112 Rerun the complete matrix and exact whole-slice scan, commit/push a
-  new immutable object with T001–T112 identity, and obtain fresh independent
-  fail-closed review before T103/T107 or candidate attempt 2 may close
+- [X] T112 Close this historical review gate as explicitly superseded by T153;
+  its exact immutable object was not approved and cannot close T103 or authorize
+  candidate attempt 2
 
 ### Phase 21 dependencies
 
@@ -993,8 +998,9 @@ post-Phase-21 tree in
 - [X] T118 Regenerate evidence and rerun the complete test/eval/security/
   governance matrix plus non-bypassable exact whole-slice scan; commit and push
   a new immutable T001–T119 object
-- [ ] T119 Obtain a fresh independent fail-closed review of that exact object;
-  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+- [X] T119 Close this historical review gate as explicitly superseded by T153;
+  its exact object remains unapproved and every later CRITICAL/HIGH finding
+  remains binding until the successor gate passes
 
 ### Phase 22 dependencies
 
@@ -1022,9 +1028,9 @@ accepted corpus identity is byte-verifiable.
   duplicate receipt correlation ID
 - [X] T123 Reject a new snapshot at the pending-attestation cap before return;
   preserve every prior issued snapshot until its one rightful receipt is built
-- [ ] T124 Regenerate evidence and rerun the complete matrix and exact scanner,
-  freeze/push a new immutable object, and obtain fresh independent fail-closed
-  review before candidate attempt 2 or handoff
+- [X] T124 Close this historical combined freeze/review gate as explicitly
+  superseded by T153; its exact object remains unapproved and cannot authorize
+  candidate attempt 2 or handoff
 
 ### Phase 23 dependencies
 
@@ -1063,11 +1069,9 @@ current remediation recorded in
 - [X] T130 Detect and quarantine the attempted cross-slice shared-governance
   modification at `8f78ec5`; preserve the literal-completion finding and route
   its slice-owned implementation to T137 instead of changing the shared oracle
-- [ ] T131 Regenerate standard/adversarial evidence on the settled Phase 23/24
-  tree; rerun the complete test/corpus/verdict/Ruff/Bandit/static/governance/
-  task-manifest/diff matrix; exact-scan the whole activation-to-candidate range;
-  commit/push one immutable T001–T131 object and obtain a fresh independent
-  fail-closed whole-slice review before candidate attempt 2
+- [X] T131 Close this historical matrix/freeze/review gate as explicitly
+  superseded by T153; its exact successor remains unapproved and cannot
+  authorize candidate attempt 2 or handoff
 
 ### Phase 24 dependencies
 
@@ -1109,8 +1113,9 @@ Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
   for the provider/continuity lifetime
 - [X] T139 Regenerate evidence, rerun the complete matrix and exact whole-slice
   scan, and freeze/push a new immutable T001–T140 object
-- [ ] T140 Obtain fresh independent fail-closed review of that exact object and
-  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+- [X] T140 Close this historical review gate as explicitly superseded by T153;
+  its exact object remains unapproved and every CRITICAL/HIGH finding remains
+  binding until the successor gate passes
 
 ### Phase 25 dependencies
 
@@ -1145,8 +1150,9 @@ be reissued and resurrect matching old capability authority.
   expiry presence, relation gaps, and lifetime timestamp order
 - [X] T145 Regenerate all evidence, rerun the complete matrix, exact-scan the
   whole activation range, and freeze/push one immutable T001–T146 object
-- [ ] T146 Obtain fresh independent fail-closed review of that exact object and
-  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+- [X] T146 Close rejected Phase 26 review gate as explicitly superseded by T153;
+  exact object `a49313a5354259346e1089e759184b9f08735b37` remains rejected and
+  cannot authorize candidate attempt 2 or handoff
 
 ### Phase 26 dependencies
 
@@ -1156,3 +1162,41 @@ be reissued and resurrect matching old capability authority.
 
 **Checkpoint**: caller mutation cannot alter receipt authority, copy failure
 cannot consume it, and no generated handle ID can ever revive prior authority.
+
+## Phase 27: Lifecycle Truth, Whole-Range Scan, and Packet Integrity
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-a49313a-governance-rejection.md`,
+HIGH-1 through HIGH-3 and the range-whitespace LOW finding.
+
+- [X] T147 Preserve the exact `a49313a` governance rejection and independently
+  reproduce its advisory-task-oracle, omitted-scanner-path, stale-packet, and
+  append-only-history mechanisms with RED tests and exact Git receipts
+- [X] T148 Integrate literal checkbox completion and the exact Slice 020 terminal
+  manifest into shared lifecycle governance while preserving normalized graph
+  identity; make manifest output distinguish all IDs from literally completed IDs
+- [X] T149 Close every obsolete final-review gate through explicit checked T153
+  supersession text, remove caller-controlled open-task policy, validate every
+  supersession target, and make the slice-owned diagnostic fail closed on any
+  noncanonical, missing, extra, or arbitrarily open task
+- [X] T150 Expand the committed-range scanner to every changed repository path so
+  lifecycle-critical scripts, planning, shared tests, and evidence cannot escape
+  an advertised whole-activation-range scan; retain redacted output and bypass tests
+- [X] T151 Record the historical `handoff.md` prefix-rewrite incident without
+  erasing it, enforce prefix-only appends from recovery baseline `a49313a`, append
+  the authoritative Phase 27 packet correction, and remove exact-range whitespace
+- [X] T152 Regenerate evidence, rerun the complete repository/Observation/
+  governance/corpus/eval/verdict/static/diff matrix, exact-scan the entire
+  activation range, and freeze/push one immutable T001–T153 review object
+- [ ] T153 Obtain fresh independent implementation and governance reviews of that
+  exact object; fix every CRITICAL/HIGH blocker before closing T103 or creating
+  candidate-attempt-2 or handoff lifecycle records
+
+### Phase 27 dependencies
+
+- T148–T151 depend on T147 RED and may proceed independently.
+- T152 depends on T148–T151. T153 depends on T152 and is the sole current final
+  review gate, superseding T107/T112/T119/T124/T131/T140/T146.
+
+**Checkpoint**: no false lifecycle transition, changed path, or mutable historical
+packet can be laundered into candidate or handoff authority.

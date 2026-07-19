@@ -81,8 +81,20 @@ class TestDocumentedContractClaims(unittest.TestCase):
         self.assertIn("v2-core-owner` unchanged", self.text)
         self.assertNotIn("v2-attention-owner", self.text)
         handoff_text = HANDOFF_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("v2-attention-owner", handoff_text)
-        self.assertIn("v2-core-owner", handoff_text)
+        current = handoff_text.split("## Phase 27 authoritative packet correction", 1)[1]
+        self.assertNotIn("v2-attention-owner", current)
+        self.assertIn("v2-core-owner", current)
+
+    def test_handoff_discloses_historical_rewrites_and_current_phase27_state(self):
+        handoff_text = HANDOFF_PATH.read_text(encoding="utf-8")
+        self.assertIn("## Phase 27 authoritative packet correction", handoff_text)
+        self.assertIn("historical append-only claim is false", handoff_text)
+        self.assertIn("a49313a5354259346e1089e759184b9f08735b37", handoff_text)
+        self.assertIn("T153", handoff_text)
+        self.assertIn(
+            "evidence/v2/observation/handoff-history-integrity-incident-2026-07-19.md",
+            handoff_text,
+        )
 
 
 class TestLocalLinksResolve(unittest.TestCase):
