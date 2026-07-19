@@ -206,6 +206,12 @@ non-receiptable and MUST NOT fabricate one.
 4. **Given** preattention is disabled by trusted configuration, **When** core
    and CLI run, **Then** both return the same bypass branch, make zero model
    calls, and route downstream with wake source `PREATTENTION_BYPASS`.
+5. **Given** a schema-valid request whose event count, canonical classifier-
+   projection byte length, or declared coverage limit exceeds the trusted
+   attention-policy cap, **When** core or CLI validates it, **Then** it returns
+   operational `ERROR`, makes zero classifier calls, emits the applicable
+   request-correlated error receipt, and neither truncates nor reassembles the
+   request.
 
 ### Edge Cases
 
@@ -217,6 +223,10 @@ non-receiptable and MUST NOT fabricate one.
   retries do not authorize a second classifier decision.
 - Request-controlled credentials, endpoint, model, limits, or suppression
   policy; trusted operator configuration must win and its source be receipted.
+- A request with exactly the trusted event/byte cap is valid; an actual count,
+  canonical projection size, or declared coverage limit above that cap is an
+  operational error. Optional declared coverage limits below the trusted cap
+  remain valid and are never widened or recalculated by the attention engine.
 - Preattention disabled as an explicit non-model bypass; social suppression
   disabled, recoverability unproven, unavailable provider, timeout, invalid
   schema, and illegal
@@ -256,6 +266,24 @@ non-receiptable and MUST NOT fabricate one.
   limit is a positive integer, `error_action` is `WAKE | NO_WAKE`, and the two
   transition-margin members are either both absent (retired) or both present
   with a finite margin in `[0,1]` and non-empty source (active).
+  After I-010A schema validation and trusted binding validation, but before
+  preattention bypass or any classifier call, I-030A MUST enforce the trusted
+  attention budget. Every message, reaction, and membership event counts once;
+  `len(request.events)` MUST be at most `policy.attention_max_events`. The
+  classifier-visible projection is the I-010A request with host-only
+  `continuation` authority removed and only its factual coverage plus
+  expansion-availability booleans retained as required by FR-018; its byte
+  length is computed before provider framing as UTF-8 JSON with object keys
+  sorted, no insignificant whitespace, and non-ASCII characters emitted
+  directly. That length MUST be at most `policy.attention_max_bytes`.
+  Equality is valid. Optional `request.coverage.max_events` and
+  `request.coverage.max_bytes` MAY be absent or lower than/equal to their
+  matching trusted caps; either declaration above its matching trusted cap is
+  an operational `ERROR` even when the supplied snapshot happens to fit.
+  Any actual or declared overage makes zero classifier calls, is receipted as
+  the normal I-010E `@2` error branch when a valid request ID and working sink
+  exist, and MUST NOT cause I-030A to truncate, reorder, reassemble, or
+  recalculate coverage. Slice 020 owns bounded observation assembly.
   `classifier_config` is exactly `{provider, endpoint, model, api_key?,
   timeout_seconds, max_retries, source}`: all present string fields are
   non-empty, timeout is positive and finite, `max_retries` is the FR-003

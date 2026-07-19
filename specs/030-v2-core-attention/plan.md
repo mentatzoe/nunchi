@@ -204,6 +204,32 @@ the slice's implementation choices without reopening product decisions.
   returning a tuple outside I-010B, or allowing surface-specific audit fields.
   Each would fork the accepted contract or prevent exact parity.
 
+### Trusted attention-budget boundary
+
+- **Decision**: After accepted I-010A and binding validation, but before bypass
+  or provider routing, count every supplied event kind against
+  `policy.attention_max_events` and measure the classifier-visible projection
+  against `policy.attention_max_bytes`. Projection bytes are the UTF-8 length
+  of canonical JSON with sorted object keys, no insignificant whitespace, and
+  direct non-ASCII characters, after removing host-only continuation authority
+  and retaining only factual coverage and expansion-availability booleans;
+  provider framing is excluded. Equality is valid. Optional I-010A
+  `coverage.max_events` and `coverage.max_bytes` may be absent or no greater
+  than the matching trusted caps; a larger declaration or actual overage is
+  operational ERROR with zero classifier calls and the normal request-ID-
+  bearing receipt rule. I-030A never truncates, reorders, reassembles, or
+  recalculates coverage.
+- **Rationale**: The trusted policy remains an enforceable cost/security cap
+  while slice 020 retains observation-assembly ownership. Allowing a stricter
+  declared coverage budget preserves honest upstream truncation without
+  requiring every adapter to assemble to the maximum allowed size.
+- **Alternatives considered**: Silently truncating in core, requiring declared
+  coverage limits to equal the trusted caps, accepting a looser declared limit
+  when the current payload happens to fit, or measuring provider-specific
+  request framing. These respectively steal 020 ownership, reject honest
+  stricter assembly, permit untrusted widening, or make core/CLI parity depend
+  on transport details.
+
 ### Retry and sparse-advice boundaries
 
 - **Decision**: Require trusted `max_retries` explicitly and accept only `0..2`
@@ -402,15 +428,17 @@ not-yet-executed protocol lives at
 | Input/result class | stdout | stderr | Exit |
 |---|---|---|---|
 | Valid request; `status: ok` or trusted `status: bypass` | Exactly one tagged JSON value | No response payload | `0` |
-| JSON parsed; config missing/unreadable/unsafe/malformed, sink construction fails, or request schema invalid | Exactly one tagged `status: error` JSON value with honest receipt-persistence fact | No response payload | `3` |
+| JSON parsed; config missing/unreadable/unsafe/malformed, sink construction fails, request schema invalid, or trusted attention-budget validation fails | Exactly one tagged `status: error` JSON value with honest receipt-persistence fact | No response payload | `3` |
 | Provider/runtime/malformed-model or constructed-sink invocation failure | Exactly one tagged `status: error` JSON value with `not-persisted` or `unknown` when applicable | No response payload | `1` |
 | Input unreadable or invalid JSON | Empty | Diagnostic only | `2` |
 
 Precedence is fixed: unreadable/invalid stdin JSON wins and exits 2 without
 loading config; after any JSON value is parsed, config security/shape and sink
-construction precede request-schema validation, so config failure wins a
-combined failure and exits 3. A valid sink records a schema/config error only
-when a valid request ID is assignable; for a config error its `receipt_sink`
+construction precede request-schema validation, and trusted attention-budget
+validation follows schema/binding validation before bypass or classifier use,
+so config failure wins a combined failure and all such validation failures exit
+3. A valid sink records a schema/config/budget error only when a valid request
+ID is assignable; for a config error its `receipt_sink`
 member must independently pass the closed security/shape checks. Otherwise no
 receipt or ID is fabricated.
 
@@ -582,9 +610,10 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
 
-Matrix scope audit (2026-07-19): the rows above enumerate all 30 current
-Markdown claim surfaces and the future slice-owned `docs/attention/v2.md`
-individually. Every disposition is attached to one exact file; no grouped
+Matrix scope audit (2026-07-19): the 31 unique rows above enumerate all 30
+current Markdown claim surfaces and the future slice-owned
+`docs/attention/v2.md` individually: 5 `UPDATE`, 14 `NO_IMPACT`, and 12
+`HANDOFF`. Every disposition is attached to one exact file; no grouped
 multi-file disposition substitutes for an exact path.
 
 Global current-state claims remain integrator-owned; the component guide and
