@@ -15,6 +15,7 @@ Invoke as a script to regenerate the aggregate evidence files:
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -158,9 +159,30 @@ def run_continuation_attacks() -> list[dict]:
             })
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(trigger_event_id=case["trigger_event_id"], **case["issue"])
+        internal_capability_before = deepcopy(
+            continuation._capabilities[capability["handle_id"]]
+        )
+        if case.get("mutate_returned_capability"):
+            capability["bound_to"]["room_id"] = "attacker-room"
+            capability["can_fetch_after"] = True
+            capability["max_events_per_fetch"] = 99
+            if "expires_at" in capability:
+                capability["expires_at"] = "2028-01-01T00:00:00Z"
+        authority_unchanged = (
+            continuation._capabilities[capability["handle_id"]]
+            == internal_capability_before
+        )
         host_context = dict(capability["bound_to"])
         host_context.update(case.get("host_context_override", {}))
         request = dict(case["fetch_request"], request_id=f"req-{case['case_id']}", handle_id=capability["handle_id"])
+
+        def fetch_page(fetch_request: dict) -> dict:
+            kwargs = {}
+            if not case.get("omit_fetch_time"):
+                kwargs["fetch_time"] = case.get("fetch_time", "2026-07-17T01:30:00Z")
+            return continuation.fetch(
+                fetch_request, host_context=host_context, **kwargs,
+            )
 
         outcome = None
         detail = ""
@@ -168,15 +190,17 @@ def run_continuation_attacks() -> list[dict]:
         sequence_mismatch = False
         observed_has_more_before = None
         observed_has_more_after = None
+        observed_final_has_more_after = None
         observed_truncated_by = None
         observed_page_event_ids: list[list[str]] = []
         observed_max_active_cursor_records = 0
         observed_window_object_ids: set[int] = set()
         try:
-            page = continuation.fetch(request, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
+            page = fetch_page(request)
             outcome = "accept"
             observed_has_more_before = page["coverage"]["has_more_before"]
             observed_has_more_after = page["coverage"]["has_more_after"]
+            observed_final_has_more_after = observed_has_more_after
             observed_truncated_by = page["coverage"]["truncated_by"]
             observed_page_event_ids.append([event["id"] for event in page["events"]])
             active_windows = continuation._cursor_windows[capability["handle_id"]]
@@ -185,12 +209,13 @@ def run_continuation_attacks() -> list[dict]:
             )
             if "next_cursor" in page:
                 observed_window_object_ids.add(
-                    id(active_windows[page["next_cursor"]]["window_event_ids"])
+                    id(active_windows[page["next_cursor"]]["window_event_refs"])
                 )
             if case["expect"] == "accept-then-paginate" and "next_cursor" in page:
                 request2 = dict(request, request_id=f"req-{case['case_id']}-2", cursor=page["next_cursor"])
-                page2 = continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
+                page2 = fetch_page(request2)
                 observed_page_event_ids.append([event["id"] for event in page2["events"]])
+                observed_final_has_more_after = page2["coverage"]["has_more_after"]
                 overlap = {e["id"] for e in page["events"]} & {e["id"] for e in page2["events"]}
                 if overlap:
                     dedup_violation = True
@@ -220,18 +245,15 @@ def run_continuation_attacks() -> list[dict]:
                         request_id=f"req-{case['case_id']}-{len(observed_page_event_ids) + 1}",
                         cursor=next_cursor,
                     )
-                    current_page = continuation.fetch(
-                        request2,
-                        host_context=host_context,
-                        fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"),
-                    )
+                    current_page = fetch_page(request2)
+                    observed_final_has_more_after = current_page["coverage"]["has_more_after"]
                     active_windows = continuation._cursor_windows[capability["handle_id"]]
                     observed_max_active_cursor_records = max(
                         observed_max_active_cursor_records, len(active_windows)
                     )
                     if "next_cursor" in current_page:
                         observed_window_object_ids.add(
-                            id(active_windows[current_page["next_cursor"]]["window_event_ids"])
+                            id(active_windows[current_page["next_cursor"]]["window_event_refs"])
                         )
                     current_ids = [event["id"] for event in current_page["events"]]
                     overlap = seen_event_ids & set(current_ids)
@@ -261,11 +283,7 @@ def run_continuation_attacks() -> list[dict]:
                     cursor=page["next_cursor"],
                 )
                 try:
-                    continuation.fetch(
-                        request2,
-                        host_context=host_context,
-                        fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"),
-                    )
+                    fetch_page(request2)
                     outcome = "accept-then-paginate"
                     detail = "retention-evicted cursor remainder was wrongly accepted"
                 except ContinuationError as exc2:
@@ -282,7 +300,7 @@ def run_continuation_attacks() -> list[dict]:
                     cursor=page["next_cursor"],
                 )
                 try:
-                    continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
+                    fetch_page(request2)
                     outcome = "accept-then-paginate"  # second fetch wrongly succeeded
                     detail = "cross-direction cursor replay was wrongly accepted"
                 except ContinuationError as exc2:
@@ -300,6 +318,15 @@ def run_continuation_attacks() -> list[dict]:
             coverage_mismatch = True
             detail = (detail + "; " if detail else "") + (
                 f"has_more_after {observed_has_more_after!r} != expected {case['expect_has_more_after']!r}"
+            )
+        if (
+            "expect_final_has_more_after" in case
+            and observed_final_has_more_after != case["expect_final_has_more_after"]
+        ):
+            coverage_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"final has_more_after {observed_final_has_more_after!r} != expected "
+                f"{case['expect_final_has_more_after']!r}"
             )
         if "expect_truncated_by" in case and observed_truncated_by != case["expect_truncated_by"]:
             coverage_mismatch = True
@@ -341,6 +368,22 @@ def run_continuation_attacks() -> list[dict]:
                 f"shared window object count {len(observed_window_object_ids)} != expected "
                 f"{case['expect_shared_window_objects']}"
             )
+        returned_capability_wire_clean = "cursors" not in capability
+        retained_delivery_ids = len(provider._seen_delivery_ids)
+        retained_event_generations = len(provider._event_generations)
+        retained_actor_records = len(provider._actors)
+        for field, observed in (
+            ("expect_authority_unchanged", authority_unchanged),
+            ("expect_returned_capability_wire_clean", returned_capability_wire_clean),
+            ("expect_retained_delivery_ids", retained_delivery_ids),
+            ("expect_retained_event_generations", retained_event_generations),
+            ("expect_retained_actor_records", retained_actor_records),
+        ):
+            if field in case and observed != case[field]:
+                sequence_mismatch = True
+                detail = (detail + "; " if detail else "") + (
+                    f"{field} observed {observed!r} != expected {case[field]!r}"
+                )
 
         result = (
             "PASS"
@@ -352,10 +395,16 @@ def run_continuation_attacks() -> list[dict]:
             "result": result, "expected": case["expect"], "observed": outcome, "detail": detail,
             "handle_id": capability["handle_id"],
             "has_more_before": observed_has_more_before, "has_more_after": observed_has_more_after,
+            "final_has_more_after": observed_final_has_more_after,
             "truncated_by": observed_truncated_by, "page_event_ids": observed_page_event_ids,
             "max_active_cursor_records": observed_max_active_cursor_records,
             "exhausted_cursor_records": exhausted_cursor_records,
             "shared_window_object_count": len(observed_window_object_ids),
+            "authority_unchanged": authority_unchanged,
+            "returned_capability_wire_clean": returned_capability_wire_clean,
+            "retained_delivery_ids": retained_delivery_ids,
+            "retained_event_generations": retained_event_generations,
+            "retained_actor_records": retained_actor_records,
         }
         rows.append(row)
     return rows

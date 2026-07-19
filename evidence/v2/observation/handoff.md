@@ -826,3 +826,93 @@ paragraphs remain unchanged as append-only historical evidence and are
 superseded by this section. This permits a fresh convergence and candidate
 attempt-2 review; it does not accept the slice or authorize integration,
 cutover, deployment, release, or promotion.
+
+## Phase 16 authority, event-instance, coverage, and retained-state supersession
+
+The independent review pinned to `75ff65f` found six additional defects that
+remained applicable after the Phase 15 resource fix at `dbe220d`:
+S020-A4-01–03/A4-06 and H020-A4-04–05. Owner-side current-tip probes reproduced
+all six: omitted/malformed fetch time served expiring authority; mutation of the
+returned capability rewrote private binding/direction/caps; cursor provenance
+contaminated the closed capability wire object; a reingested `e1` replaced the
+original cursor instance; a final `after` page hid known later `e6`; and a
+retention-three provider accumulated 100 delivery IDs and 100 actor records.
+`evidence/v2/observation/convergence-phase16-2026-07-19.md` preserves the
+rejection and correction requirements.
+
+T071–T073 established the primary RED layer: 10 test methods produced 13
+expected failures covering authority/expiry/wire isolation, replacement event
+and anchor instances, later-arrival side coverage, and retained auxiliary state.
+Three additional architectural probes each failed on their intended path before
+GREEN: ingestion input aliasing, returned snapshot/page/receipt aliasing, and
+late actor-schema validation that poisoned a delivery ID.
+
+T074–T076 then changed private reference-provider state without altering any
+accepted I-010A/I-010D/I-010E wire schema:
+
+- `issue()` stores and returns separate deep copies; cursor provenance exists
+  only in private host maps, so returned capabilities remain closed-schema clean;
+- expiry is valid only when issuance and fetch timestamps parse as timezone-aware
+  ISO-8601; absent, malformed, or naive fetch time rejects when expiry exists;
+- accepted events receive monotonic host generations; capability triggers,
+  cursor anchors, and immutable window entries bind `(event_id, generation)` and
+  reject evicted/reingested replacements;
+- cursor metadata carries snapshot generation plus immutable side-omission facts,
+  so later accepted arrivals set final `has_more_after=true` without entering the
+  original remainder;
+- retained delivery IDs, event generations, and event-to-delivery mappings are
+  removed with deque eviction; invalid events/actors commit no delivery state;
+- actor facts are schema-validated before commit, unrelated supplied actors are
+  ignored, and the registry is pruned to self plus actors referenced by retained
+  events;
+- accepted input events/actors and returned capabilities, snapshots, continuation
+  pages, actors, and receipt coverage are copied across the authority boundary,
+  preventing caller mutation of host state or source request documents.
+
+T077 adds five adversarial resource/authority cases. The continuation evidence
+now contains 22 rows, including `CONT-S15-007` fail-closed missing fetch time,
+`CONT-S15-008` returned-authority isolation, `CONT-S03-012` replacement-instance
+rejection, `CONT-S03-013` truthful later-arrival coverage, and `CONT-S15-009`
+retention-coupled delivery/generation/actor counts. Together with the existing
+resource case, every row is PASS.
+
+A fresh 2,000-event one-event-per-page probe produced:
+
+```text
+pages:                              1999
+max_active_cursor_records:             1
+max_generation_bound_window_refs:   1999
+exhausted_cursor_records:              0
+returned_capability_wire_clean:      true
+retained_delivery_ids:              2000
+retained_event_generations:         2000
+retained_actor_records:                2
+```
+
+The first two retained counts equal the configured 2,000-event buffer; they do
+not grow with traversals. Actor state equals self plus the one retained author.
+
+Phase 16 verification matrix:
+
+| Command | Result |
+|---|---|
+| Primary Phase 16 RED group on `aa0da7a` | expected RED: 10 methods, 13 failures |
+| Three focused alias/actor-validation RED probes | each failed on the intended missing isolation/early-validation behavior |
+| `PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_budget_and_continuation` | 51 tests, OK |
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 126 tests, OK, 0 skipped |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 5 suites, 45 rows, 0 FAIL (`identity-and-hygiene.jsonl`: 9; `budget-sweep.jsonl`: 7; `continuation.jsonl`: 22; `s05-recoverability.jsonl`: 4; `s13-equivalence.jsonl`: 3) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; all 202 attempt-6 cases accounted for, zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1375 tests, OK, 4 environment-dependent optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `ruff check src/nunchi/observation.py tests/v2/observation/test_budget_and_continuation.py evals/v2/observation/run_scenes.py` | clean, exit 0 |
+| `uvx bandit -q -r src/nunchi/observation.py` | clean, exit 0; 0 findings |
+| static secret scan over the working diff | `STATIC_SCAN CLEAN` |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T079 all complete; SHA256 `ca4742489a32b6631a99b212c533be4bbbde44b79bf2c5749952d662eeaf5fd0` |
+| `git diff --check` | clean, exit 0 |
+
+S020-A4-01–03/A4-06 and H020-A4-04–05 are closed locally. All earlier attempt
+records remain unchanged and are superseded only by appended sections. This
+permits a fresh immutable convergence/candidate-attempt-2 review; it does not
+accept the slice or authorize integration, cutover, deployment, release, or
+promotion.

@@ -6,12 +6,15 @@ dedup. Slice-030 classifier projection behavior is out of scope here.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import unittest
 
 from nunchi.observation import (
     ContinuationError,
     ContinuationProvider,
+    ObservationInputError,
     serialized_byte_size,
+    validate_attention_request,
     validate_context_continuation,
 )
 from tests.v2.observation.helpers import make_message, make_provider, seed_room
@@ -439,7 +442,7 @@ class TestFetchDocuments(unittest.TestCase):
             request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
         )
         cursor1 = page1["next_cursor"]
-        window1 = continuation._cursor_windows[capability["handle_id"]][cursor1]["window_event_ids"]
+        window1 = continuation._cursor_windows[capability["handle_id"]][cursor1]["window_event_refs"]
         self.assertIsInstance(window1, tuple)
         self.assertEqual(len(continuation._cursor_windows[capability["handle_id"]]), 1)
 
@@ -450,9 +453,10 @@ class TestFetchDocuments(unittest.TestCase):
         cursor2 = page2["next_cursor"]
         active = continuation._cursor_windows[capability["handle_id"]]
         self.assertNotIn(cursor1, active)
-        self.assertIs(active[cursor2]["window_event_ids"], window1)
+        self.assertIs(active[cursor2]["window_event_refs"], window1)
         self.assertEqual(len(active), 1)
-        self.assertEqual(capability["cursors"], [cursor2])
+        self.assertEqual(continuation._cursors[capability["handle_id"]], {cursor2})
+        self.assertNotIn("cursors", capability)
         with self.assertRaises(ContinuationError):
             continuation.fetch(
                 dict(request, request_id="bounded-chain-replay", cursor=cursor1),
@@ -563,6 +567,194 @@ class TestFetchDocuments(unittest.TestCase):
             )
         self.assertNotIn(capability["handle_id"], continuation._capabilities)
         self.assertNotIn(capability["handle_id"], continuation._cursor_windows)
+
+    def test_expiring_capability_requires_valid_aware_times(self):
+        provider, events = _room_with_events(3)
+        for expires_at in ("not-a-time", "2027-01-01T00:00:00"):
+            with self.subTest(expires_at=expires_at), self.assertRaises(ValueError):
+                ContinuationProvider(provider).issue(
+                    trigger_event_id="e3", max_events_per_fetch=1,
+                    max_bytes_per_fetch=8192, expires_at=expires_at,
+                )
+
+        for fetch_time in (None, "not-a-time", "2026-07-19T09:00:00"):
+            with self.subTest(fetch_time=fetch_time):
+                continuation = ContinuationProvider(provider)
+                capability = continuation.issue(
+                    trigger_event_id="e3", max_events_per_fetch=1,
+                    max_bytes_per_fetch=8192,
+                    expires_at="2027-01-01T00:00:00Z",
+                )
+                request = {
+                    "request_id": "expiry-validity", "handle_id": capability["handle_id"],
+                    "direction": "before", "max_events": 1, "max_bytes": 8192,
+                }
+                kwargs = {} if fetch_time is None else {"fetch_time": fetch_time}
+                with self.assertRaises(ContinuationError):
+                    continuation.fetch(
+                        request, host_context=capability["bound_to"], **kwargs,
+                    )
+
+    def test_returned_capability_mutation_cannot_rewrite_authority(self):
+        provider, events = _room_with_events(4)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e1", max_events_per_fetch=1,
+            max_bytes_per_fetch=8192, can_fetch_after=False,
+            expires_at="2027-01-01T00:00:00Z",
+        )
+        internal_before = deepcopy(continuation._capabilities[capability["handle_id"]])
+        capability["bound_to"]["room_id"] = "attacker-room"
+        capability["can_fetch_after"] = True
+        capability["max_events_per_fetch"] = 99
+        capability["expires_at"] = "2028-01-01T00:00:00Z"
+        self.assertEqual(continuation._capabilities[capability["handle_id"]], internal_before)
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "mutated-authority", "handle_id": capability["handle_id"],
+                    "direction": "after", "max_events": 3, "max_bytes": 8192,
+                },
+                host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+            )
+
+    def test_cursor_minting_keeps_returned_capability_wire_clean(self):
+        provider, events = _room_with_events(4)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        original = deepcopy(capability)
+        page = continuation.fetch(
+            {
+                "request_id": "wire-clean", "handle_id": capability["handle_id"],
+                "direction": "before", "max_events": 1, "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        self.assertIn("next_cursor", page)
+        self.assertEqual(capability, original)
+        self.assertNotIn("cursors", capability)
+        attention_request = provider.snapshot(
+            trigger_event_id="e4", max_events=4, max_bytes=65536,
+        )
+        attention_request["continuation"] = capability
+        self.assertEqual(validate_attention_request(attention_request), [])
+
+    def test_cursor_rejects_reingested_remainder_id_instance(self):
+        provider, events = _room_with_events(5, provider=make_provider(retention_max_events=5))
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e5", max_events_per_fetch=3, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "instance-1", "handle_id": capability["handle_id"],
+            "direction": "before", "anchor_event_id": "e5", "max_events": 3,
+            "max_bytes": 8192,
+        }
+        page = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        provider.ingest({
+            "delivery_id": "delivery:e6", "disposition": "candidate-event",
+            "authorized": True, "event": make_message("e6", "discord:1001", "six"),
+            "actors": {},
+        })
+        provider.ingest({
+            "delivery_id": "delivery:e1-replacement", "disposition": "candidate-event",
+            "authorized": True,
+            "event": make_message("e1", "discord:1001", "REPLACEMENT"), "actors": {},
+        })
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                dict(request, request_id="instance-2", cursor=page["next_cursor"]),
+                host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+            )
+
+    def test_cursor_rejects_reingested_anchor_id_instance(self):
+        provider, events = _room_with_events(3, provider=make_provider(retention_max_events=3))
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e1", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "anchor-instance-1", "handle_id": capability["handle_id"],
+            "direction": "after", "anchor_event_id": "e1", "max_events": 1,
+            "max_bytes": 8192,
+        }
+        page = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        provider.ingest({
+            "delivery_id": "delivery:e4", "disposition": "candidate-event",
+            "authorized": True, "event": make_message("e4", "discord:1001", "four"),
+            "actors": {},
+        })
+        provider.ingest({
+            "delivery_id": "delivery:e1-replacement", "disposition": "candidate-event",
+            "authorized": True,
+            "event": make_message("e1", "discord:1001", "REPLACEMENT"), "actors": {},
+        })
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                dict(request, request_id="anchor-instance-2", cursor=page["next_cursor"]),
+                host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+            )
+
+    def test_after_final_page_discloses_later_arrival_without_admitting_it(self):
+        provider, events = _room_with_events(5, provider=make_provider(retention_max_events=10))
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "after-later-1", "handle_id": capability["handle_id"],
+            "direction": "after", "anchor_event_id": "e2", "max_events": 1,
+            "max_bytes": 8192,
+        }
+        page = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        provider.ingest({
+            "delivery_id": "delivery:e6", "disposition": "candidate-event",
+            "authorized": True, "event": make_message("e6", "discord:1001", "six"),
+            "actors": {},
+        })
+        while "next_cursor" in page:
+            page = continuation.fetch(
+                dict(request, request_id=f"after-later-{page['events'][0]['id']}", cursor=page["next_cursor"]),
+                host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+            )
+        self.assertEqual([event["id"] for event in page["events"]], ["e5"])
+        self.assertTrue(page["coverage"]["has_more_after"])
+        self.assertNotIn("e6", [event["id"] for event in page["events"]])
+
+    def test_around_final_page_discloses_later_arrival_after_retention_shift(self):
+        provider, events = _room_with_events(5, provider=make_provider(retention_max_events=5))
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e4", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "around-later-1", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e4", "max_events": 2,
+            "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        provider.ingest({
+            "delivery_id": "delivery:e6", "disposition": "candidate-event",
+            "authorized": True, "event": make_message("e6", "discord:1001", "six"),
+            "actors": {},
+        })
+        page2 = continuation.fetch(
+            dict(request, request_id="around-later-2", cursor=page1["next_cursor"]),
+            host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        self.assertEqual([event["id"] for event in page2["events"]], ["e5"])
+        self.assertTrue(page2["coverage"]["has_more_after"])
+        self.assertNotIn("e6", [event["id"] for event in page2["events"]])
 
     def test_fetch_rejects_when_byte_cap_cannot_admit_the_next_event(self):
         provider, events = _room_with_events(5)
@@ -773,6 +965,152 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         ids_page1 = {event["id"] for event in page1["events"]}
         ids_page2 = {event["id"] for event in page2["events"]}
         self.assertEqual(ids_page1 & ids_page2, set())  # exact-event dedup across pages
+
+
+class TestRetentionCoupledAuxiliaryState(unittest.TestCase):
+    def test_returned_documents_cannot_mutate_provider_or_source_request(self):
+        provider = make_provider(retention_max_events=3)
+        event1 = make_message("e1", "discord:1001", "original one")
+        event2 = make_message("e2", "discord:1002", "original two")
+        provider.ingest({
+            "delivery_id": "delivery:e1", "disposition": "candidate-event",
+            "authorized": True, "event": event1,
+            "actors": {"discord:1001": {"display_name": "actor one"}},
+        })
+        provider.ingest({
+            "delivery_id": "delivery:e2", "disposition": "candidate-event",
+            "authorized": True, "event": event2,
+            "actors": {"discord:1002": {"display_name": "actor two"}},
+        })
+        snapshot = provider.snapshot(trigger_event_id="e2", max_events=2, max_bytes=65536)
+        snapshot_e1 = next(event for event in snapshot["events"] if event["id"] == "e1")
+        snapshot_e1["text"] = "MUTATED SNAPSHOT"
+        snapshot["actors"]["discord:1001"]["display_name"] = "MUTATED"
+        retained_e1 = next(event for event in provider._events if event["id"] == "e1")
+        self.assertEqual(retained_e1["text"], "original one")
+        self.assertEqual(provider._actors["discord:1001"]["display_name"], "actor one")
+
+        source_request = provider.snapshot(
+            trigger_event_id="e2", max_events=2, max_bytes=65536,
+        )
+        receipt = provider.build_observation_receipt(source_request)
+        receipt["body"]["coverage"]["max_events"] = 999
+        self.assertEqual(source_request["coverage"]["max_events"], 2)
+
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "copy-page", "handle_id": capability["handle_id"],
+                "direction": "before", "max_events": 1, "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-19T09:00:00Z",
+        )
+        page["events"][0]["text"] = "MUTATED PAGE"
+        page["actors"]["discord:1001"]["display_name"] = "MUTATED"
+        self.assertEqual(retained_e1["text"], "original one")
+        self.assertEqual(provider._actors["discord:1001"]["display_name"], "actor one")
+
+    def test_ingest_copies_event_and_actor_inputs_into_private_state(self):
+        provider = make_provider(retention_max_events=3)
+        event = make_message("e1", "discord:1001", "original")
+        actors = {"discord:1001": {"display_name": "original-name"}}
+        provider.ingest({
+            "delivery_id": "delivery:copy", "disposition": "candidate-event",
+            "authorized": True, "event": event, "actors": actors,
+        })
+        event["text"] = "MUTATED"
+        event["mentioned_actor_ids"].append("discord:attacker")
+        actors["discord:1001"]["display_name"] = "MUTATED"
+        retained = provider._events[0]
+        self.assertEqual(retained["text"], "original")
+        self.assertEqual(retained["mentioned_actor_ids"], [])
+        self.assertEqual(provider._actors["discord:1001"]["display_name"], "original-name")
+
+    def test_delivery_generation_and_actor_state_follow_retained_events(self):
+        provider = make_provider(retention_max_events=3)
+        for i in range(10):
+            actor_id = f"discord:{1000 + i}"
+            unrelated_id = f"discord:unrelated-{i}"
+            provider.ingest({
+                "delivery_id": f"delivery:{i}", "disposition": "candidate-event",
+                "authorized": True,
+                "event": make_message(f"e{i}", actor_id, f"message {i}"),
+                "actors": {
+                    actor_id: {"display_name": f"actor {i}"},
+                    unrelated_id: {"display_name": "must not persist"},
+                },
+            })
+        retained_actor_ids = {event["author_id"] for event in provider._events}
+        self.assertEqual(len(provider._events), 3)
+        self.assertEqual(len(provider._seen_delivery_ids), 3)
+        self.assertEqual(len(provider._event_generations), 3)
+        self.assertEqual(set(provider._actors), retained_actor_ids | {provider.actor_id})
+        self.assertFalse(any("unrelated" in actor_id for actor_id in provider._actors))
+
+    def test_invalid_candidate_does_not_poison_delivery_dedup(self):
+        provider = make_provider(retention_max_events=3)
+        with self.assertRaises(ObservationInputError):
+            provider.ingest({
+                "delivery_id": "delivery:retry", "disposition": "candidate-event",
+                "authorized": True, "event": {"id": "broken"}, "actors": {},
+            })
+        outcome = provider.ingest({
+            "delivery_id": "delivery:retry", "disposition": "candidate-event",
+            "authorized": True,
+            "event": make_message("e1", "discord:1001", "valid retry"), "actors": {},
+        })
+        self.assertEqual(outcome, "observed")
+
+        with self.assertRaises(ObservationInputError):
+            provider.ingest({
+                "delivery_id": "delivery:actor-retry", "disposition": "candidate-event",
+                "authorized": True,
+                "event": make_message("e2", "discord:1002", "bad actor facts"),
+                "actors": {"discord:1002": {"unexpected": "field"}},
+            })
+        actor_retry = provider.ingest({
+            "delivery_id": "delivery:actor-retry", "disposition": "candidate-event",
+            "authorized": True,
+            "event": make_message("e2", "discord:1002", "valid actor retry"),
+            "actors": {"discord:1002": {"display_name": "Actor Two"}},
+        })
+        self.assertEqual(actor_retry, "observed")
+
+    def test_delivery_id_leaves_duplicate_set_when_its_event_is_evicted(self):
+        provider = make_provider(retention_max_events=2)
+        for delivery_id, event_id in (("delivery:1", "e1"), ("delivery:2", "e2")):
+            self.assertEqual(
+                provider.ingest({
+                    "delivery_id": delivery_id, "disposition": "candidate-event",
+                    "authorized": True,
+                    "event": make_message(event_id, "discord:1001", event_id), "actors": {},
+                }),
+                "observed",
+            )
+        self.assertEqual(
+            provider.ingest({
+                "delivery_id": "delivery:1", "disposition": "candidate-event",
+                "authorized": True,
+                "event": make_message("duplicate", "discord:1001", "duplicate"), "actors": {},
+            }),
+            "duplicate-retained",
+        )
+        provider.ingest({
+            "delivery_id": "delivery:3", "disposition": "candidate-event",
+            "authorized": True,
+            "event": make_message("e3", "discord:1001", "e3"), "actors": {},
+        })
+        self.assertEqual(
+            provider.ingest({
+                "delivery_id": "delivery:1", "disposition": "candidate-event",
+                "authorized": True,
+                "event": make_message("e4", "discord:1001", "e4"), "actors": {},
+            }),
+            "observed",
+        )
 
 
 if __name__ == "__main__":

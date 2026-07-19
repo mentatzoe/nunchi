@@ -30,6 +30,7 @@ import json
 import math
 import uuid
 from collections import deque
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -378,6 +379,11 @@ def _check_continuation_capability(errors: _Errors, path: str, value: Any) -> No
             errors.add(f"{path}.{name}", "must be a positive integer (>= 1)")
     if "expires_at" in value:
         _check_nes(errors, f"{path}.expires_at", value["expires_at"])
+        parsed_expiry = _parse_timestamp_raw(value["expires_at"])
+        if parsed_expiry is None:
+            errors.add(f"{path}.expires_at", "must be a parseable ISO-8601 timestamp")
+        elif parsed_expiry.tzinfo is None:
+            errors.add(f"{path}.expires_at", "must include timezone information")
 
 
 def validate_attention_request(doc: Any) -> list[str]:
@@ -661,15 +667,26 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
     host_context = fetch_case.get("host_context") or {}
     fetch_time_raw = fetch_case.get("fetch_time")
     expires_at_raw = capability.get("expires_at")
-    if _mixed_timezone_awareness(fetch_time_raw, expires_at_raw):
-        errors.append(
-            "fetch_time and expires_at mix timezone-aware and naive timestamps; "
-            "cannot be compared safely"
-        )
-    else:
-        fetch_time = _parse_timestamp(fetch_time_raw)
-        expires_at = _parse_timestamp(expires_at_raw)
-        if expires_at is not None and fetch_time is not None and fetch_time > expires_at:
+    if expires_at_raw is not None:
+        expires_at = _parse_timestamp_raw(expires_at_raw)
+        if expires_at is None:
+            errors.append("expires_at is not a parseable ISO-8601 timestamp")
+        elif expires_at.tzinfo is None:
+            errors.append("expires_at must include timezone information")
+
+        fetch_time = _parse_timestamp_raw(fetch_time_raw)
+        if fetch_time is None:
+            errors.append("fetch_time is required and must be a parseable ISO-8601 timestamp")
+        elif fetch_time.tzinfo is None:
+            errors.append("fetch_time must include timezone information")
+
+        if (
+            expires_at is not None
+            and expires_at.tzinfo is not None
+            and fetch_time is not None
+            and fetch_time.tzinfo is not None
+            and fetch_time > expires_at
+        ):
             errors.append("handle is expired at fetch time")
     bound_to = capability.get("bound_to") or {}
     for field in ("participant_id", "room_id", "continuity_scope_id", "trigger_event_id"):
@@ -782,6 +799,8 @@ class ObservationProvider:
     ) -> None:
         if continuity not in CONTINUITY_VALUES:
             raise ValueError(f"continuity must be one of {CONTINUITY_VALUES}")
+        if not _is_positive_integer(retention_max_events):
+            raise ValueError("retention_max_events must be a positive integer")
         self.participant_id = participant_id
         self.actor_id = actor_id
         self.names = list(names) if names else None
@@ -797,7 +816,10 @@ class ObservationProvider:
 
         self._events: deque[dict] = deque(maxlen=retention_max_events)
         self._event_index: dict[str, int] = {}
-        self._actors: dict[str, dict] = {}
+        self._event_generations: dict[str, int] = {}
+        self._event_delivery_ids: dict[str, str] = {}
+        self._next_event_generation = 0
+        self._actors: dict[str, dict] = {self.actor_id: {}}
         self._seen_delivery_ids: set[str] = set()
         self._evicted = False
         self._unroutable_count = 0
@@ -850,7 +872,7 @@ class ObservationProvider:
         if not isinstance(native_event_input, dict):
             raise ObservationInputError("native event input must be an object")
         delivery_id = native_event_input.get("delivery_id")
-        if not _nes(delivery_id):
+        if not isinstance(delivery_id, str) or not delivery_id:
             raise ObservationInputError("delivery_id is required and must be a non-empty string")
         disposition = native_event_input.get("disposition")
         if disposition not in ("candidate-event", "unroutable"):
@@ -872,7 +894,6 @@ class ObservationProvider:
 
         if delivery_id in self._seen_delivery_ids:
             return DUPLICATE_RETAINED
-        self._seen_delivery_ids.add(delivery_id)
 
         event = native_event_input.get("event")
         errors = _Errors()
@@ -881,6 +902,7 @@ class ObservationProvider:
             raise ObservationInputError(
                 f"candidate-event failed normalization (operational error): {list(errors)}"
             )
+        event = deepcopy(event)
         event_id = event["id"]
         if event_id in self._event_index:
             raise ObservationInputError(
@@ -891,17 +913,52 @@ class ObservationProvider:
         actor_facts = native_event_input.get("actors") or {}
         if not isinstance(actor_facts, dict):
             raise ObservationInputError("actors must be an object mapping actor ID to actor facts")
+        actor_errors = _Errors()
         for actor_id, facts in actor_facts.items():
-            merged = dict(self._actors.get(actor_id, {}))
-            merged.update({k: v for k, v in (facts or {}).items() if v is not None})
-            self._actors[actor_id] = merged
-        for ref in _actor_references({"self": None, "events": [event]}):
-            self._actors.setdefault(ref, {})
+            if facts is not None and not isinstance(facts, dict):
+                raise ObservationInputError(f"actors.{actor_id} must be an object")
+            _check_actor(actor_errors, f"actors[{actor_id!r}]", facts or {})
+        if actor_errors:
+            raise ObservationInputError(
+                f"actor facts failed normalization (operational error): {list(actor_errors)}"
+            )
 
+        event_actor_ids = set(_actor_references({"self": None, "events": [event]}))
+        retained_actor_ids = event_actor_ids | {self.actor_id}
+        for actor_id in retained_actor_ids:
+            facts = actor_facts.get(actor_id) or {}
+            merged = dict(self._actors.get(actor_id, {}))
+            merged.update(deepcopy({k: v for k, v in facts.items() if v is not None}))
+            self._actors[actor_id] = merged
+
+        evicted_event = self._events[0] if len(self._events) == self._events.maxlen else None
         if len(self._events) == self._events.maxlen:
             self._evicted = True
+        if evicted_event is not None:
+            evicted_id = evicted_event["id"]
+            evicted_delivery_id = self._event_delivery_ids.pop(evicted_id)
+            self._seen_delivery_ids.discard(evicted_delivery_id)
+            self._event_generations.pop(evicted_id, None)
+
+        self._next_event_generation += 1
+        self._event_generations[event_id] = self._next_event_generation
+        self._event_delivery_ids[event_id] = delivery_id
+        self._seen_delivery_ids.add(delivery_id)
         self._events.append(event)
         self._reindex()
+        referenced_actor_ids = {
+            ref
+            for retained_event in self._events
+            for ref in _actor_references({"self": None, "events": [retained_event]})
+        }
+        referenced_actor_ids.add(self.actor_id)
+        self._actors = {
+            actor_id: facts
+            for actor_id, facts in self._actors.items()
+            if actor_id in referenced_actor_ids
+        }
+        for actor_id in referenced_actor_ids:
+            self._actors.setdefault(actor_id, {})
 
         is_self_caused = event.get("author_id") == self.actor_id or (
             event.get("type") == "membership" and event.get("caused_by_actor_id") == self.actor_id
@@ -1009,7 +1066,7 @@ class ObservationProvider:
             has_more_after = True
 
         included_indices = sorted(selected)
-        included_events = [selected[index] for index in included_indices]
+        included_events = [deepcopy(selected[index]) for index in included_indices]
         has_gaps = self._evicted and included_indices[0] == 0
         if not has_gaps:
             has_gaps = any(
@@ -1018,7 +1075,10 @@ class ObservationProvider:
 
         actors_used = {ref for event in included_events for ref in _actor_references({"self": None, "events": [event]})}
         actors_used.add(self.actor_id)
-        actors = {actor_id: dict(self._actors.get(actor_id, {})) for actor_id in actors_used}
+        actors = {
+            actor_id: deepcopy(self._actors.get(actor_id, {}))
+            for actor_id in actors_used
+        }
 
         coverage: dict[str, Any] = {
             "has_more_before": has_more_before,
@@ -1066,7 +1126,7 @@ class ObservationProvider:
             "continuity_scope_id": request["room"]["continuity_scope_id"],
             "event_count": len(events),
             "byte_count": sum(serialized_byte_size(event) for event in events),
-            "coverage": request["coverage"],
+            "coverage": deepcopy(request["coverage"]),
             "included_event_ids": [event["id"] for event in events],
         }
         record = {
@@ -1111,6 +1171,7 @@ class ContinuationProvider:
         self._max_handles = max_handles
         self._max_active_cursors_per_handle = max_active_cursors_per_handle
         self._capabilities: dict[str, dict] = {}
+        self._trigger_generations: dict[str, int] = {}
         self._cursors: dict[str, set[str]] = {}
         self._cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
         self._cursor_sequences: dict[str, int] = {}
@@ -1153,16 +1214,18 @@ class ContinuationProvider:
         _check_continuation_capability(errors, "continuation", capability)
         if errors:
             raise ValueError(f"issued capability failed self-validation: {list(errors)}")
-        self._capabilities[handle_id] = capability
+        self._capabilities[handle_id] = deepcopy(capability)
+        self._trigger_generations[handle_id] = self._provider._event_generations[trigger_event_id]
         self._cursors[handle_id] = set()
         self._cursor_windows[handle_id] = {}
         self._cursor_sequences[handle_id] = 0
-        return capability
+        return deepcopy(capability)
 
     def revoke(self, handle_id: str) -> bool:
         """Release all host-side state for ``handle_id``; idempotent."""
         existed = handle_id in self._capabilities
         self._capabilities.pop(handle_id, None)
+        self._trigger_generations.pop(handle_id, None)
         self._cursors.pop(handle_id, None)
         self._cursor_windows.pop(handle_id, None)
         self._cursor_sequences.pop(handle_id, None)
@@ -1172,12 +1235,6 @@ class ContinuationProvider:
         """Consume one opaque cursor and remove every host bookkeeping copy."""
         self._cursors[handle_id].discard(cursor)
         self._cursor_windows[handle_id].pop(cursor, None)
-        capability = self._capabilities[handle_id]
-        active = [item for item in capability.get("cursors", []) if item != cursor]
-        if active:
-            capability["cursors"] = active
-        else:
-            capability.pop("cursors", None)
 
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
         """Validate binding/expiry/direction/caps/cursor, then serve one page."""
@@ -1187,9 +1244,12 @@ class ContinuationProvider:
 
         handle_id = request["handle_id"]
         capability = self._capabilities.get(handle_id)
+        issued_for_check = deepcopy(capability) if capability is not None else None
+        if issued_for_check is not None:
+            issued_for_check["cursors"] = sorted(self._cursors[handle_id])
         fetch_case = {
             "fetch_time": fetch_time,
-            "issued": [capability] if capability else [],
+            "issued": [issued_for_check] if issued_for_check else [],
             "request": request,
             "host_context": host_context,
         }
@@ -1203,11 +1263,18 @@ class ContinuationProvider:
 
         events = list(self._provider._events)
         index = self._provider._event_index
+        generations = self._provider._event_generations
         direction = request["direction"]
+        trigger_id = capability["bound_to"]["trigger_event_id"]
+        if generations.get(trigger_id) != self._trigger_generations[handle_id]:
+            raise ContinuationError(
+                f"bound trigger event instance {trigger_id!r} is no longer retained"
+            )
         anchor_id = request.get("anchor_event_id") or capability["bound_to"]["trigger_event_id"]
         anchor_index = index.get(anchor_id)
         if anchor_index is None:
             raise ContinuationError(f"anchor_event_id {anchor_id!r} is not an observed event")
+        anchor_generation = generations[anchor_id]
 
         cursor = request.get("cursor")
         max_events = request["max_events"]
@@ -1217,6 +1284,9 @@ class ContinuationProvider:
         around_window_start: int | None = None
         around_window_end: int | None = None
         cursor_position = 0
+        snapshot_generation = self._provider._next_event_generation
+        base_has_more_before = False
+        base_has_more_after = False
 
         if cursor:
             cursor_window = self._cursor_windows[handle_id].get(cursor)
@@ -1232,36 +1302,53 @@ class ContinuationProvider:
                     f"cursor {cursor!r} is bound to anchor_event_id "
                     f"{cursor_window['anchor_event_id']!r}, not {anchor_id!r}"
                 )
-            window_event_ids = cursor_window["window_event_ids"]
-            cursor_position = int(cursor_window["next_position"])
-            remaining_event_ids = window_event_ids[cursor_position:]
-            missing_event_ids = [
-                event_id for event_id in remaining_event_ids if event_id not in index
-            ]
-            if missing_event_ids:
+            if cursor_window["anchor_generation"] != anchor_generation:
                 raise ContinuationError(
-                    f"cursor {cursor!r} references events no longer retained: "
-                    f"{missing_event_ids}"
+                    f"cursor {cursor!r} anchor event instance {anchor_id!r} was replaced"
+                )
+            window_event_refs = cursor_window["window_event_refs"]
+            cursor_position = int(cursor_window["next_position"])
+            remaining_event_refs = window_event_refs[cursor_position:]
+            unavailable_event_ids = [
+                event_id
+                for event_id, generation in remaining_event_refs
+                if event_id not in index or generations.get(event_id) != generation
+            ]
+            if unavailable_event_ids:
+                raise ContinuationError(
+                    f"cursor {cursor!r} references event instances no longer retained: "
+                    f"{unavailable_event_ids}"
                 )
             # Resolve every direction's original remainder by identity against
             # the live deque. Numeric positions are not stable under bounded
-            # retention; event IDs and the cursor's scan order are.
-            candidate_indices = [index[event_id] for event_id in remaining_event_ids]
+            # retention; host-owned event generations and scan order are.
+            candidate_indices = [index[event_id] for event_id, _ in remaining_event_refs]
+            snapshot_generation = int(cursor_window["snapshot_generation"])
+            base_has_more_before = bool(cursor_window["base_has_more_before"])
+            base_has_more_after = bool(cursor_window["base_has_more_after"])
             if direction == "around":
                 around_window_start = int(cursor_window["window_start"])
                 around_window_end = int(cursor_window["window_end"])
         elif direction == "before":
             candidate_indices = list(range(anchor_index - 1, -1, -1))
-            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
+            window_event_refs = tuple(
+                (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
+            )
         elif direction == "after":
             candidate_indices = list(range(anchor_index + 1, len(events)))
-            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
+            window_event_refs = tuple(
+                (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
+            )
         else:  # around
             radius = max(1, cap_events // 2)
             around_window_start = max(0, anchor_index - radius)
             around_window_end = min(len(events), anchor_index + radius + 1)
             candidate_indices = list(range(around_window_start, around_window_end))
-            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
+            window_event_refs = tuple(
+                (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
+            )
+            base_has_more_before = around_window_start > 0
+            base_has_more_after = around_window_end < len(events)
             # H020-A1-01 / T056: an ``around`` cursor is the next unserved
             # index inside its original fixed, anchor-bound window. The host
             # rejects an anchor swap and does not let a changed page cap widen
@@ -1300,7 +1387,12 @@ class ContinuationProvider:
         if direction in ("before", "after"):
             page_events_ordered = list(reversed(page_events)) if direction == "before" else page_events
             has_more_before = next_index is not None if direction == "before" else None
-            has_more_after = next_index is not None if direction == "after" else None
+            has_more_after = (
+                next_index is not None
+                or self._provider._next_event_generation > snapshot_generation
+                if direction == "after"
+                else None
+            )
         else:
             if around_window_start is None or around_window_end is None:
                 raise ContinuationError("around cursor window was not initialized")
@@ -1318,8 +1410,12 @@ class ContinuationProvider:
             # genuine before-anchor event unserved, which the window-only
             # ``around_window_start > 0`` check alone missed.
             cap_truncated_before_anchor = next_index is not None and next_index < anchor_index
-            has_more_before = around_window_start > 0 or cap_truncated_before_anchor
-            has_more_after = next_index is not None or around_window_end < len(events)
+            has_more_before = base_has_more_before or cap_truncated_before_anchor
+            has_more_after = (
+                next_index is not None
+                or base_has_more_after
+                or self._provider._next_event_generation > snapshot_generation
+            )
 
         next_cursor = None
         next_sequence: int | None = None
@@ -1339,9 +1435,13 @@ class ContinuationProvider:
                 raise ContinuationError("cursor next-position metadata was not initialized")
             new_cursor_window = {
                 "anchor_event_id": anchor_id,
+                "anchor_generation": anchor_generation,
                 "direction": direction,
-                "window_event_ids": window_event_ids,
+                "window_event_refs": window_event_refs,
                 "next_position": next_position,
+                "snapshot_generation": snapshot_generation,
+                "base_has_more_before": base_has_more_before,
+                "base_has_more_after": base_has_more_after,
             }
             if direction == "around":
                 if around_window_start is None or around_window_end is None:
@@ -1353,7 +1453,10 @@ class ContinuationProvider:
         actor_ids = {
             ref for event in page_events_ordered for ref in _actor_references({"self": None, "events": [event]})
         }
-        actors = {actor_id: dict(self._provider._actors.get(actor_id, {})) for actor_id in actor_ids}
+        actors = {
+            actor_id: deepcopy(self._provider._actors.get(actor_id, {}))
+            for actor_id in actor_ids
+        }
 
         page: dict[str, Any] = {
             "request_id": request["request_id"],
@@ -1363,7 +1466,7 @@ class ContinuationProvider:
             "direction": direction,
             "anchor_event_id": anchor_id,
             "actors": actors,
-            "events": page_events_ordered,
+            "events": deepcopy(page_events_ordered),
             "coverage": {
                 "has_more_before": has_more_before,
                 "has_more_after": has_more_after,
@@ -1397,7 +1500,6 @@ class ContinuationProvider:
             self._cursor_sequences[handle_id] = next_sequence
             self._cursors[handle_id].add(next_cursor)
             self._cursor_windows[handle_id][next_cursor] = new_cursor_window
-            capability["cursors"] = [*capability.get("cursors", []), next_cursor]
         elif cursor is not None:
             self._discard_cursor(handle_id, cursor)
         return page

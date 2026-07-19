@@ -24,11 +24,15 @@ implicit.
   bound to participant/room/continuity-scope/trigger; a fetch request
   carries no inline binding fields — the host's actual call context is
   checked independently against the issued capability's `bound_to`. Cursor
-  tokens are one-shot, each active sequence shares one immutable ordered event
-  window, handles and active cursors have host-configurable hard bounds, and
-  exhausted/expired/revoked state is reclaimed.
+  tokens are one-shot, each active sequence shares one immutable ordered
+  `(event_id, host_generation)` window, handles and active cursors have
+  host-configurable hard bounds, returned wire documents cannot mutate private
+  authority, expiry fails closed, and exhausted/expired/revoked state is
+  reclaimed. Snapshot-generation facts keep later known arrivals visible in
+  side coverage without admitting them to the fixed remainder.
 - **Retention (FR-010)**: bounded (`retention_max_events`) and
-  outcome-neutral; no prior attention/social outcome ever changes
+  outcome-neutral; retained delivery IDs, event generations, and actor facts are
+  pruned with deque eviction, and no prior attention/social outcome ever changes
   retention behavior.
 - **Receipt (FR-015)**: exactly one immutable `observation`-stage `I-010E`
   record per request, correlated by `request_id`, attesting only
@@ -40,15 +44,15 @@ implicit.
 |---|---|---|---|
 | S01 Exact self and alias collision | Exact attested self wins; names never establish authorship | `identity-and-hygiene.jsonl` (`ID-S01-*`, 2 rows) | `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` |
 | S02 Native relations | Actor-targeted vs. room-wide mentions distinct; reply/thread/reaction/membership survive | `identity-and-hygiene.jsonl` (`ID-S02-*`, 2 rows) | same |
-| S03 Bounded context and tail | Trigger, relation closure, tail, bytes/events, gaps truthful | `budget-sweep.jsonl` (`BUD-S03-*`, 3 rows), `continuation.jsonl` (`CONT-S03-*`, 11 rows) | same |
+| S03 Bounded context and tail | Trigger, relation closure, tail, bytes/events, immutable event instances, later-arrival side coverage, gaps truthful | `budget-sweep.jsonl` (`BUD-S03-*`, 3 rows), `continuation.jsonl` (`CONT-S03-*`, 13 rows) | same |
 | S04 False-suppression scars | Referential mention/resolution/other-addressee/class-address never enter deterministic hygiene | `identity-and-hygiene.jsonl` (`ID-S04-*`, 2 rows) | same |
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
 | S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences explained | `s13-equivalence.jsonl` (`CAP-S13-*`, 3 rows) | same |
-| S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; cursor resource state remains bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 6 rows) | same |
+| S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; authority, expiry, cursor, delivery, generation, and actor state remain isolated/bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 9 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 40 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 45 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)
