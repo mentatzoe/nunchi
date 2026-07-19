@@ -1016,6 +1016,7 @@ The implementation staged-diff SHA256 before `84d161f` was
 | `ruff check ...` over all changed Python | clean, exit 0 |
 | `uvx bandit -q -r src/nunchi/observation.py evals/v2/observation/run_phase18_adversarial.py scripts/check_slice020_secrets.py` | clean, exit 0; 0 findings |
 | `python3 scripts/check_slice020_secrets.py --base 5e2380af3c9abda63ff55c61f3ef16491cd1776c --head 1ac2ffe6836a9a674a9129364413d2c370082757` | `SLICE020_SECRET_SCAN CLEAN`; 19 files, 1307 additions, 4 matchers |
+| `python3 scripts/check_slice020_secrets.py --base fc60858a3810e2f53d9574cce1eb9589bd19b55b --head 1ac2ffe6836a9a674a9129364413d2c370082757` | `SLICE020_SECRET_SCAN CLEAN`; whole slice, 57 files, 8087 additions, 4 matchers |
 | `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
 | `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T103 graph SHA256 `e0c0b49005566b2ab9c18e5789608d59eb416d324f4a9ec3c5aaa35c7a26b76e` |
 | `git diff --check` | clean, exit 0 |
