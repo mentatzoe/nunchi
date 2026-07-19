@@ -294,6 +294,7 @@ EXPECTED_LIFECYCLE_PATHS = {
         "candidate": str(Path(activation).with_name("slice-candidate.md")),
         "handoff": str(Path(activation).with_name("slice-handoff.md")),
         "acceptance": str(Path(activation).with_name("slice-acceptance.md")),
+        "amendments": str(Path(activation).with_name("slice-amendments.md")),
     }
     for dirname, activation in EXPECTED_ACTIVATION_PATHS.items()
 }
@@ -1375,6 +1376,116 @@ def _lifecycle_records(text: str) -> tuple[str, ...]:
     )
 
 
+def _effective_dependency_commit(
+    root: Path,
+    upstream: str,
+    terminal_commit: str,
+) -> tuple[str, list[str]]:
+    """Resolve the exact commit a dependent slice must bind to for *upstream*.
+
+    A post-acceptance amendment (see the constitution's amendment procedure)
+    never appends to `slice-candidate.md`/`slice-handoff.md`/`slice-acceptance.md`
+    — those stay pinned to the terminal accepted candidate so an amendment
+    cannot reopen or reauthor the slice's own accepted lifecycle. Instead each
+    accepted amendment appends one record to a separate canonical
+    `slice-amendments.md` ledger. This validates that ledger's chain integrity
+    independently (never by parsing narrative `amendment-A*.md` prose) and
+    returns the commit downstream slices must now depend on.
+    """
+
+    errors: list[str] = []
+    amendments_value = EXPECTED_LIFECYCLE_PATHS[upstream].get("amendments", "")
+    amendments_relative = Path(amendments_value) if amendments_value else None
+    if amendments_relative is None or not _repo_path_is_safe(
+        root, amendments_relative, require_file=True
+    ):
+        return terminal_commit, errors
+    try:
+        text = (root / amendments_relative).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return terminal_commit, errors
+    records = _lifecycle_records(text)
+    if not records:
+        return terminal_commit, errors
+
+    seen_ids: set[str] = set()
+    previous_effective = terminal_commit
+    effective_commit = terminal_commit
+    for index, record in enumerate(records, 1):
+        prefix = f"{amendments_relative} record {index}"
+        if _clean_metadata(record, "Slice") != upstream:
+            errors.append(f"{prefix}: Slice must be {upstream!r}")
+        if _clean_metadata(record, "Status") != "ACCEPTED":
+            errors.append(f"{prefix}: Status must be 'ACCEPTED'")
+        amendment_id = _clean_metadata(record, "Amendment ID")
+        if not amendment_id:
+            errors.append(f"{prefix}: missing Amendment ID")
+        elif amendment_id in seen_ids:
+            errors.append(f"{prefix}: duplicate Amendment ID {amendment_id!r}")
+        seen_ids.add(amendment_id)
+        prior_effective = _clean_metadata(record, "Prior effective commit")
+        candidate = _clean_metadata(record, "Amendment candidate commit")
+        decision = _clean_metadata(record, "Amendment decision commit")
+        for label, value in {
+            "Prior effective commit": prior_effective,
+            "Amendment candidate commit": candidate,
+            "Amendment decision commit": decision,
+        }.items():
+            if not re.fullmatch(r"[0-9a-f]{40}", value):
+                errors.append(f"{prefix}: {label} must be a full Git SHA")
+            elif not _git_commit_exists(root, value):
+                errors.append(f"{prefix}: {label} does not exist in Git")
+        if prior_effective != previous_effective:
+            errors.append(
+                f"{prefix}: Prior effective commit must be {previous_effective!r} "
+                "(the terminal accepted candidate, or the immediately preceding "
+                "amendment's candidate)"
+            )
+        if (
+            candidate
+            and prior_effective
+            and candidate != prior_effective
+            and _git_commit_exists(root, candidate)
+            and _git_commit_exists(root, prior_effective)
+            and not _git_is_ancestor(root, prior_effective, candidate)
+        ):
+            errors.append(
+                f"{prefix}: Amendment candidate commit must descend from the "
+                "Prior effective commit"
+            )
+        if not re.search(
+            r"I-\d{3}[A-Z]", _clean_metadata(record, "Amended interface")
+        ):
+            errors.append(f"{prefix}: missing concrete Amended interface")
+        prior_version = _clean_metadata(record, "Prior interface version")
+        new_version = _clean_metadata(record, "New interface version")
+        prior_match = re.fullmatch(r"@(\d+)", prior_version)
+        new_match = re.fullmatch(r"@(\d+)", new_version)
+        if (
+            not prior_match
+            or not new_match
+            or int(new_match.group(1)) != int(prior_match.group(1)) + 1
+        ):
+            errors.append(
+                f"{prefix}: New interface version must be exactly one version "
+                "above Prior interface version"
+            )
+        if _clean_metadata(record, "Accepted by") != "v2-integrator":
+            errors.append(f"{prefix}: Accepted by must be 'v2-integrator'")
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}", _clean_metadata(record, "Accepted on")
+        ):
+            errors.append(f"{prefix}: Accepted on must be an ISO date")
+        for label in ("Decision reference", "Amendment record"):
+            reference_path = Path(_clean_metadata(record, label))
+            if not _repo_path_is_safe(root, reference_path, require_file=True):
+                errors.append(f"{prefix}: {label} must name an existing file")
+        if candidate:
+            previous_effective = candidate
+            effective_commit = candidate
+    return effective_commit, errors
+
+
 def _slice_ids(value: str | None) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -1397,6 +1508,52 @@ def _task_manifest(entries: tuple[tuple[str, str], ...]) -> tuple[str, str]:
     ids = ", ".join(task_id for task_id, _line in entries)
     payload = "\n".join(line for _task_id, line in entries) + ("\n" if entries else "")
     return ids, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _checked_task_ids(tasks_text: str) -> tuple[str, ...]:
+    """Return only task IDs whose literal canonical checkbox is checked."""
+
+    checked: list[str] = []
+    for line in tasks_text.splitlines():
+        if not line.startswith(("- [x] T", "- [X] T")):
+            continue
+        normalized = re.sub(r"^- \[[xX]\]", "- [ ]", line).rstrip()
+        match = TASK_LINE.fullmatch(normalized)
+        if match:
+            checked.append(f"T{match.group(1)}")
+    return tuple(checked)
+
+
+def _candidate_task_completion_errors(
+    *,
+    tasks_complete: str,
+    declared_completed: str,
+    committed_tasks: str,
+    committed_task_entries: tuple[tuple[str, str], ...],
+    prefix: str,
+) -> list[str]:
+    """Validate candidate completion against literal committed checkboxes."""
+
+    errors: list[str] = []
+    valid_ids = {task_id for task_id, _line in committed_task_entries}
+    checked_ids = tuple(
+        task_id
+        for task_id in _checked_task_ids(committed_tasks)
+        if task_id in valid_ids
+    )
+    expected_completed = ", ".join(checked_ids)
+    if tasks_complete != "YES":
+        errors.append(f"{prefix}: Tasks complete must be 'YES'")
+    elif len(checked_ids) != len(committed_task_entries):
+        errors.append(
+            f"{prefix}: Tasks complete 'YES' requires every committed task checkbox "
+            "to be literally checked"
+        )
+    if declared_completed != expected_completed:
+        errors.append(
+            f"{prefix}: Completed task IDs must be exactly {expected_completed!r}"
+        )
+    return errors
 
 
 def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
@@ -2050,13 +2207,19 @@ def _slice_lifecycle_evidence_errors(
             except (OSError, UnicodeDecodeError):
                 continue
             if upstream_records:
-                observed_commit = _clean_metadata(
+                terminal_commit = _clean_metadata(
                     upstream_records[-1], "Candidate commit"
                 )
-                if commit != observed_commit:
+                effective_commit, amendment_errors = _effective_dependency_commit(
+                    root, upstream, terminal_commit
+                )
+                errors.extend(amendment_errors)
+                if commit != effective_commit:
                     errors.append(
                         f"{relative}: dependency {dependency_id} commit must match "
-                        f"{upstream_path.relative_to(root)}"
+                        f"the effective accepted candidate for "
+                        f"{upstream_path.relative_to(root)} (including any accepted "
+                        "amendments recorded in its slice-amendments.md ledger)"
                     )
         analysis = _clean_metadata(activation, "Analysis result")
         if analysis != "PASS — zero CRITICAL/HIGH findings":
@@ -2196,8 +2359,6 @@ def _slice_lifecycle_evidence_errors(
                     f"{prefix}: Candidate commit must descend from the activation "
                     "Starting commit"
                 )
-            if _clean_metadata(record, "Tasks complete") != "YES":
-                errors.append(f"{prefix}: Tasks complete must be 'YES'")
             committed_tasks = (
                 _git_file_text(
                     root,
@@ -2221,10 +2382,24 @@ def _slice_lifecycle_evidence_errors(
             expected_task_ids, expected_task_hash = _task_manifest(
                 committed_task_entries
             )
-            if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
-                errors.append(
-                    f"{prefix}: Completed task IDs must be exactly {expected_task_ids!r}"
+            if attempt == len(records):
+                errors.extend(
+                    _candidate_task_completion_errors(
+                        tasks_complete=_clean_metadata(record, "Tasks complete"),
+                        declared_completed=_clean_metadata(record, "Completed task IDs"),
+                        committed_tasks=committed_tasks or "",
+                        committed_task_entries=committed_task_entries,
+                        prefix=prefix,
+                    )
                 )
+            else:
+                if _clean_metadata(record, "Tasks complete") != "YES":
+                    errors.append(f"{prefix}: Tasks complete must be 'YES'")
+                if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
+                    errors.append(
+                        f"{prefix}: Completed task IDs must be exactly "
+                        f"{expected_task_ids!r}"
+                    )
             if _clean_metadata(record, "Tasks SHA256") != expected_task_hash:
                 errors.append(
                     f"{prefix}: Tasks SHA256 must match tasks.md at Candidate commit"
@@ -3888,8 +4063,10 @@ def validate(root: Path, *, include_cli: bool = False) -> list[str]:
     return sorted(set(errors))
 
 
-def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]:
-    """Return the canonical task IDs and digest for one exact planned slice."""
+def task_manifest_state_for_slice(
+    root: Path, slice_directory: str,
+) -> tuple[str, str, str]:
+    """Return initial IDs/digest plus literal completed IDs for one slice."""
 
     expected = {f"specs/{dirname}" for dirname in EXPECTED_SLICES}
     if slice_directory not in expected:
@@ -3900,8 +4077,19 @@ def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]
     task_path = root / task_relative
     if not _repo_path_is_safe(root, task_relative, require_file=True):
         raise ValueError("bound slice tasks.md is missing or unsafe")
-    entries = _validated_task_entries(task_path.read_text(encoding="utf-8"))
+    tasks_text = task_path.read_text(encoding="utf-8")
+    entries = _validated_task_entries(tasks_text)
     task_ids, digest = _task_manifest(entries)
+    completed_ids = ", ".join(_checked_task_ids(tasks_text))
+    return task_ids, digest, completed_ids
+
+
+def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]:
+    """Return the canonical initial task IDs and digest for one planned slice."""
+
+    task_ids, digest, _completed_ids = task_manifest_state_for_slice(
+        root, slice_directory,
+    )
     return task_ids, digest
 
 
@@ -3923,13 +4111,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.check_cli:
             parser.error("--task-manifest cannot be combined with --check-cli")
         try:
-            task_ids, digest = task_manifest_for_slice(root, args.task_manifest)
+            task_ids, digest, completed_ids = task_manifest_state_for_slice(
+                root, args.task_manifest,
+            )
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         print(f"**Initial task IDs**: {task_ids}")
         print(f"**Initial tasks SHA256**: {digest}")
-        print(f"**Completed task IDs**: {task_ids}")
+        print(f"**Completed task IDs**: {completed_ids}")
         print(f"**Tasks SHA256**: {digest}")
         return 0
     errors = validate(root, include_cli=args.check_cli)
