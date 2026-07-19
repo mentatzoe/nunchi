@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `PLANNED`
+**Slice state**: `ACTIVE`
 
 **Program implementation authority**: `GRANTED`
 
@@ -78,8 +78,11 @@ and Codex bindings in later slices
 **Project Type**: shared library plus reference test/evaluation providers;
 integration-specific providers belong to downstream slices
 
-**Performance Goals**: hard event/byte caps on every projection and fetch;
-serialized size and model-specific estimated token cost recorded in evidence
+**Performance Goals**: hard event/byte caps on every snapshot and fetch;
+serialized UTF-8 size plus the deterministic, explicitly non-model-specific
+`utf8-bytes-ceil-div4@1` token-size proxy recorded only in separate evidence as
+`(serialized_utf8_bytes + 3) // 4`, with `estimator_id`, `estimated_tokens`,
+`serialized_bytes`, and `model_id: null`
 
 **Constraints**: no semantic deterministic gate, no inferred roster or social
 ledger, authoritative order, outcome-neutral retention, honest unknowns
@@ -117,16 +120,21 @@ Post-design re-check: PASS. No prohibited SpecKit output is planned.
 ### Produces
 
 - `I-020A ObservationProviderV2@1` in future shared code at
-  `src/nunchi/observation.py`, returning a bounded I-010A request and optional
-  I-010D continuation provider, plus the observation-stage I-010E record for
-  facts this slice can attest. Later owners append separately correlated,
-  immutable stages; they never mutate this record.
+  `src/nunchi/observation.py`, returning a bounded I-010A request whose optional
+  continuation field carries the accepted capability shape, plus the
+  observation-stage I-010E record for facts this slice can attest. Its separate
+  host-owned fetch seam consumes I-010D fetch-request documents and returns
+  I-010D fetch-page documents; I-010D is not itself a provider. Later owners
+  append separately correlated, immutable stages; they never mutate this
+  record. Token-size proxy results remain separate evidence because accepted
+  I-010E is closed and contains no token field.
 
 ## Integration Strategy
 
 **Integration order**: 010 contract handoff → shared normalizer/buffer/assembler
 → continuation seam → reference replay/recoverability/comparison evidence
-→ downstream handoff. Slice 030 can implement in parallel against I-010A;
+→ downstream handoff. Slice 030 can implement in parallel against I-010A and
+alone owns classifier-safe projection/redaction in `src/nunchi/core.py`;
 050 and 060–090 bind and prove native surfaces only after accepting I-020A, and
 110 owns the final comparison.
 
@@ -151,7 +159,7 @@ their bindings, and 110 owns final integration conflict resolution.
 | S05 Governed suppression recoverability | Reference continuity variants | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility is explicit. | `evidence/v2/observation/s05-recoverability.jsonl` |
 | S11 Transport hygiene | Shared provider fixtures | Exact duplicate, exact self, and unroutable are the only mechanical no-wake classes. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
 | S13 Adapter equivalence | Capability-neutral reference variants | Equivalent supplied facts normalize equivalently and capability-only differences are explained; real adapters must rerun this contract downstream. | `evidence/v2/observation/s13-equivalence.jsonl` |
-| S15 Context budget | Shared assembler | Attention projection and fetch hard caps are enforced with byte/token receipts. | `evidence/v2/observation/budget-sweep.jsonl`, `evidence/v2/observation/continuation.jsonl` |
+| S15 Context budget | Shared assembler | Snapshot and fetch hard caps are enforced with accepted I-010E byte telemetry; the separately labelled `utf8-bytes-ceil-div4@1` proxy is evidence only and makes no model-tokenizer claim. | `evidence/v2/observation/budget-sweep.jsonl`, `evidence/v2/observation/continuation.jsonl` |
 | S16 No registry or ledger | Buffer/continuation fixtures | No roster inference, outcome registry, obligation queue, or handled/open state is created. | `evidence/v2/observation/identity-and-hygiene.jsonl` |
 
 Reusable native fixtures and comparison tools target `evals/v2/observation/`;
@@ -212,10 +220,11 @@ product module.
 
 | Claim surface | Reviewed ordinary path(s) | Disposition | Owning task/lane | Validation or exact handoff delta |
 |---|---|---|---|---|
-| Global context/identity description | `README.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
-| Observation reference | `docs/observation/v2.md` | `UPDATE` | T023 / `v2-observation-owner` | Validate budgets, capability truth, continuation authority, diagrams/links, and runnable examples against the accepted provider. |
-| Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
-| Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T023 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |
+| Global context/identity description | `README.md` | `HANDOFF` | T028, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
+| Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034 / `v2-observation-owner` | Validate budgets, capability truth, continuation authority, diagrams/links, and runnable examples against the accepted provider. |
+| Accepted 010 contract reference | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T034 / `v2-observation-owner` | Evidence-backed rationale: slice 020 consumes accepted I-010A/I-010D/I-010E unchanged; validate the documented closed shapes and record the result. |
+| Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T029, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
+| Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T030–T034 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |
 
 The README handoff is an owned future delta, not `NO_IMPACT`; slice 020 must
 land and validate its own reference before handoff.
@@ -225,7 +234,10 @@ land and validate its own reference before handoff.
 The handoff must include exact commit, I-020A version, shared module, capability
 requirements, budget evidence, deterministic/recoverability commands and
 reference results, comparator contract, suppression-eligibility limitations,
-and explicit downstream proof instructions. It MUST state that no actual
+the accepted-I-010E token-field limitation, and explicit downstream proof
+instructions. It MUST also hand the I-010A expansion-availability input to
+`v2-attention-owner` while leaving classifier-safe projection/redaction wholly
+owned by slice 030. It MUST state that no actual
 surface, restart-safety, or parity claim was completed by reference variants.
 Review does not transfer normalization ownership silently; 110 remains the sole
 final integration sink.

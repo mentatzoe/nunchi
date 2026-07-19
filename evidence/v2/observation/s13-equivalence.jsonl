@@ -1,0 +1,3 @@
+{"case_id": "CAP-S13-001", "equivalent": true, "explained": [], "result": "PASS", "scene_id": "S13", "title": "equivalent facts and budgets on two reference variants compare equal", "unexplained": []}
+{"case_id": "CAP-S13-002", "equivalent": false, "explained": [], "result": "PASS", "scene_id": "S13", "title": "a real content divergence is an unexplained difference, not equivalence", "unexplained": ["event 'e1' field 'text' differs: 'hi' vs 'bye'"]}
+{"case_id": "CAP-S13-003", "equivalent": true, "explained": ["event 'e1' honestly unavailable on the right (reference-declared gap)"], "result": "PASS", "scene_id": "S13", "title": "an honestly unavailable native fact is explained, not a raw failure", "unexplained": []}

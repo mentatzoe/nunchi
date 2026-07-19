@@ -1531,6 +1531,15 @@ class GovernanceBoundaryTests(unittest.TestCase):
                     text,
                     count=1,
                 )
+                if artifact == "tasks.md":
+                    # A synthetic PLANNED slice is dormant: any task
+                    # checkbox a live sibling slice has actually completed
+                    # (e.g. an ACTIVE slice's real progress) must not leak
+                    # into this baseline as a checked-but-PLANNED
+                    # inconsistency — independence from live slice state
+                    # covers task-checkbox state, not only the declared
+                    # state label.
+                    text = re.sub(r"- \[[xX]\] (T\d)", r"- [ ] \1", text)
                 path.write_text(text, encoding="utf-8")
         # No live lifecycle record may survive into the synthetic
         # baseline; only the activation record written below exists.

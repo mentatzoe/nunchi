@@ -1,10 +1,15 @@
 # Tasks: V2 Observation
 
-**Input**: `specs/020-v2-observation/spec.md` and `specs/020-v2-observation/plan.md`
+**Input**: `specs/020-v2-observation/spec.md` and
+`specs/020-v2-observation/plan.md`
 
-**Slice state**: `PLANNED`
+**Slice state**: `ACTIVE`
 
-**Execution status**: `DORMANT` while the slice remains `PLANNED`
+**Execution status**: stated by reference rather than as a fixed transition claim —
+unchecked tasks execute only inside this slice's bound `run speckit` run while
+the transition-updated `Slice state` declaration above and immutable activation
+evidence establish `ACTIVE`; they are `DORMANT` under every other established
+state, including `PLANNED`
 
 **Program implementation authority**: `GRANTED`
 
@@ -16,20 +21,22 @@
 
 **Activation prerequisites**: the one valid complete
 `evidence/governance/v2-implementation-authorization.md` enumerating exactly
-slices `010` through `110`; accepted declared dependency `010-v2-contract`; an assigned
-participant and durable external assignment source declared above;
-active `v2-observation-owner`; zero CRITICAL/HIGH analysis findings; and an
-isolated owner worktree
+slices `010` through `110`; accepted declared dependency `010-v2-contract`; the
+assigned participant and durable external assignment source declared above;
+active `v2-observation-owner`; zero CRITICAL/HIGH analysis findings; and the
+isolated `.worktrees/v2-observation/` worktree on `v2/observation`
 
 **Activation evidence**: `evidence/v2/observation/slice-activation.md`, written
 only after every activation prerequisite is accepted; it copies and attests the
-assignment declaration and all other prerequisite facts, establishing `READY`
-before `ACTIVE` or any implementation checkbox
+assignment and dependency facts, exact interfaces/scenes/evidence/docs scope,
+and the frozen initial task manifest, establishing `READY` before `ACTIVE` or
+any implementation checkbox
 
-**Dependency evidence contract**: the activation record MUST preserve declared
-order in `Accepted dependencies`, record ordered `Dependency commits` as
-`slice=full-sha`, and record matching ordered
-`Dependency acceptance references` as `slice=repo-relative-evidence-file`.
+**Task manifest**: before activation, run
+`python3 scripts/check_governance.py --task-manifest specs/020-v2-observation`
+and copy its exact `Initial task IDs` and `Initial tasks SHA256` into
+`evidence/v2/observation/slice-activation.md`; copy the exact completed manifest
+fields into each later candidate attempt
 
 **Candidate evidence**: `evidence/v2/observation/slice-candidate.md` (for
 `CONVERGED`; absent while `PLANNED`)
@@ -40,123 +47,310 @@ order in `Accepted dependencies`, record ordered `Dependency commits` as
 **Acceptance evidence**: `evidence/v2/observation/slice-acceptance.md` (for
 `ACCEPTED`; absent while `PLANNED`)
 
-**Rejection / rework**: Candidate and handoff files are append-only attempt
-streams after first use.
-If convergence adds tasks, the slice stays `ACTIVE`; retain its immutable
-activation and start a new bound `run speckit` for this slice. If a completed
-handoff is rejected, append `REJECTED`, return to `ACTIVE`, and likewise start
-a new bound run—never resume the completed run. Fixes requested by a paused
-post-convergence gate may resume that same run only when the task graph is
-unchanged. New candidate and handoff attempts append without rewriting history.
-
 **Accountable owner lane**: `v2-observation-owner`
 
-**Integration handoff**: owners of slices `040` through `110` and `v2-integrator`
+**Integration handoff**: owners of slices `040` through `110` and
+`v2-integrator`
 
-**Slice activation**: No checkbox may begin while the slice is `PLANNED` or
-before valid activation evidence attests the accepted prerequisites above and
-establishes `READY`. The assigned participant must then declare `ACTIVE` before
-beginning the first checkbox.
+**Tests**: deterministic contract/mechanics tests and reusable replay scenes
+are required; tests must fail before the corresponding provider, continuation,
+or reference behavior is accepted
 
-**Tests**: Deterministic tests and replay scenes are required before each
-provider or continuity claim is accepted.
+## Upstream Handoff Inputs
 
-## Phase 1: Shared Test and Replay Harness
+The readiness review consumes the accepted `010-v2-contract` candidate
+`bff6b463a44c1b9066fc654691042f9550da6c64`, packet commit
+`39deb459c7fb18cf7d64dc0edaaaadcca39eae20`, append-only packet record
+`evidence/v2/contract/slice-handoff.md`, and terminal acceptance record
+`evidence/v2/contract/slice-acceptance.md`. Aleph's separate consumer decision
+must be recorded under the observation evidence directory in an exact filename
+containing `010`, such as
+`evidence/v2/observation/dependency-acceptance-010.md`, and the immutable
+activation record must map `010` to the accepted candidate and that consumer-
+owned reference.
 
-- [ ] T001 Create observation test helpers in `tests/v2/observation/helpers.py`
-- [ ] T002 [P] Add native-shape replay loader in `evals/v2/observation/replay.py`
-- [ ] T003 [P] Add shared/reference observation comparator for downstream reuse in `evals/v2/observation/compare.py`
-- [ ] T004 [P] Add red shared-provider tests covering exact self, actor-targeted mentions, and distinct room-wide mentions in `tests/v2/observation/test_provider.py`
-- [ ] T005 [P] Add red budget and continuation tests in `tests/v2/observation/test_budget_and_continuation.py`
+Implementation consumes these accepted contract files without modifying them:
 
-## Phase 2: User Story 1 - Native Facts and Exact Self (Priority: P1)
+- `schemas/v2/attention-request.schema.json` (`I-010A`)
+- `schemas/v2/context-continuation.schema.json` (`I-010D`)
+- `schemas/v2/attention-receipt.schema.json` (`I-010E` staged-record shape)
+- `docs/contracts/nunchi-v2.md`
+- `tests/v2/contract/schema_helpers.py`
 
-**Goal**: Implement exact self binding, actor/event normalization, and narrowly
-bounded transport hygiene.
+`docs/contracts/nunchi-v2.md` is an evidence-backed `NO_IMPACT` disposition:
+slice 020 consumes the accepted closed I-010A/I-010D/I-010E shapes and validates
+the document without editing it. The accepted I-010E observation body has no
+token field; token-size proxy results therefore live only in separate evidence
+and the limitation is handed to `v2-contract-owner` and `v2-integrator`.
+
+## Correction and Rejection Preservation
+
+This is the initial dormant task graph; there is no slice-020 correction or
+rejection record to append from. Once activation freezes this manifest, an
+`ACTIVE` correction or recorded rejection must preserve every existing task and
+checkbox exactly and append only new sequential tasks. Each appended phase and
+task must cite the durable correction/review path and finding ID that requires
+it. A convergence-added graph or completed-handoff rejection starts a new bound
+`run speckit`; only a paused post-convergence fix with an unchanged graph may
+resume its current run. Candidate and handoff attempts remain append-only.
+
+## Phase 1: Shared Test and Replay Setup
+
+**Purpose**: Create transport-neutral helpers used by every independently
+testable story without adding a native surface binding.
+
+- [X] T001 [P] Create reusable observation fixture, assertion, serialized-byte, and `utf8-bytes-ceil-div4@1` evidence-only token-size proxy helpers in `tests/v2/observation/helpers.py`; emit `estimator_id`, `estimated_tokens`, `serialized_bytes`, and `model_id: null`, and make no model-tokenizer claim
+- [X] T002 [P] Create the authoritative-order native-shape replay loader in `evals/v2/observation/replay.py`
+- [X] T003 [P] Create the capability-aware shared/reference observation comparator for downstream reuse in `evals/v2/observation/compare.py`
+- [X] T004 [P] Create the exact-attempt-6 corpus loader and test driver for slice 020's own stdlib validation adapter, covering accepted I-010A, I-010D, and I-010E inputs while accounting explicitly for every case in the identical `bff6b463a44c1b9066fc654691042f9550da6c64` corpus revision, in `tests/v2/observation/contract_helpers.py`
+
+**Checkpoint**: Tests and replay cases can describe accepted contract inputs,
+native facts, budgets, and evidence rows without importing a native transport.
+
+## Phase 2: Foundational Contract Tests
+
+**Purpose**: Freeze the accepted upstream boundary before implementing any user
+story.
+
+**Critical**: This phase blocks every story implementation.
+
+- [X] T005 Add red contract tests for exact accepted I-010A request output including its optional continuation capability, I-010D fetch-request/fetch-page documents through the separate host fetch seam, immutable observation-stage I-010E output with no token field, unknown later-stage facts, and rejection of contract drift in `tests/v2/observation/test_contract_inputs.py`
+
+**Checkpoint**: The accepted 010 schemas fail against the still-missing I-020A
+provider for the intended reasons; no 010-owned file has changed.
+
+## Phase 3: User Story 1 - Native Facts and Exact Self (Priority: P1) MVP
+
+**Goal**: Preserve exact transport-attested self identity, stable actors,
+literal native relations, narrow transport hygiene, and outcome-neutral bounded
+observation.
 
 **Independent Test**: Native-shape fixtures preserve exact actor identity and
-literal structure; only duplicate, exact-self, and unroutable scenes avoid an
-attention candidate.
+literal relations, distinguish actor-targeted from room-wide mentions, retain
+self events without waking their author, and permit only exact duplicate,
+exact-self, and transport-attested unroutable mechanical no-wake actions
+without invoking an attention model or independently deciding routing.
 
-- [ ] T006 [US1] Implement I-020A provider boundary and immutable observation-stage I-010E emission in `src/nunchi/observation.py`
-- [ ] T007 [US1] Implement factual actor/event normalization with distinct actor-targeted and room-wide mention facts in `src/nunchi/observation.py`
-- [ ] T008 [US1] Implement bounded outcome-neutral observation storage in `src/nunchi/observation.py`
-- [ ] T009 [P] [US1] Add exact-self, actor-targeted mention, room-wide mention, and transport-hygiene reference cases in `evals/v2/observation/identity-and-hygiene/cases.jsonl`
-- [ ] T010 [US1] Record exact-self, mention-distinction, and hygiene reference results with mandatory `scene_id` values for S01, S02, S04, S11, and S16 in `evidence/v2/observation/identity-and-hygiene.jsonl`
+### Tests for User Story 1
 
-## Phase 3: User Story 2 - Bounded Snapshot and Expansion (Priority: P1)
+- [X] T006 [P] [US1] Add red provider tests for exact-self alias collisions, actor-targeted mentions, room-wide mentions, replies, threads, reactions, memberships, honest unavailable facts, authoritative order, exact delivery deduplication, and consumption of transport-attested `candidate-event`/`unroutable` inputs without independently deciding routing in `tests/v2/observation/test_provider.py`
+- [X] T007 [P] [US1] Add red tests for outcome-neutral bounded retention, request correlation, singly attested immutable observation-stage receipts, and operational-error treatment after routable native-event construction in `tests/v2/observation/test_storage_and_receipt.py`
 
-**Goal**: Assemble budgeted requests and enforce bound continuation without a
-context bomb or relation-loss concealment.
+### Implementation for User Story 1
 
-**Independent Test**: Multiple budget/fetch matrices stay within hard caps,
-preserve trigger/order/fitting relations, and report every known omission.
+- [X] T008 [US1] Implement the I-020A provider boundary plus slice 020's stdlib-only I-010A/I-010E runtime-validation and serialization boundary in `src/nunchi/observation.py`
+- [X] T009 [US1] Implement factual actor/event normalization with exact self binding, stable native order, distinct actor-targeted and room-wide mention facts, literal relations, and honest unknowns in `src/nunchi/observation.py`
+- [X] T010 [US1] Implement bounded outcome-neutral retention and mechanical handling limited to exact delivery duplicate, exact-self retain-without-wake, and transport-attested `unroutable` cases in `src/nunchi/observation.py`; require routing/authorization provenance on `candidate-event` input and never derive it from payload content
+- [X] T011 [P] [US1] Add exact-self, relation, unavailable-fact, transport-hygiene, operational-error, and no-social-ledger cases for S01, S02, S04, S11, and S16 in `evals/v2/observation/identity-and-hygiene/cases.jsonl`
+- [X] T012 [US1] Run the US1 contract/provider/receipt suites and record request-correlated S01, S02, S04, S11, and S16 results with serialized sizes and mandatory `scene_id` values in `evidence/v2/observation/identity-and-hygiene.jsonl`
 
-- [ ] T011 [US2] Implement trigger-first bounded assembly in `src/nunchi/observation.py`
-- [ ] T012 [US2] Implement bound before/after/around fetch in `src/nunchi/observation.py`
-- [ ] T013 [P] [US2] Add budget sweep corpus in `evals/v2/observation/budgets/cases.jsonl`
-- [ ] T014 [P] [US2] Add continuation attack corpus in `evals/v2/observation/continuation/cases.jsonl`
-- [ ] T015 [US2] Record serialized-byte and estimated-token results with mandatory S03/S15 `scene_id` values in `evidence/v2/observation/budget-sweep.jsonl`
-- [ ] T016 [US2] Record continuation binding and order results with mandatory S03/S15 `scene_id` values in `evidence/v2/observation/continuation.jsonl`
+**Checkpoint**: User Story 1 passes independently and provides the factual
+provider/retention seam used by later stories without claiming native-surface
+conformance.
 
-## Phase 4: User Story 3 - Recoverability and Comparison References (Priority: P2)
+## Phase 4: User Story 2 - Bounded Snapshot and Expansion (Priority: P1)
 
-**Goal**: Prove the shared seam against reference capability/continuity variants
-and provide a reusable comparison contract for later native bindings without
-claiming that any real surface has passed it.
+**Goal**: Assemble trigger-first factual snapshots under hard limits and expose
+truthful participant/room/scope/trigger-bound I-010A continuation capability
+plus a separate I-010D fetch seam. Slice 030—not this slice—owns the
+classifier-visible projection and redaction of opaque authority.
 
-**Independent Test**: Simulated reference providers with equivalent native facts
-normalize equivalently, and reference restart-safe claims fail unless simulated
-backfill restores content and exact actor identity. Actual surfaces remain
-downstream evidence obligations.
+**Independent Test**: Multiple event/byte/age budgets and before/after/around
+queries preserve authoritative order, trigger inclusion, fitting relation
+closure, known gaps, exact-event deduplication, binding, expiry, cursors, and
+operator caps; the provider emits only accepted I-010A/I-010D shapes and hands
+their projection obligation to the slice-030 owner.
 
-- [ ] T017 [P] [US3] Add continuity and capability variants in `evals/v2/observation/capabilities/cases.jsonl`
-- [ ] T018 [P] [US3] Add red reference-provider recoverability tests in `tests/v2/observation/test_recoverability.py`
-- [ ] T019 [P] [US3] Add red reference-equivalence and downstream comparator-contract tests in `tests/v2/observation/test_equivalence.py`
-- [ ] T020 [US3] Implement simulated reference restart/backfill behavior outside product code in `evals/v2/observation/capabilities/reference_provider.py`
-- [ ] T021 [US3] Record recoverability reference results in `evidence/v2/observation/s05-recoverability.jsonl`
-- [ ] T022 [US3] Record capability-neutral equivalence results in `evidence/v2/observation/s13-equivalence.jsonl`
+### Tests for User Story 2
 
-## Phase 5: Documentation and Packet Inputs
+- [X] T013 [US2] Add red hard-budget, relation-closure, coverage, accepted I-010A capability shape, I-010D fetch-document, continuation binding, expiry, cursor, authoritative-order, and exact-event deduplication tests in `tests/v2/observation/test_budget_and_continuation.py`; do not test slice-030 classifier projection behavior here
 
-- [ ] T023 Prepare documentation-freshness inputs by executing every exact row in `plan.md` §Documentation Impact and Freshness; validate each `UPDATE`, route every global and downstream `HANDOFF` delta (including `README.md`) to its accepting owner, and record all proposed documentation dispositions, paths, results, and reviewer in `evidence/v2/observation/handoff.md` for the later workflow gate
-- [ ] T024 Publish the scene-to-record manifest, reference capability rules, and explicit downstream suppression-eligibility proof boundary in `evidence/v2/observation/README.md`
-- [ ] T025 Prepare the proposed packet input with commit, commands, I-020A version, shared/reference modules, evidence, downstream comparator obligations, documentation dispositions/validation/reviewer, and limitations in `evidence/v2/observation/handoff.md`; the later convergence, documentation-freshness, and handoff gates—not this checkbox—establish lifecycle state
+### Implementation for User Story 2
 
-## Dependencies & Execution Order
+- [X] T014 [US2] Implement trigger-first snapshot assembly, fitting relation closure, nearby context fill, authoritative order, and honest event/byte/age truncation coverage in `src/nunchi/observation.py`
+- [X] T015 [US2] Implement optional host-owned before/after/around continuation with an accepted I-010A capability plus a separate stdlib-validated I-010D request/page seam, participant/room/continuity/trigger binding, capped fetches, and exact merge deduplication in `src/nunchi/observation.py`; leave classifier projection/redaction to slice 030
+- [X] T016 [P] [US2] Add S03/S15 event, byte, age, relation-fit, gap, accepted-I-010E byte, and separately labelled `utf8-bytes-ceil-div4@1` proxy matrices in `evals/v2/observation/budgets/cases.jsonl`
+- [X] T017 [P] [US2] Add S03/S15 cross-binding, redirect, over-limit, expiry, cursor-replay, order, duplicate-content, and exact-event continuation attacks in `evals/v2/observation/continuation/cases.jsonl`
+- [X] T018 [P] [US2] Run the budget matrix and record configured caps, serialized bytes, accepted-I-010E byte telemetry, separate `estimator_id`/`estimated_tokens`/`serialized_bytes`/`model_id: null` proxy evidence, included/omitted event IDs, relation outcomes, and mandatory S03/S15 `scene_id` values in `evidence/v2/observation/budget-sweep.jsonl`
+- [X] T019 [P] [US2] Run the continuation attack matrix and record binding, accepted I-010A/I-010D shape, cap, expiry, cursor, order, coverage, and deduplication outcomes with mandatory S03/S15 `scene_id` values in `evidence/v2/observation/continuation.jsonl`; record projection/redaction as a slice-030 obligation, not a 020 result
 
-- The accepted 010 schema commit is immutable input to every task.
-- T001 precedes shared tests; T004/T005 must fail before T006–T012 are accepted.
-- US1 supplies normalization and storage used by US2 and US3.
-- T013 and T014 may proceed in parallel after the shared replay loader exists.
-- T017–T019 may proceed in parallel after US1/US2 shared seams stabilize.
-- T020 follows the red recoverability tests; T021/T022 require their respective
-  suites; T025 requires all evidence and documentation.
-- Downstream slices may bind native surfaces only after separately accepting
-  and recording the lifecycle handoff packet derived from T025; each
-  surface owner must rerun the comparator/recoverability contract, and 110 alone
-  may make the final cross-surface claim.
+**Checkpoint**: User Story 2 passes independently over the shared provider and
+proves bounded assembly/expansion mechanics while leaving classifier-safe
+projection/redaction explicitly unimplemented and owned by slice 030.
 
-## Parallel Opportunities
+## Phase 5: User Story 3 - Recoverability and Comparison References (Priority: P2)
 
-- T002–T005 target separate ordinary files.
-- T017–T019 target separate ordinary test/eval paths.
-- Recoverability and equivalence evidence may run concurrently once the shared
-  provider is stable.
+**Goal**: Supply reusable reference variants and a comparator that downstream
+owners can apply to real surfaces without turning reference evidence into a
+surface, restart-safety, suppression-eligibility, or parity claim.
+
+**Independent Test**: Restart-safe, session-only, unknown, known-gap, live-only,
+unavailable-event, and continuation capability variants produce the declared
+recoverability outcome, while equivalent supplied facts/budgets/capabilities
+compare equal except for explicitly unavailable native facts.
+
+### Tests for User Story 3
+
+- [X] T020 [P] [US3] Add red restart/backfill, outcome-neutral later-hearing, session-only, unknown, known-gap, and suppression-eligibility reference tests in `tests/v2/observation/test_recoverability.py`
+- [X] T021 [P] [US3] Add red reference-equivalence and reusable downstream comparator-contract tests in `tests/v2/observation/test_equivalence.py`
+
+### Implementation for User Story 3
+
+- [X] T022 [P] [US3] Add restart-safe, session-only, unknown, known-gap, history/live visibility, unavailable-event, and continuation capability cases for S05/S13 in `evals/v2/observation/capabilities/cases.jsonl`
+- [X] T023 [US3] Implement simulated restart/backfill and capability variants outside product runtime code in `evals/v2/observation/capabilities/reference_provider.py`
+- [X] T024 [P] [US3] Run the reference recoverability suite and record exact content/actor retention, restart/backfill, ordinary later-hearing, capability, limitation, and eligibility outcomes for S05 in `evidence/v2/observation/s05-recoverability.jsonl`
+- [X] T025 [P] [US3] Run the reference comparator and record normalized equivalence plus every capability-explained difference for S13 in `evidence/v2/observation/s13-equivalence.jsonl`
+
+**Checkpoint**: User Story 3 passes independently as a reference contract;
+every real-surface proof remains an explicit downstream obligation.
+
+## Phase 6: Documentation Impact and Freshness with Exact Claim Handoffs
+
+**Purpose**: Execute every exact documentation disposition before the candidate
+can be handed off. Global/current-state and downstream-owner docs remain
+handoffs; slice-owned observation documentation lands with this candidate.
+
+- [X] T026 Create or update the owned `UPDATE` surface with evidence-proven I-020A identity, literal native relations, authoritative order, hard budgets, gaps/unknowns, outcome-neutral retention, continuation binding/authority, capability truth, reference-only limitations, links, and runnable examples in `docs/observation/v2.md`
+- [X] T027 Add documentation truthfulness tests that execute every Python example and assert the documented contract versions, budget/coverage behavior, I-010A/I-010D ownership boundary, capability limits, accepted-I-010E token-field limitation, and reference-only claim boundary in `tests/v2/observation/test_docs.py`
+- [X] T028 Record the `README.md` `HANDOFF` to accepting `v2-integrator`: at atomic cutover add only proven exact-self, literal-native-relation, trigger-first hard-budget, gap/unknown, outcome-neutral retention, and optional host-bound continuation claims while preserving V1-current wording until cutover verification, in `evidence/v2/observation/handoff.md`
+- [X] T029 Record exact `HANDOFF` deltas to accepting `v2-integrator` for breaking I-020A/current-state wording in `CHANGELOG.md` and `docs/STABILITY.md`, request/identity/relation/order/budget/gap/continuation integration wording in `docs/integration.md` and `docs/adapters.md`, and the observation/host-only-continuation diagram boundary in `docs/architecture/v2-selected-design.md`; in the same `evidence/v2/observation/handoff.md`, hand I-010A expansion-availability input to `v2-attention-owner` while stating that slice 030 alone implements classifier-safe projection/redaction in `src/nunchi/core.py`
+- [X] T030 Record exact I-020A identity/native-fact/order/budget/gap/continuation `HANDOFF` deltas for `integrations/mcp-discord/README.md` and `integrations/mcp-discord/DESIGN.md` to accepting `v2-transport-owner` in `evidence/v2/observation/handoff.md`
+- [X] T031 Record the exact I-020A identity/native-fact/order/budget/gap/continuation `HANDOFF` delta for `integrations/hermes/README.md` to accepting `v2-hermes-owner` in `evidence/v2/observation/handoff.md`
+- [X] T032 Record the exact I-020A identity/native-fact/order/budget/gap/continuation `HANDOFF` delta for `integrations/claude-code/README.md` to accepting `v2-claude-owner` in `evidence/v2/observation/handoff.md`
+- [X] T033 Record the exact I-020A identity/native-fact/order/budget/gap/continuation `HANDOFF` delta for `integrations/codex/README.md` to accepting `v2-codex-owner` in `evidence/v2/observation/handoff.md`
+- [X] T034 Run `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_docs` and `python3 scripts/check_governance.py --check-cli`, execute every command in `docs/observation/v2.md`, validate every local link, validate the evidence-backed `NO_IMPACT` disposition for `docs/contracts/nunchi-v2.md` against accepted I-010A/I-010D/I-010E, record `N/A` if the owned document has no Mermaid block or render every block if present, and record exact `UPDATE`/`NO_IMPACT`/`HANDOFF` paths, validation results, accepting owners, and reviewer in `evidence/v2/observation/handoff.md`
+
+**Checkpoint**: The owned observation guide is updated and validated; every
+other affected path has an exact delta, accepting owner, reviewer, and result
+rather than a generic defer or premature current-state edit.
+
+## Phase 7: Evidence Manifest, Verification, and Handoff Inputs
+
+**Purpose**: Assemble exact ordinary-path inputs for convergence,
+documentation freshness, and the owner handoff without fabricating those later
+lifecycle decisions.
+
+- [X] T035 Publish the scene-to-record/command manifest for S01, S02, S03, S04, S05, S11, S13, S15, and S16, I-020A capability rules, exact downstream comparator/recoverability obligations, the accepted-I-010E token-field limitation, the exact slice-030 classifier-projection handoff, and the reference-only suppression-eligibility boundary in `evidence/v2/observation/README.md`
+- [X] T036 Run `PYTHONPATH=src python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'`, the observation replay/evaluation commands named in `evidence/v2/observation/README.md`, `PYTHONPATH=src python3 -m unittest`, `python3 -m evals.verdict_suite.runner --list`, and `python3 scripts/check_governance.py --check-cli`, then record exact commands, nonzero discovered test counts, results, candidate provenance, and any limitation in `evidence/v2/observation/handoff.md`
+- [X] T037 Run slice 020's own stdlib runtime-validation adapter in `src/nunchi/observation.py` through the driver in `tests/v2/observation/contract_helpers.py` over the complete identical attempt-6 corpus revision `bff6b463a44c1b9066fc654691042f9550da6c64` (202 cases, including all seven runtime-adapter-only semantic/relational classes); validate consumed interfaces, explicitly account for non-consumed interface cases rather than silently skipping them, fail on corpus identity or expected-count drift, and record exact command, revision, per-class counts, and result in `evidence/v2/observation/handoff.md`
+- [X] T038 Prepare the exact proposed owner-handoff input with candidate commit, upstream 010 candidate/packet references, completed task IDs and normalized task SHA256, I-020A version, consumed I-010A/I-010D/I-010E versions and schema paths, accepted-I-010E token-field limitation plus separate estimator provenance, shared/reference module paths, test/eval commands and results, exact attempt-6 downstream-adapter conformance result, evidence paths, all documentation dispositions/validation/reviewer records, the exact `v2-attention-owner` projection handoff, downstream comparator/recoverability/provenance obligations, recipients, and known limitations in `evidence/v2/observation/handoff.md`; later convergence, documentation-freshness, and handoff gates append lifecycle attempts and establish state
+
+## Dependencies and Execution Order
+
+### Pre-task lifecycle dependencies
+
+- Every task is dormant until Aleph separately accepts the exact 010 packet,
+  records the consumer-owned dependency decision, the bound delivery workflow
+  proves zero CRITICAL/HIGH findings and all readiness facts, immutable
+  activation evidence freezes this manifest, and the slice declares `ACTIVE`.
+- The accepted 010 candidate, packet, schemas, and contract helpers listed in
+  **Upstream Handoff Inputs** are immutable inputs to every phase.
+
+### Phase dependencies
+
+- Phase 1 has no product-code dependency after activation.
+- T005 depends on T004 and blocks every user story implementation.
+- US1 tests T006/T007 must fail before T008-T010 are accepted; T012 requires
+  T006-T011 to pass.
+- US2 starts after the US1 provider/retention seam is stable; T013 must fail
+  before T014/T015 are accepted; T018/T019 require their matching corpora and
+  passing suite.
+- US3 uses the completed US1/US2 provider, continuation, and comparator seams;
+  T020/T021 must fail before T023 is accepted; T024/T025 require the matching
+  capability cases and passing suites.
+- Documentation tasks T026-T034 require the exact complete story behavior and
+  evidence. T034 blocks the packet phase.
+- T035 requires all scene evidence. T036 requires T026-T035. T037 requires the
+  implemented runtime adapter plus T004 and T036 and blocks handoff. T038
+  requires every prior task and supplies inputs to the later lifecycle gates.
+
+### Parallel opportunities
+
+- T002-T004 target independent setup files and may run in parallel after
+  activation.
+- T006/T007 and T011 target separate test/eval paths and may proceed in parallel
+  after T005.
+- T016/T017 may proceed in parallel; T018/T019 may run in parallel once the
+  shared US2 implementation passes.
+- T020-T022 may proceed in parallel; T024/T025 may run in parallel after T023.
+- Documentation handoff tasks T028-T033 share one evidence file and therefore
+  remain ordered even though their accepting owners differ.
+
+## Parallel Examples
+
+### User Story 1
+
+After T005, prepare T006, T007, and T011 concurrently; then implement T008-T010
+in order and converge their results in T012.
+
+### User Story 2
+
+After the red T013 result, implement T014/T015 in order while preparing T016
+and T017 concurrently; run T018 and T019 concurrently after the code/corpora
+stabilize.
+
+### User Story 3
+
+Prepare T020, T021, and T022 concurrently; implement T023 against those red
+contracts, then run T024 and T025 concurrently.
 
 ## Implementation Strategy
 
-Build one factual provider first, then bounded expansion, then reference
-recoverability and equivalence assets. Do not implement a native transport,
-harness binding, or social behavior here. Downstream platforms that cannot prove
-a fact or restart property must report an honest limitation, and reference
-results must never be substituted for their installed-surface evidence.
+The MVP is Phase 1, Phase 2, and User Story 1: one factual provider that proves
+exact identity, native structure, narrow transport hygiene, immutable
+observation-stage receipts, and outcome-neutral bounded retention. Continue
+with bounded expansion, then reference recoverability/equivalence, and converge
+one complete slice candidate. No intermediate story, reference provider, or
+slice state authorizes a native-surface claim, integration, deployment,
+release, promotion, or cutover.
+
+## Handoff Input Contract
+
+The proposed packet assembled by T038 is complete only when it names:
+
+- the exact candidate commit and frozen/completed task manifests;
+- the accepted 010 candidate and packet plus I-010A/I-010D/I-010E versions,
+  the closed-I-010E token-field limitation, and separate estimator provenance;
+- `src/nunchi/observation.py`, every shared/reference test and eval path, and
+  every committed evidence path;
+- reproducible commands and exact results;
+- every exact documentation `UPDATE` or `HANDOFF`, validation result, accepting
+  owner, and reviewer, including the `README.md` delta;
+- capability, recoverability, comparator, installed-surface, and final-parity
+  obligations for each downstream recipient, including slice 030's sole
+  classifier-safe projection/redaction ownership; and
+- known limitations, especially that reference variants prove no real surface,
+  restart-safe deployment, social-suppression eligibility, or cross-surface
+  parity.
+
+The bound workflow later appends the exact candidate and handoff lifecycle
+records. The task checkbox alone does not establish `CONVERGED`,
+`HANDOFF_READY`, or `ACCEPTED`.
 
 ## Notes
 
-- No task edits 010-owned schemas, native transport sources, or 040/060–090
-  harness and adapter entrypoints.
+- No task edits 010-owned schemas, native transport sources, or 040/050/060-110
+  integration entrypoints.
 - No task creates a product artifact under a SpecKit-managed path.
 - Outcome-neutral retention must be testable without a live classifier.
 - Restart/backfill simulations live only in tests/evals; actual persistence and
   native-history behavior remain owned by downstream surfaces.
+- No handoff task edits global current-state wording before its accepting owner
+  applies the delta at the governed atomic cutover.
+
+## Phase 8: Convergence
+
+**Purpose**: Close gaps found by `/speckit-converge` between the accepted
+spec/plan/tasks and the completed T001–T038 candidate. Appending these tasks
+keeps the slice `ACTIVE`; per the Rejection/Rework contract and the
+Correction and Rejection Preservation section above, completing them requires
+a new bound `python3 scripts/run_slice_workflow.py run speckit
+specs/020-v2-observation` run rather than resuming the completed T001–T038
+delivery run.
+
+- [ ] T039 Document native `reaction` and `membership` event ingestion in `docs/observation/v2.md` — add a runnable example and description of literal relations (e.g. reaction `target_event_id`, membership operation) and honest-unavailability representation for both event kinds alongside the existing `message`-event coverage, and extend `tests/v2/observation/test_docs.py` to assert their presence, per FR-003 / plan.md Acceptance Scene S02 (partial)
+- [ ] T040 Add test coverage in `tests/v2/observation/test_provider.py` for a self-caused `membership` event (self as `subject_actor_id` or `caused_by_actor_id`) and record whether `SELF_RETAINED_NO_WAKE` applies or `ingest()`'s self-check is intentionally scoped to authored (`author_id`) events only, documenting the resolved scope in `docs/observation/v2.md` or evidence, per FR-004 (partial)
+- [ ] T041 Add test and/or eval coverage exercising the `event_visibility` coverage field returned by `ObservationProvider.snapshot()`/`fetch()` in `tests/v2/observation/test_budget_and_continuation.py` or `evals/v2/observation/budgets/cases.jsonl`, and record its outcomes in `evidence/v2/observation/budget-sweep.jsonl`, per FR-007 (partial)
+- [ ] T042 Correct the inaccurate "four-line addition" diff-size claim for the `tests/test_governance.py` fix in `evidence/v2/observation/handoff.md`'s Known Limitations section to match the actual 9-insertion diff (`git diff --stat tests/test_governance.py`), per FR-013 / Constitution VI Evidence Before Claims (contradicts)
+- [ ] T043 Name `v2-wake-owner` (040), `v2-adapters-owner` (090), and `v2-security-owner` (100) as explicit recipients of the T038 handoff packet in `evidence/v2/observation/handoff.md`, consistent with `spec.md`'s declared `Feeds` list, per tasks.md Handoff Input Contract "recipients" element (partial)
+- [ ] T044 Explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary (what each means and how a consumer should read a `known-gap` result) in `docs/observation/v2.md`'s reference-variant section, per FR-011 / plan.md T026 "capability truth" (partial)
