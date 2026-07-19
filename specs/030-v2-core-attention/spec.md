@@ -99,6 +99,10 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   No. Every receipt-sink invocation failure uses the shared `WAKE` default,
   regardless of the previously trusted policy, because the override cannot be
   durably receipted.
+- Q: What delay does the bounded V2 transport retry use? → A: It waits a fixed
+  0.5 seconds before attempt 2 and 1.0 second before attempt 3. It does not
+  consume or honor provider `Retry-After`; success, a terminal non-retryable
+  failure, and the final allowed failure never sleep.
 
 ### Resolved post-acceptance contract amendments and program handoff
 
@@ -504,6 +508,10 @@ non-receiptable and MUST NOT fabricate one.
   inspecting or trusting its `reason`. Every other HTTP status, configuration
   or request/schema validation failure, JSON decoding failure, malformed model
   output, and failure after a response has been obtained is non-retryable.
+  The retry delay is fixed and deterministic: wait 0.5 seconds before attempt
+  2 and 1.0 second before attempt 3, never honor provider `Retry-After`, and do
+  not sleep after success, a terminal non-retryable failure, or the final
+  allowed failure.
   Deterministic tests MUST cover HTTP `429`, `499`, `500`, `599`, and `600`;
   direct timeout, `URLError`, `ConnectionError`, and other request-execution
   `OSError`; exact attempt and sleep counts for `max_retries` `0`, `1`, and `2`;

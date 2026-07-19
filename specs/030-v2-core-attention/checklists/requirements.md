@@ -466,10 +466,13 @@ ownership. No result is inherited from the earlier 164 items.
 - [x] CHK174 Are host-control `BaseException` propagation and ordinary timeout/cancellation-as-`Exception` classification non-conflicting and explicitly separate? [Clarity, Coverage, Spec §FR-001; Plan §I-030A callable and CLI equivalence seam]
 - [x] CHK175 Can each final delta be traced to exact implementation, deterministic corpus/evidence, and handoff tasks without changing accepted 010 schemas or taking slice-040 ownership? [Traceability, Governance, Spec §FR-015–§FR-020; Plan §Ordinary Repository Targets; Tasks §T004, §T006–§T007, §T019, §T021–§T022, §T026]
 - [x] CHK176 Does the 47-path `8 UPDATE / 17 NO_IMPACT / 22 HANDOFF` documentation denominator remain complete after these clarifications, with component exception evidence in the existing UPDATE paths and participant-host mapping in the already named downstream/shared HANDOFF paths? [Documentation, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–§T026]
+- [x] CHK177 Is the retry delay fully specified without widening the closed classifier configuration: exactly 0.5 seconds before attempt 2 and 1.0 second before attempt 3? [Clarity, Completeness, Spec §Clarifications, §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T006]
+- [x] CHK178 Do requirements explicitly ignore provider `Retry-After`, preventing untrusted response metadata from changing the bounded deterministic schedule? [Safety, Determinism, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T006, §T021]
+- [x] CHK179 Are zero-sleep boundaries measurable after success, a terminal non-retryable failure, and the final allowed failure for every `max_retries=0|1|2` case? [Measurability, Coverage, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T021]
 
 ## Formal Reviewer Final Scoped-Finding Notes
 
-- Mark CHK165–CHK176 complete only from the reconciled requirement text and
+- Mark CHK165–CHK179 complete only from the reconciled requirement text and
   cited authority; implementation success is not a substitute.
 - Any reintroduction of host-owned ParticipantWakeV2 behavior, request
   mutation, open-ended retry classification, or post-dispatch
@@ -477,6 +480,6 @@ ownership. No result is inherited from the earlier 164 items.
 - The program-interface registry remains the separately recorded non-blocking
   `v2-program-owner` handoff and is not reclassified by this gate.
 
-**2026-07-19 final scoped-finding result**: 12/12 fresh items pass; the complete
-requirements checklist is now 176/176. The task graph remains T001–T027 and
+**2026-07-19 final scoped-finding result**: 15/15 fresh items pass; the complete
+requirements checklist is now 179/179. The task graph remains T001–T027 and
 dormant until a separate READY activation record exists.

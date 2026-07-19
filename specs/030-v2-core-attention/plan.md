@@ -322,10 +322,14 @@ does not let the response or offered receipt attest its own persistence.
   `ConnectionError`) raised during `urlopen` request execution. Never retry
   any other HTTP status, validation/configuration failure, JSON decoding or
   malformed model output, post-response failure, or an already-complete model
-  judgment. Deterministic oracles cover HTTP `429`, `499`, `500`, `599`, and
-  `600`; each named transport exception class; exact attempts/sleeps for
-  `max_retries=0|1|2`; identical payload/logical request identity; immediate
-  stop after success; and zero retries for non-retryable cases. Exhaustion is
+  judgment. Use the fixed deterministic schedule inherited from the existing
+  stdlib seam: sleep 0.5 seconds before attempt 2 and 1.0 second before attempt
+  3, ignore provider `Retry-After`, and never sleep after success, a terminal
+  non-retryable failure, or the final allowed failure. Deterministic oracles
+  cover HTTP `429`, `499`, `500`, `599`, and `600`; each named transport
+  exception class; exact attempts/sleeps for `max_retries=0|1|2`; identical
+  payload/logical request identity; immediate stop after success; and zero
+  retries for non-retryable cases. Exhaustion is
   operational ERROR after the full trust boundary, so shared `WAKE` is the
   default, a validated and receiptable `NO_WAKE` policy may override it, and a
   failed override-receipt offer reverts to `WAKE`. Prompt for at most two WAKE annotations of at most 240
@@ -336,8 +340,9 @@ does not let the response or offered receipt attest its own persistence.
   prompt/evidence enforcement preserves brief framing without locally narrowing
   the accepted I-010B schema.
 - **Alternatives considered**: Unbounded/operator-arbitrary retry counts,
-  retrying invalid output, a second-vote retry, or a local advice schema cap.
-  These undermine bounded cost, single judgment, or contract ownership.
+  immediate retries, provider-controlled `Retry-After`, retrying invalid
+  output, a second-vote retry, or a local advice schema cap. These undermine
+  bounded deterministic cost, single judgment, or contract ownership.
 
 ### Finite transition and social-evidence gates
 
