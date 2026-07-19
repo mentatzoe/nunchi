@@ -12,6 +12,16 @@
 **Dependency acceptance references**:
 `010-v2-contract=evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`
 
+**Candidate commit**: `26a6b531fa146ba1f1f5fcd1c4d191041b141301`
+
+**Packet reference**: `evidence/v2/contract/slice-handoff.md`
+
+**Decision reference**:
+`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md#decision`
+
+**Amendment ledger reference**:
+`evidence/v2/contract/slice-amendments.md`
+
 **Amendment candidate commit**: `26a6b531fa146ba1f1f5fcd1c4d191041b141301`
 
 **Upstream integrator decision commit**:
@@ -54,6 +64,12 @@ they continue to establish I-010A `AttentionRequestV2@1` and I-010E
 `AttentionReceiptV2@2` respectively. At readiness, the latest exact dependency
 mapping above binds the composite candidate containing all three accepted
 interfaces; it does not rewrite either earlier decision.
+
+The `Packet reference` above retains the immutable terminal attempt-6 packet
+lineage. The canonical append-only amendment ledger extends that lineage
+through accepted A1 and A2 and establishes the exact effective dependency
+candidate recorded here; neither the terminal packet nor either prior consumer
+decision is rewritten.
 
 The accepted I-010B `@2` surface changes exactly one contract boundary:
 `routing_audit.effective_margin` is finite in inclusive `[0,1]`, so exact `0`
