@@ -118,6 +118,18 @@ work around this itself.
   exact new candidate, update its consumed `I-010E` version to `@2`, and
   rerun its zero-CRITICAL/HIGH planning analysis before it can proceed to
   `READY`.
+- Slice `020-v2-observation` also cites `I-010E AttentionReceiptV2@1`
+  (`specs/020-v2-observation/spec.md` FR-015, `plan.md`) — flagged by Aleph
+  (`v2-observation-owner`) during cross-slice status alignment and verified
+  directly here: `@2`'s only changes are to `attentionBody`'s
+  classifier-outcome and error variants; the `observationBody` definition
+  (`schema_version`, `trigger_event_id`, `continuity_scope_id`,
+  `event_count`, `byte_count`, `coverage`, `included_event_ids`) that 020
+  exclusively writes is byte-for-byte unchanged between `@1` and `@2`. This
+  is a no-code compatibility case, but 020's own version citation is now
+  stale and must not be assumed away: its owner must record an explicit
+  reacceptance/version-binding update to `@2` (spec/plan text only) before
+  handoff, even though no implementation edit is owed.
 - No other slice has begun implementation against `I-010E` yet, so no
   further downstream migration is owed at this time.
 
