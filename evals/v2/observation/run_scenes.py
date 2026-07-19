@@ -146,7 +146,7 @@ def run_budget_sweep() -> list[dict]:
 
 def run_continuation_attacks() -> list[dict]:
     rows = []
-    for case in _load("continuation"):
+    for case in [*_load("continuation"), *_load("resource-safety")]:
         provider_kwargs: dict[str, Any] = dict(ROOM_KWARGS)
         if "retention_max_events" in case:
             provider_kwargs["retention_max_events"] = case["retention_max_events"]
@@ -170,6 +170,8 @@ def run_continuation_attacks() -> list[dict]:
         observed_has_more_after = None
         observed_truncated_by = None
         observed_page_event_ids: list[list[str]] = []
+        observed_max_active_cursor_records = 0
+        observed_window_object_ids: set[int] = set()
         try:
             page = continuation.fetch(request, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
             outcome = "accept"
@@ -177,6 +179,14 @@ def run_continuation_attacks() -> list[dict]:
             observed_has_more_after = page["coverage"]["has_more_after"]
             observed_truncated_by = page["coverage"]["truncated_by"]
             observed_page_event_ids.append([event["id"] for event in page["events"]])
+            active_windows = continuation._cursor_windows[capability["handle_id"]]
+            observed_max_active_cursor_records = max(
+                observed_max_active_cursor_records, len(active_windows)
+            )
+            if "next_cursor" in page:
+                observed_window_object_ids.add(
+                    id(active_windows[page["next_cursor"]]["window_event_ids"])
+                )
             if case["expect"] == "accept-then-paginate" and "next_cursor" in page:
                 request2 = dict(request, request_id=f"req-{case['case_id']}-2", cursor=page["next_cursor"])
                 page2 = continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
@@ -215,6 +225,14 @@ def run_continuation_attacks() -> list[dict]:
                         host_context=host_context,
                         fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"),
                     )
+                    active_windows = continuation._cursor_windows[capability["handle_id"]]
+                    observed_max_active_cursor_records = max(
+                        observed_max_active_cursor_records, len(active_windows)
+                    )
+                    if "next_cursor" in current_page:
+                        observed_window_object_ids.add(
+                            id(active_windows[current_page["next_cursor"]]["window_event_ids"])
+                        )
                     current_ids = [event["id"] for event in current_page["events"]]
                     overlap = seen_event_ids & set(current_ids)
                     if overlap:
@@ -293,6 +311,36 @@ def run_continuation_attacks() -> list[dict]:
             detail = (detail + "; " if detail else "") + (
                 f"page event IDs {observed_page_event_ids!r} != expected {case['expect_page_event_ids']!r}"
             )
+        exhausted_cursor_records = len(
+            continuation._cursor_windows.get(capability["handle_id"], {})
+        )
+        if (
+            "expect_max_active_cursor_records" in case
+            and observed_max_active_cursor_records != case["expect_max_active_cursor_records"]
+        ):
+            sequence_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"max active cursor records {observed_max_active_cursor_records} != expected "
+                f"{case['expect_max_active_cursor_records']}"
+            )
+        if (
+            "expect_exhausted_cursor_records" in case
+            and exhausted_cursor_records != case["expect_exhausted_cursor_records"]
+        ):
+            sequence_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"exhausted cursor records {exhausted_cursor_records} != expected "
+                f"{case['expect_exhausted_cursor_records']}"
+            )
+        if (
+            "expect_shared_window_objects" in case
+            and len(observed_window_object_ids) != case["expect_shared_window_objects"]
+        ):
+            sequence_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"shared window object count {len(observed_window_object_ids)} != expected "
+                f"{case['expect_shared_window_objects']}"
+            )
 
         result = (
             "PASS"
@@ -305,6 +353,9 @@ def run_continuation_attacks() -> list[dict]:
             "handle_id": capability["handle_id"],
             "has_more_before": observed_has_more_before, "has_more_after": observed_has_more_after,
             "truncated_by": observed_truncated_by, "page_event_ids": observed_page_event_ids,
+            "max_active_cursor_records": observed_max_active_cursor_records,
+            "exhausted_cursor_records": exhausted_cursor_records,
+            "shared_window_object_count": len(observed_window_object_ids),
         }
         rows.append(row)
     return rows

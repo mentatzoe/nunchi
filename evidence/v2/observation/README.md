@@ -23,7 +23,10 @@ implicit.
 - **Continuation (FR-008, FR-009)**: optional, host-owned, opaque,
   bound to participant/room/continuity-scope/trigger; a fetch request
   carries no inline binding fields — the host's actual call context is
-  checked independently against the issued capability's `bound_to`.
+  checked independently against the issued capability's `bound_to`. Cursor
+  tokens are one-shot, each active sequence shares one immutable ordered event
+  window, handles and active cursors have host-configurable hard bounds, and
+  exhausted/expired/revoked state is reclaimed.
 - **Retention (FR-010)**: bounded (`retention_max_events`) and
   outcome-neutral; no prior attention/social outcome ever changes
   retention behavior.
@@ -42,10 +45,10 @@ implicit.
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
 | S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences explained | `s13-equivalence.jsonl` (`CAP-S13-*`, 3 rows) | same |
-| S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 5 rows) | same |
+| S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; cursor resource state remains bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 6 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 39 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 40 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

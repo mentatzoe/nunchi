@@ -648,24 +648,24 @@ S020-A3-01 HIGH/security.
 **Purpose**: Preserve retention-safe immutable cursor identity without
 quadratic or never-pruned host bookkeeping.
 
-- [ ] T066 Add RED tests in
+- [X] T066 Add RED tests in
   `tests/v2/observation/test_budget_and_continuation.py` proving a long
   one-event-per-page chain retains one shared immutable event-ID window and at
   most one active cursor for that sequence, consumed tokens reject as one-shot,
   and exhaustion releases the sequence's active cursor state
-- [ ] T067 Replace copied remaining-ID suffixes in
+- [X] T067 Replace copied remaining-ID suffixes in
   `src/nunchi/observation.py` with a shared immutable ordered event-ID tuple plus
   next-position metadata, consume incoming tokens only after a page validates,
   and preserve all direction/anchor/fixed-window/retention/cap/order guarantees
-- [ ] T068 Add configurable global handle and per-handle active-cursor bounds,
+- [X] T068 Add configurable global handle and per-handle active-cursor bounds,
   explicit host `revoke()` cleanup, and expiry-triggered handle cleanup to
   `ContinuationProvider`; add RED→GREEN tests for each rejection and cleanup
   path without changing accepted I-010A/I-010D wire shapes
-- [ ] T069 Add a deterministic bounded-resource continuation case to
-  `evals/v2/observation/continuation/cases.jsonl`, extend
+- [X] T069 Add a deterministic bounded-resource continuation case to
+  `evals/v2/observation/resource-safety/cases.jsonl`, extend
   `evals/v2/observation/run_scenes.py` to assert retained handle/cursor/window
   counts, and regenerate every aggregate evidence file plus the scene manifest
-- [ ] T070 Append a Phase 15 supersession to
+- [X] T070 Append a Phase 15 supersession to
   `evidence/v2/observation/handoff.md`, restore the Constitution Check rows to
   PASS only on exact GREEN evidence, rerun the complete
   Observation/corpus/eval/full-suite/verdict/Ruff/security/governance/

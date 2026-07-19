@@ -1094,8 +1094,22 @@ class ContinuationProvider:
     """Host-owned, bounded, opaque-to-room-data continuation over one
     :class:`ObservationProvider`'s buffer (FR-008, FR-009)."""
 
-    def __init__(self, provider: ObservationProvider) -> None:
+    def __init__(
+        self,
+        provider: ObservationProvider,
+        *,
+        max_handles: int = 64,
+        max_active_cursors_per_handle: int = 16,
+    ) -> None:
+        for name, value in (
+            ("max_handles", max_handles),
+            ("max_active_cursors_per_handle", max_active_cursors_per_handle),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
         self._provider = provider
+        self._max_handles = max_handles
+        self._max_active_cursors_per_handle = max_active_cursors_per_handle
         self._capabilities: dict[str, dict] = {}
         self._cursors: dict[str, set[str]] = {}
         self._cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
@@ -1114,6 +1128,10 @@ class ContinuationProvider:
     ) -> dict:
         if trigger_event_id not in self._provider._event_index:
             raise ValueError(f"trigger_event_id {trigger_event_id!r} is not an observed event")
+        if len(self._capabilities) >= self._max_handles:
+            raise ContinuationError(
+                f"continuation handle limit {self._max_handles} reached; revoke or expire a handle"
+            )
         handle_id = f"cont-{uuid.uuid4().hex[:12]}"
         capability = {
             "handle_id": handle_id,
@@ -1141,6 +1159,26 @@ class ContinuationProvider:
         self._cursor_sequences[handle_id] = 0
         return capability
 
+    def revoke(self, handle_id: str) -> bool:
+        """Release all host-side state for ``handle_id``; idempotent."""
+        existed = handle_id in self._capabilities
+        self._capabilities.pop(handle_id, None)
+        self._cursors.pop(handle_id, None)
+        self._cursor_windows.pop(handle_id, None)
+        self._cursor_sequences.pop(handle_id, None)
+        return existed
+
+    def _discard_cursor(self, handle_id: str, cursor: str) -> None:
+        """Consume one opaque cursor and remove every host bookkeeping copy."""
+        self._cursors[handle_id].discard(cursor)
+        self._cursor_windows[handle_id].pop(cursor, None)
+        capability = self._capabilities[handle_id]
+        active = [item for item in capability.get("cursors", []) if item != cursor]
+        if active:
+            capability["cursors"] = active
+        else:
+            capability.pop("cursors", None)
+
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
         """Validate binding/expiry/direction/caps/cursor, then serve one page."""
         errors = validate_context_continuation(request)
@@ -1157,7 +1195,11 @@ class ContinuationProvider:
         }
         binding_errors = check_binding_expiry(fetch_case)
         if binding_errors:
+            if "handle is expired at fetch time" in binding_errors:
+                self.revoke(handle_id)
             raise ContinuationError(f"binding/expiry validation failed: {binding_errors}")
+        if capability is None:
+            raise ContinuationError("issued handle state disappeared after binding validation")
 
         events = list(self._provider._events)
         index = self._provider._event_index
@@ -1174,7 +1216,7 @@ class ContinuationProvider:
         cap_bytes = min(max_bytes, capability["max_bytes_per_fetch"])
         around_window_start: int | None = None
         around_window_end: int | None = None
-        cursor_remaining_event_ids: list[str] | None = None
+        cursor_position = 0
 
         if cursor:
             cursor_window = self._cursor_windows[handle_id].get(cursor)
@@ -1190,7 +1232,9 @@ class ContinuationProvider:
                     f"cursor {cursor!r} is bound to anchor_event_id "
                     f"{cursor_window['anchor_event_id']!r}, not {anchor_id!r}"
                 )
-            remaining_event_ids = list(cursor_window["remaining_event_ids"])
+            window_event_ids = cursor_window["window_event_ids"]
+            cursor_position = int(cursor_window["next_position"])
+            remaining_event_ids = window_event_ids[cursor_position:]
             missing_event_ids = [
                 event_id for event_id in remaining_event_ids if event_id not in index
             ]
@@ -1208,13 +1252,16 @@ class ContinuationProvider:
                 around_window_end = int(cursor_window["window_end"])
         elif direction == "before":
             candidate_indices = list(range(anchor_index - 1, -1, -1))
+            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
         elif direction == "after":
             candidate_indices = list(range(anchor_index + 1, len(events)))
+            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
         else:  # around
             radius = max(1, cap_events // 2)
             around_window_start = max(0, anchor_index - radius)
             around_window_end = min(len(events), anchor_index + radius + 1)
             candidate_indices = list(range(around_window_start, around_window_end))
+            window_event_ids = tuple(events[i]["id"] for i in candidate_indices)
             # H020-A1-01 / T056: an ``around`` cursor is the next unserved
             # index inside its original fixed, anchor-bound window. The host
             # rejects an anchor swap and does not let a changed page cap widen
@@ -1223,6 +1270,7 @@ class ContinuationProvider:
         page_events: list[dict] = []
         total_bytes = 0
         next_index = None
+        next_position: int | None = None
         truncated_by: list[str] = []
         for position, i in enumerate(candidate_indices):
             event = events[i]
@@ -1238,8 +1286,7 @@ class ContinuationProvider:
                     truncated_by.append("events")
                 if byte_cap_exceeded:
                     truncated_by.append("bytes")
-                remaining_indices = list(candidate_indices)[position:]
-                cursor_remaining_event_ids = [events[j]["id"] for j in remaining_indices]
+                next_position = cursor_position + position
                 break
             page_events.append(event)
             total_bytes += size
@@ -1275,29 +1322,33 @@ class ContinuationProvider:
             has_more_after = next_index is not None or around_window_end < len(events)
 
         next_cursor = None
+        next_sequence: int | None = None
+        new_cursor_window: dict[str, Any] | None = None
         if next_index is not None:
+            if cursor is None and len(self._cursors[handle_id]) >= self._max_active_cursors_per_handle:
+                raise ContinuationError(
+                    "active cursor limit "
+                    f"{self._max_active_cursors_per_handle} reached for handle {handle_id!r}"
+                )
             # Direction-bound (H020-01): encoding ``direction`` into the
             # cursor lets ``check_binding_expiry`` reject a cursor replayed
             # under a different direction before any page is served.
-            self._cursor_sequences[handle_id] += 1
-            next_cursor = f"{handle_id}:{direction}:{self._cursor_sequences[handle_id]}"
-            self._cursors[handle_id].add(next_cursor)
-            capability.setdefault("cursors", [])
-            if next_cursor not in capability["cursors"]:
-                capability["cursors"].append(next_cursor)
-            if cursor_remaining_event_ids is None:
-                raise ContinuationError("cursor remaining-event metadata was not initialized")
-            new_cursor_window: dict[str, Any] = {
+            next_sequence = self._cursor_sequences[handle_id] + 1
+            next_cursor = f"{handle_id}:{direction}:{next_sequence}"
+            if next_position is None:
+                raise ContinuationError("cursor next-position metadata was not initialized")
+            new_cursor_window = {
                 "anchor_event_id": anchor_id,
                 "direction": direction,
-                "remaining_event_ids": cursor_remaining_event_ids,
+                "window_event_ids": window_event_ids,
+                "next_position": next_position,
             }
             if direction == "around":
                 if around_window_start is None or around_window_end is None:
                     raise ContinuationError("around cursor window was not initialized")
                 new_cursor_window["window_start"] = around_window_start
                 new_cursor_window["window_end"] = around_window_end
-            self._cursor_windows[handle_id][next_cursor] = new_cursor_window
+
 
         actor_ids = {
             ref for event in page_events_ordered for ref in _actor_references({"self": None, "events": [event]})
@@ -1334,4 +1385,19 @@ class ContinuationProvider:
         dedup_errors = check_id_uniqueness(page_events_ordered)
         if dedup_errors:
             raise ContinuationError(f"assembled page failed exact-event dedup: {dedup_errors}")
+
+        # Cursor transitions commit only after the response validates. Incoming
+        # tokens are deliberately one-shot: replacing or exhausting one cursor
+        # reclaims its metadata and capability bookkeeping atomically.
+        if next_cursor is not None:
+            if next_sequence is None or new_cursor_window is None:
+                raise ContinuationError("validated page is missing next-cursor state")
+            if cursor is not None:
+                self._discard_cursor(handle_id, cursor)
+            self._cursor_sequences[handle_id] = next_sequence
+            self._cursors[handle_id].add(next_cursor)
+            self._cursor_windows[handle_id][next_cursor] = new_cursor_window
+            capability["cursors"] = [*capability.get("cursors", []), next_cursor]
+        elif cursor is not None:
+            self._discard_cursor(handle_id, cursor)
         return page

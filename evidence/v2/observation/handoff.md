@@ -762,3 +762,67 @@ pruning.
 H020-A2-01 is closed. This evidence permits a fresh convergence and candidate-attempt-2
 review; it does not accept the slice or authorize integration, cutover, deployment,
 release, or promotion.
+
+## Phase 15 bounded cursor lifecycle supersession (S020-A3-01)
+
+The independent fail-closed review of superseded commit `cd61dfd` identified a
+resource-security finding that remained applicable through `247e282`: every
+minted cursor copied its full remaining-ID suffix and every consumed cursor was
+retained. Owner reproduction over 500 events retained 498 cursor records with
+124,251 event-ID references. The review's 2,000-event shape retained roughly
+1,999,000 references. `evidence/v2/observation/convergence-phase15-2026-07-19.md`
+preserves the rejection and required correction.
+
+T066 first established four RED lifecycle/resource checks: missing shared-window
+metadata, unsupported active-cursor and handle bounds/revocation, and absent
+expiry cleanup. T067–T068 then changed only host-side implementation state:
+
+- each sequence owns one immutable ordered event-ID tuple and each cursor stores
+  only its next position plus direction/anchor/fixed-window binding;
+- a validated incoming cursor is consumed atomically after response validation,
+  with its map, set, and capability-list entries removed before its successor is
+  registered;
+- exhausted chains retain no cursor/window records and expose no stale
+  capability `cursors` field;
+- `ContinuationProvider` defaults to at most 64 issued handles and 16 active
+  cursors per handle, both constructor-configurable positive integers;
+- `revoke(handle_id)` idempotently releases every host-side collection for the
+  handle, and an expired fetch rejects while reclaiming that handle;
+- fresh sequences reject at the active-cursor bound, while following an active
+  one-shot cursor may replace itself without increasing the bound.
+
+The accepted I-010A/I-010D wire shapes are unchanged. Same token replay now has
+explicit one-shot semantics: a consumed cursor rejects rather than accidentally
+re-serving a page. Direction, anchor, immutable identity, fixed-window,
+retention-eviction, cap, ordering, exact-dedup, and zero-progress guarantees all
+remain enforced.
+
+`CONT-S15-006` deterministically paginates `e5` through `e1` one event per page
+and records `max_active_cursor_records=1`, `shared_window_object_count=1`, and
+`exhausted_cursor_records=0`. A direct 2,000-event reproduction returned 1,999
+pages with one active cursor, at most 1,999 retained event-ID references, zero
+cursor records after exhaustion, and no capability cursor field: linear window
+state instead of the rejected quadratic 1,999,000-reference shape.
+
+Phase 15 verification matrix:
+
+| Command | Result |
+|---|---|
+| Phase 15 four-test RED group on `058f4a5` | expected RED: 1 failure + 3 errors; missing lifecycle behavior confirmed |
+| `PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_budget_and_continuation` | 39 tests, OK |
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 114 tests, OK, 0 skipped |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 5 suites, 40 rows, 0 FAIL (`identity-and-hygiene.jsonl`: 9; `budget-sweep.jsonl`: 7; `continuation.jsonl`: 17; `s05-recoverability.jsonl`: 4; `s13-equivalence.jsonl`: 3) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; all 202 attempt-6 cases accounted for, zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1363 tests, OK, 4 environment-dependent optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `ruff check src/nunchi/observation.py tests/v2/observation/test_budget_and_continuation.py evals/v2/observation/run_scenes.py` | clean, exit 0 |
+| `uvx bandit -q -r src/nunchi/observation.py` | clean, exit 0; 0 findings after two LOW runtime `assert` uses were replaced with explicit fail-closed errors |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T070 all complete; SHA256 `f3125f49702a2b4b593f95fa68587859146dafb26f892f8129e3a17337022b99` |
+| `git diff --check` | clean, exit 0 |
+
+S020-A3-01 is closed locally. The previous Phase 12/14 unbounded-bookkeeping
+paragraphs remain unchanged as append-only historical evidence and are
+superseded by this section. This permits a fresh convergence and candidate
+attempt-2 review; it does not accept the slice or authorize integration,
+cutover, deployment, release, or promotion.

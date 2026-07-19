@@ -424,6 +424,146 @@ class TestFetchDocuments(unittest.TestCase):
         self.assertEqual([event["id"] for event in page3["events"]], ["e5"])
         self.assertNotIn("next_cursor", page3)
 
+    def test_cursor_chain_reuses_one_window_and_reclaims_consumed_state(self):
+        provider, events = _room_with_events(20)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e20", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "bounded-chain-1", "handle_id": capability["handle_id"],
+            "direction": "before", "anchor_event_id": "e20", "max_events": 1,
+            "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        cursor1 = page1["next_cursor"]
+        window1 = continuation._cursor_windows[capability["handle_id"]][cursor1]["window_event_ids"]
+        self.assertIsInstance(window1, tuple)
+        self.assertEqual(len(continuation._cursor_windows[capability["handle_id"]]), 1)
+
+        page2 = continuation.fetch(
+            dict(request, request_id="bounded-chain-2", cursor=cursor1),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        cursor2 = page2["next_cursor"]
+        active = continuation._cursor_windows[capability["handle_id"]]
+        self.assertNotIn(cursor1, active)
+        self.assertIs(active[cursor2]["window_event_ids"], window1)
+        self.assertEqual(len(active), 1)
+        self.assertEqual(capability["cursors"], [cursor2])
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                dict(request, request_id="bounded-chain-replay", cursor=cursor1),
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+
+        page = page2
+        page_number = 3
+        while "next_cursor" in page:
+            page = continuation.fetch(
+                dict(
+                    request,
+                    request_id=f"bounded-chain-{page_number}",
+                    cursor=page["next_cursor"],
+                ),
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+            self.assertLessEqual(
+                len(continuation._cursor_windows[capability["handle_id"]]), 1,
+            )
+            page_number += 1
+        self.assertEqual(continuation._cursor_windows[capability["handle_id"]], {})
+        self.assertEqual(continuation._cursors[capability["handle_id"]], set())
+        self.assertNotIn("cursors", capability)
+
+    def test_active_cursor_limit_rejects_a_second_independent_sequence(self):
+        provider, events = _room_with_events(8)
+        continuation = ContinuationProvider(provider, max_active_cursors_per_handle=1)
+        capability = continuation.issue(
+            trigger_event_id="e8", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        continuation.fetch(
+            {
+                "request_id": "active-limit-1", "handle_id": capability["handle_id"],
+                "direction": "before", "anchor_event_id": "e8", "max_events": 1,
+                "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "active-limit-2", "handle_id": capability["handle_id"],
+                    "direction": "around", "anchor_event_id": "e4", "max_events": 1,
+                    "max_bytes": 8192,
+                },
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+        self.assertEqual(len(continuation._cursor_windows[capability["handle_id"]]), 1)
+
+    def test_handle_limit_and_revoke_release_all_state(self):
+        provider, events = _room_with_events(4)
+        continuation = ContinuationProvider(provider, max_handles=1)
+        capability = continuation.issue(
+            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "revoke-1", "handle_id": capability["handle_id"],
+                "direction": "before", "max_events": 1, "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.issue(
+                trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            )
+        continuation.revoke(capability["handle_id"])
+        self.assertFalse(continuation.revoke(capability["handle_id"]))
+        self.assertNotIn(capability["handle_id"], continuation._capabilities)
+        self.assertNotIn(capability["handle_id"], continuation._cursor_windows)
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "revoke-2", "handle_id": capability["handle_id"],
+                    "direction": "before", "max_events": 1, "max_bytes": 8192,
+                    "cursor": page["next_cursor"],
+                },
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+        replacement = continuation.issue(
+            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        self.assertNotEqual(replacement["handle_id"], capability["handle_id"])
+
+    def test_expired_fetch_rejects_and_reclaims_handle_state(self):
+        provider, events = _room_with_events(4)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            expires_at="2026-07-17T01:00:00Z",
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "expiry-cleanup-1", "handle_id": capability["handle_id"],
+                "direction": "before", "max_events": 1, "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T00:30:00Z",
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "expiry-cleanup-2", "handle_id": capability["handle_id"],
+                    "direction": "before", "max_events": 1, "max_bytes": 8192,
+                    "cursor": page["next_cursor"],
+                },
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+        self.assertNotIn(capability["handle_id"], continuation._capabilities)
+        self.assertNotIn(capability["handle_id"], continuation._cursor_windows)
+
     def test_fetch_rejects_when_byte_cap_cannot_admit_the_next_event(self):
         provider, events = _room_with_events(5)
         continuation = ContinuationProvider(provider)
