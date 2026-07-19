@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010B AttentionDecisionV2@1`` (slice 010, T003;
+"""Contract tests for ``I-010B AttentionDecisionV2@2`` (slice 010, T003;
 reworked by T028 after rejection R2).
 
 This file supersedes, in writing, T003's original framing of

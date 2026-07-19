@@ -121,3 +121,24 @@ unchanged.
 that neither this amendment nor amendment A1 disturbs the other's scope or
 any of the R7–R11 findings already cleared — and record accept or reject
 the same way as slice 010's prior candidate attempts.
+
+## Freshness correction (pre-review)
+
+**Flagged by**: Aleph (`v2-observation-owner`), cross-checking the pushed
+candidate directly during program status alignment (Discord).
+
+**Finding**: the schema file's own top-level `description` field (and one
+`$comment`) still self-identified as `AttentionDecisionV2@1`, even though
+the functional fix (the `effective_margin` bound) and every other file
+(amendment record, contract docs, slice spec/plan) already say `@2`. The
+canonical schema is contract truth, not wording — this is the same class
+of miss as A1's own freshness note (the test module docstring caught only
+after the first review pass).
+
+**Correction**: `schemas/v2/attention-decision.schema.json`'s description
+and the `legacy_verdict_confidences` `$comment` now correctly cite `@2`;
+`tests/v2/contract/test_attention_decision.py`'s module docstring likewise.
+A full sweep of every schema, adapter, test, and doc file for a stale
+`@1` self-reference to either `I-010B` or `I-010E` found no further
+misses. No functional change; full baseline and dual-validator suite
+re-verified green (1253 / 195 tests).
