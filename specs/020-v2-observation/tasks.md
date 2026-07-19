@@ -509,29 +509,29 @@ H020-A1-01 HIGH and M020-A1-02 MEDIUM, against rejected candidate
 and every capped page names the actual event/byte stop cause before candidate
 attempt 2 is proposed.
 
-- [ ] T055 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py`
+- [X] T055 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py`
   and a matching adversarial case in
   `evals/v2/observation/continuation/cases.jsonl` that fetch `around` e1–e5
   anchored at e3 with an event cap of 2, follow the minted same-handle,
   same-direction cursor, and reject any page-2 event overlap, repeated cursor,
   or failure to exhaust after the remaining fixed-window event, reproducing
   H020-A1-01
-- [ ] T056 Make `ContinuationProvider.fetch` consume a validated `around`
+- [X] T056 Make `ContinuationProvider.fetch` consume a validated `around`
   cursor as the next scan position, preserve the original anchor-bound fixed
   window and authoritative ordering, emit no duplicate event IDs across the
   page sequence, and make T055 plus all existing direction-binding,
   before/after/around, cap, expiry, and coverage tests pass without weakening
   H020-01 or T054
-- [ ] T057 Add RED continuation-fetch tests and adversarial eval cases proving
+- [X] T057 Add RED continuation-fetch tests and adversarial eval cases proving
   `coverage.truncated_by` reports exactly `events` for event-only truncation,
   exactly `bytes` for byte-only truncation, and both causes when both stop
   conditions are simultaneously true, reproducing M020-A1-02
-- [ ] T058 Track event-cap and byte-cap stop causes independently from
+- [X] T058 Track event-cap and byte-cap stop causes independently from
   `next_index` in `ContinuationProvider.fetch`, return their truthful stable
   cause list, and make T057 plus snapshot/continuation schema, budget, and
   evidence tests pass without changing accepted I-010D wire shape or cap
   enforcement
-- [ ] T059 Regenerate continuation and aggregate evidence, append an attempt-1
+- [X] T059 Regenerate continuation and aggregate evidence, append an attempt-1
   rejection supersession to `evidence/v2/observation/handoff.md` with T055–T058
   RED→GREEN receipts and the final T001–T059 manifest identity, rerun the
   complete observation/corpus/eval/full-suite/verdict/governance/task-manifest/
@@ -546,10 +546,46 @@ attempt 2 is proposed.
 - T057 must fail before T058 is accepted.
 - T056 and T058 may share one implementation pass only after both RED classes
   are captured; neither may weaken T047–T050 or T054.
-- T059 is last and blocks `/speckit-converge`, candidate attempt 2, and handoff
-  attempt 2.
+- T059 closed Phase 12 and initially blocked `/speckit-converge`; convergence
+  then appended T060, which now blocks candidate attempt 2 and handoff attempt 2.
 
 **Checkpoint**: every continuation cursor progresses or exhausts, cap-cause
-coverage names what actually stopped the page, all 59 tasks are complete, and
-the append-only evidence distinguishes rejected attempt 1 from the new
-candidate tree.
+coverage names what actually stopped the page, all tasks through T059 are
+complete, and the append-only evidence distinguishes rejected attempt 1 from
+the new candidate tree before convergence.
+
+## Phase 13: Convergence
+
+**Correction source**: `/speckit-converge` re-run (2026-07-19) against the
+completed T001–T059 candidate tree, found by direct row-count inspection of
+the regenerated evidence files versus the separate manifest that describes
+them.
+
+**Purpose**: Close a stale scene-to-record manifest left behind when Phase 10
+(T050), Phase 11 (T054), and Phase 12 (T055–T058) each appended new
+`continuation.jsonl` rows (and Phase 10 appended a `budget-sweep.jsonl` row)
+without updating the manifest's per-scene row counts or total.
+
+- [X] T060 Regenerate the Scene-to-record manifest table in
+  `evidence/v2/observation/README.md` and supersede the stale T059 aggregate
+  matrix in `evidence/v2/observation/handoff.md` to match the current evidence
+  files: correct `continuation.jsonl`'s stated `CONT-S03-*` count (4 rows) to
+  the actual 9 (`CONT-S03-001`–`009`) and stated `CONT-S15-*` count (2 rows)
+  to the actual 5 (`CONT-S15-001`–`005`); correct `budget-sweep.jsonl`'s stated
+  `BUD-S15-*` count (3 rows) to the actual 4 (`BUD-S15-001`–`004`); and
+  correct the stale 28/36-row totals to the actual 37-row total
+  (`identity-and-hygiene.jsonl`: 9, `budget-sweep.jsonl`: 7,
+  `continuation.jsonl`: 14, `s05-recoverability.jsonl`: 4,
+  `s13-equivalence.jsonl`: 3); re-verify every other scene/file row count with
+  exact JSONL `case_id` counting before recording the correction, per T035 /
+  FR-013 (contradicts)
+
+### Phase 13 dependencies
+
+- T060 is evidence-manifest-only; it has no code, test, or corpus dependency
+  and may run any time against the current evidence files.
+
+**Checkpoint**: `evidence/v2/observation/README.md`'s Scene-to-record
+manifest states exact, currently-reproducible row counts for every scene and
+evidence file, matching `evidence/v2/observation/handoff.md`'s own
+verification matrix.

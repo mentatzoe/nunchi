@@ -579,3 +579,140 @@ F1 CRITICAL is closed. The plan.md Constitution Check rows "Truthful
 identity/observation" and "Evidence before claims", both marked
 `BLOCKED (T054)`, return to `PASS` as of this candidate — see the
 corresponding plan.md update accompanying this section.
+
+## Phase 12 attempt-1 rejection supersession (T055–T059)
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-v2-integrator-attempt-1.md`,
+findings H020-A1-01 HIGH and M020-A1-02 MEDIUM, cited by
+`specs/020-v2-observation/tasks.md` Phase 12. Attempt 1 at
+`7b00bcaa4a2b8af12b6eb71bf6d8b098f4cfeba7` remains rejected and its
+records remain unchanged. This section is the append-only implementation and
+evidence supersession for candidate attempt 2.
+
+### RED reproductions
+
+The Phase 12 tests were run before the product fixes. Eight focused tests
+produced seven expected failures and one control pass:
+
+- `test_around_cursor_progresses_without_overlap_and_exhausts` failed because
+  page 2 repeated `['e2', 'e3']` instead of progressing to `['e4']`;
+- `test_continuation_fetch_reports_byte_only_truncation` failed because the
+  page reported `['events']` instead of `['bytes']`;
+- `test_continuation_fetch_reports_both_truncation_causes` failed because the
+  page reported `['events']` instead of `['events', 'bytes']`;
+- `test_around_cursor_rejects_a_changed_anchor` failed because the minted
+  cursor was not bound to its original anchor;
+- `test_around_cursor_preserves_original_window_when_page_cap_changes` failed
+  because a larger page cap widened the already-minted fixed window and served
+  `['e4', 'e5']` instead of only the original window's remaining `['e4']`;
+- `test_fetch_rejects_when_byte_cap_cannot_admit_the_next_event` failed because
+  an empty page minted the same-index non-progress cursor;
+- `test_around_cursor_preserves_event_identity_across_retention_shift` failed
+  because bounded deque eviction shifted the stored numeric index and page 2
+  served `['e5']` instead of the original window's remaining `['e4']`;
+- `test_continuation_fetch_reports_event_only_truncation` passed as the control.
+
+The pre-fix eval replay likewise returned 3 FAIL across 13 continuation rows,
+with every other eval suite green. These receipts reproduce H020-A1-01 and
+M020-A1-02 without weakening the existing direction-binding or coverage tests.
+
+### Fix and focused GREEN receipts
+
+`ContinuationProvider.fetch` now consumes a validated `around` cursor as the
+next unserved index inside the original fixed anchor-bound window. The host
+stores that opaque cursor's anchor and window bounds, rejects an anchor swap,
+does not let a later page-cap change widen the minted window, and retains the
+remaining event identities so deque eviction cannot retarget a cursor. Page 1 for
+e1–e5 around anchor e3 serves `['e2', 'e3']`; replay of its cursor serves
+`['e4']`, has no event overlap, and emits no further cursor. Before/after
+pagination, handle/direction binding, authoritative order, expiry, and the
+T054 side-specific coverage formula remain unchanged.
+
+A byte cap that cannot admit even the next single authoritative event now
+raises `ContinuationError` instead of returning an empty page with a cursor at
+the same index. Therefore every cursor the provider actually mints either
+advances or exhausts.
+
+The fetch loop now records `event_cap_reached` and `byte_cap_exceeded`
+independently at the exact candidate that stops the page. The stable
+`coverage.truncated_by` order is therefore `['events']` for event-only,
+`['bytes']` for byte-only, and `['events', 'bytes']` when both conditions are
+simultaneously true.
+
+Focused verification:
+
+| Check | Result |
+|---|---|
+| Eight Phase 12 unit tests | 8 tests, OK; cursor progresses/exhausts, preserves anchor/window/event-identity binding across retention shifts, rejects a zero-progress byte cap, and all three truncation-cause shapes are exact |
+| `CONT-S03-008` | PASS; page IDs `[['e2', 'e3'], ['e4']]`, no repeated cursor or event |
+| `CONT-S03-009` | PASS; after e1 eviction shifts every retained index, page 2 still serves original remaining identity `['e4']` rather than `['e5']` |
+| `CONT-S15-003` | PASS; `truncated_by: ['events']` |
+| `CONT-S15-004` | PASS; `truncated_by: ['bytes']` |
+| `CONT-S15-005` | PASS; `truncated_by: ['events', 'bytes']` |
+
+### T059 final verification matrix
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 108 tests, OK, 0 skipped |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 5 suites, 37 rows, 0 FAIL (`identity-and-hygiene.jsonl`: 9; `budget-sweep.jsonl`: 7; `continuation.jsonl`: 14; `s05-recoverability.jsonl`: 4; `s13-equivalence.jsonl`: 3) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; all 202 frozen attempt-6 cases accounted for (100 consumed, 102 explicitly non-consumed), zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1357 tests, OK, 4 environment-dependent skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | Full append-only manifest T001–T059; SHA256 `48fce91126f6c1d0515f5e279c8deec28d1bb9b468e8a209426981acce9b7bff` |
+| `git diff --check` | clean, exit 0 |
+
+Every discovered test/eval/fixture count is nonzero. The 4 full-suite skips are
+environment-dependent optional integrations, not Slice 020 failures. This
+matrix supersedes the Phase 11 matrix for candidate attempt 2 while preserving
+every earlier matrix as an accurate historical receipt.
+
+**Non-blocking follow-up**: `ContinuationProvider` still retains issued
+capabilities in `_capabilities`, minted cursor strings in each handle's
+`_cursors` set, and the corresponding fixed-window bindings in
+`_around_cursor_windows` (including remaining event identities) for the lifetime
+of the in-memory provider. Phase 12 fixes cursor
+progression and truthful cap attribution; it does not add expiry-driven cleanup
+or a size bound to those bookkeeping collections, and this packet makes no
+bounded-bookkeeping claim. Production host owners must add lifecycle pruning or
+explicit limits before treating a long-lived provider as memory-bounded. This
+is follow-up hardening, not an attempt-2 correctness blocker for the accepted
+in-memory reference seam.
+
+H020-A1-01 and M020-A1-02 are closed. The plan.md Constitution Check rows
+"Truthful identity/observation" and "Evidence before claims" return to `PASS`.
+This evidence authorizes convergence and candidate-attempt-2 preparation; it
+does not accept the slice or authorize integration, cutover, deployment,
+release, or promotion.
+
+## Phase 13 evidence-manifest convergence supersession (T060)
+
+A subsequent `/speckit-converge` pass found that the separate
+`evidence/v2/observation/README.md` scene-to-record manifest still described the
+original 28-row candidate even though the generated JSONL evidence had grown.
+T060 corrects that manifest without changing product behavior:
+
+| Evidence file | Verified scene counts | Rows | FAIL |
+|---|---|---:|---:|
+| `identity-and-hygiene.jsonl` | S01 2; S02 2; S04 2; S11 2; S16 1 | 9 | 0 |
+| `budget-sweep.jsonl` | S03 3; S15 4 | 7 | 0 |
+| `continuation.jsonl` | S03 9; S15 5 | 14 | 0 |
+| `s05-recoverability.jsonl` | S05 4 | 4 | 0 |
+| `s13-equivalence.jsonl` | S13 3 | 3 | 0 |
+| **Total** | all nine applicable scenes | **37** | **0** |
+
+The manifest now states those exact counts and remains reproducible with
+`PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes`.
+
+The final append-only task graph is T001–T060, all complete, with SHA256
+`de7bbcf87e45b2d06d8685023b404c29f06e088930f7005296984ed33fd3c85d`
+from `python3 scripts/check_governance.py --task-manifest
+specs/020-v2-observation`. The T001–T059 digest in the T059 matrix remains an
+accurate historical receipt for the graph immediately before convergence
+appended T060.
+
+T060 closes the evidence-manifest contradiction and permits another convergence
+pass. It does not accept the slice or authorize integration, cutover,
+deployment, release, or promotion.

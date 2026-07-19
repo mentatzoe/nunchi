@@ -14,7 +14,7 @@ from nunchi.observation import (
     serialized_byte_size,
     validate_context_continuation,
 )
-from tests.v2.observation.helpers import FIXTURE_ACTORS, make_message, make_provider, seed_room
+from tests.v2.observation.helpers import make_message, make_provider, seed_room
 
 
 def _room_with_events(count: int, provider=None):
@@ -224,6 +224,185 @@ class TestFetchDocuments(unittest.TestCase):
         self.assertEqual([event["id"] for event in page["events"]], ["e1"])
         self.assertTrue(page["coverage"]["has_more_before"])  # e2 was never served
         self.assertTrue(page["coverage"]["has_more_after"])  # e3 (anchor)..e5 were never served either
+
+    def test_around_cursor_progresses_without_overlap_and_exhausts(self):
+        # H020-A1-01 / T055: a valid same-handle, same-direction cursor must
+        # resume at the next unserved index inside the original anchor-bound
+        # window rather than reconstructing and replaying page 1 forever.
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "around-page-1", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page1["events"]], ["e2", "e3"])
+        self.assertIn("next_cursor", page1)
+
+        page2 = continuation.fetch(
+            dict(request, request_id="around-page-2", cursor=page1["next_cursor"]),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        ids1 = {event["id"] for event in page1["events"]}
+        ids2 = {event["id"] for event in page2["events"]}
+        self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
+        self.assertEqual(ids1 & ids2, set())
+        self.assertNotIn("next_cursor", page2)
+
+    def test_around_cursor_rejects_a_changed_anchor(self):
+        provider, events = _room_with_events(6)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=4, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "around-anchor-1", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                dict(
+                    request,
+                    request_id="around-anchor-2",
+                    anchor_event_id="e5",
+                    cursor=page1["next_cursor"],
+                ),
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+
+    def test_around_cursor_preserves_original_window_when_page_cap_changes(self):
+        provider, events = _room_with_events(6)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=4, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "around-window-1", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        page2 = continuation.fetch(
+            dict(
+                request,
+                request_id="around-window-2",
+                max_events=4,
+                cursor=page1["next_cursor"],
+            ),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
+        self.assertNotIn("next_cursor", page2)
+
+    def test_around_cursor_preserves_event_identity_across_retention_shift(self):
+        provider = make_provider(retention_max_events=5)
+        initial_events = [
+            make_message(
+                f"e{i}", "discord:1001", f"message {i}",
+                timestamp=f"2026-07-17T01:00:0{i}Z",
+            )
+            for i in range(1, 6)
+        ]
+        seed_room(provider, initial_events)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "around-retention-1", "handle_id": capability["handle_id"],
+            "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page1["events"]], ["e2", "e3"])
+
+        # Appending e6 evicts e1 and shifts every surviving deque index. The
+        # cursor must still resolve the original window's remaining e4 by
+        # identity; treating its opaque numeric tail as a live index serves e5.
+        seed_room(
+            provider,
+            [make_message("e6", "discord:1001", "message 6", timestamp="2026-07-17T01:00:06Z")],
+        )
+        page2 = continuation.fetch(
+            dict(request, request_id="around-retention-2", cursor=page1["next_cursor"]),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
+        self.assertNotIn("next_cursor", page2)
+
+    def test_fetch_rejects_when_byte_cap_cannot_admit_the_next_event(self):
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=8192,
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "no-progress-byte-cap", "handle_id": capability["handle_id"],
+                    "direction": "around", "anchor_event_id": "e3", "max_events": 6, "max_bytes": 1,
+                },
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+
+    def test_continuation_fetch_reports_event_only_truncation(self):
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "event-only", "handle_id": capability["handle_id"],
+                "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": 8192,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual(page["coverage"]["truncated_by"], ["events"])
+
+    def test_continuation_fetch_reports_byte_only_truncation(self):
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        one_event_bytes = serialized_byte_size(provider._events[0])
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=one_event_bytes,
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "byte-only", "handle_id": capability["handle_id"],
+                "direction": "around", "anchor_event_id": "e3", "max_events": 6,
+                "max_bytes": one_event_bytes,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual(page["coverage"]["truncated_by"], ["bytes"])
+
+    def test_continuation_fetch_reports_both_truncation_causes(self):
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        one_event_bytes = serialized_byte_size(provider._events[1])
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=1, max_bytes_per_fetch=one_event_bytes,
+        )
+        page = continuation.fetch(
+            {
+                "request_id": "both-causes", "handle_id": capability["handle_id"],
+                "direction": "around", "anchor_event_id": "e3", "max_events": 1,
+                "max_bytes": one_event_bytes,
+            },
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual(page["coverage"]["truncated_by"], ["events", "bytes"])
 
     def test_around_fetch_requires_anchor(self):
         provider, continuation, capability, host_context = self._issued()

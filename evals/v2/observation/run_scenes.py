@@ -147,7 +147,10 @@ def run_budget_sweep() -> list[dict]:
 def run_continuation_attacks() -> list[dict]:
     rows = []
     for case in _load("continuation"):
-        provider = ObservationProvider(**ROOM_KWARGS)
+        provider_kwargs: dict[str, Any] = dict(ROOM_KWARGS)
+        if "retention_max_events" in case:
+            provider_kwargs["retention_max_events"] = case["retention_max_events"]
+        provider = ObservationProvider(**provider_kwargs)
         for event in case["events"]:
             provider.ingest({
                 "delivery_id": f"delivery:{event['id']}", "disposition": "candidate-event",
@@ -162,21 +165,69 @@ def run_continuation_attacks() -> list[dict]:
         outcome = None
         detail = ""
         dedup_violation = False
+        sequence_mismatch = False
         observed_has_more_before = None
         observed_has_more_after = None
+        observed_truncated_by = None
+        observed_page_event_ids: list[list[str]] = []
         try:
             page = continuation.fetch(request, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
             outcome = "accept"
             observed_has_more_before = page["coverage"]["has_more_before"]
             observed_has_more_after = page["coverage"]["has_more_after"]
+            observed_truncated_by = page["coverage"]["truncated_by"]
+            observed_page_event_ids.append([event["id"] for event in page["events"]])
             if case["expect"] == "accept-then-paginate" and "next_cursor" in page:
                 request2 = dict(request, request_id=f"req-{case['case_id']}-2", cursor=page["next_cursor"])
                 page2 = continuation.fetch(request2, host_context=host_context, fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"))
+                observed_page_event_ids.append([event["id"] for event in page2["events"]])
                 overlap = {e["id"] for e in page["events"]} & {e["id"] for e in page2["events"]}
                 if overlap:
                     dedup_violation = True
                     detail = f"exact-event dedup violated: {overlap}"
                 outcome = "accept-then-paginate"
+            elif case["expect"] == "accept-then-paginate-until-exhausted":
+                for event in case.get("between_page_events", []):
+                    provider.ingest({
+                        "delivery_id": f"delivery:{event['id']}",
+                        "disposition": "candidate-event",
+                        "authorized": True,
+                        "event": event,
+                        "actors": {},
+                    })
+                seen_event_ids = {event["id"] for event in page["events"]}
+                seen_cursors: set[str] = set()
+                current_page = page
+                while "next_cursor" in current_page:
+                    next_cursor = current_page["next_cursor"]
+                    if next_cursor in seen_cursors:
+                        sequence_mismatch = True
+                        detail = f"non-progress cursor repeated: {next_cursor}"
+                        break
+                    seen_cursors.add(next_cursor)
+                    request2 = dict(
+                        request,
+                        request_id=f"req-{case['case_id']}-{len(observed_page_event_ids) + 1}",
+                        cursor=next_cursor,
+                    )
+                    current_page = continuation.fetch(
+                        request2,
+                        host_context=host_context,
+                        fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"),
+                    )
+                    current_ids = [event["id"] for event in current_page["events"]]
+                    overlap = seen_event_ids & set(current_ids)
+                    if overlap:
+                        dedup_violation = True
+                        detail = f"exact-event dedup violated: {overlap}"
+                        break
+                    seen_event_ids.update(current_ids)
+                    observed_page_event_ids.append(current_ids)
+                    if len(observed_page_event_ids) > len(case["events"]) + 1:
+                        sequence_mismatch = True
+                        detail = "pagination did not exhaust within the finite event bound"
+                        break
+                outcome = "accept-then-paginate-until-exhausted"
             elif case["expect"] == "reject-on-second-fetch" and "next_cursor" in page:
                 # H020-01 adversarial shape: the first fetch must succeed and
                 # mint a cursor, then a *second* fetch replaying that cursor
@@ -207,13 +258,28 @@ def run_continuation_attacks() -> list[dict]:
             detail = (detail + "; " if detail else "") + (
                 f"has_more_after {observed_has_more_after!r} != expected {case['expect_has_more_after']!r}"
             )
+        if "expect_truncated_by" in case and observed_truncated_by != case["expect_truncated_by"]:
+            coverage_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"truncated_by {observed_truncated_by!r} != expected {case['expect_truncated_by']!r}"
+            )
+        if "expect_page_event_ids" in case and observed_page_event_ids != case["expect_page_event_ids"]:
+            sequence_mismatch = True
+            detail = (detail + "; " if detail else "") + (
+                f"page event IDs {observed_page_event_ids!r} != expected {case['expect_page_event_ids']!r}"
+            )
 
-        result = "PASS" if outcome == case["expect"] and not dedup_violation and not coverage_mismatch else "FAIL"
+        result = (
+            "PASS"
+            if outcome == case["expect"] and not dedup_violation and not coverage_mismatch and not sequence_mismatch
+            else "FAIL"
+        )
         row = {
             "scene_id": case["scene_id"], "case_id": case["case_id"], "title": case["title"],
             "result": result, "expected": case["expect"], "observed": outcome, "detail": detail,
             "handle_id": capability["handle_id"],
             "has_more_before": observed_has_more_before, "has_more_after": observed_has_more_after,
+            "truncated_by": observed_truncated_by, "page_event_ids": observed_page_event_ids,
         }
         rows.append(row)
     return rows

@@ -151,17 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | BLOCKED (T055–T058) | Exact self, native relations, bounded context, unknowns, and continuity remain primary requirements; attempt-1 review proved that `around` cursor replay does not progress and byte-cap truncation is mislabeled. This row returns to PASS only after the Phase 12 RED→GREEN corrections and evidence land. |
+| Truthful identity/observation | PASS | Exact self, native relations, bounded context, unknowns, and continuity remain primary requirements; Phase 12 consumes the validated `around` cursor inside its original fixed anchor-bound window, rejects anchor swaps and zero-progress byte caps, preserves remaining event identity across retention-index shifts, and reports event-cap and byte-cap stop causes independently. Eight focused tests and `CONT-S03-008`–`009`/`CONT-S15-003`–`005` prove the attempt-1 defects closed. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T055–T059) | Shared/reference replay, budget, recoverability, restart, and capability evidence remain distinct from downstream live-surface proof; attempt-1 evidence omitted around-cursor progression and reported the wrong cap cause. This row returns to PASS only when those gaps and the superseding attempt-2 matrix are recorded. |
+| Evidence before claims | PASS | Shared/reference replay, budget, recoverability, restart, and capability evidence remain distinct from downstream live-surface proof; the Phase 12 supersession records RED reproductions, 108 green Observation tests, 37 green eval rows, 202/202 corpus accounting, and the 1357-test repository pass before candidate-attempt-2 preparation. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
-| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; tasks remain `DORMANT` while the slice is `PLANNED`. |
+| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: PASS for scope and control-plane structure; implementation
-truthfulness and evidence remain explicitly BLOCKED by T055–T059. No prohibited
-SpecKit output is planned, and no candidate-attempt-2 or handoff claim is valid
-until those tasks close.
+Post-design re-check: PASS. T055–T059 close the two attempt-1 findings with
+RED→GREEN tests, eval cases, regenerated evidence, and the complete verification
+matrix. No prohibited SpecKit output is planned; candidate attempt 2 and its
+handoff still require the ordinary convergence/candidate/handoff lifecycle.
 
 ## Slice Interfaces
 

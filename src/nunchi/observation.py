@@ -1098,6 +1098,7 @@ class ContinuationProvider:
         self._provider = provider
         self._capabilities: dict[str, dict] = {}
         self._cursors: dict[str, set[str]] = {}
+        self._around_cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
 
     def issue(
         self,
@@ -1135,6 +1136,7 @@ class ContinuationProvider:
             raise ValueError(f"issued capability failed self-validation: {list(errors)}")
         self._capabilities[handle_id] = capability
         self._cursors[handle_id] = set()
+        self._around_cursor_windows[handle_id] = {}
         return capability
 
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
@@ -1168,6 +1170,9 @@ class ContinuationProvider:
         max_bytes = request["max_bytes"]
         cap_events = min(max_events, capability["max_events_per_fetch"])
         cap_bytes = min(max_bytes, capability["max_bytes_per_fetch"])
+        around_window_start: int | None = None
+        around_window_end: int | None = None
+        around_remaining_event_ids: list[str] | None = None
 
         if direction == "before":
             start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index - 1
@@ -1176,27 +1181,80 @@ class ContinuationProvider:
             start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index + 1
             candidate_indices = range(start, len(events))
         else:  # around
-            radius = max(1, cap_events // 2)
-            around_window_start = max(0, anchor_index - radius)
-            around_window_end = min(len(events), anchor_index + radius + 1)
-            candidate_indices = list(range(around_window_start, around_window_end))
+            if cursor:
+                cursor_window = self._around_cursor_windows[handle_id].get(cursor)
+                if cursor_window is None:
+                    raise ContinuationError(
+                        f"around cursor {cursor!r} has no bound window metadata"
+                    )
+                if cursor_window["anchor_event_id"] != anchor_id:
+                    raise ContinuationError(
+                        f"around cursor {cursor!r} is bound to anchor_event_id "
+                        f"{cursor_window['anchor_event_id']!r}, not {anchor_id!r}"
+                    )
+                around_window_start = int(cursor_window["window_start"])
+                around_window_end = int(cursor_window["window_end"])
+                remaining_event_ids = list(cursor_window["remaining_event_ids"])
+                missing_event_ids = [
+                    event_id for event_id in remaining_event_ids if event_id not in index
+                ]
+                if missing_event_ids:
+                    raise ContinuationError(
+                        f"around cursor {cursor!r} references events no longer retained: "
+                        f"{missing_event_ids}"
+                    )
+                # Resolve the original window's remaining identities against
+                # the live deque. Numeric indices shift when bounded retention
+                # evicts an older event; event identity does not.
+                candidate_indices = [index[event_id] for event_id in remaining_event_ids]
+            else:
+                radius = max(1, cap_events // 2)
+                around_window_start = max(0, anchor_index - radius)
+                around_window_end = min(len(events), anchor_index + radius + 1)
+                candidate_indices = list(range(around_window_start, around_window_end))
+            # H020-A1-01 / T056: an ``around`` cursor is the next unserved
+            # index inside its original fixed, anchor-bound window. The host
+            # rejects an anchor swap and does not let a changed page cap widen
+            # that already-minted window.
 
         page_events: list[dict] = []
         total_bytes = 0
         next_index = None
+        truncated_by: list[str] = []
         for position, i in enumerate(candidate_indices):
             event = events[i]
             size = serialized_byte_size(event)
-            if len(page_events) >= cap_events or total_bytes + size > cap_bytes:
+            event_cap_reached = len(page_events) >= cap_events
+            byte_cap_exceeded = total_bytes + size > cap_bytes
+            if event_cap_reached or byte_cap_exceeded:
                 next_index = i
+                # M020-A1-02 / T058: the next-index sentinel says only that
+                # the page stopped. Preserve each actual stop cause instead of
+                # attributing every truncation to the event cap.
+                if event_cap_reached:
+                    truncated_by.append("events")
+                if byte_cap_exceeded:
+                    truncated_by.append("bytes")
+                if direction == "around":
+                    remaining_indices = list(candidate_indices)[position:]
+                    around_remaining_event_ids = [events[j]["id"] for j in remaining_indices]
                 break
             page_events.append(event)
             total_bytes += size
+        if next_index is not None and not page_events:
+            # A cursor at the same unserved index would repeat forever. Fail
+            # closed instead: the caller must request a byte cap large enough
+            # to admit at least one authoritative event.
+            raise ContinuationError(
+                f"max_bytes={cap_bytes} cannot admit the next event; refusing a non-progress cursor"
+            )
         if direction in ("before", "after"):
             page_events_ordered = list(reversed(page_events)) if direction == "before" else page_events
             has_more_before = next_index is not None if direction == "before" else None
             has_more_after = next_index is not None if direction == "after" else None
         else:
+            if around_window_start is None or around_window_end is None:
+                raise ContinuationError("around cursor window was not initialized")
             page_events_ordered = page_events
             # L020-01: truthful side-specific coverage instead of two nulls.
             # Either side is incomplete when the fixed radius window ends
@@ -1224,6 +1282,19 @@ class ContinuationProvider:
             capability.setdefault("cursors", [])
             if next_cursor not in capability["cursors"]:
                 capability["cursors"].append(next_cursor)
+            if direction == "around":
+                if (
+                    around_window_start is None
+                    or around_window_end is None
+                    or around_remaining_event_ids is None
+                ):
+                    raise ContinuationError("around cursor window was not initialized")
+                self._around_cursor_windows[handle_id][next_cursor] = {
+                    "anchor_event_id": anchor_id,
+                    "window_start": around_window_start,
+                    "window_end": around_window_end,
+                    "remaining_event_ids": around_remaining_event_ids,
+                }
 
         actor_ids = {
             ref for event in page_events_ordered for ref in _actor_references({"self": None, "events": [event]})
@@ -1243,7 +1314,7 @@ class ContinuationProvider:
                 "has_more_before": has_more_before,
                 "has_more_after": has_more_after,
                 "has_gaps": False,
-                "truncated_by": ["events"] if next_index is not None else [],
+                "truncated_by": truncated_by,
                 "continuity": self._provider.continuity,
                 "has_restart_gap": False if self._provider.continuity != "unknown" else None,
                 "max_events": cap_events,
