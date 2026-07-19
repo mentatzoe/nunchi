@@ -738,3 +738,29 @@ couple all auxiliary observation state to bounded retention.
 **Checkpoint**: returned wire documents cannot rewrite authority, expiry fails
 closed, cursor identity survives ID reuse, side coverage discloses later known
 arrivals, and every host registry is bounded by explicit limits or retention.
+
+## Phase 17: Exact Expiry Boundary
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase17-2026-07-19.md`, finding
+S020-A5-01 HIGH.
+
+**Purpose**: Make `expires_at` the first invalid instant rather than serving
+authority at exact equality.
+
+- [ ] T080 Add a RED exact-boundary test proving `fetch_time == expires_at`
+  rejects and reclaims the handle
+- [ ] T081 Change expiry comparison to exclusive-authority semantics
+  (`fetch_time >= expires_at`); add a deterministic resource-safety case,
+  regenerate evidence/manifest, and append a Phase 17 handoff supersession
+- [ ] T082 Restore planning PASS only after the complete matrix is green; record
+  the T001–T082 graph identity and obtain a fresh immutable independent review
+  before candidate attempt 2
+
+### Phase 17 dependencies
+
+- T081 depends on T080 RED.
+- T082 depends on T081 GREEN evidence and is the final convergence blocker.
+
+**Checkpoint**: expiring authority rejects before serving any event when fetch
+time is equal to or later than `expires_at`.

@@ -151,19 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | Phase 15 bounded cursor lifecycle remains closed and H020-A4-04–05 are closed: retained events have monotonic host generations; capability triggers, cursor anchors, and window entries bind exact event instances; snapshot-generation/side-omission facts disclose later arrivals without admitting them. |
+| Truthful identity/observation | BLOCKED (T080–T081) | Phase 16 event-instance and side-coverage corrections remain closed, but S020-A5-01 proves authority still serves at `fetch_time == expires_at`. T080–T081 must make expiry exclusive and evidence the exact boundary. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS | The appended Phase 16 supersession records the 10-method/13-failure primary RED reproduction plus three focused alias/validation RED probes, 51 focused GREEN tests, 126 green Observation tests, 45 green evidence rows, the generation-bound 2,000-event probe, 202/202 corpus accounting, 1375 full-suite tests with 4 optional skips, 60 fixtures, and passing Ruff/static/governance/diff gates. |
+| Evidence before claims | BLOCKED (T080–T082) | The Phase 16 matrix remains historically accurate for its candidate, but S020-A5-01 rejects candidate readiness. Exact-expiry RED/GREEN/eval evidence, regenerated aggregates, the expanded graph hash, a complete matrix, and a fresh immutable review are required. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: PASS. T071–T079 close S020-A4-01–03/A4-06 and
-H020-A4-04–05 with private deep-copied authority/wire state, fail-closed expiry,
-generation-bound event instances, truthful side coverage, retention-coupled
-registries, deterministic eval evidence, and the complete verification matrix.
-Candidate attempt 2 still requires fresh immutable independent review and the
-ordinary lifecycle; this pass grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 17. T071–T079 remain complete and close
+the six Phase 16 findings, but T080–T082 must reject the exact expiry instant,
+regenerate evidence, rerun the complete matrix, and obtain a fresh immutable
+review. This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 
