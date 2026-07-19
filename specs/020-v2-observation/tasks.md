@@ -1014,13 +1014,13 @@ accepted corpus identity is byte-verifiable.
 
 - [X] T120 Reproduce duplicate receipt request IDs after recent-attestation LRU
   eviction and the pending-overflow loss of an already-issued request
-- [ ] T121 Add RED tests proving a request ID can never be reissued after
+- [X] T121 Add RED tests proving a request ID can never be reissued after
   bounded recent-state eviction and proving the uniqueness structure itself is
   fixed-size
-- [ ] T122 Implement fixed-memory, no-false-negative per-provider request-ID
+- [X] T122 Implement fixed-memory, no-false-negative per-provider request-ID
   non-reuse; conservative false positives fail closed rather than permitting a
   duplicate receipt correlation ID
-- [ ] T123 Reject a new snapshot at the pending-attestation cap before return;
+- [X] T123 Reject a new snapshot at the pending-attestation cap before return;
   preserve every prior issued snapshot until its one rightful receipt is built
 - [ ] T124 Regenerate evidence and rerun the complete matrix and exact scanner,
   freeze/push a new immutable object, and obtain fresh independent fail-closed

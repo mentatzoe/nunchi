@@ -117,17 +117,16 @@ class TestSinglyAttestedImmutableReceipt(unittest.TestCase):
         with self.assertRaises(ObservationInputError):
             provider.build_observation_receipt(fabricated)
 
-    def test_pending_attestations_are_bounded_and_oldest_fails_closed(self):
+    def test_pending_cap_rejects_new_snapshot_without_invalidating_issued_requests(self):
         provider = make_provider(max_pending_receipts=2)
         seed_room(provider, [make_message("e1", "discord:1001", "hi")])
         first = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
         second = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
-        third = provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
-        self.assertLessEqual(len(provider._pending_receipts), 2)
         with self.assertRaises(ObservationInputError):
-            provider.build_observation_receipt(first)
+            provider.snapshot(trigger_event_id="e1", max_events=10, max_bytes=65536)
+        self.assertEqual(len(provider._pending_receipts), 2)
+        provider.build_observation_receipt(first)
         provider.build_observation_receipt(second)
-        provider.build_observation_receipt(third)
 
     def test_duplicate_caller_request_id_cannot_replace_pending_attestation(self):
         provider = make_provider()
@@ -142,6 +141,28 @@ class TestSinglyAttestedImmutableReceipt(unittest.TestCase):
                 request_id="fixed-request-id",
             )
         provider.build_observation_receipt(first)
+
+    def test_request_id_never_reuses_after_recent_attestation_eviction(self):
+        provider = make_provider(max_pending_receipts=1)
+        seed_room(provider, [make_message("e1", "discord:1001", "hi")])
+        first = provider.snapshot(
+            trigger_event_id="e1", max_events=10, max_bytes=65536, request_id="r1"
+        )
+        provider.build_observation_receipt(first)
+        second = provider.snapshot(
+            trigger_event_id="e1", max_events=10, max_bytes=65536, request_id="r2"
+        )
+        provider.build_observation_receipt(second)
+        self.assertNotIn("r1", provider._attested_request_ids)
+        with self.assertRaises(ObservationInputError):
+            provider.snapshot(
+                trigger_event_id="e1", max_events=10, max_bytes=65536,
+                request_id="r1",
+            )
+
+    def test_permanent_request_id_memory_is_fixed_size(self):
+        provider = make_provider()
+        self.assertEqual(len(provider._request_id_filter), 8192)
 
 
 class TestOperationalErrorSeparation(unittest.TestCase):

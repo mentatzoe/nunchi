@@ -1150,3 +1150,51 @@ T119 remains open for fresh independent review of the exact immutable object.
 T103/T107/T112 are historical review gates superseded by T119, not acceptance
 claims. Nothing here establishes `CONVERGED`, `HANDOFF_READY`, acceptance,
 integration, deployment, release, promotion, or cutover authority.
+
+## Phase 23 permanent request-ID uniqueness correction
+
+Owner adversarial review rejected `d70f2fd006007a43a6303e66537327a48794e7ed`
+before its in-flight independent reviews returned. With
+`max_pending_receipts=1`, the recent-attestation LRU forgot `r1` after `r2`,
+allowing valid receipt IDs `r1`, `r2`, `r1`. Pending overflow also returned a
+new snapshot after evicting an older issued request, making the older request's
+required observation receipt impossible.
+
+Phase 23 supersedes the Phase 22 overflow wording:
+
+- each provider owns a fixed 65,536-bit SHA-256 membership filter (8,192 bytes,
+  four positions per ID); once an ID is issued, all its bits remain set for the
+  provider lifetime, so it cannot be reissued after diagnostic LRU eviction;
+- the filter has no false negatives; collisions/saturation can conservatively
+  reject a fresh ID but can never admit a duplicate;
+- when pending attestations reach their explicit cap, a new snapshot rejects
+  before return; every already-issued pending request remains exactly
+  attestable once;
+- pending exact documents and recent attested IDs remain separately bounded.
+
+Direct GREEN probe:
+
+```text
+{'reused_request_id': 'ObservationInputError',
+ 'pending_overflow_new': 'ObservationInputError',
+ 'older_receipt': 'old',
+ 'filter_bytes': 8192}
+```
+
+Phase 23 matrix:
+
+| Command | Result |
+|---|---|
+| focused receipt/provider/corpus modules | 42 tests, OK |
+| Observation discovery | 166 tests, OK |
+| aggregate scenes | 52 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 8 equivalence) |
+| Phase 18 adversarial evaluator | 11 rows, 0 FAIL |
+| full repository suite | 1415 tests, OK; 4 optional-integration skips |
+| verdict fixture discovery | 60 fixtures |
+| expanded Ruff / production Bandit / governance / task manifest / `git diff --check` / absent generated reviewer checklist | clean |
+
+T124 remains open for exact-object scan and fresh independent review. The
+reviews already running against rejected `d70f2fd` are stale for approval and
+may be used only as additional review input. Nothing here establishes
+`CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
+promotion, or cutover authority.

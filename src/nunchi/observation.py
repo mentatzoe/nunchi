@@ -26,6 +26,7 @@ docs/contracts/nunchi-v2.md assigns to every I-010A/I-010D/I-010E consumer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import uuid
@@ -57,6 +58,8 @@ RECEIPT_WRITER_MAP = dict(zip(RECEIPT_STAGES, RECEIPT_WRITERS))
 PARTICIPANT_HOST_OUTCOMES = ("sent", "silent", "unknown")
 WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 TRANSPORT_DELIVERY = ("sent", "failed", "unknown", "unavailable")
+REQUEST_ID_FILTER_BYTES = 8192
+REQUEST_ID_FILTER_HASHES = 4
 
 # The FR-013 slice-owned token-size proxy. Evidence-only; never written onto
 # I-010E, whose closed observation body has no token field (FR-015).
@@ -890,6 +893,7 @@ class ObservationProvider:
         self._max_pending_receipts = max_pending_receipts
         self._pending_receipts: OrderedDict[str, dict] = OrderedDict()
         self._attested_request_ids: OrderedDict[str, None] = OrderedDict()
+        self._request_id_filter = bytearray(REQUEST_ID_FILTER_BYTES)
 
     # -- identity -----------------------------------------------------
 
@@ -914,6 +918,24 @@ class ObservationProvider:
         if self.room_kind is not None:
             block["kind"] = self.room_kind
         return block
+
+    def _request_id_filter_positions(self, request_id: str) -> tuple[int, ...]:
+        digest = hashlib.sha256(request_id.encode("utf-8")).digest()
+        bit_count = len(self._request_id_filter) * 8
+        return tuple(
+            int.from_bytes(digest[index * 2:index * 2 + 2], "big") % bit_count
+            for index in range(REQUEST_ID_FILTER_HASHES)
+        )
+
+    def _request_id_was_issued(self, request_id: str) -> bool:
+        return all(
+            self._request_id_filter[position // 8] & (1 << (position % 8))
+            for position in self._request_id_filter_positions(request_id)
+        )
+
+    def _remember_request_id(self, request_id: str) -> None:
+        for position in self._request_id_filter_positions(request_id):
+            self._request_id_filter[position // 8] |= 1 << (position % 8)
 
     # -- ingestion (FR-003, FR-004, FR-010) ----------------------------
 
@@ -1101,6 +1123,13 @@ class ObservationProvider:
         """Assemble one bounded, trigger-first ``AttentionRequestV2`` document."""
         if not _is_positive_integer(max_events) or not _is_positive_integer(max_bytes):
             raise ValueError("max_events and max_bytes must be positive integers")
+        if len(self._pending_receipts) >= self._max_pending_receipts:
+            raise ObservationInputError(
+                f"pending observation receipt limit {self._max_pending_receipts} reached; "
+                "attest an issued request before creating another snapshot"
+            )
+        if request_id is not None and not _nes(request_id):
+            raise ObservationInputError("request_id must be a non-empty string when supplied")
         events = list(self._events)
         trigger_index = self._event_index.get(trigger_event_id)
         if trigger_index is None:
@@ -1205,9 +1234,21 @@ class ObservationProvider:
         if self.event_visibility:
             coverage["event_visibility"] = dict(self.event_visibility)
 
+        issued_request_id = request_id
+        if issued_request_id is None:
+            for _ in range(16):
+                generated = f"req-{uuid.uuid4()}"
+                if not self._request_id_was_issued(generated):
+                    issued_request_id = generated
+                    break
+            if issued_request_id is None:
+                raise ObservationInputError(
+                    "could not allocate a fresh request_id from the bounded uniqueness filter"
+                )
+
         document: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
-            "request_id": request_id or f"req-{uuid.uuid4()}",
+            "request_id": issued_request_id,
             "self": self.self_block(),
             "room": self.room_block(),
             "actors": actors,
@@ -1218,17 +1259,12 @@ class ObservationProvider:
         errors = validate_attention_request(document)
         if errors:
             raise ObservationInputError(f"assembled snapshot failed self-validation: {errors}")
-        issued_request_id = document["request_id"]
-        if (
-            issued_request_id in self._pending_receipts
-            or issued_request_id in self._attested_request_ids
-        ):
+        if self._request_id_was_issued(issued_request_id):
             raise ObservationInputError(
                 f"request_id {issued_request_id!r} was already issued by this provider"
             )
-        if len(self._pending_receipts) >= self._max_pending_receipts:
-            self._pending_receipts.popitem(last=False)
         self._pending_receipts[issued_request_id] = deepcopy(document)
+        self._remember_request_id(issued_request_id)
         return document
 
     # -- observation-stage receipt (FR-015) ----------------------------
