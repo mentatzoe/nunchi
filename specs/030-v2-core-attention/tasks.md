@@ -4,7 +4,12 @@
 
 **Slice state**: `PLANNED`
 
-**Execution status**: `DORMANT` while the slice remains `PLANNED`
+**Execution status**: stated by reference, never as a fixed state claim —
+unchecked tasks execute only inside a bound `run speckit` run for this slice
+while the transition-updated `Slice state` declaration above and lifecycle
+evidence establish `ACTIVE`; they are `DORMANT` under every other established
+state, including `PLANNED` and `READY`. This line is not edited at later state
+transitions.
 
 **Program implementation authority**: `GRANTED`
 
@@ -37,19 +42,19 @@ candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb` represents required
 classifier policy provenance and the paired `NO_WAKE` operational-failure
 override. This consumer independently accepted it at
 `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`; the original
-consumer acceptance and post-acceptance blocker remain immutable history. No
-task below may begin until the fresh bound analysis reports zero scoped CRITICAL/HIGH
-findings and activation evidence establishes `READY`. Do not add local receipt
-fields or encode provenance in `error.detail`.
+consumer acceptance and post-acceptance blocker remain immutable history. Fresh
+bound analysis reports zero scoped CRITICAL/HIGH findings, but the separate A2
+readiness-validator blocker prevents activation; no task below may begin. Do
+not add local receipt fields or encode provenance in `error.detail`.
 
 Accepted I-010B `@2` at exact A2-R1 correction candidate
 `26a6b531fa146ba1f1f5fcd1c4d191041b141301` represents the selected inclusive
 zero-width active-margin audit without changing another decision rule. This
 consumer independently accepted it at
 `evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`; the earlier
-zero-margin blocker remains immutable history. No task below may begin until
-fresh bound analysis reports zero scoped CRITICAL/HIGH findings and activation
-evidence establishes `READY`.
+zero-margin blocker remains immutable history. Fresh bound analysis reports
+zero scoped CRITICAL/HIGH findings, but the separate A2 readiness-validator
+blocker prevents activation; no task below may begin.
 
 **Open program-owner handoff**: the canonical program registry remains stale
 for accepted I-010B/I-010E `@2`. It is recorded at
@@ -58,6 +63,15 @@ and dispositioned at
 `evidence/v2/attention/program-interface-registry-readiness-disposition.md` as
 a non-blocking `v2-program-owner` handoff, not a dependency/task-graph finding.
 This slice neither edits nor claims completion of that program artifact.
+
+**Open readiness blocker**: the activation validator requires dependency `010`
+to match the last candidate in the pre-amendment upstream
+`evidence/v2/contract/slice-handoff.md`, while this consumer must record exact
+accepted A2 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301` to consume
+I-010B `@2`. The exact failure and ownership boundary are recorded at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`.
+This is separate from the non-blocking program-registry handoff above and keeps
+the slice `PLANNED` with no activation evidence.
 
 **Planning reconciliation result**: The spec, plan, and this task graph retain
 the same 47-path documentation matrix (8 `UPDATE`, 17 `NO_IMPACT`, and 22

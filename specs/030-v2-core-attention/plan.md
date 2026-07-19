@@ -107,9 +107,16 @@ records that mismatch as a `NON_BLOCKING_HANDOFF` for this bound slice: it is
 neither slice 030's dependency nor a finding in this slice's requirement/task
 graph. `v2-program-owner` must still synchronize the canonical registry with
 the accepted amendment provenance; `v2-core-owner` records but does not perform
-or claim that program-owned edit. Fresh bound analysis must independently
-report zero scoped CRITICAL/HIGH findings, and immutable activation evidence is
-still required before `READY`.
+or claim that program-owned edit. Fresh bound analysis independently reports
+zero scoped CRITICAL/HIGH findings at
+`evidence/v2/attention/analysis-2026-07-19.md`. A separate activation-boundary
+failure remains open at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`:
+the governance validator still compares dependency `010` with the original
+pre-amendment handoff candidate rather than accepted A2 candidate
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`. No immutable activation record may
+be written and no `READY` or `ACTIVE` declaration may be made until that
+program-level mismatch is resolved.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -511,16 +518,18 @@ readiness analysis.
 | Atomic parity contract | PASS | Non-current `evaluate_v2`/`attention-v2` stage I-030A without calling V1; the complete V1 baseline stays green, and 110 alone removes V1 and staging names while publishing I-030A in one atomic candidate. |
 | Evidence before claims | PASS | Mechanics, replay, multi-model, canary, and margin evidence targets are separate. |
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
-| Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
+| Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks execute only while the declaration and lifecycle evidence establish `ACTIVE`, and remain `DORMANT` at `PLANNED`. |
 | Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
 | Selected zero-width margin / accepted I-010B | PASS | Accepted I-010B `@2` represents applied `effective_margin: 0`; this consumer accepted exact A2-R1 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301`. |
 | Program canonical interface registry | HANDOFF | `v2-program-owner` must synchronize I-010B/I-010E to accepted `@2`; the mismatch is explicitly scoped as a non-blocking owner handoff for slice 030 and is not claimed complete. |
 
 Post-design re-check: PASS for the bound slice. Slice-owned contract questions
 and exact dependency acceptance are resolved; the separately owned canonical
-program-registry mismatch remains an explicit non-blocking handoff. READY still
-requires fresh bound analysis with zero scoped CRITICAL/HIGH findings plus the
-remaining activation prerequisites.
+program-registry mismatch remains an explicit non-blocking handoff. Fresh bound
+analysis is complete, but the separate dependency-validator mismatch recorded
+at
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`
+prevents a truthful activation record and keeps the slice `PLANNED`.
 Because this is a planning-only revision, no `data-model.md`, local contract,
 quickstart, schema, test, corpus, evidence payload, or product documentation is
 created here.

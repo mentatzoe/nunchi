@@ -143,9 +143,15 @@ I-010B/I-010E versions. That open program handoff is recorded at
 and dispositioned for this bound slice at
 `evidence/v2/attention/program-interface-registry-readiness-disposition.md`.
 It remains owned by `v2-program-owner` but is not a slice-030 dependency or a
-CRITICAL/HIGH finding in this slice's requirements/task graph. Slice 030 remains
-`PLANNED` and dormant until a fresh bound analysis reports zero scoped
-CRITICAL/HIGH findings and activation evidence establishes `READY`.
+CRITICAL/HIGH finding in this slice's requirements/task graph. Fresh bound
+analysis reports zero scoped CRITICAL/HIGH findings at
+`evidence/v2/attention/analysis-2026-07-19.md`. Activation nevertheless remains
+blocked because the governance validator requires dependency `010` to match the
+stale pre-amendment candidate in `evidence/v2/contract/slice-handoff.md` rather
+than exact accepted A2 candidate
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`; see
+`evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`.
+Slice 030 remains `PLANNED` and dormant; no activation evidence exists.
 
 ## Interface Summary
 
