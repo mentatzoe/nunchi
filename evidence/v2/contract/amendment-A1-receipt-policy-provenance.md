@@ -2,7 +2,8 @@
 
 **Slice**: `010-v2-contract`
 
-**Status**: `PROPOSED` (pending independent `v2-integrator` review)
+**Status**: `REJECTED` (independent `v2-integrator` review; the accepted
+I-010E `@1` state remains unchanged)
 
 **Amended interface**: `I-010E AttentionReceiptV2` `@1` → `@2`
 
@@ -140,3 +141,23 @@ work around this itself.
 requires (no broader, no narrower) and that `@1`'s prior review scope
 (R7–R11, all cleared) is otherwise undisturbed — and record accept or
 reject the same way as slice 010's original candidate attempts.
+
+## Integrator decision
+
+**Decision**: `REJECTED`
+
+**Reviewed candidate**: `959e4ac6869ff38f19de29070696bb69be4fb36f`
+
+**Rejected by**: `v2-integrator`
+
+**Rejected on**: 2026-07-19
+
+**Decision reference**:
+`evidence/v2/contract/review-2026-07-19-v2-integrator-amendment-A1.md`
+
+The proposed `wake_action` enum admits `WAKE` plus policy provenance even
+though pair presence is defined as an explicit override and the selected
+design names `NO_WAKE` as the override to the shared `WAKE` default. The
+focused correction and complete verification are recorded in the decision
+reference. This amendment rejection does not revoke slice 010's terminal
+attempt-6 acceptance at I-010E `@1`.
