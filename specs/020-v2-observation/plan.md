@@ -151,19 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | BLOCKED (T083–T097) | Phase 16/17 corrections remain closed, but Phase 18 reviews prove hard snapshot bytes, origin merge identity, atomicity, replay complexity, and retention-gap disclosure are false; packet history also contains a false append-only claim. T083–T097 must close those mechanisms and correct the record. |
+| Truthful identity/observation | PASS | T083–T102 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, and the exact closed four-field host context; 47 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T083–T098) | The Phase 17 matrix remains historical evidence for `f38a4fe`, but its static-scan row is not reproducible, its budget evaluator permits a false PASS, and no deterministic concurrency, replay-complexity, or retention-gap evidence exists. RED/GREEN evidence, a committed scanner, corrected packet history, regenerated aggregates, expanded graph hash, complete matrix, and fresh review are required. |
+| Evidence before claims | BLOCKED (T103) | T083–T102 have reproducible RED/GREEN tests, exact-range scanner coverage, corrected packet history, 47 aggregate PASS rows, and 11 adversarial PASS rows. T103 remains the sole blocker: complete matrix, immutable commit/push, and fresh independent verdict. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 18. T080–T082 remain complete and close
-S020-A5-01, but T083–T098 must enforce hard trigger-byte caps,
-originating-request merge deduplication, reproducible static evidence,
-linearizable shared state transitions, linear cursor replay, truthful retention
-gaps, and accurate packet history before another immutable review. This status
-grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED only on T103. Phase 17–19 local mechanisms and
+evidence are GREEN, including exact closed host binding. A complete final matrix,
+immutable pushed candidate, and fresh independent verdict are still required.
+This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

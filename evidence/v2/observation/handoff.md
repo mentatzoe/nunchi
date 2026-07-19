@@ -957,3 +957,20 @@ S020-A5-01 is closed locally. A fresh immutable review of the post-fix candidate
 is still required before candidate attempt 2 can advance through the ordinary
 lifecycle. This section does not accept the slice or authorize integration,
 cutover, deployment, release, or promotion.
+
+## Phase 18 packet-history correction (T097)
+
+The Phase 11 statement above that “T001–T053 remain exactly as originally
+recorded” is false when applied to this mutable packet file. Git-object history
+shows non-prefix edits to earlier T036/T038 packet text across correction
+passes. This appended correction supersedes that provenance claim without
+rewriting it again.
+
+The narrow lifecycle ledgers
+`evidence/v2/observation/slice-candidate.md` and
+`evidence/v2/observation/slice-handoff.md` remain append-only. This broader
+`handoff.md` packet is mutable, append-superseded evidence: historical tables
+remain useful as dated receipts, but neither their bytes nor every surrounding
+claim can be described as immutable. Future verification must cite the current
+superseding section and the relevant Git objects rather than infer append-only
+history from this packet’s prose.

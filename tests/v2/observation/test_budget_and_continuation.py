@@ -9,6 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 import unittest
 
+from evals.v2.observation.run_scenes import run_budget_sweep
 from nunchi.observation import (
     ContinuationError,
     ContinuationProvider,
@@ -34,11 +35,19 @@ class TestHardBudgets(unittest.TestCase):
         self.assertLessEqual(len(snapshot["events"]), 3)
         self.assertIn("events", snapshot["coverage"]["truncated_by"])
 
-    def test_byte_cap_is_enforced_and_reported(self):
+    def test_trigger_larger_than_byte_cap_fails_closed(self):
         provider, events = _room_with_events(5)
-        snapshot = provider.snapshot(trigger_event_id="e3", max_events=100, max_bytes=1)
-        self.assertEqual(len(snapshot["events"]), 1)  # only the trigger fits
-        self.assertIn("bytes", snapshot["coverage"]["truncated_by"])
+        with self.assertRaises(ObservationInputError):
+            provider.snapshot(trigger_event_id="e3", max_events=100, max_bytes=1)
+
+    def test_budget_evidence_never_passes_an_accepted_event_byte_overrun(self):
+        overruns = [
+            row
+            for row in run_budget_sweep()
+            if row.get("observed") != "reject"
+            and row.get("receipt_byte_count", 0) > row["configured_max_bytes"]
+        ]
+        self.assertEqual(overruns, [])
 
     def test_age_cap_is_enforced_and_reported(self):
         provider = make_provider()
@@ -74,7 +83,7 @@ class TestEventVisibilityCoverage(unittest.TestCase):
     def test_event_visibility_present_in_fetch_page_coverage_when_configured(self):
         provider, events = _room_with_events(3, provider=make_provider(event_visibility={"message": "history-and-live"}))
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=10, max_bytes_per_fetch=8192)
         page = continuation.fetch(
             {"request_id": "req-1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 5, "max_bytes": 8192},
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
@@ -84,7 +93,7 @@ class TestEventVisibilityCoverage(unittest.TestCase):
     def test_event_visibility_absent_from_fetch_page_coverage_when_unconfigured(self):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=10, max_bytes_per_fetch=8192)
         page = continuation.fetch(
             {"request_id": "req-1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 5, "max_bytes": 8192},
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
@@ -131,11 +140,21 @@ class TestCoverageAuthoritativeOrder(unittest.TestCase):
 
 
 class TestAcceptedCapabilityShape(unittest.TestCase):
+    def test_issuance_requires_originating_request_event_ids(self):
+        provider, events = _room_with_events(3)
+        continuation = ContinuationProvider(provider)
+        with self.assertRaises(ValueError):
+            continuation.issue(
+                trigger_event_id="e3", max_events_per_fetch=10,
+                max_bytes_per_fetch=4096,
+            )
+
     def test_issued_capability_matches_accepted_i010a_shape(self):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=4096
+            trigger_event_id="e3", originating_event_ids=["e3"],
+            max_events_per_fetch=10, max_bytes_per_fetch=4096,
         )
         self.assertEqual(
             capability["bound_to"],
@@ -146,6 +165,7 @@ class TestAcceptedCapabilityShape(unittest.TestCase):
                 "trigger_event_id": "e3",
             },
         )
+        self.assertNotIn("originating_event_ids", capability)
 
 
 class TestFetchDocuments(unittest.TestCase):
@@ -154,6 +174,7 @@ class TestFetchDocuments(unittest.TestCase):
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
             trigger_event_id=events[-1]["id"],
+            originating_event_ids=[events[-1]["id"]],
             max_events_per_fetch=max_events_per_fetch,
             max_bytes_per_fetch=max_bytes_per_fetch,
         )
@@ -174,6 +195,87 @@ class TestFetchDocuments(unittest.TestCase):
         ids = [event["id"] for event in page["events"]]
         self.assertEqual(ids, sorted(ids, key=lambda x: int(x[1:])))
 
+    def test_host_context_requires_the_exact_closed_binding_shape(self):
+        invalid_contexts = {
+            "additional-property": lambda context: dict(
+                context, unexpected_tenant="other",
+            ),
+            "missing-property": lambda context: {
+                key: value for key, value in context.items()
+                if key != "continuity_scope_id"
+            },
+            "wrong-value": lambda context: dict(context, room_id="other-room"),
+            "malformed": lambda context: {"participant_id": [context["participant_id"]]},
+        }
+        for label, mutate in invalid_contexts.items():
+            with self.subTest(label=label):
+                _, continuation, capability, host_context = self._issued(count=3)
+                with self.assertRaises(ContinuationError):
+                    continuation.fetch(
+                        {
+                            "request_id": f"closed-binding-{label}",
+                            "handle_id": capability["handle_id"],
+                            "direction": "before", "max_events": 10,
+                            "max_bytes": 8192,
+                        },
+                        host_context=mutate(host_context),
+                        fetch_time="2026-07-17T01:00:00Z",
+                    )
+                self.assertEqual(
+                    continuation._cursors[capability["handle_id"]], set(),
+                )
+                self.assertEqual(
+                    continuation._cursor_windows[capability["handle_id"]], {},
+                )
+
+    def test_additional_host_context_rejection_does_not_consume_cursor(self):
+        _, continuation, capability, host_context = self._issued(
+            count=6, max_events_per_fetch=1,
+        )
+        request = {
+            "request_id": "closed-binding-page-1",
+            "handle_id": capability["handle_id"],
+            "direction": "before", "max_events": 1, "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=host_context,
+            fetch_time="2026-07-17T01:00:00Z",
+        )
+        cursor = page1["next_cursor"]
+        page2_request = dict(
+            request, request_id="closed-binding-page-2", cursor=cursor,
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                page2_request,
+                host_context=dict(host_context, unexpected_tenant="other"),
+                fetch_time="2026-07-17T01:00:00Z",
+            )
+        page2 = continuation.fetch(
+            page2_request, host_context=host_context,
+            fetch_time="2026-07-17T01:00:00Z",
+        )
+        self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
+
+    def test_page_overlapping_originating_request_rejects_before_cursor_commit(self):
+        provider, events = _room_with_events(5)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e5", originating_event_ids=["e3", "e4", "e5"],
+            max_events_per_fetch=10, max_bytes_per_fetch=8192,
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "origin-overlap", "handle_id": capability["handle_id"],
+                    "direction": "before", "max_events": 10, "max_bytes": 8192,
+                },
+                host_context=capability["bound_to"],
+                fetch_time="2026-07-17T01:30:00Z",
+            )
+        self.assertEqual(continuation._cursors[capability["handle_id"]], set())
+        self.assertEqual(continuation._cursor_windows[capability["handle_id"]], {})
+
     def test_truncated_around_fetch_reports_truthful_side_specific_coverage(self):
         # L020-01: a truncated `around` page must report which side(s) have
         # more, not two nulls. e1..e10, anchor e5 (index 4), radius window
@@ -181,7 +283,7 @@ class TestFetchDocuments(unittest.TestCase):
         # e1-e3 (before) and e7-e10 (after) unserved.
         provider, events = _room_with_events(10)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e5", max_events_per_fetch=3, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e10", originating_event_ids=["e10"], max_events_per_fetch=3, max_bytes_per_fetch=8192)
         request = {
             "request_id": "req-x", "handle_id": capability["handle_id"],
             "direction": "around", "anchor_event_id": "e5", "max_events": 3, "max_bytes": 8192,
@@ -192,17 +294,19 @@ class TestFetchDocuments(unittest.TestCase):
         self.assertTrue(page["coverage"]["has_more_before"])
         self.assertTrue(page["coverage"]["has_more_after"])
 
-    def test_untruncated_around_fetch_reports_no_more_on_either_side(self):
+    def test_full_buffer_around_fetch_rejects_origin_overlap(self):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e2", max_events_per_fetch=100, max_bytes_per_fetch=65536)
+        capability = continuation.issue(trigger_event_id="e2", originating_event_ids=["e2"], max_events_per_fetch=100, max_bytes_per_fetch=65536)
         request = {
             "request_id": "req-x", "handle_id": capability["handle_id"],
             "direction": "around", "anchor_event_id": "e2", "max_events": 100, "max_bytes": 65536,
         }
-        page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
-        self.assertFalse(page["coverage"]["has_more_before"])
-        self.assertFalse(page["coverage"]["has_more_after"])
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                request, host_context=capability["bound_to"],
+                fetch_time="2026-07-17T01:00:00Z",
+            )
 
     def test_around_fetch_cap_truncated_strictly_before_anchor_reports_has_more_before(self):
         # F1 CRITICAL (Phase 11, convergence-phase11-2026-07-19.md): the
@@ -217,16 +321,16 @@ class TestFetchDocuments(unittest.TestCase):
         continuation = ContinuationProvider(provider)
         one_event_bytes = serialized_byte_size(provider._events[0])
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=one_event_bytes,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=one_event_bytes,
         )
         request = {
             "request_id": "req-x", "handle_id": capability["handle_id"],
-            "direction": "around", "anchor_event_id": "e3", "max_events": 6, "max_bytes": one_event_bytes,
+            "direction": "around", "anchor_event_id": "e3", "max_events": 2, "max_bytes": one_event_bytes,
         }
         page = continuation.fetch(request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z")
-        self.assertEqual([event["id"] for event in page["events"]], ["e1"])
-        self.assertTrue(page["coverage"]["has_more_before"])  # e2 was never served
-        self.assertTrue(page["coverage"]["has_more_after"])  # e3 (anchor)..e5 were never served either
+        self.assertEqual([event["id"] for event in page["events"]], ["e2"])
+        self.assertTrue(page["coverage"]["has_more_before"])  # e1 is outside the fixed window
+        self.assertTrue(page["coverage"]["has_more_after"])  # e3 (anchor) and e4 were never served
 
     def test_around_cursor_progresses_without_overlap_and_exhausts(self):
         # H020-A1-01 / T055: a valid same-handle, same-direction cursor must
@@ -235,7 +339,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "around-page-1", "handle_id": capability["handle_id"],
@@ -261,7 +365,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=4, max_bytes_per_fetch=8192,
+            trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=4, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "around-anchor-1", "handle_id": capability["handle_id"],
@@ -285,7 +389,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=4, max_bytes_per_fetch=8192,
+            trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=4, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "around-window-1", "handle_id": capability["handle_id"],
@@ -318,7 +422,7 @@ class TestFetchDocuments(unittest.TestCase):
         seed_room(provider, initial_events)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "around-retention-1", "handle_id": capability["handle_id"],
@@ -357,7 +461,7 @@ class TestFetchDocuments(unittest.TestCase):
         )
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e5", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "before-retention-1", "handle_id": capability["handle_id"],
@@ -396,7 +500,7 @@ class TestFetchDocuments(unittest.TestCase):
         )
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e2", originating_event_ids=["e2"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "after-retention-1", "handle_id": capability["handle_id"],
@@ -431,7 +535,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(20)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e20", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e20", originating_event_ids=["e20"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "bounded-chain-1", "handle_id": capability["handle_id"],
@@ -486,7 +590,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(8)
         continuation = ContinuationProvider(provider, max_active_cursors_per_handle=1)
         capability = continuation.issue(
-            trigger_event_id="e8", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e8", originating_event_ids=["e8"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         continuation.fetch(
             {
@@ -511,7 +615,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(4)
         continuation = ContinuationProvider(provider, max_handles=1)
         capability = continuation.issue(
-            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e4", originating_event_ids=["e4"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         page = continuation.fetch(
             {
@@ -522,7 +626,7 @@ class TestFetchDocuments(unittest.TestCase):
         )
         with self.assertRaises(ContinuationError):
             continuation.issue(
-                trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+                trigger_event_id="e4", originating_event_ids=["e4"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
             )
         continuation.revoke(capability["handle_id"])
         self.assertFalse(continuation.revoke(capability["handle_id"]))
@@ -538,7 +642,7 @@ class TestFetchDocuments(unittest.TestCase):
                 host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
             )
         replacement = continuation.issue(
-            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e4", originating_event_ids=["e4"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         self.assertNotEqual(replacement["handle_id"], capability["handle_id"])
 
@@ -546,7 +650,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(4)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e4", originating_event_ids=["e4"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
             expires_at="2026-07-17T01:00:00Z",
         )
         page = continuation.fetch(
@@ -573,7 +677,7 @@ class TestFetchDocuments(unittest.TestCase):
         for expires_at in ("not-a-time", "2027-01-01T00:00:00"):
             with self.subTest(expires_at=expires_at), self.assertRaises(ValueError):
                 ContinuationProvider(provider).issue(
-                    trigger_event_id="e3", max_events_per_fetch=1,
+                    trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=1,
                     max_bytes_per_fetch=8192, expires_at=expires_at,
                 )
 
@@ -581,7 +685,7 @@ class TestFetchDocuments(unittest.TestCase):
             with self.subTest(fetch_time=fetch_time):
                 continuation = ContinuationProvider(provider)
                 capability = continuation.issue(
-                    trigger_event_id="e3", max_events_per_fetch=1,
+                    trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=1,
                     max_bytes_per_fetch=8192,
                     expires_at="2027-01-01T00:00:00Z",
                 )
@@ -599,7 +703,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=1,
+            trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=1,
             max_bytes_per_fetch=8192, expires_at="2026-07-19T10:30:00Z",
         )
         with self.assertRaises(ContinuationError):
@@ -618,7 +722,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(4)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e1", max_events_per_fetch=1,
+            trigger_event_id="e1", originating_event_ids=["e1"], max_events_per_fetch=1,
             max_bytes_per_fetch=8192, can_fetch_after=False,
             expires_at="2027-01-01T00:00:00Z",
         )
@@ -641,7 +745,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(4)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e4", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e4", originating_event_ids=["e4"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         original = deepcopy(capability)
         page = continuation.fetch(
@@ -664,7 +768,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5, provider=make_provider(retention_max_events=5))
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e5", max_events_per_fetch=3, max_bytes_per_fetch=8192,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=3, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "instance-1", "handle_id": capability["handle_id"],
@@ -694,7 +798,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(3, provider=make_provider(retention_max_events=3))
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e1", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e1", originating_event_ids=["e1"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "anchor-instance-1", "handle_id": capability["handle_id"],
@@ -724,7 +828,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5, provider=make_provider(retention_max_events=10))
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e2", originating_event_ids=["e2"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "after-later-1", "handle_id": capability["handle_id"],
@@ -752,7 +856,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5, provider=make_provider(retention_max_events=5))
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e4", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+            trigger_event_id="e2", originating_event_ids=["e2"], max_events_per_fetch=2, max_bytes_per_fetch=8192,
         )
         request = {
             "request_id": "around-later-1", "handle_id": capability["handle_id"],
@@ -779,7 +883,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=8192,
+            trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=6, max_bytes_per_fetch=8192,
         )
         with self.assertRaises(ContinuationError):
             continuation.fetch(
@@ -794,7 +898,7 @@ class TestFetchDocuments(unittest.TestCase):
         provider, events = _room_with_events(5)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=8192,
         )
         page = continuation.fetch(
             {
@@ -810,12 +914,12 @@ class TestFetchDocuments(unittest.TestCase):
         continuation = ContinuationProvider(provider)
         one_event_bytes = serialized_byte_size(provider._events[0])
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=6, max_bytes_per_fetch=one_event_bytes,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=2, max_bytes_per_fetch=one_event_bytes,
         )
         page = continuation.fetch(
             {
                 "request_id": "byte-only", "handle_id": capability["handle_id"],
-                "direction": "around", "anchor_event_id": "e3", "max_events": 6,
+                "direction": "around", "anchor_event_id": "e3", "max_events": 2,
                 "max_bytes": one_event_bytes,
             },
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
@@ -827,7 +931,7 @@ class TestFetchDocuments(unittest.TestCase):
         continuation = ContinuationProvider(provider)
         one_event_bytes = serialized_byte_size(provider._events[1])
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=1, max_bytes_per_fetch=one_event_bytes,
+            trigger_event_id="e5", originating_event_ids=["e5"], max_events_per_fetch=1, max_bytes_per_fetch=one_event_bytes,
         )
         page = continuation.fetch(
             {
@@ -868,7 +972,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=4096,
+            trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=10, max_bytes_per_fetch=4096,
             expires_at="2026-07-17T00:00:00Z",
         )
         request = {
@@ -884,7 +988,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=10, max_bytes_per_fetch=4096,
+            trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=10, max_bytes_per_fetch=4096,
             can_fetch_after=False,
         )
         request = {
@@ -900,7 +1004,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         provider, events = _room_with_events(3)
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e3", max_events_per_fetch=2, max_bytes_per_fetch=4096,
+            trigger_event_id="e3", originating_event_ids=["e3"], max_events_per_fetch=2, max_bytes_per_fetch=4096,
         )
         request = {
             "request_id": "req-x", "handle_id": capability["handle_id"],
@@ -914,8 +1018,8 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
     def test_cross_handle_cursor_reuse_rejects(self):
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
-        cap_a = continuation.issue(trigger_event_id="e6", max_events_per_fetch=1, max_bytes_per_fetch=4096)
-        cap_b = continuation.issue(trigger_event_id="e6", max_events_per_fetch=10, max_bytes_per_fetch=4096)
+        cap_a = continuation.issue(trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=1, max_bytes_per_fetch=4096)
+        cap_b = continuation.issue(trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=10, max_bytes_per_fetch=4096)
         first_page = continuation.fetch(
             {"request_id": "r1", "handle_id": cap_a["handle_id"], "direction": "before", "max_events": 1, "max_bytes": 4096},
             host_context=cap_a["bound_to"], fetch_time="2026-07-17T01:00:00Z",
@@ -935,7 +1039,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
         # followed by ['e3', 'e4']).
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e6", max_events_per_fetch=2, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=2, max_bytes_per_fetch=8192)
         page1 = continuation.fetch(
             {"request_id": "r1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 2, "max_bytes": 8192},
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z",
@@ -951,7 +1055,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
     def test_same_direction_cursor_replay_still_paginates(self):
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e6", max_events_per_fetch=2, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=2, max_bytes_per_fetch=8192)
         page1 = continuation.fetch(
             {"request_id": "r1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 2, "max_bytes": 8192},
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z",
@@ -968,7 +1072,7 @@ class TestContinuationBindingAndExpiry(unittest.TestCase):
     def test_cursor_replay_continues_without_duplication(self):
         provider, events = _room_with_events(6)
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id="e6", max_events_per_fetch=2, max_bytes_per_fetch=8192)
+        capability = continuation.issue(trigger_event_id="e6", originating_event_ids=["e6"], max_events_per_fetch=2, max_bytes_per_fetch=8192)
         page1 = continuation.fetch(
             {"request_id": "r1", "handle_id": capability["handle_id"], "direction": "before", "max_events": 2, "max_bytes": 8192},
             host_context=capability["bound_to"], fetch_time="2026-07-17T01:00:00Z",
@@ -1018,7 +1122,7 @@ class TestRetentionCoupledAuxiliaryState(unittest.TestCase):
 
         continuation = ContinuationProvider(provider)
         capability = continuation.issue(
-            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            trigger_event_id="e2", originating_event_ids=["e2"], max_events_per_fetch=1, max_bytes_per_fetch=8192,
         )
         page = continuation.fetch(
             {

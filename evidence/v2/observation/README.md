@@ -22,14 +22,20 @@ implicit.
   reports every limit that actually excluded a candidate.
 - **Continuation (FR-008, FR-009)**: optional, host-owned, opaque,
   bound to participant/room/continuity-scope/trigger; a fetch request
-  carries no inline binding fields — the host's actual call context is
-  checked independently against the issued capability's `bound_to`. Cursor
+  carries no inline binding fields, while the host context must exactly equal
+  the closed four-field issued `bound_to` object — missing, malformed,
+  wrong-valued, and additional properties reject before state commits. Cursor
   tokens are one-shot, each active sequence shares one immutable ordered
   `(event_id, host_generation)` window, handles and active cursors have
-  host-configurable hard bounds, returned wire documents cannot mutate private
-  authority, expiry fails closed, and exhausted/expired/revoked state is
-  reclaimed. Snapshot-generation facts keep later known arrivals visible in
-  side coverage without admitting them to the fixed remainder.
+  host-configurable hard bounds, issuance privately binds the originating
+  request's event-ID set, overlapping pages reject before state commits,
+  returned wire documents cannot mutate private authority, expiry fails closed,
+  and exhausted/expired/revoked state is reclaimed. A provider-owned shared
+  lock makes complete provider/continuation transitions linearizable. Cursor
+  replay resolves only the next page through a retention-bounded event map,
+  with no full remainder/deque scan; known retention eviction is disclosed as
+  `has_gaps=true`. Snapshot-generation facts keep later known arrivals visible
+  in side coverage without admitting them to the fixed remainder.
 - **Retention (FR-010)**: bounded (`retention_max_events`) and
   outcome-neutral; retained delivery IDs, event generations, and actor facts are
   pruned with deque eviction, and no prior attention/social outcome ever changes
@@ -49,11 +55,23 @@ implicit.
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
 | S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences explained | `s13-equivalence.jsonl` (`CAP-S13-*`, 3 rows) | same |
-| S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; authority, exclusive expiry, cursor, delivery, generation, and actor state remain isolated/bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 10 rows) | same |
+| S15 Context budget | Snapshot/fetch hard caps and exact closed host binding enforced with `I-010E` byte telemetry; authority, exclusive expiry, cursor, delivery, generation, and actor state remain isolated/bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 11 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 46 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 47 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
+
+## Phase 18 atomicity/resource evidence
+
+`phase18-adversarial.jsonl` contains 11 deterministic PASS rows: five
+barrier-controlled atomicity cases, three retention-gap coverage cases, two
+bounded-resource regressions, and one explicit N=64/2N=128 replay metric row.
+The measured retained-deque visits after initial window creation are 0 and 0.
+Reproduce with:
+
+```sh
+PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
+```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)
 

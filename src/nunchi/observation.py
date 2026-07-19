@@ -32,6 +32,8 @@ import uuid
 from collections import deque
 from copy import deepcopy
 from datetime import datetime, timezone
+from functools import wraps
+from threading import RLock
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -68,6 +70,16 @@ class ObservationInputError(ValueError):
     routable native event is an operational error downstream — never a
     silent drop and never a social suppression decision.
     """
+
+
+def _with_state_lock(method):
+    """Serialize one complete provider/continuation state transition."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return locked
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +676,11 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
         return list(capability_errors)
 
     errors: list[str] = []
-    host_context = fetch_case.get("host_context") or {}
+    host_context = fetch_case.get("host_context")
+    host_context_errors = _Errors()
+    _check_continuation_binding(host_context_errors, "host_context", host_context)
+    errors.extend(host_context_errors)
+    host_context_fields = host_context if isinstance(host_context, dict) else {}
     fetch_time_raw = fetch_case.get("fetch_time")
     expires_at_raw = capability.get("expires_at")
     if expires_at_raw is not None:
@@ -690,11 +706,13 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
             errors.append("handle is expired at fetch time")
     bound_to = capability.get("bound_to") or {}
     for field in ("participant_id", "room_id", "continuity_scope_id", "trigger_event_id"):
-        if bound_to.get(field) != host_context.get(field):
+        if bound_to.get(field) != host_context_fields.get(field):
             errors.append(
-                f"host context {field}={host_context.get(field)!r} does not match "
+                f"host context {field}={host_context_fields.get(field)!r} does not match "
                 f"issued binding {field}={bound_to.get(field)!r}"
             )
+    if host_context != bound_to:
+        errors.append("host context does not exactly match the issued closed binding")
     direction = request.get("direction")
     direction_flag = {
         "before": "can_fetch_before",
@@ -813,9 +831,11 @@ class ObservationProvider:
         self.room_kind = room_kind
         self.continuity = continuity
         self.event_visibility = dict(event_visibility) if event_visibility else None
+        self._lock = RLock()
 
         self._events: deque[dict] = deque(maxlen=retention_max_events)
         self._event_index: dict[str, int] = {}
+        self._events_by_id: dict[str, dict] = {}
         self._event_generations: dict[str, int] = {}
         self._event_delivery_ids: dict[str, str] = {}
         self._next_event_generation = 0
@@ -850,6 +870,7 @@ class ObservationProvider:
 
     # -- ingestion (FR-003, FR-004, FR-010) ----------------------------
 
+    @_with_state_lock
     def ingest(self, native_event_input: dict) -> str:
         """Normalize one transport-attested native event input.
 
@@ -967,6 +988,7 @@ class ObservationProvider:
 
     def _reindex(self) -> None:
         self._event_index = {event["id"]: index for index, event in enumerate(self._events)}
+        self._events_by_id = {event["id"]: event for event in self._events}
 
     # -- snapshot assembly (FR-006, FR-007) ----------------------------
 
@@ -981,6 +1003,7 @@ class ObservationProvider:
             return [trigger["target_event_id"]] if trigger.get("target_event_id") else []
         return []
 
+    @_with_state_lock
     def snapshot(
         self,
         *,
@@ -1016,7 +1039,9 @@ class ObservationProvider:
         truncated_by: set[str] = set()
         total_bytes = serialized_byte_size(trigger)
         if total_bytes > max_bytes:
-            truncated_by.add("bytes")
+            raise ObservationInputError(
+                f"trigger event requires {total_bytes} bytes, exceeding hard max_bytes={max_bytes}"
+            )
 
         def try_add(index: int) -> bool:
             nonlocal total_bytes
@@ -1112,6 +1137,7 @@ class ObservationProvider:
 
     # -- observation-stage receipt (FR-015) ----------------------------
 
+    @_with_state_lock
     def build_observation_receipt(self, request: dict) -> dict:
         """One immutable observation-stage I-010E record for ``request``.
 
@@ -1168,18 +1194,22 @@ class ContinuationProvider:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         self._provider = provider
+        self._lock = provider._lock
         self._max_handles = max_handles
         self._max_active_cursors_per_handle = max_active_cursors_per_handle
         self._capabilities: dict[str, dict] = {}
         self._trigger_generations: dict[str, int] = {}
+        self._originating_event_ids: dict[str, frozenset[str]] = {}
         self._cursors: dict[str, set[str]] = {}
         self._cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
         self._cursor_sequences: dict[str, int] = {}
 
+    @_with_state_lock
     def issue(
         self,
         *,
         trigger_event_id: str,
+        originating_event_ids: list[str] | tuple[str, ...] | set[str] | frozenset[str] | None = None,
         max_events_per_fetch: int,
         max_bytes_per_fetch: int,
         can_fetch_before: bool = True,
@@ -1189,6 +1219,21 @@ class ContinuationProvider:
     ) -> dict:
         if trigger_event_id not in self._provider._event_index:
             raise ValueError(f"trigger_event_id {trigger_event_id!r} is not an observed event")
+        if originating_event_ids is None or isinstance(originating_event_ids, (str, bytes)):
+            raise ValueError("originating_event_ids must be the non-empty event-ID collection from the originating request")
+        origin_ids = list(originating_event_ids)
+        if not origin_ids or any(not isinstance(event_id, str) or not event_id for event_id in origin_ids):
+            raise ValueError("originating_event_ids must contain non-empty strings")
+        if len(origin_ids) != len(set(origin_ids)):
+            raise ValueError("originating_event_ids must be unique")
+        origin_id_set = frozenset(origin_ids)
+        if trigger_event_id not in origin_id_set:
+            raise ValueError("originating_event_ids must contain trigger_event_id")
+        unknown_origin_ids = sorted(origin_id_set - self._provider._event_index.keys())
+        if unknown_origin_ids:
+            raise ValueError(
+                f"originating_event_ids are not retained observed events: {unknown_origin_ids}"
+            )
         if len(self._capabilities) >= self._max_handles:
             raise ContinuationError(
                 f"continuation handle limit {self._max_handles} reached; revoke or expire a handle"
@@ -1216,16 +1261,19 @@ class ContinuationProvider:
             raise ValueError(f"issued capability failed self-validation: {list(errors)}")
         self._capabilities[handle_id] = deepcopy(capability)
         self._trigger_generations[handle_id] = self._provider._event_generations[trigger_event_id]
+        self._originating_event_ids[handle_id] = origin_id_set
         self._cursors[handle_id] = set()
         self._cursor_windows[handle_id] = {}
         self._cursor_sequences[handle_id] = 0
         return deepcopy(capability)
 
+    @_with_state_lock
     def revoke(self, handle_id: str) -> bool:
         """Release all host-side state for ``handle_id``; idempotent."""
         existed = handle_id in self._capabilities
         self._capabilities.pop(handle_id, None)
         self._trigger_generations.pop(handle_id, None)
+        self._originating_event_ids.pop(handle_id, None)
         self._cursors.pop(handle_id, None)
         self._cursor_windows.pop(handle_id, None)
         self._cursor_sequences.pop(handle_id, None)
@@ -1236,6 +1284,7 @@ class ContinuationProvider:
         self._cursors[handle_id].discard(cursor)
         self._cursor_windows[handle_id].pop(cursor, None)
 
+    @_with_state_lock
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
         """Validate binding/expiry/direction/caps/cursor, then serve one page."""
         errors = validate_context_continuation(request)
@@ -1261,10 +1310,12 @@ class ContinuationProvider:
         if capability is None:
             raise ContinuationError("issued handle state disappeared after binding validation")
 
-        events = list(self._provider._events)
         index = self._provider._event_index
+        events_by_id = self._provider._events_by_id
         generations = self._provider._event_generations
         direction = request["direction"]
+        cursor = request.get("cursor")
+        events = None if cursor else list(self._provider._events)
         trigger_id = capability["bound_to"]["trigger_event_id"]
         if generations.get(trigger_id) != self._trigger_generations[handle_id]:
             raise ContinuationError(
@@ -1276,7 +1327,6 @@ class ContinuationProvider:
             raise ContinuationError(f"anchor_event_id {anchor_id!r} is not an observed event")
         anchor_generation = generations[anchor_id]
 
-        cursor = request.get("cursor")
         max_events = request["max_events"]
         max_bytes = request["max_bytes"]
         cap_events = min(max_events, capability["max_events_per_fetch"])
@@ -1308,21 +1358,28 @@ class ContinuationProvider:
                 )
             window_event_refs = cursor_window["window_event_refs"]
             cursor_position = int(cursor_window["next_position"])
-            remaining_event_refs = window_event_refs[cursor_position:]
-            unavailable_event_ids = [
-                event_id
-                for event_id, generation in remaining_event_refs
-                if event_id not in index or generations.get(event_id) != generation
-            ]
-            if unavailable_event_ids:
+            if cursor_position < 0 or cursor_position >= len(window_event_refs):
+                raise ContinuationError(f"cursor {cursor!r} has an invalid next position")
+            # Retention removes only a left prefix of authoritative event order.
+            # Continuation windows are contiguous: ``before`` stores newest to
+            # oldest, while ``after``/``around`` store oldest to newest. Exact
+            # generation identity at the oldest remaining frontier therefore
+            # proves every newer original remainder is still retained in O(1).
+            frontier_position = (
+                len(window_event_refs) - 1
+                if direction == "before"
+                else cursor_position
+            )
+            frontier_id, frontier_generation = window_event_refs[frontier_position]
+            if (
+                frontier_id not in events_by_id
+                or generations.get(frontier_id) != frontier_generation
+            ):
                 raise ContinuationError(
-                    f"cursor {cursor!r} references event instances no longer retained: "
-                    f"{unavailable_event_ids}"
+                    f"cursor {cursor!r} references event instance no longer retained: "
+                    f"{frontier_id!r}"
                 )
-            # Resolve every direction's original remainder by identity against
-            # the live deque. Numeric positions are not stable under bounded
-            # retention; host-owned event generations and scan order are.
-            candidate_indices = [index[event_id] for event_id, _ in remaining_event_refs]
+            candidate_positions = range(cursor_position, len(window_event_refs))
             snapshot_generation = int(cursor_window["snapshot_generation"])
             base_has_more_before = bool(cursor_window["base_has_more_before"])
             base_has_more_after = bool(cursor_window["base_has_more_after"])
@@ -1330,16 +1387,24 @@ class ContinuationProvider:
                 around_window_start = int(cursor_window["window_start"])
                 around_window_end = int(cursor_window["window_end"])
         elif direction == "before":
+            if events is None:
+                raise ContinuationError("fresh fetch event snapshot was not initialized")
             candidate_indices = list(range(anchor_index - 1, -1, -1))
             window_event_refs = tuple(
                 (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
             )
+            candidate_positions = range(len(window_event_refs))
         elif direction == "after":
+            if events is None:
+                raise ContinuationError("fresh fetch event snapshot was not initialized")
             candidate_indices = list(range(anchor_index + 1, len(events)))
             window_event_refs = tuple(
                 (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
             )
+            candidate_positions = range(len(window_event_refs))
         else:  # around
+            if events is None:
+                raise ContinuationError("fresh fetch event snapshot was not initialized")
             radius = max(1, cap_events // 2)
             around_window_start = max(0, anchor_index - radius)
             around_window_end = min(len(events), anchor_index + radius + 1)
@@ -1347,6 +1412,7 @@ class ContinuationProvider:
             window_event_refs = tuple(
                 (events[i]["id"], generations[events[i]["id"]]) for i in candidate_indices
             )
+            candidate_positions = range(len(window_event_refs))
             base_has_more_before = around_window_start > 0
             base_has_more_after = around_window_end < len(events)
             # H020-A1-01 / T056: an ``around`` cursor is the next unserved
@@ -1359,8 +1425,14 @@ class ContinuationProvider:
         next_index = None
         next_position: int | None = None
         truncated_by: list[str] = []
-        for position, i in enumerate(candidate_indices):
-            event = events[i]
+        for absolute_position in candidate_positions:
+            event_id, expected_generation = window_event_refs[absolute_position]
+            event = events_by_id.get(event_id)
+            if event is None or generations.get(event_id) != expected_generation:
+                raise ContinuationError(
+                    f"cursor window event instance {event_id!r} is no longer retained"
+                )
+            i = index[event_id]
             size = serialized_byte_size(event)
             event_cap_reached = len(page_events) >= cap_events
             byte_cap_exceeded = total_bytes + size > cap_bytes
@@ -1373,7 +1445,7 @@ class ContinuationProvider:
                     truncated_by.append("events")
                 if byte_cap_exceeded:
                     truncated_by.append("bytes")
-                next_position = cursor_position + position
+                next_position = absolute_position
                 break
             page_events.append(event)
             total_bytes += size
@@ -1453,6 +1525,15 @@ class ContinuationProvider:
         actor_ids = {
             ref for event in page_events_ordered for ref in _actor_references({"self": None, "events": [event]})
         }
+        origin_overlap = sorted(
+            {event["id"] for event in page_events_ordered}
+            & self._originating_event_ids[handle_id]
+        )
+        if origin_overlap:
+            raise ContinuationError(
+                "continuation page overlaps originating request event IDs: "
+                f"{origin_overlap}"
+            )
         actors = {
             actor_id: deepcopy(self._provider._actors.get(actor_id, {}))
             for actor_id in actor_ids
@@ -1470,7 +1551,7 @@ class ContinuationProvider:
             "coverage": {
                 "has_more_before": has_more_before,
                 "has_more_after": has_more_after,
-                "has_gaps": False,
+                "has_gaps": self._provider._evicted,
                 "truncated_by": truncated_by,
                 "continuity": self._provider.continuity,
                 "has_restart_gap": False if self._provider.continuity != "unknown" else None,

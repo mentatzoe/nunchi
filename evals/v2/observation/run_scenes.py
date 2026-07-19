@@ -22,6 +22,7 @@ from typing import Any
 from nunchi.observation import (
     ContinuationError,
     ContinuationProvider,
+    ObservationInputError,
     ObservationProvider,
     estimate_tokens,
     serialized_byte_size,
@@ -105,12 +106,37 @@ def run_budget_sweep() -> list[dict]:
                 "delivery_id": f"delivery:{event['id']}", "disposition": "candidate-event",
                 "authorized": True, "event": event, "actors": {},
             })
-        request = provider.snapshot(
-            trigger_event_id=case["trigger_event_id"],
-            max_events=case["max_events"], max_bytes=case["max_bytes"],
-            max_age_seconds=case.get("max_age_seconds"),
-        )
         failures = []
+        try:
+            request = provider.snapshot(
+                trigger_event_id=case["trigger_event_id"],
+                max_events=case["max_events"], max_bytes=case["max_bytes"],
+                max_age_seconds=case.get("max_age_seconds"),
+            )
+        except ObservationInputError as exc:
+            if case.get("expect") != "reject":
+                failures.append(f"unexpected rejection: {exc}")
+            expected_detail = case.get("expect_error_contains")
+            if expected_detail and expected_detail not in str(exc):
+                failures.append(
+                    f"rejection detail {str(exc)!r} did not contain {expected_detail!r}"
+                )
+            rows.append({
+                "scene_id": case["scene_id"],
+                "case_id": case["case_id"],
+                "title": case["title"],
+                "result": "PASS" if not failures else "FAIL",
+                "observed": "reject",
+                "detail": "; ".join(failures) or str(exc),
+                "configured_max_events": case["max_events"],
+                "configured_max_bytes": case["max_bytes"],
+                "receipt_byte_count": None,
+                "included_event_ids": [],
+                "event_visibility": None,
+            })
+            continue
+        if case.get("expect") == "reject":
+            failures.append("expected hard-cap rejection but snapshot was accepted")
         truncated_by = set(request["coverage"]["truncated_by"])
         if "expect_truncated_by" in case and truncated_by != set(case["expect_truncated_by"]):
             failures.append(f"truncated_by {sorted(truncated_by)} != expected {case['expect_truncated_by']}")
@@ -129,8 +155,13 @@ def run_budget_sweep() -> list[dict]:
         if "event_visibility" not in case and "event_visibility" in request["coverage"]:
             failures.append("event_visibility present in coverage but not configured on the provider")
         receipt = provider.build_observation_receipt(request)
+        if receipt["body"]["byte_count"] > case["max_bytes"]:
+            failures.append(
+                f"accepted event bytes {receipt['body']['byte_count']} exceed hard max_bytes={case['max_bytes']}"
+            )
         result = "PASS" if not failures else "FAIL"
         row = _snapshot_row(case, request, result=result, detail="; ".join(failures))
+        row["observed"] = "accept"
         row["configured_max_events"] = case["max_events"]
         row["configured_max_bytes"] = case["max_bytes"]
         row["receipt_byte_count"] = receipt["body"]["byte_count"]
@@ -158,7 +189,13 @@ def run_continuation_attacks() -> list[dict]:
                 "authorized": True, "event": event, "actors": {},
             })
         continuation = ContinuationProvider(provider)
-        capability = continuation.issue(trigger_event_id=case["trigger_event_id"], **case["issue"])
+        capability = continuation.issue(
+            trigger_event_id=case["trigger_event_id"],
+            originating_event_ids=case.get(
+                "originating_event_ids", [case["trigger_event_id"]],
+            ),
+            **case["issue"],
+        )
         internal_capability_before = deepcopy(
             continuation._capabilities[capability["handle_id"]]
         )

@@ -774,23 +774,23 @@ two CRITICAL findings and one HIGH finding against `f38a4fe`.
 **Purpose**: Make snapshot hard caps and cross-request merge identity true in
 the implementation and make every static completion receipt reproducible.
 
-- [ ] T083 Add RED tests proving a trigger larger than `max_bytes` rejects
+- [X] T083 Add RED tests proving a trigger larger than `max_bytes` rejects
   without returning an over-budget snapshot, and the budget evaluator cannot
   mark any row PASS when accepted event bytes exceed the configured cap
-- [ ] T084 Fail closed before snapshot assembly when the mandatory trigger does
+- [X] T084 Fail closed before snapshot assembly when the mandatory trigger does
   not fit; update BUD-S15-001 to expect rejection, make the runner assert the
   cap invariant, and regenerate budget evidence
-- [ ] T085 Add RED tests proving continuation issuance requires a private
+- [X] T085 Add RED tests proving continuation issuance requires a private
   originating-request event-ID set and fetch rejects any page whose event IDs
   overlap that set before cursor state commits
-- [ ] T086 Bind an immutable originating-request ID set to each handle, clean it
+- [X] T086 Bind an immutable originating-request ID set to each handle, clean it
   up on revoke/expiry, enforce exact merge dedup without changing I-010A/I-010D
   wire shapes, update all host call sites/docs, and add deterministic adversarial
   continuation evidence
-- [ ] T087 Add a committed, owner-scoped static secret scanner with documented
+- [X] T087 Add a committed, owner-scoped static secret scanner with documented
   high-confidence matchers and explicit `--base`/`--head` range; replace the
   unreproducible Phase 17 row with its exact invocation and output
-- [ ] T088 Regenerate manifest/handoff evidence for T083–T087 with exact
+- [X] T088 Regenerate manifest/handoff evidence for T083–T087 with exact
   hard-cap, merge-identity, and scanner receipts; retain planning BLOCKED until
   the concurrent/resource extension and complete matrix also close
 
@@ -809,24 +809,24 @@ reproducible from the candidate tree.
 `evidence/v2/observation/convergence-phase18-concurrency-resource-2026-07-19.md`,
 findings S020-A6-01 HIGH and S020-A6-02 MEDIUM/resource-security.
 
-- [ ] T089 Add deterministic barrier-controlled RED tests proving concurrent
+- [X] T089 Add deterministic barrier-controlled RED tests proving concurrent
   issue obeys `max_handles`, concurrent fresh fetch obeys the active-cursor
   limit, a one-shot cursor has exactly one successful consumer, fetch/revoke and
   ingest/fetch interleavings are linearizable, and no raw exception or state
   resurrection escapes
-- [ ] T090 Add one provider-owned shared `threading.RLock` and serialize complete
+- [X] T090 Add one provider-owned shared `threading.RLock` and serialize complete
   ingest/snapshot/receipt/issue/fetch/revoke transitions across every
   `ContinuationProvider` wrapper while preserving exact-expiry cleanup and all
   accepted wire shapes
-- [ ] T091 Add RED operation-count and retention-frontier tests proving one-item
+- [X] T091 Add RED operation-count and retention-frontier tests proving one-item
   pagination at N and 2N grows near-linearly, cursor replay does not copy/scan the
   full deque/remainder, the event-by-ID map remains retention-bounded, evicted-ID
   replacements reject, successor cursors share one immutable tuple, and
   exhaustion reclaims state
-- [ ] T092 Add a retention-coupled event-by-ID map and lazy page resolution with
+- [X] T092 Add a retention-coupled event-by-ID map and lazy page resolution with
   an O(1) prefix-eviction frontier check, preserving monotonic-generation,
   contiguous-window, authoritative-order, side-coverage, and hard-cap semantics
-- [ ] T093 Add deterministic atomicity/resource eval evidence and regenerate
+- [X] T093 Add deterministic atomicity/resource eval evidence and regenerate
   affected aggregates for T089–T092; retain planning BLOCKED pending the late
   immutable-review extension
 
@@ -847,29 +847,65 @@ contention, and a complete one-event cursor chain performs O(N) cumulative work.
 finding 5 HIGH and finding 6 MEDIUM; the HIGH mechanism is reproduced on the
 current dirty implementation.
 
-- [ ] T094 Preserve and adjudicate the complete late immutable review against
+- [X] T094 Preserve and adjudicate the complete late immutable review against
   current Phase 18 scope without promoting its stale target into a current
   candidate verdict
-- [ ] T095 Add RED continuation tests proving `coverage.has_gaps` is true when
+- [X] T095 Add RED continuation tests proving `coverage.has_gaps` is true when
   bounded retention has evicted known history, across before/after/around pages
   and final-page/exhaustion paths
-- [ ] T096 Derive continuation `has_gaps` from provider retention history and
+- [X] T096 Derive continuation `has_gaps` from provider retention history and
   page/window omissions without changing I-010D wire shape; add deterministic
   evaluation evidence and preserve truthful side-specific `has_more_*`
-- [ ] T097 Append a correction to the false handoff claim that T001–T038 packet
+- [X] T097 Append a correction to the false handoff claim that T001–T038 packet
   text was never edited; distinguish mutable append-superseded packet evidence
   from append-only lifecycle ledgers without rewriting either history
-- [ ] T098 Regenerate all evidence and handoff aggregates, restore planning PASS
-  only after the complete matrix is green, record T001–T098 graph identity, and
-  obtain one fresh immutable independent review covering every Phase 18 finding
-  before candidate attempt 2
+- [X] T098 Regenerate all Phase 18 evidence and handoff aggregates, record the
+  expanded graph identity, and retain planning BLOCKED until the late
+  closed-binding extension and fresh immutable review close
 
 ### Phase 18 late-extension dependencies
 
 - T094 is preservation/adjudication and blocks T095/T097 attribution.
 - T096 depends on T095 RED; T097 depends on T094.
-- T098 depends on T093, T096, and T097 and is the only final convergence blocker.
+- T098 depends on T093, T096, and T097 and closes the Phase 18 local evidence lane.
 
 **Late-extension checkpoint**: continuation coverage discloses every known
 retention gap, packet-history claims match Git history, and only a fresh review
 of the final immutable tree may authorize candidate-attempt-2 preparation.
+
+## Phase 19: Closed Exact Host Binding
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-5562004-binding-rejection.md`,
+HIGH finding 2. The exact-expiry half is stale and already closed by T080–T082;
+the additional-property host-context probe reproduces on the current Phase 18
+tree.
+
+- [X] T099 Preserve the complete immutable review, adjudicate exact expiry as
+  stale against Phase 17, reproduce the closed-binding defect against current
+  scope, and keep the current tree BLOCKED
+- [X] T100 Add RED unit and evaluator cases proving additional, missing,
+  malformed, and wrong-valued host-context properties reject before serving or
+  cursor mutation, while the exact four-field context remains accepted
+- [X] T101 Validate `host_context` with `_check_continuation_binding` and require
+  exact dictionary equality with issued `bound_to`, preserving closed I-010D
+  wire shapes, lock atomicity, expiry cleanup, and existing rejection messages
+- [X] T102 Update executable documentation and deterministic evidence for the
+  closed exact host-context rule; regenerate all affected aggregates
+- [ ] T103 Run the complete Observation/corpus/eval/adversarial/full-suite/
+  verdict/Ruff/Bandit/static/governance/task-manifest/diff matrix, record
+  T001–T103 identity, restore planning PASS, create and push an immutable
+  candidate, and obtain one fresh independent fail-closed review before
+  candidate attempt 2
+
+### Phase 19 dependencies
+
+- T100 depends on T099; T101 depends on T100 RED.
+- T102 depends on T101 GREEN.
+- T098 may close after T102 regenerates the superseding aggregate evidence.
+- T103 depends on T098 and T102 and is the sole final convergence blocker.
+
+**Phase 19 checkpoint**: host binding is the exact closed four-field context;
+no additional tenant/authority-shaped property is ignored, and only a fresh
+review of the final immutable tree may authorize candidate-attempt-2
+preparation.
