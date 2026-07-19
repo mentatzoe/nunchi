@@ -1328,7 +1328,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
 
 **Accepted by**: `v2-integrator`
 
-**Decision reference**: `evidence/v2/contract/review-test-decision.md`
+**Decision reference**: `seed.txt`
 """,
         )
         return self._commit_all(root, f"accept {record_path}")
@@ -1558,6 +1558,195 @@ class GovernanceBoundaryTests(unittest.TestCase):
             self.assertEqual(effective, base)
             self.assertTrue(
                 any("has no attested record" in error for error in errors)
+            )
+
+    def test_effective_dependency_commit_validates_last_summary_on_append(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            a1_candidate = self._next_git_commit(root, "a1")
+            a1_decision = self._accept_amendment_commit(
+                root, "evidence/v2/contract/amendment-A1-test.md", a1_candidate
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            # First candidate: only A1, with its own correct summary.
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{a1_candidate}`
+**Amendment decision commit**: `{a1_decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+
+## Current effective dependency commit
+
+`{a1_candidate}`
+""",
+            )
+            effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertEqual(errors, [])
+            self.assertEqual(effective, a1_candidate)
+
+            # Append-only extension: retain the A1 record and its summary
+            # verbatim, then append A2 and a fresh summary below it.
+            a2_candidate = self._next_git_commit(root, "a2")
+            a2_decision = self._accept_amendment_commit(
+                root, "evidence/v2/contract/amendment-A2-test.md", a2_candidate
+            )
+            existing = (root / ledger).read_text(encoding="utf-8")
+            appended = existing.replace(
+                f"## Current effective dependency commit\n\n`{a1_candidate}`\n",
+                f"""## Amendment A2
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A2
+**Status**: ACCEPTED
+**Amended interface**: I-010B
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{a1_candidate}`
+**Amendment candidate commit**: `{a2_candidate}`
+**Amendment decision commit**: `{a2_decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A2-test.md`
+
+## Current effective dependency commit
+
+`{a2_candidate}`
+""",
+            )
+            self._write_lifecycle_record(root, ledger, appended)
+            effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertEqual(errors, [])
+            self.assertEqual(effective, a2_candidate)
+
+    def test_effective_dependency_commit_rejects_decision_reference_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            candidate = self._next_git_commit(root, "candidate")
+            decision = self._accept_amendment_commit(
+                root, "evidence/v2/contract/amendment-A1-test.md", candidate
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            # Ledger claims a different Decision reference than the one
+            # actually recorded inside the amendment record at that commit.
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `evidence/v2/contract/amendment-A1-test.md`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertTrue(
+                any(
+                    "Decision reference at the decision commit must be" in error
+                    for error in errors
+                )
+            )
+
+    def test_effective_dependency_commit_rejects_decision_reference_absent_at_commit(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            candidate = self._next_git_commit(root, "candidate")
+            # Write an amendment record whose Decision reference names a file
+            # that does not yet exist at the decision commit itself.
+            self._write_lifecycle_record(
+                root,
+                "evidence/v2/contract/amendment-A1-test.md",
+                """# Amendment record
+
+## Integrator decision
+
+**Decision**: `ACCEPTED`
+
+**Accepted candidate**: `%s`
+
+**Accepted by**: `v2-integrator`
+
+**Decision reference**: `evidence/v2/contract/does-not-exist-yet.md`
+"""
+                % candidate,
+            )
+            decision = self._commit_all(root, "accept without decision file")
+            # The referenced file is created only afterwards -- too late to
+            # prove it existed at the exact decision commit.
+            self._write_lifecycle_record(
+                root, "evidence/v2/contract/does-not-exist-yet.md", "late\n"
+            )
+            self._commit_all(root, "late decision file")
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010E
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `evidence/v2/contract/does-not-exist-yet.md`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertTrue(
+                any(
+                    "must name a file that already exists at the Amendment "
+                    "decision commit" in error
+                    for error in errors
+                )
             )
 
     def test_effective_dependency_commit_rejects_broken_prior_effective_link(self):
