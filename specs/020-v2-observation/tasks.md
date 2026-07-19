@@ -49,8 +49,10 @@ fields into each later candidate attempt
 
 **Accountable owner lane**: `v2-observation-owner`
 
-**Integration handoff**: owners of slices `040` through `110` and
-`v2-integrator`
+**Integration handoff**: `v2-wake-owner` (040), `v2-transport-owner` (050),
+`v2-hermes-owner` (060), `v2-claude-owner` (070), `v2-codex-owner` (080),
+`v2-adapters-owner` (090), `v2-security-owner` (100), and `v2-integrator`
+(110)
 
 **Tests**: deterministic contract/mechanics tests and reusable replay scenes
 are required; tests must fail before the corresponding provider, continuation,
