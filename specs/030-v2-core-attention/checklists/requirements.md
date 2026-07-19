@@ -20,14 +20,14 @@ human-shaped, measurable, lifecycle-safe, and integration-ready
 - [x] CHK006 Are classifier dispositions, trusted no-classifier preattention bypass, and operational ERROR unambiguously separate? [Consistency, Spec §FR-004, FR-017]
 - [x] CHK007 Are advice authority, grounding, allowed disposition, and reply-prose prohibitions complete? [Completeness, Spec §FR-005]
 - [x] CHK008 Are all suppression-legitimacy conditions and trusted operator-policy boundaries specified? [Completeness, Spec §FR-006–FR-007]
-- [x] CHK009 Are direct DEFER, margin DEFER, malformed confidence evidence, allowed widening, and margin-retirement boundaries clear? [Clarity, Spec §FR-008–FR-010]
-- [ ] CHK010 Are all validation/provider/timeout/config/runtime failures and the explicit NO_WAKE override defined without social relabeling and representable through accepted I-010E `@2`'s exact paired override fields? [Coverage, Spec §Resolved post-acceptance contract blocker, FR-011]
+- [x] CHK009 Are direct DEFER, margin DEFER, the inclusive `PASS - max(ACK, ASK, SPEAK) <= transition_defer_margin` boundary, malformed confidence evidence, allowed widening, and margin-retirement boundaries clear? [Clarity, Spec §FR-008–FR-010]
+- [x] CHK010 Are all validation/provider/timeout/config/runtime failures and the explicit NO_WAKE override defined without social relabeling and representable through accepted I-010E `@2`'s exact paired override fields? [Coverage, Spec §Resolved post-acceptance contract blocker, FR-011]
 
 ## Scenario, Security, and Evidence Coverage
 
 - [x] CHK011 Do scenarios cover confident suppress, grounded wake advice, direct DEFER, margin DEFER, disabled delegation, trusted preattention bypass, unproven recovery, ERROR, and core/CLI parity? [Coverage, Spec §User Scenarios & Testing]
 - [x] CHK012 Are forged output/advice, request-controlled configuration, provider retries, invalid transitions, host-secret projection leaks, same-class address, and apparent-resolution scars addressed? [Edge Case, Spec §Edge Cases]
-- [ ] CHK013 Is the immutable attention stage limited to accepted I-010E `@2`'s closed classifier/bypass, effective-route, valve, policy/model-source, and error shapes when a valid request ID exists, while representing every selected effective-policy and NO_WAKE provenance obligation and forbidding fabricated IDs/receipts for unassignable pre-validation failures and downstream host/transport facts? [Completeness, Spec §Resolved post-acceptance contract blocker, FR-012]
+- [x] CHK013 Is the immutable attention stage limited to accepted I-010E `@2`'s closed classifier/bypass, effective-route, valve, policy/model-source, and error shapes when a valid request ID exists, while representing every selected effective-policy and NO_WAKE provenance obligation and forbidding fabricated IDs/receipts for unassignable pre-validation failures and downstream host/transport facts? [Completeness, Spec §Resolved post-acceptance contract blocker, FR-012]
 - [x] CHK014 Are deterministic mechanics, replay, multi-model evidence, downstream canary protocol, and margin evidence distinguished so unit tests cannot overclaim social quality or create a dependency cycle? [Evidence, Spec §FR-014, SC-004–SC-006]
 - [x] CHK015 Can every success criterion and handoff obligation be measured against a named ordinary artifact or result? [Measurability, Spec §SC-001–SC-008, FR-015]
 - [x] CHK016 Is the exact CLI stdout/stderr/exit 0/1/2/3 process contract complete for valid, bypass, schema-invalid, operational, and unreadable inputs? [Completeness, Spec §FR-019]
@@ -39,12 +39,12 @@ human-shaped, measurable, lifecycle-safe, and integration-ready
 
 ## Notes
 
-- Requirement-quality checks pass except CHK010 and CHK013, which record the
-  accepted I-010E incompatibility found by analysis. They do not claim that
-  I-030A, V2 CLI behavior, or any social evidence exists yet. The later finding
-  is durably recorded at
-  `evidence/v2/attention/dependency-010-post-acceptance-blocker.md` without
-  rewriting the earlier dependency acceptance.
+- CHK010 and CHK013 now pass through independently accepted I-010E `@2`.
+  The earlier incompatibility remains immutable history at
+  `evidence/v2/attention/dependency-010-post-acceptance-blocker.md`, alongside
+  the original acceptance; the updated consumer decision is recorded at
+  `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`. These
+  checks do not claim that I-030A, V2 CLI behavior, or social evidence exists.
 
 ## Formal Reviewer Run — 2026-07-18
 
@@ -77,7 +77,7 @@ before the zero-CRITICAL/HIGH analysis and slice-readiness gates
 - [ ] CHK030 Do the spec, plan, and tasks agree on `PLANNED` state, `GRANTED` program authority, dormant execution, the assigned participant/source, accountable lane, dependency, activation path, and exact workflow binding? [Consistency, Spec metadata; Plan metadata; Tasks metadata]
 - [ ] CHK031 Are I-010A/B/E and I-030A identifiers, versions, schema/source paths, read-only ownership, and downstream recipients identical across the interface summary, slice-interface plan, ordinary targets, task graph, and handoff requirements? [Consistency, Spec §Interface Summary, FR-001, FR-015; Plan §Slice Interfaces, Ordinary Repository Targets; Tasks §Dependencies & Execution Order]
 - [ ] CHK032 Do the lifecycle requirements consistently separate external program authority, assignment, dependency acceptance, activation evidence, `READY`, owner-declared `ACTIVE`, task execution, convergence, documentation freshness, handoff, and recipient acceptance? [Consistency, Spec metadata; Plan metadata; Tasks §Slice activation; Constitution §Program and Slice Lifecycle Gates]
-- [ ] CHK033 Is the `HANDOFF` disposition for `integrations/mcp-discord/README.md` and `integrations/mcp-discord/DESIGN.md` in the spec reconciled with the plan’s `NO_IMPACT` disposition for the same paths, with one authoritative disposition and matching rationale or exact delta? [Conflict, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [ ] CHK033 Are the matching `NO_IMPACT` dispositions for `integrations/mcp-discord/README.md` and `integrations/mcp-discord/DESIGN.md` in the spec and plan backed by the same gate-neutral transport rationale and ordinary handoff-evidence obligation? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 - [ ] CHK034 Are the complete documentation path inventory, per-path owner, disposition, validation/rationale/delta, and T025/T026 responsibility consistent across the spec, plan, and tasks, including paths present in only one artifact? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–T026]
 
 ### Governance Boundaries

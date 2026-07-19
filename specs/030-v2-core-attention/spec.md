@@ -159,11 +159,13 @@ missing legitimacy condition can create or preserve an unsafe hard stop.
 **Acceptance Scenarios**:
 
 1. **Given** candidate `SUPPRESS`, proven recoverability, enabled delegation,
-   and a valid margin that does not defer, **When** routing completes, **Then**
-   effective `SUPPRESS` is allowed and fully receipted.
-2. **Given** candidate `SUPPRESS` with margin uncertainty, disabled suppression,
-   or unproven recoverability, **When** routing completes, **Then** effective
-   disposition is `DEFER` with the exact valve and override cause.
+   and a valid active-margin vector where
+   `PASS - max(ACK, ASK, SPEAK) > transition_defer_margin`, **When** routing
+   completes, **Then** effective `SUPPRESS` is allowed and fully receipted.
+2. **Given** candidate `SUPPRESS` with an inclusive active-margin result
+   `PASS - max(ACK, ASK, SPEAK) <= transition_defer_margin`, disabled
+   suppression, or unproven recoverability, **When** routing completes, **Then**
+   effective disposition is `DEFER` with the exact valve and override cause.
 3. **Given** classifier `DEFER`, **When** the margin is still active, **Then**
    classifier DEFER is honored independently and cannot be narrowed to
    suppression.
@@ -338,13 +340,17 @@ non-receiptable and MUST NOT fabricate one.
   receipted; either may only widen attention, and the margin retains protective
   precedence until separately retired by evidence. Routing validation precedes
   policy: malformed/missing active-margin confidence on candidate `SUPPRESS`
-  is `ERROR`. For a valid candidate `SUPPRESS`, precedence is suppression
-  disabled (`policy-defer` / `suppression-disabled`), then recoverability false
-  (`policy-defer` / `recoverability-unproven`), then active margin uncertainty
-  (`margin-defer` / `margin`), then no valve. Thus each matrix row has one exact
-  audit oracle even when several widening conditions coexist. Candidate
+  is `ERROR`. For a valid candidate `SUPPRESS`, active-margin uncertainty is
+  exactly `PASS - max(ACK, ASK, SPEAK) <= transition_defer_margin`; equality is
+  inside the margin and produces `margin-defer` / `margin`, while a strictly
+  greater difference is outside the margin. First-match routing precedence is
+  suppression disabled (`policy-defer` / `suppression-disabled`), then
+  recoverability false (`policy-defer` / `recoverability-unproven`), then that
+  active-margin uncertainty result, then no valve. Thus each matrix row has one
+  exact audit oracle even when several widening conditions coexist. Candidate
   `WAKE` uses `none`; classifier `DEFER` uses `classifier-defer`; neither is
-  narrowed by policy or margin.
+  narrowed by policy or margin. This preserves the selected existing-margin
+  valve rather than inventing a new V2 threshold rule.
 - **FR-009**: A candidate suppression while the margin is active MUST include
   the exact valid legacy confidence vector required by I-010B; missing or
   malformed evidence MUST produce operational error and wake fallback.
@@ -473,11 +479,14 @@ non-receiptable and MUST NOT fabricate one.
   eligible/ineligible x margin active/retired), four retired-margin `SUPPRESS`
   rows (suppression x recoverability), and 16 active-margin `SUPPRESS` rows
   (suppression x recoverability x confidence class outside-margin,
-  inside-margin, missing, or malformed). Missing/malformed active-margin
-  confidence always yields operational `ERROR`; policy may otherwise change
-  only candidate `SUPPRESS` to effective `DEFER`. Every row records expected
-  response status, classifier/effective pair when applicable, margin status,
-  valve, and override cause using FR-008's validation and precedence order.
+  inside-margin, missing, or malformed). `inside-margin` means
+  `PASS - max(ACK, ASK, SPEAK) <= transition_defer_margin`, including equality;
+  `outside-margin` means the difference is strictly greater. Missing/malformed
+  active-margin confidence always yields operational `ERROR`; policy may
+  otherwise change only candidate `SUPPRESS` to effective `DEFER`. Every row
+  records expected response status, classifier/effective pair when applicable,
+  margin status, valve, and override cause using FR-008's validation and
+  precedence order.
 - **SC-003**: All forged advice, nonexistent evidence IDs, reply-bearing fields,
   request-controlled operator settings, and invalid model output are rejected
   or routed to operational error.
@@ -526,7 +535,8 @@ non-receiptable and MUST NOT fabricate one.
 
 ## Assumptions
 
-- Slice 010 lands accepted I-010A/B/E `@1` schemas before implementation begins.
+- Slice 010 has landed accepted I-010A `@1`, I-010B `@1`, and amended I-010E
+  `@2` before implementation begins.
 - The existing standard-library OpenAI-compatible provider transport may be
   evolved without adding a runtime dependency.
 - Initial V2 integration retains the protective margin; direct classifier

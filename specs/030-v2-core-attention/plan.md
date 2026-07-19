@@ -226,22 +226,26 @@ the slice's implementation choices without reopening product decisions.
 
 - **Decision**: Exercise the exact 36-row transition domain in spec SC-002.
   Validate active-margin candidate-suppression evidence before routing. For a
-  valid candidate `SUPPRESS`, apply exactly this first-match precedence:
-  suppression disabled, recoverability unproven, active-margin uncertainty,
-  then no valve. Candidate `WAKE` always uses `none`; classifier `DEFER` always
-  uses `classifier-defer`. Each row freezes status, pair, margin status, valve,
-  and override-cause oracles.
+  valid candidate `SUPPRESS`, compute the retained valve exactly as
+  `PASS - max(ACK, ASK, SPEAK) <= transition_defer_margin`; equality is
+  inside-margin and a strictly greater difference is outside-margin. Apply
+  exactly this first-match precedence: suppression disabled, recoverability
+  unproven, active-margin uncertainty, then no valve. Candidate `WAKE` always
+  uses `none`; classifier `DEFER` always uses `classifier-defer`. Each row
+  freezes status, pair, margin status, valve, and override-cause oracles.
   Treat the required three-family social rates as descriptive/non-gating for
   030; missing runs/provenance, advice-criterion failure, or unsafe mechanical
   routing blocks handoff, while mistaken/missed suppression, wake-volume, and
   family-disagreement rates remain explicit limitations and cannot retire the
   margin.
-- **Rationale**: A finite mechanics denominator supports a real zero-unsafe-row
-  claim without pretending that a small stochastic sample proves social
-  correctness.
-- **Alternatives considered**: An open-ended “full” matrix, local stochastic
-  pass thresholds, or treating mere execution as proof. Each is unreviewable or
-  overclaims evidence.
+- **Rationale**: The inclusive arithmetic preserves the existing V1 transition
+  valve selected for temporary coexistence with classifier-DEFER. A finite
+  mechanics denominator supports a real zero-unsafe-row claim without
+  pretending that a small stochastic sample proves social correctness.
+- **Alternatives considered**: An exclusive comparison, implementation-defined
+  boundary behavior, an open-ended “full” matrix, local stochastic pass
+  thresholds, or treating mere execution as proof. The first two silently alter
+  the retained valve; the others are unreviewable or overclaim evidence.
 
 ### Advice evidence rubric
 
@@ -577,6 +581,11 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Hermes integration | `integrations/hermes/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace V1 `nunchi-channel` verdict/fail-open/config/receipt semantics with accepted I-030A, bypass/ERROR, dual-DEFER, and immutable attention-stage facts in the Hermes slice. |
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
+
+Matrix scope audit (2026-07-19): the rows above enumerate all 30 current
+Markdown claim surfaces and the future slice-owned `docs/attention/v2.md`
+individually. Every disposition is attached to one exact file; no grouped
+multi-file disposition substitutes for an exact path.
 
 Global current-state claims remain integrator-owned; the component guide and
 every exact handoff delta are required before 030 can converge. T025 records
