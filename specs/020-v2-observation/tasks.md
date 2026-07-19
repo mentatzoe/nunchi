@@ -681,3 +681,60 @@ quadratic or never-pruned host bookkeeping.
 **Checkpoint**: cursor correctness state is linear in each immutable window,
 active cursors and handles are explicitly bounded, consumed/exhausted/expired/
 revoked state is reclaimed, and resource claims are evidence-backed.
+
+## Phase 16: Authority Isolation, Event-Instance Identity, and Retained State
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase16-2026-07-19.md`, findings
+S020-A4-01–03, H020-A4-04–05, and S020-A4-06 HIGH.
+
+**Purpose**: Make continuation authority fail closed, bind immutable event
+instances rather than reusable IDs, report later known arrivals truthfully, and
+couple all auxiliary observation state to bounded retention.
+
+- [ ] T071 Add RED authority tests proving absent/malformed fetch time and
+  malformed/naive expiry reject when expiry exists; mutating the returned
+  capability cannot alter internal binding/expiry/direction/caps; cursor minting
+  never adds a closed-schema-forbidden field to the returned I-010A document
+- [ ] T072 Add RED event-instance and side-coverage tests proving an evicted and
+  reingested ID cannot satisfy an original cursor remainder or anchor, and final
+  `after`/retention-shifted `around` pages report known later arrivals through
+  `has_more_after` without admitting them to the original remainder
+- [ ] T073 Add RED retained-state tests proving `_seen_delivery_ids`, event
+  instance generations, and `_actors` remain bounded by retained events/self;
+  unrelated actor facts and invalid candidate deliveries create no durable state
+- [ ] T074 Separate private continuation authority and cursor provenance from
+  deep-copied returned wire documents; make issuance/fetch expiry validation
+  parseable, timezone-aware, and fail closed; preserve expiry cleanup and all
+  accepted I-010A/I-010D shapes
+- [ ] T075 Assign monotonic host generations to accepted retained events, bind
+  cursor anchors/windows to `(event_id, generation)` pairs, reject replacement
+  instances, and carry immutable snapshot-generation/side-omission facts through
+  pagination while preserving one-shot bounded lifecycle behavior
+- [ ] T076 Couple retained delivery IDs, event generations, and actor facts to
+  deque eviction; filter actor input to retained references/self; move delivery
+  dedup commitment after successful validation; preserve ordinary retained
+  duplicate and relation-resolution behavior
+- [ ] T077 Add deterministic authority, replacement-identity, later-arrival
+  coverage, and retained-state cases under
+  `evals/v2/observation/resource-safety/cases.jsonl`; extend the runner only as
+  needed and regenerate every evidence aggregate plus the scene manifest
+- [ ] T078 Update `evidence/v2/observation/README.md` and append a Phase 16
+  supersession to `evidence/v2/observation/handoff.md`; preserve all rejected
+  attempt history unchanged and supersede only through new appended evidence
+- [ ] T079 Restore the Constitution Check rows to PASS only after the complete
+  Observation/corpus/eval/full-suite/verdict/Ruff/static/governance/
+  task-manifest/diff matrix is green; record T001–T079 identity and dispatch an
+  immutable independent review before candidate attempt 2
+
+### Phase 16 dependencies
+
+- T071–T073 are independent RED groups and may be authored in parallel.
+- T074 depends on T071 RED; T075 depends on T072 RED; T076 depends on T073 RED.
+- T077 depends on T074–T076 GREEN behavior.
+- T078 depends on regenerated T077 evidence.
+- T079 is last and blocks convergence and candidate attempt 2.
+
+**Checkpoint**: returned wire documents cannot rewrite authority, expiry fails
+closed, cursor identity survives ID reuse, side coverage discloses later known
+arrivals, and every host registry is bounded by explicit limits or retention.

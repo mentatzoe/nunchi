@@ -151,19 +151,18 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | H020-A2-01 remains closed and S020-A3-01 is now closed: every active sequence references one immutable ordered event-ID tuple plus a next position; consumed cursors are one-shot; exhaustion, expiry, and host revocation reclaim state; global handles and per-handle active cursors have configurable hard bounds. |
+| Truthful identity/observation | BLOCKED (T071–T077) | Phase 15 bounded cursor lifecycle remains closed, but H020-A4-04–05 prove reusable IDs can impersonate evicted event instances and final pages can hide later known arrivals. T072/T075/T077 must bind host generations and immutable side-coverage facts. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS | The Phase 15 supersession records the four-test RED reproduction, 39 focused GREEN tests, 114 green Observation tests, 40 green evidence rows including `CONT-S15-006`, the 2,000-event linear-state probe, 202/202 corpus accounting, 1363 full-suite tests with 4 optional skips, 60 fixtures, and passing Ruff/Bandit/governance/diff gates. |
+| Evidence before claims | BLOCKED (T071–T079) | The Phase 15 matrix remains historically accurate, but S020-A4-01–03/A4-06 and H020-A4-04–05 reject its candidate readiness. Authority isolation, fail-closed expiry, generation identity, truthful side coverage, bounded auxiliary state, regenerated evidence, and a new complete matrix are required. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: PASS. T066–T070 close S020-A3-01 with RED→GREEN resource
-tests, a shared immutable-window representation, one-shot lifecycle cleanup,
-explicit handle/cursor bounds, deterministic eval evidence, and the complete
-verification matrix. Candidate attempt 2 and its handoff still require the
-ordinary convergence/candidate/handoff lifecycle; this pass grants no
-acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 16. T066–T070 remain complete and
+historically accurate for bounded cursor lifecycle, but T071–T079 must isolate
+authority, fail closed on expiry, bind immutable event generations, repair side
+coverage, and couple auxiliary registries to retention before candidate attempt
+2. This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 
