@@ -149,8 +149,9 @@ CRITICAL/HIGH findings and activation evidence establishes `READY`.
   - `I-010B AttentionDecisionV2@2`
   - `I-010E AttentionReceiptV2@2`
 - **Produces**: `I-030A AttentionEngineV2@1` — the versioned
-  `evaluate_v2(...)` callable plus the non-current `attention-v2` CLI command,
-  contract-equivalent CLI implementing I-010A/B/E, participant-shaped
+  `evaluate_v2(...)` callable, its `ReceiptSinkPersistenceError` protocol type,
+  plus the non-current `attention-v2` CLI command, contract-equivalent CLI
+  implementing I-010A/B/E, participant-shaped
   `SUPPRESS | WAKE(advice) | DEFER`, a non-social preattention-disabled
   `BYPASS`, separate `ERROR`, and the dual-valve uncertainty transition.
 - **Integration handoff**: `v2-core-owner` hands the exact commit, interface
@@ -258,7 +259,12 @@ non-receiptable and MUST NOT fabricate one.
    audit fields.
 4. **Given** preattention is disabled by trusted configuration, **When** core
    and CLI run, **Then** both return the same bypass branch, make zero model
-   calls, and route downstream with wake source `PREATTENTION_BYPASS`.
+   calls, and expose only the exact I-010B `status: bypass`,
+   `cause: "preattention-disabled"` branch required for
+   the participant-host handoff. Slice 030 emits no ParticipantWakeV2 and does
+   not invoke the host; `v2-wake-owner` in slice 040 must independently accept
+   the handoff, map that accepted bypass to wake source
+   `PREATTENTION_BYPASS`, and test the downstream mapping.
 5. **Given** a schema-valid request whose event count, canonical classifier-
    projection byte length, or declared coverage limit exceeds the trusted
    attention-policy cap, **When** core or CLI validates it, **Then** it returns
@@ -274,6 +280,12 @@ non-receiptable and MUST NOT fabricate one.
    invocation returns `not-persisted` or `unknown`, **When** the engine returns
    the sink-failure `ERROR`, **Then** it uses the shared `WAKE` default because
    the required override receipt cannot be proven durable.
+8. **Given** the callable receipt sink violates its return/exception protocol,
+   **When** the engine classifies persistence, **Then** only a recognized
+   `ReceiptSinkPersistenceError` may carry `not-persisted` or `unknown`; every
+   other `Exception` or non-`None` return maps to `unknown`, no exception path
+   may claim `persisted`, and host-control `BaseException` classes propagate
+   without an I-030A result rather than being mislabeled as persistence facts.
 
 ### Edge Cases
 
@@ -407,7 +419,29 @@ non-receiptable and MUST NOT fabricate one.
   `receipt_sink` is exactly a synchronous
   `Callable[[AttentionReceiptV2], None]`: one normal `None` return means the
   offered record persisted, any raised exception means failure, and the engine
-  neither retries nor calls the sink more than once for a request. The CLI
+  neither retries nor calls the sink more than once for a request. The staged
+  I-030A runtime defines `ReceiptSinkPersistenceError` in
+  `src/nunchi/core.py` as its sole engine-owned typed sink-failure protocol.
+  Its constructor accepts exactly `not-persisted` or `unknown`, exposes that
+  value as a read-only `persistence` member, and rejects every other member.
+  The engine recognizes the type and its subclasses with `isinstance`; it does
+  not traverse a wrapper or `__cause__`/`__context__` chain. A recognized
+  instance whose member was forged or altered outside the constructor maps to
+  `unknown`. Every other `Exception`, including an exception that merely
+  carries a lookalike attribute, maps conservatively to `unknown`, as does a
+  normal non-`None` sink return. No exception may report `persisted`.
+  `not-persisted` is valid only for a closed-contract pre-write rejection whose
+  semantics guarantee that no durable side effect occurred. Generic
+  exceptions, unrecognized typed exceptions, timeout/cancellation, and post-
+  dispatch failures map to `unknown`. An `unknown` result MUST NOT trigger a
+  non-idempotent retry; the one-offer/no-second-offer rule still applies.
+  `BaseException` classes, including process termination, keyboard interrupt,
+  and host cancellation outside `Exception`, are not converted into an I-030A
+  decision or persistence fact: they propagate after the sole offer. A host
+  that catches such control flow and converts it into participant routing MUST
+  use wake, never silence. Exception text, attributes other than the validated
+  member, wrapper/cause chains, paths, and credentials never enter projection,
+  stdout, stderr, decisions, receipts, or logs. The CLI
   adapts its closed `receipt_sink` object to that protocol by canonicalizing the
   attention record as UTF-8 JSON plus one newline and using descriptor-relative
   no-follow exclusive create for mode `0600` file
@@ -416,11 +450,13 @@ non-receiptable and MUST NOT fabricate one.
   directory `fsync`. An exclusive-create collision raises a typed sink failure
   with persistence `unknown`: the engine neither overwrites nor assumes the
   existing file is its record. Any other open failure before creation is
-  `not-persisted`. Any write/flush/fsync/close failure
-  triggers descriptor-relative unlink of only the newly created file followed
-  by directory `fsync`; only successful cleanup may report `not-persisted`.
-  Cleanup/unlink/directory-fsync failure, or a final directory-fsync failure
-  after the file was closed, reports persistence `unknown`. Neither failure
+  `not-persisted` only when the failed exclusive-create operation guarantees
+  that no file was created. Any write/flush/fsync/close failure triggers
+  descriptor-relative unlink of only the newly created file followed by
+  directory `fsync`, but every such post-dispatch failure reports `unknown`
+  even when cleanup succeeds. Cleanup/unlink/directory-fsync failure, or a
+  final directory-fsync failure after the file was closed, likewise reports
+  persistence `unknown`. Neither failure
   outcome claims persistence, and the engine returns operational `ERROR` with
   the shared `WAKE` default and the exact sink outcome in its off-surface error
   fact. The configuration file,
@@ -460,11 +496,25 @@ non-receiptable and MUST NOT fabricate one.
   Trusted `classifier_config.max_retries` is required and MUST be an integer
   from `0` through `2`, so one judgment has at most three transport attempts;
   neither callable nor CLI inserts a default.
-  Only connection failures, timeouts, HTTP `429`, and HTTP `5xx` are retryable;
-  schema/configuration errors, other `4xx`, and malformed model output are not.
+  The V2 stdlib transport classifies `urllib.error.HTTPError` before the other
+  request failures. Only HTTP `429`, any HTTP status from `500` through `599`,
+  `urllib.error.URLError`, `socket.timeout`/`TimeoutError`, and an `OSError`
+  (including `ConnectionError`) raised while `urlopen` is executing the request
+  are retryable. A `URLError` is classified by its outer type without
+  inspecting or trusting its `reason`. Every other HTTP status, configuration
+  or request/schema validation failure, JSON decoding failure, malformed model
+  output, and failure after a response has been obtained is non-retryable.
+  Deterministic tests MUST cover HTTP `429`, `499`, `500`, `599`, and `600`;
+  direct timeout, `URLError`, `ConnectionError`, and other request-execution
+  `OSError`; exact attempt and sleep counts for `max_retries` `0`, `1`, and `2`;
+  identical payload/request identity on every attempt; immediate stop after
+  success; and zero retry for each non-retryable class.
   Every attempt reuses the same request payload and logical request ID and may
   not be treated as an independent social vote. Exhaustion returns operational
-  `ERROR` with wake as the shared default.
+  `ERROR` and follows FR-011's later-provider-failure policy: shared default is
+  `WAKE`; a fully validated, bound `NO_WAKE` policy applies only when its
+  required override receipt can be offered; and any sink failure reverts to
+  `WAKE`.
 - **FR-004**: The classifier disposition MUST be exactly `SUPPRESS`, `WAKE`, or
   `DEFER`; operational `ERROR` MUST remain a separate tagged response branch.
 - **FR-005**: `WAKE` advice, when present, MUST be non-authoritative, grounded
@@ -551,6 +601,10 @@ non-receiptable and MUST NOT fabricate one.
   Accepted I-010E `@2` represents the selected design's broader
   effective-policy and `NO_WAKE` provenance requirements directly; neither may
   be hidden in I-010E `error.detail` or a local extension.
+  The I-030A-owned `ReceiptSinkPersistenceError` changes no I-010E field or
+  ownership rule. It is part of the still-unaccepted initial I-030A `@1`
+  runtime seam, so this clarification does not bump I-030A; every downstream
+  consumer receives and separately accepts that exact `@1` seam.
 - **FR-013**: The isolated slice branch MUST stage I-030A as additive,
   non-current symbols inside the owned `src/nunchi/core.py`,
   `src/nunchi/cli.py`, `src/nunchi/classifiers.py`, `src/nunchi/models.py`, and
@@ -609,7 +663,8 @@ non-receiptable and MUST NOT fabricate one.
   advice adherence is below FR-005's criterion, or mechanics fail to route an
   invalid/unsafe result to `DEFER` or operational `ERROR` as specified.
 - **FR-015**: The owner MUST hand off the exact commit; consumed I-010A/B/E and
-  produced I-030A versions; complete commands/results; prompt/model and
+  produced I-030A versions plus its exact receipt-sink failure protocol;
+  complete commands/results; prompt/model and
   effective-policy provenance; deterministic, replay, three-family, and
   false-suppression evidence; the preregistered downstream canary protocol;
   active-margin state; exact documentation dispositions, validations, reviewer,
@@ -627,9 +682,14 @@ non-receiptable and MUST NOT fabricate one.
   slice.
 - **FR-017**: Trusted `preattention-disabled` configuration MUST return the
   I-010B `status: bypass` branch, make zero classifier calls, carry no
-  classifier/effective disposition, and identify downstream wake source
-  `PREATTENTION_BYPASS`; it MUST NOT be represented as WAKE, DEFER, ERROR, or
-  model suppression.
+  classifier/effective disposition, and carry exactly
+  `cause: "preattention-disabled"`;
+  it MUST NOT be represented as WAKE, DEFER, ERROR, or model suppression.
+  I-030A does not emit ParticipantWakeV2, identify its `wake_source`, or invoke
+  the participant host. The slice-030 packet MUST hand the exact bypass branch
+  to `v2-wake-owner`; slice 040 owns independently accepting it, mapping it to
+  `PREATTENTION_BYPASS`, and proving that downstream mapping in an acceptance
+  test.
 - **FR-018**: The classifier projection MUST omit every opaque continuation
   handle, participant/room binding token, cursor, and expiry value. It MAY
   expose only factual coverage and booleans describing whether bounded
@@ -663,8 +723,14 @@ non-receiptable and MUST NOT fabricate one.
   reports the typed `not-persisted` or `unknown` outcome from FR-001.
 - **FR-020**: Core/CLI tests MUST pass contract-valid requests containing
   sentinel continuation secrets and prove the classifier provider receives
-  none of those host-only values while the downstream host can still receive
-  the original bound continuation capability.
+  none of those host-only values. I-030A MUST treat the accepted request and
+  its continuation object as caller-owned immutable input: evaluation neither
+  mutates nor consumes it. Callable tests MUST compare a deep/canonical snapshot
+  of the caller-held request before and after evaluation and prove the exact
+  continuation capability remains present and available for later host use.
+  CLI tests MUST retain a caller-side copy of the parsed input/capability and
+  prove it remains byte/deep-equal after command evaluation while the provider
+  projection contains no secret. Slice 030 does not itself invoke the host.
 
 ### Key Entities
 
@@ -685,7 +751,9 @@ non-receiptable and MUST NOT fabricate one.
 - **SC-001**: For every deterministic fixture, callable core and CLI produce
   field-for-field equal I-010B results and equal offered attention records for
   normalized inputs, using `evaluate_v2` and `attention-v2`, with only framing,
-  diagnostics, and exit status allowed to differ.
+  diagnostics, and exit status allowed to differ. The applicable callable sink
+  failure and CLI adapter fixtures preserve the plan's exact 23-row recognition
+  matrix and expected persistence/wake outcome.
 - **SC-002**: The exact 36-row classifier/effective transition matrix has zero
   invalid success pairs and zero cases where uncertainty or malformed evidence
   yields effective suppression. Its finite domain is: 16 `WAKE`/`DEFER` rows
@@ -702,8 +770,10 @@ non-receiptable and MUST NOT fabricate one.
   margin status, valve, and override cause using FR-008's validation and
   precedence order.
 - **SC-003**: All forged advice, nonexistent evidence IDs, reply-bearing fields,
-  request-controlled operator settings, and invalid model output are rejected
-  or routed to operational error.
+  request-controlled operator settings, invalid model output, non-`None` sink
+  returns, lookalike persistence attributes, forbidden typed members, and
+  forged invalid typed members are rejected or routed to the exact safe error
+  path; no exception message or secret enters output or evidence.
 - **SC-004**: False-suppression-scar replay contains no deterministic semantic
   suppressor and records model disposition, effective disposition, and
   participant-shaped rationale for every case.
@@ -733,7 +803,10 @@ non-receiptable and MUST NOT fabricate one.
   host/OS, and fixture/corpus identity are mandatory descriptive fields. Slice
   030 sets no latency or token threshold and makes no performance pass claim
   beyond complete measurement; retry count remains mechanically bounded by
-  FR-003. The full baseline MUST also prove that current V1 public exports,
+  FR-003. The focused suite and ordinary evidence MUST identify all 23
+  receipt-sink matrix rows, their expected and observed classifications, the
+  exact candidate, and zero skips. The full baseline MUST also prove that
+  current V1 public exports,
   `admit`, adapters, and tests remain unchanged and green, while V2-specific
   tests prove the staging names never invoke or translate through V1. The
   activation record freezes the exact starting-commit root test/skip counts,
@@ -790,6 +863,7 @@ non-receiptable and MUST NOT fabricate one.
   `docs/integrations/hermes-core-patch.md`,
   `docs/integrations/hermes-core-patch-test-plan.md`,
   `integrations/claude-code/transport-patch/README.md`,
+  `integrations/codex/nunchi-codex/.mcp.json`,
   `integrations/hermes/nunchi-gate/dashboard/manifest.json`,
   `integrations/mcp-discord/DESIGN.md`, and
   `integrations/mcp-discord/README.md`. Each path retains the exact per-file
@@ -799,7 +873,9 @@ non-receiptable and MUST NOT fabricate one.
 - **`HANDOFF` inventory**: `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`,
   `docs/INSTALL.md`, `docs/STABILITY.md`, `docs/adapters.md`,
   `docs/architecture/v2-selected-design.md`, `docs/contracts/channel-adapter-v1.md`,
-  `docs/integration.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/DEFER_EVAL.md`,
+  `docs/integration.md`, `examples/loader-snippet.md`,
+  `examples/generic_host_demo.py`, `examples/read_the_room_demo.py`,
+  `profiles/open-floor.md`, `integrations/claude-code/DEFER_EVAL.md`,
   `integrations/claude-code/README.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/README.md`,
   `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`,
   `integrations/hermes/README.md`, and `integrations/hermes/nunchi-gate/plugin.yaml`. Each path uses the exact claim delta and
@@ -808,8 +884,8 @@ non-receiptable and MUST NOT fabricate one.
   and Hermes files go to their named surface owners. No `HANDOFF` row is a
   no-impact finding or a slice-owned documentation escape.
 - **Inventory invariant**: the spec, plan matrix, and T025 MUST retain the same
-  44 exact paths and one disposition per path: 8 `UPDATE`, 16 `NO_IMPACT`, and
-  20 `HANDOFF`.
+  47 exact paths and one disposition per path: 8 `UPDATE`, 17 `NO_IMPACT`, and
+  22 `HANDOFF`.
 - **Handoff evidence**: `evidence/v2/attention/handoff.md` records the exact
   reviewed paths, dispositions, delta, validation, and reviewer.
 

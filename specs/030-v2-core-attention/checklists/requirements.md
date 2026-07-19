@@ -162,7 +162,7 @@ implementation
 
 ### Documentation Freshness Dispositions
 
-- [x] CHK076 Is the exact-path inventory requirement measurable as the same 44 unique paths across spec, plan, and T025 with exactly 8 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF` dispositions? [Measurability, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025]
+- [x] CHK076 Is the exact-path inventory requirement measurable as the same 47 unique paths across spec, plan, and T025 with exactly 8 `UPDATE`, 17 `NO_IMPACT`, and 22 `HANDOFF` dispositions? [Measurability, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025]
 - [x] CHK077 Does the documentation review require one disposition for every exact affected ordinary path across behavior, contracts, configuration/defaults, install/upgrade, entry points, supported surfaces, security, evidence grade, limitations, version/current/release state, diagrams, examples, and commands, with no grouped path or wildcard substitution? [Completeness, Documentation, Spec §Documentation Freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK078 Does every `UPDATE` requirement name the exact document, concrete claim delta, accountable task/lane, candidate-relative validation for applicable links/diagrams/examples/commands/machine-checkable claims, and ordinary evidence needed for PASS? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK079 Does every `NO_IMPACT` requirement name one exact path, give a concrete candidate-specific rationale, require reviewer identity and ordinary handoff evidence, and remain rejectable when the exact candidate diff or resulting claim invalidates the rationale? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
@@ -251,9 +251,9 @@ the earlier 86/86 result.
 
 ### Documentation Freshness Dispositions
 
-- [x] CHK102 Are the documentation inventories reconciled before analysis so the spec, plan, T025, T026, and checklist name the same 44 exact paths with `8 UPDATE / 16 NO_IMPACT / 20 HANDOFF`, without a superseded inventory coexisting in current requirements? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–T026]
+- [x] CHK102 Are the documentation inventories reconciled before analysis so the spec, plan, T025, T026, and checklist name the same 47 exact paths with `8 UPDATE / 17 NO_IMPACT / 22 HANDOFF`, without a superseded inventory coexisting in current requirements? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–T026]
 - [x] CHK103 Is the post-reconciliation inventory count objectively reproducible from unique exact paths, with no duplicates, grouped substitutes, wildcards, or future files silently omitted from its stated denominator? [Measurability, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness]
-- [x] CHK104 Are the twelve newly inventoried surfaces—`AGENTS.md`, `CLAUDE.md`, `evidence/verdict-suite/README.md`, `evidence/v2/contract/README.md`, `evidence/v2/attention/README.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`, `integrations/hermes/nunchi-gate/dashboard/manifest.json`, and `integrations/hermes/nunchi-gate/plugin.yaml`—each represented with one consistent disposition, owner, rationale or exact delta, validation obligation, and task trace across all three artifacts? [Completeness, Consistency, Gap, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness; Tasks §T025]
+- [x] CHK104 Are the fifteen finally inventoried surfaces—`AGENTS.md`, `CLAUDE.md`, `evidence/verdict-suite/README.md`, `evidence/v2/contract/README.md`, `evidence/v2/attention/README.md`, `examples/loader-snippet.md`, `examples/generic_host_demo.py`, `examples/read_the_room_demo.py`, `profiles/open-floor.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/nunchi-codex/.mcp.json`, `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`, `integrations/hermes/nunchi-gate/dashboard/manifest.json`, and `integrations/hermes/nunchi-gate/plugin.yaml`—each represented with one consistent disposition, owner, rationale or exact delta, validation obligation, and task trace across all three artifacts? [Completeness, Consistency, Gap, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness; Tasks §T025]
 - [x] CHK105 Does every `UPDATE` requirement name one exact path, the candidate-specific claim delta, accountable owner/task, applicable link/diagram/example/command validation, evidence-grade boundary, and objective PASS evidence? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK106 Does every `NO_IMPACT` requirement name one exact path, provide a candidate-specific rationale, require reviewer identity and ordinary handoff evidence, and remain rejectable if the exact candidate diff or resulting claim invalidates that rationale? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Tasks §Documentation freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK107 Does every `HANDOFF` requirement name one exact shared or downstream-owned path, state the exact claim delta, identify the accepting owner, prohibit use for slice-owned documentation, and avoid representing deferred work as complete or no-impact? [Completeness, Ownership, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness; Constitution §Documentation Freshness Gate]
@@ -278,7 +278,7 @@ publication delta, accepted I-010B/I-010E `@2` inputs, receipt offer/persistence
 semantics, pre-run exact model selection, commit-range verification,
 receipt-sink wake fallback, and non-blocking program-owner registry handoff were
 reconciled across spec, plan, and tasks. Its documentation-completeness result
-is superseded by the fresh 44-path review below.
+is superseded by the fresh 47-path review below.
 
 ## Formal Reviewer Gate — 2026-07-19
 
@@ -322,7 +322,7 @@ CHK001–CHK110 or from any implementation result.
 
 ### Documentation Freshness Dispositions
 
-- [x] CHK127 Do the spec, plan matrix, T025, T026, and this current checklist agree on one reproducible inventory of 44 unique exact paths with exactly 8 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF` dispositions? [Consistency, Traceability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §Documentation freshness, §T025–§T026]
+- [x] CHK127 Do the spec, plan matrix, T025, T026, and this current checklist agree on one reproducible inventory of 47 unique exact paths with exactly 8 `UPDATE`, 17 `NO_IMPACT`, and 22 `HANDOFF` dispositions? [Consistency, Traceability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §Documentation freshness, §T025–§T026]
 - [x] CHK128 Does every inventoried surface receive exactly one disposition, with no duplicate path, grouped substitute, generic directory, wildcard, or silent omission of a known documentation, evidence, example, profile, configuration, or installed-metadata claim surface? [Completeness, Measurability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
 - [x] CHK129 Does every `UPDATE` requirement name one exact path, candidate-specific claim delta, accountable task/lane, applicable link/diagram/example/command/configuration validation, evidence-grade boundary, and objective PASS record? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Tasks §T025; Constitution §Documentation Freshness Gate]
 - [x] CHK130 Does every `NO_IMPACT` requirement name one exact path, concrete candidate-specific rationale, reviewer identity, and ordinary handoff evidence, while remaining rejectable when the exact candidate diff or resulting claim invalidates that rationale? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Tasks §T025; Constitution §Documentation Freshness Gate]
@@ -346,3 +346,137 @@ CHK001–CHK110 or from any implementation result.
 **2026-07-19 formal result**: 24/24 fresh items pass; the full checklist is now
 134/134. The separately owned stale program interface registry remains an open
 `v2-program-owner` handoff and is not counted as a scoped slice-030 finding.
+
+## Formal Reviewer Receipt-Sink Delta Gate — 2026-07-19
+
+**Purpose**: Review the requirement quality, governance boundaries, and
+documentation-freshness consequences of the clarified callable receipt-sink
+exception contract without reusing the completed CHK111–CHK134 result.
+
+**Depth**: Formal blocking review
+
+**Reviewer**: codex-session-1 (`v2-core-owner`), acting as the formal owner
+reviewer under Zoe's explicit identity-separation waiver
+
+**Actor / timing**: Assigned owner conducting a fresh review after the receipt-
+sink clarification is reconciled across spec, plan, and tasks and before fresh
+zero scoped CRITICAL/HIGH analysis, slice activation, or implementation
+
+**Review status**: Complete. All 30 items were reviewed independently against
+the post-clarification requirement text; no result is inherited from
+CHK111–CHK134 or from implementation behavior.
+
+### Requirement Completeness and Clarity
+
+- [x] CHK135 Is the receipt-sink outcome domain closed and exhaustive: normal `None` return means `persisted`, a recognized engine-owned typed failure carries only `not-persisted` or `unknown`, every unrecognized exception maps to `unknown`, and no raised path may claim `persisted`? [Completeness, Spec §FR-001, User Story 3 Acceptance Scenario 8; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK136 Is the “engine-owned typed sink-failure exception” specified precisely enough to identify its owning interface, construction authority, validated persistence member, and recognition boundary without relying on implementation knowledge? [Clarity, Ambiguity, Spec §FR-001; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK137 Does “every other exception” define whether host-control, cancellation, and process-termination exception classes belong to the mapping domain or remain intentionally outside it? [Gap, Ambiguity, Spec §FR-001, User Story 3 Acceptance Scenario 8]
+- [x] CHK138 Are exact-type, subclass, wrapped-error, and cause-chained recognition semantics defined so two conforming hosts cannot disagree about which failure is “recognized,” while attribute-lookalike exceptions are explicitly untrusted? [Clarity, Coverage, Spec §FR-001; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK139 Are CLI adapter requirements complete for mapping collision, pre-create failure, post-create write/flush/fsync/close failure, cleanup success, cleanup uncertainty, and final-directory-fsync uncertainty into the only two permitted typed failure outcomes? [Completeness, Spec §FR-001; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK140 Are the callable-core and CLI-adapter responsibilities separated unambiguously: the adapter classifies its owned persistence facts, the core recognizes only its owned typed failure, and neither trusts arbitrary exception attributes or retries the sink? [Clarity, Ownership, Spec §FR-001, §FR-012; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK141 Are the required response status, stable code/cause-detail pair, `receipt_persistence` suffix, offered-record facts, and one-call/no-second-offer rule defined for every sink outcome? [Completeness, Spec §FR-001, §FR-011–§FR-012, §FR-019; Plan §CLI Process Contract]
+- [x] CHK142 Is the safety relationship between sink persistence and `NO_WAKE` authority explicit for recognized `not-persisted`, recognized `unknown`, unrecognized, and lookalike exception paths, with shared `WAKE` required in every failure case? [Clarity, Safety, Spec §FR-001, §FR-011–§FR-012, User Story 3 Acceptance Scenarios 7–8]
+- [x] CHK143 Are primary, alternate, exception, recovery, and hostile-input requirements present for normal return, both recognized outcomes, malformed recognized outcome, forbidden `persisted`, unrecognized exception, attribute lookalike, and cleanup uncertainty? [Coverage, Gap, Spec §User Story 3, Edge Cases; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK144 Can every new exception-contract clause be traced to an accountable task, exact ordinary-path target, deterministic case/evidence target, and handoff obligation without treating a passing implementation test as proof of requirement quality? [Traceability, Spec §FR-001, §FR-012; Plan §Ordinary Repository Targets; Tasks §T004, §T007, §T018–§T022, §T026]
+
+### Requirement Consistency and Acceptance Criteria
+
+- [x] CHK145 Do User Story 3 Acceptance Scenario 8, FR-001, FR-012, the callable/CLI plan, and T004/T007/T018/T019/T021 use one non-conflicting exception taxonomy and persistence vocabulary? [Consistency, Spec §User Story 3 Acceptance Scenario 8, §FR-001, §FR-012; Plan §I-030A callable and CLI equivalence seam; Tasks §T004, §T007, §T018–§T021]
+- [x] CHK146 Is callable/CLI field equivalence measurable when a host-injected sink raises each recognized or unrecognized failure and the CLI adapter reaches the corresponding persistence outcome, with only framing, diagnostics, and exit status allowed to differ? [Measurability, Spec §SC-001, §FR-019; Plan §CLI Process Contract]
+- [x] CHK147 Are “offered,” “persisted,” `not-persisted`, and `unknown` consistent with accepted I-010E ownership, including the prohibition on a response or offered receipt attesting its own persistence? [Consistency, Dependency, Spec §FR-012; Plan §Accepted contract amendment resolution]
+- [x] CHK148 Is sink-failure precedence specified relative to configuration, request-schema, binding, budget, bypass, provider/runtime, and malformed-model failures so every combined-failure case has one objectively determined result? [Clarity, Coverage, Spec §FR-001, §FR-011–§FR-012, §FR-019; Plan §CLI Process Contract]
+- [x] CHK149 Is there a finite, reproducible acceptance matrix for normal return, each recognized typed outcome, invalid typed member, unrecognized exception, attribute lookalike, and adapter cleanup outcome, including expected wake policy and persistence reporting? [Measurability, Gap, Spec §FR-001, §SC-001, §SC-003; Tasks §T004, §T021]
+- [x] CHK150 Are the evidence requirements specific about the exact exception cases, expected facts, denominator/count, zero-skip rule, and candidate binding needed to support the sink-contract completion claim? [Acceptance Criteria, Gap, Spec §SC-003, §SC-008; Plan §Candidate Verification Commands; Tasks §T021, §T027]
+- [x] CHK151 Are secrecy requirements consistent about preventing exception messages, sink paths, credentials, and lookalike attributes from entering classifier projection, stdout/stderr, decisions, receipts, logs, or handoff claims beyond the closed persistence fact? [Security, Consistency, Spec §FR-001, §FR-018–§FR-019; Plan §I-030A callable and CLI equivalence seam]
+
+### Governance Boundaries
+
+- [x] CHK152 Is the typed sink failure explicitly scoped to slice-030-owned I-030A runtime seams without changing accepted 010-owned schemas, weakening I-010E receipt ownership, or creating a free-text contract extension? [Boundary, Ownership, Spec §Interface Summary, §FR-012, §FR-016; Plan §Slice Interfaces]
+- [x] CHK153 Does the requirements set make an explicit, traceable determination about whether the newly specified host-visible exception changes I-030A `@1` interface exposure or versioning obligations for downstream consumers? [Gap, Dependency, Spec §FR-015; Plan §Slice Interfaces, §Owner Handoff]
+- [x] CHK154 Are ownership and handoff requirements complete for the core-defined failure type, CLI adapter classification, downstream host acceptance, security review, integrator acceptance, and slice-110 publication without silent cross-slice ownership transfer? [Completeness, Ownership, Spec §FR-013, §FR-015; Plan §Documentation ownership, §Owner Handoff]
+- [x] CHK155 Are current V1 behavior, non-current `evaluate_v2`/`attention-v2` staging, atomic slice-110 publication, verification-pending cutover, and `CUTOVER_VERIFIED` wording still distinguished after the exception-contract clarification? [Consistency, Governance, Spec §Control-Plane Boundary, §FR-013, Explicit Exclusions; Plan §Green pre-cutover staging, §Integration Strategy]
+- [x] CHK156 Do activation prerequisites and planning-reconciliation declarations identify this latest formal reviewer gate, rather than treating completed CHK111–CHK134 as review of later requirement changes? [Conflict, Traceability, Tasks metadata §Activation prerequisites, §Planning reconciliation result]
+- [x] CHK157 Do the clarified requirements keep authority, assignment, dependency acceptance, lifecycle, candidate, handoff, and acceptance facts out of the exception, runtime configuration, decisions, receipts, and classifier input while keeping this checklist in control-plane-only scope? [Boundary, Spec §Control-Plane Boundary, §FR-016, Explicit Exclusions; Constitution §SpecKit Is Control-Plane Only, §Program and Slice Lifecycle Gates]
+
+### Documentation Freshness Dispositions
+
+- [x] CHK158 Has the 47-path documentation matrix been re-evaluated against the clarified host-visible exception contract, with an explicit requirement that the `8 UPDATE / 17 NO_IMPACT / 22 HANDOFF` denominator remains valid only if no newly affected surface is omitted? [Completeness, Measurability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [x] CHK159 Do the `UPDATE` requirements for `docs/attention/v2.md` and `evidence/v2/attention/README.md` state the exact typed/unrecognized exception taxonomy, shared-`WAKE` rule, evidence cases, candidate binding, and applicable validation delta? [Completeness, Gap, Plan §Documentation Impact and Freshness; Tasks §T025–§T026]
+- [x] CHK160 Are the other evidence and evaluation `UPDATE` rows required either to incorporate the new sink-failure evidence boundary or to retain a concrete candidate-specific rationale for why their existing claim delta is sufficient? [Clarity, Documentation, Plan §Documentation Impact and Freshness; Tasks §T025]
+- [x] CHK161 Are `NO_IMPACT` requirements for `docs/contracts/nunchi-v2.md` and `evidence/v2/contract/README.md` re-justified against the host-visible runtime exception seam, accepted 010 contract ownership, and exact candidate diff rather than inherited from the pre-clarification review? [Consistency, Assumption, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
+- [x] CHK162 Does every affected `HANDOFF` row name the exact exception-related claim delta and accepting owner for shared or downstream host guidance, while unchanged rows retain an explicit candidate-specific rationale and are not silently treated as complete? [Completeness, Ownership, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness]
+- [x] CHK163 Are per-path validation requirements defined for callable examples, CLI exits, configuration syntax, installed metadata, error/persistence claims, links, and evidence-grade/current-state wording instead of one generic documentation-success assertion? [Coverage, Acceptance Criteria, Plan §Documentation Impact and Freshness; Tasks §T025]
+- [x] CHK164 Is documentation-freshness PASS tied to the exact post-clarification lifecycle candidate and ordinary handoff evidence, with stale dispositions, inherited reviewer results, missing deltas, or premature V2-current claims explicitly blocking `HANDOFF_READY`? [Governance, Traceability, Spec §FR-015, Documentation Freshness; Tasks §T025–§T027, Post-Task Lifecycle Gates; Constitution §Documentation Freshness Gate]
+
+## Formal Reviewer Receipt-Sink Delta Notes
+
+- Mark CHK135–CHK164 complete only from the reconciled requirement text and
+  cited authority. Implementation, test, evaluation, or runtime success cannot
+  substitute for requirement quality.
+- Record findings inline with the affected CHK ID. Any unresolved ambiguity,
+  conflict, ownership leak, governance-boundary violation, traceability gap, or
+  documentation-disposition mismatch blocks analysis and activation.
+- This generated gate does not establish `READY`, create activation evidence,
+  authorize implementation, prove documentation freshness, or record an
+  acceptance decision.
+
+**2026-07-19 receipt-sink delta result**: 30/30 fresh items pass; the complete
+requirements checklist is now 164/164. The I-030A runtime exception remains
+inside slice-030 ownership and changes no accepted 010 contract. The separately
+owned program-interface registry remains a non-blocking `v2-program-owner`
+handoff, not a scoped slice-030 finding.
+
+**2026-07-19 final inventory revalidation**: codex-session-1 re-ran CHK076,
+CHK102–CHK110, CHK127–CHK134, and CHK158–CHK164 after the final ordinary-path
+sweep added `examples/generic_host_demo.py`, `examples/read_the_room_demo.py`,
+and `integrations/codex/nunchi-codex/.mcp.json`. All remain PASS against the
+47-path `8 UPDATE / 17 NO_IMPACT / 22 HANDOFF` denominator; no earlier 44-path
+count remains current.
+
+## Formal Reviewer Final Scoped-Finding Gate — 2026-07-19
+
+**Purpose**: Independently review the requirement delta that closes the final
+scoped analysis findings: participant-host ownership, continuation retention,
+the concrete stdlib retry taxonomy, and conservative sink persistence.
+
+**Depth**: Formal blocking review
+
+**Reviewer**: codex-session-1 (`v2-core-owner`), acting as the formal owner
+reviewer under Zoe's explicit identity-separation waiver
+
+**Actor / timing**: Assigned owner after reconciling the advisory sink rule and
+the aborted run's final scoped findings across spec, plan, and tasks, before a
+new bound planning run, activation, or implementation
+
+**Review status**: Complete. All 12 items were reviewed against the selected
+design, accepted I-010A/B/E versions, current stdlib transport seam, and slice
+ownership. No result is inherited from the earlier 164 items.
+
+### Ownership, Safety, and Measurability
+
+- [x] CHK165 Does slice 030 prove only the exact I-010B bypass branch/cause and zero classifier calls, without claiming ParticipantWakeV2 emission, host invocation, or downstream wake-source ownership? [Ownership, Boundary, Spec §User Story 3, §FR-017; Plan §Integration Strategy, §S06]
+- [x] CHK166 Is the downstream obligation explicit and independently testable: `v2-wake-owner` must accept the exact 030 handoff, map bypass to ParticipantWakeV2 source `PREATTENTION_BYPASS`, and pass a slice-040 acceptance test? [Dependency, Acceptance Criteria, Spec §FR-015, §FR-017; Plan §Owner Handoff; Tasks §T022, §T026]
+- [x] CHK167 Do callable requirements prove the accepted request and original continuation are caller-owned immutable input through deep/canonical pre/post equality and continued availability, while the provider receives no secret? [Security, Measurability, Spec §FR-018–§FR-020; Plan §Trusted attention-budget boundary; Tasks §T004, §T007]
+- [x] CHK168 Do CLI requirements retain a caller-side byte/deep copy and prove post-evaluation equality and capability availability without claiming that slice 030 invokes the participant host? [Security, Ownership, Measurability, Spec §FR-020; Plan §CLI Process Contract; Tasks §T021]
+- [x] CHK169 Is the retryable transport set closed over the concrete V2 stdlib seam: `HTTPError` first with only `429` and `500..599`, outer `URLError` without reason inspection, direct timeout, and request-execution `OSError` including `ConnectionError`? [Clarity, Completeness, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T006]
+- [x] CHK170 Are non-retryable boundaries and deterministic oracles complete for HTTP `499`/`600`, post-response JSON/model failures, exact attempts/sleeps at all allowed retry counts, payload/request identity, stop-on-success, and exhaustion policy? [Measurability, Coverage, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T021]
+- [x] CHK171 Is `not-persisted` restricted to a closed-contract pre-write rejection whose semantics guarantee no durable side effect, with generic, unrecognized typed, ordinary timeout/cancellation, and every post-dispatch failure mapped to `unknown`? [Safety, Clarity, Spec §FR-001; Plan §Receipt-sink exception recognition matrix; Tasks §T004, §T007]
+- [x] CHK172 Does every `unknown` sink result prohibit non-idempotent retry and retain the one-offer/no-second-offer/shared-`WAKE` rules? [Safety, Consistency, Spec §FR-001, §FR-012; Plan §I-030A callable and CLI equivalence seam; Tasks §T019, §T021]
+- [x] CHK173 Do adapter rows 15–18 report `unknown` even after successful best-effort cleanup, while row 14 alone may report `not-persisted` only when failed exclusive create guarantees no file was created? [Consistency, Measurability, Spec §FR-001; Plan §Receipt-sink exception recognition matrix; Tasks §T019, §T021]
+- [x] CHK174 Are host-control `BaseException` propagation and ordinary timeout/cancellation-as-`Exception` classification non-conflicting and explicitly separate? [Clarity, Coverage, Spec §FR-001; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK175 Can each final delta be traced to exact implementation, deterministic corpus/evidence, and handoff tasks without changing accepted 010 schemas or taking slice-040 ownership? [Traceability, Governance, Spec §FR-015–§FR-020; Plan §Ordinary Repository Targets; Tasks §T004, §T006–§T007, §T019, §T021–§T022, §T026]
+- [x] CHK176 Does the 47-path `8 UPDATE / 17 NO_IMPACT / 22 HANDOFF` documentation denominator remain complete after these clarifications, with component exception evidence in the existing UPDATE paths and participant-host mapping in the already named downstream/shared HANDOFF paths? [Documentation, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–§T026]
+
+## Formal Reviewer Final Scoped-Finding Notes
+
+- Mark CHK165–CHK176 complete only from the reconciled requirement text and
+  cited authority; implementation success is not a substitute.
+- Any reintroduction of host-owned ParticipantWakeV2 behavior, request
+  mutation, open-ended retry classification, or post-dispatch
+  `not-persisted` blocks analysis and activation.
+- The program-interface registry remains the separately recorded non-blocking
+  `v2-program-owner` handoff and is not reclassified by this gate.
+
+**2026-07-19 final scoped-finding result**: 12/12 fresh items pass; the complete
+requirements checklist is now 176/176. The task graph remains T001–T027 and
+dormant until a separate READY activation record exists.

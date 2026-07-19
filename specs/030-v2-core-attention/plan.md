@@ -195,7 +195,24 @@ still required before `READY`.
   `EffectiveAttentionPolicy` inventory and validation in spec FR-001;
   `recoverability` is the exact bound four-field capability there;
   `classifier_config` is its exact seven-field trusted provider configuration;
-  and `receipt_sink` is the one-call synchronous `None`/exception protocol.
+  and `receipt_sink` is the one-call synchronous `None`/exception protocol:
+  normal `None` return proves `persisted`; the recognized engine-owned typed
+  `ReceiptSinkPersistenceError` may carry only `not-persisted` or `unknown`;
+  every unrecognized `Exception`, attribute lookalike, forged invalid typed
+  member, or non-`None` return maps to `unknown`; and no raised path may claim
+  persistence. The class is defined by I-030A in `src/nunchi/core.py`, validates
+  a read-only member at construction, and is recognized with `isinstance`, so
+  subclasses are recognized but wrappers and cause/context chains are not
+  traversed. `BaseException` control flow propagates without an I-030A result;
+  a catching host may route only by waking. Exception text and unrecognized
+  attributes never become output, receipt, projection, or log data.
+  A sink may raise typed `not-persisted` only for a closed-contract pre-write
+  rejection whose semantics guarantee that no durable side effect occurred.
+  Generic exceptions, unrecognized typed exceptions, ordinary timeout or
+  cancellation exceptions, and every post-dispatch failure are `unknown`.
+  `unknown` never authorizes a non-idempotent retry; every such path remains
+  subject to the one-offer/no-second-offer rule. Host-control cancellation
+  outside `Exception` remains the propagating `BaseException` case above.
   Policy and recoverability participants bind exactly to I-010A `self`, and the
   recoverability scope binds exactly to I-010A `room.continuity_scope_id`.
   Callable inputs arrive normalized. The CLI file is the exact closed FR-001
@@ -209,10 +226,14 @@ still required before `READY`.
   mode `0600`, writes one canonical JSON line, flushes, file-fsyncs, closes, and
   directory-fsyncs; it never overwrites or retries. Exclusive-create collision
   reports `unknown` without touching the existing file; other pre-create open
-  failure reports `not-persisted`. Post-create failure attempts descriptor-
-  relative unlink plus directory fsync. Only successful cleanup
-  reports `not-persisted`; cleanup or final-directory-fsync uncertainty reports
-  `unknown`, and neither outcome claims persistence.
+  failure reports `not-persisted` only when the failed exclusive-create
+  operation guarantees that no file was created. Every post-create write,
+  flush, file-fsync, close, cleanup, or final-directory-fsync failure reports
+  `unknown`; descriptor-relative unlink plus directory fsync remains required
+  best-effort cleanup but cannot downgrade a post-dispatch outcome to
+  `not-persisted`.
+  The adapter raises the recognized typed sink failure for those two outcomes;
+  the core never trusts duck-typed exception attributes.
   Missing, duplicate, conflicting, unsafe, malformed, or room-supplied sources
   are configuration errors, never merged by implicit precedence. Credentials,
   configuration paths, and sink details never enter projection, stdout, stderr,
@@ -224,6 +245,38 @@ still required before `READY`.
   returning a tuple outside I-010B, or allowing surface-specific audit fields.
   Each would fork the accepted contract or prevent exact parity.
 
+### Receipt-sink exception recognition matrix
+
+The deterministic contract denominator is exactly 23 cases: 12 callable-core
+protocol cases plus 11 exclusive-file adapter cases. Each ordinary failure
+replaces the pending result with `receipt-sink-failure`, appends the observed
+`receipt_persistence` fact, makes no second offer, exposes no exception text,
+and uses shared `WAKE`. A normal `None` return preserves the pre-sink result.
+
+| Rows | Stimulus | Required classification |
+|---|---|---|
+| 1 | normal exact `None` return | `persisted`; preserve the pre-sink result |
+| 2 | normal non-`None` return | protocol failure, `unknown` |
+| 3–4 | exact `ReceiptSinkPersistenceError` with `not-persisted` / `unknown` | recognized member |
+| 5–6 | subclass instance with `not-persisted` / `unknown` | recognized member via `isinstance` |
+| 7 | other `Exception` | `unknown` |
+| 8 | other `Exception` with lookalike `persistence` attribute | `unknown` |
+| 9 | unrecognized wrapper whose inner error or cause/context is recognized | `unknown`; do not traverse |
+| 10 | forged/altered recognized instance with an invalid member | `unknown` |
+| 11 | sink attempts `ReceiptSinkPersistenceError("persisted")` and therefore raises constructor `ValueError` | unrecognized `Exception`, `unknown` |
+| 12 | `BaseException` host-control/process interruption | propagate with no I-030A result; a catching host may route only by waking |
+| 13 | exclusive-create collision | typed `unknown`; existing file untouched |
+| 14 | other pre-create open failure | typed `not-persisted` |
+| 15–18 | write / flush / file-`fsync` / close failure, each followed by successful unlink and directory-`fsync` | typed `unknown`; post-dispatch cleanup does not prove no durable side effect |
+| 19–22 | the same four post-create failures, each with unlink or cleanup-directory-`fsync` uncertainty | typed `unknown` |
+| 23 | final success-path directory-`fsync` failure after close | typed `unknown` |
+
+T004 and T021 preserve this row numbering and expected classification. T027
+requires all 23 deterministic cases, zero focused skips, candidate binding,
+and the ordinary evidence record before claiming the sink protocol complete.
+This matrix is I-030A `@1` runtime behavior only; it adds no I-010E field and
+does not let the response or offered receipt attest its own persistence.
+
 ### Trusted attention-budget boundary
 
 - **Decision**: After accepted I-010A and binding validation, but before bypass
@@ -234,7 +287,13 @@ still required before `READY`.
   `expansion_available: {before, after, around_event}`. Those strict booleans
   copy the three continuation `can_fetch_*` values or are all `false` when no
   continuation exists; every other I-010A field, including coverage, remains
-  unchanged. Projection bytes are the UTF-8 length of canonical JSON with
+  unchanged. I-030A treats the caller's accepted request and continuation as
+  immutable: it builds a separate projection and never mutates or consumes the
+  original. Callable evidence compares deep/canonical pre/post snapshots and
+  proves the exact caller-held continuation remains available; CLI evidence
+  retains a caller-side copy and proves byte/deep equality after evaluation.
+  Slice 030 does not invoke the participant host. Projection bytes are the
+  UTF-8 length of canonical JSON with
   sorted object keys, no insignificant whitespace, and direct non-ASCII
   characters; provider framing is excluded. Equality is valid. Optional I-010A
   `coverage.max_events` and `coverage.max_bytes` may be absent or no greater
@@ -256,11 +315,20 @@ still required before `READY`.
 ### Retry and sparse-advice boundaries
 
 - **Decision**: Require trusted `max_retries` explicitly and accept only `0..2`
-  with no callable or CLI default;
-  retry connection failures, timeout, `429`, and `5xx` with the identical
-  payload/logical request ID, never other `4xx`, validation/configuration,
-  malformed model output, or an already-complete model judgment. Exhaustion is
-  operational ERROR. Prompt for at most two WAKE annotations of at most 240
+  with no callable or CLI default. In the V2 stdlib provider seam,
+  `urllib.error.HTTPError` is classified first: retry only `429` or status
+  `500..599`. Also retry outer `urllib.error.URLError` without inspecting its
+  `reason`, direct `socket.timeout`/`TimeoutError`, and `OSError` (including
+  `ConnectionError`) raised during `urlopen` request execution. Never retry
+  any other HTTP status, validation/configuration failure, JSON decoding or
+  malformed model output, post-response failure, or an already-complete model
+  judgment. Deterministic oracles cover HTTP `429`, `499`, `500`, `599`, and
+  `600`; each named transport exception class; exact attempts/sleeps for
+  `max_retries=0|1|2`; identical payload/logical request identity; immediate
+  stop after success; and zero retries for non-retryable cases. Exhaustion is
+  operational ERROR after the full trust boundary, so shared `WAKE` is the
+  default, a validated and receiptable `NO_WAKE` policy may override it, and a
+  failed override-receipt offer reverts to `WAKE`. Prompt for at most two WAKE annotations of at most 240
   Unicode scalar values; require 100% deterministic/three-family adherence, but
   do not reject or truncate an otherwise I-010B-valid result solely for length
   or item count.
@@ -448,7 +516,10 @@ created here.
 - `I-030A AttentionEngineV2@1` at `src/nunchi/core.py` and
   `src/nunchi/cli.py`, with provider/prompt support in
   `src/nunchi/classifiers.py` and runtime validation/audit support in the
-  existing `src/nunchi/models.py` and `src/nunchi/schema.py` seams.
+  existing `src/nunchi/models.py` and `src/nunchi/schema.py` seams. Its initial
+  `@1` runtime surface includes `ReceiptSinkPersistenceError`; because I-030A
+  has not yet been produced or accepted, this clarification is not a version
+  bump and changes no 010-owned schema.
 
 ## Integration Strategy
 
@@ -471,13 +542,21 @@ attention-policy files named here until handoff. It does not edit 010 schemas,
 020 observation, 040 participant hosting, or surface integration files. 110
 alone resolves final integration conflicts.
 
+The bypass boundary is explicit: slice 030 proves only the accepted I-010B
+`status: bypass`, `cause: "preattention-disabled"` branch and zero classifier
+calls. It emits no
+ParticipantWakeV2 and invokes no participant host. The packet gives
+`v2-wake-owner` the exact accepted branch; slice 040 must independently accept
+it, map it to ParticipantWakeV2 wake source `PREATTENTION_BYPASS`, and pass a
+downstream acceptance test for that mapping.
+
 ## Acceptance Scenes and Evidence
 
 | Scene | Surface(s) | Required observation | Ordinary evidence target |
 |---|---|---|---|
 | S04 False-suppression scars | Core replay | No deterministic semantic suppressor; model/effective decisions remain inspectable. | `evidence/v2/attention/s04-suppression-scars/results.jsonl` |
 | S05 Governed suppression | Core policy matrix | Hard stop requires enabled delegation, recoverability, valid transition evidence, and revocable provenance. | `evidence/v2/attention/s05-governed-suppress.jsonl` |
-| S06 WAKE/bypass contribution handoff | Core-neutral decision fixture | WAKE carries only grounded optional advice; trusted preattention-disabled bypass makes no model claim and supplies `PREATTENTION_BYPASS`. | `evidence/v2/attention/core-cli-parity.jsonl` |
+| S06 WAKE/bypass contribution handoff | Core-neutral decision fixture | WAKE carries only grounded optional advice; trusted preattention-disabled input produces exact I-010B `status: bypass`, `cause: "preattention-disabled"` with zero model calls. The recorded handoff requires slice 040 to map the accepted branch to ParticipantWakeV2 source `PREATTENTION_BYPASS` and test that mapping; 030 emits no ParticipantWakeV2. | `evidence/v2/attention/core-cli-parity.jsonl` |
 | S08 Dual DEFER valves | Three-family replay | Classifier-DEFER and margin-DEFER remain separate; either only widens attention across incumbent Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3. Live canary execution is downstream. | `evidence/v2/attention/s08-defer-transition/results.jsonl`; `evidence/v2/attention/model-comparison/results.jsonl` |
 | S09 Operational error | Core and CLI | Every validation/provider/runtime failure remains ERROR with wake default and separate override audit. | `evidence/v2/attention/core-cli-parity.jsonl` |
 | S16 No registry or ledger | Boundary and replay | Engine consumes no prior outcome, obligation, handled/open, roster, or permission state. | `evidence/v2/attention/s04-suppression-scars/results.jsonl` |
@@ -568,9 +647,12 @@ tokens, cursors, and expiry values never enter the classifier projection. The
 model sees the exact top-level
 `expansion_available: {before, after, around_event}` strict-boolean object only;
 all values are false without continuation and otherwise copy the three
-continuation `can_fetch_*` flags. The
-original bound I-010A continuation capability remains available downstream to
-040. I-030A does not consume I-010D fetch request/page objects.
+continuation `can_fetch_*` flags. The original bound I-010A continuation
+capability remains available downstream to 040 because I-030A neither mutates
+nor consumes the caller-owned request. Core tests compare deep/canonical
+snapshots before and after evaluation; CLI tests retain and compare a caller-
+side byte/deep copy. I-030A does not invoke the host or consume I-010D fetch
+request/page objects.
 
 ## Project Structure
 
@@ -717,17 +799,17 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 
 | Claim surface | Exact reviewed ordinary path | Disposition | Owning task/lane | Validation, rationale, or exact handoff delta |
 |---|---|---|---|---|
-| Global product and CLI state | `README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace V1 verdict/core/CLI claims and examples with accepted I-030A `SUPPRESS`/`WAKE`/`DEFER`, trusted bypass, separate ERROR, dual-valve, and 0/1/2/3 process behavior while preserving verification-pending wording. |
+| Global product and CLI state | `README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace V1 verdict/core/CLI claims and examples with accepted I-030A `SUPPRESS`/`WAKE`/`DEFER`, trusted bypass, separate ERROR, dual-valve, 0/1/2/3 process behavior, and the closed receipt-sink persistence-failure rule while preserving verification-pending wording. |
 | Repository agent guidance | `AGENTS.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace the V1-implementation/current-command claims with state-aware accepted-V2/verification-pending guidance, preserve the governance and owner boundaries, and make the eventual `CUTOVER_VERIFIED` current-state interpretation explicit without requiring a product-code edit. |
-| Claude execution guidance | `CLAUDE.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace V1 runtime/config/CLI smoke guidance with accepted I-030A, trusted bypass, ERROR, receipt, and 0/1/2/3 commands while preserving verification-pending wording and the exact-main gate. |
+| Claude execution guidance | `CLAUDE.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace V1 runtime/config/CLI smoke guidance with accepted I-030A, trusted bypass, ERROR, receipt-sink typed/unrecognized failure handling, and 0/1/2/3 commands while preserving verification-pending wording and the exact-main gate. |
 | Global evidence index | `evidence/README.md` | `UPDATE` | T025 / `v2-core-owner` | Add the exact `evidence/v2/attention/` component-record scope, commands/manifest link, evidence grade, candidate binding, and explicit non-cutover/non-current boundary while preserving the immutable/history rules; validate every link and claim against the candidate. |
 | V1 verdict-suite evidence index | `evidence/verdict-suite/README.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve every historical V1 run record and reproduction boundary, add the exact 030 scar/transition role and V2 result links, and validate current-classifier wording and commands without presenting V1 evidence as V2 social proof. |
-| Slice-030 evidence and command manifest | `evidence/v2/attention/README.md` | `UPDATE` | T025–T026 / `v2-core-owner` | Create the exact scene-to-record and command manifest with candidate binding, consumed/produced interface versions, deterministic/replay/model evidence links, evidence grades, rejected claims, and explicit non-current/non-cutover limitations; validate every command, path, link, count, and claim against the exact candidate and packet. |
-| Accepted contract evidence manifest | `evidence/v2/contract/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the 010-owned manifest already records accepted I-010B/I-010E `@2` provenance and commands; 030 consumes those exact contracts without changing the manifest. Validate versions and links, then record the unchanged review in handoff evidence. |
-| Release history | `CHANGELOG.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; add the exact accepted 030 commit, breaking core/CLI contract delta, active-margin status, evidence links, and limitations in the atomic cutover entry. |
+| Slice-030 evidence and command manifest | `evidence/v2/attention/README.md` | `UPDATE` | T025–T026 / `v2-core-owner` | Create the exact scene-to-record and command manifest with candidate binding, consumed/produced interface versions, the 23-row receipt-sink classification evidence, deterministic/replay/model evidence links, evidence grades, rejected claims, and explicit non-current/non-cutover limitations; validate every command, path, link, count, and claim against the exact candidate and packet. |
+| Accepted contract evidence manifest | `evidence/v2/contract/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale re-reviewed after the sink clarification: the 010-owned manifest records accepted I-010B/I-010E `@2` schema provenance and commands, while `ReceiptSinkPersistenceError` is an I-030A-only runtime protocol with no 010 field or ownership change. Validate versions and links, then record the unchanged review in handoff evidence. |
+| Release history | `CHANGELOG.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; add the exact accepted 030 commit, breaking core/CLI and receipt-sink exception contract delta, active-margin status, evidence links, and limitations in the atomic cutover entry. |
 | Installation and executable claims | `docs/INSTALL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace V1 `nunchi-channel`/configuration assumptions with the accepted V2 CLI, model/policy inputs, installed-runtime provenance, and no-V1-residue instructions at cutover. |
-| Public stability contract | `docs/STABILITY.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 request/verdict/process promise with accepted I-010A/B/E plus I-030A, explicitly retaining the active transition margin and breaking-version boundary. |
-| Cross-adapter reference | `docs/adapters.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; apply the exact common I-030A lifecycle, bypass/error routes, and dual-DEFER requirements to the cutover-wide adapter table without claiming unproven surface parity. |
+| Public stability contract | `docs/STABILITY.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 request/verdict/process promise with accepted I-010A/B/E plus I-030A, including the host-visible `ReceiptSinkPersistenceError` recognition boundary, while retaining the active transition margin and breaking-version boundary. |
+| Cross-adapter reference | `docs/adapters.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; apply the exact common I-030A lifecycle, bypass/error routes, dual-DEFER requirements, and sink failure-to-wake mapping to the cutover-wide adapter table without claiming unproven surface parity. |
 | Selected-design diagrams | `docs/architecture/v2-selected-design.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at cutover update I-030A implementation/evidence status and diagram-linked claims from selected target to accepted verification-pending candidate, then to verified current only after post-merge proof. |
 | V1 archive index | `docs/archive/v1/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the frozen archive index already says its children are historical and not current instructions; record exact review unchanged in the attention handoff evidence. |
 | Archived V1 classifier contract | `docs/archive/v1/admission-classifier/contract.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the historical/superseded banner makes the V1 fields and commands archival evidence, not a V2 integration claim; record the review in handoff evidence. |
@@ -737,39 +819,65 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Archived V1 core/CLI data model | `docs/archive/v1/core-cli/data-model.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the historical/superseded banner keeps the replaced V1 model as evidence; record the review in handoff evidence. |
 | Archived V1 core/CLI quickstart | `docs/archive/v1/core-cli/quickstart.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the archived-command warning already prevents current-use ambiguity; record the review in handoff evidence. |
 | Channel-adapter V1 contract | `docs/contracts/channel-adapter-v1.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover mark the V1 gate/result contract superseded and route readers to the accepted V2 lifecycle and final adapter guidance. |
-| Accepted V2 public contracts | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: slice 010 owns this already-current contract reference; 030 implements it without changing fields or its truthful V1-current caveat. Validate candidate conformance and record the unchanged finding. |
+| Accepted V2 public contracts | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale re-reviewed after the sink clarification: slice 010 owns this schema reference, while the host-visible typed failure belongs only to the I-030A runtime seam and changes no I-010A/B/E field or truthful V1-current caveat. Validate candidate conformance and record the unchanged finding. |
 | V1 verdict-suite data model | `docs/contracts/verdict-suite-data-model-v1.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve the V1 evidence schema, add its exact S04/S08 regression/transition role and V2 result links, then validate terminology and links against the candidate. |
 | V1 verdict-suite requirements | `docs/contracts/verdict-suite-requirements-v1.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve historical ground truth, map the applicable scars to S04/S16 and dual-valve evidence, and validate requirement/result links. |
 | V1 verdict-suite runner guide | `docs/evaluations/verdict-suite-runner.md` | `UPDATE` | T025 / `v2-core-owner` | Keep V1 commands runnable, name their bounded regression role, add exact V2 runner/result commands, and validate every retained/new command. |
 | V1 verdict-suite evidence guide | `docs/evaluations/verdict-suite.md` | `UPDATE` | T025 / `v2-core-owner` | Distinguish historical V1 quality evidence from 030 mechanics/social evidence, link exact S04/S05/S08/model-comparison records, and validate claims and links. |
 | Governance execution guide | `docs/governance/execution-spine.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: 030 follows but does not change the already-current workflow/lifecycle contract; planning and later component implementation create no new governance rule. Record exact review in handoff evidence. |
-| General integration guide | `docs/integration.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 verdict, fail-policy, request, output, provider, and CLI wiring with accepted I-030A behavior only in the atomic cutover. |
-| Generic loader example | `examples/loader-snippet.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace `nunchi-channel`, environment-test-result, V1 request/verdict/run-shape, fail-policy, and silent-token instructions with the accepted V2 operator config, I-010A stdin, I-030A tagged result/exit behavior, trusted bypass/ERROR, and direct act-or-silence flow; validate the example end to end. |
+| General integration guide | `docs/integration.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 verdict, fail-policy, request, output, provider, and CLI wiring with accepted I-030A behavior, including the exact `ReceiptSinkPersistenceError`/unrecognized exception protocol and shared-wake fallback, only in the atomic cutover. |
+| Generic loader example | `examples/loader-snippet.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace `nunchi-channel`, environment-test-result, V1 request/verdict/run-shape, fail-policy, and silent-token instructions with the accepted V2 operator config, I-010A stdin, I-030A tagged result/exit behavior, typed sink failure example, unrecognized-failure wake fallback, trusted bypass/ERROR, and direct act-or-silence flow; validate the example end to end. |
+| Generic host runnable demo | `examples/generic_host_demo.py` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace the V1 adapter, PASS/ACK/ASK/SPEAK fixture, fail-open, `silent`/sentinel, and run-shape flow with accepted I-010A/I-030A configuration, tagged result, receipt-sink failure handling, and direct act-or-silence behavior; execute both offline and configured-provider paths with the assembled candidate. |
+| Read-the-room runnable demo | `examples/read_the_room_demo.py` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace the V1 adapter, verdict/silent-pass sentinel, loose agent identity, and pinned PASS fixture with accepted exact-self I-010A, I-030A result/bypass/ERROR behavior, and direct act-or-silence routing; execute both offline and configured-provider paths with the assembled candidate. |
 | Open-floor V1 profile | `profiles/open-floor.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; remove this PASS/ACK/ASK/SPEAK and `pinned_rules` profile from the current product and all current links in the atomic cutover, because I-010A/I-030A accepts no governance-profile input and the sparse participant-shaped prompt must not become a deterministic social rulebook. Git history remains the V1 record. |
 | Hermes display-patch guide | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the optional channel-scoped display override controls operational UI chatter, not attention judgment or I-030A; record the exact review unchanged. |
 | Hermes display-patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: resolver and gateway-display checks are independent of the core attention contract; record the exact review unchanged. |
-| Attention/operator reference | `docs/attention/v2.md` | `UPDATE` | T025 / `v2-core-owner` | Create the exact component guide; validate policy, bypass, error/exit semantics, active margin, prompt/model provenance, examples, links, and commands against the exact candidate without claiming atomic cutover. |
+| Attention/operator reference | `docs/attention/v2.md` | `UPDATE` | T025 / `v2-core-owner` | Create the exact component guide; document the typed/unrecognized/non-`None`/`BaseException` sink taxonomy, 23-row evidence denominator, shared-wake rule, policy, bypass, error/exit semantics, active margin, prompt/model provenance, examples, links, and commands against the exact candidate without claiming atomic cutover. |
 | Claude DEFER evaluation | `integrations/claude-code/DEFER_EVAL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; replace V1 uncertain-PASS terminology with the exact classifier-DEFER/margin-DEFER transition, reuse criteria, and downstream canary protocol after accepting I-030A. |
-| Claude Code integration | `integrations/claude-code/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; migrate the V1 wake gate to I-030A, distinguish bypass/ERROR/DEFER, preserve one judgment and act-or-silence, and update config/evidence claims only with its surface candidate. |
+| Claude Code integration | `integrations/claude-code/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; migrate the V1 wake gate to I-030A, distinguish bypass/ERROR/DEFER, bind its host sink to the typed/unrecognized failure and shared-wake protocol, preserve one judgment and act-or-silence, and update config/evidence claims only with its surface candidate. |
 | Claude operator configuration example | `integrations/claude-code/nunchi-gate.env.example` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; replace V1 fail-open wrapper, loose identity/peer-roster, and `nunchi-channel` assumptions with the accepted V2 descriptor-secure operator-policy source, exact-self binding, I-030A CLI, and surface-owned migration guidance. Validate the runnable example with the Claude slice candidate. |
 | Claude transport patch | `integrations/claude-code/transport-patch/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the allowlisted peer-bot transport patch changes event delivery, not the attention engine contract; exact review remains downstream transport evidence and is recorded unchanged. |
-| Codex integration | `integrations/codex/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace V1 verdict, inbound/outbound re-gate, receipt/config, and wake claims with accepted I-030A bypass/ERROR/dual-DEFER plus direct act-or-silence behavior in the Codex slice. |
+| Codex integration | `integrations/codex/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace V1 verdict, inbound/outbound re-gate, receipt/config, and wake claims with accepted I-030A bypass/ERROR/dual-DEFER, typed/unrecognized sink failure handling, and direct act-or-silence behavior in the Codex slice. |
+| Codex MCP wiring | `integrations/codex/nunchi-codex/.mcp.json` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the plugin-local MCP server/tool wiring contains no V1 verdict, I-030A field, schema version, policy/default, or receipt-body claim; the generic `get_nunchi_receipts` tool name remains valid. Validate JSON and installed wiring, then record the candidate-specific unchanged review. |
 | Codex plugin metadata | `integrations/codex/nunchi-codex/.codex-plugin/plugin.json` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace the public wake-and-send gating and outbound-send-guard descriptions with the accepted one-judgment wake admission plus direct act-or-silence lifecycle. Validate JSON, plugin metadata, and installed descriptions with the Codex slice candidate. |
 | Codex hook manifest | `integrations/codex/nunchi-codex/hooks/hooks.json` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace the V1 prompt-admission plus `PreToolUse` send-gate topology with the accepted single preattention judgment and direct act-or-silence lifecycle, removing send-time social reclassification. Validate manifest syntax and installed hook behavior with the Codex slice candidate. |
-| Hermes integration | `integrations/hermes/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace V1 `nunchi-channel` verdict/fail-open/config/receipt semantics with accepted I-030A, bypass/ERROR, dual-DEFER, and immutable attention-stage facts in the Hermes slice. |
+| Hermes integration | `integrations/hermes/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace V1 `nunchi-channel` verdict/fail-open/config/receipt semantics with accepted I-030A, bypass/ERROR, dual-DEFER, typed/unrecognized sink failure handling, and immutable attention-stage facts in the Hermes slice. |
 | Hermes dashboard manifest | `integrations/hermes/nunchi-gate/dashboard/manifest.json` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the generic runtime-configuration and receipt-log-viewer metadata names no V1 verdict, field, CLI, policy, or current schema version and remains truthful for the downstream V2 migration. Validate JSON syntax and record the candidate-specific unchanged review. |
 | Hermes plugin manifest description | `integrations/hermes/nunchi-gate/plugin.yaml` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace the public PASS/ACK/ASK/SPEAK and `nunchi-channel` description with the accepted I-030A wake/suppress/defer, bypass, and operational-error lifecycle when the Hermes surface migrates. Validate manifest syntax and installed metadata with that candidate. |
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
 
-Matrix scope audit (2026-07-19): the 44 unique rows above enumerate all 42
-known affected current ordinary documentation/evidence/configuration claim
+Matrix scope audit (2026-07-19): the 47 unique rows above enumerate all 45
+known affected current ordinary documentation/evidence/configuration/example claim
 surfaces and the future slice-owned `docs/attention/v2.md` and
 `evidence/v2/attention/README.md` individually: 8
-`UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF`. Every disposition is attached to one exact file;
+`UPDATE`, 17 `NO_IMPACT`, and 22 `HANDOFF`. Every disposition is attached to one exact file;
 no grouped multi-file disposition substitutes for an exact path. The bound
 specification, dormant T025, and formal requirements checklist retain this same
-44-path inventory and disposition count.
+47-path inventory and disposition count.
+
+Receipt-sink clarification re-review (2026-07-19): the disposition denominator
+remains 47 / 8 / 17 / 22. Exactly 12 rows need an exception-protocol claim
+delta and now state it above: `README.md`, `CLAUDE.md`,
+`evidence/v2/attention/README.md`, `CHANGELOG.md`, `docs/STABILITY.md`,
+`docs/adapters.md`, `docs/integration.md`, `examples/loader-snippet.md`,
+`docs/attention/v2.md`, `integrations/claude-code/README.md`,
+`integrations/codex/README.md`, and `integrations/hermes/README.md`. The other
+six `UPDATE` rows remain evidence-index or historical verdict-suite surfaces,
+so their existing candidate-relative deltas already cover every claim they
+own. All 17 `NO_IMPACT` rows were re-reviewed; in particular the two 010-owned
+contract references now state why an I-030A runtime exception does not alter
+them. The other twelve `HANDOFF` rows govern lifecycle, installation/configuration,
+architecture, V1 retirement, policy profiles, evaluation, or installed
+metadata that neither exposes nor consumes the callable sink exception; their
+existing exact deltas therefore remain complete. Every conclusion is still
+retested against the exact candidate and recorded by T025 rather than inherited
+as documentation-freshness proof.
+
+Completeness correction (2026-07-19): the final sweep added the two runnable V1
+Python demos as exact integrator handoffs and the plugin-local `.mcp.json` as a
+candidate-revalidated `NO_IMPACT`. This is the source of the final 47-path
+denominator; no earlier 44-path count remains current.
 
 Global current-state claims remain integrator-owned; the component guide and
 every exact handoff delta are required before 030 can converge. T025 records
@@ -786,7 +894,11 @@ versions, complete commands/results, prompt and model identity, effective
 operator configuration and source, margin state, deterministic/replay/multi-
 model evidence (including exact provider IDs/provenance for the selected three-
 family matrix or an explicit later Zoe override), the preregistered downstream
-canary protocol, rejected claims, and known limitations. It also carries the
+canary protocol, rejected claims, and known limitations. It carries exact
+I-010B `status: bypass`, `cause: "preattention-disabled"` plus zero-call evidence for independent
+acceptance by `v2-wake-owner`; the accepting slice-040 test must map that branch
+to ParticipantWakeV2 wake source `PREATTENTION_BYPASS`. Slice 030 neither emits
+ParticipantWakeV2 nor claims that downstream test complete. It also carries the
 exact slice-110 ordinary-path publication delta from the staging decision:
 remove V1 request/verdict handling, `require_pass_corroboration`, reply-bearing
 output, and hidden fallbacks; publish I-030A as public `evaluate`/`admit`; and
