@@ -42,10 +42,12 @@ implicit.
 - **Retention (FR-010)**: bounded (`retention_max_events`) and
   outcome-neutral; retained delivery IDs, event generations, and actor facts are
   pruned with deque eviction, and no prior attention/social outcome ever changes
-  retention behavior.
+  retention behavior. A constant-size lifetime timestamp watermark survives
+  eviction and prevents undated events from hiding parseable order regression.
 - **Receipt (FR-015)**: exactly one immutable `observation`-stage `I-010E`
   record per request, correlated by `request_id`, attesting only
-  snapshot/coverage facts; no token field, no later-stage fact.
+  snapshot/coverage facts from the private issued document after complete caller
+  input copy and exact comparison; no token field, no later-stage fact.
 
 ## Scene-to-record manifest
 
@@ -64,13 +66,14 @@ implicit.
 Total: 53 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18/23/25 atomicity/resource evidence
+## Phase 18/23/25/26 authority/resource evidence
 
-`phase18-adversarial.jsonl` contains 19 deterministic PASS rows: five
+`phase18-adversarial.jsonl` contains 34 deterministic PASS rows: five
 barrier-controlled continuation atomicity cases, three retention-gap coverage
 cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
-four Phase 25 provider-wide continuation-authority/relation-gap cases, plus one
-explicit N=64/2N=128 replay metric row. The measured retained-deque visits
+four preserved Phase 25 provider-wide continuation-authority/relation-gap cases,
+fifteen Phase 26 comparator/permanent-handle/receipt/timestamp/direct-concurrency
+cases, plus one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
 after initial window creation are 0 and 0; an over-limit fresh fetch also records
 zero retained-deque visits. Reproduce with:
 
@@ -88,7 +91,7 @@ the shared oracle:
 ```sh
 python3 scripts/check_slice020_task_state.py \
   --tasks specs/020-v2-observation/tasks.md \
-  --allow-open T103,T140
+  --allow-open T103,T145,T146
 ```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

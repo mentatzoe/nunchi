@@ -1123,3 +1123,36 @@ Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
 authority, provider-wide caps survive wrapper multiplicity, unavailable literal
 relation targets are disclosed as gaps, and the timestamp watermark survives
 retention eviction.
+
+## Phase 26: Receipt Memory and Permanent Handle Authority
+
+**Correction source**: the complete independent rejection of `80c1de2` exposed
+receipt caller-memory mutation and lifetime timestamp loss. Timestamp loss was
+settled in Phase 25; receipt mutation reproduced unchanged on `22a0a1a`. A
+variant-closure probe additionally showed that a revoked generated handle could
+be reissued and resurrect matching old capability authority.
+
+- [X] T141 Preserve and reproduce post-comparison receipt mutation, receipt-copy
+  failure consumption, revoked-handle resurrection, and direct/concurrent
+  cross-wrapper collision/cap variants on exact Phase 25 object `22a0a1a`
+- [X] T142 Copy the complete receipt request before validation/comparison and
+  compute every attested field from the stable provider-private issued document;
+  convert copy failure to `ObservationInputError` without consuming authority
+- [X] T143 Add one provider-owned constant-size issued-handle membership filter;
+  reject live or revoked ID reuse with bounded retries and no false negatives
+- [X] T144 Add direct and concurrent RED/GREEN tests, docs, and reproducible
+  adversarial rows for receipt memory, permanent handles, provider-wide caps,
+  expiry presence, relation gaps, and lifetime timestamp order
+- [ ] T145 Regenerate all evidence, rerun the complete matrix, exact-scan the
+  whole activation range, and freeze/push one immutable T001–T146 object
+- [ ] T146 Obtain fresh independent fail-closed review of that exact object and
+  fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
+
+### Phase 26 dependencies
+
+- T142–T144 depend on T141 and may proceed independently after RED.
+- T145 depends on T142–T144; T146 depends on T145 and supersedes T140/T131/T124
+  as the sole final convergence review.
+
+**Checkpoint**: caller mutation cannot alter receipt authority, copy failure
+cannot consume it, and no generated handle ID can ever revive prior authority.
