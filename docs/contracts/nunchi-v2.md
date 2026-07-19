@@ -1,4 +1,4 @@
-# Nunchi V2 Contracts (I-010A–I-010E, version `@1`)
+# Nunchi V2 Contracts (I-010A–I-010D at `@1`, I-010E at `@2`)
 
 **Owner**: `v2-contract-owner` (slice `010`). Only this owner edits
 `schemas/v2/**`; a dependent slice requests changes through an explicit
@@ -13,8 +13,9 @@ running product today.
 **Field-level authority**: the selected Aleph Vault design at `c834e8c`
 (`projects/shared/nunchi/technical-design.md`) is the field-level naming and
 shape authority for all five interfaces (FR-014); the program-canonical
-interface names and versions (`I-010A`–`I-010E` at `@1`) are this slice's own
-vocabulary layered over that same field inventory. A document the selected
+interface names and versions (`I-010A`–`I-010D` at `@1`, `I-010E` at `@2`)
+are this slice's own vocabulary layered over that same field inventory. A
+document the selected
 design declares valid that either validator rejects is a contract defect,
 never resolved by narrowing the corpus.
 
@@ -26,7 +27,7 @@ never resolved by narrowing the corpus.
 | `I-010B AttentionDecisionV2` | `@1` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@1` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`

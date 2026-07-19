@@ -1,5 +1,5 @@
 """Contract tests for ``I-010D ContextContinuationV2@1`` and
-``I-010E AttentionReceiptV2@1`` (slice 010, T005).
+``I-010E AttentionReceiptV2@2`` (slice 010, T005).
 
 Red cases cover host-secret leakage, fetch-time binding validation
 (expired-handle rejection and cross-binding cursor reuse,
@@ -358,6 +358,19 @@ class ReceiptRecordCases(unittest.TestCase):
             },
         )
         assert_schema_verdict(self, "attention-receipt", only_provenance, "invalid")
+
+    def test_error_override_wake_action_rejects_wake(self):
+        # Rejection A1-R1: WAKE is the shared default and is never itself a
+        # receipted override; wake_action is closed to exactly "NO_WAKE".
+        wake_override = make_receipt(
+            "attention",
+            body={
+                "error": {"code": "provider-failure", "detail": "provider timeout"},
+                "wake_action": "WAKE",
+                "policy_provenance": "trusted:profiles/default@2026-07",
+            },
+        )
+        assert_schema_verdict(self, "attention-receipt", wake_override, "invalid")
 
     def test_bypass_attention_record_carries_trusted_provenance(self):
         # 010-Preattention-bypass: classifier_not_invoked plus provenance,

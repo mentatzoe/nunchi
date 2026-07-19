@@ -2,8 +2,8 @@
 
 **Slice**: `010-v2-contract`
 
-**Status**: `REJECTED` (independent `v2-integrator` review; the accepted
-I-010E `@1` state remains unchanged)
+**Status**: `PROPOSED` (revised candidate after A1-R1 correction; pending
+independent `v2-integrator` re-review)
 
 **Amended interface**: `I-010E AttentionReceiptV2` `@1` → `@2`
 
@@ -161,3 +161,42 @@ design names `NO_WAKE` as the override to the shared `WAKE` default. The
 focused correction and complete verification are recorded in the decision
 reference. This amendment rejection does not revoke slice 010's terminal
 attempt-6 acceptance at I-010E `@1`.
+
+## A1-R1 correction (revised candidate)
+
+**Corrected by**: `v2-contract-owner` (cc-session-1)
+
+**Corrected on**: 2026-07-19
+
+**Exact fix**: `schemas/v2/attention-receipt.schema.json`'s error variant
+changes `"wake_action": {"enum": ["WAKE", "NO_WAKE"]}` to
+`"wake_action": {"const": "NO_WAKE"}`; `tests/v2/contract/schema_helpers.py`'s
+`_check_attention_body` mirrors the closed constant instead of a two-value
+enum. Added: a negative unit test
+(`test_error_override_wake_action_rejects_wake`) and a matching
+schema-expressible corpus case (`DWN-S06-115`) asserting
+`wake_action: "WAKE"` (with `policy_provenance`) rejects. Also fixed the
+non-blocking freshness note: `tests/v2/contract/test_context_and_receipt.py`'s
+module docstring now cites `I-010E AttentionReceiptV2@2` instead of the
+stale `@1`, and `docs/contracts/nunchi-v2.md`'s title, field-authority
+sentence, and interface table row (previously missed) now cite `@2` too.
+No other file changed; R7–R11 remain untouched.
+
+**Revised candidate commit**: (recorded once committed)
+
+**Verification (2026-07-19, post-correction tree)**:
+
+- `python3 -m unittest discover -s tests/v2/contract -p 'test_*.py'` — PASS,
+  194 tests, 3 skipped.
+- `uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'`
+  — PASS, 194 tests, 0 skipped.
+- `python3 -m unittest` (repository baseline) — PASS, 1252 tests, 11 skipped.
+- `python3 scripts/check_governance.py --check-cli` — PASS,
+  `governance boundary + CLI: OK (SpecKit 0.12.11)`.
+- Independent dual-validator probes re-run: default error without the pair
+  — valid; `NO_WAKE` plus provenance — valid; either pair member alone —
+  invalid; `WAKE` plus provenance — now **invalid** (the A1-R1 fix).
+- Scene-to-record manifest cross-checked case-ID-for-case-ID against the
+  three corpora — zero missing, zero spurious (207/207).
+
+Requesting the same independent `v2-integrator` re-review.

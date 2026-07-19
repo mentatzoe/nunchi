@@ -28,6 +28,14 @@ exactly when an explicit operator override applied). This is a breaking
 edit per FR-010/FR-014; `@1` consumers must migrate to `@2` before
 consuming attention-stage receipts.
 
+**Focused correction (A1-R1, first amendment candidate rejected)**: the
+first A1 candidate (`959e4ac`) defined `wake_action` as
+`enum: ["WAKE", "NO_WAKE"]`, which wrongly let a receipt assert an operator
+override while naming the unchanged shared default. `evidence/v2/contract/review-2026-07-19-v2-integrator-amendment-A1.md`
+rejected it (R7–R11 remained cleared and undisturbed). `wake_action` is now
+`const: "NO_WAKE"`: `WAKE` is the shared default and is never itself a
+receipted override.
+
 Each aggregate JSONL evidence file holds two records per corpus case — one
 per validator — and every record carries the five mandatory fields
 (`scene_id`, `case_id`, `validator`, `expected`, `observed`). A record ID
@@ -42,7 +50,7 @@ The exact offline dual-validator command (the sole complete run):
 uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-Result (2026-07-19, post-amendment tree): `Ran 193 tests ... OK`, 0 skipped —
+Result (2026-07-19, post-correction tree): `Ran 194 tests ... OK`, 0 skipped —
 every oracle-side check ran; only the explicit per-class oracle skips
 applied inside the corpus runner (counted below).
 
@@ -57,12 +65,11 @@ product schemas, tests, fixtures, evaluation assets, evidence, or product
 documentation under the SpecKit directories.
 
 The full offline repository baseline (`python3 -m unittest`, full suite,
-2026-07-19, post-amendment tree): **1251 tests, OK, 11 skipped** — the 8
+2026-07-19, post-correction tree): **1252 tests, OK, 11 skipped** — the 8
 pre-existing V1 skips plus the 3 counted `baseline-oracle-absence` skips
-(one per corpus suite). The test-count delta from the attempt-6 baseline
-(1249 → 1251) is the 2 new unit tests added for amendment A1 (required
-`policy_provenance` on the classifier-outcome body; conditional
-`wake_action`/`policy_provenance` pairing on the error body).
+(one per corpus suite). The test-count delta from the rejected first A1
+candidate (1251 → 1252) is the one new unit test added for the A1-R1
+correction (`wake_action: "WAKE"` rejects).
 
 Evidence generation and shape verification:
 
@@ -72,14 +79,14 @@ uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_
 ```
 
 Result (2026-07-19): attention-request 98 records, attention-decision 132
-records, downstream 182 records; 0 mismatched; all records carry the five
+records, downstream 184 records; 0 mismatched; all records carry the five
 mandatory fields.
 
 ## Observed per-class partition counts (cases; each case = 2 records)
 
 | Partition class | attention-request | attention-decision | downstream | Total |
 |---|---|---|---|---|
-| `schema-expressible` | 36 | 64 | 56 | 156 |
+| `schema-expressible` | 36 | 64 | 57 | 157 |
 | `id-uniqueness` | 2 | 0 | 2 | 4 |
 | `timestamp-order` | 2 | 0 | 0 | 2 |
 | `advice-citation` | 0 | 2 | 0 | 2 |
@@ -87,7 +94,7 @@ mandatory fields.
 | `actor-reference-integrity` | 7 | 0 | 2 | 9 |
 | `binding-expiry` | 0 | 0 | 20 | 20 |
 | `receipt-sequence` | 0 | 0 | 11 | 11 |
-| **Total cases** | **49** | **66** | **91** | **206** |
+| **Total cases** | **49** | **66** | **92** | **207** |
 
 These observed counts match each corpus's authoritative
 `expected-counts.json` exactly (asserted loudly on every load). The
@@ -95,18 +102,18 @@ These observed counts match each corpus's authoritative
 class (19 cases total: 6 request, 5 decision, 8 downstream — enumerated
 below), a named manifest-counted subset of `schema-expressible`, never a
 fourth oracle-treatment class (CHK099/CHK115). `schema-expressible` widens
-from 52 to 56 in the downstream corpus this amendment (A1): 4 new cases —
-a classifier-outcome body missing `policy_provenance` (invalid), an
-operational error with a complete `wake_action`/`policy_provenance` pair
-(valid), and the error carrying only one half of that pair, each direction
-(invalid).
+from 52 to 57 in the downstream corpus across amendment A1 and its A1-R1
+correction: 4 cases from the first A1 candidate (a classifier-outcome body
+missing `policy_provenance`, invalid; a complete `wake_action`/
+`policy_provenance` pair, valid; either half of that pair alone, invalid)
+plus 1 from the A1-R1 correction (`wake_action: "WAKE"`, invalid).
 
 ## Both skip regimes (kept separately named and counted)
 
 | Regime | When | Count |
 |---|---|---|
 | `oracle-class-skip` | Under the pinned command: the oracle skips the two behavioral classes by explicit class | 31 cases (20 `binding-expiry` + 11 `receipt-sequence`, all in the downstream corpus; 31 oracle-side records observe `oracle-class-skip`) |
-| `baseline-oracle-absence` | Under `python3 -m unittest` (no pinned oracle): every oracle-side check for the six oracle-visible classes is skipped with an explicit count | 175 oracle-side checks (49 attention-request + 66 attention-decision + 60 downstream), surfaced as 3 counted unittest skips |
+| `baseline-oracle-absence` | Under `python3 -m unittest` (no pinned oracle): every oracle-side check for the six oracle-visible classes is skipped with an explicit count | 176 oracle-side checks (49 attention-request + 66 attention-decision + 61 downstream), surfaced as 3 counted unittest skips |
 
 ## FR-014 authority-conformance class (CHK099/CHK110/CHK121; 19 cases)
 
@@ -165,7 +172,7 @@ from those exact schema files (`iter_errors()` count).
 | `S03` Bounded context and tail | `attention-request.jsonl` | REQ-S03-001, REQ-S03-002, REQ-S03-003, REQ-S03-101, REQ-S03-102, REQ-S03-103, REQ-S03-104, REQ-S03-201, REQ-S03-202, REQ-AUTH-004, REQ-AUTH-005 |
 | | `downstream.jsonl` | DWN-S03-001, DWN-S03-002, DWN-S03-003, DWN-S03-101, DWN-S03-102, DWN-S03-103, DWN-S03-104, DWN-S03-201, DWN-S03-202, DWN-S03-301, DWN-S03-302, DWN-S03-303, DWN-S03-305, DWN-AUTH-001, DWN-AUTH-002, DWN-S03-306, DWN-S03-307, DWN-S03-308, DWN-S03-309, DWN-S03-310, DWN-S03-311, DWN-S03-312, DWN-S03-313, DWN-S03-314, DWN-S03-315, DWN-S03-316, DWN-S03-317, DWN-S03-318, DWN-S03-319, DWN-S03-320, DWN-S03-321 |
 | `S05` Governed suppression (conditional FR-007 rule) | `attention-decision.jsonl` | DEC-S05-001, DEC-S05-002, DEC-S05-003, DEC-S05-004, DEC-S05-005, DEC-S05-006, DEC-S05-101, DEC-S05-102, DEC-S05-103, DEC-S05-104, DEC-AUTH-002 |
-| `S06` WAKE/bypass contribution | `downstream.jsonl` | DWN-S06-001, DWN-S06-002, DWN-S06-003, DWN-S06-101, DWN-S06-102, DWN-S06-104, DWN-S06-004, DWN-S06-005, DWN-S06-006, DWN-S06-007, DWN-S06-105, DWN-S06-106, DWN-S06-107, DWN-S06-108, DWN-S06-306, DWN-S06-301, DWN-S06-302, DWN-S06-303, DWN-S06-304, DWN-S06-305, DWN-S06-307, DWN-S06-308, DWN-S06-309, DWN-AUTH-003, DWN-AUTH-004, DWN-AUTH-005, DWN-AUTH-007, DWN-AUTH-008, DWN-S06-109, DWN-S06-110, DWN-S06-111, DWN-S06-112, DWN-S06-113, DWN-S06-114 |
+| `S06` WAKE/bypass contribution | `downstream.jsonl` | DWN-S06-001, DWN-S06-002, DWN-S06-003, DWN-S06-101, DWN-S06-102, DWN-S06-104, DWN-S06-004, DWN-S06-005, DWN-S06-006, DWN-S06-007, DWN-S06-105, DWN-S06-106, DWN-S06-107, DWN-S06-108, DWN-S06-306, DWN-S06-301, DWN-S06-302, DWN-S06-303, DWN-S06-304, DWN-S06-305, DWN-S06-307, DWN-S06-308, DWN-S06-309, DWN-AUTH-003, DWN-AUTH-004, DWN-AUTH-005, DWN-AUTH-007, DWN-AUTH-008, DWN-S06-109, DWN-S06-110, DWN-S06-111, DWN-S06-112, DWN-S06-113, DWN-S06-114, DWN-S06-115 |
 | `S07` Participant silence | `downstream.jsonl` | DWN-S07-001, DWN-S07-002, DWN-S07-003, DWN-S07-101, DWN-S07-102, DWN-S07-301, DWN-S07-302, DWN-AUTH-006 |
 | `S08` Dual DEFER valves | `attention-decision.jsonl` | DEC-S08-001, DEC-S08-002, DEC-S08-003, DEC-S08-004, DEC-S08-101, DEC-S08-102, DEC-S08-103, DEC-S08-104, DEC-S08-105, DEC-S08-106, DEC-S08-107, DEC-AUTH-001 |
 | `S09` Operational error | `attention-decision.jsonl` | DEC-S09-001, DEC-S09-002, DEC-S09-003, DEC-S09-004, DEC-S09-101 through DEC-S09-122, DEC-S09-201, DEC-S09-202, DEC-AUTH-003, DEC-AUTH-004, DEC-AUTH-005 |
@@ -181,6 +188,6 @@ from those exact schema files (`iter_errors()` count).
 
 The `S09` row abbreviates the contiguous run DEC-S09-101 through
 DEC-S09-122 (twenty-two consecutive IDs, all present); every other row
-enumerates its record IDs exhaustively. All 206 case IDs above (184 named
+enumerates its record IDs exhaustively. All 207 case IDs above (185 named
 plus the abbreviated S09 run) are exactly the cases present in the three
 corpora; no evidence record is outside this manifest.

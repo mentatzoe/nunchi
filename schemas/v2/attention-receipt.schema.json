@@ -46,7 +46,7 @@
           }
         },
         {
-          "$comment": "Operational error, kept separate from any social outcome. wake_action and policy_provenance are present together exactly when an explicit operator override to the shared WAKE default applied (@2 amendment A1: c834e8c 'NO_WAKE is an explicit operator override... receipted as operational failure policy'); their absence means the default WAKE behavior applied with no override to receipt.",
+          "$comment": "Operational error, kept separate from any social outcome. wake_action is the closed override discriminator, exactly 'NO_WAKE' (rejection A1-R1, review-2026-07-19-v2-integrator-amendment-A1.md: WAKE is the shared default, never itself a receipted override, so it is not a permitted member); wake_action and policy_provenance are present together exactly when that explicit operator override applied (@2 amendment A1: c834e8c 'NO_WAKE is an explicit operator override... receipted as operational failure policy'); their absence means the default WAKE behavior applied with no override to receipt.",
           "type": "object",
           "additionalProperties": false,
           "required": ["error"],
@@ -60,7 +60,7 @@
                 "detail": {"type": "string"}
               }
             },
-            "wake_action": {"enum": ["WAKE", "NO_WAKE"]},
+            "wake_action": {"const": "NO_WAKE"},
             "policy_provenance": {"$ref": "#/$defs/nonEmptyString"}
           },
           "allOf": [

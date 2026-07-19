@@ -1347,6 +1347,8 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
         # wake_action/policy_provenance are present together exactly when an
         # explicit operator override to the shared WAKE default applied (@2
         # amendment A1); absence means the default WAKE behavior applied.
+        # wake_action is closed to exactly "NO_WAKE": WAKE is the shared
+        # default and is never itself a receipted override (rejection A1-R1).
         if "wake_action" in value or "policy_provenance" in value:
             if "wake_action" not in value or "policy_provenance" not in value:
                 errors.add(
@@ -1354,8 +1356,8 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
                     "wake_action and policy_provenance must be present together "
                     "(an explicit operator override) or both absent",
                 )
-            if "wake_action" in value:
-                _check_enum(errors, f"{path}.wake_action", value["wake_action"], ("WAKE", "NO_WAKE"))
+            if "wake_action" in value and value["wake_action"] != "NO_WAKE":
+                errors.add(f"{path}.wake_action", "must be exactly 'NO_WAKE'")
             if "policy_provenance" in value:
                 _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
         return
