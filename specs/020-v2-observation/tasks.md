@@ -748,12 +748,12 @@ S020-A5-01 HIGH.
 **Purpose**: Make `expires_at` the first invalid instant rather than serving
 authority at exact equality.
 
-- [ ] T080 Add a RED exact-boundary test proving `fetch_time == expires_at`
+- [X] T080 Add a RED exact-boundary test proving `fetch_time == expires_at`
   rejects and reclaims the handle
-- [ ] T081 Change expiry comparison to exclusive-authority semantics
+- [X] T081 Change expiry comparison to exclusive-authority semantics
   (`fetch_time >= expires_at`); add a deterministic resource-safety case,
   regenerate evidence/manifest, and append a Phase 17 handoff supersession
-- [ ] T082 Restore planning PASS only after the complete matrix is green; record
+- [X] T082 Restore planning PASS only after the complete matrix is green; record
   the T001–T082 graph identity and obtain a fresh immutable independent review
   before candidate attempt 2
 

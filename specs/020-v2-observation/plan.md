@@ -151,17 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | BLOCKED (T080–T081) | Phase 16 event-instance and side-coverage corrections remain closed, but S020-A5-01 proves authority still serves at `fetch_time == expires_at`. T080–T081 must make expiry exclusive and evidence the exact boundary. |
+| Truthful identity/observation | PASS | Phase 16 event-instance and side-coverage corrections remain closed, and S020-A5-01 is closed: `expires_at` is the first invalid authority instant, exact equality rejects before serving, and the handle is reclaimed. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T080–T082) | The Phase 16 matrix remains historically accurate for its candidate, but S020-A5-01 rejects candidate readiness. Exact-expiry RED/GREEN/eval evidence, regenerated aggregates, the expanded graph hash, a complete matrix, and a fresh immutable review are required. |
+| Evidence before claims | PASS | The appended Phase 17 supersession records exact-boundary RED/GREEN evidence, 52 focused tests, 127 Observation tests, 46 green evidence rows, 202/202 corpus accounting, 1376 full-suite tests with 4 optional skips, 60 fixtures, Ruff/Bandit/static/governance/diff gates, and T001–T082 hash `94e0ab99732a95c983dfdc587612e5bd516238ad64fddabd5adc63f0cd89c22d`. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 17. T071–T079 remain complete and close
-the six Phase 16 findings, but T080–T082 must reject the exact expiry instant,
-regenerate evidence, rerun the complete matrix, and obtain a fresh immutable
-review. This status grants no acceptance or cutover authority.
+Post-design re-check: PASS. T080–T082 close S020-A5-01 with exclusive expiry,
+deterministic exact-boundary evidence, and the complete expanded verification
+matrix. Candidate attempt 2 still requires fresh immutable independent review
+and the ordinary lifecycle; this pass grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

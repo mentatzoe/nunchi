@@ -916,3 +916,44 @@ records remain unchanged and are superseded only by appended sections. This
 permits a fresh immutable convergence/candidate-attempt-2 review; it does not
 accept the slice or authorize integration, cutover, deployment, release, or
 promotion.
+
+## Phase 17 exact-expiry boundary supersession (S020-A5-01)
+
+After immutable Phase 16 candidate `55620049a4abd63672951ea2bd221558846fe1df`
+was pushed, an owner-side fail-closed boundary probe proved that
+`fetch_time == expires_at` still served event `e1`. The durable rejection and
+direct probe are recorded in
+`evidence/v2/observation/convergence-phase17-2026-07-19.md`.
+
+T080 added
+`test_exact_expiry_instant_rejects_and_reclaims_handle`; it failed RED because
+no `ContinuationError` was raised. T081 changes the expiry predicate from `>`
+to `>=`, making `expires_at` the first invalid authority instant. The isolated
+test and the 52-test focused continuation suite are GREEN, and deterministic
+case `CONT-S15-010` rejects exact equality before serving an event. Regenerated
+evidence now contains 46 PASS rows and 0 FAIL: 9 identity and hygiene, 7 budget,
+23 continuation, 4 recoverability, and 3 equivalence.
+
+Phase 17 verification matrix:
+
+| Command | Result |
+|---|---|
+| Exact-boundary RED on `107f84b` | 1 intended failure: `ContinuationError` was not raised at `fetch_time == expires_at` |
+| Exact-boundary GREEN | 1 test, OK; expired handle and cursor-window state reclaimed |
+| `PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_budget_and_continuation` | 52 tests, OK |
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 127 tests, OK, 0 skipped |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 5 suites, 46 rows, 0 FAIL (9 identity; 7 budget; 23 continuation; 4 recoverability; 3 equivalence) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; all 202 attempt-6 cases accounted for, zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1376 tests, OK, 4 environment-dependent optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `ruff check src/nunchi/observation.py tests/v2/observation/test_budget_and_continuation.py evals/v2/observation/run_scenes.py` | clean, exit 0 |
+| `uvx bandit -q -r src/nunchi/observation.py` | clean, exit 0; 0 findings |
+| high-confidence static secret scan over the working diff | `STATIC_SECRET_SCAN CLEAN` |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T082 all complete; SHA256 `94e0ab99732a95c983dfdc587612e5bd516238ad64fddabd5adc63f0cd89c22d` |
+| `git diff --check` | clean, exit 0 |
+
+S020-A5-01 is closed locally. A fresh immutable review of the post-fix candidate
+is still required before candidate attempt 2 can advance through the ordinary
+lifecycle. This section does not accept the slice or authorize integration,
+cutover, deployment, release, or promotion.

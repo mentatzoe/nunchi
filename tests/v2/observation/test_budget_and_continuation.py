@@ -595,6 +595,25 @@ class TestFetchDocuments(unittest.TestCase):
                         request, host_context=capability["bound_to"], **kwargs,
                     )
 
+    def test_exact_expiry_instant_rejects_and_reclaims_handle(self):
+        provider, events = _room_with_events(3)
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e3", max_events_per_fetch=1,
+            max_bytes_per_fetch=8192, expires_at="2026-07-19T10:30:00Z",
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                {
+                    "request_id": "expiry-equality", "handle_id": capability["handle_id"],
+                    "direction": "before", "max_events": 1, "max_bytes": 8192,
+                },
+                host_context=capability["bound_to"],
+                fetch_time="2026-07-19T10:30:00Z",
+            )
+        self.assertNotIn(capability["handle_id"], continuation._capabilities)
+        self.assertNotIn(capability["handle_id"], continuation._cursor_windows)
+
     def test_returned_capability_mutation_cannot_rewrite_authority(self):
         provider, events = _room_with_events(4)
         continuation = ContinuationProvider(provider)

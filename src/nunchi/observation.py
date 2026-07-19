@@ -685,7 +685,7 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
             and expires_at.tzinfo is not None
             and fetch_time is not None
             and fetch_time.tzinfo is not None
-            and fetch_time > expires_at
+            and fetch_time >= expires_at
         ):
             errors.append("handle is expired at fetch time")
     bound_to = capability.get("bound_to") or {}
