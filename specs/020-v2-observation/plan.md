@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `ACTIVE`
+**Slice state**: `HANDOFF_READY`
 
 **Program implementation authority**: `GRANTED`
 
@@ -154,16 +154,16 @@ parity claim
 | Truthful identity/observation | PASS | T083–T138 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-state truth. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T140) | Phase 24/25 runtime, authority, gap, timestamp, slice-owned literal-state, complete-matrix, and immutable-freeze mechanisms are locally GREEN. T140 must obtain fresh exact-object review. |
+| Evidence before claims | PASS | Exact object `22a0a1ab9a996e82ec625ce73e301023889209e4` passed the complete owner matrix, exact whole-slice scan, and independent fail-closed Opus review with no HIGH blocker. T001–T140 are resolved as 135 checked and five explicitly superseded historical review gates. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
-| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
+| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; after remaining `ACTIVE` through every correction, the slice advanced through candidate attempt 2 and independent review to `HANDOFF_READY`. |
 
-Post-design re-check: BLOCKED on Phase 25 T140. Runtime, scanner,
+Post-design re-check: PASS. Runtime, scanner,
 ordering, input, corpus-byte, receipt-uniqueness, caller-memory, early-resource,
 continuation/comparator authority, relation-gap, lifetime timestamp, and
-slice-owned literal-state mechanisms are locally GREEN. A new immutable object,
-exact whole-slice scan, and fresh independent verdict are required. This status
-grants no acceptance or cutover authority.
+slice-owned literal-state mechanisms are GREEN on exact reviewed object
+`22a0a1ab9a996e82ec625ce73e301023889209e4`. Independent review returned
+APPROVE. This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

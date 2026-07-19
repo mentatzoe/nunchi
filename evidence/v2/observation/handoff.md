@@ -1296,3 +1296,33 @@ immediately after freeze. T103 and T140 remain open for the final exact-object
 review and umbrella closure. No current statement claims
 `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
 promotion, or cutover authority.
+
+## Phase 25 exact-object review and lifecycle closure
+
+The mid-T139 receipt above is intentionally historical. After freezing
+`22a0a1ab9a996e82ec625ce73e301023889209e4`, the literal checker reproduced:
+
+```text
+SLICE020_TASK_STATE OK total=140 checked=133
+superseded=T107,T112,T119,T124,T131 open=T103,T140
+```
+
+Independent Claude Opus review of an exact Git-generated packet for that object
+returned `APPROVE` with no HIGH correctness, resource, authority,
+evidence-integrity, or lifecycle blocker. Durable report:
+
+`evidence/v2/observation/review-2026-07-19-phase25-opus-22a0a1a.md`
+
+Closing T103 and T140 in this receipt-only successor produces the final literal
+state:
+
+```text
+SLICE020_TASK_STATE OK total=140 checked=135
+superseded=T107,T112,T119,T124,T131 open=none
+```
+
+Candidate attempt 2 and handoff attempt 2 are appended to
+`slice-candidate.md` and `slice-handoff.md`. This establishes
+`HANDOFF_READY` for independent `v2-integrator` acceptance review only. It does
+not accept the slice or authorize integration, cutover, deployment, release, or
+promotion.

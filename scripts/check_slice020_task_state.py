@@ -46,10 +46,19 @@ def evaluate_task_state(path: Path, *, allowed_open: frozenset[str]) -> TaskStat
     if numeric != expected:
         raise ValueError("task IDs must be unique, ordered, and contiguous")
 
-    checked = frozenset(task_id for mark, task_id in matches if mark.lower() == "x")
-    unchecked = frozenset(ids) - checked
-    superseded = unchecked & SUPERSEDED_BY.keys()
-    unexplained = unchecked - superseded - allowed_open
+    literal_checked = frozenset(
+        task_id for mark, task_id in matches if mark.lower() == "x"
+    )
+    superseded = frozenset(SUPERSEDED_BY) & frozenset(ids)
+    unclosed_superseded = superseded - literal_checked
+    if unclosed_superseded:
+        raise ValueError(
+            "superseded task IDs must be literally checked as resolved: "
+            f"{sorted(unclosed_superseded)}"
+        )
+    checked = literal_checked - superseded
+    unchecked = frozenset(ids) - literal_checked
+    unexplained = unchecked - allowed_open
     unknown_allowed = allowed_open - unchecked
     if unexplained:
         raise ValueError(f"unexplained unchecked task IDs: {sorted(unexplained)}")
@@ -62,7 +71,7 @@ def evaluate_task_state(path: Path, *, allowed_open: frozenset[str]) -> TaskStat
         all_ids=tuple(ids),
         checked=checked,
         superseded=frozenset(superseded),
-        open_ids=unchecked - superseded,
+        open_ids=unchecked,
     )
 
 

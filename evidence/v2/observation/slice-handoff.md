@@ -37,3 +37,33 @@
 **Decision reference**: evidence/v2/observation/review-2026-07-19-v2-integrator-attempt-1.md
 
 **Recorded by**: v2-integrator
+
+## Attempt 2 — HANDOFF_READY
+
+**Slice**: `020-v2-observation`
+
+**Status**: HANDOFF_READY
+
+**Candidate commit**: `22a0a1ab9a996e82ec625ce73e301023889209e4`
+
+**Acceptance owner**: v2-integrator
+
+**Documentation freshness**: PASS
+
+**Tasks complete**: YES — T001–T140 resolved as 135 checked and five
+explicitly superseded historical review gates; no open task remains.
+
+**Tasks SHA256**: `86e71d42acbeadc7759d70b64585dec5ae40798a1befc791a777821430a56a2a`
+
+**Independent review**: APPROVE —
+`evidence/v2/observation/review-2026-07-19-phase25-opus-22a0a1a.md`
+
+**Packet paths**: evidence/v2/observation/handoff.md, evidence/v2/observation/slice-activation.md, evidence/v2/observation/slice-candidate.md, evidence/v2/observation/dependency-010-acceptance.md, evidence/v2/observation/dependency-010-amendment-A1-acceptance.md, evidence/v2/observation/review-2026-07-19-phase25-opus-22a0a1a.md, evidence/v2/observation/identity-and-hygiene.jsonl, evidence/v2/observation/budget-sweep.jsonl, evidence/v2/observation/continuation.jsonl, evidence/v2/observation/s05-recoverability.jsonl, evidence/v2/observation/s13-equivalence.jsonl, evidence/v2/observation/phase18-adversarial.jsonl
+
+**Interfaces offered**: I-020A ObservationProviderV2@1, consuming I-010A
+AttentionRequestV2@1, I-010D ContextContinuationV2@1, and accepted I-010E
+AttentionReceiptV2@2.
+
+**Review boundary**: packet is ready for independent `v2-integrator`
+acceptance review. This record does not accept the slice or authorize
+integration, cutover, deployment, release, or promotion.
