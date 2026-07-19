@@ -182,7 +182,7 @@ stale `@1`, and `docs/contracts/nunchi-v2.md`'s title, field-authority
 sentence, and interface table row (previously missed) now cite `@2` too.
 No other file changed; R7–R11 remain untouched.
 
-**Revised candidate commit**: (recorded once committed)
+**Revised candidate commit**: `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`
 
 **Verification (2026-07-19, post-correction tree)**:
 
