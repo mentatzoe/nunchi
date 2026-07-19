@@ -186,19 +186,26 @@ implementation
   CRITICAL/HIGH task-graph findings? [Ownership, Scope, Spec §Resolved
   post-acceptance contract amendments; Plan §Planning Decisions; Tasks §Open
   program-owner handoff]
+- [x] CHK086 Do spec, plan, tasks, and acceptance scenes consistently require
+  every receipt-sink invocation failure—both `not-persisted` and `unknown`—to
+  use the shared `WAKE` default, forbidding a previously trusted `NO_WAKE`
+  override when its required receipt did not persist? [Consistency, Safety,
+  Spec §Clarifications, FR-001, FR-012; Plan §I-030A callable and CLI
+  equivalence seam, Bypass operational error and CLI parity; Tasks §T004,
+  T018, T021]
 
 ## Formal Reviewer Refresh Notes
 
 - Mark an item complete only when the requirement text itself is complete,
   clear, consistent, measurable, and traceable. Passing implementation tests is
   not evidence that these requirement-quality items pass.
-- Record blocking findings inline with CHK060–CHK085 and reject analysis
+- Record blocking findings inline with CHK060–CHK086 and reject analysis
   readiness while any unresolved requirement ambiguity, governance conflict,
   ownership leak, or documentation-disposition mismatch remains.
 - This refresh does not establish `READY`, create activation evidence, or
   authorize implementation.
 
-**2026-07-19 refresh result**: 85/85 requirement-quality items pass after the
+**2026-07-19 refresh result**: 86/86 requirement-quality items pass after the
 slice-owned clarifications and accepted dependency amendments. Accepted I-010B
 `@2` clears the zero-margin dependency conflict; the stale program registry is
 an explicit non-blocking `v2-program-owner` handoff rather than a bound-slice

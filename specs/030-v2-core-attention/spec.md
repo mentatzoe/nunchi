@@ -90,6 +90,16 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   verification; V2 becomes current only when the program reaches
   `CUTOVER_VERIFIED` after final documentation validation.
 
+## Clarifications
+
+### Session 2026-07-19
+
+- Q: Does a receipt-sink invocation failure retain a previously trusted
+  `NO_WAKE` override when the required override receipt did not persist? → A:
+  No. Every receipt-sink invocation failure uses the shared `WAKE` default,
+  regardless of the previously trusted policy, because the override cannot be
+  durably receipted.
+
 ### Resolved post-acceptance contract amendments and program handoff
 
 The selected design at `c834e8c` requires the effective policy and its source
@@ -237,9 +247,10 @@ non-receiptable and MUST NOT fabricate one.
    **When** the engine returns, **Then** status is `ERROR`, default host action
    is wake, and error detail remains off the room surface.
 2. **Given** a fully validated, exactly request-bound trusted configuration
-   explicitly selects `NO_WAKE`, **When** a later operational error occurs,
-   **Then** the override is separately sourced and receipted through I-010E
-   `@2`'s paired `wake_action: "NO_WAKE"` and
+   explicitly selects `NO_WAKE`, **When** a later budget, provider, malformed-
+   model, or runtime error remains receiptable, **Then** the override is
+   separately sourced and receipted through I-010E `@2`'s paired
+   `wake_action: "NO_WAKE"` and
    `policy_provenance`, and never labeled model suppression or implemented
    through a local extension or error-detail convention.
 3. **Given** equivalent input and effective trusted configuration, **When** the
@@ -259,6 +270,10 @@ non-receiptable and MUST NOT fabricate one.
    raw bytes nevertheless contain `error_action: "NO_WAKE"`, **Then** the
    engine uses the shared `WAKE` default and any independently writable error
    receipt omits both override fields.
+7. **Given** a fully trusted `NO_WAKE` policy but the sole receipt-sink
+   invocation returns `not-persisted` or `unknown`, **When** the engine returns
+   the sink-failure `ERROR`, **Then** it uses the shared `WAKE` default because
+   the required override receipt cannot be proven durable.
 
 ### Edge Cases
 
@@ -383,10 +398,12 @@ non-receiptable and MUST NOT fabricate one.
   the CLI precedence rules, its error receipt omits both `wake_action` and
   `policy_provenance`. Request-schema and binding failures may likewise use
   that already constructed sink. Otherwise the failure is non-receiptable and
-  MUST NOT fabricate one. A fully validated and bound `NO_WAKE`
-  policy does apply to later trusted-budget, provider, timeout, malformed-model,
-  runtime, or sink-invocation errors; when the error itself is receiptable, the
-  receipt carries the accepted paired override fields.
+  MUST NOT fabricate one. A fully validated and bound `NO_WAKE` policy applies
+  to later trusted-budget, provider, timeout, malformed-model, or runtime errors
+  only when the override can be offered through the required receipt. Every
+  receipt-sink invocation failure instead uses the shared `WAKE` default because
+  the override receipt did not persist; neither `not-persisted` nor `unknown`
+  persistence retains silence authority.
   `receipt_sink` is exactly a synchronous
   `Callable[[AttentionReceiptV2], None]`: one normal `None` return means the
   offered record persisted, any raised exception means failure, and the engine
@@ -405,7 +422,8 @@ non-receiptable and MUST NOT fabricate one.
   Cleanup/unlink/directory-fsync failure, or a final directory-fsync failure
   after the file was closed, reports persistence `unknown`. Neither failure
   outcome claims persistence, and the engine returns operational `ERROR` with
-  the exact sink outcome in its off-surface error fact. The configuration file,
+  the shared `WAKE` default and the exact sink outcome in its off-surface error
+  fact. The configuration file,
   credentials, filesystem path, and sink source never enter classifier input,
   stdout, stderr, decision data, or receipt body.
   I-030A generates only these stable error-code/cause-detail pairs, while

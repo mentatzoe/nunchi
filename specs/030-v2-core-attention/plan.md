@@ -369,17 +369,19 @@ readiness analysis.
   pair. Missing, unreadable, unsafe, invalid-JSON, or duplicate-key config
   constructs no sink and emits no receipt. Once the
   trust boundary passes, `NO_WAKE` applies to later budget, provider, malformed-
-  model, runtime, or sink-invocation error; receiptable instances use the exact
-  paired `wake_action: "NO_WAKE"` and `policy_provenance` fields.
+  model, or runtime errors only when the required override receipt can be
+  offered. Every sink-invocation failure uses the shared `WAKE` default because
+  its override receipt did not persist; both `not-persisted` and `unknown`
+  persistence outcomes reject silence authority.
 - **Rationale**: Bypass must not fabricate a model result, errors must not
   impersonate social judgments, malformed configuration must not gain silence
   authority from one parseable member, and callable-core/CLI equivalence is the
   shared consumer seam.
 - **Alternatives considered**: Converting bypass to WAKE, converting failures
   to a social disposition, honoring `NO_WAKE` before complete validation and
-  binding, or emitting diagnostics and response payloads on the same stream.
-  These lose provenance, grant untrusted silence authority, or break
-  deterministic host handling.
+  binding, retaining `NO_WAKE` after its required receipt fails, or emitting
+  diagnostics and response payloads on the same stream. These lose provenance,
+  grant unreceipted silence authority, or break deterministic host handling.
 
 ### Documentation ownership
 
@@ -532,8 +534,9 @@ persistence. After the sole sink attempt, the returned I-010B error appends
 exactly `; receipt_persistence=<persisted|not-persisted|unknown>` to the safe
 cause detail. A sink failure replaces the returned cause with
 `receipt-sink-failure` and its observed non-persistence value; it never triggers
-a second receipt attempt. No fixed detail exposes a path, credential, provider
-payload, configuration value, or receipt provenance.
+a second receipt attempt and always uses the shared `WAKE` default, even when
+the previously validated policy selected `NO_WAKE`. No fixed detail exposes a
+path, credential, provider payload, configuration value, or receipt provenance.
 
 Core and CLI must also prove that host-only continuation handles, binding
 tokens, cursors, and expiry values never enter the classifier projection. The
