@@ -51,9 +51,9 @@
         "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven"]},
         "margin_status": {"enum": ["active", "retired"]},
         "effective_margin": {
-          "$comment": "Finite (0, 1]; the contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
+          "$comment": "Finite [0, 1] (@2 amendment A2, c834e8c 'a transition margin, when active, is a finite number within [0,1]'; the accepted @1 shape wrongly used exclusiveMinimum, excluding the exact boundary the retained inclusive <= comparison relies on). The contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
           "type": "number",
-          "exclusiveMinimum": 0,
+          "minimum": 0,
           "maximum": 1,
           "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
         },

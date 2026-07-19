@@ -1,4 +1,4 @@
-# Nunchi V2 Contracts (I-010A–I-010D at `@1`, I-010E at `@2`)
+# Nunchi V2 Contracts (I-010A, I-010C, I-010D at `@1`; I-010B, I-010E at `@2`)
 
 **Owner**: `v2-contract-owner` (slice `010`). Only this owner edits
 `schemas/v2/**`; a dependent slice requests changes through an explicit
@@ -13,9 +13,9 @@ running product today.
 **Field-level authority**: the selected Aleph Vault design at `c834e8c`
 (`projects/shared/nunchi/technical-design.md`) is the field-level naming and
 shape authority for all five interfaces (FR-014); the program-canonical
-interface names and versions (`I-010A`–`I-010D` at `@1`, `I-010E` at `@2`)
-are this slice's own vocabulary layered over that same field inventory. A
-document the selected
+interface names and versions (`I-010A`, `I-010C`, `I-010D` at `@1`;
+`I-010B`, `I-010E` at `@2`) are this slice's own vocabulary layered over
+that same field inventory. A document the selected
 design declares valid that either validator rejects is a contract defect,
 never resolved by narrowing the corpus.
 
@@ -24,7 +24,7 @@ never resolved by narrowing the corpus.
 | Interface | Version | Schema path |
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@1` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010B AttentionDecisionV2` | `@2` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
@@ -98,7 +98,7 @@ A truthful attention request represents:
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
 
-## I-010B AttentionDecisionV2@1
+## I-010B AttentionDecisionV2@2
 
 A tagged host-facing union on `status`:
 
@@ -132,7 +132,10 @@ A tagged host-facing union on `status`:
   the `effective_margin`, and the trusted `margin_source`. The
   cross-field rules are part of the contract: a margin counts as
   **applied** exactly when the valve is `margin-defer` — the
-  `effective_margin` (a finite number in `(0, 1]`) is then required and is
+  `effective_margin` (a finite number in `[0, 1]`, inclusive of the exact
+  boundary — `@2` amendment A2, c834e8c "a transition margin, when active,
+  is a finite number within `[0,1]`"; the accepted `@1` shape wrongly
+  excluded exactly `0`) is then required and is
   forbidden on every other valve, the override cause must be `margin`,
   and the margin status must be `active` (a retired margin cannot apply);
   the trusted `margin_source` may appear only on that margin-applied

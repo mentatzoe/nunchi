@@ -157,11 +157,19 @@ class RoutingAuditCases(unittest.TestCase):
         assert_schema_verdict(self, "attention-decision", doc, "invalid")
 
     def test_out_of_range_effective_margin_rejects(self):
-        for value in (0, -0.1, 1.5):
+        for value in (-0.1, 1.5):
             with self.subTest(value=value):
                 doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
                 doc["routing_audit"]["effective_margin"] = value
                 assert_schema_verdict(self, "attention-decision", doc, "invalid")
+
+    def test_zero_effective_margin_validates(self):
+        # @2 amendment A2 (c834e8c: "a transition margin, when active, is a
+        # finite number within [0,1]"): the domain is inclusive of the exact
+        # boundary, matching the retained inclusive <= transition comparison.
+        doc = make_decision_ok("SUPPRESS", "DEFER", "margin-defer")
+        doc["routing_audit"]["effective_margin"] = 0
+        assert_schema_verdict(self, "attention-decision", doc, "valid")
 
     def test_reasons_is_a_required_sibling_field(self):
         doc = make_decision_ok()

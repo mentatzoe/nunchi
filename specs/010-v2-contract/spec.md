@@ -76,7 +76,8 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   interface.
 - **Produces**:
   - `I-010A AttentionRequestV2@1`
-  - `I-010B AttentionDecisionV2@1`
+  - `I-010B AttentionDecisionV2@2` (amended post-acceptance from `@1`; see
+    FR-005 amendment A2)
   - `I-010C ParticipantWakeV2@1`
   - `I-010D ContextContinuationV2@1`
   - `I-010E AttentionReceiptV2@2` (amended post-acceptance from `@1`; see FR-010
@@ -333,7 +334,7 @@ participant outcomes and binding failures.
   that call; this redaction is a runtime-adapter-only behavioral rule, not a
   schema-expressible one, since the wire schema legitimately carries the full
   capability for host/evidence use.
-- **FR-005**: The slice MUST define `I-010B AttentionDecisionV2@1` as a tagged
+- **FR-005**: The slice MUST define `I-010B AttentionDecisionV2@2` as a tagged
   host-facing union with `status: ok`, `status: bypass`, and `status: error`.
   The ok branch contains classifier/effective dispositions, `WAKE`-only grounded advice (FR-013),
   reasons retained as audit material that never enters the participant turn,
@@ -348,7 +349,10 @@ participant outcomes and binding failures.
   audit's conditional facts are closed per combination, not only per field:
   a margin counts as **applied** exactly when the applied valve is
   `margin-defer`, and exactly then the effective margin (a finite number in
-  `(0, 1]`) MUST be present and is forbidden on every other valve; the
+  `[0, 1]`, inclusive of the exact boundary — `@2` amendment A2, c834e8c
+  "a transition margin, when active, is a finite number within `[0,1]`";
+  accepted `@1` wrongly excluded exactly `0`) MUST be present and is
+  forbidden on every other valve; the
   trusted margin source counts as **present** only on a margin-applied
   decision whose margin width was supplied by a trusted source, so
   `margin_source` MAY appear only when the valve is `margin-defer` (optional
@@ -488,8 +492,9 @@ participant outcomes and binding failures.
   request, target attention response, participant wake contract, and staged
   receipt sections — is the field-level naming and shape authority for every
   interface at its exact current version; the program-canonical interface
-  names and versions (`I-010A`–`I-010D` at `@1`, `I-010E` at `@2` per FR-010
-  amendment A1) remain this slice's vocabulary for those same documents. A
+  names and versions (`I-010A`, `I-010C`, `I-010D` at `@1`; `I-010B` at `@2`
+  per FR-005 amendment A2; `I-010E` at `@2` per FR-010 amendment A1) remain
+  this slice's vocabulary for those same documents. A
   later-discovered gap against the authority is resolved by an explicit
   versioned amendment, never by narrowing the authority's own text. Schemas
   MUST encode the selected field inventory rather than a narrowed local
