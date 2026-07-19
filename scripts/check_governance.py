@@ -1541,22 +1541,38 @@ def _effective_dependency_commit(
                 referenced_decision = _clean_metadata(
                     amendment_record_text, "Decision reference", last=True
                 )
-                if len(referenced_decision) < 10:
+                ledger_decision_reference = _clean_metadata(
+                    record, "Decision reference"
+                )
+                if referenced_decision != ledger_decision_reference:
                     errors.append(
-                        f"{prefix}: Amendment record at the decision commit is "
-                        "missing a durable Decision reference"
+                        f"{prefix}: Amendment record's Decision reference at "
+                        f"the decision commit must be {ledger_decision_reference!r}"
+                        f"; observed {referenced_decision!r}"
+                    )
+                elif not _repo_path_is_safe(
+                    root, Path(referenced_decision), require_file=False
+                ) or _git_file_text(
+                    root, decision, Path(referenced_decision)
+                ) is None:
+                    errors.append(
+                        f"{prefix}: Amendment record's Decision reference must "
+                        "name a file that already exists at the Amendment "
+                        "decision commit"
                     )
         if candidate:
             previous_effective = candidate
             effective_commit = candidate
-    summary_match = re.search(
-        r"Current effective dependency commit\s*\n+\s*`([0-9a-f]{40})`", text
+    summary_matches = list(
+        re.finditer(
+            r"Current effective dependency commit\s*\n+\s*`([0-9a-f]{40})`", text
+        )
     )
-    if summary_match and summary_match.group(1) != effective_commit:
+    if summary_matches and summary_matches[-1].group(1) != effective_commit:
         errors.append(
             f"{amendments_relative}: 'Current effective dependency commit' "
             f"summary must be {effective_commit!r}; observed "
-            f"{summary_match.group(1)!r}"
+            f"{summary_matches[-1].group(1)!r}"
         )
     return effective_commit, errors
 
