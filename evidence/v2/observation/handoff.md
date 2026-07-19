@@ -1060,3 +1060,45 @@ whole activation-to-candidate range. T107 and T103 remain open until a fresh
 independent review of that exact object returns without blockers. This section
 does not establish `CONVERGED`, `HANDOFF_READY`, acceptance, integration,
 deployment, release, promotion, or cutover authority.
+
+## Phase 21 comparator-completeness correction
+
+Late immutable review of `f38a4fe4cf98fd4d63887e0baf735db7427298f6`
+identified one current mechanism not covered by the earlier Phase 18 rejection:
+the reusable comparator silently discarded authoritative event order,
+one-sided event fields, actors, and almost all coverage state. The other four
+HIGH findings in that review are closed by Phases 18–20; the complete
+adjudication is preserved at
+`evidence/v2/observation/review-2026-07-19-f38a4fe-late-rejection.md`.
+
+Current-tree RED produced five intended failures. Before correction,
+`compare_requests()` returned `equivalent: true` with no unexplained differences
+for reversed order, a missing native event field, actor divergence, and
+coverage/budget divergence; `compare_pages()` likewise ignored successor-cursor
+presence and side coverage.
+
+T110 now compares schema/self/room/actors, authoritative common-event order,
+complete event shapes, trigger/anchor, all semantic coverage fields, direction,
+continuation capability shape, and successor-cursor presence. Only request-local
+correlation IDs, issued handle IDs, exact cursor bytes, and expiry-clock values
+are opaque. Capability explanations must name unavailable event/actor IDs or
+semantic paths; continuity differences are labelled as declared capability, and
+one-sided facts remain unexplained.
+
+Phase 21 matrix:
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_equivalence` | 11 tests, OK; five former false-equivalence mechanisms covered |
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 153 tests, OK |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 52 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 8 equivalence) |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial` | 11 rows, 0 FAIL |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; 202/202 accounted for |
+| `PYTHONPATH=src python3 -m unittest` | 1402 tests, OK; 4 optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| expanded Ruff / production Bandit / governance / task manifest / `git diff --check` | clean |
+
+T106/T112 remain open until this tree is committed, pushed, exact-scanned, and
+freshly reviewed. T103/T107 remain historical convergence blockers folded into
+that final review. Nothing here establishes `CONVERGED`, `HANDOFF_READY`,
+acceptance, integration, deployment, release, promotion, or cutover authority.

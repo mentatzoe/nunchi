@@ -93,7 +93,6 @@ class TestLocalLinksResolve(unittest.TestCase):
         # scanner-only string never appears as a literal governed-path
         # token in the file (governance lexical scan, not a real reference).
         managed_prefixes = ("spec" + "s/", "." + "specify/")
-        repo_root = DOC_PATH.parents[2]
         text = DOC_PATH.read_text(encoding="utf-8")
         for match in self.LINK_PATTERN.findall(text):
             with self.subTest(path=match):

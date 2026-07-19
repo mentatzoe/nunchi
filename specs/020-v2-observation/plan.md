@@ -151,18 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T102 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, and the exact closed four-field host context; 47 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
+| Truthful identity/observation | PASS | T083–T111 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, and complete semantic comparison; 52 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T109–T112) | T105 removes the unrestricted scanner marker bypass, but late immutable review H4 reproduced a current comparator defect: order, one-sided facts, actors, and semantic coverage can disappear while equivalence remains true. T109–T112 must close that oracle gap, regenerate evidence, freeze/scan a new object, and obtain fresh independent review. |
+| Evidence before claims | BLOCKED (T106/T112) | T109–T111 close the comparator oracle gap with 11 unit tests and 8 deterministic S13 rows. T106/T112 must freeze and exact-scan the final immutable object and obtain fresh independent review. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 21 T109–T112. Phase 17–20 runtime and
-scanner mechanisms remain GREEN, but the reusable parity comparator does not
-yet classify every semantic difference. Complete comparator evidence, a new
-immutable pushed object, exact-range scan, and fresh independent verdict are
-required. This status grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on T106/T112. Phase 17–21 runtime, scanner, and
+comparator mechanisms are locally GREEN. A new immutable pushed object,
+exact-range scan, and fresh independent verdict are required. This status
+grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

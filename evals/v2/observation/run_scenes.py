@@ -28,7 +28,7 @@ from nunchi.observation import (
     serialized_byte_size,
 )
 from evals.v2.observation.capabilities.reference_provider import make_reference_provider
-from evals.v2.observation.compare import compare_requests
+from evals.v2.observation.compare import compare_pages, compare_requests
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EVALS_DIR = REPO_ROOT / "evals" / "v2" / "observation"
@@ -493,6 +493,25 @@ def run_recoverability() -> list[dict]:
     return rows
 
 
+def _apply_document_mutations(document: dict, mutations: list[dict]) -> None:
+    """Apply deterministic evaluator-only mutations declared by an S13 case."""
+    for mutation in mutations:
+        path = mutation["path"]
+        target: Any = document
+        for component in path[:-1]:
+            target = target[component]
+        leaf = path[-1]
+        if mutation.get("op") == "remove":
+            if isinstance(target, list):
+                target.pop(leaf)
+            else:
+                target.pop(leaf)
+        elif isinstance(target, list):
+            target[leaf] = mutation["value"]
+        else:
+            target[leaf] = mutation["value"]
+
+
 def run_equivalence() -> list[dict]:
     rows = []
     for case in _load("capabilities"):
@@ -509,10 +528,32 @@ def run_equivalence() -> list[dict]:
 
         left = build(case["left_events"])
         right = build(case["right_events"])
+        if case.get("reverse_right_events"):
+            right["events"].reverse()
+        _apply_document_mutations(left, case.get("left_mutations") or [])
+        _apply_document_mutations(right, case.get("right_mutations") or [])
         right_capability = None
         if case.get("right_unavailable_event_ids"):
             right_capability = {"unavailable_event_ids": set(case["right_unavailable_event_ids"]), "reason": "reference-declared gap"}
-        comparison = compare_requests(left, right, right_capability=right_capability)
+        if case.get("document_kind") == "page":
+            def page_from(request: dict, suffix: str) -> dict:
+                return {
+                    "request_id": f"page-{suffix}",
+                    "handle_id": f"opaque-handle-{suffix}",
+                    "direction": "after",
+                    "anchor_event_id": case["trigger_event_id"],
+                    "events": request["events"],
+                    "coverage": request["coverage"],
+                    "next_cursor": f"opaque-cursor-{suffix}",
+                }
+
+            left = page_from(left, "left")
+            right = page_from(right, "right")
+            _apply_document_mutations(left, case.get("left_page_mutations") or [])
+            _apply_document_mutations(right, case.get("right_page_mutations") or [])
+            comparison = compare_pages(left, right, right_capability=right_capability)
+        else:
+            comparison = compare_requests(left, right, right_capability=right_capability)
         result = "PASS" if comparison["equivalent"] == case["expect_equivalent"] else "FAIL"
         rows.append({
             "scene_id": case["scene_id"], "case_id": case["case_id"], "title": case["title"],

@@ -947,13 +947,13 @@ HIGH H4, reproduced against the current post-Phase-20 tree.
 - [X] T108 Preserve and adjudicate the complete late `f38a4fe` review; close
   its hard-byte, atomicity, transient-work, and packet-history findings against
   later phases while pinning the comparator mechanism as current RED
-- [ ] T109 Add RED unit/evaluator cases proving reversed authoritative event
+- [X] T109 Add RED unit/evaluator cases proving reversed authoritative event
   order, one-sided event facts, actor divergence, semantic coverage divergence,
   and continuation-page divergence are never silently equivalent
-- [ ] T110 Implement a complete semantic comparator that excludes only declared
+- [X] T110 Implement a complete semantic comparator that excludes only declared
   request-local opaque identities, preserves explicit capability-gap
   explanations, and reports every other request/page difference
-- [ ] T111 Extend S13 deterministic evidence and documentation with comparator
+- [X] T111 Extend S13 deterministic evidence and documentation with comparator
   completeness cases; regenerate aggregates and downstream handoff receipts
 - [ ] T112 Rerun the complete matrix and exact whole-slice scan, commit/push a
   new immutable object with T001–T112 identity, and obtain fresh independent

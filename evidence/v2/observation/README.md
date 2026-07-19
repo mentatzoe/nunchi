@@ -54,11 +54,11 @@ implicit.
 | S04 False-suppression scars | Referential mention/resolution/other-addressee/class-address never enter deterministic hygiene | `identity-and-hygiene.jsonl` (`ID-S04-*`, 2 rows) | same |
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
-| S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences explained | `s13-equivalence.jsonl` (`CAP-S13-*`, 3 rows) | same |
+| S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences are explicit; authoritative order, one-sided event facts, actors, semantic coverage/budgets, and continuation-page state cannot disappear | `s13-equivalence.jsonl` (`CAP-S13-*`, 8 rows) | same |
 | S15 Context budget | Snapshot/fetch hard caps and exact closed host binding enforced with `I-010E` byte telemetry; authority, exclusive expiry, cursor, delivery, generation, and actor state remain isolated/bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 11 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 47 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 52 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
 ## Phase 18 atomicity/resource evidence
