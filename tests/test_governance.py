@@ -767,6 +767,43 @@ class GovernanceBoundaryTests(unittest.TestCase):
         self.assertIn(f"**Initial tasks SHA256**: {digest}", completed.stdout)
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
+    def test_task_manifest_state_preserves_literal_checkbox_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tasks = root / "specs/010-v2-contract/tasks.md"
+            tasks.parent.mkdir(parents=True)
+            tasks.write_text(
+                "- [X] T001 Done\n- [ ] T002 Still open\n",
+                encoding="utf-8",
+            )
+            initial_ids, digest, completed_ids = (
+                check_governance.task_manifest_state_for_slice(
+                    root, "specs/010-v2-contract",
+                )
+            )
+        self.assertEqual(initial_ids, "T001, T002")
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertEqual(completed_ids, "T001")
+
+    def test_candidate_completion_rejects_any_open_committed_checkbox(self):
+        tasks_text = "- [X] T001 Done\n- [ ] T002 Still open\n"
+        entries = check_governance._validated_task_entries(tasks_text)
+        errors = check_governance._candidate_task_completion_errors(
+            tasks_complete="YES",
+            declared_completed="T001, T002",
+            committed_tasks=tasks_text,
+            committed_task_entries=entries,
+            prefix="candidate record",
+        )
+        self.assertTrue(
+            any("every committed task checkbox" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("Completed task IDs must be exactly 'T001'" in error for error in errors),
+            errors,
+        )
+
     def test_task_manifest_rejects_gaps_and_noncanonical_checkboxes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1035,3 +1035,49 @@ accepted corpus identity is byte-verifiable.
 **Checkpoint**: fixed memory may reject a never-before-seen request ID, but it
 must never forget and reaccept an issued ID; pending capacity never invalidates
 a receipt promise already returned to a caller.
+
+## Phase 24: Caller-Memory Atomicity, Early Limits, and Completion Truth
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-ff3c5a2-rejection.md`,
+independent fail-closed review of exact immutable candidate `ff3c5a2`, with
+current remediation recorded in
+`evidence/v2/observation/convergence-phase24-input-atomicity-governance-2026-07-19.md`.
+
+- [X] T125 Preserve and adjudicate the complete `ff3c5a2` rejection; close the
+  scanner-marker finding against `707f3e7`, carry stale exact-candidate counts
+  into the next receipt, and pin caller-memory, early-limit, and governance
+  completion mechanisms as current blockers
+- [X] T126 Add deterministic RED tests proving a caller can mutate a fetch
+  request after authority validation, mutate an event after normalization,
+  bypass complete-input copy failure handling, and force O(retention) work on a
+  fresh request already at active-cursor capacity
+- [X] T127 Deep-copy complete native ingestion input plus fetch request/host
+  context once at method entry; validate and use only those private copies and
+  convert copy failures to domain errors before state or cursor mutation
+- [X] T128 Add a deterministic retained-deque visit counter proving an
+  over-limit fresh fetch performs zero retention traversal before rejection
+- [X] T129 Enforce active-cursor capacity immediately after binding/expiry
+  validation and before fresh deque/window construction, preserving existing
+  cursor-chain progress under the provider-shared lock
+- [X] T130 Preserve literal checkbox state separately from normalized graph
+  identity; make the read-only manifest report only checked IDs and require the
+  effective candidate's committed tasks to be literally complete before
+  `Tasks complete: YES` can pass
+- [ ] T131 Regenerate standard/adversarial evidence on the settled Phase 23/24
+  tree; rerun the complete test/corpus/verdict/Ruff/Bandit/static/governance/
+  task-manifest/diff matrix; exact-scan the whole activation-to-candidate range;
+  commit/push one immutable T001–T131 object and obtain a fresh independent
+  fail-closed whole-slice review before candidate attempt 2
+
+### Phase 24 dependencies
+
+- T126/T128/T130 depend on T125 and may proceed independently after their RED
+  cases; T127 depends on T126 and T129 depends on T128.
+- T131 depends on T106, T118, T123, T127, T129, and T130. It supersedes
+  T124/T119/T112/T107 as the sole final convergence review; T103 remains the
+  historical umbrella gate and cannot close before T131.
+
+**Checkpoint**: caller-owned memory is copied before validation, over-limit
+fresh fetches reject before retention work, and completion claims are grounded
+in literal committed checkboxes rather than normalized task identity.

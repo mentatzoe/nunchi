@@ -151,18 +151,19 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T123 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, timestamp order, closed transport/configuration inputs, and accepted-corpus byte identity; 52 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
+| Truthful identity/observation | PASS | T083–T130 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-completion truth. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T124) | T121–T123 establish fixed-memory permanent request-ID non-reuse and reject new snapshots at pending capacity without invalidating issued requests. T124 must rerun/freeze/scan and obtain fresh review. |
+| Evidence before claims | BLOCKED (T131) | Permanent request-ID uniqueness and Phase 24 caller-memory/resource/governance mechanisms are locally GREEN. T131 must regenerate exact aggregate/adversarial evidence, run the complete matrix and whole-slice exact scan, then obtain a fresh immutable whole-slice review. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 23 T124. Earlier runtime, scanner,
-comparator, ordering, input, and corpus-byte mechanisms remain locally GREEN,
-and request-ID uniqueness/pending receipt promises are now locally GREEN. A new
-immutable object, exact-range scan, and fresh independent verdict are required.
-This status grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 24 T131. Runtime, scanner, comparator,
+provider attestation, request-ID uniqueness, ordering, transport/configuration,
+corpus-byte, caller-memory, early-resource, and governance-completion mechanisms
+are locally GREEN. A final immutable object, exact whole-slice scan, and fresh
+independent verdict are required. This status grants no acceptance or cutover
+authority.
 
 ## Slice Interfaces
 

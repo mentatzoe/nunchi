@@ -8,4 +8,8 @@
 {"case_id": "P18-GAP-003", "detail": "", "result": "PASS", "test": "TestContinuationRetentionGapCoverage.test_around_chain_discloses_known_retention_gap_through_exhaustion"}
 {"case_id": "P18-RESOURCE-001", "detail": "", "result": "PASS", "test": "TestCursorReplayComplexity.test_one_event_cursor_chain_replay_grows_near_linearly"}
 {"case_id": "P18-RESOURCE-002", "detail": "", "result": "PASS", "test": "TestCursorReplayComplexity.test_event_by_id_state_is_retention_bounded_and_reclaimed_with_eviction"}
+{"case_id": "P23-INPUT-001", "detail": "", "result": "PASS", "test": "TestCallerMemoryIsolation.test_fetch_uses_one_private_request_copy_after_authorization"}
+{"case_id": "P23-INPUT-002", "detail": "", "result": "PASS", "test": "TestCallerMemoryIsolation.test_ingest_copies_complete_native_input_before_validation"}
+{"case_id": "P23-INPUT-003", "detail": "", "result": "PASS", "test": "TestCallerMemoryIsolation.test_copy_failures_reject_without_state_mutation"}
+{"case_id": "P23-RESOURCE-001", "detail": "", "result": "PASS", "test": "TestEarlyCursorLimit.test_over_limit_fresh_fetch_rejects_before_retained_deque_visit"}
 {"case_id": "P18-RESOURCE-METRICS", "deque_visits_2n": 0, "deque_visits_n": 0, "detail": "cursor replay excludes fresh-page setup and counts retained-deque iteration", "linear_bound": 8, "n": 64, "result": "PASS", "two_n": 128}

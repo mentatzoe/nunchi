@@ -1,4 +1,4 @@
-"""Reproducible Phase 18 atomicity and replay-resource evidence.
+"""Reproducible Phase 18/23 atomicity and replay-resource evidence.
 
 This runner executes the deterministic barrier-controlled regression cases and
 emits one JSONL row per mechanism plus explicit N/2N deque-visit metrics.
@@ -16,6 +16,10 @@ from tests.v2.observation.test_continuation_atomicity import (
     TestContinuationRetentionGapCoverage,
     TestCursorReplayComplexity,
 )
+from tests.v2.observation.test_input_atomicity import (
+    TestCallerMemoryIsolation,
+    TestEarlyCursorLimit,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = REPO_ROOT / "evidence/v2/observation/phase18-adversarial.jsonl"
@@ -31,6 +35,10 @@ CASES = (
     ("P18-GAP-003", TestContinuationRetentionGapCoverage, "test_around_chain_discloses_known_retention_gap_through_exhaustion"),
     ("P18-RESOURCE-001", TestCursorReplayComplexity, "test_one_event_cursor_chain_replay_grows_near_linearly"),
     ("P18-RESOURCE-002", TestCursorReplayComplexity, "test_event_by_id_state_is_retention_bounded_and_reclaimed_with_eviction"),
+    ("P23-INPUT-001", TestCallerMemoryIsolation, "test_fetch_uses_one_private_request_copy_after_authorization"),
+    ("P23-INPUT-002", TestCallerMemoryIsolation, "test_ingest_copies_complete_native_input_before_validation"),
+    ("P23-INPUT-003", TestCallerMemoryIsolation, "test_copy_failures_reject_without_state_mutation"),
+    ("P23-RESOURCE-001", TestEarlyCursorLimit, "test_over_limit_fresh_fetch_rejects_before_retained_deque_visit"),
 )
 
 

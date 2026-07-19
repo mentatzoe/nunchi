@@ -15,7 +15,8 @@ implicit.
 - **Transport hygiene (FR-004)**: the only three mechanical no-wake
   dispositions are `duplicate-retained`, `self-retained-no-wake`, and
   `unroutable`; every other authorized event is `observed`. Authorization
-  is never derived from payload content.
+  is never derived from payload content. Complete native input is copied before
+  field validation, and copy/validation failure leaves provider state unchanged.
 - **Bounded snapshot (FR-006, FR-007)**: trigger, then exact relation
   closure, then nearby fill, under hard `max_events`/`max_bytes`/optional
   `max_age_seconds` caps, in authoritative (ingestion) order; `coverage`
@@ -30,7 +31,9 @@ implicit.
   host-configurable hard bounds, issuance privately binds the originating
   request's event-ID set, overlapping pages reject before state commits,
   returned wire documents cannot mutate private authority, expiry fails closed,
-  and exhausted/expired/revoked state is reclaimed. A provider-owned shared
+  and exhausted/expired/revoked state is reclaimed. Fetch request and host
+  context are copied once before validation; fresh requests at active-cursor
+  capacity reject before retention traversal. A provider-owned shared
   lock makes complete provider/continuation transitions linearizable. Cursor
   replay resolves only the next page through a retention-bounded event map,
   with no full remainder/deque scan; known retention eviction is disclosed as
@@ -61,13 +64,14 @@ implicit.
 Total: 52 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18 atomicity/resource evidence
+## Phase 18/23 atomicity/resource evidence
 
-`phase18-adversarial.jsonl` contains 11 deterministic PASS rows: five
-barrier-controlled atomicity cases, three retention-gap coverage cases, two
-bounded-resource regressions, and one explicit N=64/2N=128 replay metric row.
-The measured retained-deque visits after initial window creation are 0 and 0.
-Reproduce with:
+`phase18-adversarial.jsonl` contains 15 deterministic PASS rows: five
+barrier-controlled continuation atomicity cases, three retention-gap coverage
+cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
+one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
+after initial window creation are 0 and 0; an over-limit fresh fetch also records
+zero retained-deque visits. Reproduce with:
 
 ```sh
 PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial

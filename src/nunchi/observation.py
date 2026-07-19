@@ -961,6 +961,12 @@ class ObservationProvider:
         """
         if not isinstance(native_event_input, dict):
             raise ObservationInputError("native event input must be an object")
+        try:
+            native_event_input = deepcopy(native_event_input)
+        except Exception as exc:
+            raise ObservationInputError(
+                "native event input copy failed safely"
+            ) from exc
         delivery_id = native_event_input.get("delivery_id")
         if not isinstance(delivery_id, str) or not delivery_id:
             raise ObservationInputError("delivery_id is required and must be a non-empty string")
@@ -1445,6 +1451,13 @@ class ContinuationProvider:
     @_with_state_lock
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
         """Validate binding/expiry/direction/caps/cursor, then serve one page."""
+        try:
+            request = deepcopy(request)
+            host_context = deepcopy(host_context)
+        except Exception as exc:
+            raise ContinuationError(
+                "fetch request or host context copy failed safely"
+            ) from exc
         errors = validate_context_continuation(request)
         if errors:
             raise ContinuationError(f"malformed fetch request: {errors}")
@@ -1473,6 +1486,14 @@ class ContinuationProvider:
         generations = self._provider._event_generations
         direction = request["direction"]
         cursor = request.get("cursor")
+        if (
+            cursor is None
+            and len(self._cursors[handle_id]) >= self._max_active_cursors_per_handle
+        ):
+            raise ContinuationError(
+                "active cursor limit "
+                f"{self._max_active_cursors_per_handle} reached for handle {handle_id!r}"
+            )
         events = None if cursor else list(self._provider._events)
         trigger_id = capability["bound_to"]["trigger_event_id"]
         if generations.get(trigger_id) != self._trigger_generations[handle_id]:

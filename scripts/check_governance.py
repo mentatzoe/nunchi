@@ -1399,6 +1399,51 @@ def _task_manifest(entries: tuple[tuple[str, str], ...]) -> tuple[str, str]:
     return ids, hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _checked_task_ids(tasks_text: str) -> tuple[str, ...]:
+    """Return only task IDs whose literal canonical checkbox is checked."""
+
+    checked: list[str] = []
+    for line in tasks_text.splitlines():
+        if not line.startswith(("- [x] T", "- [X] T")):
+            continue
+        normalized = re.sub(r"^- \[[xX]\]", "- [ ]", line).rstrip()
+        match = TASK_LINE.fullmatch(normalized)
+        if match:
+            checked.append(f"T{match.group(1)}")
+    return tuple(checked)
+
+
+def _candidate_task_completion_errors(
+    *,
+    tasks_complete: str,
+    declared_completed: str,
+    committed_tasks: str,
+    committed_task_entries: tuple[tuple[str, str], ...],
+    prefix: str,
+) -> list[str]:
+    """Validate candidate completion against literal committed checkboxes."""
+
+    errors: list[str] = []
+    valid_ids = {task_id for task_id, _line in committed_task_entries}
+    checked_ids = tuple(
+        task_id for task_id in _checked_task_ids(committed_tasks)
+        if task_id in valid_ids
+    )
+    expected_completed = ", ".join(checked_ids)
+    if tasks_complete != "YES":
+        errors.append(f"{prefix}: Tasks complete must be 'YES'")
+    elif len(checked_ids) != len(committed_task_entries):
+        errors.append(
+            f"{prefix}: Tasks complete 'YES' requires every committed task checkbox "
+            "to be literally checked"
+        )
+    if declared_completed != expected_completed:
+        errors.append(
+            f"{prefix}: Completed task IDs must be exactly {expected_completed!r}"
+        )
+    return errors
+
+
 def _validated_task_entries(tasks_text: str) -> tuple[tuple[str, str], ...]:
     """Return a complete sequential manifest or fail on any checkbox-shaped line."""
 
@@ -2196,8 +2241,6 @@ def _slice_lifecycle_evidence_errors(
                     f"{prefix}: Candidate commit must descend from the activation "
                     "Starting commit"
                 )
-            if _clean_metadata(record, "Tasks complete") != "YES":
-                errors.append(f"{prefix}: Tasks complete must be 'YES'")
             committed_tasks = (
                 _git_file_text(
                     root,
@@ -2221,10 +2264,24 @@ def _slice_lifecycle_evidence_errors(
             expected_task_ids, expected_task_hash = _task_manifest(
                 committed_task_entries
             )
-            if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
-                errors.append(
-                    f"{prefix}: Completed task IDs must be exactly {expected_task_ids!r}"
+            if attempt == len(records):
+                errors.extend(
+                    _candidate_task_completion_errors(
+                        tasks_complete=_clean_metadata(record, "Tasks complete"),
+                        declared_completed=_clean_metadata(record, "Completed task IDs"),
+                        committed_tasks=committed_tasks or "",
+                        committed_task_entries=committed_task_entries,
+                        prefix=prefix,
+                    )
                 )
+            else:
+                if _clean_metadata(record, "Tasks complete") != "YES":
+                    errors.append(f"{prefix}: Tasks complete must be 'YES'")
+                if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
+                    errors.append(
+                        f"{prefix}: Completed task IDs must be exactly "
+                        f"{expected_task_ids!r}"
+                    )
             if _clean_metadata(record, "Tasks SHA256") != expected_task_hash:
                 errors.append(
                     f"{prefix}: Tasks SHA256 must match tasks.md at Candidate commit"
@@ -3888,8 +3945,10 @@ def validate(root: Path, *, include_cli: bool = False) -> list[str]:
     return sorted(set(errors))
 
 
-def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]:
-    """Return the canonical task IDs and digest for one exact planned slice."""
+def task_manifest_state_for_slice(
+    root: Path, slice_directory: str,
+) -> tuple[str, str, str]:
+    """Return initial IDs/digest plus literal completed IDs for one slice."""
 
     expected = {f"specs/{dirname}" for dirname in EXPECTED_SLICES}
     if slice_directory not in expected:
@@ -3900,8 +3959,19 @@ def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]
     task_path = root / task_relative
     if not _repo_path_is_safe(root, task_relative, require_file=True):
         raise ValueError("bound slice tasks.md is missing or unsafe")
-    entries = _validated_task_entries(task_path.read_text(encoding="utf-8"))
+    tasks_text = task_path.read_text(encoding="utf-8")
+    entries = _validated_task_entries(tasks_text)
     task_ids, digest = _task_manifest(entries)
+    completed_ids = ", ".join(_checked_task_ids(tasks_text))
+    return task_ids, digest, completed_ids
+
+
+def task_manifest_for_slice(root: Path, slice_directory: str) -> tuple[str, str]:
+    """Return the canonical initial task IDs and digest for one planned slice."""
+
+    task_ids, digest, _completed_ids = task_manifest_state_for_slice(
+        root, slice_directory,
+    )
     return task_ids, digest
 
 
@@ -3923,13 +3993,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.check_cli:
             parser.error("--task-manifest cannot be combined with --check-cli")
         try:
-            task_ids, digest = task_manifest_for_slice(root, args.task_manifest)
+            task_ids, digest, completed_ids = task_manifest_state_for_slice(
+                root, args.task_manifest,
+            )
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         print(f"**Initial task IDs**: {task_ids}")
         print(f"**Initial tasks SHA256**: {digest}")
-        print(f"**Completed task IDs**: {task_ids}")
+        print(f"**Completed task IDs**: {completed_ids}")
         print(f"**Tasks SHA256**: {digest}")
         return 0
     errors = validate(root, include_cli=args.check_cli)
