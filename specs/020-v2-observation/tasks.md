@@ -589,3 +589,52 @@ without updating the manifest's per-scene row counts or total.
 manifest states exact, currently-reproducible row counts for every scene and
 evidence file, matching `evidence/v2/observation/handoff.md`'s own
 verification matrix.
+
+## Phase 14: Attempt-2 Retention-Cursor Rework
+
+**Correction source**:
+`evidence/v2/observation/convergence-phase14-2026-07-19.md`, finding
+H020-A2-01 HIGH.
+
+**Purpose**: Make every paginated continuation direction preserve original
+event identity across bounded-retention index shifts, rather than protecting
+only `around` cursors.
+
+- [ ] T061 Add RED `before` cursor tests in
+  `tests/v2/observation/test_budget_and_continuation.py` proving a retained
+  anchor plus a one-event deque shift cannot duplicate an already served
+  event, reorder the original remaining identities, or silently continue when
+  any original remaining identity has been evicted, reproducing H020-A2-01
+- [ ] T062 Add RED `after` cursor tests in
+  `tests/v2/observation/test_budget_and_continuation.py` proving a retained
+  anchor plus a one-event deque shift serves the originally next event rather
+  than the event now occupying the old numeric index, and fails closed when an
+  original remaining identity is no longer retained, reproducing H020-A2-01
+- [ ] T063 Generalize continuation cursor metadata in
+  `src/nunchi/observation.py` so `before`, `after`, and `around` all bind the
+  original anchor, direction, and remaining event identities; resolve those
+  identities against the live event index on replay; reject missing identities;
+  preserve authoritative direction ordering, cap-cause reporting, exact-event
+  dedup, and zero-progress protection; make T061–T062 and all existing tests pass
+- [ ] T064 Add deterministic `before` and `after` retention-shift and eviction
+  cases to `evals/v2/observation/continuation/cases.jsonl`, extend
+  `evals/v2/observation/run_scenes.py` only as needed to exercise them, and
+  regenerate `evidence/v2/observation/continuation.jsonl` plus every aggregate
+  evidence file without weakening T054–T060
+- [ ] T065 Update `evidence/v2/observation/README.md` and append a Phase 14
+  supersession to `evidence/v2/observation/handoff.md`; rerun the complete
+  Observation/corpus/eval/full-suite/verdict/governance/task-manifest/diff
+  matrix; record final T001–T065 IDs/hash and exact evidence counts; keep the
+  bounded bookkeeping limitation explicit; prepare candidate attempt 2 only
+  if convergence appends no further task
+
+### Phase 14 dependencies
+
+- T061 and T062 are independent RED coverage and may run in parallel.
+- T063 depends on T061–T062.
+- T064 depends on T063 GREEN behavior.
+- T065 is last and blocks convergence and candidate attempt 2.
+
+**Checkpoint**: every continuation cursor direction is identity-bound across
+retention shifts or fails closed on eviction; no page overlaps, skips, or
+claims gap-free continuity after identity loss.
