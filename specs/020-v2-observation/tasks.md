@@ -319,8 +319,13 @@ The proposed packet assembled by T038 is complete only when it names:
 - every exact documentation `UPDATE` or `HANDOFF`, validation result, accepting
   owner, and reviewer, including the `README.md` delta;
 - capability, recoverability, comparator, installed-surface, and final-parity
-  obligations for each downstream recipient, including slice 030's sole
-  classifier-safe projection/redaction ownership; and
+  obligations for each of the eight declared downstream recipients —
+  `v2-wake-owner` (040), `v2-transport-owner` (050), `v2-hermes-owner` (060),
+  `v2-claude-owner` (070), `v2-codex-owner` (080), `v2-adapters-owner` (090),
+  `v2-security-owner` (100), and `v2-integrator` (110) — matching the
+  **Integration handoff** declaration above and `spec.md`'s declared `Feeds`
+  list, plus slice 030's (`v2-core-owner`) sole classifier-safe
+  projection/redaction ownership; and
 - known limitations, especially that reference variants prove no real surface,
   restart-safe deployment, social-suppression eligibility, or cross-surface
   parity.
