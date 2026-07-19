@@ -1198,3 +1198,47 @@ reviews already running against rejected `d70f2fd` are stale for approval and
 may be used only as additional review input. Nothing here establishes
 `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
 promotion, or cutover authority.
+
+## Phase 24 caller-memory/resource/governance preparation receipt
+
+Independent review rejected immutable candidate
+`ff3c5a2e71bb05cdba644c3a95f5346ef82987bb`. The complete verdict is preserved
+in `review-2026-07-19-ff3c5a2-rejection.md`. Phase 24 closes its current
+caller-memory, early-resource, and governance-completion findings while retaining
+the scanner correction and stale-candidate-matrix finding as explicit inputs.
+
+Immutable preparation object:
+
+- commit: `40bbb8c2d86237dfa200f8669fa536b5e263fb0f`;
+- tree: `70a78aca94513b36b9c71b78cd57d14c3c29f80d`;
+- parent/base for Phase 24: `80c1de2ed5941c1cc5d4e28ea3f13d84dc39b6d2`;
+- pushed branch: `origin/v2/observation`, locally aligned and clean after push.
+
+Phase 24 matrix:
+
+| Command | Result |
+|---|---|
+| full repository suite | 1421 tests, OK; 4 optional-integration skips |
+| Observation discovery | 170 tests, OK |
+| governance suite | 66 tests, OK |
+| aggregate scenes | 52 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 8 equivalence) |
+| Phase 18/24 adversarial evaluator | 15 rows, 0 FAIL |
+| attempt-6 corpus conformance | 6 tests, 202/202 accounted for, exact digest GREEN |
+| verdict fixture discovery | 60 fixtures |
+| Ruff / production Bandit / governance CLI / task manifest / docs / scanner regressions / `git diff --check` / absent generated reviewer checklist | clean |
+
+Whole-slice committed-range scanner receipt:
+
+```text
+SLICE020_SECRET_SCAN CLEAN
+base=fc60858a3810e2f53d9574cce1eb9589bd19b55b
+head=40bbb8c2d86237dfa200f8669fa536b5e263fb0f
+files=66 additions=9727 matchers=4
+```
+
+This append and the literal T106 completion check will create a small
+receipt-only successor object. That exact successor must be rescanned and is the
+only object eligible for the next independent whole-slice review. T131 remains
+open until that review returns and every finding is adjudicated. Nothing here
+establishes `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment,
+release, promotion, or cutover authority.

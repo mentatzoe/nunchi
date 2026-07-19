@@ -922,7 +922,7 @@ owner review of immutable preparation `cd8917c`.
 - [X] T105 Remove the runtime fixture-marker exemption entirely, construct
   synthetic test tokens dynamically so scanner source scans cleanly, and add a
   regression proving marker text never suppresses a real finding
-- [ ] T106 Regenerate static/evaluator evidence, rerun the complete matrix and
+- [X] T106 Regenerate static/evaluator evidence, rerun the complete matrix and
   whole-slice exact-range scan, commit/push a new immutable preparation object,
   and record the T001–T107 graph identity without claiming handoff
 - [ ] T107 Obtain a fresh independent fail-closed review of that exact immutable
