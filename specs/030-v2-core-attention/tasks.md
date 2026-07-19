@@ -28,7 +28,7 @@ participant and durable external assignment source declared above;
 active `v2-core-owner`; zero CRITICAL/HIGH analysis findings; and an isolated
 owner worktree
 
-**Resolved upstream finding**: Accepted I-010E `@2` at exact amendment
+**Resolved upstream findings**: Accepted I-010E `@2` at exact amendment
 candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb` represents required
 classifier policy provenance and the paired `NO_WAKE` operational-failure
 override. This consumer independently accepted it at
@@ -38,15 +38,22 @@ task below may begin until the fresh bound analysis reports zero CRITICAL/HIGH
 findings and activation evidence establishes `READY`. Do not add local receipt
 fields or encode provenance in `error.detail`.
 
-**Open cross-owner readiness blockers**: fresh bound analysis confirmed that
-accepted I-010B `@1` cannot represent the selected zero-inclusive active-margin
-case and that the program-owned canonical registry still declares I-010E `@1`.
-They are recorded at
-`evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md`
-and `evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`.
-No task may begin and no activation record may be written until the owning lanes
-resolve both and a later fresh bound analysis reports zero CRITICAL/HIGH
-findings.
+Accepted I-010B `@2` at exact A2-R1 correction candidate
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301` represents the selected inclusive
+zero-width active-margin audit without changing another decision rule. This
+consumer independently accepted it at
+`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`; the earlier
+zero-margin blocker remains immutable history. No task below may begin until
+fresh bound analysis reports zero scoped CRITICAL/HIGH findings and activation
+evidence establishes `READY`.
+
+**Open program-owner handoff**: the canonical program registry remains stale
+for accepted I-010B/I-010E `@2`. It is recorded at
+`evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`
+and dispositioned at
+`evidence/v2/attention/program-interface-registry-readiness-disposition.md` as
+a non-blocking `v2-program-owner` handoff, not a dependency/task-graph finding.
+This slice neither edits nor claims completion of that program artifact.
 
 **Activation evidence**: `evidence/v2/attention/slice-activation.md`, written
 only after every activation prerequisite is accepted; it copies and attests the
@@ -122,11 +129,13 @@ the following in immutable `evidence/v2/attention/slice-activation.md`:
   described above, without treating assignment as authority or readiness;
 - terminal acceptance of the exact `010-v2-contract` candidate plus this
   consumer's separate acceptance at
-  `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`, recorded as
+  `evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`, recorded as
   ordered `slice=full-sha` and `slice=repo-relative-evidence-file` mappings;
 - zero CRITICAL/HIGH analysis findings, including no unresolved spec/plan/task
-  or documentation-disposition conflict and both cross-owner blocker records
-  above superseded by exact accepted resolutions;
+  or documentation-disposition conflict; the zero-margin dependency finding
+  must be superseded by the exact accepted A2 consumer decision above, while
+  the separate program-registry mismatch remains the recorded non-blocking
+  owner handoff;
 - the isolated `.worktrees/v2-core-attention/` worktree on
   `v2/core-attention`, its full starting commit, and the green full ordinary-
   path baseline at that commit, freezing exact root test/skip counts, the ordered
@@ -179,7 +188,7 @@ while keeping classifier and margin deferrals distinct.
 **Independent Test**: Exhaustive transition/policy fixtures prove missing
 legitimacy or malformed evidence never produces effective suppression.
 
-- [ ] T011 [US2] Implement the closed trusted effective-attention policy, classifier configuration, and separately supplied recoverability-capability validation from spec FR-001—including positive integer limits, selected active margin `[0,1]`/retired pairing once the I-010B blocker is resolved, strict participant/scope binding, normalized single-source rules, secret non-disclosure, and the inclusive actual/declaration event and canonical-projection byte cap rules—in `src/nunchi/schema.py`
+- [ ] T011 [US2] Implement the closed trusted effective-attention policy, classifier configuration, and separately supplied recoverability-capability validation from spec FR-001—including positive integer limits, accepted I-010B `@2` active margin `[0,1]`/retired pairing, strict participant/scope binding, normalized single-source rules, secret non-disclosure, and the inclusive actual/declaration event and canonical-projection byte cap rules—in `src/nunchi/schema.py`
 - [ ] T012 [US2] Implement the allowed disposition transition matrix in `src/nunchi/core.py`, preserving the exact inclusive active-margin comparison from FR-008
 - [ ] T013 [US2] Implement separate classifier-DEFER and margin-DEFER audit in `src/nunchi/models.py`
 - [ ] T014 [P] [US2] Add the exact 36-row governed-suppression matrix from SC-002, including explicit equality-boundary inside-margin and strictly-greater outside-margin cases, in `evals/v2/attention/governed-suppression/cases.jsonl`

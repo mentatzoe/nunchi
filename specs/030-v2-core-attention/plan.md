@@ -95,15 +95,17 @@ policy, and one evidence-backed prompt/model configuration
 
 ## Planning Decisions
 
-No slice-local clarification items remain. Two cross-owner readiness blockers
-do: accepted I-010B `@1` cannot serialize the selected zero-inclusive active
-margin, and the program-owned canonical registry still declares I-010E `@1`
-after accepted amendment A1 established `@2`. They are recorded at
-`evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md`
-and `evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`.
-Until their owning lanes resolve them and fresh bound analysis reports zero
-CRITICAL/HIGH findings, this plan remains `PLANNED` and no activation evidence
-or implementation task is permitted.
+No slice-local clarification or accepted-dependency blocker remains. Accepted
+I-010B `@2` now represents the selected zero-inclusive active margin and is
+bound by this consumer at
+`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`. The stale
+program-owned canonical registry remains an explicit `v2-program-owner`
+handoff, not a dependency or CRITICAL/HIGH finding in this bound slice; its
+slice-readiness disposition is recorded at
+`evidence/v2/attention/program-interface-registry-readiness-disposition.md`.
+This plan remains `PLANNED` and dormant until fresh bound analysis reports zero
+scoped CRITICAL/HIGH findings and immutable activation evidence establishes
+`READY`.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -330,10 +332,27 @@ or implementation task is permitted.
   violates authority and ownership.
 
 Amendment A1 remains accepted for exactly those receipt changes. It does not
-resolve the later-discovered I-010B zero-margin conflict, and it does not update
-the program owner's canonical interface registry. Those independent blockers
-remain owned and recorded at the two evidence paths named at the start of
-Planning Decisions.
+itself resolve the later-discovered I-010B zero-margin conflict or update the
+program owner's canonical interface registry.
+
+- **Decision**: Consume accepted I-010B `AttentionDecisionV2@2` at exact A2-R1
+  correction candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301`, bound by
+  this consumer at
+  `evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`. Its applied
+  `routing_audit.effective_margin` domain is finite inclusive `[0,1]`; every
+  other field, valve, pairing, and cross-field constraint is retained.
+- **Rationale**: The versioned 010-owned amendment exactly resolves the
+  selected-policy/decision-audit representation conflict and permits the
+  retained inclusive transition at zero without a local schema edit or hidden
+  special case.
+- **Alternatives considered**: Rejecting design-valid zero, changing the
+  inclusive comparison, omitting the applied audit, or widening I-010B inside
+  slice 030. Each would contradict the selected design or dependency ownership.
+
+The program-owned interface registry still requires I-010B/I-010E version
+synchronization. That remains a named owner handoff and is not treated as
+completed, but it does not gate this slice's exact dependency acceptance or
+readiness analysis.
 
 ### Bypass, operational error, and CLI parity
 
@@ -386,13 +405,13 @@ Planning Decisions.
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
 | Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 | Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
-| Selected zero-width margin / accepted I-010B | BLOCKED | Selected policy permits active margin `0`, but I-010B `@1` rejects the required applied `effective_margin: 0`; resolution belongs to `v2-contract-owner`. |
-| Program canonical I-010E registry | BLOCKED | The program-owned interface registry still says I-010E `@1`; `v2-program-owner` must synchronize it to accepted `@2`. |
+| Selected zero-width margin / accepted I-010B | PASS | Accepted I-010B `@2` represents applied `effective_margin: 0`; this consumer accepted exact A2-R1 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301`. |
+| Program canonical interface registry | HANDOFF | `v2-program-owner` must synchronize I-010B/I-010E to accepted `@2`; the stale program-owned registry is explicitly non-blocking for this bound slice and is not claimed complete. |
 
-Post-design re-check: BLOCKED on the two cross-owner findings above. All
-slice-owned findings from the fresh analysis are resolved in this planning
-revision, but READY still requires a later fresh bound analysis with zero
-CRITICAL/HIGH findings.
+Post-design re-check: PASS for the bound slice. All slice-owned and exact-
+dependency findings are resolved; READY still requires a fresh bound analysis
+with zero scoped CRITICAL/HIGH findings plus the remaining activation
+prerequisites.
 Because this is a planning-only revision, no `data-model.md`, local contract,
 quickstart, schema, test, corpus, evidence payload, or product documentation is
 created here.
@@ -402,7 +421,9 @@ created here.
 ### Consumes
 
 - `I-010A AttentionRequestV2@1` at `schemas/v2/attention-request.schema.json`.
-- `I-010B AttentionDecisionV2@1` at `schemas/v2/attention-decision.schema.json`.
+- `I-010B AttentionDecisionV2@2` at `schemas/v2/attention-decision.schema.json`,
+  accepted by this consumer at
+  `evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`.
 - `I-010E AttentionReceiptV2@2` at `schemas/v2/attention-receipt.schema.json`,
   accepted by this consumer at
   `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`.

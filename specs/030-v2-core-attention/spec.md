@@ -90,7 +90,7 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   verification; V2 becomes current only when the program reaches
   `CUTOVER_VERIFIED` after final documentation validation.
 
-### Resolved post-acceptance contract blocker
+### Resolved post-acceptance contract amendments and program handoff
 
 The selected design at `c834e8c` requires the effective policy and its source
 to be inspectable in receipts and an operator `NO_WAKE` override to be
@@ -110,21 +110,33 @@ omits that pair. This consumer independently accepts the exact amendment at
 consumer acceptance and blocker records are not rewritten.
 
 Fresh bound analysis subsequently found a separate selected-design/I-010B
-conflict: a zero-width active margin is permitted by the design but cannot be
-represented by accepted I-010B `@1`. The immutable current blocker is
+conflict: a zero-width active margin is permitted by the design but could not
+be represented by accepted I-010B `@1`. The immutable discovery remains at
 `evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md`.
-It also found the program-owned canonical interface registry still declaring
-I-010E `@1`; that separate ownership blocker is recorded at
-`evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`.
-Slice 030 therefore remains `PLANNED`, its implementation tasks remain dormant,
-and no activation record may be written until both cross-owner findings are
-resolved and fresh analysis reports zero CRITICAL/HIGH findings.
+Slice 010 resolved it through accepted amendment A2: exact correction candidate
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301` and integrator decision commit
+`d504310c61a93afbe57d4fe4ed05e93055c75555`. I-010B
+`AttentionDecisionV2@2` accepts an applied `effective_margin` in inclusive
+`[0,1]` without changing any other decision field or cross-field rule. This
+consumer independently accepts that exact amendment at
+`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`; the prior
+acceptance and blocker records remain immutable history.
+
+The program-owned canonical interface registry remains stale for the accepted
+I-010B/I-010E versions. That open program handoff is recorded at
+`evidence/v2/attention/program-interface-registry-I-010E-version-blocker.md`
+and dispositioned for this bound slice at
+`evidence/v2/attention/program-interface-registry-readiness-disposition.md`.
+It remains owned by `v2-program-owner` but is not a slice-030 dependency or a
+CRITICAL/HIGH finding in this slice's requirements/task graph. Slice 030 remains
+`PLANNED` and dormant until a fresh bound analysis reports zero scoped
+CRITICAL/HIGH findings and activation evidence establishes `READY`.
 
 ## Interface Summary
 
 - **Consumes**:
   - `I-010A AttentionRequestV2@1`
-  - `I-010B AttentionDecisionV2@1`
+  - `I-010B AttentionDecisionV2@2`
   - `I-010E AttentionReceiptV2@2`
 - **Produces**: `I-030A AttentionEngineV2@1` — the versioned
   `evaluate_v2(...)` callable plus the non-current `attention-v2` CLI command,
@@ -698,7 +710,7 @@ non-receiptable and MUST NOT fabricate one.
 
 ## Assumptions
 
-- Slice 010 has landed accepted I-010A `@1`, I-010B `@1`, and amended I-010E
+- Slice 010 has landed accepted I-010A `@1`, amended I-010B `@2`, and amended I-010E
   `@2` before implementation begins.
 - The existing standard-library OpenAI-compatible provider transport may be
   evolved without adding a runtime dependency.

@@ -171,19 +171,36 @@ implementation
 - [x] CHK082 Are documentation path, disposition, owner, validation/rationale/delta, evidence location, and task responsibility consistent across the spec inventory, plan matrix, T025, T026, candidate requirements, and handoff packet requirements? [Consistency, Documentation, Spec §FR-015, Documentation Freshness; Plan §Documentation Impact and Freshness, Owner Handoff; Tasks §T025–T026]
 - [x] CHK083 Is documentation-freshness PASS tied to the exact lifecycle candidate and ordinary evidence, with explicit rejection of stale inventories, bare assertions, premature current-state claims, missing validation/reviewer facts, or any disposition that no longer matches the candidate diff? [Acceptance Criteria, Documentation, Spec §Documentation Freshness; Tasks §Post-Task Lifecycle Gates; Constitution §Documentation Freshness Gate]
 
+### Amendment and owner-handoff refresh
+
+- [x] CHK084 Do spec, plan, and tasks consistently consume accepted I-010B
+  `AttentionDecisionV2@2`, bind exact A2-R1 candidate
+  `26a6b531fa146ba1f1f5fcd1c4d191041b141301`, preserve the earlier
+  acceptance/blocker history, and require the inclusive `[0,1]`
+  applied-margin domain without changing another decision rule? [Consistency,
+  Dependency, Spec §Resolved post-acceptance contract amendments; Plan
+  §Accepted contract amendment resolution; Tasks §Resolved upstream findings]
+- [x] CHK085 Is the stale program interface registry kept as an exact
+  `v2-program-owner` handoff—neither silently edited nor claimed complete by
+  slice 030—while remaining outside this bound slice's dependency and
+  CRITICAL/HIGH task-graph findings? [Ownership, Scope, Spec §Resolved
+  post-acceptance contract amendments; Plan §Planning Decisions; Tasks §Open
+  program-owner handoff]
+
 ## Formal Reviewer Refresh Notes
 
 - Mark an item complete only when the requirement text itself is complete,
   clear, consistent, measurable, and traceable. Passing implementation tests is
   not evidence that these requirement-quality items pass.
-- Record blocking findings inline with CHK060–CHK083 and reject analysis
+- Record blocking findings inline with CHK060–CHK085 and reject analysis
   readiness while any unresolved requirement ambiguity, governance conflict,
   ownership leak, or documentation-disposition mismatch remains.
 - This refresh does not establish `READY`, create activation evidence, or
   authorize implementation.
 
-**2026-07-19 refresh result**: 83/83 requirement-quality items pass after the
-slice-owned clarifications. This result does not clear the separately recorded
-CRITICAL I-010B zero-margin conflict or HIGH program I-010E registry conflict;
-slice 030 remains `PLANNED` pending their owning lanes and a later fresh bound
-analysis.
+**2026-07-19 refresh result**: 85/85 requirement-quality items pass after the
+slice-owned clarifications and accepted dependency amendments. Accepted I-010B
+`@2` clears the zero-margin dependency conflict; the stale program registry is
+an explicit non-blocking `v2-program-owner` handoff rather than a bound-slice
+finding. Slice 030 remains `PLANNED` pending fresh bound analysis and the
+remaining activation prerequisites.
