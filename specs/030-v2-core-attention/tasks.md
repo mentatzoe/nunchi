@@ -21,15 +21,15 @@ participant and durable external assignment source declared above;
 active `v2-core-owner`; zero CRITICAL/HIGH analysis findings; and an isolated
 owner worktree
 
-**Current blocker**: Planning analysis found that accepted I-010E's closed
-classifier/error bodies cannot represent the selected design's effective-policy
-source and separately receipted `NO_WAKE` operational-failure policy. No task
-below may begin until `v2-contract-owner` provides a versioned accepted
-resolution, this consumer separately accepts it, and rerun analysis reports
-zero CRITICAL/HIGH findings. Do not add local receipt fields or encode the facts
-in `error.detail`. The post-acceptance discovery is recorded at
-`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`; the immutable
-earlier consumer acceptance is not rewritten.
+**Resolved upstream finding**: Accepted I-010E `@2` at exact amendment
+candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb` represents required
+classifier policy provenance and the paired `NO_WAKE` operational-failure
+override. This consumer independently accepted it at
+`evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`; the original
+consumer acceptance and post-acceptance blocker remain immutable history. No
+task below may begin until the fresh bound analysis reports zero CRITICAL/HIGH
+findings and activation evidence establishes `READY`. Do not add local receipt
+fields or encode provenance in `error.detail`.
 
 **Activation evidence**: `evidence/v2/attention/slice-activation.md`, written
 only after every activation prerequisite is accepted; it copies and attests the
@@ -102,8 +102,8 @@ the following in immutable `evidence/v2/attention/slice-activation.md`:
   `evidence/governance/assignments/codex-session-1-v2-core-owner-2026-07-16.md`;
 - terminal acceptance of the exact `010-v2-contract` candidate plus this
   consumer's separate acceptance at
-  `evidence/v2/attention/dependency-010-acceptance.md`, recorded as ordered
-  `slice=full-sha` and `slice=repo-relative-evidence-file` mappings;
+  `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`, recorded as
+  ordered `slice=full-sha` and `slice=repo-relative-evidence-file` mappings;
 - zero CRITICAL/HIGH analysis findings, including no unresolved spec/plan/task
   or documentation-disposition conflict;
 - the isolated `.worktrees/v2-core-attention/` worktree on

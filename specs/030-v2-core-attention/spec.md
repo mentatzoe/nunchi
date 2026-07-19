@@ -70,28 +70,33 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   verification; V2 becomes current only when the program reaches
   `CUTOVER_VERIFIED` after final documentation validation.
 
-### Readiness blocker discovered during planning analysis
+### Resolved post-acceptance contract blocker
 
 The selected design at `c834e8c` requires the effective policy and its source
 to be inspectable in receipts and an operator `NO_WAKE` override to be
-separately receipted as operational failure policy. Accepted
-`I-010E AttentionReceiptV2@1` has closed classifier and error bodies with no
-field for those facts; only bypass has `policy_provenance`. Slice 030 cannot add
-local fields, encode provenance in free-form error detail, or revise a 010-owned
-contract. Until `v2-contract-owner` supplies a versioned accepted resolution
-and this consumer separately accepts it, analysis cannot reach zero HIGH
-findings, this slice remains `PLANNED`, activation evidence remains absent, and
-all implementation tasks remain dormant. The post-acceptance discovery and its
-lifecycle effect are recorded at
-`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`; the earlier
-consumer acceptance record remains immutable.
+separately receipted as operational failure policy. The deficiency discovered
+against I-010E `@1` remains immutable historical evidence at
+`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`.
+
+Slice 010 resolved it through accepted amendment A1: exact candidate
+`817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`, exact candidate-record commit
+`6296316fd415e85762860569289016a675ab5d2d`, and integrator decision commit
+`30aba09f13a6752b4c24811da0d8ec772a9d9682`. I-010E
+`AttentionReceiptV2@2` requires classifier-outcome `policy_provenance` and
+represents the explicit error-policy override only as paired
+`wake_action: "NO_WAKE"` plus `policy_provenance`; the default `WAKE` path
+omits that pair. This consumer independently accepts the exact amendment at
+`evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`. The earlier
+consumer acceptance and blocker records are not rewritten. Slice 030 remains
+`PLANNED` only until the fresh bound planning analysis and remaining readiness
+prerequisites pass; implementation tasks remain dormant meanwhile.
 
 ## Interface Summary
 
 - **Consumes**:
   - `I-010A AttentionRequestV2@1`
   - `I-010B AttentionDecisionV2@1`
-  - `I-010E AttentionReceiptV2@1`
+  - `I-010E AttentionReceiptV2@2`
 - **Produces**: `I-030A AttentionEngineV2@1` — the versioned
   `evaluate_v2(...)` callable plus the non-current `attention-v2` CLI command,
   contract-equivalent CLI implementing I-010A/B/E, participant-shaped
@@ -190,9 +195,9 @@ non-receiptable and MUST NOT fabricate one.
    is wake, and error detail remains off the room surface.
 2. **Given** an explicit operator `NO_WAKE` error override, **When** an
    operational error occurs, **Then** it is separately sourced and receipted
-   and never labeled model suppression; this scenario is blocked by the
-   accepted I-010E shape identified above and MUST NOT be implemented through a
-   local extension or error-detail convention.
+   through I-010E `@2`'s paired `wake_action: "NO_WAKE"` and
+   `policy_provenance`, and never labeled model suppression or implemented
+   through a local extension or error-detail convention.
 3. **Given** equivalent input and effective trusted configuration, **When** the
    core and CLI run, **Then** they produce contract-equivalent decisions and
    audit fields.
@@ -349,9 +354,9 @@ non-receiptable and MUST NOT fabricate one.
 - **FR-011**: Validation, provider, timeout, malformed-output, configuration,
   and runtime failures MUST return `ERROR`; shared default action is wake, with
   any explicit `NO_WAKE` operator override separately sourced and receipted.
-  The closed accepted I-010E error body cannot currently satisfy that selected
-  requirement, so implementation is blocked pending the versioned 010-owned
-  resolution described in the readiness blocker.
+  Accepted I-010E `@2` represents that override only through paired
+  `wake_action: "NO_WAKE"` and non-empty `policy_provenance`; the default wake
+  path omits both fields, and `WAKE`, other actions, or incomplete pairs reject.
 - **FR-012**: Whenever a parsed request supplies a valid request ID, the engine
   MUST emit one immutable attention-stage I-010E record correlated by that ID
   that keeps classifier disposition, effective disposition, valve, override
@@ -366,9 +371,9 @@ non-receiptable and MUST NOT fabricate one.
   not extra fields inside the closed I-010E attention body. The engine MUST
   leave participant, send, and transport outcome facts to later stages and MUST
   NOT mutate an earlier observation-stage record.
-  This wording does not waive the selected design's broader effective-policy
-  and `NO_WAKE` provenance requirement; the readiness blocker must be resolved
-  upstream rather than hidden in I-010E `error.detail`.
+  Accepted I-010E `@2` represents the selected design's broader
+  effective-policy and `NO_WAKE` provenance requirements directly; neither may
+  be hidden in I-010E `error.detail` or a local extension.
 - **FR-013**: The isolated slice branch MUST stage I-030A as additive,
   non-current symbols inside the owned `core.py`, `cli.py`, classifier, model,
   and validation seams: `evaluate_v2` and `attention-v2` accept and emit only V2

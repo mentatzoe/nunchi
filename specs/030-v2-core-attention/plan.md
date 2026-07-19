@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Core Attention
 
-**Branch**: `v2/core-attention` | **Date**: 2026-07-18 | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/core-attention` | **Date**: 2026-07-19 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/030-v2-core-attention/spec.md`
 
@@ -271,22 +271,23 @@ the slice's implementation choices without reopening product decisions.
   error detail, or omitting performance measurements. The first two violate the
   contract; the last would leave the performance goal unproven.
 
-### Blocking accepted-contract mismatch
+### Accepted contract amendment resolution
 
-- **Decision**: Do not activate or implement while accepted I-010E lacks fields
-  for the selected design's effective-policy source on ordinary/error outcomes
-  and separately receipted `NO_WAKE` operational-failure policy. Return that
-  incompatibility to `v2-contract-owner` for a versioned accepted resolution;
-  then rerun this consumer's dependency acceptance and zero-blocker analysis.
-  The later discovery is durably recorded without rewriting the earlier
-  acceptance at
-  `evidence/v2/attention/dependency-010-post-acceptance-blocker.md`.
-- **Rationale**: I-010E's classifier and error bodies are closed. Local fields,
-  an `error.detail` encoding convention, or misuse of classifier/margin fields
-  would violate both the selected design and 010 ownership.
-- **Alternatives considered**: Treating the accepted packet as sufficient,
-  omitting the required provenance, or hiding it in free text. Each creates an
-  implementation that cannot conform to the higher-authority selected design.
+- **Decision**: Consume accepted I-010E `AttentionReceiptV2@2` at exact
+  amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. Its
+  classifier-outcome body requires `policy_provenance`; its operational-error
+  body represents only the explicit operator override as paired
+  `wake_action: "NO_WAKE"` plus `policy_provenance`, with the shared default
+  `WAKE` path omitting the pair. Bind that version through
+  `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md` while
+  retaining the original `@1` acceptance and blocker as immutable history.
+- **Rationale**: The versioned 010-owned amendment resolves both selected-design
+  obligations without a local field, free-text convention, or misuse of
+  classifier identity or `routing_audit.margin_source`.
+- **Alternatives considered**: Continuing to block after exact upstream
+  acceptance, editing the schema in slice 030, omitting provenance, or hiding
+  it in `error.detail`. Each either ignores current accepted contract truth or
+  violates authority and ownership.
 
 ### Bypass, operational error, and CLI parity
 
@@ -323,13 +324,13 @@ the slice's implementation choices without reopening product decisions.
 | Evidence before claims | PASS | Mechanics, replay, multi-model, canary, and margin evidence targets are separate. |
 | Control-plane boundary | PASS | This directory contains planning Markdown only. |
 | Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
-| Accepted receipt compatibility | BLOCKED | Accepted I-010E cannot represent selected effective-policy source and separately receipted `NO_WAKE`; versioned 010-owned resolution is required before READY. |
+| Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
 
-Post-design re-check: BLOCKED only on the accepted receipt incompatibility
-above; the independently green staging strategy and exact CLI configuration/
-sink surface resolve the local analysis findings. No `data-model.md`, local contract,
-quickstart, schema, test, corpus, evidence, or product documentation is created
-here.
+Post-design re-check: PASS, subject to the fresh bound cross-artifact analysis
+and readiness evidence. The accepted receipt amendment, independently green
+staging strategy, and exact CLI configuration/sink surface resolve the prior
+findings. No `data-model.md`, local contract, quickstart, schema, test, corpus,
+evidence, or product documentation is created here.
 
 ## Slice Interfaces
 
@@ -337,7 +338,9 @@ here.
 
 - `I-010A AttentionRequestV2@1` at `schemas/v2/attention-request.schema.json`.
 - `I-010B AttentionDecisionV2@1` at `schemas/v2/attention-decision.schema.json`.
-- `I-010E AttentionReceiptV2@1` at `schemas/v2/attention-receipt.schema.json`.
+- `I-010E AttentionReceiptV2@2` at `schemas/v2/attention-receipt.schema.json`,
+  accepted by this consumer at
+  `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`.
 
 ### Produces
 
