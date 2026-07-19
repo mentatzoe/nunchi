@@ -72,7 +72,12 @@ unchanged. New candidate and handoff attempts append without rewriting history.
 - **Consumes**:
   - `I-010A AttentionRequestV2@1`
   - `I-010D ContextContinuationV2@1`
-  - the immutable staged-record shape of `I-010E AttentionReceiptV2@1`
+  - the immutable staged-record shape of `I-010E AttentionReceiptV2@2`,
+    accepted by this consumer in
+    `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; the
+    observation-stage definition is byte-for-byte unchanged from the
+    previously accepted `@1`, while the amendment is confined to the
+    separately owned attention-stage body
 - **Produces**: `I-020A ObservationProviderV2@1` — native events and exact host
   bindings to a bounded `AttentionRequestV2`, plus a bound continuation seam
   only where the host can fulfill it honestly; and one immutable observation-

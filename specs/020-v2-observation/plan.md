@@ -1,6 +1,6 @@
 # Implementation Plan: V2 Observation
 
-**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning pass, 2026-07-19) | **Spec**: [spec.md](spec.md)
+**Branch**: `v2/observation` | **Date**: 2026-07-11 (dependency-acceptance alignment to accepted 010 attempt-6, 2026-07-18; convergence-rework replanning and accepted I-010E `@2` amendment rebind, 2026-07-19) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/020-v2-observation/spec.md`
 
@@ -57,14 +57,18 @@ harness slices bind their native surfaces later. Slice 020 stops at a tested
 I-020A handoff; 110 alone owns final parity and cutover. This planning baseline
 creates no product behavior.
 
-This replanning pass additionally governs the convergence-rework closing the
-T039-T044 gaps appended against the completed T001-T038 candidate: native
-`reaction`/`membership` documentation coverage, the FR-004 self-event scope for
-membership operations, FR-007 `event_visibility` coverage-field test evidence,
-and handoff-packet (`evidence/v2/observation/handoff.md`) accuracy and
-recipient completeness. The slice remains `ACTIVE`, retains its original
-activation, and proceeds through a new bound run to a new candidate/handoff
-attempt per the Rejection/rework contract above.
+This replanning pass additionally governs the convergence and independent
+pre-review rework appended against the completed T001–T038 candidate: native
+`reaction`/`membership` documentation coverage; the FR-004 author-attested
+self-event scope; FR-007 `event_visibility` propagation and evidence;
+handoff-packet (`evidence/v2/observation/handoff.md`) accuracy, recipient, and
+version freshness; direction-bound cursor replay; truthful side-specific
+`around` coverage; and the accepted I-010E `@2` no-code consumer rebind. The
+slice remains `ACTIVE`, retains its original activation, and proceeds through a
+new bound run to a new candidate/handoff attempt per the Rejection/rework
+contract above. Durable correction sources are
+`evidence/v2/observation/convergence-2026-07-19.md` and
+`evidence/v2/observation/pre-review-2026-07-19-sr-critic.md`.
 
 ## Technical Context
 
@@ -123,8 +127,16 @@ Post-design re-check: PASS. No prohibited SpecKit output is planned.
   `schemas/v2/attention-request.schema.json`.
 - `I-010D ContextContinuationV2@1` from 010 at
   `schemas/v2/context-continuation.schema.json`.
-- The immutable staged-record shape of `I-010E AttentionReceiptV2@1` at
-  `schemas/v2/attention-receipt.schema.json`.
+- The immutable staged-record shape of `I-010E AttentionReceiptV2@2` at
+  `schemas/v2/attention-receipt.schema.json`, accepted at exact amendment
+  candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb` / integrator decision
+  `30aba09f13a6752b4c24811da0d8ec772a9d9682` in
+  `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`. The
+  consumer comparison proves `observationBody` unchanged from accepted `@1`
+  (canonical SHA256
+  `2b8b50f77007d79a8bc682d8e3c6c7f093b14ce5ddea1d6b56a759303ccae687`),
+  so this is an explicit no-code version rebind; only the separately owned
+  `attentionBody` changed.
 
 ### Produces
 
@@ -235,7 +247,7 @@ product module.
 |---|---|---|---|---|
 | Global context/identity description | `README.md` | `HANDOFF` | T028, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; add only evidence-proven exact-self, native-relation, budget, gap, and continuation claims at atomic cutover. |
 | Observation reference | `docs/observation/v2.md` | `UPDATE` | T026, T027, T034, T039, T044 / `v2-observation-owner` | Validate budgets, continuation authority, diagrams/links, and runnable examples against the accepted provider; explicitly cover `message`, `reaction`, and `membership` native event examples with honest-unavailability representation (T039), and explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary for reference-variant consumers (T044). |
-| Accepted 010 contract reference | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T034 / `v2-observation-owner` | Evidence-backed rationale: slice 020 consumes accepted I-010A/I-010D/I-010E unchanged; validate the documented closed shapes and record the result. |
+| Accepted 010 contract reference | `docs/contracts/nunchi-v2.md` | `NO_IMPACT` | T034 plus 2026-07-19 dependency rebind / `v2-observation-owner` | Evidence-backed rationale: slice 020 consumes I-010A@1/I-010D@1 and accepted I-010E@2; `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md` proves the observation-stage definition byte-for-byte unchanged while the amendment affects only the separately owned attention stage. The slice-owned implementation needs no code change, but current handoff/docs citations must name `@2`. |
 | Shared change/current contract/integration/design | `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T029, T034 / `v2-observation-owner` | Accepting owner: `v2-integrator`; apply exact breaking-change, request, identity, relation, order, budget, gap, continuation, and diagram deltas at cutover. |
 | Downstream surface references | `integrations/mcp-discord/README.md`, `integrations/mcp-discord/DESIGN.md`, `integrations/hermes/README.md`, `integrations/claude-code/README.md`, `integrations/codex/README.md` | `HANDOFF` | T030–T034 / `v2-observation-owner` | Accepting owner: `v2-transport-owner`, `v2-hermes-owner`, `v2-claude-owner`, and `v2-codex-owner`; apply the exact I-020A identity/native-fact/budget/gap/continuation delta in each owned guide. |
 

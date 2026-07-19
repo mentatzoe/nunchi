@@ -29,3 +29,18 @@
 ## Verification boundary
 
 This record is correction provenance only. It does not mark any appended task complete, establish convergence, create a candidate, accept a handoff, or authorize cutover/release/promotion. Each appended task remains unchecked until executed and verified inside a fresh bound slice-020 delivery run.
+
+## Independent pre-review adjudication
+
+**Review source**: `evidence/v2/observation/pre-review-2026-07-19-sr-critic.md`, produced by the read-only `sr-critic` Kanban worker against exact commit `418432a50815fdc6875c13681cd18e64bdce32d7`.
+
+The reviewer re-ran the 84 observation tests, 28-row scene suite, full 1333-test repository suite, governance, and attempt-6 corpus conformance. Aleph independently reproduced the highest-severity new defect against the current branch before accepting it into the task graph.
+
+- **H020-01 — HIGH — cross-direction cursor replay.** A cursor minted by a `before` fetch can be replayed under `after` for the same handle, returning an event already served on the first page (`['e4', 'e5']` followed by `['e3', 'e4']`). The cursor binding omits direction. Required tasks: T047–T048.
+- **M020-01 — MEDIUM — stale completed-task SHA claim.** The handoff's T038-era full-manifest SHA claim became stale once convergence appended tasks. Historical activation prefix identity remains valid, but the current handoff needs an append-only supersession with the final full-manifest identity. Required task: T051.
+- **M020-02 — MEDIUM — self-membership scope.** Accepted into existing T040. The selected design says “self-authored” events: membership events lack `author_id`, so `subject_actor_id == self` or `caused_by_actor_id == self` remains an ordinary observed fact. T040 must pin and test that author-attested scope explicitly.
+- **M020-03 — MEDIUM — full-suite skip count mismatch.** Fresh runs return 1333 tests with 4 skips, while handoff evidence says 11 skips. Required task: T051.
+- **M020-04 — MEDIUM — event-visibility propagation.** Accepted into strengthened T041: both snapshot and continuation-fetch coverage must propagate configured `event_visibility`, and evidence must record it.
+- **L020-01 — LOW — around-fetch side coverage.** An `around` page may report both `has_more_before` and `has_more_after` as null even when truncated, preventing consumers from knowing which side has more context. Required tasks: T049–T050.
+
+The review's remaining findings are already covered by T039, T042–T046. The accepted I-010E `@2` amendment is separately bound by `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; current handoff evidence must append that version update before a candidate is proposed.

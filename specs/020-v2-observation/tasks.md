@@ -353,8 +353,8 @@ specs/020-v2-observation` run rather than resuming the completed T001–T038
 delivery run.
 
 - [ ] T039 Document native `reaction` and `membership` event ingestion in `docs/observation/v2.md` — add a runnable example and description of literal relations (e.g. reaction `target_event_id`, membership operation) and honest-unavailability representation for both event kinds alongside the existing `message`-event coverage, and extend `tests/v2/observation/test_docs.py` to assert their presence, per FR-003 / plan.md Acceptance Scene S02 (partial)
-- [ ] T040 Add test coverage in `tests/v2/observation/test_provider.py` for a self-caused `membership` event (self as `subject_actor_id` or `caused_by_actor_id`) and record whether `SELF_RETAINED_NO_WAKE` applies or `ingest()`'s self-check is intentionally scoped to authored (`author_id`) events only, documenting the resolved scope in `docs/observation/v2.md` or evidence, per FR-004 (partial)
-- [ ] T041 Add test and/or eval coverage exercising the `event_visibility` coverage field returned by `ObservationProvider.snapshot()`/`fetch()` in `tests/v2/observation/test_budget_and_continuation.py` or `evals/v2/observation/budgets/cases.jsonl`, and record its outcomes in `evidence/v2/observation/budget-sweep.jsonl`, per FR-007 (partial)
+- [ ] T040 Add test coverage in `tests/v2/observation/test_provider.py` proving membership events where self is `subject_actor_id` or `caused_by_actor_id` remain ordinary `OBSERVED` facts rather than `SELF_RETAINED_NO_WAKE`; document that the selected design's exact-self no-wake class is author-attested (`author_id == self.actor_id`) while membership events carry no authorship field, per FR-004 and M020-02 in `evidence/v2/observation/convergence-2026-07-19.md`
+- [ ] T041 Add RED→GREEN test/eval coverage proving configured `event_visibility` appears consistently in both `ObservationProvider.snapshot()` and `ContinuationProvider.fetch()` coverage (and is absent when unavailable); implement missing fetch propagation if the red test exposes it, then record exact outcomes in `evidence/v2/observation/budget-sweep.jsonl`, per FR-007 and M020-04 in `evidence/v2/observation/convergence-2026-07-19.md`
 - [ ] T042 Correct the inaccurate "four-line addition" diff-size claim for the `tests/test_governance.py` fix in `evidence/v2/observation/handoff.md`'s Known Limitations section to match the actual 9-insertion diff (`git diff --stat tests/test_governance.py`), per FR-013 / Constitution VI Evidence Before Claims (contradicts)
 - [ ] T043 Name `v2-wake-owner` (040), `v2-adapters-owner` (090), and `v2-security-owner` (100) as explicit recipients of the T038 handoff packet in `evidence/v2/observation/handoff.md`, consistent with `spec.md`'s declared `Feeds` list, per tasks.md Handoff Input Contract "recipients" element (partial)
 - [ ] T044 Explain the `restart-safe`/`session-only`/`unknown`/`known-gap` capability vocabulary (what each means and how a consumer should read a `known-gap` result) in `docs/observation/v2.md`'s reference-variant section, per FR-011 / plan.md T026 "capability truth" (partial)
@@ -405,3 +405,38 @@ appends the fix rather than rewriting that history.
 `evidence/v2/observation/handoff.md` name only real, currently declared
 owner lanes for every downstream handoff, and T045's regression assertion
 prevents the wrong name from silently returning.
+
+## Phase 10: Independent Pre-Review Rework and Accepted-Contract Rebind
+
+**Correction sources**:
+`evidence/v2/observation/pre-review-2026-07-19-sr-critic.md` and
+`evidence/v2/observation/convergence-2026-07-19.md` findings H020-01 HIGH,
+M020-01 through M020-04 MEDIUM, and L020-01 LOW. The accepted upstream version
+rebind is recorded separately in
+`evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`.
+
+**Purpose**: Close the independently reproduced cursor defect, finish truthful
+continuation coverage, supersede stale evidence claims without rewriting
+historical records, and bind the accepted I-010E `@2` amendment before a new
+candidate is proposed.
+
+- [ ] T047 Add RED regression tests in `tests/v2/observation/test_budget_and_continuation.py` and a named adversarial case in `evals/v2/observation/continuation/cases.jsonl` proving a cursor minted for `before` cannot be replayed as `after` (or vice versa) under the same handle and cannot return an event already served by the prior page, reproducing H020-01
+- [ ] T048 Make continuation cursors direction-bound in `src/nunchi/observation.py` (or reject an exact direction mismatch before page selection), preserve same-direction pagination, update serialized cursor evidence, and make T047 plus the complete continuation suite pass without weakening cross-handle/binding/expiry/cap checks
+- [ ] T049 Add RED tests in `tests/v2/observation/test_budget_and_continuation.py` for truncated `around` fetches that require truthful boolean `has_more_before` and `has_more_after` side coverage instead of two nulls, reproducing L020-01
+- [ ] T050 Implement truthful side-specific `around` coverage in `src/nunchi/observation.py`, update the matching continuation eval/evidence rows, and make T049 plus all existing before/after/around budget and ordering tests pass
+- [ ] T051 Append a superseding convergence section to `evidence/v2/observation/handoff.md` that distinguishes the immutable T001–T038 activation-prefix SHA from the final full-manifest SHA, replaces the stale 11-skip current claim with the exact re-run result without rewriting the historical T038 text, and cites M020-01/M020-03 plus the exact commands used
+- [ ] T052 Update current slice-owned documentation and handoff/evidence citations from I-010E `@1` to accepted I-010E `@2`, cite exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`, integrator acceptance `30aba09f13a6752b4c24811da0d8ec772a9d9682`, and `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; preserve completed attempt-6 history and state explicitly that `observationBody` is unchanged and no implementation change was owed by the version rebind
+- [ ] T053 Run the complete observation tests, scene replay/evals, full repository suite, verdict fixture discovery, governance CLI, task-manifest check, and `git diff --check`; record exact nonzero counts/results and all T039–T052 correction receipts in the append-only current handoff section before convergence review
+
+### Phase 10 dependencies
+
+- T047 must fail before T048 is accepted; T049 must fail before T050 is
+  accepted.
+- T051 and T052 run after T039–T050 so their current-state evidence captures
+  the complete correction tree rather than an intermediate manifest or result.
+- T053 is last and blocks `/speckit-converge`.
+
+**Checkpoint**: cross-direction cursor replay rejects without duplicate
+delivery, all continuation coverage is truthful, I-010E `@2` is explicitly
+consumer-bound, and the append-only handoff's current section matches every
+re-runnable command and final task identity.
