@@ -801,12 +801,45 @@ class GovernanceBoundaryTests(unittest.TestCase):
             ],
         )
 
-    def test_slice020_active_policy_requires_exact_terminal_and_open_gates(self):
-        lines = [
-            f"- [{' ' if number in {103, 153} else 'X'}] T{number:03d} task {number}"
-            for number in range(1, 154)
-        ]
-        tasks = "\n".join(lines) + "\n"
+    @staticmethod
+    def _slice020_policy_tasks(*, complete: bool = False) -> str:
+        superseded = {
+            107: 153,
+            112: 153,
+            119: 153,
+            124: 153,
+            131: 153,
+            140: 153,
+            146: 153,
+            153: 160,
+        }
+        open_ids = set() if complete else {103, 159, 160}
+        lines = ["# Tasks", "", "**Slice state**: `ACTIVE`", ""]
+        for number in range(1, 161):
+            mark = " " if number in open_ids else "X"
+            description = f"task {number}"
+            if number in superseded:
+                description = (
+                    f"Close historical gate explicitly superseded by "
+                    f"T{superseded[number]:03d}; exact object remains rejected"
+                )
+            lines.append(f"- [{mark}] T{number:03d} {description}")
+        return "\n".join(lines) + "\n"
+
+    def test_every_checkbox_shaped_task_row_must_be_canonical(self):
+        for malformed in (
+            "- [ ] TASK002 hidden\n",
+            "- [ ] T 002 hidden\n",
+            "- [done] T002 hidden\n",
+        ):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(ValueError, "invalid task format"):
+                    check_governance._validated_task_entries(
+                        "- [X] T001 valid\n" + malformed
+                    )
+
+    def test_slice020_policy_binds_terminal_open_gates_and_supersession_truth(self):
+        tasks = self._slice020_policy_tasks()
         self.assertEqual(
             check_governance._slice_task_policy_errors(
                 "020-v2-observation", tasks, "ACTIVE"
@@ -817,13 +850,15 @@ class GovernanceBoundaryTests(unittest.TestCase):
             any(
                 "exact terminal manifest" in error
                 for error in check_governance._slice_task_policy_errors(
-                    "020-v2-observation", "\n".join(lines[:-1]) + "\n", "ACTIVE"
+                    "020-v2-observation",
+                    tasks.replace("- [ ] T160 task 160\n", ""),
+                    "ACTIVE",
                 )
             )
         )
         false_transition = tasks.replace("- [ ] T103", "- [X] T103").replace(
-            "- [ ] T153", "- [X] T153"
-        )
+            "- [ ] T159", "- [X] T159"
+        ).replace("- [ ] T160", "- [X] T160")
         self.assertTrue(
             any(
                 "ACTIVE literal open task IDs" in error
@@ -832,6 +867,70 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             )
         )
+        stale_successor = self._slice020_policy_tasks(complete=True).replace(
+            "T153 Close historical gate explicitly superseded by T160",
+            "T153 Close historical gate explicitly superseded by T159",
+        )
+        self.assertTrue(
+            any(
+                "superseded gate T153" in error
+                for error in check_governance._slice_task_policy_errors(
+                    "020-v2-observation", stale_successor, "CONVERGED"
+                )
+            )
+        )
+
+    def test_candidate_attempt_two_binds_policy_baseline_and_exact_commit_graph(self):
+        complete = self._slice020_policy_tasks(complete=True)
+        self.assertEqual(
+            check_governance._candidate_slice_task_policy_errors(
+                "020-v2-observation",
+                complete,
+                attempt_number=2,
+                policy_baseline_is_ancestor=True,
+            ),
+            [],
+        )
+        missing = complete.replace("- [X] T160 task 160\n", "")
+        extra = complete + "- [X] T161 extra\n"
+        for malformed in (missing, extra):
+            with self.subTest(kind="candidate manifest"):
+                self.assertTrue(
+                    any(
+                        "exact terminal manifest" in error
+                        for error in check_governance._candidate_slice_task_policy_errors(
+                            "020-v2-observation",
+                            malformed,
+                            attempt_number=2,
+                            policy_baseline_is_ancestor=True,
+                        )
+                    )
+                )
+        self.assertTrue(
+            any(
+                "policy baseline" in error
+                for error in check_governance._candidate_slice_task_policy_errors(
+                    "020-v2-observation",
+                    complete,
+                    attempt_number=2,
+                    policy_baseline_is_ancestor=False,
+                )
+            )
+        )
+
+    def test_slice020_task_manifest_cli_boundary_rejects_extra_terminal_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tasks = root / "specs/020-v2-observation/tasks.md"
+            tasks.parent.mkdir(parents=True)
+            tasks.write_text(
+                self._slice020_policy_tasks() + "- [X] T161 extra\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "exact terminal manifest"):
+                check_governance.task_manifest_for_slice(
+                    root, "specs/020-v2-observation"
+                )
 
     @staticmethod
     def _write_lifecycle_record(root: Path, relative: str, text: str) -> None:
@@ -1080,6 +1179,41 @@ class GovernanceBoundaryTests(unittest.TestCase):
                     )
                 )
             )
+
+    def test_rejection_recovery_baseline_is_immutable_not_append_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            relative = Path("evidence/v2/observation/review-test-rejection.md")
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text("# REJECT\n", encoding="utf-8")
+            baseline = self._commit_all(root, "rejection recovery baseline")
+
+            self.assertEqual(
+                check_governance._git_path_immutable_since(
+                    root, relative, baseline=baseline
+                ),
+                [],
+            )
+            path.write_text("# REJECT\nrewritten\n", encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "immutable recovery baseline" in error
+                    for error in check_governance._git_path_immutable_since(
+                        root, relative, baseline=baseline
+                    )
+                )
+            )
+            path.unlink()
+            self.assertTrue(
+                check_governance._git_path_immutable_since(
+                    root, relative, baseline=baseline
+                )
+            )
+
+    def test_registered_rejection_evidence_history_is_clean(self):
+        self.assertEqual(check_governance.check_rejection_evidence_history(ROOT), [])
 
     def test_assignment_rejects_symlinked_ancestor(self):
         with tempfile.TemporaryDirectory() as tmp:

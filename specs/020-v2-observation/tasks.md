@@ -1188,9 +1188,9 @@ HIGH-1 through HIGH-3 and the range-whitespace LOW finding.
 - [X] T152 Regenerate evidence, rerun the complete repository/Observation/
   governance/corpus/eval/verdict/static/diff matrix, exact-scan the entire
   activation range, and freeze/push one immutable T001–T153 review object
-- [ ] T153 Obtain fresh independent implementation and governance reviews of that
-  exact object; fix every CRITICAL/HIGH blocker before closing T103 or creating
-  candidate-attempt-2 or handoff lifecycle records
+- [X] T153 Close rejected Phase 27 review gate as explicitly superseded by T160;
+  exact object `abad8d85e8150bfd2716ab77ebb3791827591bf1` remains rejected
+  and cannot close T103 or authorize candidate-attempt-2 or handoff records
 
 ### Phase 27 dependencies
 
@@ -1200,3 +1200,40 @@ HIGH-1 through HIGH-3 and the range-whitespace LOW finding.
 
 **Checkpoint**: no false lifecycle transition, changed path, or mutable historical
 packet can be laundered into candidate or handoff authority.
+
+## Phase 28: Candidate-Bound Task Truth and Immutable Rejections
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-abad8d85-dual-rejection.md`,
+P28-H1 through P28-H4 and the stale scanner-documentation finding.
+
+- [ ] T154 Preserve both exact `abad8d85` rejection verdicts and independently
+  reproduce malformed TASK/T-space rows, missing/extra candidate terminal graphs,
+  shared stale-successor acceptance, and rejection-record erasure with RED tests
+- [ ] T155 Make every top-level checkbox-shaped row in a bound tasks file either
+  canonical or a hard parse error; bind `--task-manifest` and the standalone
+  diagnostic to exact Slice 020 policy as well as shared lifecycle validation
+- [ ] T156 Require candidate attempt 2 and later to descend the Phase 27 policy
+  baseline and make the referenced candidate commit itself pass exact terminal,
+  literal-completion, and supersession policy under `CONVERGED`
+- [ ] T157 Move the complete supersession chain into shared lifecycle policy:
+  exact keys/targets, increasing target order, checked historical gate, and
+  durable rejected/not-approved semantics; make the diagnostic consume that policy
+- [ ] T158 Register every rejection record as immutable from introduction, pin the
+  disclosed `80c1de2` recovery bytes from `abad8d85`, reject deletion/unregistered
+  additions/rewrites, and correct the scanner docstring's removed suppression claim
+- [ ] T159 Update current packet/plan/evidence, rerun the complete matrix, exact-scan
+  the whole activation range, and freeze/push one immutable T001–T160 review object
+- [ ] T160 Obtain fresh independent implementation and governance reviews of that
+  exact object; fix every CRITICAL/HIGH blocker before closing T103 or creating
+  candidate-attempt-2 or handoff lifecycle records
+
+### Phase 28 dependencies
+
+- T155–T158 depend on T154 RED and may proceed independently.
+- T159 depends on T155–T158. T160 depends on T159 and is the sole current final
+  review gate; T153 and all prior review gates remain rejected history.
+
+**Checkpoint**: current and candidate commits prove the same exact terminal graph,
+shared lifecycle and diagnostics share one supersession policy, and no rejection
+record can be erased or rewritten without governance failure.
