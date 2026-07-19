@@ -937,3 +937,35 @@ owner review of immutable preparation `cd8917c`.
 
 **Checkpoint**: no repository line can suppress a static finding by carrying a
 fixture marker; scanner test data is synthetic by construction, not exempt.
+
+## Phase 21: Complete Semantic Comparator
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-f38a4fe-late-rejection.md`,
+HIGH H4, reproduced against the current post-Phase-20 tree.
+
+- [X] T108 Preserve and adjudicate the complete late `f38a4fe` review; close
+  its hard-byte, atomicity, transient-work, and packet-history findings against
+  later phases while pinning the comparator mechanism as current RED
+- [ ] T109 Add RED unit/evaluator cases proving reversed authoritative event
+  order, one-sided event facts, actor divergence, semantic coverage divergence,
+  and continuation-page divergence are never silently equivalent
+- [ ] T110 Implement a complete semantic comparator that excludes only declared
+  request-local opaque identities, preserves explicit capability-gap
+  explanations, and reports every other request/page difference
+- [ ] T111 Extend S13 deterministic evidence and documentation with comparator
+  completeness cases; regenerate aggregates and downstream handoff receipts
+- [ ] T112 Rerun the complete matrix and exact whole-slice scan, commit/push a
+  new immutable object with T001–T112 identity, and obtain fresh independent
+  fail-closed review before T103/T107 or candidate attempt 2 may close
+
+### Phase 21 dependencies
+
+- T109 depends on T108; T110 depends on T109 RED.
+- T111 depends on T110 GREEN.
+- T112 depends on T106/T111 and supersedes T107 as the sole final convergence
+  blocker.
+
+**Checkpoint**: equivalent means every semantic request/page fact agrees or has
+one explicit capability explanation; order, one-sided facts, actors, and
+coverage can never disappear from comparison.
