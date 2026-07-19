@@ -414,8 +414,10 @@ does not let the response or offered receipt attest its own persistence.
 
 - **Decision**: Consume accepted I-010E `AttentionReceiptV2@2` at exact
   amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. Its
-  classifier-outcome body requires `policy_provenance`; its operational-error
-  body represents only the explicit operator override as paired
+  trusted-bypass body requires `classifier_not_invoked: true`, cause
+  `preattention-disabled`, and non-empty `policy_provenance`; its classifier-
+  outcome body requires `policy_provenance`; its operational-error body
+  represents only the explicit operator override as paired
   `wake_action: "NO_WAKE"` plus `policy_provenance`, with the shared default
   `WAKE` path omitting the pair. Bind that version through
   `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md` while
@@ -454,7 +456,12 @@ readiness analysis.
 ### Bypass, operational error, and CLI parity
 
 - **Decision**: Return trusted preattention-disabled bypass with zero classifier
-  calls, keep operational error as its own tagged branch, and expose the exact
+  calls. When a valid request ID and eligible sink exist, offer the exact
+  I-010E `@2` attention body
+  `{classifier_not_invoked: true, cause: "preattention-disabled",
+  policy_provenance: <non-empty trusted policy source>}` with none of the
+  mutually exclusive classifier-outcome or error fields. Keep operational
+  error as its own tagged branch, and expose the exact
   0/1/2/3 CLI process contract recorded below. The shared wake default remains
   mandatory until the complete operator configuration is descriptor-secure,
   closed-shape and value valid, single-source, and exactly bound to a schema-
@@ -561,7 +568,9 @@ alone resolves final integration conflicts.
 
 The bypass boundary is explicit: slice 030 proves only the accepted I-010B
 `status: bypass`, `cause: "preattention-disabled"` branch and zero classifier
-calls. It emits no
+calls, plus the separately accepted I-010E `@2` bypass body
+`classifier_not_invoked: true`, the same cause, and required non-empty trusted
+`policy_provenance`. It emits no
 ParticipantWakeV2 and invokes no participant host. The packet gives
 `v2-wake-owner` the exact accepted branch; slice 040 must independently accept
 it, map it to ParticipantWakeV2 wake source `PREATTENTION_BYPASS`, and pass a

@@ -116,7 +116,8 @@ Slice 010 resolved it through accepted amendment A1: exact candidate
 `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`, exact candidate-record commit
 `6296316fd415e85762860569289016a675ab5d2d`, and integrator decision commit
 `30aba09f13a6752b4c24811da0d8ec772a9d9682`. I-010E
-`AttentionReceiptV2@2` requires classifier-outcome `policy_provenance` and
+`AttentionReceiptV2@2` preserves the trusted-bypass body's required
+`policy_provenance`, adds required classifier-outcome `policy_provenance`, and
 represents the explicit error-policy override only as paired
 `wake_action: "NO_WAKE"` plus `policy_provenance`; the default `WAKE` path
 omits that pair. This consumer independently accepts the exact amendment at
@@ -616,6 +617,14 @@ non-receiptable and MUST NOT fabricate one.
   not extra fields inside the closed I-010E attention body. The engine MUST
   leave participant, send, and transport outcome facts to later stages and MUST
   NOT mutate an earlier observation-stage record.
+  The trusted-bypass attention body is exactly
+  `{classifier_not_invoked: true, cause: "preattention-disabled",
+  policy_provenance: <non-empty string>}`. It MUST carry the trusted effective
+  policy source even though no classifier ran, and it MUST NOT contain
+  classifier disposition, effective disposition, classifier identity,
+  evidence, routing-audit, or error members. Missing or empty bypass
+  `policy_provenance` is invalid I-010E `@2` and MUST NOT be offered as a valid
+  receipt.
   Accepted I-010E `@2` represents the selected design's broader
   effective-policy and `NO_WAKE` provenance requirements directly; neither may
   be hidden in I-010E `error.detail` or a local extension.

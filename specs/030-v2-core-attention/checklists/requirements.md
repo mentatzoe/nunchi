@@ -453,7 +453,7 @@ reviewer under Zoe's explicit identity-separation waiver, durably copied at
 the aborted run's final scoped findings across spec, plan, and tasks, before a
 new bound planning run, activation, or implementation
 
-**Review status**: Complete. All 20 items were reviewed against the selected
+**Review status**: Complete. All 23 items were reviewed against the selected
 design, accepted I-010A/B/E versions, current stdlib transport seam, and slice
 ownership. No result is inherited from the earlier 164 items.
 
@@ -479,10 +479,13 @@ ownership. No result is inherited from the earlier 164 items.
 - [x] CHK182 Are all six policy cap fields validated as positive integers while only `attention_max_events`/`attention_max_bytes` are enforced by I-030A? [Clarity, Ownership, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T004, §T011]
 - [x] CHK183 Is downstream ownership explicit and consistent with the selected design: participant packet caps to slice 040 and continuation-fetch caps to slice 020, with no host or continuation-provider invocation by slice 030? [Ownership, Dependency, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T011]
 - [x] CHK184 Do deterministic requirements reject each invalid downstream-owned cap before bypass/provider use and prove valid variations cannot change an otherwise identical I-030A result or offered attention receipt? [Measurability, Safety, Spec §FR-001; Plan §Trusted attention-budget boundary; Tasks §T004]
+- [x] CHK185 Is the trusted-bypass I-010E `@2` attention body stated literally as `classifier_not_invoked: true`, `cause: "preattention-disabled"`, and required non-empty trusted `policy_provenance`? [Completeness, Contract Alignment, Spec §FR-012; Plan §Bypass operational error and CLI parity; Tasks §T007, §T018]
+- [x] CHK186 Do requirements forbid every classifier-outcome and error member on that mutually exclusive bypass receipt while keeping the I-010B bypass result separate from receipt fields? [Consistency, Safety, Spec §FR-012, §FR-017; Tasks §T004, §T021]
+- [x] CHK187 Are missing/empty bypass provenance and exact valid core/CLI receipt parity covered by deterministic corpus and evidence tasks without claiming participant-host behavior? [Measurability, Traceability, Spec §FR-012; Tasks §T004, §T021–§T022]
 
 ## Formal Reviewer Final Scoped-Finding Notes
 
-- Mark CHK165–CHK184 complete only from the reconciled requirement text and
+- Mark CHK165–CHK187 complete only from the reconciled requirement text and
   cited authority; implementation success is not a substitute.
 - Any reintroduction of host-owned ParticipantWakeV2 behavior, request
   mutation, open-ended retry classification, or post-dispatch
@@ -490,6 +493,6 @@ ownership. No result is inherited from the earlier 164 items.
 - The program-interface registry remains the separately recorded non-blocking
   `v2-program-owner` handoff and is not reclassified by this gate.
 
-**2026-07-19 final scoped-finding result**: 20/20 fresh items pass; the complete
-requirements checklist is now 184/184. The task graph remains T001–T027 and
+**2026-07-19 final scoped-finding result**: 23/23 fresh items pass; the complete
+requirements checklist is now 187/187. The task graph remains T001–T027 and
 dormant until a separate READY activation record exists.
