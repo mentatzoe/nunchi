@@ -2,9 +2,9 @@
 
 **Slice**: `010-v2-contract`
 
-**Status**: `REJECTED` (independent `v2-integrator` review of revised candidate
-`22c249a`; A2-R1 leaves one current stdlib-mirror contract description on the
-rejected `(0, 1]` domain; accepted I-010B `@1` remains unchanged)
+**Status**: `ACCEPTED` (A2-R1 correction candidate accepted by
+`v2-integrator`; the terminal attempt-6 slice acceptance and amendment A1
+acceptance remain unchanged)
 
 **Amended interface**: `I-010B AttentionDecisionV2` `@1` → `@2`
 
@@ -196,3 +196,30 @@ python -m unittest discover -s tests/v2/contract -p 'test_*.py'` PASS (195
 tests, 0 skipped).
 
 Requesting the same independent `v2-integrator` re-review.
+
+## Integrator re-review decision
+
+**Decision**: `ACCEPTED`
+
+**Accepted candidate**: `26a6b531fa146ba1f1f5fcd1c4d191041b141301`
+
+**Prior rejected candidate**: `22c249a1a2a3c8c142dfc4849fef689dc271b27b`
+
+**Prior rejection decision**: `0730fac388dc4f7286ba144fb633aea147f6df04`
+
+**Accepted by**: `v2-integrator`
+
+**Accepted on**: 2026-07-19
+
+**Decision reference**:
+`evidence/v2/contract/review-2026-07-19-v2-integrator-amendment-A2-revised.md`
+
+The correction closes A2-R1 exactly: the live stdlib mirror now documents the
+same inclusive `[0, 1]` domain enforced by its executable check, emitted error,
+public schema, tests, corpus, current contract documentation, and selected
+design. Remaining mentions of `(0, 1]` identify only the rejected historical
+rule, including immutable CHK084 adjudication and prior amendment/review
+evidence. The functional A2 boundary remains no broader and no narrower than
+`c834e8c`; amendment A1 and R7–R11 remain cleared. This versioned amendment
+acceptance does not replace each dependent owner's separate exact-candidate
+acceptance or the `v2-program-owner`'s separate canonical-registry update.
