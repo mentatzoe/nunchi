@@ -826,17 +826,50 @@ findings S020-A6-01 HIGH and S020-A6-02 MEDIUM/resource-security.
 - [ ] T092 Add a retention-coupled event-by-ID map and lazy page resolution with
   an O(1) prefix-eviction frontier check, preserving monotonic-generation,
   contiguous-window, authoritative-order, side-coverage, and hard-cap semantics
-- [ ] T093 Add deterministic atomicity/resource eval evidence, regenerate every
-  aggregate and handoff, restore planning PASS only after the complete matrix is
-  green, record T001–T093 identity, and obtain one fresh immutable independent
-  review covering all Phase 18 findings before candidate attempt 2
+- [ ] T093 Add deterministic atomicity/resource eval evidence and regenerate
+  affected aggregates for T089–T092; retain planning BLOCKED pending the late
+  immutable-review extension
 
 ### Phase 18 extension dependencies
 
 - T090 depends on T089 RED; T092 depends on T091 RED.
 - T089/T090 and T091/T092 may proceed independently after T083–T087 lanes.
-- T093 depends on T088, T090, and T092 and is the only final convergence blocker.
+- T093 depends on T088, T090, and T092.
 
 **Extended checkpoint**: provider and continuation state transitions are
 linearizable across threads/wrappers, one-shot and hard-limit claims hold under
 contention, and a complete one-event cursor chain performs O(N) cumulative work.
+
+## Phase 18 late extension: Retention-Gap Truth and Packet Correction
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-5562004-late-rejection.md`,
+finding 5 HIGH and finding 6 MEDIUM; the HIGH mechanism is reproduced on the
+current dirty implementation.
+
+- [ ] T094 Preserve and adjudicate the complete late immutable review against
+  current Phase 18 scope without promoting its stale target into a current
+  candidate verdict
+- [ ] T095 Add RED continuation tests proving `coverage.has_gaps` is true when
+  bounded retention has evicted known history, across before/after/around pages
+  and final-page/exhaustion paths
+- [ ] T096 Derive continuation `has_gaps` from provider retention history and
+  page/window omissions without changing I-010D wire shape; add deterministic
+  evaluation evidence and preserve truthful side-specific `has_more_*`
+- [ ] T097 Append a correction to the false handoff claim that T001–T038 packet
+  text was never edited; distinguish mutable append-superseded packet evidence
+  from append-only lifecycle ledgers without rewriting either history
+- [ ] T098 Regenerate all evidence and handoff aggregates, restore planning PASS
+  only after the complete matrix is green, record T001–T098 graph identity, and
+  obtain one fresh immutable independent review covering every Phase 18 finding
+  before candidate attempt 2
+
+### Phase 18 late-extension dependencies
+
+- T094 is preservation/adjudication and blocks T095/T097 attribution.
+- T096 depends on T095 RED; T097 depends on T094.
+- T098 depends on T093, T096, and T097 and is the only final convergence blocker.
+
+**Late-extension checkpoint**: continuation coverage discloses every known
+retention gap, packet-history claims match Git history, and only a fresh review
+of the final immutable tree may authorize candidate-attempt-2 preparation.
