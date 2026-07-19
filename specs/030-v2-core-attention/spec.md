@@ -858,7 +858,9 @@ non-receiptable and MUST NOT fabricate one.
   `docs/contracts/verdict-suite-requirements-v1.md`,
   `docs/evaluations/verdict-suite.md`, and
   `docs/evaluations/verdict-suite-runner.md`, preserving V1 scar evidence while
-  naming its V2 role.
+  naming its V2 role. `docs/attention/v2.md` MUST document the fixed 0.5-second
+  then 1.0-second retry cadence, ignored provider `Retry-After`, and every
+  no-sleep terminal boundary alongside the retryable-failure taxonomy.
 - **`NO_IMPACT` inventory**: `evidence/v2/contract/README.md`,
   `docs/archive/v1/README.md`,
   `docs/archive/v1/admission-classifier/contract.md`,
@@ -890,7 +892,9 @@ non-receiptable and MUST NOT fabricate one.
   accepting owner in plan section Documentation Impact and Freshness:
   integrator-owned cross-surface files go to `v2-integrator`; Claude, Codex,
   and Hermes files go to their named surface owners. No `HANDOFF` row is a
-  no-impact finding or a slice-owned documentation escape.
+  no-impact finding or a slice-owned documentation escape. The
+  `docs/STABILITY.md` handoff MUST include that same closed deterministic retry
+  contract as part of the accepted public I-030A stability promise.
 - **Inventory invariant**: the spec, plan matrix, and T025 MUST retain the same
   47 exact paths and one disposition per path: 8 `UPDATE`, 17 `NO_IMPACT`, and
   22 `HANDOFF`.

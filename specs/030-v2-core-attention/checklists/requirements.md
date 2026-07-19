@@ -288,7 +288,9 @@ current reconciled spec, plan, and dormant task graph.
 
 **Depth**: Formal blocking review
 
-**Reviewer**: codex-session-1 (`v2-core-owner`)
+**Reviewer**: codex-session-1 (`v2-core-owner`), acting as the formal owner
+reviewer under Zoe's explicit identity-separation waiver, durably copied at
+`evidence/v2/attention/identity-separation-waiver.md`
 
 **Actor / timing**: Assigned owner conducting the fresh formal review after
 artifact reconciliation and before zero scoped CRITICAL/HIGH analysis, slice
@@ -356,7 +358,8 @@ exception contract without reusing the completed CHK111–CHK134 result.
 **Depth**: Formal blocking review
 
 **Reviewer**: codex-session-1 (`v2-core-owner`), acting as the formal owner
-reviewer under Zoe's explicit identity-separation waiver
+reviewer under Zoe's explicit identity-separation waiver, durably copied at
+`evidence/v2/attention/identity-separation-waiver.md`
 
 **Actor / timing**: Assigned owner conducting a fresh review after the receipt-
 sink clarification is reconciled across spec, plan, and tasks and before fresh
@@ -442,13 +445,14 @@ the concrete stdlib retry taxonomy, and conservative sink persistence.
 **Depth**: Formal blocking review
 
 **Reviewer**: codex-session-1 (`v2-core-owner`), acting as the formal owner
-reviewer under Zoe's explicit identity-separation waiver
+reviewer under Zoe's explicit identity-separation waiver, durably copied at
+`evidence/v2/attention/identity-separation-waiver.md`
 
 **Actor / timing**: Assigned owner after reconciling the advisory sink rule and
 the aborted run's final scoped findings across spec, plan, and tasks, before a
 new bound planning run, activation, or implementation
 
-**Review status**: Complete. All 12 items were reviewed against the selected
+**Review status**: Complete. All 17 items were reviewed against the selected
 design, accepted I-010A/B/E versions, current stdlib transport seam, and slice
 ownership. No result is inherited from the earlier 164 items.
 
@@ -469,10 +473,12 @@ ownership. No result is inherited from the earlier 164 items.
 - [x] CHK177 Is the retry delay fully specified without widening the closed classifier configuration: exactly 0.5 seconds before attempt 2 and 1.0 second before attempt 3? [Clarity, Completeness, Spec §Clarifications, §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T006]
 - [x] CHK178 Do requirements explicitly ignore provider `Retry-After`, preventing untrusted response metadata from changing the bounded deterministic schedule? [Safety, Determinism, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T006, §T021]
 - [x] CHK179 Are zero-sleep boundaries measurable after success, a terminal non-retryable failure, and the final allowed failure for every `max_retries=0|1|2` case? [Measurability, Coverage, Spec §FR-003; Plan §Retry and sparse-advice boundaries; Tasks §T004, §T021]
+- [x] CHK180 Does the unchanged 47-path documentation matrix route the fixed retry cadence, ignored `Retry-After`, and no-sleep terminal boundaries into slice-owned `docs/attention/v2.md` and the `v2-integrator`-owned `docs/STABILITY.md` handoff? [Documentation, Traceability, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–§T026]
+- [x] CHK181 Is Zoe's identity-separation waiver copied into durable slice-owned evidence with exact scope and non-authorizing limits before relying on the owner-conducted checklist? [Governance, Evidence, `evidence/v2/attention/identity-separation-waiver.md`; Tasks §Activation prerequisites]
 
 ## Formal Reviewer Final Scoped-Finding Notes
 
-- Mark CHK165–CHK179 complete only from the reconciled requirement text and
+- Mark CHK165–CHK181 complete only from the reconciled requirement text and
   cited authority; implementation success is not a substitute.
 - Any reintroduction of host-owned ParticipantWakeV2 behavior, request
   mutation, open-ended retry classification, or post-dispatch
@@ -480,6 +486,6 @@ ownership. No result is inherited from the earlier 164 items.
 - The program-interface registry remains the separately recorded non-blocking
   `v2-program-owner` handoff and is not reclassified by this gate.
 
-**2026-07-19 final scoped-finding result**: 15/15 fresh items pass; the complete
-requirements checklist is now 179/179. The task graph remains T001–T027 and
+**2026-07-19 final scoped-finding result**: 17/17 fresh items pass; the complete
+requirements checklist is now 181/181. The task graph remains T001–T027 and
 dormant until a separate READY activation record exists.
