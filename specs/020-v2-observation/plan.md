@@ -151,17 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | Phase 16 event-instance and side-coverage corrections remain closed, and S020-A5-01 is closed: `expires_at` is the first invalid authority instant, exact equality rejects before serving, and the handle is reclaimed. |
+| Truthful identity/observation | BLOCKED (T083–T086) | Phase 16/17 corrections remain closed, but candidate-attempt-2 preparation review proves snapshot trigger bytes can exceed a hard cap and continuation pages are not checked against their originating request. T083–T086 must fail closed and bind private merge identity. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | PASS | The appended Phase 17 supersession records exact-boundary RED/GREEN evidence, 52 focused tests, 127 Observation tests, 46 green evidence rows, 202/202 corpus accounting, 1376 full-suite tests with 4 optional skips, 60 fixtures, Ruff/Bandit/static/governance/diff gates, and T001–T082 hash `94e0ab99732a95c983dfdc587612e5bd516238ad64fddabd5adc63f0cd89c22d`. |
+| Evidence before claims | BLOCKED (T083–T088) | The Phase 17 matrix remains historical evidence for `f38a4fe`, but its static-scan row is not reproducible and its budget evaluator permits a false PASS. RED/GREEN implementation evidence, a committed scanner with exact diff basis, regenerated aggregates, an expanded graph hash, complete matrix, and fresh review are required. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: PASS. T080–T082 close S020-A5-01 with exclusive expiry,
-deterministic exact-boundary evidence, and the complete expanded verification
-matrix. Candidate attempt 2 still requires fresh immutable independent review
-and the ordinary lifecycle; this pass grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 18. T080–T082 remain complete and close
+S020-A5-01, but T083–T088 must enforce hard trigger-byte caps, originating-request
+merge deduplication, and a reproducible static-scan receipt before another
+immutable review. This status grants no acceptance or cutover authority.
 
 ## Slice Interfaces
 

@@ -764,3 +764,41 @@ authority at exact equality.
 
 **Checkpoint**: expiring authority rejects before serving any event when fetch
 time is equal to or later than `expires_at`.
+
+## Phase 18: Hard Snapshot Bytes, Origin Merge Identity, and Reproducible Static Evidence
+
+**Correction source**:
+`evidence/v2/observation/review-2026-07-19-candidate-2-preparation-rejection.md`,
+two CRITICAL findings and one HIGH finding against `f38a4fe`.
+
+**Purpose**: Make snapshot hard caps and cross-request merge identity true in
+the implementation and make every static completion receipt reproducible.
+
+- [ ] T083 Add RED tests proving a trigger larger than `max_bytes` rejects
+  without returning an over-budget snapshot, and the budget evaluator cannot
+  mark any row PASS when accepted event bytes exceed the configured cap
+- [ ] T084 Fail closed before snapshot assembly when the mandatory trigger does
+  not fit; update BUD-S15-001 to expect rejection, make the runner assert the
+  cap invariant, and regenerate budget evidence
+- [ ] T085 Add RED tests proving continuation issuance requires a private
+  originating-request event-ID set and fetch rejects any page whose event IDs
+  overlap that set before cursor state commits
+- [ ] T086 Bind an immutable originating-request ID set to each handle, clean it
+  up on revoke/expiry, enforce exact merge dedup without changing I-010A/I-010D
+  wire shapes, update all host call sites/docs, and add deterministic adversarial
+  continuation evidence
+- [ ] T087 Add a committed, owner-scoped static secret scanner with documented
+  high-confidence matchers and explicit `--base`/`--head` range; replace the
+  unreproducible Phase 17 row with its exact invocation and output
+- [ ] T088 Regenerate manifest/handoff evidence, restore planning PASS only
+  after the complete matrix is green, record T001–T088 identity, and obtain a
+  fresh immutable independent review before candidate attempt 2
+
+### Phase 18 dependencies
+
+- T083/T084, T085/T086, and T087 are independent correction lanes.
+- T088 depends on T084, T086, and T087 GREEN evidence and is the final blocker.
+
+**Checkpoint**: no accepted snapshot exceeds hard bytes, no continuation page
+overlaps its originating request, and static completion evidence is exactly
+reproducible from the candidate tree.
