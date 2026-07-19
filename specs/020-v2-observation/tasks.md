@@ -919,7 +919,7 @@ owner review of immutable preparation `cd8917c`.
 - [X] T104 Add a RED probe proving an added production secret can bypass all
   matchers by carrying the unrestricted `slice020-secret-fixture` marker;
   reject `cd8917c` as a final candidate target
-- [ ] T105 Remove the runtime fixture-marker exemption entirely, construct
+- [X] T105 Remove the runtime fixture-marker exemption entirely, construct
   synthetic test tokens dynamically so scanner source scans cleanly, and add a
   regression proving marker text never suppresses a real finding
 - [ ] T106 Regenerate static/evaluator evidence, rerun the complete matrix and

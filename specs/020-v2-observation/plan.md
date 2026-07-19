@@ -154,15 +154,15 @@ parity claim
 | Truthful identity/observation | PASS | T083–T102 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, and the exact closed four-field host context; 47 aggregate rows plus 11 Phase 18 adversarial rows are GREEN. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T105–T107) | T083–T104 have reproducible evidence, but owner review of `cd8917c` found the static scanner's unrestricted fixture marker can suppress a production finding. T105–T107 must remove the bypass, regenerate the exact-range receipt, freeze a new object, and obtain a fresh independent verdict. |
+| Evidence before claims | BLOCKED (T106–T107) | T105 removes the unrestricted scanner marker bypass and the complete 1,396-test matrix is GREEN. T106–T107 must freeze and scan the new immutable object and obtain a fresh independent verdict. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 20 T105–T107. Phase 17–19 runtime
-mechanisms remain GREEN, including exact closed host binding, but `cd8917c` is
-not a candidate target because its committed scanner has a marker-based bypass.
-A new complete matrix, immutable pushed object, and fresh independent verdict
-are required. This status grants no acceptance or cutover authority.
+Post-design re-check: BLOCKED on Phase 20 T106–T107. Phase 17–19 runtime
+mechanisms remain GREEN, including exact closed host binding, and T105 removes
+the `cd8917c` scanner bypass. A new immutable pushed object, exact-range scan,
+and fresh independent verdict are required. This status grants no acceptance or
+cutover authority.
 
 ## Slice Interfaces
 

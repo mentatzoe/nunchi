@@ -57,9 +57,6 @@ MATCHERS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
-FIXTURE_MARKER = "slice020-secret-fixture"
-
-
 @dataclass(frozen=True)
 class Finding:
     path: str
@@ -89,9 +86,6 @@ def scan_added_lines(diff_text: str) -> list[Finding]:
             continue
         if raw_line.startswith("+") and not raw_line.startswith("+++"):
             added = raw_line[1:]
-            if FIXTURE_MARKER in added:
-                new_line += 1
-                continue
             for label, matcher in MATCHERS:
                 if matcher.search(added):
                     findings.append(Finding(path=path, line=new_line, matcher=label))

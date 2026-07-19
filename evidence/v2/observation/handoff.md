@@ -1025,3 +1025,38 @@ T083–T102 are locally complete. T103 remains BLOCKED pending commit/push of th
 receipt and one fresh independent fail-closed review of the exact immutable
 candidate. Nothing in this section accepts the slice or authorizes integration,
 cutover, deployment, release, promotion, or candidate-attempt-2 handoff.
+
+## Phase 20 scanner-bypass correction
+
+Owner review of immutable preparation `cd8917c56f0d051f52cdba68c177d45e7a9f1103`
+found that the scanner skipped every added line containing
+`slice020-secret-fixture`, regardless of repository path or content. A direct
+production-path probe returned zero findings for a matcher-shaped `API_KEY`
+assignment carrying that marker. `cd8917c` is therefore rejected as a final
+candidate target; the earlier CLEAN rows remain accurate outputs of a
+bypassable scanner and do not authorize handoff.
+
+T105 removes the marker exemption entirely. Synthetic keys are now assembled
+at test runtime so no complete matcher-shaped token is stored as an added source
+line. A dedicated regression proves marker text does not suppress a real
+finding.
+
+Phase 20 pre-commit matrix:
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_static_secret_scanner` | 4 tests, OK |
+| marker-bypass direct GREEN probe | 1 finding, expected 1 |
+| `PYTHONPATH=src:. python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 147 tests, OK |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` | 47 rows, 0 FAIL |
+| `PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial` | 11 rows, 0 FAIL |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; 202/202 accounted for |
+| `PYTHONPATH=src python3 -m unittest` | 1396 tests, OK; 4 optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| Ruff / production Bandit / governance / task manifest / `git diff --check` | clean |
+
+T106 remains open until a new immutable commit is pushed and scanned over the
+whole activation-to-candidate range. T107 and T103 remain open until a fresh
+independent review of that exact object returns without blockers. This section
+does not establish `CONVERGED`, `HANDOFF_READY`, acceptance, integration,
+deployment, release, promotion, or cutover authority.

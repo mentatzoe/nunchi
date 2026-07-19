@@ -11,11 +11,21 @@ import tempfile
 import unittest
 
 
+def _synthetic_openai_key() -> str:
+    """Build a matcher-shaped token without storing one in repository text."""
+    return "".join(("sk", "-", "proj", "-", "A" * 24))
+
+
+def _synthetic_github_token() -> str:
+    """Build another matcher-shaped token without a literal scanner finding."""
+    return "".join(("gh", "p", "_", "B" * 24))
+
+
 class TestSlice020SecretScanner(unittest.TestCase):
     def test_added_secret_is_reported_without_echoing_secret_bytes(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
-        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # slice020-secret-fixture
+        secret = _synthetic_openai_key()
         diff = (
             "diff --git a/src/nunchi/observation.py b/src/nunchi/observation.py\n"
             "--- a/src/nunchi/observation.py\n"
@@ -28,24 +38,25 @@ class TestSlice020SecretScanner(unittest.TestCase):
         self.assertEqual(findings[0].path, "src/nunchi/observation.py")
         self.assertNotIn(secret, findings[0].render())
 
-    def test_synthetic_fixture_marker_suppresses_only_its_added_line(self):
+    def test_fixture_marker_text_does_not_suppress_a_finding(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
-        secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # slice020-secret-fixture
+        secret = _synthetic_openai_key()
         diff = (
-            "diff --git a/tests/v2/observation/test_fixture.py "
-            "b/tests/v2/observation/test_fixture.py\n"
-            "--- a/tests/v2/observation/test_fixture.py\n"
-            "+++ b/tests/v2/observation/test_fixture.py\n"
+            "diff --git a/src/nunchi/observation.py b/src/nunchi/observation.py\n"
+            "--- a/src/nunchi/observation.py\n"
+            "+++ b/src/nunchi/observation.py\n"
             "@@ -1,0 +2 @@\n"
             f'+API_KEY = "{secret}"  # slice020-secret-fixture\n'
         )
-        self.assertEqual(scan_added_lines(diff), [])
+        findings = scan_added_lines(diff)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].matcher, "openai-style-key")
 
     def test_removed_secret_and_regex_matcher_source_are_not_findings(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
-        removed = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"  # slice020-secret-fixture
+        removed = _synthetic_github_token()
         diff = (
             "diff --git a/src/nunchi/observation.py b/src/nunchi/observation.py\n"
             "--- a/src/nunchi/observation.py\n"
