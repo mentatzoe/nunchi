@@ -25,8 +25,9 @@ activation.
 `evidence/governance/v2-implementation-authorization.md` enumerating exactly
 slices `010` through `110`; accepted declared dependency `010-v2-contract`; an assigned
 participant and durable external assignment source declared above;
-active `v2-core-owner`; zero CRITICAL/HIGH analysis findings; and an isolated
-owner worktree
+active `v2-core-owner`; completed fresh formal owner review at
+`checklists/requirements.md` CHK111–CHK134; zero scoped CRITICAL/HIGH analysis findings;
+and an isolated owner worktree
 
 **Resolved upstream findings**: Accepted I-010E `@2` at exact amendment
 candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb` represents required
@@ -34,7 +35,7 @@ classifier policy provenance and the paired `NO_WAKE` operational-failure
 override. This consumer independently accepted it at
 `evidence/v2/attention/dependency-010-amendment-A1-acceptance.md`; the original
 consumer acceptance and post-acceptance blocker remain immutable history. No
-task below may begin until the fresh bound analysis reports zero CRITICAL/HIGH
+task below may begin until the fresh bound analysis reports zero scoped CRITICAL/HIGH
 findings and activation evidence establishes `READY`. Do not add local receipt
 fields or encode provenance in `error.detail`.
 
@@ -56,11 +57,12 @@ a non-blocking `v2-program-owner` handoff, not a dependency/task-graph finding.
 This slice neither edits nor claims completion of that program artifact.
 
 **Planning reconciliation result**: The spec, plan, and this task graph retain
-the same 43-path documentation matrix (7 `UPDATE`, 16 `NO_IMPACT`, and 20
-`HANDOFF`), and `checklists/requirements.md` records the completed CHK087–CHK110
-formal delta review. Fresh bound analysis must independently leave no
-spec/plan/task or documentation-disposition conflict. This result is
-control-plane evidence, not an implementation checkbox.
+the same 44-path documentation matrix (8 `UPDATE`, 16 `NO_IMPACT`, and 20
+`HANDOFF`). `checklists/requirements.md` records both the completed prior
+CHK087–CHK110 delta review and codex-session-1's fresh completed CHK111–CHK134
+formal owner review from the reconciled requirement text. Any unresolved scoped
+requirement, governance, or documentation-disposition finding blocks analysis
+and activation. This is control-plane review, not an implementation checkbox.
 
 **Activation evidence**: `evidence/v2/attention/slice-activation.md`, written
 only after every activation prerequisite is accepted; it copies and attests the
@@ -112,8 +114,8 @@ beginning the first checkbox.
 replay/model evidence remains separate from unit mechanics; live participant
 canaries belong to dependent surfaces and final integration.
 
-**Documentation freshness**: `README.md` and all 43 exact ordinary paths in
-`plan.md` §Documentation Impact and Freshness are blocking: 7 `UPDATE`, 16
+**Documentation freshness**: `README.md` and all 44 exact ordinary paths in
+`plan.md` §Documentation Impact and Freshness are blocking: 8 `UPDATE`, 16
 `NO_IMPACT`, and 20 `HANDOFF`. `UPDATE` requires candidate-relative validation,
 `NO_IMPACT` requires exact-path rationale and a reviewer in ordinary handoff
 evidence, and `HANDOFF` requires the exact claim delta and accepting owner. No
@@ -139,11 +141,13 @@ the following in immutable `evidence/v2/attention/slice-activation.md`:
   consumer's separate acceptance at
   `evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`, recorded as
   ordered `slice=full-sha` and `slice=repo-relative-evidence-file` mappings;
-- zero CRITICAL/HIGH analysis findings, including no unresolved spec/plan/task
+- zero scoped CRITICAL/HIGH analysis findings, including no unresolved spec/plan/task
   or documentation-disposition conflict; the spec, plan, and this task graph
-  retain the same 43 exact documentation paths, and CHK087–CHK110 record the
-  completed formal requirements review from that reconciled text; the
-  zero-margin dependency finding must be superseded by the exact
+  retain the same 44 exact documentation paths; CHK087–CHK110 retain the prior
+  completed delta review, and codex-session-1 has completed fresh
+  CHK111–CHK134 from the reconciled requirement text with no unresolved
+  requirement-quality, governance-boundary, or documentation-disposition
+  finding; the zero-margin dependency finding must be superseded by the exact
   accepted A2 consumer decision above, while the separate program-registry
   mismatch remains the recorded non-blocking owner handoff;
 - the isolated `.worktrees/v2-core-attention/` worktree on
@@ -228,8 +232,8 @@ convergence and handoff; it is not optional polish.
 
 - [ ] T023 Refuse execution unless committed `evals/v2/attention/model-selection.json` is closed, one-to-one, and reviewed as required by T009, then run the exact Cartesian product of every committed `evals/v2/attention/suppression-scars/cases.jsonl` case and its three exact selected provider model IDs, rejecting any family/ID mismatch or post-result selection change, and record every attempt in `evidence/v2/attention/model-comparison/results.jsonl` with canonical `case_id`/`scene_id`, corpus and selection-manifest identity, `expected_attention`, exact provider model ID, provider, endpoint class, date, prompt/config identity, effective-policy source, invocation command, direct/effective dispositions, result, and any override provenance; for every WAKE advice item also record the note, cited supplied-event IDs, Unicode scalar count, deterministic citation-resolution field, and three owner-adjudicated semantic fields; compute mistaken suppression over all `ATTEND` cases, missed suppression over all `NOT_ATTEND` cases, wake volume over all cases, separate direct-DEFER and margin-DEFER counts, and family disagreement over all case IDs exactly as FR-014 defines; treat rates as descriptive/non-gating limitations, but block handoff on a missing/duplicate family-case result, incomplete provenance, failed advice field, or unsafe mechanical routing
 - [ ] T024 Preregister the downstream live DEFER canary scenes, metrics, stop/retirement rules, owners, and immutable result paths in `evidence/v2/attention/defer-canary/protocol.md`; do not execute participant/live-room canaries in slice 030
-- [ ] T025 Execute and validate all 43 exact rows in `plan.md` §Documentation Impact and Freshness—exactly 7 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF`—and record candidate-relative results in `evidence/v2/attention/handoff.md`: `UPDATE` `evidence/README.md`, `evidence/verdict-suite/README.md`, `docs/attention/v2.md`, `docs/contracts/verdict-suite-data-model-v1.md`, `docs/contracts/verdict-suite-requirements-v1.md`, `docs/evaluations/verdict-suite.md`, and `docs/evaluations/verdict-suite-runner.md`; route the exact `HANDOFF` delta and accepting owner for `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, `docs/INSTALL.md`, `docs/STABILITY.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md`, `docs/contracts/channel-adapter-v1.md`, `docs/integration.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/claude-code/README.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/README.md`, `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`, `integrations/hermes/README.md`, and `integrations/hermes/nunchi-gate/plugin.yaml`; and record reviewer plus concrete candidate-specific rationale for `NO_IMPACT` on `evidence/v2/contract/README.md`, `docs/archive/v1/README.md`, `docs/archive/v1/admission-classifier/contract.md`, `docs/archive/v1/admission-classifier/data-model.md`, `docs/archive/v1/admission-classifier/quickstart.md`, `docs/archive/v1/core-cli/contract.md`, `docs/archive/v1/core-cli/data-model.md`, `docs/archive/v1/core-cli/quickstart.md`, `docs/contracts/nunchi-v2.md`, `docs/governance/execution-spine.md`, `docs/integrations/hermes-core-patch.md`, `docs/integrations/hermes-core-patch-test-plan.md`, `integrations/claude-code/transport-patch/README.md`, `integrations/hermes/nunchi-gate/dashboard/manifest.json`, `integrations/mcp-discord/DESIGN.md`, and `integrations/mcp-discord/README.md`; validate applicable links, Mermaid diagrams, examples, commands, CLI exits, configuration syntax/default claims, installed metadata, evidence-grade/current-state boundaries, evidence links, and V1-current/V2-component truth without claiming atomic cutover or live participant results
-- [ ] T026 Publish the scene-to-record command and evidence manifest in `evidence/v2/attention/README.md` and assemble the proposed owner packet inputs in `evidence/v2/attention/handoff.md`: complete commands/results, I-030A and consumed version-resolved I-010A/B/E versions, prompt/model and effective-policy provenance, all deterministic/replay/three-family records, downstream canary protocol, active-margin state, all 43 exact documentation dispositions/validations/reviewer findings and routed deltas from T025, rejected claims, limitations, the individually named recipients `v2-wake-owner`, `v2-hermes-owner`, `v2-claude-owner`, `v2-codex-owner`, `v2-adapters-owner`, `v2-security-owner`, and `v2-integrator`, each dependent's separate exact-commit/packet acceptance duty, and the exact slice-110 delta across `src/nunchi/core.py`, `src/nunchi/cli.py`, `src/nunchi/classifiers.py`, `src/nunchi/models.py`, `src/nunchi/schema.py`, and `src/nunchi/__init__.py` that removes V1 request/verdict handling, `require_pass_corroboration`, reply-bearing output, hidden local fallbacks, and staging names while publishing I-030A as public `evaluate`/`admit`; distinguish the tested implementation tree, lifecycle candidate, and later packet commit, because the later convergence, documentation-freshness, and owner-handoff gates record exact candidate/packet commits and establish lifecycle state, never this checkbox
+- [ ] T025 Execute and validate all 44 exact rows in `plan.md` §Documentation Impact and Freshness—exactly 8 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF`—and record candidate-relative results in `evidence/v2/attention/handoff.md`: `UPDATE` `evidence/README.md`, `evidence/verdict-suite/README.md`, `evidence/v2/attention/README.md`, `docs/attention/v2.md`, `docs/contracts/verdict-suite-data-model-v1.md`, `docs/contracts/verdict-suite-requirements-v1.md`, `docs/evaluations/verdict-suite.md`, and `docs/evaluations/verdict-suite-runner.md`; route the exact `HANDOFF` delta and accepting owner for `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, `docs/INSTALL.md`, `docs/STABILITY.md`, `docs/adapters.md`, `docs/architecture/v2-selected-design.md`, `docs/contracts/channel-adapter-v1.md`, `docs/integration.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/DEFER_EVAL.md`, `integrations/claude-code/README.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/README.md`, `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`, `integrations/hermes/README.md`, and `integrations/hermes/nunchi-gate/plugin.yaml`; and record reviewer plus concrete candidate-specific rationale for `NO_IMPACT` on `evidence/v2/contract/README.md`, `docs/archive/v1/README.md`, `docs/archive/v1/admission-classifier/contract.md`, `docs/archive/v1/admission-classifier/data-model.md`, `docs/archive/v1/admission-classifier/quickstart.md`, `docs/archive/v1/core-cli/contract.md`, `docs/archive/v1/core-cli/data-model.md`, `docs/archive/v1/core-cli/quickstart.md`, `docs/contracts/nunchi-v2.md`, `docs/governance/execution-spine.md`, `docs/integrations/hermes-core-patch.md`, `docs/integrations/hermes-core-patch-test-plan.md`, `integrations/claude-code/transport-patch/README.md`, `integrations/hermes/nunchi-gate/dashboard/manifest.json`, `integrations/mcp-discord/DESIGN.md`, and `integrations/mcp-discord/README.md`; validate applicable links, Mermaid diagrams, examples, commands, CLI exits, configuration syntax/default claims, installed metadata, evidence-grade/current-state boundaries, evidence links, and V1-current/V2-component truth without claiming atomic cutover or live participant results
+- [ ] T026 Publish the scene-to-record command and evidence manifest in `evidence/v2/attention/README.md` and assemble the proposed owner packet inputs in `evidence/v2/attention/handoff.md`: complete commands/results, I-030A and consumed version-resolved I-010A/B/E versions, prompt/model and effective-policy provenance, all deterministic/replay/three-family records, downstream canary protocol, active-margin state, all 44 exact documentation dispositions/validations/reviewer findings and routed deltas from T025, rejected claims, limitations, the individually named recipients `v2-wake-owner`, `v2-hermes-owner`, `v2-claude-owner`, `v2-codex-owner`, `v2-adapters-owner`, `v2-security-owner`, and `v2-integrator`, each dependent's separate exact-commit/packet acceptance duty, and the exact slice-110 delta across `src/nunchi/core.py`, `src/nunchi/cli.py`, `src/nunchi/classifiers.py`, `src/nunchi/models.py`, `src/nunchi/schema.py`, and `src/nunchi/__init__.py` that removes V1 request/verdict handling, `require_pass_corroboration`, reply-bearing output, hidden local fallbacks, and staging names while publishing I-030A as public `evaluate`/`admit`; distinguish the tested implementation tree, lifecycle candidate, and later packet commit, because the later convergence, documentation-freshness, and owner-handoff gates record exact candidate/packet commits and establish lifecycle state, never this checkbox
 - [ ] T027 Run `python3 scripts/check_governance.py --check-cli`, `python3 -m unittest`, `python3 -m unittest discover -s tests/v2/attention -p 'test_*.py'`, `python3 -m evals.v2.attention.runner --all`, `python3 -m evals.verdict_suite.runner --list`, and `git diff --check <activation-start>..HEAD` against the tested implementation tree, resolving `<activation-start>` from immutable activation evidence; compare with activation and reject any changed pre-030 test byte/inventory, deleted or renamed pre-030 test, added skip, adapter/harness or 010-owned `schemas/v2/` contract edit, or path outside the exact 030-owned source/test/eval/evidence/docs set; require zero focused-suite skips, root skips equal the frozen activation skip count, and root test count equal the frozen activation root count plus focused count; record that parent commit, exact commands/results/counts/hashes, descriptive elapsed/byte/token-or-unavailable/attempt/provider-model/runtime/host-OS/fixture fields, environment, and diff scope in `evidence/v2/attention/verification.md` without self-referencing the T027 commit; block convergence on any failure and require the later gates to rerun/record the same commit-range whitespace check and baseline at the lifecycle candidate and packet commits
 
 ## Post-Task Lifecycle Gates (Not Implementation Checkboxes)
@@ -241,7 +245,7 @@ After T001–T027 are complete, the bound workflow—not this task graph—must:
    the exact candidate attempt to `evidence/v2/attention/slice-candidate.md` to
    establish `CONVERGED`;
 2. run the blocking documentation-freshness review against that exact candidate
-   and all 43 T025 dispositions recorded in
+   and all 44 T025 dispositions recorded in
    `evidence/v2/attention/handoff.md`;
 3. only on documentation PASS, append the complete packet attempt to
    `evidence/v2/attention/slice-handoff.md`, name every downstream recipient and

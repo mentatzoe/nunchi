@@ -722,6 +722,7 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Claude execution guidance | `CLAUDE.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace V1 runtime/config/CLI smoke guidance with accepted I-030A, trusted bypass, ERROR, receipt, and 0/1/2/3 commands while preserving verification-pending wording and the exact-main gate. |
 | Global evidence index | `evidence/README.md` | `UPDATE` | T025 / `v2-core-owner` | Add the exact `evidence/v2/attention/` component-record scope, commands/manifest link, evidence grade, candidate binding, and explicit non-cutover/non-current boundary while preserving the immutable/history rules; validate every link and claim against the candidate. |
 | V1 verdict-suite evidence index | `evidence/verdict-suite/README.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve every historical V1 run record and reproduction boundary, add the exact 030 scar/transition role and V2 result links, and validate current-classifier wording and commands without presenting V1 evidence as V2 social proof. |
+| Slice-030 evidence and command manifest | `evidence/v2/attention/README.md` | `UPDATE` | T025–T026 / `v2-core-owner` | Create the exact scene-to-record and command manifest with candidate binding, consumed/produced interface versions, deterministic/replay/model evidence links, evidence grades, rejected claims, and explicit non-current/non-cutover limitations; validate every command, path, link, count, and claim against the exact candidate and packet. |
 | Accepted contract evidence manifest | `evidence/v2/contract/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the 010-owned manifest already records accepted I-010B/I-010E `@2` provenance and commands; 030 consumes those exact contracts without changing the manifest. Validate versions and links, then record the unchanged review in handoff evidence. |
 | Release history | `CHANGELOG.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; add the exact accepted 030 commit, breaking core/CLI contract delta, active-margin status, evidence links, and limitations in the atomic cutover entry. |
 | Installation and executable claims | `docs/INSTALL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace V1 `nunchi-channel`/configuration assumptions with the accepted V2 CLI, model/policy inputs, installed-runtime provenance, and no-V1-residue instructions at cutover. |
@@ -761,13 +762,14 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
 
-Matrix scope audit (2026-07-19): the 43 unique rows above enumerate all 42
+Matrix scope audit (2026-07-19): the 44 unique rows above enumerate all 42
 known affected current ordinary documentation/evidence/configuration claim
-surfaces and the future slice-owned `docs/attention/v2.md` individually: 7
+surfaces and the future slice-owned `docs/attention/v2.md` and
+`evidence/v2/attention/README.md` individually: 8
 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF`. Every disposition is attached to one exact file;
 no grouped multi-file disposition substitutes for an exact path. The bound
 specification, dormant T025, and formal requirements checklist retain this same
-43-path inventory and disposition count.
+44-path inventory and disposition count.
 
 Global current-state claims remain integrator-owned; the component guide and
 every exact handoff delta are required before 030 can converge. T025 records

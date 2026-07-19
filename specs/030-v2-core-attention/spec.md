@@ -757,9 +757,11 @@ non-receiptable and MUST NOT fabricate one.
 - Initial V2 integration retains the protective margin; direct classifier
   DEFER evaluation can run live without narrowing safety.
 - The selected three-family matrix is Gemini 3.1 Flash Lite, GPT-5.5, and
-  Qwen3. Provider catalogs can change, so run records—not this plan—pin exact
-  provider IDs; any later family substitution requires an explicit Zoe decision
-  recorded with the evidence.
+  Qwen3. Provider catalogs can change, so the committed pre-run
+  `evals/v2/attention/model-selection.json` manifest pins the exact provider
+  IDs and every run record must match it. Any exact-ID change requires a new
+  pre-run manifest commit; any family substitution requires Zoe's durable
+  decision.
 - Slice 020 may develop in parallel and is not required to test I-030A because
   core tests can construct contract-valid I-010A fixtures directly.
 - Slice 030 prepares but does not execute participant/live-room canaries;
@@ -770,7 +772,7 @@ non-receiptable and MUST NOT fabricate one.
 - **`README.md` disposition**: `HANDOFF` exact I-030A disposition, bypass,
   operational ERROR, CLI, and dual-DEFER claim deltas to `v2-integrator`.
 - **`UPDATE` inventory**: `docs/attention/v2.md`, `evidence/README.md`,
-  `evidence/verdict-suite/README.md`,
+  `evidence/verdict-suite/README.md`, `evidence/v2/attention/README.md`,
   `docs/contracts/verdict-suite-data-model-v1.md`,
   `docs/contracts/verdict-suite-requirements-v1.md`,
   `docs/evaluations/verdict-suite.md`, and
@@ -806,7 +808,7 @@ non-receiptable and MUST NOT fabricate one.
   and Hermes files go to their named surface owners. No `HANDOFF` row is a
   no-impact finding or a slice-owned documentation escape.
 - **Inventory invariant**: the spec, plan matrix, and T025 MUST retain the same
-  43 exact paths and one disposition per path: 7 `UPDATE`, 16 `NO_IMPACT`, and
+  44 exact paths and one disposition per path: 8 `UPDATE`, 16 `NO_IMPACT`, and
   20 `HANDOFF`.
 - **Handoff evidence**: `evidence/v2/attention/handoff.md` records the exact
   reviewed paths, dispositions, delta, validation, and reviewer.
