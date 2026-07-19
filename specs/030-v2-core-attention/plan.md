@@ -323,13 +323,24 @@ the slice's implementation choices without reopening product decisions.
 
 - **Decision**: Return trusted preattention-disabled bypass with zero classifier
   calls, keep operational error as its own tagged branch, and expose the exact
-  0/1/2/3 CLI process contract recorded below.
+  0/1/2/3 CLI process contract recorded below. The shared wake default remains
+  mandatory until the complete operator configuration is descriptor-secure,
+  closed-shape and value valid, single-source, and exactly bound to a schema-
+  valid request. Raw or partially validated `NO_WAKE` has no authority; a
+  request-ID-bearing configuration/request/binding error may be written through
+  an independently valid sink only without the I-010E override pair. Once the
+  trust boundary passes, `NO_WAKE` applies to later budget, provider, malformed-
+  model, runtime, or sink-invocation error; receiptable instances use the exact
+  paired `wake_action: "NO_WAKE"` and `policy_provenance` fields.
 - **Rationale**: Bypass must not fabricate a model result, errors must not
-  impersonate social judgments, and callable-core/CLI equivalence is the shared
-  consumer seam.
+  impersonate social judgments, malformed configuration must not gain silence
+  authority from one parseable member, and callable-core/CLI equivalence is the
+  shared consumer seam.
 - **Alternatives considered**: Converting bypass to WAKE, converting failures
-  to a social disposition, or emitting diagnostics and response payloads on the
-  same stream. These lose provenance or break deterministic host handling.
+  to a social disposition, honoring `NO_WAKE` before complete validation and
+  binding, or emitting diagnostics and response payloads on the same stream.
+  These lose provenance, grant untrusted silence authority, or break
+  deterministic host handling.
 
 ### Documentation ownership
 
@@ -437,10 +448,13 @@ loading config; after any JSON value is parsed, config security/shape and sink
 construction precede request-schema validation, and trusted attention-budget
 validation follows schema/binding validation before bypass or classifier use,
 so config failure wins a combined failure and all such validation failures exit
-3. A valid sink records a schema/config/budget error only when a valid request
-ID is assignable; for a config error its `receipt_sink`
-member must independently pass the closed security/shape checks. Otherwise no
-receipt or ID is fabricated.
+3. Request-schema/configuration/binding failure precedes the full trusted-policy
+boundary and therefore always uses wake default. A valid sink records such an
+error only when a valid request ID is assignable; for a config error its
+`receipt_sink` member must independently pass the closed security/shape checks,
+and the resulting receipt omits both override fields. Trusted-budget validation
+occurs after the boundary and may therefore use a validated `NO_WAKE` policy.
+Otherwise no receipt or ID is fabricated.
 
 Core and CLI must also prove that host-only continuation handles, binding
 tokens, cursors, and expiry values never enter the classifier projection. The

@@ -195,9 +195,10 @@ non-receiptable and MUST NOT fabricate one.
 1. **Given** validation or classifier failure after a routable event exists,
    **When** the engine returns, **Then** status is `ERROR`, default host action
    is wake, and error detail remains off the room surface.
-2. **Given** an explicit operator `NO_WAKE` error override, **When** an
-   operational error occurs, **Then** it is separately sourced and receipted
-   through I-010E `@2`'s paired `wake_action: "NO_WAKE"` and
+2. **Given** a fully validated, exactly request-bound trusted configuration
+   explicitly selects `NO_WAKE`, **When** a later operational error occurs,
+   **Then** the override is separately sourced and receipted through I-010E
+   `@2`'s paired `wake_action: "NO_WAKE"` and
    `policy_provenance`, and never labeled model suppression or implemented
    through a local extension or error-detail convention.
 3. **Given** equivalent input and effective trusted configuration, **When** the
@@ -212,6 +213,11 @@ non-receiptable and MUST NOT fabricate one.
    operational `ERROR`, makes zero classifier calls, emits the applicable
    request-correlated error receipt, and neither truncates nor reassembles the
    request.
+6. **Given** a configuration is missing, unreadable, unsafe, malformed,
+   conflicting, or cannot bind exactly to a schema-valid request, **When** its
+   raw bytes nevertheless contain `error_action: "NO_WAKE"`, **Then** the
+   engine uses the shared `WAKE` default and any independently writable error
+   receipt omits both override fields.
 
 ### Edge Cases
 
@@ -223,6 +229,10 @@ non-receiptable and MUST NOT fabricate one.
   retries do not authorize a second classifier decision.
 - Request-controlled credentials, endpoint, model, limits, or suppression
   policy; trusted operator configuration must win and its source be receipted.
+- A raw or partially validated `NO_WAKE` value in missing, unreadable, unsafe,
+  malformed, conflicting, or binding-invalid configuration has no authority;
+  failure remains wake-default even when a valid request ID and independently
+  valid sink permit an error receipt.
 - A request with exactly the trusted event/byte cap is valid; an actual count,
   canonical projection size, or declared coverage limit above that cap is an
   operational error. Optional declared coverage limits below the trusted cap
@@ -308,6 +318,19 @@ non-receiptable and MUST NOT fabricate one.
   `participant_id` and recoverability `participant_id` MUST both equal
   `request.self.participant_id`; recoverability `continuity_scope_id` MUST equal
   `request.room.continuity_scope_id`; any mismatch is configuration `ERROR`.
+  An `error_action: NO_WAKE` override becomes trusted only after the complete
+  configuration file has passed descriptor security, duplicate-key, closed-
+  shape, nested-value, and single-source validation and after the accepted
+  I-010A request has passed schema validation and all participant/scope bindings
+  above. Missing, unreadable, unsafe, malformed, conflicting, request-invalid,
+  or binding-invalid input therefore always uses the shared `WAKE` default;
+  raw or partially validated `NO_WAKE` never grants silence authority. If such
+  a failure still has an assignable valid request ID and an independently valid
+  constructed sink under the CLI precedence rules, its error receipt omits both
+  `wake_action` and `policy_provenance`. A fully validated and bound `NO_WAKE`
+  policy does apply to later trusted-budget, provider, timeout, malformed-model,
+  runtime, or sink-invocation errors; when the error itself is receiptable, the
+  receipt carries the accepted paired override fields.
   `receipt_sink` is exactly a synchronous
   `Callable[[AttentionReceiptV2], None]`: one normal `None` return means the
   offered record persisted, any raised exception means failure, and the engine
@@ -388,6 +411,12 @@ non-receiptable and MUST NOT fabricate one.
 - **FR-011**: Validation, provider, timeout, malformed-output, configuration,
   and runtime failures MUST return `ERROR`; shared default action is wake, with
   any explicit `NO_WAKE` operator override separately sourced and receipted.
+  Only the fully validated, exactly request-bound trusted policy defined in
+  FR-001 may exercise that override. Configuration, request-schema, or binding
+  failure before that trust boundary MUST use the shared `WAKE` default even if
+  raw or partially validated input contains `NO_WAKE`; any writable error
+  receipt omits the override pair. A later budget/provider/runtime failure may
+  use the already trusted override.
   Accepted I-010E `@2` represents that override only through paired
   `wake_action: "NO_WAKE"` and non-empty `policy_provenance`; the default wake
   path omits both fields, and `WAKE`, other actions, or incomplete pairs reject.
@@ -469,9 +498,12 @@ non-receiptable and MUST NOT fabricate one.
   request-schema validation, so a config failure wins over a simultaneous
   request-schema failure and exits 3. With a valid sink, later request-schema
   failure also exits 3 and is receipted only when the parsed request supplies a
-  valid request ID. A configuration error is likewise receipted only when its
+  valid request ID. Request-schema, configuration, and binding failures cannot
+  exercise `NO_WAKE` because the full trust boundary has not passed. A
+  configuration error is likewise receipted only when its
   closed `receipt_sink` member independently validates and a valid request ID is
-  assignable; otherwise no engine-owned sink exists. If no trusted sink can be constructed, the tagged error
+  assignable; that receipt omits both override fields. Otherwise no engine-owned
+  sink exists. If no trusted sink can be constructed, the tagged error
   states persistence `not-persisted` and MUST NOT fabricate a receipt. A sink
   invocation failure after construction is operational/runtime exit 1 and
   reports the typed `not-persisted` or `unknown` outcome from FR-001.
