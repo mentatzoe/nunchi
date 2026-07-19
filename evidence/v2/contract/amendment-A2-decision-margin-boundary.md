@@ -2,7 +2,9 @@
 
 **Slice**: `010-v2-contract`
 
-**Status**: `PROPOSED` (pending independent `v2-integrator` review)
+**Status**: `REJECTED` (independent `v2-integrator` review of revised candidate
+`22c249a`; A2-R1 leaves one current stdlib-mirror contract description on the
+rejected `(0, 1]` domain; accepted I-010B `@1` remains unchanged)
 
 **Amended interface**: `I-010B AttentionDecisionV2` `@1` → `@2`
 
@@ -142,3 +144,29 @@ A full sweep of every schema, adapter, test, and doc file for a stale
 `@1` self-reference to either `I-010B` or `I-010E` found no further
 misses. No functional change; full baseline and dual-validator suite
 re-verified green (1253 / 195 tests).
+
+## Integrator decision
+
+**Decision**: `REJECTED`
+
+**Reviewed candidate**: `22c249a1a2a3c8c142dfc4849fef689dc271b27b`
+
+**Original A2 candidate**: `994df5606fac24b3dd1ba1201e4f0765e4e091a5`
+
+**Rejected by**: `v2-integrator`
+
+**Rejected on**: 2026-07-19
+
+**Decision reference**:
+`evidence/v2/contract/review-2026-07-19-v2-integrator-amendment-A2.md`
+
+The executable boundary correction is authority-conformant and otherwise
+scope-contained. The pre-review freshness commit fixes the schema's `@2`
+self-description and the decision-test module, but the live stdlib mirror's
+`_check_routing_audit` docstring still states that an applied effective margin
+is finite in `(0, 1]`. That directly contradicts its corrected executable
+`[0,1]` check and the selected design. The exact focused correction and full
+independent verification are recorded in the decision reference. This
+rejection does not revoke amendment A1's accepted I-010E `@2`, alter slice
+010's terminal attempt-6 acceptance, or transfer the separate umbrella-
+registry correction out of the `v2-program-owner` lane.
