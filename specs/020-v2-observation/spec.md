@@ -211,7 +211,10 @@ and limitation outcomes.
   `unroutable` disposition proving that no authorized and routable native event
   can be constructed. The shared provider MAY compare exact delivery IDs and
   exact actor IDs, but MUST NOT independently decide transport authorization or
-  routability.
+  routability. Exact self authorship/causation means `author_id == self.actor_id`
+  for authored message/reaction events or `caused_by_actor_id == self.actor_id`
+  for membership events. A membership event where self appears only as
+  `subject_actor_id` remains `OBSERVED`: being acted upon is not self-causation.
 - **FR-005**: No provider or buffer may interpret mentions, replies, apparent
   resolution, relevance, class address, turn ownership, or any conversational
   meaning as a deterministic suppression reason.

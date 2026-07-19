@@ -38,9 +38,21 @@ The reviewer re-ran the 84 observation tests, 28-row scene suite, full 1333-test
 
 - **H020-01 — HIGH — cross-direction cursor replay.** A cursor minted by a `before` fetch can be replayed under `after` for the same handle, returning an event already served on the first page (`['e4', 'e5']` followed by `['e3', 'e4']`). The cursor binding omits direction. Required tasks: T047–T048.
 - **M020-01 — MEDIUM — stale completed-task SHA claim.** The handoff's T038-era full-manifest SHA claim became stale once convergence appended tasks. Historical activation prefix identity remains valid, but the current handoff needs an append-only supersession with the final full-manifest identity. Required task: T051.
-- **M020-02 — MEDIUM — self-membership scope.** Accepted into existing T040. The selected design says “self-authored” events: membership events lack `author_id`, so `subject_actor_id == self` or `caused_by_actor_id == self` remains an ordinary observed fact. T040 must pin and test that author-attested scope explicitly.
+- **M020-02 — MEDIUM — self-membership scope.** Accepted into existing T040 and resolved by D020-01 below.
 - **M020-03 — MEDIUM — full-suite skip count mismatch.** Fresh runs return 1333 tests with 4 skips, while handoff evidence says 11 skips. Required task: T051.
 - **M020-04 — MEDIUM — event-visibility propagation.** Accepted into strengthened T041: both snapshot and continuation-fetch coverage must propagate configured `event_visibility`, and evidence must record it.
 - **L020-01 — LOW — around-fetch side coverage.** An `around` page may report both `has_more_before` and `has_more_after` as null even when truncated, preventing consumers from knowing which side has more context. Required tasks: T049–T050.
 
 The review's remaining findings are already covered by T039, T042–T046. The accepted I-010E `@2` amendment is separately bound by `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; current handoff evidence must append that version update before a candidate is proposed.
+
+## Clarification decision
+
+- **D020-01 — RESOLVED — exact self membership causation.** Bound clarify run
+  `speckit-020-20260719T040911613600Z` identified the unresolved M020-02 role
+  split. The owner selected the causation-preserving rule: a membership event
+  with `caused_by_actor_id == self.actor_id` is an exact self-caused event and
+  is retained as `SELF_RETAINED_NO_WAKE`; an event where self appears only as
+  `subject_actor_id` remains `OBSERVED`, because being acted upon is not the
+  participant's own action. This uses only exact transport-attested actor IDs
+  and introduces no semantic/social inference. T040 supplies the red test,
+  implementation change, documentation, and green proof.

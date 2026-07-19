@@ -59,8 +59,10 @@ creates no product behavior.
 
 This replanning pass additionally governs the convergence and independent
 pre-review rework appended against the completed T001–T038 candidate: native
-`reaction`/`membership` documentation coverage; the FR-004 author-attested
-self-event scope; FR-007 `event_visibility` propagation and evidence;
+`reaction`/`membership` documentation coverage; the FR-004 exact-causation
+self-event scope (`author_id` for authored events, `caused_by_actor_id` for
+membership, never passive `subject_actor_id` alone); FR-007 `event_visibility`
+propagation and evidence;
 handoff-packet (`evidence/v2/observation/handoff.md`) accuracy, recipient, and
 version freshness; direction-bound cursor replay; truthful side-specific
 `around` coverage; and the accepted I-010E `@2` no-code consumer rebind. The
