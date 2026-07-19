@@ -6,10 +6,14 @@ dedup. Slice-030 classifier projection behavior is out of scope here.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 import unittest
+from unittest.mock import patch
 
+import nunchi.observation as observation_module
 from evals.v2.observation.run_scenes import run_budget_sweep
 from nunchi.observation import (
     ContinuationError,
@@ -19,7 +23,7 @@ from nunchi.observation import (
     validate_attention_request,
     validate_context_continuation,
 )
-from tests.v2.observation.helpers import make_message, make_provider, seed_room
+from tests.v2.observation.helpers import make_message, make_provider, make_reaction, seed_room
 
 
 def _room_with_events(count: int, provider=None):
@@ -1244,6 +1248,144 @@ class TestRetentionCoupledAuxiliaryState(unittest.TestCase):
             }),
             "observed",
         )
+
+
+class TestSharedContinuationAuthorityAndRelationGaps(unittest.TestCase):
+    class _FixedUuid:
+        def __init__(self, value: str):
+            self.hex = value * 32
+
+    def test_generated_handle_collision_retries_without_overwriting_authority(self):
+        provider, _ = _room_with_events(2)
+        continuation = ContinuationProvider(provider, max_handles=3)
+        values = [self._FixedUuid("a"), self._FixedUuid("a"), self._FixedUuid("b")]
+        with patch.object(observation_module.uuid, "uuid4", side_effect=values):
+            first = continuation.issue(
+                trigger_event_id="e1", originating_event_ids=["e1"],
+                max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            )
+            second = continuation.issue(
+                trigger_event_id="e2", originating_event_ids=["e2"],
+                max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            )
+        self.assertNotEqual(first["handle_id"], second["handle_id"])
+        self.assertEqual(len(continuation._capabilities), 2)
+        self.assertEqual(
+            continuation._capabilities[first["handle_id"]]["bound_to"]["trigger_event_id"],
+            "e1",
+        )
+
+    def test_wrappers_share_provider_wide_state_and_limits(self):
+        provider, _ = _room_with_events(1)
+        first = ContinuationProvider(provider, max_handles=1, max_active_cursors_per_handle=2)
+        second = ContinuationProvider(provider, max_handles=1, max_active_cursors_per_handle=2)
+        self.assertIs(first._capabilities, second._capabilities)
+        capability = first.issue(
+            trigger_event_id="e1", originating_event_ids=["e1"],
+            max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        with self.assertRaises(ContinuationError):
+            second.issue(
+                trigger_event_id="e1", originating_event_ids=["e1"],
+                max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            )
+        self.assertTrue(second.revoke(capability["handle_id"]))
+        second.issue(
+            trigger_event_id="e1", originating_event_ids=["e1"],
+            max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        with self.assertRaises(ValueError):
+            ContinuationProvider(provider, max_handles=2, max_active_cursors_per_handle=2)
+
+    def test_cross_wrapper_concurrent_issue_obeys_one_global_cap(self):
+        provider, _ = _room_with_events(1)
+        wrappers = [
+            ContinuationProvider(provider, max_handles=1),
+            ContinuationProvider(provider, max_handles=1),
+        ]
+        barrier = Barrier(2)
+
+        def issue(wrapper):
+            barrier.wait()
+            try:
+                return wrapper.issue(
+                    trigger_event_id="e1", originating_event_ids=["e1"],
+                    max_events_per_fetch=1, max_bytes_per_fetch=8192,
+                )["handle_id"]
+            except ContinuationError:
+                return "rejected"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(issue, wrappers))
+        self.assertEqual(results.count("rejected"), 1)
+        self.assertEqual(len(wrappers[0]._capabilities), 1)
+
+    def test_collision_exhaustion_rejects_without_overwriting_first_handle(self):
+        provider, _ = _room_with_events(2)
+        continuation = ContinuationProvider(provider, max_handles=3)
+        fixed = self._FixedUuid("a")
+        with patch.object(observation_module.uuid, "uuid4", return_value=fixed):
+            first = continuation.issue(
+                trigger_event_id="e1", originating_event_ids=["e1"],
+                max_events_per_fetch=1, max_bytes_per_fetch=8192,
+            )
+            with self.assertRaises(ContinuationError):
+                continuation.issue(
+                    trigger_event_id="e2", originating_event_ids=["e2"],
+                    max_events_per_fetch=1, max_bytes_per_fetch=8192,
+                )
+        self.assertEqual(list(continuation._capabilities), [first["handle_id"]])
+        self.assertEqual(
+            continuation._capabilities[first["handle_id"]]["bound_to"]["trigger_event_id"],
+            "e1",
+        )
+
+    def test_unavailable_literal_relation_targets_are_reported_as_gaps(self):
+        cases = [
+            make_message("reply", "discord:1001", "reply", reply_to_event_id="missing"),
+            make_message("thread", "discord:1001", "thread", thread_root_event_id="missing"),
+            make_reaction("reaction", "discord:1001", "missing", "+1"),
+        ]
+        for event in cases:
+            with self.subTest(event_type=event["type"], event_id=event["id"]):
+                provider = make_provider()
+                seed_room(provider, [event])
+                snapshot = provider.snapshot(
+                    trigger_event_id=event["id"], max_events=5, max_bytes=65536
+                )
+                self.assertTrue(snapshot["coverage"]["has_gaps"])
+
+    def test_budget_excluded_known_relation_reports_actual_truncation_cause(self):
+        target = make_message(
+            "target", "discord:1001", "x" * 200,
+            timestamp="2026-07-17T01:00:00Z",
+        )
+        trigger = make_message(
+            "trigger", "discord:1001", "reply",
+            timestamp="2026-07-17T01:00:10Z", reply_to_event_id="target",
+        )
+        provider = make_provider()
+        seed_room(provider, [target, trigger])
+
+        event_limited = provider.snapshot(
+            trigger_event_id="trigger", max_events=1, max_bytes=65536
+        )
+        self.assertTrue(event_limited["coverage"]["has_gaps"])
+        self.assertIn("events", event_limited["coverage"]["truncated_by"])
+
+        trigger_bytes = serialized_byte_size(trigger)
+        byte_limited = provider.snapshot(
+            trigger_event_id="trigger", max_events=5, max_bytes=trigger_bytes
+        )
+        self.assertTrue(byte_limited["coverage"]["has_gaps"])
+        self.assertIn("bytes", byte_limited["coverage"]["truncated_by"])
+
+        age_limited = provider.snapshot(
+            trigger_event_id="trigger", max_events=5, max_bytes=65536,
+            max_age_seconds=1,
+        )
+        self.assertTrue(age_limited["coverage"]["has_gaps"])
+        self.assertIn("age", age_limited["coverage"]["truncated_by"])
 
 
 if __name__ == "__main__":

@@ -44,12 +44,15 @@ missing_relation {'has_more_before': False, 'has_more_after': False,
 4. Mark relation-target absence as `has_gaps: true`; if a known retained target
    cannot fit due an actual event/byte/age cap, preserve the exact truncation
    cause already produced by assembly.
-5. Add direct and concurrent wrapper regressions, rerun the complete matrix and
+5. Preserve the provider/continuity lifetime's last parseable timestamp as a
+   constant-size monotonic watermark even after its source event is evicted by
+   undated retained events.
+6. Add direct and concurrent wrapper regressions, rerun the complete matrix and
    exact scan, freeze a successor, and obtain fresh independent review.
 
 ## Lifecycle effect
 
-T131 is superseded by T138. The active Hermes review of `80c1de2` and any later
+T131 is superseded by T140. The active Hermes review of `80c1de2` and any later
 report are stale for approval, though their findings remain review input. Phase
 24 caller-memory/resource/governance fixes at `564c9d5` remain settled inputs.
 The slice remains `ACTIVE`; nothing here establishes `CONVERGED`,

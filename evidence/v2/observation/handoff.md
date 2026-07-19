@@ -1242,3 +1242,57 @@ only object eligible for the next independent whole-slice review. T131 remains
 open until that review returns and every finding is adjudicated. Nothing here
 establishes `CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment,
 release, promotion, or cutover authority.
+
+## Phase 25 continuation-authority, relation-gap, and timestamp correction
+
+The late independent rejection of exact object
+`80c1de2ed5941c1cc5d4e28ea3f13d84dc39b6d2` reported six HIGH mechanisms. Its
+full report is preserved at
+`evidence/v2/observation/review-2026-07-19-80c1de2-late-rejection.md`.
+Current adjudication is:
+
+1. caller-owned fetch TOCTOU — closed by Phase 24 private request/context copies;
+2. caller-owned receipt TOCTOU — closed by Phase 24 exact private receipt copy;
+3. shared governance completion misreporting — the attempted shared change was
+   quarantined at `8f78ec5`; a slice-owned literal-state checker now reports
+   checked, explicitly superseded, and open IDs without modifying that oracle;
+4. expiry-presence comparator loss — closed by comparing
+   `expires_at_present` while keeping exact clock values opaque;
+5. parseable timestamp watermark erased by undated eviction — closed by one
+   constant-size provider/continuity-lifetime monotonic watermark;
+6. missing relation targets falsely gap-free — closed for unavailable and
+   budget-excluded reply/thread/reaction targets with exact budget causes.
+
+Separate Codex probes additionally found generated continuation-handle overwrite
+and cross-wrapper capacity multiplication. Provider-owned shared continuation
+state, identical wrapper-limit enforcement, collision retry, collision-exhaustion
+rejection, and concurrent wrapper tests close those mechanisms. Codex's provider
+blocked final report generation; its probes are review input, never approval.
+
+Phase 25 RED included seven comparator/authority/gap failures and one timestamp-
+eviction failure. Focused GREEN receipts include:
+
+```text
+Ran 31 tests in 0.020s — OK
+SLICE020_TASK_STATE OK total=140 checked=132
+superseded=T107,T112,T119,T124,T131 open=T103,T139,T140
+```
+
+Complete settled-tree matrix:
+
+| Command | Result |
+|---|---|
+| Observation discovery | 182 tests, OK |
+| aggregate scenes | 53 rows, 0 FAIL (9 identity; 7 budget; 24 continuation; 4 recoverability; 9 equivalence) |
+| Phase 18/23/25 adversarial evaluator | 19 rows, 0 FAIL |
+| attempt-6 corpus conformance | 6 tests, 202/202 accounted for, exact framed digest GREEN |
+| executable docs | 13 tests, OK |
+| full repository suite | 1431 tests, OK; 4 optional-integration skips |
+| verdict fixture discovery | 60 fixtures |
+| Ruff / production Bandit / scanner regressions / governance CLI / task manifest / slice-owned literal state / `git diff --check` / absent generated reviewer checklist | clean |
+
+T139's complete matrix is settled; the immutable successor is exact-scanned
+immediately after freeze. T103 and T140 remain open for the final exact-object
+review and umbrella closure. No current statement claims
+`CONVERGED`, `HANDOFF_READY`, acceptance, integration, deployment, release,
+promotion, or cutover authority.

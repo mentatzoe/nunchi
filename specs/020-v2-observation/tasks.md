@@ -1060,10 +1060,9 @@ current remediation recorded in
 - [X] T129 Enforce active-cursor capacity immediately after binding/expiry
   validation and before fresh deque/window construction, preserving existing
   cursor-chain progress under the provider-shared lock
-- [X] T130 Preserve literal checkbox state separately from normalized graph
-  identity; make the read-only manifest report only checked IDs and require the
-  effective candidate's committed tasks to be literally complete before
-  `Tasks complete: YES` can pass
+- [X] T130 Detect and quarantine the attempted cross-slice shared-governance
+  modification at `8f78ec5`; preserve the literal-completion finding and route
+  its slice-owned implementation to T137 instead of changing the shared oracle
 - [ ] T131 Regenerate standard/adversarial evidence on the settled Phase 23/24
   tree; rerun the complete test/corpus/verdict/Ruff/Bandit/static/governance/
   task-manifest/diff matrix; exact-scan the whole activation-to-candidate range;
@@ -1091,29 +1090,36 @@ Phase 24 head `564c9d55f0fa0b5a81c8a3507d2060e0fc836d69` in
 
 - [X] T132 Preserve and reproduce comparator expiry-presence loss, generated
   handle overwrite, cross-wrapper cap bypass, and missing relation-gap coverage
-- [ ] T133 Add RED/GREEN request/page comparator coverage for expiry presence:
+- [X] T133 Add RED/GREEN request/page comparator coverage for expiry presence:
   exact expiry clock values remain opaque, but absent versus present is a
   semantic capability difference
-- [ ] T134 Add RED/GREEN generated-handle collision tests and implement bounded
+- [X] T134 Add RED/GREEN generated-handle collision tests and implement bounded
   retry/fail-closed issuance that never overwrites live capability authority
-- [ ] T135 Move continuation handle/cursor registries and limits into one
+- [X] T135 Move continuation handle/cursor registries and limits into one
   provider-owned shared state; identical-limit wrappers share the global cap
   and mismatched-limit wrappers reject before use
-- [ ] T136 Add RED/GREEN relation-gap cases: unavailable reply/thread/reaction
+- [X] T136 Add RED/GREEN relation-gap cases: unavailable reply/thread/reaction
   targets set `has_gaps`, while known targets excluded by budgets retain the
   actual `events`/`bytes`/`age` truncation cause
-- [ ] T137 Regenerate evidence and rerun the complete test/eval/security/
-  governance matrix plus exact whole-slice scan; freeze/push a new immutable
-  T001–T138 object
-- [ ] T138 Obtain fresh independent fail-closed review of that exact object and
+- [X] T137 Add a slice-owned literal task-state checker that labels checked,
+  superseded, and genuinely open IDs without altering the shared governance
+  oracle
+- [X] T138 Add RED/GREEN timestamp-order coverage across undated retention
+  eviction and preserve one constant-size monotonic parseable-time watermark
+  for the provider/continuity lifetime
+- [X] T139 Regenerate evidence, rerun the complete matrix and exact whole-slice
+  scan, and freeze/push a new immutable T001–T140 object
+- [ ] T140 Obtain fresh independent fail-closed review of that exact object and
   fix every CRITICAL/HIGH blocker before candidate attempt 2 or handoff
 
 ### Phase 25 dependencies
 
 - T133–T136 depend on T132 and may proceed independently after RED.
-- T137 depends on T133–T136; T138 depends on T137 and supersedes T131/T124 as
+- T137 depends on T132; T138 depends on the complete `80c1de2` rejection;
+  T139 depends on T133–T138; T140 depends on T139 and supersedes T131/T124 as
   the sole final convergence review.
 
 **Checkpoint**: capability presence is semantic, generated IDs never overwrite
-authority, provider-wide caps survive wrapper multiplicity, and unavailable
-literal relation targets are disclosed as gaps.
+authority, provider-wide caps survive wrapper multiplicity, unavailable literal
+relation targets are disclosed as gaps, and the timestamp watermark survives
+retention eviction.

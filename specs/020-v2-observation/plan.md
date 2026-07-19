@@ -151,17 +151,17 @@ parity claim
 |---|---|---|
 | Selected V2 boundary | PASS | Observation supplies facts only and owns no participant contribution. |
 | Human-shaped judgment | PASS | Deterministic paths are limited to transport-proven non-events. |
-| Truthful identity/observation | PASS | T083–T130 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-completion truth. |
+| Truthful identity/observation | PASS | T083–T138 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-state truth. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T133–T138) | Phase 24 caller-memory/resource/governance mechanisms are settled, but independent probes reproduce expiry-presence comparison loss, generated handle overwrite, cross-wrapper cap bypass, and undisclosed relation-target gaps. T133–T138 must close those authority/truth gaps, rerun/freeze/scan, and obtain fresh review. |
+| Evidence before claims | BLOCKED (T140) | Phase 24/25 runtime, authority, gap, timestamp, slice-owned literal-state, complete-matrix, and immutable-freeze mechanisms are locally GREEN. T140 must obtain fresh exact-object review. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
 | Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; the slice remains `ACTIVE` through correction and may advance only through a new candidate and independent handoff attempt. |
 
-Post-design re-check: BLOCKED on Phase 25 T133–T138. Earlier runtime, scanner,
+Post-design re-check: BLOCKED on Phase 25 T140. Runtime, scanner,
 ordering, input, corpus-byte, receipt-uniqueness, caller-memory, early-resource,
-and governance-completion mechanisms remain locally GREEN; continuation/
-comparator authority and relation-gap truth are open. A new immutable object,
+continuation/comparator authority, relation-gap, lifetime timestamp, and
+slice-owned literal-state mechanisms are locally GREEN. A new immutable object,
 exact whole-slice scan, and fresh independent verdict are required. This status
 grants no acceptance or cutover authority.
 

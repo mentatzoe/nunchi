@@ -57,24 +57,38 @@ implicit.
 | S04 False-suppression scars | Referential mention/resolution/other-addressee/class-address never enter deterministic hygiene | `identity-and-hygiene.jsonl` (`ID-S04-*`, 2 rows) | same |
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
-| S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences are explicit; authoritative order, one-sided event facts, actors, semantic coverage/budgets, and continuation-page state cannot disappear | `s13-equivalence.jsonl` (`CAP-S13-*`, 8 rows) | same |
+| S13 Adapter equivalence | Equivalent supplied facts normalize equivalently; capability-only differences are explicit; authoritative order, one-sided event facts, actors, semantic coverage/budgets, continuation-page state, and expiry presence cannot disappear | `s13-equivalence.jsonl` (`CAP-S13-*`, 9 rows) | same |
 | S15 Context budget | Snapshot/fetch hard caps and exact closed host binding enforced with `I-010E` byte telemetry; authority, exclusive expiry, cursor, delivery, generation, and actor state remain isolated/bounded; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 11 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 52 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 53 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18/23 atomicity/resource evidence
+## Phase 18/23/25 atomicity/resource evidence
 
-`phase18-adversarial.jsonl` contains 15 deterministic PASS rows: five
+`phase18-adversarial.jsonl` contains 19 deterministic PASS rows: five
 barrier-controlled continuation atomicity cases, three retention-gap coverage
 cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
-one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
+four Phase 25 provider-wide continuation-authority/relation-gap cases, plus one
+explicit N=64/2N=128 replay metric row. The measured retained-deque visits
 after initial window creation are 0 and 0; an over-limit fresh fetch also records
 zero retained-deque visits. Reproduce with:
 
 ```sh
 PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
+```
+
+## Literal task-state evidence
+
+The shared governance graph intentionally normalizes checkbox state for stable
+task identity. Slice 020 therefore uses a separate read-only checker that
+reports checked, explicitly superseded, and genuinely open IDs without editing
+the shared oracle:
+
+```sh
+python3 scripts/check_slice020_task_state.py \
+  --tasks specs/020-v2-observation/tasks.md \
+  --allow-open T103,T140
 ```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

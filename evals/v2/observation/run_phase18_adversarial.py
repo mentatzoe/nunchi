@@ -20,6 +20,9 @@ from tests.v2.observation.test_input_atomicity import (
     TestCallerMemoryIsolation,
     TestEarlyCursorLimit,
 )
+from tests.v2.observation.test_budget_and_continuation import (
+    TestSharedContinuationAuthorityAndRelationGaps,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = REPO_ROOT / "evidence/v2/observation/phase18-adversarial.jsonl"
@@ -39,6 +42,10 @@ CASES = (
     ("P23-INPUT-002", TestCallerMemoryIsolation, "test_ingest_copies_complete_native_input_before_validation"),
     ("P23-INPUT-003", TestCallerMemoryIsolation, "test_copy_failures_reject_without_state_mutation"),
     ("P23-RESOURCE-001", TestEarlyCursorLimit, "test_over_limit_fresh_fetch_rejects_before_retained_deque_visit"),
+    ("P25-AUTH-001", TestSharedContinuationAuthorityAndRelationGaps, "test_generated_handle_collision_retries_without_overwriting_authority"),
+    ("P25-AUTH-002", TestSharedContinuationAuthorityAndRelationGaps, "test_cross_wrapper_concurrent_issue_obeys_one_global_cap"),
+    ("P25-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_unavailable_literal_relation_targets_are_reported_as_gaps"),
+    ("P25-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_budget_excluded_known_relation_reports_actual_truncation_cause"),
 )
 
 

@@ -118,6 +118,31 @@ class TestReferenceEquivalence(unittest.TestCase):
         self.assertTrue(any("next_cursor presence" in diff for diff in result["unexplained"]))
         self.assertTrue(any("coverage.has_more_after" in diff for diff in result["unexplained"]))
 
+    def test_continuation_expiry_presence_is_semantic_but_clock_value_is_opaque(self):
+        left = _snapshot_from([make_message("e1", "discord:1001", "hi")], "e1")
+        capability = {
+            "handle_id": "opaque-left",
+            "bound_to": {
+                "participant_id": "vigil", "room_id": "42",
+                "continuity_scope_id": "scope", "trigger_event_id": "e1",
+            },
+            "can_fetch_before": True, "can_fetch_after": True,
+            "can_fetch_around_event": True,
+            "max_events_per_fetch": 5, "max_bytes_per_fetch": 8192,
+            "expires_at": "2026-07-20T00:00:00Z",
+        }
+        left["continuation"] = capability
+        right = deepcopy(left)
+        right["request_id"] = "different-request"
+        right["continuation"]["handle_id"] = "opaque-right"
+        right["continuation"]["expires_at"] = "2026-07-21T00:00:00Z"
+        self.assertTrue(compare_requests(left, right)["equivalent"])
+
+        right["continuation"].pop("expires_at")
+        result = compare_requests(left, right)
+        self.assertFalse(result["equivalent"])
+        self.assertTrue(any("expires_at_present" in diff for diff in result["unexplained"]))
+
 
 class TestComparatorContractIsReusableNotAParityClaim(unittest.TestCase):
     def test_comparator_result_carries_no_installed_surface_field(self):

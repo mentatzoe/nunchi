@@ -230,6 +230,24 @@ class TestFailClosedOrderingAndConfiguration(unittest.TestCase):
             ))
         self.assertEqual([event["id"] for event in provider._events], ["e1", "e2"])
 
+    def test_timestamp_watermark_survives_undated_event_eviction(self):
+        provider = make_provider(retention_max_events=2)
+        provider.ingest(candidate(make_message(
+            "e1", "discord:1001", "later", timestamp="2026-07-19T00:00:10Z"
+        )))
+        provider.ingest(candidate(make_message("e2", "discord:1001", "undated one")))
+        provider.ingest(candidate(make_message("e3", "discord:1001", "undated two")))
+        self.assertEqual([event["id"] for event in provider._events], ["e2", "e3"])
+        self.assertIsNotNone(provider._last_parseable_timestamp)
+        watermark = provider._last_parseable_timestamp
+        assert watermark is not None
+        self.assertEqual(watermark.isoformat(), "2026-07-19T00:00:10+00:00")
+        with self.assertRaises(ObservationInputError):
+            provider.ingest(candidate(make_message(
+                "e4", "discord:1001", "earlier", timestamp="2026-07-19T00:00:05Z"
+            )))
+        self.assertEqual([event["id"] for event in provider._events], ["e2", "e3"])
+
     def test_invalid_constructor_identity_room_or_visibility_rejects_eagerly(self):
         invalid_overrides = {
             "participant_id": "",

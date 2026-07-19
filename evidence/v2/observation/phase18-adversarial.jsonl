@@ -12,4 +12,8 @@
 {"case_id": "P23-INPUT-002", "detail": "", "result": "PASS", "test": "TestCallerMemoryIsolation.test_ingest_copies_complete_native_input_before_validation"}
 {"case_id": "P23-INPUT-003", "detail": "", "result": "PASS", "test": "TestCallerMemoryIsolation.test_copy_failures_reject_without_state_mutation"}
 {"case_id": "P23-RESOURCE-001", "detail": "", "result": "PASS", "test": "TestEarlyCursorLimit.test_over_limit_fresh_fetch_rejects_before_retained_deque_visit"}
+{"case_id": "P25-AUTH-001", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_generated_handle_collision_retries_without_overwriting_authority"}
+{"case_id": "P25-AUTH-002", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_cross_wrapper_concurrent_issue_obeys_one_global_cap"}
+{"case_id": "P25-GAP-001", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_unavailable_literal_relation_targets_are_reported_as_gaps"}
+{"case_id": "P25-GAP-002", "detail": "", "result": "PASS", "test": "TestSharedContinuationAuthorityAndRelationGaps.test_budget_excluded_known_relation_reports_actual_truncation_cause"}
 {"case_id": "P18-RESOURCE-METRICS", "deque_visits_2n": 0, "deque_visits_n": 0, "detail": "cursor replay excludes fresh-page setup and counts retained-deque iteration", "linear_bound": 8, "n": 64, "result": "PASS", "two_n": 128}

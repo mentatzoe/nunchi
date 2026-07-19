@@ -252,11 +252,13 @@ def _compare_coverage(
 def _normalized_continuation(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
-    return {
+    normalized = {
         key: item
         for key, item in value.items()
         if key not in {"handle_id", "expires_at"}
     }
+    normalized["expires_at_present"] = "expires_at" in value
+    return normalized
 
 
 def _compare_documents(

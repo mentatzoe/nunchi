@@ -889,11 +889,11 @@ class ObservationProvider:
         self._evicted = False
         self._unroutable_count = 0
         self._last_parseable_timestamp: datetime | None = None
-        self._last_parseable_event_id: str | None = None
         self._max_pending_receipts = max_pending_receipts
         self._pending_receipts: OrderedDict[str, dict] = OrderedDict()
         self._attested_request_ids: OrderedDict[str, None] = OrderedDict()
         self._request_id_filter = bytearray(REQUEST_ID_FILTER_BYTES)
+        self._continuation_state: dict[str, Any] | None = None
 
     # -- identity -----------------------------------------------------
 
@@ -1050,10 +1050,6 @@ class ObservationProvider:
             self._actors[actor_id] = merged
 
         evicted_event = self._events[0] if len(self._events) == self._events.maxlen else None
-        evicted_was_last_parseable = (
-            evicted_event is not None
-            and evicted_event["id"] == self._last_parseable_event_id
-        )
         if len(self._events) == self._events.maxlen:
             self._evicted = True
         if evicted_event is not None:
@@ -1069,16 +1065,6 @@ class ObservationProvider:
         self._events.append(event)
         if current_timestamp is not None:
             self._last_parseable_timestamp = current_timestamp
-            self._last_parseable_event_id = event_id
-        elif evicted_was_last_parseable:
-            self._last_parseable_timestamp = None
-            self._last_parseable_event_id = None
-            for retained_event in reversed(self._events):
-                retained_timestamp = _parse_timestamp(retained_event.get("timestamp"))
-                if retained_timestamp is not None:
-                    self._last_parseable_timestamp = retained_timestamp
-                    self._last_parseable_event_id = retained_event["id"]
-                    break
         self._reindex()
         referenced_actor_ids = {
             ref
@@ -1182,7 +1168,8 @@ class ObservationProvider:
             total_bytes += size
             return True
 
-        for relation_id in self._relation_closure_ids(trigger):
+        relation_ids = self._relation_closure_ids(trigger)
+        for relation_id in relation_ids:
             relation_index = self._event_index.get(relation_id)
             if relation_index is not None:
                 try_add(relation_index)
@@ -1212,7 +1199,12 @@ class ObservationProvider:
 
         included_indices = sorted(selected)
         included_events = [deepcopy(selected[index]) for index in included_indices]
-        has_gaps = self._evicted and included_indices[0] == 0
+        has_relation_gap = any(
+            (relation_index := self._event_index.get(relation_id)) is None
+            or relation_index not in selected
+            for relation_id in relation_ids
+        )
+        has_gaps = has_relation_gap or (self._evicted and included_indices[0] == 0)
         if not has_gaps:
             has_gaps = any(
                 b - a > 1 for a, b in zip(included_indices, included_indices[1:])
@@ -1359,14 +1351,39 @@ class ContinuationProvider:
                 raise ValueError(f"{name} must be a positive integer")
         self._provider = provider
         self._lock = provider._lock
-        self._max_handles = max_handles
-        self._max_active_cursors_per_handle = max_active_cursors_per_handle
-        self._capabilities: dict[str, dict] = {}
-        self._trigger_generations: dict[str, int] = {}
-        self._originating_event_ids: dict[str, frozenset[str]] = {}
-        self._cursors: dict[str, set[str]] = {}
-        self._cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
-        self._cursor_sequences: dict[str, int] = {}
+        with self._lock:
+            state = provider._continuation_state
+            if state is None:
+                state = {
+                    "max_handles": max_handles,
+                    "max_active_cursors_per_handle": max_active_cursors_per_handle,
+                    "capabilities": {},
+                    "trigger_generations": {},
+                    "originating_event_ids": {},
+                    "cursors": {},
+                    "cursor_windows": {},
+                    "cursor_sequences": {},
+                }
+                provider._continuation_state = state
+            elif (
+                state["max_handles"] != max_handles
+                or state["max_active_cursors_per_handle"]
+                != max_active_cursors_per_handle
+            ):
+                raise ValueError(
+                    "continuation wrappers for one provider must use identical "
+                    "max_handles and max_active_cursors_per_handle limits"
+                )
+            self._max_handles = state["max_handles"]
+            self._max_active_cursors_per_handle = state[
+                "max_active_cursors_per_handle"
+            ]
+            self._capabilities = state["capabilities"]
+            self._trigger_generations = state["trigger_generations"]
+            self._originating_event_ids = state["originating_event_ids"]
+            self._cursors = state["cursors"]
+            self._cursor_windows = state["cursor_windows"]
+            self._cursor_sequences = state["cursor_sequences"]
 
     @_with_state_lock
     def issue(
@@ -1402,7 +1419,14 @@ class ContinuationProvider:
             raise ContinuationError(
                 f"continuation handle limit {self._max_handles} reached; revoke or expire a handle"
             )
-        handle_id = f"cont-{uuid.uuid4().hex[:12]}"
+        for _ in range(16):
+            handle_id = f"cont-{uuid.uuid4().hex[:12]}"
+            if handle_id not in self._capabilities:
+                break
+        else:
+            raise ContinuationError(
+                "could not generate a fresh continuation handle after 16 attempts"
+            )
         capability = {
             "handle_id": handle_id,
             "bound_to": {
