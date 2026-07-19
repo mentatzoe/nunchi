@@ -27,7 +27,7 @@ human-shaped, measurable, lifecycle-safe, and integration-ready
 
 - [x] CHK011 Do scenarios cover confident suppress, grounded wake advice, direct DEFER, margin DEFER, disabled delegation, trusted preattention bypass, unproven recovery, ERROR, and core/CLI parity? [Coverage, Spec §User Scenarios & Testing]
 - [x] CHK012 Are forged output/advice, request-controlled configuration, provider retries, invalid transitions, trusted actual/declared attention-budget boundaries, host-secret projection leaks, same-class address, and apparent-resolution scars addressed? [Edge Case, Spec §Edge Cases]
-- [x] CHK013 Is the immutable attention stage limited to accepted I-010E `@2`'s closed classifier/bypass, effective-route, valve, policy/model-source, and error shapes when a valid request ID exists, while representing every selected effective-policy and NO_WAKE provenance obligation and forbidding fabricated IDs/receipts for unassignable pre-validation failures and downstream host/transport facts? [Completeness, Spec §Resolved post-acceptance contract blocker, FR-012]
+- [x] CHK013 Is the immutable attention stage limited to accepted I-010E `@2`'s closed classifier/bypass, effective-route, valve, policy/model-source, and error shapes when a valid request ID and eligible host-owned sink exist, while distinguishing a single offered record from established persistence, representing every selected effective-policy and NO_WAKE provenance obligation, and forbidding fabricated IDs/receipts for unassignable or no-sink paths and downstream host/transport facts? [Completeness, Spec §Resolved post-acceptance contract blocker, FR-012]
 - [x] CHK014 Are deterministic mechanics, replay, multi-model evidence, downstream canary protocol, and margin evidence distinguished so unit tests cannot overclaim social quality or create a dependency cycle? [Evidence, Spec §FR-014, SC-004–SC-006]
 - [x] CHK015 Can every success criterion and handoff obligation be measured against a named ordinary artifact or result? [Measurability, Spec §SC-001–SC-008, FR-015]
 - [x] CHK016 Is the exact CLI stdout/stderr/exit 0/1/2/3 process contract complete for valid, bypass, schema-invalid, operational, and unreadable inputs? [Completeness, Spec §FR-019]
@@ -97,7 +97,7 @@ before the zero-CRITICAL/HIGH analysis and slice-readiness gates
 - [x] CHK044 Is “contract-equivalent” defined by an objective comparison rule for core and CLI outputs, including which audit/provenance fields must match exactly and which values, if any, may legitimately differ? [Measurability, Ambiguity, Spec §FR-001, SC-001; Plan §CLI Process Contract]
 - [x] CHK045 Is the complete transition-matrix domain enumerated so “zero invalid success pairs” and “zero unsafe suppression” have a finite, reproducible denominator across dispositions, policy states, recoverability, margin evidence, and error overrides? [Measurability, Spec §SC-002; Tasks §T003, T014–T017]
 - [x] CHK046 Are social-quality acceptance thresholds or explicit non-gating evidence rules defined for mistaken suppressions, missed suppressions, wake volume, three-family disagreement, and false-suppression scars, rather than requiring reports whose pass/fail meaning is unspecified? [Gap, Measurability, Spec §FR-014, SC-004, SC-005; Plan §Acceptance Scenes and Evidence]
-- [x] CHK047 Are model/evaluation records required to include enough immutable provenance to reproduce and compare attempts—canonical scene IDs, exact provider model ID, provider and endpoint class, date, prompt/config identity, policy source, commands, results, and override authority? [Traceability, Spec §FR-014; Plan §Acceptance Scenes and Evidence; Tasks §T023]
+- [x] CHK047 Are model/evaluation requirements deterministic before execution through a committed closed family-to-exact-model selection manifest, and do results include enough immutable provenance to reproduce and compare attempts—canonical scene IDs, manifest identity, exact provider model ID, provider and endpoint class, date, prompt/config identity, policy source, commands, results, and override authority? [Traceability, Spec §FR-014; Plan §Acceptance Scenes and Evidence; Tasks §T009, T023]
 - [x] CHK048 Do the success criteria distinguish what deterministic tests, replay, multi-model runs, preregistered downstream canaries, installed-runtime evidence, and final live parity can each establish, including explicit claims that remain unavailable at slice-030 handoff? [Evidence, Consistency, Spec §FR-014, SC-004–SC-007, Explicit Exclusions; Plan §Owner Handoff]
 
 ### Scenario, Edge-Case, and Non-Functional Coverage
@@ -162,7 +162,7 @@ implementation
 
 ### Documentation Freshness Dispositions
 
-- [x] CHK076 Is the exact-path inventory requirement measurable as the same 32 unique paths across spec, plan, and T025 with exactly 6 `UPDATE`, 14 `NO_IMPACT`, and 12 `HANDOFF` dispositions? [Measurability, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025]
+- [x] CHK076 Is the exact-path inventory requirement measurable as the same 43 unique paths across spec, plan, and T025 with exactly 7 `UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF` dispositions? [Measurability, Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025]
 - [x] CHK077 Does the documentation review require one disposition for every exact affected ordinary path across behavior, contracts, configuration/defaults, install/upgrade, entry points, supported surfaces, security, evidence grade, limitations, version/current/release state, diagrams, examples, and commands, with no grouped path or wildcard substitution? [Completeness, Documentation, Spec §Documentation Freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK078 Does every `UPDATE` requirement name the exact document, concrete claim delta, accountable task/lane, candidate-relative validation for applicable links/diagrams/examples/commands/machine-checkable claims, and ordinary evidence needed for PASS? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
 - [x] CHK079 Does every `NO_IMPACT` requirement name one exact path, give a concrete candidate-specific rationale, require reviewer identity and ordinary handoff evidence, and remain rejectable when the exact candidate diff or resulting claim invalidates the rationale? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
@@ -211,3 +211,69 @@ slice-owned clarifications and accepted dependency amendments. Accepted I-010B
 an explicit non-blocking `v2-program-owner` handoff rather than a bound-slice
 finding. Slice 030 remains `PLANNED` pending fresh bound analysis and the
 remaining activation prerequisites.
+
+## Formal Reviewer Delta Gate — 2026-07-19
+
+**Purpose**: Apply a fresh formal requirements review after the plan expanded
+the documentation-freshness matrix and sharpened the program-registry and
+slice-110 handoff boundaries.
+
+**Depth**: Formal blocking review
+
+**Actor / timing**: Peer reviewer after spec, plan, and task-graph
+reconciliation and before zero-CRITICAL/HIGH analysis, slice activation, or
+implementation
+
+**Review status**: Complete. These items were reviewed independently against
+the reconciled spec, plan, and dormant task graph; they do not merely inherit
+the earlier 86/86 result.
+
+### Requirement Quality
+
+- [x] CHK087 Are the callable, CLI, decision, receipt, bypass, operational-error, and sink-failure requirements still complete and mutually traceable after the current planning revision, without allowing a documentation-only delta to obscure any I-030A branch? [Completeness, Traceability, Spec §FR-001, FR-004, FR-008, FR-012, FR-017, FR-019; Plan §I-030A callable and CLI equivalence seam]
+- [x] CHK088 Are “slice-local clarification,” “accepted-dependency contract blocker,” “non-blocking handoff,” and “zero scoped CRITICAL/HIGH findings” defined with objective inclusion, exclusion, ownership, and closure criteria so reviewers cannot classify the same mismatch differently? [Ambiguity, Plan §Planning Decisions; Spec §Resolved post-acceptance contract amendments and program handoff; Tasks §Open program-owner handoff]
+- [x] CHK089 Is the exact slice-110 deletion/publication requirement consistent across the planning decision, owner-handoff obligation, specification, and task graph, including the six named source files, removed V1/staging surfaces, and atomically published I-030A names? [Consistency, Plan §Green pre-cutover staging, Owner Handoff; Spec §FR-013, FR-015; Tasks §T020, T026]
+- [x] CHK090 Are every success-criterion denominator, blocking rule, evidence grade, and allowed surface difference objectively defined, including contract equivalence, the 36-row transition domain, pre-run exact model selection, social-evidence non-gates, activation-to-candidate commit-range verification, and documentation-freshness PASS? [Measurability, Spec §SC-001–SC-008; Plan §Acceptance Scenes and Evidence, Candidate Verification Commands]
+- [x] CHK091 Are primary, alternate, exception, recovery, and hostile-input requirements complete for both DEFER valves, trusted bypass, raw or partially trusted `NO_WAKE`, receipt-sink persistence failure, retry exhaustion, malformed evidence, and host-only continuation material? [Coverage, Spec §User Scenarios & Testing, Edge Cases, FR-001, FR-003, FR-006–FR-012, FR-017–FR-020]
+- [x] CHK092 Can every requirement and success criterion be traced to an accountable task, exact ordinary-path artifact, evidence record, and lifecycle gate without treating passing implementation checks as proof of requirement quality? [Traceability, Spec §FR-001–FR-020, SC-001–SC-008; Plan §Ordinary Repository Targets; Tasks §T001–T027, Post-Task Lifecycle Gates]
+- [x] CHK093 Are current V1 behavior, non-current slice-030 staging, an accepted but verification-pending atomic candidate, and `CUTOVER_VERIFIED` current behavior distinguished consistently in all requirement, handoff, and documentation claims? [Consistency, Spec §Control-Plane Boundary, FR-013, Documentation Freshness, Explicit Exclusions; Plan §Green pre-cutover staging, Integration Strategy]
+
+### Governance Boundaries
+
+- [x] CHK094 Does the requirements set state the selected-target authority order, the authority for current implementation/evidence truth, and the escalation route for a conflict that slice 030 cannot resolve? [Governance, Completeness, Spec §Authority source, Control-Plane Boundary; Constitution §Authority and Repository Boundaries]
+- [x] CHK095 Are program authorization, durable assignment, dependency acceptance, zero-finding analysis, isolated-worktree proof, activation evidence, `READY`, and owner-declared `ACTIVE` specified as separate conjunctive gates, none of which can imply another? [Governance, Clarity, Spec metadata; Tasks §Activation Gate; Constitution §Program and Slice Lifecycle Gates]
+- [x] CHK096 Are accepted I-010B/I-010E `@2` consumer truth and the stale `@1` program registry described consistently, with exact amendment provenance, immutable prior history, `v2-program-owner` repair ownership, and no claim that slice 030 completed the repair? [Consistency, Ownership, Spec §Resolved post-acceptance contract amendments and program handoff; Plan §Planning Decisions, Accepted contract amendment resolution; Tasks §Resolved upstream findings, Open program-owner handoff]
+- [x] CHK097 Is the `NON_BLOCKING_HANDOFF` classification supported by explicit requirements explaining why the stale program registry is outside slice 030's dependency/task graph while still requiring correction before any downstream claim relies on the canonical registry? [Clarity, Assumption, Plan §Planning Decisions; Spec §Resolved post-acceptance contract amendments and program handoff; Tasks §Activation Gate]
+- [x] CHK098 Are ownership and handoff boundaries complete for 010-owned schemas, 020 observation, 030 core/CLI, 040 participant hosting, surface integrations, shared guidance, slice-110 atomic publication, integrator acceptance, exact-main verification, release, and promotion? [Completeness, Ownership, Spec §Interface Summary, FR-015, Explicit Exclusions; Plan §Integration Strategy, Documentation ownership, Owner Handoff]
+- [x] CHK099 Are SpecKit-managed content and ordinary product/evidence/documentation content separated exhaustively, including a prohibition on ordinary build, test, evaluation, documentation, packaging, release, or runtime paths depending on the control plane? [Boundary, Spec §Control-Plane Boundary, FR-016, SC-008; Constitution §SpecKit Is Control-Plane Only]
+- [x] CHK100 Do the requirements prohibit authority, assignment, dependency acceptance, lifecycle, handoff, or acceptance facts from entering runtime configuration, classifier input, I-010A/B/E, receipts, participant rosters, social ledgers, obligation queues, or memory services? [Boundary, Spec §Control-Plane Boundary, Explicit Exclusions; Constitution §Program and Slice Lifecycle Gates]
+- [x] CHK101 Are activation and acceptance records immutable, candidate and handoff attempts append-only, rejections returned to `ACTIVE`, new-run versus resume rules unambiguous, and recipient acceptance kept separate from workflow completion and owner handoff? [Consistency, Governance, Spec metadata; Plan metadata; Tasks metadata, Post-Task Lifecycle Gates; Constitution §Program and Slice Lifecycle Gates]
+
+### Documentation Freshness Dispositions
+
+- [x] CHK102 Are the documentation inventories reconciled before analysis so the spec, plan, T025, T026, and checklist name the same 43 exact paths with `7 UPDATE / 16 NO_IMPACT / 20 HANDOFF`, without a superseded inventory coexisting in current requirements? [Consistency, Spec §Documentation Freshness; Plan §Documentation Impact and Freshness; Tasks §T025–T026]
+- [x] CHK103 Is the post-reconciliation inventory count objectively reproducible from unique exact paths, with no duplicates, grouped substitutes, wildcards, or future files silently omitted from its stated denominator? [Measurability, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness]
+- [x] CHK104 Are the eleven newly inventoried surfaces—`AGENTS.md`, `CLAUDE.md`, `evidence/verdict-suite/README.md`, `evidence/v2/contract/README.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`, `integrations/hermes/nunchi-gate/dashboard/manifest.json`, and `integrations/hermes/nunchi-gate/plugin.yaml`—each represented with one consistent disposition, owner, rationale or exact delta, validation obligation, and task trace across all three artifacts? [Completeness, Consistency, Gap, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness; Tasks §T025]
+- [x] CHK105 Does every `UPDATE` requirement name one exact path, the candidate-specific claim delta, accountable owner/task, applicable link/diagram/example/command validation, evidence-grade boundary, and objective PASS evidence? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Constitution §Documentation Freshness Gate]
+- [x] CHK106 Does every `NO_IMPACT` requirement name one exact path, provide a candidate-specific rationale, require reviewer identity and ordinary handoff evidence, and remain rejectable if the exact candidate diff or resulting claim invalidates that rationale? [Completeness, Measurability, Plan §Documentation Impact and Freshness; Tasks §Documentation freshness; Constitution §Documentation Freshness Gate]
+- [x] CHK107 Does every `HANDOFF` requirement name one exact shared or downstream-owned path, state the exact claim delta, identify the accepting owner, prohibit use for slice-owned documentation, and avoid representing deferred work as complete or no-impact? [Completeness, Ownership, Plan §Documentation Impact and Freshness; Spec §Documentation Freshness; Constitution §Documentation Freshness Gate]
+- [x] CHK108 Are the `README.md`, `AGENTS.md`, and `CLAUDE.md` handoff requirements mutually consistent about V1-current truth, staged I-030A, trusted bypass, separate ERROR, CLI behavior, active dual-DEFER policy, atomic publication, verification-pending wording, and the later exact-main gate? [Consistency, Documentation, Plan §Documentation Impact and Freshness; Spec §Control-Plane Boundary, Documentation Freshness]
+- [x] CHK109 Are evidence-index and historical-document requirements clear about which records are updated, which remain unchanged, how V1 scar evidence relates to V2 component evidence, and which social-quality, participant, parity, cutover, release, or promotion claims remain unavailable? [Clarity, Evidence, Plan §Documentation Impact and Freshness; Spec §SC-004–SC-008, Explicit Exclusions]
+- [x] CHK110 Do T025, T026, candidate convergence, the documentation-freshness review, and owner handoff require the reconciled matrix, exact candidate/packet identity, per-path result, reviewer, validation or rationale, routed delta, accepting owner, and ordinary evidence before `HANDOFF_READY`, without relying on the earlier 86/86 checklist result? [Traceability, Governance, Conflict, Tasks §T025–T026, Post-Task Lifecycle Gates; Plan §Documentation Impact and Freshness, Owner Handoff]
+
+## Formal Reviewer Delta Notes
+
+- Mark CHK087–CHK110 complete only from the reconciled requirement text. Code,
+  test, or evaluation success cannot close a requirement-quality item.
+- Record findings inline with the affected CHK ID. Any unresolved conflict,
+  ownership leak, ambiguous gate, or documentation-disposition mismatch blocks
+  zero-CRITICAL/HIGH analysis and slice activation.
+- This checklist does not establish `READY`, create activation evidence,
+  authorize implementation, or record an acceptance decision.
+
+**2026-07-19 delta result**: 110/110 requirement-quality items pass after the
+43-path documentation/configuration inventories, exact six-file slice-110
+publication delta, accepted I-010B/I-010E `@2` inputs, receipt offer/persistence
+semantics, pre-run exact model selection, commit-range verification,
+receipt-sink wake fallback, and non-blocking program-owner registry handoff were
+reconciled across spec, plan, and tasks.

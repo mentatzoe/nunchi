@@ -529,16 +529,21 @@ non-receiptable and MUST NOT fabricate one.
   Accepted I-010E `@2` represents that override only through paired
   `wake_action: "NO_WAKE"` and non-empty `policy_provenance`; the default wake
   path omits both fields, and `WAKE`, other actions, or incomplete pairs reject.
-- **FR-012**: Whenever a parsed request supplies a valid request ID, the engine
-  MUST emit one immutable attention-stage I-010E record correlated by that ID
-  that keeps classifier disposition, effective disposition, valve, override
-  cause, the policy/model provenance representable by the accepted branch,
-  operational error, and
-  classifier-not-invoked bypass provenance distinct. Unreadable input, invalid
-  JSON, and pre-validation failures without an assignable request ID MUST emit
-  no I-010E record and MUST NOT invent a correlation ID. Failure of the receipt
-  sink itself is likewise non-receiptable: it MUST return operational `ERROR`
-  with wake default and explicitly report that no receipt persisted. Latency and
+- **FR-012**: Whenever a parsed request supplies a valid request ID and an
+  eligible host-owned receipt sink exists, the engine MUST **offer** exactly one
+  immutable attention-stage I-010E record correlated by that ID: offer means one
+  invocation of that sink with the record. The record keeps classifier
+  disposition, effective disposition, valve, override cause, the policy/model
+  provenance representable by the accepted branch, operational error, and
+  classifier-not-invoked bypass provenance distinct. **Persisted** means the
+  sole sink invocation completed its defined durable-success protocol; no
+  response or offered record may claim its own persistence. Unreadable input,
+  invalid JSON, pre-validation failure without an assignable request ID, or a
+  path where no eligible sink can be securely constructed MUST make zero offers
+  and MUST NOT invent either a record or correlation ID. Failure of the sole
+  sink invocation means a record was offered but did not establish persistence:
+  it MUST return operational `ERROR` with wake default and report
+  `not-persisted` or `unknown` without a second offer. Latency and
   serialized/token-cost measurements MUST remain ordinary performance evidence,
   not extra fields inside the closed I-010E attention body. The engine MUST
   leave participant, send, and transport outcome facts to later stages and MUST
@@ -547,16 +552,20 @@ non-receiptable and MUST NOT fabricate one.
   effective-policy and `NO_WAKE` provenance requirements directly; neither may
   be hidden in I-010E `error.detail` or a local extension.
 - **FR-013**: The isolated slice branch MUST stage I-030A as additive,
-  non-current symbols inside the owned `core.py`, `cli.py`, classifier, model,
-  and validation seams: `evaluate_v2` and `attention-v2` accept and emit only V2
+  non-current symbols inside the owned `src/nunchi/core.py`,
+  `src/nunchi/cli.py`, `src/nunchi/classifiers.py`, `src/nunchi/models.py`, and
+  `src/nunchi/schema.py` seams: `evaluate_v2` and `attention-v2` accept and emit only V2
   contracts and MUST NOT call, translate to, or fall back through V1. Existing
   public `nunchi.evaluate`, `nunchi admit`, and their V1 tests remain unchanged
   and green solely to preserve current behavior before cutover. The owner packet
-  MUST give `v2-integrator` the exact slice-110 publication delta: remove V1
-  request/verdict handling, `require_pass_corroboration`, reply-bearing output,
-  and hidden local fallbacks; publish I-030A as the public `evaluate`/`admit`
-  behavior; and remove the temporary `evaluate_v2`/`attention-v2` staging names
-  in the same atomic assembled candidate. This staging is not a V1-to-V2
+  MUST give `v2-integrator` the exact slice-110 publication delta across
+  `src/nunchi/core.py`, `src/nunchi/cli.py`, `src/nunchi/classifiers.py`,
+  `src/nunchi/models.py`, `src/nunchi/schema.py`, and
+  `src/nunchi/__init__.py`: remove V1 request/verdict handling,
+  `require_pass_corroboration`, reply-bearing output, and hidden local
+  fallbacks; publish I-030A as the public `evaluate`/`admit` behavior; and
+  remove the temporary `evaluate_v2`/`attention-v2` staging names in the same
+  atomic assembled candidate. This staging is not a V1-to-V2
   compatibility bridge and MUST NOT land on `main` or be documented as current
   behavior before slice 110.
 - **FR-014**: Deterministic tests MUST prove mechanics and transition safety;
@@ -569,6 +578,15 @@ non-receiptable and MUST NOT fabricate one.
   identity, the exact provider model ID, provider, endpoint class, date,
   prompt/config identity, effective-policy source, invocation command, result,
   and any override provenance.
+  Before the first provider call, T009 MUST commit the closed selection manifest
+  `evals/v2/attention/model-selection.json`, mapping each required family to one
+  exact provider model ID, provider, endpoint class, catalog/source evidence,
+  selection date, and `v2-core-owner` review. T023 MUST refuse an absent,
+  uncommitted, duplicate-family, extra-family, or result-mismatched selection.
+  Any exact-ID change invalidates prior results and requires a new pre-run
+  manifest commit; any family substitution still requires Zoe's durable
+  decision. This freezes the Cartesian matrix before results rather than
+  selecting a favorable model after execution.
   The exact required provider matrix is the Cartesian product of those three
   families and every committed case in
   `evals/v2/attention/suppression-scars/cases.jsonl`; each row MUST contain a
@@ -596,7 +614,10 @@ non-receiptable and MUST NOT fabricate one.
   false-suppression evidence; the preregistered downstream canary protocol;
   active-margin state; exact documentation dispositions, validations, reviewer,
   and routed deltas; rejected claims; known limitations; and the slice-110
-  publication/deletion delta. The packet MUST name `v2-wake-owner`, the owners
+  publication/deletion delta across `src/nunchi/core.py`,
+  `src/nunchi/cli.py`, `src/nunchi/classifiers.py`, `src/nunchi/models.py`,
+  `src/nunchi/schema.py`, and `src/nunchi/__init__.py`. The packet MUST name
+  `v2-wake-owner`, the owners
   of slices `060` through `110`, and `v2-integrator` individually, and state
   that every dependent still owes separate acceptance of the exact commit and
   packet before its own activation. Delivery does not fabricate recipient
@@ -704,7 +725,8 @@ non-receiptable and MUST NOT fabricate one.
   `python3 scripts/check_governance.py --check-cli`, `python3 -m unittest`,
   `python3 -m unittest discover -s tests/v2/attention -p 'test_*.py'`,
   `python3 -m evals.v2.attention.runner --all`,
-  `python3 -m evals.verdict_suite.runner --list`, and `git diff --check`, with
+  `python3 -m evals.verdict_suite.runner --list`, and
+  `git diff --check <activation-start>..HEAD`, with
   governance finding zero product artifacts under this slice directory.
   Latency, serialized request/response bytes, provider-reported input/output
   tokens (or explicit `unavailable`), attempt count, provider/model, runtime,
@@ -748,12 +770,14 @@ non-receiptable and MUST NOT fabricate one.
 - **`README.md` disposition**: `HANDOFF` exact I-030A disposition, bypass,
   operational ERROR, CLI, and dual-DEFER claim deltas to `v2-integrator`.
 - **`UPDATE` inventory**: `docs/attention/v2.md`, `evidence/README.md`,
+  `evidence/verdict-suite/README.md`,
   `docs/contracts/verdict-suite-data-model-v1.md`,
   `docs/contracts/verdict-suite-requirements-v1.md`,
   `docs/evaluations/verdict-suite.md`, and
   `docs/evaluations/verdict-suite-runner.md`, preserving V1 scar evidence while
   naming its V2 role.
-- **`NO_IMPACT` inventory**: `docs/archive/v1/README.md`,
+- **`NO_IMPACT` inventory**: `evidence/v2/contract/README.md`,
+  `docs/archive/v1/README.md`,
   `docs/archive/v1/admission-classifier/contract.md`,
   `docs/archive/v1/admission-classifier/data-model.md`,
   `docs/archive/v1/admission-classifier/quickstart.md`,
@@ -764,25 +788,26 @@ non-receiptable and MUST NOT fabricate one.
   `docs/integrations/hermes-core-patch.md`,
   `docs/integrations/hermes-core-patch-test-plan.md`,
   `integrations/claude-code/transport-patch/README.md`,
+  `integrations/hermes/nunchi-gate/dashboard/manifest.json`,
   `integrations/mcp-discord/DESIGN.md`, and
   `integrations/mcp-discord/README.md`. Each path retains the exact per-file
   rationale in plan section Documentation Impact and Freshness; T025 MUST test
   that rationale against the candidate and record the reviewer and ordinary
   handoff evidence rather than treating this inventory as proof.
-- **`HANDOFF` inventory**: `README.md`, `CHANGELOG.md`, `docs/INSTALL.md`,
-  `docs/STABILITY.md`, `docs/adapters.md`,
-  `docs/architecture/v2-selected-design.md`,
-  `docs/contracts/channel-adapter-v1.md`, `docs/integration.md`,
-  `integrations/claude-code/DEFER_EVAL.md`,
-  `integrations/claude-code/README.md`, `integrations/codex/README.md`, and
-  `integrations/hermes/README.md`. Each path uses the exact claim delta and
+- **`HANDOFF` inventory**: `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`,
+  `docs/INSTALL.md`, `docs/STABILITY.md`, `docs/adapters.md`,
+  `docs/architecture/v2-selected-design.md`, `docs/contracts/channel-adapter-v1.md`,
+  `docs/integration.md`, `examples/loader-snippet.md`, `profiles/open-floor.md`, `integrations/claude-code/DEFER_EVAL.md`,
+  `integrations/claude-code/README.md`, `integrations/claude-code/nunchi-gate.env.example`, `integrations/codex/README.md`,
+  `integrations/codex/nunchi-codex/.codex-plugin/plugin.json`, `integrations/codex/nunchi-codex/hooks/hooks.json`,
+  `integrations/hermes/README.md`, and `integrations/hermes/nunchi-gate/plugin.yaml`. Each path uses the exact claim delta and
   accepting owner in plan section Documentation Impact and Freshness:
   integrator-owned cross-surface files go to `v2-integrator`; Claude, Codex,
   and Hermes files go to their named surface owners. No `HANDOFF` row is a
   no-impact finding or a slice-owned documentation escape.
 - **Inventory invariant**: the spec, plan matrix, and T025 MUST retain the same
-  32 exact paths and one disposition per path: 6 `UPDATE`, 14 `NO_IMPACT`, and
-  12 `HANDOFF`.
+  43 exact paths and one disposition per path: 7 `UPDATE`, 16 `NO_IMPACT`, and
+  20 `HANDOFF`.
 - **Handoff evidence**: `evidence/v2/attention/handoff.md` records the exact
   reviewed paths, dispositions, delta, validation, and reviewer.
 

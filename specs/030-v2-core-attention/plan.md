@@ -95,17 +95,21 @@ policy, and one evidence-backed prompt/model configuration
 
 ## Planning Decisions
 
-No slice-local clarification or accepted-dependency blocker remains. Accepted
-I-010B `@2` now represents the selected zero-inclusive active margin and is
-bound by this consumer at
-`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`. The stale
-program-owned canonical registry remains an explicit `v2-program-owner`
-handoff, not a dependency or CRITICAL/HIGH finding in this bound slice; its
-slice-readiness disposition is recorded at
-`evidence/v2/attention/program-interface-registry-readiness-disposition.md`.
-This plan remains `PLANNED` and dormant until fresh bound analysis reports zero
-scoped CRITICAL/HIGH findings and immutable activation evidence establishes
-`READY`.
+No slice-local clarification or accepted-dependency contract blocker remains.
+Accepted I-010B `@2` now represents the selected zero-inclusive active margin
+and is bound by this consumer at
+`evidence/v2/attention/dependency-010-amendment-A2-acceptance.md`. The umbrella
+program's canonical interface registry nevertheless still declares I-010B and
+I-010E as `@1`, while this bound slice correctly consumes their accepted `@2`
+versions. The owner-scoped readiness disposition at
+`evidence/v2/attention/program-interface-registry-readiness-disposition.md`
+records that mismatch as a `NON_BLOCKING_HANDOFF` for this bound slice: it is
+neither slice 030's dependency nor a finding in this slice's requirement/task
+graph. `v2-program-owner` must still synchronize the canonical registry with
+the accepted amendment provenance; `v2-core-owner` records but does not perform
+or claim that program-owned edit. Fresh bound analysis must independently
+report zero scoped CRITICAL/HIGH findings, and immutable activation evidence is
+still required before `READY`.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -115,8 +119,13 @@ scoped CRITICAL/HIGH findings and immutable activation evidence establishes
   `src/nunchi/schema.py` on the isolated slice branch. Keep current public
   `nunchi.evaluate`, `nunchi admit`, V1 internals, and the complete V1 baseline
   unchanged. Neither staging entry point may call or translate through V1. The
-  owner packet gives slice 110 an exact deletion/publication delta that removes
-  V1 and the temporary staging names while publishing I-030A atomically.
+  owner packet gives slice 110 this exact deletion/publication delta: in
+  `src/nunchi/core.py`, `src/nunchi/cli.py`, `src/nunchi/classifiers.py`,
+  `src/nunchi/models.py`, `src/nunchi/schema.py`, and
+  `src/nunchi/__init__.py`, remove the V1 request/verdict handling,
+  `require_pass_corroboration`, reply-bearing output, and hidden local
+  fallbacks; publish I-030A as public `evaluate`/`admit`; and remove the
+  temporary `evaluate_v2`/`attention-v2` names in the same atomic candidate.
 - **Rationale**: Program planning requires lane branches to be independently
   green while main remains V1 and slice 110 alone performs assembly/cutover.
   Additive, unreachable-from-current-runtime staging makes I-030A testable by
@@ -171,8 +180,11 @@ scoped CRITICAL/HIGH findings and immutable activation evidence establishes
   configuration/capability inputs are host-trusted; recoverability is the exact
   `{participant_id, continuity_scope_id, eligible, source}` shape; the required
   host-owned sink is offered the exact I-010E attention-stage record when a
-  valid request ID exists; and the return is I-010B. Sink failure is operational
-  ERROR with wake default and never a false persistence claim. The exact staged
+  valid request ID exists; “offered” means the sink is invoked once with that
+  record, while “persisted” means the sink's durable-success protocol completed.
+  A valid ID without an eligible securely constructed sink makes zero offers;
+  sink-invocation failure is one offer with no persistence, operational ERROR,
+  wake default, and no second attempt. The return is I-010B. The exact staged
   command is `nunchi attention-v2 --config PATH`; stdin supplies only I-010A,
   while that one operator-owned JSON file supplies the other inputs. For
   identical normalized inputs, parsed CLI stdout and the callable return are
@@ -408,12 +420,13 @@ readiness analysis.
 | Single owner and slice lifecycle | PASS | `v2-core-owner` owns I-030A; tasks remain `DORMANT` while the slice is `PLANNED`. |
 | Accepted receipt compatibility | PASS | Accepted I-010E `@2` requires classifier policy provenance and separately receipts only paired `NO_WAKE` plus provenance; this consumer accepted exact amendment candidate `817394d6cd4aa17fc47d7a89ebb8c8d974c595eb`. |
 | Selected zero-width margin / accepted I-010B | PASS | Accepted I-010B `@2` represents applied `effective_margin: 0`; this consumer accepted exact A2-R1 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301`. |
-| Program canonical interface registry | HANDOFF | `v2-program-owner` must synchronize I-010B/I-010E to accepted `@2`; the stale program-owned registry is explicitly non-blocking for this bound slice and is not claimed complete. |
+| Program canonical interface registry | HANDOFF | `v2-program-owner` must synchronize I-010B/I-010E to accepted `@2`; the mismatch is explicitly scoped as a non-blocking owner handoff for slice 030 and is not claimed complete. |
 
-Post-design re-check: PASS for the bound slice. All slice-owned and exact-
-dependency findings are resolved; READY still requires a fresh bound analysis
-with zero scoped CRITICAL/HIGH findings plus the remaining activation
-prerequisites.
+Post-design re-check: PASS for the bound slice. Slice-owned contract questions
+and exact dependency acceptance are resolved; the separately owned canonical
+program-registry mismatch remains an explicit non-blocking handoff. READY still
+requires fresh bound analysis with zero scoped CRITICAL/HIGH findings plus the
+remaining activation prerequisites.
 Because this is a planning-only revision, no `data-model.md`, local contract,
 quickstart, schema, test, corpus, evidence payload, or product documentation is
 created here.
@@ -449,7 +462,8 @@ Slice 020 runs in parallel; 040 begins only after both handoffs.
 **Worktree/branch**: isolated worktree `.worktrees/v2-core-attention/` on branch
 `v2/core-attention`
 
-**Handoff to**: `v2-wake-owner`, owners of slices `060` through `110`, and
+**Handoff to**: `v2-wake-owner`, `v2-hermes-owner`, `v2-claude-owner`,
+`v2-codex-owner`, `v2-adapters-owner`, `v2-security-owner`, and
 `v2-integrator`
 
 **Conflict ownership**: 030 owns core, CLI, classifier prompt/provider, and
@@ -464,7 +478,7 @@ alone resolves final integration conflicts.
 | S04 False-suppression scars | Core replay | No deterministic semantic suppressor; model/effective decisions remain inspectable. | `evidence/v2/attention/s04-suppression-scars/results.jsonl` |
 | S05 Governed suppression | Core policy matrix | Hard stop requires enabled delegation, recoverability, valid transition evidence, and revocable provenance. | `evidence/v2/attention/s05-governed-suppress.jsonl` |
 | S06 WAKE/bypass contribution handoff | Core-neutral decision fixture | WAKE carries only grounded optional advice; trusted preattention-disabled bypass makes no model claim and supplies `PREATTENTION_BYPASS`. | `evidence/v2/attention/core-cli-parity.jsonl` |
-| S08 Dual DEFER valves | Three-family replay | Classifier-DEFER and margin-DEFER remain separate; either only widens attention across incumbent Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3. Live canary execution is downstream. | `evidence/v2/attention/s08-defer-transition/results.jsonl` |
+| S08 Dual DEFER valves | Three-family replay | Classifier-DEFER and margin-DEFER remain separate; either only widens attention across incumbent Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3. Live canary execution is downstream. | `evidence/v2/attention/s08-defer-transition/results.jsonl`; `evidence/v2/attention/model-comparison/results.jsonl` |
 | S09 Operational error | Core and CLI | Every validation/provider/runtime failure remains ERROR with wake default and separate override audit. | `evidence/v2/attention/core-cli-parity.jsonl` |
 | S16 No registry or ledger | Boundary and replay | Engine consumes no prior outcome, obligation, handled/open, roster, or permission state. | `evidence/v2/attention/s04-suppression-scars/results.jsonl` |
 | 030-CLI Core/CLI parity | Core and CLI | Equivalent input/config yields equivalent tagged decision and audit. | `evidence/v2/attention/core-cli-parity.jsonl` |
@@ -480,11 +494,22 @@ The three-family attempts live at
 `evidence/v2/attention/model-comparison/results.jsonl`; the preregistered but
 not-yet-executed protocol lives at
 `evidence/v2/attention/defer-canary/protocol.md`.
+`python3 -m evals.v2.attention.runner --all` dispatches the exact
+`evals/v2/attention/defer-transition/analyze.py` file by filesystem path,
+includes its S08 output in the aggregate result, and fails if that analyzer is
+not executed successfully; the hyphenated evidence-family directory is not
+treated as an importable Python package.
 
 The exact model-comparison matrix is every committed row in
 `evals/v2/attention/suppression-scars/cases.jsonl` crossed with the incumbent
 Gemini 3.1 Flash Lite, frontier GPT-5.5, and open-weight Qwen3 families (unless
-Zoe durably substitutes a family). Each case preregisters `case_id`, canonical
+Zoe durably substitutes a family). Before any provider request, committed
+`evals/v2/attention/model-selection.json` maps those three families one-to-one
+to exact provider model IDs plus provider, endpoint class, catalog/source
+evidence, selection date, and `v2-core-owner` review. A missing/uncommitted,
+duplicate, extra, or result-mismatched mapping blocks execution; changing an
+exact ID requires a new pre-run manifest commit and invalidates older results.
+Each case preregisters `case_id`, canonical
 `scene_id`, contract-valid `request`, and `expected_attention` as `ATTEND` or
 `NOT_ATTEND`. Mistaken suppression is effective `SUPPRESS` over `ATTEND` cases;
 missed suppression is non-`SUPPRESS` over `NOT_ATTEND` cases; wake volume is
@@ -579,23 +604,32 @@ tests/v2/attention/
 
 evals/v2/attention/
 ├── runner.py
+├── model-selection.json
 ├── core-cli/cases.jsonl
 ├── defer-transition/analyze.py
 ├── governed-suppression/cases.jsonl
 └── suppression-scars/cases.jsonl
 
-evidence/v2/attention/
+evidence/
 ├── README.md
-├── core-cli-parity.jsonl
-├── defer-canary/protocol.md
-├── handoff.md
-├── model-comparison/results.jsonl
-├── s04-suppression-scars/results.jsonl
-├── s05-governed-suppress.jsonl
-├── s08-defer-transition/results.jsonl
-└── verification.md
+├── verdict-suite/README.md
+└── v2/attention/
+    ├── README.md
+    ├── core-cli-parity.jsonl
+    ├── defer-canary/protocol.md
+    ├── handoff.md
+    ├── model-comparison/results.jsonl
+    ├── s04-suppression-scars/results.jsonl
+    ├── s05-governed-suppress.jsonl
+    ├── s08-defer-transition/results.jsonl
+    └── verification.md
 
-docs/attention/v2.md
+docs/
+├── attention/v2.md
+├── contracts/verdict-suite-data-model-v1.md
+├── contracts/verdict-suite-requirements-v1.md
+├── evaluations/verdict-suite.md
+└── evaluations/verdict-suite-runner.md
 ```
 
 **Structure Decision**: Evolve the current shared core/CLI seams on an isolated
@@ -616,7 +650,7 @@ layer that could survive the atomic cutover.
 | Transition-policy tests | `tests/v2/attention/test_transition_policy.py` | T003 / US2 |
 | Advice/bypass/error/projection tests | `tests/v2/attention/test_advice_and_errors.py` | T004 / US1–US3 |
 | Replay runner | `evals/v2/attention/runner.py` | T005 / US1–US3 |
-| Suppression-scar corpus | `evals/v2/attention/suppression-scars/cases.jsonl` | T009 / US1 |
+| Suppression-scar corpus and exact pre-run model selection | `evals/v2/attention/suppression-scars/cases.jsonl`, `evals/v2/attention/model-selection.json` | T009 / US1 |
 | Governed-suppression corpus | `evals/v2/attention/governed-suppression/cases.jsonl` | T014 / US2 |
 | DEFER analysis | `evals/v2/attention/defer-transition/analyze.py` | T015 / US2 |
 | Core/CLI corpus | `evals/v2/attention/core-cli/cases.jsonl` | T021 / US3 |
@@ -629,6 +663,8 @@ layer that could survive the atomic cutover.
 | Handoff packet input | `evidence/v2/attention/handoff.md` | T020, T025–T026 / US3 and cross-cutting |
 | Evidence/command manifest | `evidence/v2/attention/README.md` | T026 / cross-cutting |
 | Candidate verification record | `evidence/v2/attention/verification.md` | T027 / cross-cutting |
+| Global evidence index documentation | `evidence/README.md` | T025 / cross-cutting |
+| V1 evidence index documentation | `evidence/verdict-suite/README.md` | T025 / cross-cutting |
 | Attention/operator guide | `docs/attention/v2.md` | T025 / cross-cutting |
 | V1 scar data-model reference | `docs/contracts/verdict-suite-data-model-v1.md` | T025 / cross-cutting |
 | V1 scar requirements reference | `docs/contracts/verdict-suite-requirements-v1.md` | T025 / cross-cutting |
@@ -650,14 +686,18 @@ python3 -m unittest
 python3 -m unittest discover -s tests/v2/attention -p 'test_*.py'
 python3 -m evals.v2.attention.runner --all
 python3 -m evals.verdict_suite.runner --list
-git diff --check
+git diff --check <activation-start>..HEAD
 ```
 
+Here `<activation-start>` is the full immutable starting commit copied from
+`evidence/v2/attention/slice-activation.md`; candidate and packet reruns use
+that same commit as the lower bound so committed whitespace defects are visible.
 Activation freezes the starting commit's exact root test/skip counts and the
 ordered tracked pre-030 test-file inventory plus content hash outside
 `tests/v2/attention/`, and the exact allowed 030 path set. T001's package marker
 makes the attention suite visible to root discovery. At tested tree, candidate,
-and packet commits, verification rejects any changed pre-030 test byte, adapter/
+and packet commits, the commit-range whitespace check and verification reject
+any changed pre-030 test byte, adapter/
 harness or 010-owned `schemas/v2/` contract edit, deleted or renamed pre-030
 test, new skip, out-of-scope
 path, or count mismatch. The focused suite must have zero skips, root skips must
@@ -678,13 +718,17 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | Claim surface | Exact reviewed ordinary path | Disposition | Owning task/lane | Validation, rationale, or exact handoff delta |
 |---|---|---|---|---|
 | Global product and CLI state | `README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace V1 verdict/core/CLI claims and examples with accepted I-030A `SUPPRESS`/`WAKE`/`DEFER`, trusted bypass, separate ERROR, dual-valve, and 0/1/2/3 process behavior while preserving verification-pending wording. |
+| Repository agent guidance | `AGENTS.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace the V1-implementation/current-command claims with state-aware accepted-V2/verification-pending guidance, preserve the governance and owner boundaries, and make the eventual `CUTOVER_VERIFIED` current-state interpretation explicit without requiring a product-code edit. |
+| Claude execution guidance | `CLAUDE.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; in the atomic candidate replace V1 runtime/config/CLI smoke guidance with accepted I-030A, trusted bypass, ERROR, receipt, and 0/1/2/3 commands while preserving verification-pending wording and the exact-main gate. |
 | Global evidence index | `evidence/README.md` | `UPDATE` | T025 / `v2-core-owner` | Add the exact `evidence/v2/attention/` component-record scope, commands/manifest link, evidence grade, candidate binding, and explicit non-cutover/non-current boundary while preserving the immutable/history rules; validate every link and claim against the candidate. |
+| V1 verdict-suite evidence index | `evidence/verdict-suite/README.md` | `UPDATE` | T025 / `v2-core-owner` | Preserve every historical V1 run record and reproduction boundary, add the exact 030 scar/transition role and V2 result links, and validate current-classifier wording and commands without presenting V1 evidence as V2 social proof. |
+| Accepted contract evidence manifest | `evidence/v2/contract/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the 010-owned manifest already records accepted I-010B/I-010E `@2` provenance and commands; 030 consumes those exact contracts without changing the manifest. Validate versions and links, then record the unchanged review in handoff evidence. |
 | Release history | `CHANGELOG.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; add the exact accepted 030 commit, breaking core/CLI contract delta, active-margin status, evidence links, and limitations in the atomic cutover entry. |
 | Installation and executable claims | `docs/INSTALL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace V1 `nunchi-channel`/configuration assumptions with the accepted V2 CLI, model/policy inputs, installed-runtime provenance, and no-V1-residue instructions at cutover. |
 | Public stability contract | `docs/STABILITY.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 request/verdict/process promise with accepted I-010A/B/E plus I-030A, explicitly retaining the active transition margin and breaking-version boundary. |
 | Cross-adapter reference | `docs/adapters.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; apply the exact common I-030A lifecycle, bypass/error routes, and dual-DEFER requirements to the cutover-wide adapter table without claiming unproven surface parity. |
 | Selected-design diagrams | `docs/architecture/v2-selected-design.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at cutover update I-030A implementation/evidence status and diagram-linked claims from selected target to accepted verification-pending candidate, then to verified current only after post-merge proof. |
-| V1 archive index | `docs/archive/v1/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the frozen archive index already says its children are historical and not current instructions; record exact review unchanged in `evidence/v2/attention/handoff.md`. |
+| V1 archive index | `docs/archive/v1/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the frozen archive index already says its children are historical and not current instructions; record exact review unchanged in the attention handoff evidence. |
 | Archived V1 classifier contract | `docs/archive/v1/admission-classifier/contract.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the historical/superseded banner makes the V1 fields and commands archival evidence, not a V2 integration claim; record the review in handoff evidence. |
 | Archived V1 classifier data model | `docs/archive/v1/admission-classifier/data-model.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the historical/superseded banner remains accurate after 030; record the review in handoff evidence. |
 | Archived V1 classifier quickstart | `docs/archive/v1/admission-classifier/quickstart.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the archived-command warning prevents it from acting as current runnable guidance; preserve it unchanged and record the review. |
@@ -699,22 +743,31 @@ recorded by T023 and are not hidden inside the deterministic baseline.
 | V1 verdict-suite evidence guide | `docs/evaluations/verdict-suite.md` | `UPDATE` | T025 / `v2-core-owner` | Distinguish historical V1 quality evidence from 030 mechanics/social evidence, link exact S04/S05/S08/model-comparison records, and validate claims and links. |
 | Governance execution guide | `docs/governance/execution-spine.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: 030 follows but does not change the already-current workflow/lifecycle contract; planning and later component implementation create no new governance rule. Record exact review in handoff evidence. |
 | General integration guide | `docs/integration.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; replace the V1 verdict, fail-policy, request, output, provider, and CLI wiring with accepted I-030A behavior only in the atomic cutover. |
+| Generic loader example | `examples/loader-snippet.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; at atomic cutover replace `nunchi-channel`, environment-test-result, V1 request/verdict/run-shape, fail-policy, and silent-token instructions with the accepted V2 operator config, I-010A stdin, I-030A tagged result/exit behavior, trusted bypass/ERROR, and direct act-or-silence flow; validate the example end to end. |
+| Open-floor V1 profile | `profiles/open-floor.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-integrator`; remove this PASS/ACK/ASK/SPEAK and `pinned_rules` profile from the current product and all current links in the atomic cutover, because I-010A/I-030A accepts no governance-profile input and the sparse participant-shaped prompt must not become a deterministic social rulebook. Git history remains the V1 record. |
 | Hermes display-patch guide | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the optional channel-scoped display override controls operational UI chatter, not attention judgment or I-030A; record the exact review unchanged. |
 | Hermes display-patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: resolver and gateway-display checks are independent of the core attention contract; record the exact review unchanged. |
 | Attention/operator reference | `docs/attention/v2.md` | `UPDATE` | T025 / `v2-core-owner` | Create the exact component guide; validate policy, bypass, error/exit semantics, active margin, prompt/model provenance, examples, links, and commands against the exact candidate without claiming atomic cutover. |
 | Claude DEFER evaluation | `integrations/claude-code/DEFER_EVAL.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; replace V1 uncertain-PASS terminology with the exact classifier-DEFER/margin-DEFER transition, reuse criteria, and downstream canary protocol after accepting I-030A. |
 | Claude Code integration | `integrations/claude-code/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; migrate the V1 wake gate to I-030A, distinguish bypass/ERROR/DEFER, preserve one judgment and act-or-silence, and update config/evidence claims only with its surface candidate. |
+| Claude operator configuration example | `integrations/claude-code/nunchi-gate.env.example` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-claude-owner`; replace V1 fail-open wrapper, loose identity/peer-roster, and `nunchi-channel` assumptions with the accepted V2 descriptor-secure operator-policy source, exact-self binding, I-030A CLI, and surface-owned migration guidance. Validate the runnable example with the Claude slice candidate. |
 | Claude transport patch | `integrations/claude-code/transport-patch/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the allowlisted peer-bot transport patch changes event delivery, not the attention engine contract; exact review remains downstream transport evidence and is recorded unchanged. |
 | Codex integration | `integrations/codex/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace V1 verdict, inbound/outbound re-gate, receipt/config, and wake claims with accepted I-030A bypass/ERROR/dual-DEFER plus direct act-or-silence behavior in the Codex slice. |
+| Codex plugin metadata | `integrations/codex/nunchi-codex/.codex-plugin/plugin.json` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace the public wake-and-send gating and outbound-send-guard descriptions with the accepted one-judgment wake admission plus direct act-or-silence lifecycle. Validate JSON, plugin metadata, and installed descriptions with the Codex slice candidate. |
+| Codex hook manifest | `integrations/codex/nunchi-codex/hooks/hooks.json` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-codex-owner`; replace the V1 prompt-admission plus `PreToolUse` send-gate topology with the accepted single preattention judgment and direct act-or-silence lifecycle, removing send-time social reclassification. Validate manifest syntax and installed hook behavior with the Codex slice candidate. |
 | Hermes integration | `integrations/hermes/README.md` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace V1 `nunchi-channel` verdict/fail-open/config/receipt semantics with accepted I-030A, bypass/ERROR, dual-DEFER, and immutable attention-stage facts in the Hermes slice. |
+| Hermes dashboard manifest | `integrations/hermes/nunchi-gate/dashboard/manifest.json` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the generic runtime-configuration and receipt-log-viewer metadata names no V1 verdict, field, CLI, policy, or current schema version and remains truthful for the downstream V2 migration. Validate JSON syntax and record the candidate-specific unchanged review. |
+| Hermes plugin manifest description | `integrations/hermes/nunchi-gate/plugin.yaml` | `HANDOFF` | T025 / `v2-core-owner` | Accepting owner: `v2-hermes-owner`; replace the public PASS/ACK/ASK/SPEAK and `nunchi-channel` description with the accepted I-030A wake/suppress/defer, bypass, and operational-error lifecycle when the Hermes surface migrates. Validate manifest syntax and installed metadata with that candidate. |
 | Discord MCP design | `integrations/mcp-discord/DESIGN.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: the document correctly keeps the transport gate-neutral and assigns admission harness-side; I-030A changes no transport protocol or ownership. Record exact review unchanged. |
 | Discord MCP operator guide | `integrations/mcp-discord/README.md` | `NO_IMPACT` | T025 / `v2-core-owner` | Rationale: token, SSE/MCP, routing, and send-backstop guidance remains transport-only and does not consume I-030A; record exact review unchanged. |
 
-Matrix scope audit (2026-07-19): the 32 unique rows above enumerate all 31
-current Markdown claim surfaces and the future slice-owned
-`docs/attention/v2.md` individually: 6 `UPDATE`, 14 `NO_IMPACT`, and 12
-`HANDOFF`. Every disposition is attached to one exact file; no grouped
-multi-file disposition substitutes for an exact path.
+Matrix scope audit (2026-07-19): the 43 unique rows above enumerate all 42
+known affected current ordinary documentation/evidence/configuration claim
+surfaces and the future slice-owned `docs/attention/v2.md` individually: 7
+`UPDATE`, 16 `NO_IMPACT`, and 20 `HANDOFF`. Every disposition is attached to one exact file;
+no grouped multi-file disposition substitutes for an exact path. The bound
+specification, dormant T025, and formal requirements checklist retain this same
+43-path inventory and disposition count.
 
 Global current-state claims remain integrator-owned; the component guide and
 every exact handoff delta are required before 030 can converge. T025 records
@@ -731,8 +784,13 @@ versions, complete commands/results, prompt and model identity, effective
 operator configuration and source, margin state, deterministic/replay/multi-
 model evidence (including exact provider IDs/provenance for the selected three-
 family matrix or an explicit later Zoe override), the preregistered downstream
-canary protocol, rejected claims, and known limitations. The handoff explicitly
-does not claim live participant outcomes. Downstream review
+canary protocol, rejected claims, and known limitations. It also carries the
+exact slice-110 ordinary-path publication delta from the staging decision:
+remove V1 request/verdict handling, `require_pass_corroboration`, reply-bearing
+output, and hidden fallbacks; publish I-030A as public `evaluate`/`admit`; and
+remove `evaluate_v2`/`attention-v2` atomically across the six named source
+files. The handoff explicitly does not claim live participant outcomes.
+Downstream review
 does not silently transfer core ownership; 110 remains the sole final sink.
 The packet distinguishes (1) the tested implementation tree named by T027,
 (2) the lifecycle candidate commit that contains `verification.md`, and (3) the
