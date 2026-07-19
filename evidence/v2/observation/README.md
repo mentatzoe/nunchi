@@ -37,7 +37,7 @@ implicit.
 |---|---|---|---|
 | S01 Exact self and alias collision | Exact attested self wins; names never establish authorship | `identity-and-hygiene.jsonl` (`ID-S01-*`, 2 rows) | `PYTHONPATH=src:. python3 -m evals.v2.observation.run_scenes` |
 | S02 Native relations | Actor-targeted vs. room-wide mentions distinct; reply/thread/reaction/membership survive | `identity-and-hygiene.jsonl` (`ID-S02-*`, 2 rows) | same |
-| S03 Bounded context and tail | Trigger, relation closure, tail, bytes/events, gaps truthful | `budget-sweep.jsonl` (`BUD-S03-*`, 3 rows), `continuation.jsonl` (`CONT-S03-*`, 9 rows) | same |
+| S03 Bounded context and tail | Trigger, relation closure, tail, bytes/events, gaps truthful | `budget-sweep.jsonl` (`BUD-S03-*`, 3 rows), `continuation.jsonl` (`CONT-S03-*`, 11 rows) | same |
 | S04 False-suppression scars | Referential mention/resolution/other-addressee/class-address never enter deterministic hygiene | `identity-and-hygiene.jsonl` (`ID-S04-*`, 2 rows) | same |
 | S05 Governed suppression recoverability | Earlier events remain ordinarily available under claimed continuity; unsupported eligibility explicit | `s05-recoverability.jsonl` (`CAP-S05-*`, 4 rows) | same |
 | S11 Transport hygiene | Exact duplicate, exact self, unroutable are the only mechanical no-wake classes | `identity-and-hygiene.jsonl` (`ID-S11-*`, 2 rows) | same |
@@ -45,7 +45,7 @@ implicit.
 | S15 Context budget | Snapshot/fetch hard caps enforced with `I-010E` byte telemetry; `utf8-bytes-ceil-div4@1` proxy is evidence only | `budget-sweep.jsonl` (`BUD-S15-*`, 4 rows), `continuation.jsonl` (`CONT-S15-*`, 5 rows) | same |
 | S16 No registry or ledger | No roster inference, outcome registry, obligation queue, or handled/open state | `identity-and-hygiene.jsonl` (`ID-S16-*`, 1 row) | same |
 
-Total: 37 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
+Total: 39 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)

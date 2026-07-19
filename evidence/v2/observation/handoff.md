@@ -671,9 +671,9 @@ every earlier matrix as an accurate historical receipt.
 
 **Non-blocking follow-up**: `ContinuationProvider` still retains issued
 capabilities in `_capabilities`, minted cursor strings in each handle's
-`_cursors` set, and the corresponding fixed-window bindings in
-`_around_cursor_windows` (including remaining event identities) for the lifetime
-of the in-memory provider. Phase 12 fixes cursor
+`_cursors` set, monotonic counters in `_cursor_sequences`, and the
+corresponding direction/anchor/remaining-identity bindings in `_cursor_windows`
+for the lifetime of the in-memory provider. Phase 12 fixes cursor
 progression and truthful cap attribution; it does not add expiry-driven cleanup
 or a size bound to those bookkeeping collections, and this packet makes no
 bounded-bookkeeping claim. Production host owners must add lifecycle pruning or
@@ -716,3 +716,47 @@ appended T060.
 T060 closes the evidence-manifest contradiction and permits another convergence
 pass. It does not accept the slice or authorize integration, cutover,
 deployment, release, or promotion.
+
+## Phase 14 retention-safe before/after cursor supersession (T061–T065)
+
+Independent convergence review of candidate `cd61dfd649b8f03f340b553ac3864183d42fe567`
+found H020-A2-01 HIGH: `before` and `after` cursor tokens carried stale bounded-deque
+positions. Owner-side RED reproduction proved `before` repeated `e3` after a one-event
+retention shift and `after` skipped original next event `e4` to serve `e5`.
+
+The provider now binds every cursor direction to its original direction, anchor, and
+remaining event identities. Replay resolves those identities against the live event
+index, fails closed when any original identity was evicted, and uses monotonic opaque
+tokens so a shifted live index cannot repeat a cursor despite page progress. The
+original remainder is closed at mint time: later arrivals are not silently admitted.
+
+Focused receipts:
+
+| Check | Result |
+|---|---|
+| T061/T062 RED | 2 tests, 2 failures: `before` did not raise after remainder eviction; `after` served `e5` instead of `e4` |
+| T061/T062 GREEN | 2 tests, OK |
+| `tests.v2.observation.test_budget_and_continuation` | 35 tests, OK |
+| `CONT-S03-010` | PASS; after pages `[['e3'], ['e4'], ['e5']]`, excluding later `e6` |
+| `CONT-S03-011` | PASS; before replay rejects after original remainder identity eviction |
+
+Final verification matrix:
+
+| Command | Result |
+|---|---|
+| `PYTHONPATH=src python3 -m unittest discover -s tests/v2/observation -p 'test_*.py'` | 110 tests, OK, 0 skipped |
+| `PYTHONPATH=src python3 -m evals.v2.observation.run_scenes` | 5 suites, 39 rows, 0 FAIL (`identity-and-hygiene.jsonl`: 9; `budget-sweep.jsonl`: 7; `continuation.jsonl`: 16; `s05-recoverability.jsonl`: 4; `s13-equivalence.jsonl`: 3) |
+| `PYTHONPATH=src python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance` | 5 tests, OK; all 202 attempt-6 cases accounted for, zero mismatches |
+| `PYTHONPATH=src python3 -m unittest` | 1359 tests, OK, 4 environment-dependent optional-integration skips |
+| `python3 -m evals.verdict_suite.runner --list` | 60 fixtures discovered |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `python3 scripts/check_governance.py --task-manifest specs/020-v2-observation` | T001–T065 all complete; SHA256 `aa46ba303fe6f2d8a8642f590e19c597bd39bc6c736a71b4260f6976f2e857f4` |
+| `git diff --check` | clean, exit 0 |
+
+The evidence manifest now totals 39 rows: 9 + 7 + 16 + 4 + 3. The unbounded
+in-memory cursor/capability bookkeeping limitation above remains explicit; Phase 14
+changes correctness under retention, not lifecycle pruning.
+
+H020-A2-01 is closed. This evidence permits a fresh convergence and candidate-attempt-2
+review; it does not accept the slice or authorize integration, cutover, deployment,
+release, or promotion.

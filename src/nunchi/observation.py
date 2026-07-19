@@ -699,7 +699,7 @@ def check_binding_expiry(fetch_case: dict) -> list[str]:
         if cursor not in (capability.get("cursors") or []):
             errors.append(f"cursor {cursor!r} was not minted under handle {request.get('handle_id')!r}")
         else:
-            # Cursors are minted as ``{handle_id}:{direction}:{index}``
+            # Cursors are minted as ``{handle_id}:{direction}:{sequence}``
             # (H020-01): a cursor minted for one direction must never be
             # replayable under a different direction, which would silently
             # re-serve events the minting direction's page already returned.
@@ -1098,7 +1098,8 @@ class ContinuationProvider:
         self._provider = provider
         self._capabilities: dict[str, dict] = {}
         self._cursors: dict[str, set[str]] = {}
-        self._around_cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
+        self._cursor_windows: dict[str, dict[str, dict[str, Any]]] = {}
+        self._cursor_sequences: dict[str, int] = {}
 
     def issue(
         self,
@@ -1136,7 +1137,8 @@ class ContinuationProvider:
             raise ValueError(f"issued capability failed self-validation: {list(errors)}")
         self._capabilities[handle_id] = capability
         self._cursors[handle_id] = set()
-        self._around_cursor_windows[handle_id] = {}
+        self._cursor_windows[handle_id] = {}
+        self._cursor_sequences[handle_id] = 0
         return capability
 
     def fetch(self, request: dict, *, host_context: dict, fetch_time: str | None = None) -> dict:
@@ -1172,46 +1174,47 @@ class ContinuationProvider:
         cap_bytes = min(max_bytes, capability["max_bytes_per_fetch"])
         around_window_start: int | None = None
         around_window_end: int | None = None
-        around_remaining_event_ids: list[str] | None = None
+        cursor_remaining_event_ids: list[str] | None = None
 
-        if direction == "before":
-            start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index - 1
-            candidate_indices = range(start, -1, -1)
-        elif direction == "after":
-            start = int(cursor.rsplit(":", 1)[1]) if cursor else anchor_index + 1
-            candidate_indices = range(start, len(events))
-        else:  # around
-            if cursor:
-                cursor_window = self._around_cursor_windows[handle_id].get(cursor)
-                if cursor_window is None:
-                    raise ContinuationError(
-                        f"around cursor {cursor!r} has no bound window metadata"
-                    )
-                if cursor_window["anchor_event_id"] != anchor_id:
-                    raise ContinuationError(
-                        f"around cursor {cursor!r} is bound to anchor_event_id "
-                        f"{cursor_window['anchor_event_id']!r}, not {anchor_id!r}"
-                    )
+        if cursor:
+            cursor_window = self._cursor_windows[handle_id].get(cursor)
+            if cursor_window is None:
+                raise ContinuationError(f"cursor {cursor!r} has no bound window metadata")
+            if cursor_window["direction"] != direction:
+                raise ContinuationError(
+                    f"cursor {cursor!r} is bound to direction "
+                    f"{cursor_window['direction']!r}, not {direction!r}"
+                )
+            if cursor_window["anchor_event_id"] != anchor_id:
+                raise ContinuationError(
+                    f"cursor {cursor!r} is bound to anchor_event_id "
+                    f"{cursor_window['anchor_event_id']!r}, not {anchor_id!r}"
+                )
+            remaining_event_ids = list(cursor_window["remaining_event_ids"])
+            missing_event_ids = [
+                event_id for event_id in remaining_event_ids if event_id not in index
+            ]
+            if missing_event_ids:
+                raise ContinuationError(
+                    f"cursor {cursor!r} references events no longer retained: "
+                    f"{missing_event_ids}"
+                )
+            # Resolve every direction's original remainder by identity against
+            # the live deque. Numeric positions are not stable under bounded
+            # retention; event IDs and the cursor's scan order are.
+            candidate_indices = [index[event_id] for event_id in remaining_event_ids]
+            if direction == "around":
                 around_window_start = int(cursor_window["window_start"])
                 around_window_end = int(cursor_window["window_end"])
-                remaining_event_ids = list(cursor_window["remaining_event_ids"])
-                missing_event_ids = [
-                    event_id for event_id in remaining_event_ids if event_id not in index
-                ]
-                if missing_event_ids:
-                    raise ContinuationError(
-                        f"around cursor {cursor!r} references events no longer retained: "
-                        f"{missing_event_ids}"
-                    )
-                # Resolve the original window's remaining identities against
-                # the live deque. Numeric indices shift when bounded retention
-                # evicts an older event; event identity does not.
-                candidate_indices = [index[event_id] for event_id in remaining_event_ids]
-            else:
-                radius = max(1, cap_events // 2)
-                around_window_start = max(0, anchor_index - radius)
-                around_window_end = min(len(events), anchor_index + radius + 1)
-                candidate_indices = list(range(around_window_start, around_window_end))
+        elif direction == "before":
+            candidate_indices = list(range(anchor_index - 1, -1, -1))
+        elif direction == "after":
+            candidate_indices = list(range(anchor_index + 1, len(events)))
+        else:  # around
+            radius = max(1, cap_events // 2)
+            around_window_start = max(0, anchor_index - radius)
+            around_window_end = min(len(events), anchor_index + radius + 1)
+            candidate_indices = list(range(around_window_start, around_window_end))
             # H020-A1-01 / T056: an ``around`` cursor is the next unserved
             # index inside its original fixed, anchor-bound window. The host
             # rejects an anchor swap and does not let a changed page cap widen
@@ -1235,9 +1238,8 @@ class ContinuationProvider:
                     truncated_by.append("events")
                 if byte_cap_exceeded:
                     truncated_by.append("bytes")
-                if direction == "around":
-                    remaining_indices = list(candidate_indices)[position:]
-                    around_remaining_event_ids = [events[j]["id"] for j in remaining_indices]
+                remaining_indices = list(candidate_indices)[position:]
+                cursor_remaining_event_ids = [events[j]["id"] for j in remaining_indices]
                 break
             page_events.append(event)
             total_bytes += size
@@ -1277,24 +1279,25 @@ class ContinuationProvider:
             # Direction-bound (H020-01): encoding ``direction`` into the
             # cursor lets ``check_binding_expiry`` reject a cursor replayed
             # under a different direction before any page is served.
-            next_cursor = f"{handle_id}:{direction}:{next_index}"
+            self._cursor_sequences[handle_id] += 1
+            next_cursor = f"{handle_id}:{direction}:{self._cursor_sequences[handle_id]}"
             self._cursors[handle_id].add(next_cursor)
             capability.setdefault("cursors", [])
             if next_cursor not in capability["cursors"]:
                 capability["cursors"].append(next_cursor)
+            if cursor_remaining_event_ids is None:
+                raise ContinuationError("cursor remaining-event metadata was not initialized")
+            new_cursor_window: dict[str, Any] = {
+                "anchor_event_id": anchor_id,
+                "direction": direction,
+                "remaining_event_ids": cursor_remaining_event_ids,
+            }
             if direction == "around":
-                if (
-                    around_window_start is None
-                    or around_window_end is None
-                    or around_remaining_event_ids is None
-                ):
+                if around_window_start is None or around_window_end is None:
                     raise ContinuationError("around cursor window was not initialized")
-                self._around_cursor_windows[handle_id][next_cursor] = {
-                    "anchor_event_id": anchor_id,
-                    "window_start": around_window_start,
-                    "window_end": around_window_end,
-                    "remaining_event_ids": around_remaining_event_ids,
-                }
+                new_cursor_window["window_start"] = around_window_start
+                new_cursor_window["window_end"] = around_window_end
+            self._cursor_windows[handle_id][next_cursor] = new_cursor_window
 
         actor_ids = {
             ref for event in page_events_ordered for ref in _actor_references({"self": None, "events": [event]})

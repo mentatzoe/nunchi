@@ -340,6 +340,90 @@ class TestFetchDocuments(unittest.TestCase):
         self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
         self.assertNotIn("next_cursor", page2)
 
+    def test_before_cursor_fails_closed_when_retention_evicts_original_remainder(self):
+        provider = make_provider(retention_max_events=5)
+        seed_room(
+            provider,
+            [
+                make_message(
+                    f"e{i}", "discord:1001", f"message {i}",
+                    timestamp=f"2026-07-17T01:00:0{i}Z",
+                )
+                for i in range(1, 6)
+            ],
+        )
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e5", max_events_per_fetch=2, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "before-retention-1", "handle_id": capability["handle_id"],
+            "direction": "before", "anchor_event_id": "e5", "max_events": 2,
+            "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page1["events"]], ["e3", "e4"])
+
+        # e6 evicts e1, which belonged to the cursor's original remainder.
+        # Replaying a stale numeric position would duplicate e3 while claiming
+        # gap-free coverage; identity-bound replay must reject instead.
+        seed_room(
+            provider,
+            [make_message("e6", "discord:1001", "message 6", timestamp="2026-07-17T01:00:06Z")],
+        )
+        with self.assertRaises(ContinuationError):
+            continuation.fetch(
+                dict(request, request_id="before-retention-2", cursor=page1["next_cursor"]),
+                host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+            )
+
+    def test_after_cursor_preserves_original_remainder_across_retention_shift(self):
+        provider = make_provider(retention_max_events=5)
+        seed_room(
+            provider,
+            [
+                make_message(
+                    f"e{i}", "discord:1001", f"message {i}",
+                    timestamp=f"2026-07-17T01:00:0{i}Z",
+                )
+                for i in range(1, 6)
+            ],
+        )
+        continuation = ContinuationProvider(provider)
+        capability = continuation.issue(
+            trigger_event_id="e2", max_events_per_fetch=1, max_bytes_per_fetch=8192,
+        )
+        request = {
+            "request_id": "after-retention-1", "handle_id": capability["handle_id"],
+            "direction": "after", "anchor_event_id": "e2", "max_events": 1,
+            "max_bytes": 8192,
+        }
+        page1 = continuation.fetch(
+            request, host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page1["events"]], ["e3"])
+
+        # e6 evicts e1 and shifts e4 from index 3 to index 2. Replay must serve
+        # the original e4/e5 remainder, not the objects now occupying old
+        # numeric positions, and must not admit later arrival e6.
+        seed_room(
+            provider,
+            [make_message("e6", "discord:1001", "message 6", timestamp="2026-07-17T01:00:06Z")],
+        )
+        page2 = continuation.fetch(
+            dict(request, request_id="after-retention-2", cursor=page1["next_cursor"]),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page2["events"]], ["e4"])
+        page3 = continuation.fetch(
+            dict(request, request_id="after-retention-3", cursor=page2["next_cursor"]),
+            host_context=capability["bound_to"], fetch_time="2026-07-17T01:30:00Z",
+        )
+        self.assertEqual([event["id"] for event in page3["events"]], ["e5"])
+        self.assertNotIn("next_cursor", page3)
+
     def test_fetch_rejects_when_byte_cap_cannot_admit_the_next_event(self):
         provider, events = _room_with_events(5)
         continuation = ContinuationProvider(provider)

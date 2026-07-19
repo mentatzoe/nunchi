@@ -228,6 +228,31 @@ def run_continuation_attacks() -> list[dict]:
                         detail = "pagination did not exhaust within the finite event bound"
                         break
                 outcome = "accept-then-paginate-until-exhausted"
+            elif case["expect"] == "reject-on-pagination-after-retention-eviction":
+                for event in case.get("between_page_events", []):
+                    provider.ingest({
+                        "delivery_id": f"delivery:{event['id']}",
+                        "disposition": "candidate-event",
+                        "authorized": True,
+                        "event": event,
+                        "actors": {},
+                    })
+                request2 = dict(
+                    request,
+                    request_id=f"req-{case['case_id']}-2",
+                    cursor=page["next_cursor"],
+                )
+                try:
+                    continuation.fetch(
+                        request2,
+                        host_context=host_context,
+                        fetch_time=case.get("fetch_time", "2026-07-17T01:30:00Z"),
+                    )
+                    outcome = "accept-then-paginate"
+                    detail = "retention-evicted cursor remainder was wrongly accepted"
+                except ContinuationError as exc2:
+                    outcome = "reject-on-pagination-after-retention-eviction"
+                    detail = str(exc2)
             elif case["expect"] == "reject-on-second-fetch" and "next_cursor" in page:
                 # H020-01 adversarial shape: the first fetch must succeed and
                 # mint a cursor, then a *second* fetch replaying that cursor
