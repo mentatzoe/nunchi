@@ -536,6 +536,17 @@ non-receiptable and MUST NOT fabricate one.
   `WAKE`.
 - **FR-004**: The classifier disposition MUST be exactly `SUPPRESS`, `WAKE`, or
   `DEFER`; operational `ERROR` MUST remain a separate tagged response branch.
+  A successful I-010B `@2` result has exactly required `status: "ok"`,
+  `request_id`, `classifier_disposition`, `effective_disposition`,
+  `routing_audit`, `reasons`, `evidence_event_ids`, and `classifier`, with only
+  schema-permitted `legacy_verdict_confidences` and `attention_advice` optional.
+  The classifier audit requires non-empty `name` and permits only non-empty
+  `provider`/`model`; `reasons` and `evidence_event_ids` are arrays of non-empty
+  strings. The bypass result is exactly `status`, `request_id`, and cause as
+  specified by FR-017. The error result is exactly `status: "error"`, required
+  `error: {code, detail}`, optional assignable `request_id`, and optional
+  classifier audit only after invocation. No branch may borrow a field from a
+  mutually exclusive branch.
 - **FR-005**: `WAKE` advice, when present, MUST be non-authoritative, grounded
   in named supplied event IDs, and free of reply prose; `SUPPRESS` and `DEFER`
   MUST carry no participant advice. The prompt MUST request at most two sparse
@@ -600,11 +611,16 @@ non-receiptable and MUST NOT fabricate one.
   path omits both fields, and `WAKE`, other actions, or incomplete pairs reject.
 - **FR-012**: Whenever a parsed request supplies a valid request ID and an
   eligible host-owned receipt sink exists, the engine MUST **offer** exactly one
-  immutable attention-stage I-010E record correlated by that ID: offer means one
-  invocation of that sink with the record. The record keeps classifier
-  disposition, effective disposition, valve, override cause, the policy/model
-  provenance representable by the accepted branch, operational error, and
-  classifier-not-invoked bypass provenance distinct. **Persisted** means the
+  immutable attention-stage I-010E record correlated by that ID: its exact
+  top-level members are `request_id` equal to that ID, `stage: "attention"`,
+  `writer: "attention-engine"`, and `body`, with no extras; offer means one
+  invocation of that sink with the record. The classifier-outcome body requires
+  exactly `classifier_disposition`, `effective_disposition`, `classifier`,
+  `evidence_event_ids`, `routing_audit`, and non-empty `policy_provenance`.
+  The mutually exclusive operational-error body requires
+  `error: {code, detail}` and permits only the paired explicit-override fields
+  from FR-011. The third mutually exclusive body is the exact trusted bypass
+  shape below. **Persisted** means the
   sole sink invocation completed its defined durable-success protocol; no
   response or offered record may claim its own persistence. Unreadable input,
   invalid JSON, pre-validation failure without an assignable request ID, or a

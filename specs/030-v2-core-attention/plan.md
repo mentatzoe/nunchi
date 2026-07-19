@@ -179,8 +179,10 @@ still required before `READY`.
   receipt_sink) -> AttentionDecisionV2`. The request is I-010A; the three
   configuration/capability inputs are host-trusted; recoverability is the exact
   `{participant_id, continuity_scope_id, eligible, source}` shape; the required
-  host-owned sink is offered the exact I-010E attention-stage record when a
-  valid request ID exists; “offered” means the sink is invoked once with that
+  host-owned sink is offered the exact I-010E record with top-level
+  `request_id`, `stage: "attention"`, `writer: "attention-engine"`, and the
+  mutually exclusive classifier/error/bypass `body` when a valid request ID
+  exists; “offered” means the sink is invoked once with that
   record, while “persisted” means the sink's durable-success protocol completed.
   A valid ID without an eligible securely constructed sink makes zero offers;
   sink-invocation failure is one offer with no persistence, operational ERROR,
@@ -189,7 +191,7 @@ still required before `READY`.
   while that one operator-owned JSON file supplies the other inputs. For
   identical normalized inputs, parsed CLI stdout and the callable return are
   field-for-field equal, and any offered attention receipt has the same
-  body/writer; framing, diagnostics, and exit code are the only surface
+  full record including body/writer; framing, diagnostics, and exit code are the only surface
   differences.
 - **Runtime input contract**: `policy` is the selected
   `EffectiveAttentionPolicy` inventory and validation in spec FR-001;

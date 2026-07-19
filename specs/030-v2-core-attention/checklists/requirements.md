@@ -453,7 +453,7 @@ reviewer under Zoe's explicit identity-separation waiver, durably copied at
 the aborted run's final scoped findings across spec, plan, and tasks, before a
 new bound planning run, activation, or implementation
 
-**Review status**: Complete. All 23 items were reviewed against the selected
+**Review status**: Complete. All 26 items were reviewed against the selected
 design, accepted I-010A/B/E versions, current stdlib transport seam, and slice
 ownership. No result is inherited from the earlier 164 items.
 
@@ -482,10 +482,13 @@ ownership. No result is inherited from the earlier 164 items.
 - [x] CHK185 Is the trusted-bypass I-010E `@2` attention body stated literally as `classifier_not_invoked: true`, `cause: "preattention-disabled"`, and required non-empty trusted `policy_provenance`? [Completeness, Contract Alignment, Spec §FR-012; Plan §Bypass operational error and CLI parity; Tasks §T007, §T018]
 - [x] CHK186 Do requirements forbid every classifier-outcome and error member on that mutually exclusive bypass receipt while keeping the I-010B bypass result separate from receipt fields? [Consistency, Safety, Spec §FR-012, §FR-017; Tasks §T004, §T021]
 - [x] CHK187 Are missing/empty bypass provenance and exact valid core/CLI receipt parity covered by deterministic corpus and evidence tasks without claiming participant-host behavior? [Measurability, Traceability, Spec §FR-012; Tasks §T004, §T021–§T022]
+- [x] CHK188 Is every offered I-010E record closed at the top level with exact `request_id`, `stage: "attention"`, `writer: "attention-engine"`, and one mutually exclusive classifier/error/bypass body? [Completeness, Ownership, Spec §FR-012; Plan §I-030A callable and CLI equivalence seam; Tasks §T002, §T018]
+- [x] CHK189 Does the I-010B `@2` ok branch explicitly require `reasons`, `evidence_event_ids`, `classifier`, and `routing_audit` alongside its status/request/disposition fields, while bypass and error stay closed and mutually exclusive? [Contract Alignment, Clarity, Spec §FR-004; Tasks §T002, §T018]
+- [x] CHK190 Are full-record callable/CLI equality and exact stage-to-writer ownership measurable without allowing the offered receipt or response to claim persistence? [Measurability, Consistency, Spec §FR-001, §FR-012; Plan §I-030A callable and CLI equivalence seam; Tasks §T002, §T018]
 
 ## Formal Reviewer Final Scoped-Finding Notes
 
-- Mark CHK165–CHK187 complete only from the reconciled requirement text and
+- Mark CHK165–CHK190 complete only from the reconciled requirement text and
   cited authority; implementation success is not a substitute.
 - Any reintroduction of host-owned ParticipantWakeV2 behavior, request
   mutation, open-ended retry classification, or post-dispatch
@@ -493,6 +496,6 @@ ownership. No result is inherited from the earlier 164 items.
 - The program-interface registry remains the separately recorded non-blocking
   `v2-program-owner` handoff and is not reclassified by this gate.
 
-**2026-07-19 final scoped-finding result**: 23/23 fresh items pass; the complete
-requirements checklist is now 187/187. The task graph remains T001–T027 and
+**2026-07-19 final scoped-finding result**: 26/26 fresh items pass; the complete
+requirements checklist is now 190/190. The task graph remains T001–T027 and
 dormant until a separate READY activation record exists.
