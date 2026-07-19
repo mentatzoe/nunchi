@@ -14,7 +14,7 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
     def test_current_handoff_state_has_no_unresolved_task(self):
         state = evaluate_task_state(
             TASKS,
-            allowed_open=frozenset({"T153"}),
+            allowed_open=frozenset(),
         )
         self.assertEqual(state.all_ids[0], "T001")
         self.assertEqual(state.all_ids[-1], "T153")
@@ -24,7 +24,7 @@ class TestSlice020LiteralTaskState(unittest.TestCase):
         )
         self.assertEqual(
             state.open_ids,
-            frozenset({"T153"}),
+            frozenset(),
         )
 
     def test_unexplained_unchecked_task_fails_closed(self):

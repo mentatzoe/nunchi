@@ -14,7 +14,7 @@
 
 **Read-only preflight**: performed atomically by the bound runner above; a paused run with an unchanged task graph resumes only with `python3 scripts/run_slice_workflow.py resume <run-id>`
 
-**Slice state**: `ACTIVE`
+**Slice state**: `HANDOFF_READY`
 
 **Program implementation authority**: `GRANTED`
 
@@ -154,16 +154,16 @@ parity claim
 | Truthful identity/observation | PASS | T083–T138 enforce hard snapshot bytes, private origin merge identity, atomic transitions, linear bounded replay, truthful retention and relation gaps, corrected packet history, exact closed host context, a non-bypassable scanner, complete semantic comparison including expiry presence, provider-wide continuation authority/caps, permanent bounded request-ID uniqueness, one-shot provider-issued receipt attestation, lifetime-monotonic timestamp order, closed transport/configuration inputs, accepted-corpus byte identity, copy-before-validation caller-memory isolation, early cursor-capacity rejection, and literal task-state truth. |
 | Attention/contribution split | PASS | I-020A ends at request/continuation production and does not route participant turns. |
 | Atomic parity contract | PASS | I-020A and its comparator define one shared seam; downstream slices prove each native binding and 110 proves final parity. |
-| Evidence before claims | BLOCKED (T148–T153) | Exact-object review rejected `2b10abb` because S13 validated before final page mutation and relation-target priority depended on hash-set iteration. Phase 27 must close both findings, correct evidence, regenerate/freeze/scan, and obtain a new exact-object review. |
+| Evidence before claims | PASS | Exact candidate `7c86440053d2be892ae3a1c343168b3c2a93c955` is matrix- and scanner-clean; independent direct review approved both Phase 27 corrections with no blocking finding. |
 | Control-plane boundary | PASS | Only four planning artifact types exist in this directory. |
-| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; handoff attempt 2 is append-rejected and the slice is `ACTIVE` under Phase 27 correction. |
+| Single owner and slice lifecycle | PASS | `v2-observation-owner` owns I-020A; candidate/handoff attempt 3 names exact approved object `7c86440`; acceptance remains with `v2-integrator`. |
 
-Post-design re-check: BLOCKED on Phase 27 T148–T153. Runtime, scanner,
-ordering, input, corpus-byte, receipt-uniqueness, caller-memory, early-resource,
-continuation/comparator authority, relation-gap, lifetime timestamp, and
-slice-owned literal-state mechanisms from Phase 25 remain inputs, but direct
-barrier/relation/restart/range probes rejected the object. No convergence,
-handoff, acceptance, or cutover authority remains.
+Post-design re-check: PASS. Runtime, scanner, ordering, input, corpus-byte,
+receipt-uniqueness, caller-memory, early-resource, continuation/comparator
+authority, relation-gap, restart-gap, lifetime timestamp, deterministic relation
+priority, final-page validity, and slice-owned literal-state controls are GREEN
+on exact candidate `7c86440` and independently approved. This establishes
+handoff readiness only; acceptance and cutover authority remain external.
 
 ## Slice Interfaces
 

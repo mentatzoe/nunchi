@@ -3,11 +3,10 @@
 **Input**: `specs/020-v2-observation/spec.md` and
 `specs/020-v2-observation/plan.md`
 
-**Slice state**: `ACTIVE`
+**Slice state**: `HANDOFF_READY`
 
-**Execution status**: `ACTIVE` for Phase 26 correction under this slice's bound
-delivery lane; previously completed and superseded task history remains
-append-only
+**Execution status**: T001–T153 are resolved; runtime remains `DORMANT` at
+`HANDOFF_READY` pending independent `v2-integrator` acceptance
 
 **Program implementation authority**: `GRANTED`
 
@@ -1175,7 +1174,7 @@ independent exact-object review of `2b10abb0b9b7d4dff802e08b36030995263cf520`.
   preserve `_relation_closure_ids()` order with separate dedup membership
 - [X] T152 Correct Phase 26 evidence, rerun the complete matrix and exact scan,
   then freeze/push a clean immutable T001–T153 successor
-- [ ] T153 Obtain fresh independent read-only review of that exact successor;
+- [X] T153 Obtain fresh independent read-only review of that exact successor;
   resolve every blocking finding before candidate or handoff attempt 3
 
 ### Phase 27 dependencies

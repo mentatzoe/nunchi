@@ -55,3 +55,31 @@
 **Boundary**: candidate attempt 2 authorizes handoff review only. It does not
 accept the slice or authorize integration, cutover, deployment, release, or
 promotion.
+
+## Attempt 3 — CONVERGED
+
+**Slice**: `020-v2-observation`
+
+**Status**: CONVERGED
+
+**Candidate commit**: `7c86440053d2be892ae3a1c343168b3c2a93c955`
+
+**Candidate tree**: `e535b07b9bf510a68216eabd1b7d80bd824b50d9`
+
+**Tasks complete**: YES
+
+**Completed task IDs**: T001, T002, T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013, T014, T015, T016, T017, T018, T019, T020, T021, T022, T023, T024, T025, T026, T027, T028, T029, T030, T031, T032, T033, T034, T035, T036, T037, T038, T039, T040, T041, T042, T043, T044, T045, T046, T047, T048, T049, T050, T051, T052, T053, T054, T055, T056, T057, T058, T059, T060, T061, T062, T063, T064, T065, T066, T067, T068, T069, T070, T071, T072, T073, T074, T075, T076, T077, T078, T079, T080, T081, T082, T083, T084, T085, T086, T087, T088, T089, T090, T091, T092, T093, T094, T095, T096, T097, T098, T099, T100, T101, T102, T103, T104, T105, T106, T107, T108, T109, T110, T111, T112, T113, T114, T115, T116, T117, T118, T119, T120, T121, T122, T123, T124, T125, T126, T127, T128, T129, T130, T131, T132, T133, T134, T135, T136, T137, T138, T139, T140, T141, T142, T143, T144, T145, T146, T147, T148, T149, T150, T151, T152, T153
+
+**Tasks SHA256**: 365da96091cb6dbe7c84dcd710b6c929279eccd0658830ef9774029075380641
+
+**Verification commands / results**: PASS — Phase 27 focused 2 tests; Observation discovery 189 tests; aggregate scenes 53 rows and adversarial evidence 25 rows, zero FAIL; corpus/docs 19 tests with 202/202 corpus accounting and digest `1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f`; full repository 1438 tests with four optional skips; 60 fixtures; Ruff, Bandit, scanner regressions, governance, task state, task manifest, reviewer-checklist absence, and working-tree/activation-range diff checks clean; whole-slice scanner CLEAN from `fc60858a3810e2f53d9574cce1eb9589bd19b55b` over 74 files, 11007 additions, four matchers; independent exact-object review APPROVE with no blocking finding.
+
+**Interface versions**: I-020A ObservationProviderV2@1; consumed I-010A AttentionRequestV2@1, I-010D ContextContinuationV2@1, and accepted I-010E AttentionReceiptV2@2.
+
+**Evidence paths**: evidence/v2/observation/handoff.md, evidence/v2/observation/slice-activation.md, evidence/v2/observation/dependency-010-acceptance.md, evidence/v2/observation/dependency-010-amendment-A1-acceptance.md, evidence/v2/observation/identity-and-hygiene.jsonl, evidence/v2/observation/budget-sweep.jsonl, evidence/v2/observation/continuation.jsonl, evidence/v2/observation/s05-recoverability.jsonl, evidence/v2/observation/s13-equivalence.jsonl, evidence/v2/observation/phase18-adversarial.jsonl, evidence/v2/observation/convergence-phase25-continuation-authority-2026-07-19.md, evidence/v2/observation/convergence-phase26.md, evidence/v2/observation/convergence-phase27.md, evidence/v2/observation/review-2026-07-19-phase25-hermes-22a0a1a-rejection.md, evidence/v2/observation/review-2026-07-19-phase26-hermes-2b10abb-rejection.md
+
+**Known limitations**: this slice supplies transport-attested bounded observation and host-only continuation authority; it does not classify, route, invoke participants, guarantee transport persistence, establish downstream native-surface parity, accept itself, or authorize integration/cutover.
+
+**Independent review**: APPROVE — `evidence/v2/observation/review-2026-07-19-phase27-hermes-7c86440-approval.md`; direct final-page and cross-hash-seed checks found no blocking issue.
+
+**Boundary**: candidate attempt 3 authorizes handoff review only. It does not accept the slice or authorize integration, cutover, deployment, release, or promotion.

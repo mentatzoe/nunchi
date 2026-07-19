@@ -1387,3 +1387,17 @@ T148–T152 are complete. T153 alone remains open for fresh independent review
 of the exact frozen successor. The slice remains `ACTIVE`; no acceptance,
 convergence, handoff readiness, integration, deployment, release, promotion,
 or cutover authority is claimed.
+
+## 29. Exact `7c86440` approval and handoff attempt 3
+
+Independent direct review approved exact candidate
+`7c86440053d2be892ae3a1c343168b3c2a93c955`, tree
+`e535b07b9bf510a68216eabd1b7d80bd824b50d9`, with no blocking finding. The
+review independently exercised both Phase 27 canaries and reran the documented
+matrix. Its durable record is
+`evidence/v2/observation/review-2026-07-19-phase27-hermes-7c86440-approval.md`.
+
+T153 is complete. Candidate attempt 3 and handoff attempt 3 are appended to the
+canonical lifecycle files. Slice 020 is `HANDOFF_READY` for independent
+`v2-integrator` acceptance review. This does not accept the slice or authorize
+integration, deployment, release, promotion, or cutover.

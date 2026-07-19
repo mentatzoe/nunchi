@@ -47,3 +47,14 @@ PHASE27_GREEN
 | generated reviewer checklist | absent |
 
 T148–T152 are complete. T153 remains open for fresh independent review of the exact frozen successor. This receipt does not claim acceptance, convergence, handoff readiness, integration, deployment, release, promotion, or cutover authority.
+
+## Exact-object approval
+
+Independent read-only review approved exact candidate
+`7c86440053d2be892ae3a1c343168b3c2a93c955` with no blocking finding after
+rerunning the two Phase 27 canaries, 189 Observation tests, aggregate and
+adversarial evidence, corpus/docs, the 1438-test full suite, and static,
+governance, scanner, task-state, and diff gates. The durable review is
+`evidence/v2/observation/review-2026-07-19-phase27-hermes-7c86440-approval.md`.
+T153 is complete. Candidate/handoff attempt 3 may establish handoff readiness
+only; acceptance and integration authority remain with `v2-integrator`.

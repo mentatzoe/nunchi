@@ -89,8 +89,7 @@ the shared oracle:
 
 ```sh
 python3 scripts/check_slice020_task_state.py \
-  --tasks specs/020-v2-observation/tasks.md \
-  --allow-open T153
+  --tasks specs/020-v2-observation/tasks.md
 ```
 
 ## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)
