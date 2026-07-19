@@ -118,6 +118,13 @@ validator recorded at
 Immutable activation evidence now binds dependency `010` to exact effective A2
 candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301` and establishes `READY`;
 neither that record nor planning declares `ACTIVE` or begins implementation.
+The final post-activation checker lineage at exact upstream commits
+`38db5db491b284c9685ae490cb8878d2bdcd97fa` and
+`0969319e6b28c27a25f9564ae4851c5cdfe31f0b` was merged and independently
+re-run against the same immutable activation. The final direct resolver returns
+the same effective candidate with an empty error list, and the full
+boundary/suite remain green as recorded at
+`evidence/v2/attention/dependency-010-amendment-A2-post-activation-hardening-verification.md`.
 
 ### Green pre-cutover staging in the existing core and CLI seams
 
@@ -531,7 +538,8 @@ analysis is complete, and the separate dependency-validator mismatch recorded
 at
 `evidence/v2/attention/dependency-010-amendment-A2-readiness-validator-blocker.md`
 is superseded by the amendment-aware validator resolution and immutable
-activation record. Those facts establish `READY`, not `ACTIVE`.
+activation record. Post-activation adversarial hardening is separately verified
+against that exact record. Those facts establish `READY`, not `ACTIVE`.
 Because this is a planning-only revision, no `data-model.md`, local contract,
 quickstart, schema, test, corpus, evidence payload, or product documentation is
 created here.

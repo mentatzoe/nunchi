@@ -74,7 +74,13 @@ The canonical `evidence/v2/contract/slice-amendments.md` chain and amendment-
 aware governance validator now derive exact accepted A2 candidate
 `26a6b531fa146ba1f1f5fcd1c4d191041b141301`; activation records that exact
 mapping and establishes `READY`. This remains separate from the non-blocking
-program-registry handoff above.
+program-registry handoff above. The final append-only, authority-bound,
+fail-closed, interface-version-continuous, append-extension-safe, exact-
+decision-reference checker at exact upstream commits
+`38db5db491b284c9685ae490cb8878d2bdcd97fa` and
+`0969319e6b28c27a25f9564ae4851c5cdfe31f0b` is independently verified at
+`evidence/v2/attention/dependency-010-amendment-A2-post-activation-hardening-verification.md`;
+it retains the same exact effective commit and `READY` result.
 
 **Planning reconciliation result**: The spec, plan, and this task graph retain
 the same 47-path documentation matrix (8 `UPDATE`, 17 `NO_IMPACT`, and 22

@@ -156,6 +156,16 @@ the canonical amendment ledger now derives exact accepted A2 candidate
 remains dormant until the assigned owner separately declares `ACTIVE` through
 a bound delivery run.
 
+Post-activation adversarial hardening at exact upstream commits
+`38db5db491b284c9685ae490cb8878d2bdcd97fa` and
+`0969319e6b28c27a25f9564ae4851c5cdfe31f0b` makes the amendment ledger
+append-only, authority-bound, fail-closed, interface-version-continuous,
+append-extension-safe, and exact about decision-reference provenance.
+Independent final re-verification on the consumer tree still derives exact A2
+candidate `26a6b531fa146ba1f1f5fcd1c4d191041b141301` with zero errors and retains
+`READY`; see
+`evidence/v2/attention/dependency-010-amendment-A2-post-activation-hardening-verification.md`.
+
 ## Interface Summary
 
 - **Consumes**:
