@@ -26,7 +26,7 @@ MODE="${2:-apply}"
 PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 BASE_SHA256="c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135"
-PATCHED_SHA256="67900f7e0275debcfd9deabb0345c92e879b25047ce00777e3fbd9552b19bd8a"
+PATCHED_SHA256="0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c"
 BASE_VERSION="0.0.4"
 
 [ -d "$PLUGIN_DIR" ] || { echo "fail closed: $PLUGIN_DIR is not a directory" >&2; exit 2; }

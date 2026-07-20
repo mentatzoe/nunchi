@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nunchi Operators <nunchi@users.noreply.github.com>
-Date: Mon, 20 Jul 2026 20:39:22 +0100
+Date: Mon, 20 Jul 2026 23:22:11 +0100
 Subject: [PATCH 1/2] discord: drop only self-messages so allowlisted peer bots
  are heard
 

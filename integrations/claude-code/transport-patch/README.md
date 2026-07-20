@@ -16,18 +16,29 @@ and every room event is honestly unroutable. Apply both, in order.
 
 ### Sidecar confidentiality (patch `0002`)
 
-The sidecar carries verbatim room content, so the transport writes it into an
-owner-only `0700` subdirectory, creates the file `0600`, opens it with
-`O_NOFOLLOW`, and validates on every write that the descriptor is an
-owner-owned regular file with no group/other bits. An unsafe target (symlink,
-shared, or non-regular) is refused fail-closed rather than written, and an
-unserializable record is dropped rather than partially written. The consumer
-reads the sidecar the same way (no-follow, owner-only) and treats a malformed
-matching record as unroutable, never binding a partial actor.
+The sidecar carries verbatim room content, so both writer and reader keep it
+owner-only:
 
-If a prior install left a world-readable `native-events.jsonl` behind, delete
-it before arming V2 — the hardened writer refuses to append to a file whose
-mode is not owner-only.
+- **Directory** — mode `0700`, caller-owned, non-symlink. Before every write
+  the transport validates the containing directory with a no-follow `lstat`
+  and refuses fail-closed if it is a symlink, not a directory, not
+  caller-owned, or has any group/other bits. A pre-existing unsafe directory
+  (`0755`, `0777`, symlinked, or non-directory) is **rejected, never silently
+  reused or re-moded**.
+- **File** — mode `0600`, created with that mode, opened `O_NOFOLLOW`, and
+  validated on every write as an owner-owned regular file with no group/other
+  bits. An unserializable record is dropped rather than partially written.
+
+The consumer reads the sidecar the same way — it validates the parent
+directory (owner-only, non-symlink) and opens the file no-follow/owner-only —
+and treats a malformed or unsafe matching record as unroutable, never binding
+a partial actor.
+
+If a prior install left a sidecar at the **old** path
+`~/.claude/channels/discord/nunchi-native-events.jsonl`, it is not reused (the
+hardened path is `~/.claude/channels/discord/nunchi-v2/native-events.jsonl`).
+Review and move the old file aside explicitly if you want it gone; the
+installer never deletes it for you.
 
 ## Exact provenance
 
@@ -35,7 +46,7 @@ mode is not owner-only.
   version `0.0.4`, SHA-256
   `c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135`.
 - **Result** after `0001` + `0002`, SHA-256
-  `67900f7e0275debcfd9deabb0345c92e879b25047ce00777e3fbd9552b19bd8a`.
+  `0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c`.
 
 Both digests are pinned inside `apply-transport-patch.sh`; the patches
 themselves were generated with `git format-patch` against that exact base and

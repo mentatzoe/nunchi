@@ -1,24 +1,26 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nunchi Operators <nunchi@users.noreply.github.com>
-Date: Mon, 20 Jul 2026 20:39:55 +0100
-Subject: [PATCH 2/2] discord: hardened owner-only native-fact sidecar with
- self context
+Date: Mon, 20 Jul 2026 23:22:47 +0100
+Subject: [PATCH 2/2] discord: owner-only native-fact sidecar with validated
+ directory and self context
 
 Append exact native facts per message to an owner-only sidecar
 (STATE_DIR/nunchi-v2/native-events.jsonl): author ID, bot flag, mention
 IDs, guild, reply reference, and the EXACT delivered content (attachment
-placeholders and voice transcripts included). Written 0600, opened
-O_NOFOLLOW, and validated as an owner-owned regular file before every
-write; an unsafe target is refused fail-closed and an unserializable
-record is dropped, never partially written. Self-authored messages are
-recorded here as retained context before the waking-path drop, so a V2
-consumer can keep them as SELF_RETAINED_NO_WAKE without a recursive wake.
+placeholders and voice transcripts included). The containing directory is
+validated to be a caller-owned, non-symlink directory with mode 0700
+before every write; a pre-existing 0755/0777/symlinked/non-directory path
+is rejected fail-closed. The file is created 0600, opened O_NOFOLLOW, and
+validated as an owner-owned regular file; an unserializable record is
+dropped, never partially written. Self-authored messages are recorded here
+as retained context before the waking-path drop, so a V2 consumer keeps
+them as SELF_RETAINED_NO_WAKE without a recursive wake.
 ---
- server.ts | 82 +++++++++++++++++++++++++++++++++++++++++++++++++++++--
- 1 file changed, 80 insertions(+), 2 deletions(-)
+ server.ts | 102 ++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 100 insertions(+), 2 deletions(-)
 
 diff --git a/server.ts b/server.ts
-index 9162be1..03ecab4 100644
+index 9162be1..9d879bd 100644
 --- a/server.ts
 +++ b/server.ts
 @@ -31,7 +31,7 @@ import {
@@ -30,7 +32,7 @@ index 9162be1..03ecab4 100644
  import { homedir } from 'os'
  import { join, sep } from 'path'
  
-@@ -40,6 +40,74 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
+@@ -40,6 +40,94 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
  const APPROVED_DIR = join(STATE_DIR, 'approved')
  const ENV_FILE = join(STATE_DIR, '.env')
  
@@ -41,21 +43,41 @@ index 9162be1..03ecab4 100644
 +// facts it holds, one JSON line per message, so a V2 consumer can bind
 +// identity and native relations without guessing from display names.
 +//
-+// It carries verbatim room content, so it is written to an OWNER-ONLY
-+// subdirectory, created 0600, opened O_NOFOLLOW, and validated as an
-+// owner-owned regular file before every write. An unsafe target is refused
-+// (fail closed) rather than written. Records are validated/serialized before
-+// writing; an unserializable record is dropped, never partially written.
-+// Mechanical fact recording only: no filtering, no policy, no social meaning.
++// It carries verbatim room content, so it is kept OWNER-ONLY: written into a
++// caller-owned directory validated to mode 0700 (non-symlink, non-shared),
++// as a file created 0600, opened O_NOFOLLOW, and validated as an owner-owned
++// regular file before every write. An unsafe directory or file is refused
++// (fail closed) rather than written; a pre-existing 0755/0777/symlinked/
++// non-directory path is rejected, never silently reused. Records are
++// validated/serialized before writing; an unserializable record is dropped,
++// never partially written. Mechanical fact recording only: no filtering, no
++// policy, no social meaning.
 +// -------------------------------------------------------------------------
 +const NUNCHI_SIDECAR_DIR = join(STATE_DIR, 'nunchi-v2')
 +const NATIVE_FACT_LOG = join(NUNCHI_SIDECAR_DIR, 'native-events.jsonl')
 +const NATIVE_FACT_LOG_MAX_BYTES = 8 * 1024 * 1024
 +
++function nunchiSidecarDirIsSafe() {
++  // Create the owner-only directory if absent; then validate the existing
++  // directory is a caller-owned, non-symlink directory with mode 0700.
++  // A pre-existing unsafe (0755/0777/symlink/non-directory) path is rejected.
++  try { mkdirSync(NUNCHI_SIDECAR_DIR, { recursive: true, mode: 0o700 }) } catch {}
++  let ds
++  try { ds = lstatSync(NUNCHI_SIDECAR_DIR) } catch { return false }
++  const duid = typeof process.getuid === 'function' ? process.getuid() : ds.uid
++  if (ds.isSymbolicLink() || !ds.isDirectory() || ds.uid !== duid || (ds.mode & 0o077) !== 0) {
++    return false
++  }
++  return true
++}
++
 +function recordNativeFacts(msg, content, attachments, transcripts, delivered) {
 +  let fd = -1
 +  try {
-+    try { mkdirSync(NUNCHI_SIDECAR_DIR, { recursive: true, mode: 0o700 }) } catch {}
++    if (!nunchiSidecarDirIsSafe()) {
++      process.stderr.write('discord: native-fact sidecar directory is unsafe (must be owner-only 0700); refusing to record\n')
++      return
++    }
 +    // Best-effort size rotation using a no-follow stat: never rotate a symlink.
 +    try {
 +      const ls = lstatSync(NATIVE_FACT_LOG)
@@ -69,7 +91,7 @@ index 9162be1..03ecab4 100644
 +    const st = fstatSync(fd)
 +    const uid = typeof process.getuid === 'function' ? process.getuid() : st.uid
 +    if (!st.isFile() || st.uid !== uid || (st.mode & 0o077) !== 0) {
-+      process.stderr.write('discord: native-fact sidecar is unsafe; refusing to record\n')
++      process.stderr.write('discord: native-fact sidecar file is unsafe (must be owner-only 0600); refusing to record\n')
 +      return
 +    }
 +    let line
@@ -105,7 +127,7 @@ index 9162be1..03ecab4 100644
  // Load ~/.claude/channels/discord/.env into process.env. Real env wins.
  // Plugin-spawned servers don't get an env block — this is where the token lives.
  try {
-@@ -911,7 +979,13 @@ client.on('messageCreate', msg => {
+@@ -911,7 +999,13 @@ client.on('messageCreate', msg => {
    // group policy exactly like a human before its messages are delivered.
    // Upstream: anthropics/claude-plugins-official issues #1153 and #1559;
    // community reference chenjr0719 fix/allow-bot-messages (e0474df).
@@ -120,7 +142,7 @@ index 9162be1..03ecab4 100644
    handleInbound(msg).catch(e => process.stderr.write(`discord: handleInbound failed: ${e}\n`))
  })
  
-@@ -990,6 +1064,10 @@ async function handleInbound(msg: Message): Promise<void> {
+@@ -990,6 +1084,10 @@ async function handleInbound(msg: Message): Promise<void> {
      transcripts.length > 0 ? `\n\n[Voice transcript]\n${transcripts.join('\n\n')}` : ''
    const content = `${baseContent}${transcriptBlock}`.trim()
  

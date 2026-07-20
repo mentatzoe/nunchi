@@ -397,22 +397,25 @@ class ReactiveHearingCases(_GateCase):
         self.assert_blocked(second)
         self.assertEqual(transport.call_count, 1)
 
-    def test_operator_prompts_and_foreign_rooms_pass_untouched(self) -> None:
+    def test_operator_prompts_pass_but_foreign_rooms_are_declined(self) -> None:
         transport = CountingTransport(wake_judgment)
         plain = self.module.handle_user_prompt_submit(
             prompt_payload("run the unit suite"),
             self.environ,
             classifier_transport=transport,
         )
-        self.assertIsNone(plain.output)
+        self.assertIsNone(plain.output)  # operator-typed prompt untouched
         foreign = self.module.handle_user_prompt_submit(
             prompt_payload(
-                channel_prompt(message_id="1", chat_id="9999999999999999999")
+                channel_prompt(message_id="9000000000000000099", chat_id="9999999999999999999")
             ),
             self.environ,
             classifier_transport=transport,
         )
-        self.assertIsNone(foreign.output)
+        # A foreign room for a single-room binding is declined, not passed
+        # through as operator work.
+        self.assertIsNotNone(foreign.output)
+        self.assertEqual(foreign.output.get("decision"), "block")
         self.assertEqual(transport.call_count, 0)
 
     def test_reactive_surface_has_no_polling_loop(self) -> None:
@@ -439,6 +442,10 @@ class ReactiveHearingCases(_GateCase):
         self.assertIn("native-events.jsonl", patch_two)
         self.assertIn("O_NOFOLLOW", patch_two)
         self.assertIn("0o600", patch_two)
+        # Directory safety: a caller-owned 0700 non-symlink dir is required.
+        self.assertIn("nunchiSidecarDirIsSafe", patch_two)
+        self.assertIn("isSymbolicLink", patch_two)
+        self.assertIn("0o700", patch_two)
         self.assertIn("recordNativeFacts(msg, msg.content, [], [], false)", patch_two)
         self.assertIn("recordNativeFacts(msg, content, atts, transcripts, true)", patch_two)
         self.assertIn("reply_to_message_id", patch_two)
@@ -1185,6 +1192,134 @@ class AdversarialRegressionCases(_GateCase):
         )
         self.assertIn("nunchi-v2", str(config.sidecar_path))
         self.assertEqual(config.sidecar_path.name, "native-events.jsonl")
+
+    # -- B1: invalid policy cannot create an unguarded entry point ----------
+
+    def test_invalid_policy_blocks_prompt_and_denies_privileged(self) -> None:
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        # Corrupt the operator policy after configuration: now unloadable, so
+        # the room binding cannot be established.
+        policy_path = Path(self.environ["NUNCHI_CLAUDE_V2_POLICY"])
+        policy_path.write_text("{ not valid json", encoding="utf-8")
+        policy_path.chmod(0o600)
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="7300000000000000001")
+        # The bound-room prompt did NOT pass un-gated: it is blocked fail-closed.
+        self.assertIsNotNone(decision.output)
+        self.assertEqual(decision.output.get("decision"), "block")
+        self.assertEqual(transport.call_count, 0)
+        # A durable degraded room-causal marker was recorded for the session.
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertIsInstance(turn, dict)
+        self.assertTrue(turn["degraded"])
+        # The subsequent mapped privileged action is denied, not treated as
+        # operator work.
+        gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_state_failure_blocks_prompt_fail_closed(self) -> None:
+        # If even the degraded marker cannot be recorded (state dir unusable),
+        # the configured channel event is still blocked, never passed un-gated.
+        self.environ = make_environ(self.tmp)
+        state_dir = Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        # Make the state directory a file so the store cannot open.
+        state_dir.parent.mkdir(parents=True, exist_ok=True)
+        state_dir.write_text("not a directory", encoding="utf-8")
+        # Also corrupt the policy so the binding cannot be established.
+        Path(self.environ["NUNCHI_CLAUDE_V2_POLICY"]).write_text("{bad", encoding="utf-8")
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="7300000000000000002")
+        self.assertIsNotNone(decision.output)
+        self.assertEqual(decision.output.get("decision"), "block")
+
+    # -- B2: foreign-room events are declined, not an entry point -----------
+
+    def test_foreign_room_declined_and_privileged_denied(self) -> None:
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        transport = CountingTransport(wake_judgment)
+        foreign = self.module.handle_user_prompt_submit(
+            prompt_payload(
+                channel_prompt(message_id="7400000000000000001", chat_id="8888888888888888888")
+            ),
+            self.environ,
+            classifier_transport=transport,
+        )
+        # The foreign-room prompt is declined (blocked), never passed through.
+        self.assertIsNotNone(foreign.output)
+        self.assertEqual(foreign.output.get("decision"), "block")
+        self.assertEqual(transport.call_count, 0)
+        # A room-action targeting the foreign room is denied (send safety).
+        react = self.pre_tool(
+            tool_name="mcp__discord__react",
+            tool_input={"chat_id": "8888888888888888888", "message_id": "1", "emoji": "👀"},
+        )
+        self.assertIsNotNone(react.output)
+        self.assertEqual(react.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        # A mapped privileged action in the foreign-contaminated session is
+        # denied, not treated as operator work.
+        gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_foreign_room_does_not_clobber_a_healthy_bound_turn(self) -> None:
+        # A healthy bound-room turn must survive a foreign-room event so the
+        # legitimate turn is not disrupted.
+        self.environ = make_environ(self.tmp)
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7400000000000000010"))
+        before = self._read_turn()
+        self.module.handle_user_prompt_submit(
+            prompt_payload(
+                channel_prompt(message_id="7400000000000000011", chat_id="8888888888888888888")
+            ),
+            self.environ,
+            classifier_transport=transport,
+        )
+        after = self._read_turn()
+        self.assertEqual(after["request_id"], before["request_id"])
+        self.assertFalse(after.get("degraded", False))
+
+    def _read_turn(self) -> dict:
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            return store.read_room()["turn"]
+
+    # -- B3: sidecar directory must be owner-only ---------------------------
+
+    def test_group_readable_sidecar_directory_is_refused(self) -> None:
+        subdir = self.tmp / "sidecar-dir"
+        subdir.mkdir(mode=0o700)
+        self.environ = make_environ(
+            self.tmp, NUNCHI_CLAUDE_V2_SIDECAR=str(subdir / "native-events.jsonl")
+        )
+        append_sidecar(self.environ, sidecar_row(message_id="7500000000000000001"))
+        # Widen the DIRECTORY mode: a world/group-accessible parent must be
+        # refused, so a matching record reads as fail-closed malformed.
+        subdir.chmod(0o755)
+        result = self.module.read_sidecar_record(
+            Path(self.environ["NUNCHI_CLAUDE_V2_SIDECAR"]), "7500000000000000001"
+        )
+        self.assertIs(result, self.module._SIDECAR_MALFORMED)
+
+    def test_symlinked_sidecar_directory_is_refused(self) -> None:
+        real_dir = self.tmp / "real-sidecar-dir"
+        real_dir.mkdir(mode=0o700)
+        (real_dir / "native-events.jsonl").write_text(
+            json.dumps(sidecar_row(message_id="7500000000000000002")) + "\n",
+            encoding="utf-8",
+        )
+        (real_dir / "native-events.jsonl").chmod(0o600)
+        link_dir = self.tmp / "linked-sidecar-dir"
+        link_dir.symlink_to(real_dir)
+        result = self.module.read_sidecar_record(
+            link_dir / "native-events.jsonl", "7500000000000000002"
+        )
+        self.assertIs(result, self.module._SIDECAR_MALFORMED)
 
     # -- F6: patch installer rejects symlinked target/backup ----------------
 

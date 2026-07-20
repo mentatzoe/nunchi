@@ -280,13 +280,37 @@ _SIDECAR_MALFORMED = object()
 _SIDECAR_REQUIRED_KEYS = ("message_id", "channel_id", "author", "content")
 
 
+def _validate_owner_only_dir(directory: Path) -> None:
+    """Confirm ``directory`` is a caller-owned, owner-only, non-symlink dir.
+
+    The confidential sidecar's containing directory must itself be safe: a
+    symlinked, world/group-accessible, or non-directory parent would let
+    another user substitute or expose the file. Raises ``ClaudeGateStateError``
+    on any unsafe condition (pre-existing ``0755``/``0777``/symlink/non-dir).
+    """
+    try:
+        info = os.lstat(directory)
+    except OSError as exc:
+        raise ClaudeGateStateError(f"sidecar directory is unavailable: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ClaudeGateStateError("sidecar directory is a symlink")
+    if not stat.S_ISDIR(info.st_mode):
+        raise ClaudeGateStateError("sidecar directory is not a directory")
+    if info.st_uid != os.geteuid():
+        raise ClaudeGateStateError("sidecar directory is not owner-owned")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise ClaudeGateStateError("sidecar directory is not owner-only (mode must be 0700)")
+
+
 def _open_owner_only_regular(path: Path) -> Any:
     """Open a file no-follow and confirm it is an owner-owned regular file.
 
-    Raises ``ClaudeGateStateError`` when the target is a symlink, not a
-    regular file, not owned by us, or group/other-accessible. Confidential
-    room content must never be read through a substituted or shared path.
+    The containing directory is validated first (owner-only, non-symlink),
+    then the file is opened ``O_NOFOLLOW`` and confirmed to be an owner-owned
+    regular file with no group/other bits. Confidential room content must never
+    be read through a substituted, shared, or symlinked path or directory.
     """
+    _validate_owner_only_dir(path.parent)
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags)
@@ -1069,6 +1093,90 @@ class _ObservedDeliveryRecorder:
 # ---------------------------------------------------------------------------
 
 
+def _degraded_turn_marker(
+    session_id: str, anchor: str, kind: str, detail: str
+) -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "request_id": None,
+        "anchor_event_id": anchor,
+        "snapshot": None,
+        "decision": None,
+        "wake_source": "DEGRADED",
+        "degraded": True,
+        "degraded_kind": kind,
+        "detail": detail,
+        "started_at": time.time(),
+    }
+
+
+def _record_marker_and_block(
+    state_dir: Path,
+    session_id: str,
+    tag: dict[str, str],
+    *,
+    kind: str,
+    detail: str,
+) -> HookDecision:
+    """Record a durable degraded room-causal marker and block the room delivery.
+
+    Used when a recognized, configured channel event cannot be gated normally
+    (broken policy/state, or a foreign room). The marker makes ``PreToolUse``
+    treat the session as room-caused, so any mapped privileged tool is denied
+    rather than mistaken for operator work. If the marker cannot be recorded,
+    the prompt is still blocked — a configured channel event never passes
+    un-gated. A healthy same-session bound-room turn is never clobbered; it
+    already denies privileged execution.
+    """
+    anchor = (
+        f"discord:message:{tag['message_id']}"
+        if tag.get("message_id")
+        else "discord:degraded"
+    )
+    try:
+        with RoomStateStore(state_dir) as store:
+            room = store.read_room()
+            existing = room.get("turn")
+            healthy = (
+                isinstance(existing, dict)
+                and existing.get("session_id") == session_id
+                and not existing.get("degraded")
+            )
+            if not healthy:
+                room["session_id"] = session_id
+                room["turn"] = _degraded_turn_marker(session_id, anchor, kind, detail)
+                store.write_room(room)
+        return _block_prompt(
+            f"{kind}: {detail}; degraded room-causal marker recorded, room delivery blocked"
+        )
+    except Exception as exc:  # never fail open on a configured channel event
+        return _block_prompt(
+            f"{kind}: {detail}; state unavailable ({exc}), room delivery blocked fail-closed"
+        )
+
+
+def _fail_closed_channel_event(
+    environ: dict[str, str],
+    session_id: str,
+    tag: dict[str, str],
+    detail: str,
+    *,
+    config: ClaudeGateConfig | None = None,
+) -> HookDecision:
+    if config is not None:
+        return _record_marker_and_block(
+            config.state_dir, session_id, tag, kind="degraded-channel-event", detail=detail
+        )
+    raw = (environ.get("NUNCHI_CLAUDE_V2_STATE_DIR") or "").strip()
+    if not raw:
+        return _block_prompt(
+            f"{detail}; no state directory to record a marker, room delivery blocked fail-closed"
+        )
+    return _record_marker_and_block(
+        Path(raw), session_id, tag, kind="degraded-channel-event", detail=detail
+    )
+
+
 def handle_user_prompt_submit(
     payload: dict[str, Any],
     environ: dict[str, str],
@@ -1082,26 +1190,41 @@ def handle_user_prompt_submit(
         return _allow()
     if not ClaudeGateConfig.is_configured(environ):
         return _allow("not configured; channel prompt passes through un-gated")
+    # INVARIANT: from here the prompt is a recognized Discord channel event and
+    # V2 is configured. It MUST NOT pass through un-gated. Every failure below
+    # records a durable degraded room-causal marker (so PreToolUse denies
+    # privileged tools this session) and blocks the room delivery; if even the
+    # marker cannot be recorded, it still blocks.
+    session_id = str(payload.get("session_id") or "")
     try:
         config = ClaudeGateConfig.from_env(environ)
     except ClaudeGateConfigError as exc:
-        # Attention errors widen toward hearing: a broken configuration must
-        # not silence the room, and no social result is fabricated for it.
-        return _allow(f"configuration error ({exc}); allowing the turn un-gated")
+        return _fail_closed_channel_event(
+            environ, session_id, tag, f"configuration error ({exc})"
+        )
     if tag["chat_id"] != config.channel_id:
-        # A different room is outside this binding; the packet documents the
-        # single-room scope honestly instead of half-gating it.
-        return _allow()
-
-    session_id = str(payload.get("session_id") or "")
+        # Single-room binding: a foreign room is declined, not passed through as
+        # operator work. The marker keeps the session's privileged tools denied.
+        return _record_marker_and_block(
+            config.state_dir,
+            session_id,
+            tag,
+            kind="foreign-room-declined",
+            detail=(
+                f"event from {tag['chat_id']} is outside the bound room "
+                f"{config.channel_id}"
+            ),
+        )
     try:
         with RoomStateStore(config.state_dir) as store:
             room_binding = ClaudeRoomV2(
                 config, store, classifier_transport=classifier_transport
             )
             return _gate_channel_event(room_binding, store, tag, session_id)
-    except (ClaudeGateStateError, ClaudeGateConfigError, OSError, ValueError) as exc:
-        return _allow(f"operational error ({exc}); allowing the turn un-gated")
+    except Exception as exc:  # broad: a configured channel event never fails open
+        return _fail_closed_channel_event(
+            environ, session_id, tag, f"operational error ({exc})", config=config
+        )
 
 
 def _gate_channel_event(
