@@ -218,3 +218,21 @@ consumption) for adversarial review per `docs/INSTALL.md`: inspect the diff,
 rerun the packet commands, run the shared deterministic suite, build/install
 the wheel, compare installed inventory, and exercise the mixed-room ladder.
 This lane does not self-declare acceptance.
+
+---
+
+## Addendum — exact candidate binding (2026-07-20)
+
+**Candidate commit**: `6476b58ca015e259fa576fd8f9ed569adc0c6913`
+(descends from base `a03eeb95c7d569895e1171993c7a5748fc250bd8` on branch
+`claude/claude-code-v2-integration-3ac219`; intermediate lineage
+`ef7c2cc` implementation → `4e46b39` documentation → `6476b58` evidence).
+
+This addendum commit is docs/evidence-only: its diff from the candidate
+touches only `evidence/v2/claude-code/`. Verify with:
+
+```sh
+git diff --name-only 6476b58ca015e259fa576fd8f9ed569adc0c6913..HEAD
+python3 -m unittest            # 1155 tests OK (skipped=7) at the candidate
+python3 scripts/check_governance.py --check-cli
+```
