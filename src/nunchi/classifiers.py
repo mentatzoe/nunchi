@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from .errors import NunchiError, ValidationError
 from .models import AdmissionRequest, AdmissionResult, FORBIDDEN_REPLY_FIELDS, VERDICTS
+from .policy import ClassifierPolicy
 
 PRODUCT_CLASSIFIER = "product"
 SUPPORTED_CLASSIFIERS = (PRODUCT_CLASSIFIER,)
@@ -552,3 +553,99 @@ def classify(
         reasons=decision.reasons,
         request_id=request.request_id,
     )
+
+
+def _attention_v2_system_prompt() -> str:
+    return (
+        "You are the named participant's pre-attention faculty in a live shared "
+        "conversation. Read the supplied current factual room snapshot as that "
+        "participant would. Decide whether this current conversational moment is "
+        "worth waking the participant now. The trigger_event_id is only the anchor "
+        "that caused a fresh look; it is not an obligation to answer that event, and "
+        "later events may have superseded or resolved it. Do not compose a reply, "
+        "issue a tool instruction, infer a complete roster, or decide authorization.\n\n"
+        "Return one JSON object only with: disposition (SUPPRESS, WAKE, or DEFER), "
+        "reasons (array of short strings), evidence_event_ids (array containing only "
+        "supplied event IDs), optional legacy_verdict_confidences with exactly PASS, "
+        "ACK, ASK, SPEAK numeric values in [0,1], and optional attention_advice only "
+        "for WAKE as an array of {note,evidence_event_ids}. Use SUPPRESS only when "
+        "confident the participant would not want attention. Uncertainty is DEFER. "
+        "Advice is a sparse non-authoritative observation, never drafted response text."
+    )
+
+
+def classify_attention_v2(
+    projection: dict[str, Any],
+    config: ClassifierPolicy,
+) -> dict[str, Any]:
+    """Invoke one trusted OpenAI-compatible V2 classifier configuration.
+
+    All provider identity, endpoint, model, credential, timeout, and retry data
+    comes from the strict operator policy.  Room/request data cannot redirect
+    this call.  Retries repeat the identical logical judgment payload and use
+    the fixed 0.5s/1.0s schedule; provider ``Retry-After`` is ignored.
+    """
+    if not isinstance(config, ClassifierPolicy):
+        raise ValidationError("V2 classifier configuration is invalid")
+    payload = {
+        "model": config.model,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": _attention_v2_system_prompt()},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    projection,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            },
+        ],
+    }
+    body = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if config.api_key is not None:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    request = urllib.request.Request(
+        config.endpoint,
+        data=body,
+        method="POST",
+        headers=headers,
+    )
+    retry_delays = (0.5, 1.0)
+    last_error: Exception | None = None
+    for attempt in range(config.max_retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:
+                response_body = response.read().decode("utf-8")
+            try:
+                provider_payload = json.loads(response_body)
+            except json.JSONDecodeError as exc:
+                raise NunchiError("attention provider returned invalid JSON") from exc
+            return _extract_result_payload(provider_payload)
+        except urllib.error.HTTPError as exc:
+            last_error = NunchiError(f"attention provider HTTP {exc.code}")
+            retryable = exc.code == 429 or 500 <= exc.code <= 599
+            exc.close()
+            if not retryable:
+                raise last_error from exc
+        except (socket.timeout, TimeoutError) as exc:
+            last_error = TimeoutError("attention provider timed out")
+        except urllib.error.URLError as exc:
+            last_error = NunchiError("attention provider request failed")
+        except OSError as exc:
+            last_error = NunchiError("attention provider request failed")
+        if attempt < config.max_retries:
+            time.sleep(retry_delays[attempt])
+    assert last_error is not None
+    raise last_error

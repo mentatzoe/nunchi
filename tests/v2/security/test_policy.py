@@ -81,7 +81,13 @@ class ClosedTypedPolicyCases(unittest.TestCase):
         root = clone_policy()
         root["room_override"] = True
         mutations.append(root)
-        for section in ("attention", "recoverability", "classifier", "authorization"):
+        for section in (
+            "attention",
+            "recoverability",
+            "classifier",
+            "authorization",
+            "receipt_sink",
+        ):
             document = clone_policy()
             document[section]["room_override"] = True
             mutations.append(document)

@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from .core import evaluate
+from .core import evaluate, evaluate_v2
 from .errors import (
     EXIT_INPUT,
     EXIT_RUNTIME,
@@ -19,6 +19,8 @@ from .errors import (
     NunchiError,
     ValidationError,
 )
+from .policy import PolicyLoadError, load_operator_policy
+from .receipts import ExclusiveJSONFileReceiptSink, ReceiptSinkConstructionError
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -31,6 +33,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--classifier-config",
         metavar="JSON_OR_PATH",
         help="classifier configuration as a JSON object or path to a JSON object file",
+    )
+    attention = subparsers.add_parser(
+        "attention-v2",
+        help="evaluate one V2 attention request using trusted operator configuration",
+    )
+    attention.add_argument(
+        "--config",
+        required=True,
+        metavar="PATH",
+        help="absolute owner-only V2 operator policy path",
     )
     return parser
 
@@ -82,12 +94,53 @@ def main(argv: Sequence[str] | None = None):
     args = parser.parse_args(argv)
 
     try:
-        if args.command != "admit":
+        if args.command == "admit":
+            raw = _read_input(args.input)
+            request = _load_request(raw)
+            classifier_config = _load_classifier_config(args.classifier_config)
+            result = evaluate(request, classifier=args.classifier, classifier_config=classifier_config)
+            exit_code = EXIT_SUCCESS
+        elif args.command == "attention-v2":
+            raw = _read_input(None)
+            request = _load_request(raw)
+            try:
+                operator = load_operator_policy(args.config)
+                sink = ExclusiveJSONFileReceiptSink(operator.receipt_sink)
+            except (PolicyLoadError, ReceiptSinkConstructionError):
+                request_id = request.get("request_id") if isinstance(request, dict) else None
+                result = {
+                    "status": "error",
+                    "error": {
+                        "code": "configuration-error",
+                        "detail": "trusted attention configuration is invalid",
+                    },
+                }
+                if isinstance(request_id, str) and request_id:
+                    result["request_id"] = request_id
+                exit_code = EXIT_VALIDATION
+            else:
+                try:
+                    result = evaluate_v2(
+                        request,
+                        policy=operator.attention,
+                        recoverability=operator.recoverability,
+                        classifier_config=operator.classifier,
+                        receipt_sink=sink,
+                    )
+                finally:
+                    sink.close()
+                if result["status"] in ("ok", "bypass"):
+                    exit_code = EXIT_SUCCESS
+                elif result["error"]["code"] in {
+                    "invalid-request",
+                    "configuration-error",
+                    "attention-budget-error",
+                }:
+                    exit_code = EXIT_VALIDATION
+                else:
+                    exit_code = EXIT_RUNTIME
+        else:
             raise InputError(f"unsupported command: {args.command}")
-        raw = _read_input(args.input)
-        request = _load_request(raw)
-        classifier_config = _load_classifier_config(args.classifier_config)
-        result = evaluate(request, classifier=args.classifier, classifier_config=classifier_config)
     except InputError as exc:
         _write_error(exc)
         return EXIT_INPUT
@@ -100,4 +153,4 @@ def main(argv: Sequence[str] | None = None):
 
     json.dump(result, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
-    return EXIT_SUCCESS
+    return exit_code

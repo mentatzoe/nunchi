@@ -133,6 +133,13 @@ class AuthorizationPolicy:
 
 
 @dataclass(frozen=True)
+class ReceiptSinkPolicy:
+    type: str
+    directory: str
+    source: str
+
+
+@dataclass(frozen=True)
 class OperatorPolicy:
     schema_version: int
     source_label: str
@@ -141,6 +148,7 @@ class OperatorPolicy:
     recoverability: RecoverabilityPolicy
     classifier: ClassifierPolicy
     authorization: AuthorizationPolicy
+    receipt_sink: ReceiptSinkPolicy
 
 
 def _fail(code: str = "policy-invalid") -> PolicyLoadError:
@@ -404,6 +412,20 @@ def _authorization(value: Any, provenance: str) -> AuthorizationPolicy:
     )
 
 
+def _receipt_sink(value: Any, provenance: str) -> ReceiptSinkPolicy:
+    data = _closed_object(value, required=("type", "directory", "source"))
+    if data["type"] != "exclusive-json-file":
+        raise _fail()
+    directory = _string(data["directory"])
+    if not Path(directory).is_absolute():
+        raise _fail()
+    return ReceiptSinkPolicy(
+        type="exclusive-json-file",
+        directory=directory,
+        source=f"{_string(data['source'])}@{provenance}",
+    )
+
+
 def _reject_constant(_value: str) -> Any:
     raise _fail()
 
@@ -481,6 +503,7 @@ def load_operator_policy(path: str | os.PathLike[str]) -> OperatorPolicy:
             "recoverability",
             "classifier",
             "authorization",
+            "receipt_sink",
         ),
     )
     if root["schema_version"] != 2:
@@ -496,6 +519,7 @@ def load_operator_policy(path: str | os.PathLike[str]) -> OperatorPolicy:
         recoverability=_recoverability(root["recoverability"], provenance),
         classifier=_classifier(root["classifier"], provenance),
         authorization=_authorization(root["authorization"], provenance),
+        receipt_sink=_receipt_sink(root["receipt_sink"], provenance),
     )
 
 
@@ -522,6 +546,7 @@ __all__ = [
     "OperatorPolicySource",
     "PolicyLoadError",
     "RecoverabilityPolicy",
+    "ReceiptSinkPolicy",
     "ResourceScope",
     "load_operator_policy",
 ]

@@ -80,6 +80,11 @@ def policy_document() -> dict[str, Any]:
                 },
             ],
         },
+        "receipt_sink": {
+            "type": "exclusive-json-file",
+            "directory": "/tmp",
+            "source": "operator:local-receipts",
+        },
     }
 
 
