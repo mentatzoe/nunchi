@@ -1,0 +1,5 @@
+{"scene_id": "CC-05", "s_ids": ["S03", "S05"], "case": "later-hearing-after-suppression", "expectation": "a socially suppressed event stays retained and appears as ordinary context in the next opportunity's bounded snapshot"}
+{"scene_id": "CC-05", "s_ids": ["S15"], "case": "restart-retains-context", "expectation": "previously delivered events persist across a Claude session restart and appear in post-restart snapshots within retention bounds"}
+{"scene_id": "CC-05", "s_ids": ["S17"], "case": "restart-drops-pending-anchor", "expectation": "a pending coalesced anchor from a previous session never becomes a wake after restart; no backlog turn is fabricated"}
+{"scene_id": "CC-05", "s_ids": ["S17"], "case": "burst-coalesces-to-one-fresh-successor", "expectation": "a burst during one active turn yields exactly one successor opportunity anchored at the newest event with a fresh snapshot"}
+{"scene_id": "CC-05", "s_ids": ["S05"], "case": "cold-wake-honestly-unsupported", "expectation": "events arriving with no live Claude session are not delivered by the transport and are never claimed as heard; recovery is bounded native history, declared as a limitation"}

@@ -1,47 +1,36 @@
-From c44ae01849f6ce14035b22be4188e544552be9a2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nunchi Operators <nunchi@users.noreply.github.com>
-Date: Thu, 9 Jul 2026 00:01:06 +0100
-Subject: [PATCH] discord: drop only self-messages so allowlisted peer bots are
- heard
+Date: Mon, 20 Jul 2026 18:14:46 +0100
+Subject: [PATCH 1/2] discord: drop only self-messages so allowlisted peer bots
+ are heard
 
-Replace the unconditional bot-drop in the messageCreate handler
-(if (msg.author.bot) return) with a self-only guard
-(if (msg.author.id === client.user?.id) return).
-
-The unconditional drop runs before gate(), so messages from other bots
-never reach the plugin's own access control: an operator who explicitly
-allowlists a peer bot's user ID still never hears it (upstream issues
-anthropics/claude-plugins-official#1153, #1559). With this patch, bot
-authors flow into gate() like any other sender: they must satisfy
-dmPolicy/allowFrom (DMs) or the per-channel group policy
-(allowFrom + requireMention) before delivery. The self-guard preserves
-the original loop-prevention purpose.
-
-Community reference: chenjr0719/claude-plugins-official
-branch fix/allow-bot-messages (commit e0474df); this patch is the same
-minimal delta rebased onto current upstream HEAD.
+Replace the unconditional bot-drop in the messageCreate handler with a
+self-only guard. The unconditional drop ran before gate(), so a peer bot
+explicitly allowlisted by the operator was never heard (upstream issues
+anthropics/claude-plugins-official#1153, #1559). With this patch bot
+authors flow into gate() like any other sender and must satisfy
+dmPolicy/allowFrom (DMs) or the per-channel group policy before
+delivery. The self-guard preserves the original echo-loop prevention.
 ---
- external_plugins/discord/server.ts | 7 ++++++-
- 1 file changed, 6 insertions(+), 1 deletion(-)
+ server.ts | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
 
-diff --git a/external_plugins/discord/server.ts b/external_plugins/discord/server.ts
-index 0595fc7..6cfda9b 100644
---- a/external_plugins/discord/server.ts
-+++ b/external_plugins/discord/server.ts
-@@ -803,7 +803,12 @@ client.on('interactionCreate', async (interaction: Interaction) => {
+diff --git a/server.ts b/server.ts
+index 0b346f5..9162be1 100644
+--- a/server.ts
++++ b/server.ts
+@@ -905,7 +905,13 @@ client.on('interactionCreate', async (interaction: Interaction) => {
  })
  
  client.on('messageCreate', msg => {
 -  if (msg.author.bot) return
 +  // Drop only our own messages (echo-loop guard). Peer bots are NOT dropped
 +  // here: gate()/allowFrom in access.json remains the authorization layer,
-+  // and a bot sender must be allowlisted exactly like a human before its
-+  // messages are delivered. Upstream: anthropics/claude-plugins-official
-+  // issues #1153 and #1559.
++  // and a bot sender must satisfy dmPolicy/allowFrom or the per-channel
++  // group policy exactly like a human before its messages are delivered.
++  // Upstream: anthropics/claude-plugins-official issues #1153 and #1559;
++  // community reference chenjr0719 fix/allow-bot-messages (e0474df).
 +  if (msg.author.id === client.user?.id) return
    handleInbound(msg).catch(e => process.stderr.write(`discord: handleInbound failed: ${e}\n`))
  })
  
--- 
-2.53.0
-

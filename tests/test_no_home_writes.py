@@ -52,8 +52,8 @@ _HOME_PATTERNS = (
 )
 
 # Rule 2: hook-running test modules must not inherit the bare parent env.
-_GATE = _REPO_ROOT / "integrations" / "claude-code" / "nunchi_prompt_gate.py"
-_HOOK_SCRIPT_MARKERS = ("nunchi_prompt_gate", "nunchi_send_gate")
+_GATE = _REPO_ROOT / "integrations" / "claude-code" / "nunchi_claude_v2.py"
+_HOOK_SCRIPT_MARKERS = ("nunchi_claude_v2", "nunchi_prompt_gate", "nunchi_send_gate")
 _BARE_ENV_PATTERNS = (
     "**os.environ",
     "os.environ.copy",
@@ -135,11 +135,10 @@ class TestHookRunnersUseSandbox(unittest.TestCase):
             ):
                 hook_referencing += 1
             violations.extend(_scan_for_bare_env(path.name, text))
-        # Guard against silent no-op: the remaining inherited hook test
-        # modules must be seen while the V2 packet is still pending.
+        # Guard against silent no-op: the V2 gate test modules must be seen.
         self.assertGreaterEqual(
             hook_referencing, 2,
-            "scan looks broken: expected the inherited hook test modules",
+            "scan looks broken: expected the V2 gate test modules",
         )
         self.assertEqual(violations, [], "\n".join(violations))
 
@@ -185,56 +184,49 @@ class TestSandboxEnvContract(unittest.TestCase):
 
 
 class TestRuntimeCanary(unittest.TestCase):
-    """A hook subprocess with NUNCHI_HOOK_LOG unset must write its receipt
-    under the sandbox HOME — proving the home-default fall-through exists and
-    is contained by the sandbox (this is the exact scenario that polluted the
-    operator's live log)."""
+    """The V2 gate must never write home-anchored files at runtime. Its state,
+    receipts, and audit paths all come from explicit operator configuration;
+    an unconfigured gate passes a channel prompt through and writes nothing.
+    (The V1 hook's home-default receipt log — the file this module exists to
+    protect — was removed with the V1 gate.)"""
 
-    def test_receipt_fallthrough_lands_in_sandbox_home(self):
-        # Channel-tagged prompt + missing gate binary → "allow-gate-error"
-        # receipt (a write path that needs no gate binary).
-        fd, transcript = tempfile.mkstemp(suffix=".jsonl")
-        os.close(fd)
-        env = sandbox_env({"NUNCHI_CHANNEL_BIN": "/nonexistent"})
-        # Simulate the historical mistake: no explicit NUNCHI_HOOK_LOG.
+    def test_unconfigured_gate_writes_nothing_under_home(self):
+        env = sandbox_env()
         env.pop("NUNCHI_HOOK_LOG", None)
+        for name in list(env):
+            if name.startswith("NUNCHI_CLAUDE_V2_"):
+                env.pop(name)
+        # The deployed gate imports the installed nunchi package; the test
+        # runs it from the source layout.
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
         hook_input = {
             "session_id": "sess-canary",
-            "transcript_path": transcript,
+            "transcript_path": "",
             "hook_event_name": "UserPromptSubmit",
             "prompt": (
-                '<channel source="discord" chat_id="enforcement-canary" '
-                'message_id="m1" user="alice" ts="2026-01-01T00:00:00Z">\n'
+                '<channel source="discord" chat_id="1" '
+                'message_id="1" user="alice" ts="2026-01-01T00:00:00Z">\n'
                 "hi\n</channel>"
             ),
             "cwd": "/tmp",
         }
-        try:
-            result = subprocess.run(
-                [sys.executable, str(_GATE)],
-                input=json.dumps(hook_input),
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-        finally:
-            os.unlink(transcript)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-        sandbox_home = pathlib.Path(env["HOME"])
-        receipt_file = sandbox_home / ".claude" / "nunchi-gate-receipts.jsonl"
-        self.assertTrue(
-            receipt_file.exists(),
-            "expected the home-default receipt inside the sandbox HOME; "
-            "if the hook's default path changed, update this canary",
+        result = subprocess.run(
+            [sys.executable, str(_GATE), "user-prompt-submit"],
+            input=json.dumps(hook_input),
+            capture_output=True,
+            text=True,
+            env=env,
         )
-        records = [
-            json.loads(line)
-            for line in receipt_file.read_text(encoding="utf-8").splitlines()
-            if line.strip()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sandbox_home = pathlib.Path(env["HOME"])
+        written = [
+            str(p.relative_to(sandbox_home))
+            for p in sandbox_home.rglob("*")
+            if p.is_file()
         ]
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["chat_id"], "enforcement-canary")
+        self.assertEqual(
+            written, [], f"unconfigured V2 gate wrote home files: {written}"
+        )
 
 
 if __name__ == "__main__":

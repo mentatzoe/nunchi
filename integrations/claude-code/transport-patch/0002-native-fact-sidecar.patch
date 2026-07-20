@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nunchi Operators <nunchi@users.noreply.github.com>
+Date: Mon, 20 Jul 2026 18:15:05 +0100
+Subject: [PATCH 2/2] discord: append exact native facts per delivered message
+
+The rendered channel tag omits the exact author ID, bot flag, mention
+IDs, guild, and reply reference even though the gateway payload has
+them. Append those facts as one JSON line per delivered message to
+STATE_DIR/nunchi-native-events.jsonl so a Nunchi V2 consumer can bind
+exact identity and native relations without inferring them from display
+names or prose. Facts the transport does not synchronously hold (the
+referenced message's author and content) are recorded as absent rather
+than fetched or guessed. Size-capped with one rotation generation.
+---
+ server.ts | 43 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/server.ts b/server.ts
+index 9162be1..c226b57 100644
+--- a/server.ts
++++ b/server.ts
+@@ -31,7 +31,7 @@ import {
+ } from 'discord.js'
+ import { randomBytes } from 'crypto'
+ import { spawn } from 'child_process'
+-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
++import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, appendFileSync } from 'fs'
+ import { homedir } from 'os'
+ import { join, sep } from 'path'
+ 
+@@ -40,6 +40,45 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
+ const APPROVED_DIR = join(STATE_DIR, 'approved')
+ const ENV_FILE = join(STATE_DIR, '.env')
+ 
++// Nunchi V2 native-fact sidecar. The channel tag rendered from the meta of
++// the inbound notification does not carry the exact author ID, bot flag,
++// mention IDs, or the reply reference, and the referenced-message author and
++// content are not synchronously known here. This transport process appends
++// the exact facts it does hold, one JSON line per delivered message, so a V2
++// consumer can bind identity and relations without guessing from display
++// names. Mechanical fact recording only: no filtering, no policy, and no
++// social meaning. Absent facts stay absent.
++const NATIVE_FACT_LOG = join(STATE_DIR, 'nunchi-native-events.jsonl')
++const NATIVE_FACT_LOG_MAX_BYTES = 8 * 1024 * 1024
++
++function recordNativeFacts(msg: Message): void {
++  try {
++    try {
++      if (statSync(NATIVE_FACT_LOG).size > NATIVE_FACT_LOG_MAX_BYTES) {
++        renameSync(NATIVE_FACT_LOG, NATIVE_FACT_LOG + '.1')
++      }
++    } catch {}
++    appendFileSync(
++      NATIVE_FACT_LOG,
++      JSON.stringify({
++        v: 1,
++        delivered_at: new Date().toISOString(),
++        guild_id: msg.guildId ?? null,
++        channel_id: msg.channelId,
++        message_id: msg.id,
++        author: { id: msg.author.id, username: msg.author.username, bot: msg.author.bot },
++        content: msg.content,
++        timestamp: msg.createdAt.toISOString(),
++        mention_user_ids: [...msg.mentions.users.keys()],
++        mention_everyone: msg.mentions.everyone,
++        reply_to_message_id: msg.reference?.messageId ?? null,
++      }) + '\n',
++    )
++  } catch (err) {
++    process.stderr.write(`discord channel: native-fact record failed: ${err}\n`)
++  }
++}
++
+ // Load ~/.claude/channels/discord/.env into process.env. Real env wins.
+ // Plugin-spawned servers don't get an env block — this is where the token lives.
+ try {
+@@ -990,6 +1029,8 @@ async function handleInbound(msg: Message): Promise<void> {
+     transcripts.length > 0 ? `\n\n[Voice transcript]\n${transcripts.join('\n\n')}` : ''
+   const content = `${baseContent}${transcriptBlock}`.trim()
+ 
++  recordNativeFacts(msg)
++
+   mcp.notification({
+     method: 'notifications/claude/channel',
+     params: {

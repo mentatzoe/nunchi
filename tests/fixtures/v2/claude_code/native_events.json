@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "comment": "Named native-event materials for the Claude Code V2 tests: transport sidecar rows plus the channel-tag surface each arrives with. IDs are test-local snowflakes; nothing here is a live identifier.",
+  "allowlisted_bot_message": {
+    "sidecar": {
+      "v": 1,
+      "delivered_at": "2026-07-20T12:00:01Z",
+      "guild_id": "2000000000000000001",
+      "channel_id": "1000000000000000001",
+      "message_id": "3000000000000000001",
+      "author": {"id": "1000000000000000004", "username": "vigil", "bot": true},
+      "content": "station: the parity sweep finished — two scenes red",
+      "timestamp": "2026-07-20T12:00:01Z",
+      "mention_user_ids": [],
+      "mention_everyone": false,
+      "reply_to_message_id": null
+    },
+    "tag_user": "vigil"
+  },
+  "exact_self_message": {
+    "sidecar": {
+      "v": 1,
+      "delivered_at": "2026-07-20T12:00:02Z",
+      "guild_id": "2000000000000000001",
+      "channel_id": "1000000000000000001",
+      "message_id": "3000000000000000002",
+      "author": {"id": "1000000000000000002", "username": "station", "bot": true},
+      "content": "on it — checking the red scenes",
+      "timestamp": "2026-07-20T12:00:02Z",
+      "mention_user_ids": [],
+      "mention_everyone": false,
+      "reply_to_message_id": null
+    },
+    "tag_user": "station"
+  },
+  "native_relations_message": {
+    "sidecar": {
+      "v": 1,
+      "delivered_at": "2026-07-20T12:00:03Z",
+      "guild_id": "2000000000000000001",
+      "channel_id": "1000000000000000001",
+      "message_id": "3000000000000000003",
+      "author": {"id": "1000000000000000003", "username": "zoe", "bot": false},
+      "content": "<@1000000000000000002> see vigil's sweep above",
+      "timestamp": "2026-07-20T12:00:03Z",
+      "mention_user_ids": ["1000000000000000002"],
+      "mention_everyone": false,
+      "reply_to_message_id": "3000000000000000001"
+    },
+    "tag_user": "zoe"
+  },
+  "no_sidecar_record_message": {
+    "sidecar": null,
+    "tag_user": "zoe",
+    "comment": "Simulates transport-patch drift: the tag arrives with no native-fact record, so no exact author is representable and the event is honestly unroutable."
+  }
+}

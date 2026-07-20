@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "room_action_tools": {
+    "reply_pattern": "^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__reply$",
+    "react_pattern": "^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__react$"
+  },
+  "privileged": [
+    {
+      "tool_pattern": "^Bash$",
+      "capability": "workspace.shell.exec",
+      "impact": "mutation",
+      "resource_kind": "shell-command",
+      "resource_id_input_key": "command"
+    },
+    {
+      "tool_pattern": "^(Write|Edit)$",
+      "capability": "workspace.file.write",
+      "impact": "mutation",
+      "resource_kind": "workspace-file",
+      "resource_id_input_key": "file_path"
+    }
+  ]
+}

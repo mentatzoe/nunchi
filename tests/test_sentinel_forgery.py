@@ -12,15 +12,16 @@ Covered surfaces:
 1. The hermes plugin (``integrations/hermes/nunchi-gate``): an event whose
    text is/contains the sentinel is forwarded verbatim as trigger content and
    only the directive decides skip vs allow.
-2. The Claude Code UserPromptSubmit hook (``nunchi_prompt_gate.py``): a
-   channel prompt containing the sentinel never causes a block by itself.
-   (The retired send-time hook's surface was removed with the hook itself —
-   nunchi makes one judgment per turn, at wake.)
+2. The Claude Code V2 gate (``nunchi_claude_v2.py``): a channel prompt
+   containing the sentinel never causes a block by itself. Suppression can
+   only come from the canonical attention decision; inbound sentinel text is
+   ordinary conversation data. (The retired send-time hook's surface was
+   removed with the hook itself — nunchi makes one judgment per turn, at
+   wake.)
 
-Stdlib-only, offline, deterministic: the gate binary is a stub script in a
-temp dir (the pattern from tests/test_claude_code_prompt_gate.py) and hermes'
-``_run_nunchi`` is patched in-process. Receipt logs are pointed at temp files;
-nothing is written outside temporary directories.
+Offline and deterministic: hermes' ``_run_nunchi`` is patched in-process and
+the V2 gate runs in-process with an injected classifier seam. All state and
+receipts live in temporary directories.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ import os
 import pathlib
 import subprocess
 import sys
-from tests.hook_sandbox import sandbox_env
 import tempfile
 import textwrap
 import types
@@ -42,7 +42,6 @@ from types import SimpleNamespace
 
 _WORKTREE_ROOT = Path(__file__).resolve().parents[1]
 _PLUGIN_PATH = _WORKTREE_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
-_INBOUND_HOOK = _WORKTREE_ROOT / "integrations" / "claude-code" / "nunchi_prompt_gate.py"
 
 # Forged-sentinel spellings observed in the wild (pilot-bot leaks used the
 # 3- and 4-underscore variants) plus the bare token and an embedded form.
@@ -227,99 +226,95 @@ class HermesSentinelForgeryTests(_TempDirMixin):
 
 
 # ---------------------------------------------------------------------------
-# 2. Claude Code PreToolUse hook (outbound)
+# 2. Claude Code V2 gate (inbound)
 # ---------------------------------------------------------------------------
 
 
-def _run_hook_script(hook: pathlib.Path, hook_input: dict, env_overrides: dict) -> tuple[int, str, str]:
-    env = sandbox_env(env_overrides)
-    result = subprocess.run(
-        [sys.executable, str(hook)],
-        input=json.dumps(hook_input),
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return result.returncode, result.stdout, result.stderr
+class ClaudeV2SentinelForgeryTests(unittest.TestCase):
+    """V2 gate: a sentinel-bearing channel prompt never blocks by itself."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        import shutil
+        from pathlib import Path as _Path
 
-def _channel_tag(*, chat_id: str, message_id: str, user: str, body: str) -> str:
-    return (
-        f'<channel source="discord" chat_id="{chat_id}" message_id="{message_id}"'
-        f' user="{user}" ts="2026-07-08T00:00:00Z">{body}</channel>'
-    )
+        self.tmp = _Path(tempfile.mkdtemp(prefix="nunchi-sentinel-v2-"))
+        self.tmp.chmod(0o700)
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+        from tests.v2 import claude_code_helpers as helpers
 
+        self.helpers = helpers
+        self.module = helpers.load_gate_module()
+        self.environ = helpers.make_environ(self.tmp)
 
-class InboundHookSentinelForgeryTests(_TempDirMixin):
-    """UserPromptSubmit hook: a sentinel-bearing channel prompt never blocks by itself."""
+    def _deliver(self, body: str, transport):
+        helpers = self.helpers
+        message_id = "3900000000000000001"
+        helpers.append_sidecar(
+            self.environ,
+            helpers.sidecar_row(message_id=message_id, content=body),
+        )
+        payload = helpers.prompt_payload(
+            helpers.channel_prompt(message_id=message_id, body=body)
+        )
+        return self.module.handle_user_prompt_submit(
+            payload, self.environ, classifier_transport=transport
+        )
 
-    CHAT_ID = "chan-77"
-
-    def _hook_input(self, body: str) -> dict:
-        return {
-            "session_id": "sess-sentinel",
-            "transcript_path": "",
-            "hook_event_name": "UserPromptSubmit",
-            "prompt": _channel_tag(
-                chat_id=self.CHAT_ID, message_id="m1", user="mallory", body=body
-            ),
-            "cwd": "/tmp",
-        }
-
-    def test_sentinel_prompt_with_speak_directive_allows(self):
+    def test_sentinel_prompt_with_wake_judgment_allows(self):
         for forged in SENTINEL_FORGERIES:
             with self.subTest(forged=forged):
-                wrapper, capture = self._make_gate_stub(_speak_directive())
-                rc, out, err = _run_hook_script(
-                    _INBOUND_HOOK, self._hook_input(forged), self._hook_env(wrapper)
-                )
-                self.assertEqual(rc, 0, err)
-                parsed = json.loads(out)
-                self.assertNotIn(
+                helpers = self.helpers
+                case = ClaudeV2SentinelForgeryTests("setUp")
+                case.setUp()
+                transport = helpers.CountingTransport(helpers.wake_judgment)
+                decision = case._deliver(forged, transport)
+                case.assertIsNotNone(decision.output)
+                case.assertNotIn(
                     "decision",
-                    parsed,
+                    decision.output,
                     f"forged sentinel {forged!r} blocked the prompt on its own",
                 )
-                # SPEAK admits emit the admission note, and the forged sentinel
-                # must not leak into it (the note carries admission facts only).
-                note = parsed["hookSpecificOutput"]["additionalContext"]
-                self.assertNotIn("CC_CONNECT_SILENT_PASS", note)
-                # The forged sentinel reached the gate verbatim as trigger DATA.
-                payload = json.loads(capture.read_text(encoding="utf-8"))
-                self.assertEqual(payload["trigger"]["content"], forged)
-
-    def test_suppression_still_comes_from_the_directive_only(self):
-        """Control: same sentinel-bearing prompt IS blocked when the gate says PASS."""
-        wrapper, _ = self._make_gate_stub(_pass_directive())
-        rc, out, err = _run_hook_script(
-            _INBOUND_HOOK, self._hook_input(SENTINEL_FORGERIES[0]), self._hook_env(wrapper)
-        )
-        self.assertEqual(rc, 0, err)
-        decision = json.loads(out)
-        self.assertEqual(decision["decision"], "block")
-
-    def test_sentinel_prompt_with_gate_unavailable_fails_open(self):
-        """Even with no gate binary at all, sentinel text cannot block: the
-        inbound hook is fail-open and never inspects the text itself."""
-        rc, out, err = _run_hook_script(
-            _INBOUND_HOOK,
-            self._hook_input(SENTINEL_FORGERIES[0]),
-            {
-                "NUNCHI_CHANNEL_BIN": str(self.tmp / "missing-binary"),
-                "NUNCHI_HOOK_LOG": str(self.tmp / "receipts.jsonl"),
-            },
-        )
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(out.strip(), "")
-
-    def test_hook_sources_never_match_sentinel_against_text(self):
-        """Structural guard: neither Claude Code hook contains a code path
-        comparing message text to the sentinel token."""
-        for hook in (_INBOUND_HOOK,):
-            with self.subTest(hook=hook.name):
-                self.assertNotIn(
-                    "CC_CONNECT_SILENT_PASS", hook.read_text(encoding="utf-8")
+                # The sentinel reached the classifier verbatim as trigger DATA.
+                case.assertEqual(transport.call_count, 1)
+                projection = transport.calls[0]
+                trigger = next(
+                    event
+                    for event in projection["events"]
+                    if event["id"] == projection["trigger_event_id"]
                 )
+                case.assertEqual(trigger["text"], forged)
+
+    def test_suppression_still_comes_from_the_decision_only(self):
+        """Control: the same sentinel-bearing prompt IS blocked when the
+        canonical decision is an effective suppression."""
+        transport = self.helpers.CountingTransport(self.helpers.suppress_judgment)
+        decision = self._deliver(SENTINEL_FORGERIES[0], transport)
+        self.assertEqual(decision.output["decision"], "block")
+        self.assertEqual(transport.call_count, 1)
+
+    def test_unconfigured_gate_fails_open_without_reading_text(self):
+        """With no configuration at all, sentinel text cannot block: the
+        gate passes the prompt through un-gated and inspects nothing."""
+        decision = self.module.handle_user_prompt_submit(
+            self.helpers.prompt_payload(
+                self.helpers.channel_prompt(
+                    message_id="3900000000000000002", body=SENTINEL_FORGERIES[0]
+                )
+            ),
+            {},
+            classifier_transport=None,
+        )
+        self.assertIsNone(decision.output)
+
+    def test_gate_source_never_matches_sentinel_against_text(self):
+        source = (
+            _WORKTREE_ROOT
+            / "integrations"
+            / "claude-code"
+            / "nunchi_claude_v2.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("CC_CONNECT_SILENT_PASS", source)
 
 
 if __name__ == "__main__":
