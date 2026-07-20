@@ -35,13 +35,18 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from .config import Config
-from .events import NOTIFICATION_METHOD
-from .gateway import GatewayProtocol
+from .events import (
+    DiscordEventSourceV2,
+    NOTIFICATION_METHOD,
+    V2_NOTIFICATION_METHOD,
+    notification_params,
+)
+from .gateway import GatewayProtocol, V2_INTENTS
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
 from .server import InFlight, enqueue_event, pump_notifications
-from .tools import TOOL_SCHEMAS, ToolExecutor
+from .tools import TOOL_SCHEMAS, V2_TOOL_SCHEMAS, ToolExecutor
 
 logger = logging.getLogger("nunchi.mcp_discord.binding")
 
@@ -71,9 +76,14 @@ class SessionRegistry:
         return list(self._sessions.values())
 
 
-async def broadcast(registry: SessionRegistry, params: dict) -> None:
+async def broadcast(
+    registry: SessionRegistry,
+    params: dict,
+    *,
+    method: str = NOTIFICATION_METHOD,
+) -> None:
     """Push one discord/message notification to every live session."""
-    notification = _VendorNotification(method=NOTIFICATION_METHOD, params=params)
+    notification = _VendorNotification(method=method, params=params)
     for session in registry.sessions():
         try:
             await session.send_notification(notification)  # type: ignore[arg-type]
@@ -83,7 +93,11 @@ async def broadcast(registry: SessionRegistry, params: dict) -> None:
 
 
 def build_server(
-    executor: ToolExecutor, registry: SessionRegistry, in_flight: InFlight
+    executor: ToolExecutor,
+    registry: SessionRegistry,
+    in_flight: InFlight,
+    *,
+    tool_schemas: list[dict] = TOOL_SCHEMAS,
 ) -> Server:
     server: Server = Server("nunchi-mcp-discord")
 
@@ -96,7 +110,7 @@ def build_server(
                 description=schema["description"],
                 inputSchema=schema["inputSchema"],
             )
-            for schema in TOOL_SCHEMAS
+            for schema in tool_schemas
         ]
 
     @server.call_tool()
@@ -117,20 +131,53 @@ def serve(config: Config) -> int:
     in_flight = InFlight()
     backstop = SendBackstop(config.backstop_max_sends, config.backstop_window_seconds)
     rest = DiscordRestClient(config.token)
-    executor = ToolExecutor(rest, backstop)
-    server = build_server(executor, registry, in_flight)
+    executor = ToolExecutor(
+        rest,
+        backstop,
+        allowed_channel_ids=(config.channels if config.mode == "v2" else None),
+    )
+    server = build_server(
+        executor,
+        registry,
+        in_flight,
+        tool_schemas=(V2_TOOL_SCHEMAS if config.mode == "v2" else TOOL_SCHEMAS),
+    )
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         shutdown = asyncio.Event()
         queue: asyncio.Queue = asyncio.Queue(maxsize=config.queue_maxsize)
-        protocol = GatewayProtocol(config.token)
-        runner = GatewayRunner(protocol, lambda event: enqueue_event(queue, event))
+        source = (
+            DiscordEventSourceV2(
+                allowed_channel_ids=config.channels,
+                blocked_actor_ids=config.blocked_actors,
+            )
+            if config.mode == "v2"
+            else None
+        )
+        protocol = (
+            GatewayProtocol(config.token, intents=V2_INTENTS)
+            if source is not None
+            else GatewayProtocol(config.token)
+        )
+        runner = GatewayRunner(
+            protocol,
+            lambda event: enqueue_event(queue, event),
+            retain_self=source is not None,
+            v2_events=source is not None,
+        )
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
             pump_notifications(
-                queue, lambda params: broadcast(registry, params), shutdown=shutdown
+                queue,
+                lambda params: broadcast(
+                    registry,
+                    params,
+                    method=(V2_NOTIFICATION_METHOD if source is not None else NOTIFICATION_METHOD),
+                ),
+                shutdown=shutdown,
+                projector=(source.notification_params if source is not None else notification_params),
             ),
             name="notification-pump",
         )
@@ -172,8 +219,8 @@ def serve(config: Config) -> int:
     )
 
     logger.info(
-        "nunchi-mcp-discord listening on http://%s:%d/mcp (transport only — no gate logic)",
-        config.host, config.port,
+        "nunchi-mcp-discord listening on http://%s:%d/mcp (mode=%s, transport only)",
+        config.host, config.port, config.mode,
     )
     uvicorn.run(app, host=config.host, port=config.port, log_level="info")
     return 0

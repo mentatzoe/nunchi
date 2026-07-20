@@ -11,7 +11,7 @@ from typing import Any
 
 from .core import ReceiptSinkPersistenceError
 from .observation import validate_attention_receipt_record
-from .policy import ReceiptSinkPolicy
+from .policy import OperatorPolicy, ReceiptSinkPolicy
 
 
 class ReceiptSinkConstructionError(ValueError):
@@ -138,4 +138,44 @@ class ExclusiveJSONFileReceiptSink:
         self.close()
 
 
-__all__ = ["ExclusiveJSONFileReceiptSink", "ReceiptSinkConstructionError"]
+class ReloadingPolicyReceiptSink:
+    """Route each offer through the currently trusted receipt-sink policy."""
+
+    def __init__(self, policy_loader) -> None:
+        if not callable(policy_loader):
+            raise ReceiptSinkConstructionError("policy loader is invalid")
+        self._policy_loader = policy_loader
+        self._lock = threading.RLock()
+        self._binding: tuple[str, str, str] | None = None
+        self._sink: ExclusiveJSONFileReceiptSink | None = None
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            policy = self._policy_loader()
+            if not isinstance(policy, OperatorPolicy):
+                raise ReceiptSinkConstructionError("policy loader returned an invalid policy")
+            sink_policy = policy.receipt_sink
+            binding = (sink_policy.type, sink_policy.directory, sink_policy.source)
+            if binding != self._binding:
+                replacement = ExclusiveJSONFileReceiptSink(sink_policy)
+                previous = self._sink
+                self._sink = replacement
+                self._binding = binding
+                if previous is not None:
+                    previous.close()
+            assert self._sink is not None
+            self._sink(record)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._sink is not None:
+                self._sink.close()
+                self._sink = None
+                self._binding = None
+
+
+__all__ = [
+    "ExclusiveJSONFileReceiptSink",
+    "ReceiptSinkConstructionError",
+    "ReloadingPolicyReceiptSink",
+]

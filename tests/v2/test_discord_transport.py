@@ -10,8 +10,10 @@ from nunchi.mcp_discord.events import (
     message_event_from_create,
     reaction_event_from_dispatch,
 )
+from nunchi.mcp_discord.config import load_config
 from nunchi.mcp_discord.ratelimit import SendBackstop
 from nunchi.mcp_discord.v2 import DiscordActionSinkV2
+from nunchi.mcp_discord.tools import ToolExecutor, V2_TOOL_NAMES
 from nunchi.observation import ObservationProvider
 from tests.v2.contract.schema_helpers import validate_attention_receipt
 
@@ -266,6 +268,57 @@ class DiscordActionSinkCases(unittest.TestCase):
         self.assertEqual([item[1] for item in self.rest.messages], ["one"])
         self.assert_transport_receipt("req-2", "failed")
         self.assertEqual(self.receipts[-1]["body"]["detail"], "send-backstop")
+
+
+class V2ServerBoundaryCases(unittest.TestCase):
+    def test_v2_mode_requires_exact_trusted_channels(self):
+        with self.assertRaises(RuntimeError):
+            load_config({"NUNCHI_DISCORD_TOKEN": "secret", "NUNCHI_MCP_DISCORD_MODE": "v2"})
+        with self.assertRaises(RuntimeError):
+            load_config(
+                {
+                    "NUNCHI_DISCORD_TOKEN": "secret",
+                    "NUNCHI_MCP_DISCORD_MODE": "v2",
+                    "NUNCHI_MCP_DISCORD_CHANNELS": "42,../other",
+                }
+            )
+        config = load_config(
+            {
+                "NUNCHI_DISCORD_TOKEN": "secret",
+                "NUNCHI_MCP_DISCORD_MODE": "v2",
+                "NUNCHI_MCP_DISCORD_CHANNELS": "42,43",
+                "NUNCHI_MCP_DISCORD_BLOCKED_ACTORS": "1002",
+            }
+        )
+        self.assertEqual(config.channels, frozenset({"42", "43"}))
+        self.assertEqual(config.blocked_actors, frozenset({"1002"}))
+        self.assertNotIn("secret", repr(config))
+
+    def test_v2_tools_include_reaction_and_cannot_redirect_rooms(self):
+        self.assertIn("add_reaction", V2_TOOL_NAMES)
+        rest = FakeRest()
+        executor = ToolExecutor(
+            rest,
+            SendBackstop(5, 10, clock=lambda: 0),
+            allowed_channel_ids=frozenset({"42"}),
+        )
+        payload, ok = executor.call(
+            "send_message",
+            {
+                "channel_id": "999",
+                "content": "forged redirect",
+            },
+        )
+        self.assertFalse(ok)
+        self.assertIn("allowlist", payload["error"])
+        self.assertEqual(rest.messages, [])
+
+        payload, ok = executor.call(
+            "add_reaction",
+            {"channel_id": "42", "message_id": "111", "reaction": "👀"},
+        )
+        self.assertTrue(ok)
+        self.assertEqual(rest.reactions, [("42", "111", "👀")])
 
 
 if __name__ == "__main__":

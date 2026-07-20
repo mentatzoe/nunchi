@@ -263,6 +263,8 @@ def run_participant_turn(
     action = None
     outcome = "unknown"
     host_error = None
+    receipt_written = False
+    persistence = "unknown"
     try:
         action = _validate_action(participant(turn))
         if action is None:
@@ -291,29 +293,53 @@ def run_participant_turn(
                     outcome = "sent"
                 else:
                     outcome = "silent"
-        elif correlated_action_sink is not None:
-            returned = correlated_action_sink(packet["request_id"], copy.deepcopy(action))
-            outcome = "sent" if returned is None else "unknown"
+        elif correlated_action_sink is not None or action_sink is not None:
+            # The participant-host stage attests that one concrete action was
+            # offered to transport.  Persist it before the transport writes its
+            # later delivery stage; delivery success/failure is not this
+            # writer's fact and never rewrites the host record.
+            outcome = "sent"
+            receipt = _participant_receipt(
+                packet=packet,
+                expansion_calls=turn.expansion_calls,
+                invoked=True,
+                outcome=outcome,
+            )
+            try:
+                returned = receipt_sink(copy.deepcopy(receipt))
+                persistence = "persisted" if returned is None else "unknown"
+            except Exception:
+                persistence = "unknown"
+            receipt_written = True
+            if persistence != "persisted":
+                host_error = "participant-receipt-persistence-unknown"
+                outcome = "unknown"
+            elif correlated_action_sink is not None:
+                returned = correlated_action_sink(
+                    packet["request_id"], copy.deepcopy(action)
+                )
+                outcome = "sent" if returned is None else "unknown"
+            else:
+                returned = action_sink(copy.deepcopy(action))
+                outcome = "sent" if returned is None else "unknown"
         elif action_sink is None:
             host_error = "action-sink-unavailable"
-        else:
-            returned = action_sink(copy.deepcopy(action))
-            outcome = "sent" if returned is None else "unknown"
     except Exception:
         outcome = "unknown"
         host_error = "participant-or-action-failure"
 
-    receipt = _participant_receipt(
-        packet=packet,
-        expansion_calls=turn.expansion_calls,
-        invoked=True,
-        outcome=outcome,
-    )
-    try:
-        returned = receipt_sink(copy.deepcopy(receipt))
-        persistence = "persisted" if returned is None else "unknown"
-    except Exception:
-        persistence = "unknown"
+    if not receipt_written:
+        receipt = _participant_receipt(
+            packet=packet,
+            expansion_calls=turn.expansion_calls,
+            invoked=True,
+            outcome=outcome,
+        )
+        try:
+            returned = receipt_sink(copy.deepcopy(receipt))
+            persistence = "persisted" if returned is None else "unknown"
+        except Exception:
+            persistence = "unknown"
     result = {
         "status": "completed" if host_error is None else "error",
         "request_id": packet["request_id"],

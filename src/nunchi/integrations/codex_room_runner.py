@@ -815,8 +815,11 @@ class TransportClient:
                 return parsed
         return result
 
-    def stream_events(self) -> Iterator[dict]:
-        """Yield params of each discord message notification for an open session."""
+    def stream_events(
+        self,
+        notification_method: str = NOTIFICATION_METHOD,
+    ) -> Iterator[dict]:
+        """Yield params for one exact notification method on an open session."""
         with self.open_stream() as stream:
             logger.info("transport stream open (session %s)", self.session_id)
             lines = (raw.decode("utf-8", errors="replace") for raw in stream)
@@ -825,7 +828,7 @@ class TransportClient:
                     msg = json.loads(data)
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(msg, dict) or msg.get("method") != NOTIFICATION_METHOD:
+                if not isinstance(msg, dict) or msg.get("method") != notification_method:
                     continue
                 params = msg.get("params")
                 if isinstance(params, dict):

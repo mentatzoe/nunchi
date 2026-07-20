@@ -102,6 +102,7 @@ async def pump_notifications(
     send: Callable[[dict], Awaitable[None]],
     *,
     shutdown: asyncio.Event,
+    projector: Callable[[MessageEvent], dict] = notification_params,
 ) -> None:
     """Drain the queue into *send* (broadcast to MCP sessions) until shutdown.
 
@@ -113,7 +114,7 @@ async def pump_notifications(
             event = await asyncio.wait_for(queue.get(), timeout=_PUMP_POLL_SECONDS)
         except asyncio.TimeoutError:
             continue
-        params = notification_params(event)
+        params = projector(event)
         try:
             await send(params)
         except Exception as exc:  # noqa: BLE001 — transport must outlive one client
