@@ -70,3 +70,42 @@ immediately as `type: "action"` with its request ID; a later
 The action is written only after the participant-host receipt and receives its
 own transport receipt after the stream flush. Request IDs are at-most-once and
 capacity-bounded without eviction or queueing.
+
+## Matrix
+
+`nunchi-matrix` binds one Matrix room and one operator policy per process. This
+keeps exact self identity, the trusted room, the recoverability claim and every
+receipt under one closed binding; run another process with another policy for a
+second room. The Matrix access token is read from `NUNCHI_MATRIX_TOKEN` by
+default and is never placed in room, classifier or participant projections.
+HTTPS is mandatory unless the operator explicitly supplies
+`--allow-insecure-http` for a controlled development homeserver.
+
+```sh
+install -d -m 700 /absolute/operator-state
+nunchi-matrix \
+  --homeserver https://matrix.example.test \
+  --room-id '!room:example.test' \
+  --state /absolute/operator-state/matrix-room.json \
+  --policy /absolute/path/to/nunchi-policy.json \
+  --participant-id vigil \
+  --participant-name Vigil \
+  --participant-workspace /absolute/owner-only/empty-workspace \
+  --participant-command /absolute/path/to/participant --json-stdio
+```
+
+The policy continuity scope for that example is exactly
+`matrix:room:!room:example.test`. The first `/sync` batch is retained as bounded
+context and never wakes the participant. Each later batch records all exact
+native events and creates at most one opportunity at its newest observed event.
+The room-bound sync cursor is atomically checkpointed before a participant turn,
+so a crash does not replay a batch as queued social work. Full restart coverage
+is not proven, therefore this adapter declares `session-only` continuity with a
+restart gap and refuses a policy that claims social suppression is recoverable.
+
+Messages, exact replies, exact Matrix-user mentions and `m.annotation`
+reactions are sent directly from the participant action without a second social
+judgment. Matrix transaction IDs are deterministically derived from the Nunchi
+request ID, transport sends have a local backstop, and the transport receipt is
+written after the API effect. As with the generic adapter, no privileged
+executor is exposed on this room surface.

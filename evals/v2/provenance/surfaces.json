@@ -6,7 +6,7 @@
     "nunchi-install": "nunchi.install:main",
     "nunchi-channel": "nunchi.adapters.channel_v2:main",
     "nunchi-discord": "nunchi.adapters.discord:main",
-    "nunchi-matrix": "nunchi.adapters.matrix:main",
+    "nunchi-matrix": "nunchi.adapters.matrix_v2:main",
     "nunchi-telegram": "nunchi.adapters.telegram:main",
     "nunchi-mcp-discord": "nunchi.mcp_discord.server:main",
     "nunchi-codex-room-v2": "nunchi.integrations.codex_room_v2:main",

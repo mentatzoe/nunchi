@@ -30,6 +30,12 @@ class AcceptedDelivery:
     opportunity: ConversationOpportunity | None
 
 
+@dataclass(frozen=True)
+class AcceptedBatch:
+    observation_dispositions: tuple[str, ...]
+    opportunity: ConversationOpportunity | None
+
+
 class LiveRoomRuntime:
     """Compose the portable V2 lifecycle for one participant/room binding.
 
@@ -88,6 +94,59 @@ class LiveRoomRuntime:
                 anchor_event_id=event_id,
             )
         return AcceptedDelivery(disposition, opportunity)
+
+    def accept_batch(
+        self,
+        native_event_inputs: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    ) -> AcceptedBatch:
+        """Record one transport batch and schedule only its newest live anchor.
+
+        Polling transports commonly receive multiple events that already form
+        one current conversational tail. Every event remains observable
+        context, but the batch is not converted into a FIFO of response jobs.
+        If work is already active, only this batch's newest observed anchor
+        replaces the existing pending anchor.
+        """
+        if not isinstance(native_event_inputs, (tuple, list)):
+            raise LiveRoomRuntimeError("runtime batch must be a finite sequence")
+        if len(native_event_inputs) > 1000:
+            raise LiveRoomRuntimeError("runtime batch exceeds its event limit")
+        dispositions: list[str] = []
+        newest_event_id: str | None = None
+        for native_event_input in native_event_inputs:
+            disposition = self.observation.ingest(copy.deepcopy(native_event_input))
+            dispositions.append(disposition)
+            if disposition == OBSERVED:
+                event = native_event_input.get("event")
+                event_id = event.get("id") if isinstance(event, dict) else None
+                if not isinstance(event_id, str) or not event_id:
+                    raise LiveRoomRuntimeError(
+                        "accepted batch event identity is unavailable"
+                    )
+                newest_event_id = event_id
+        opportunity = None
+        if newest_event_id is not None:
+            opportunity = self.scheduler.observe(
+                participant_id=self.observation.participant_id,
+                platform=self.observation.platform,
+                room_id=self.observation.room_id,
+                anchor_event_id=newest_event_id,
+            )
+        return AcceptedBatch(tuple(dispositions), opportunity)
+
+    def observe_context_batch(
+        self,
+        native_event_inputs: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    ) -> tuple[str, ...]:
+        """Retain transport-proven history without creating live wake work."""
+        if not isinstance(native_event_inputs, (tuple, list)):
+            raise LiveRoomRuntimeError("runtime context batch must be finite")
+        if len(native_event_inputs) > 1000:
+            raise LiveRoomRuntimeError("runtime context batch exceeds its event limit")
+        return tuple(
+            self.observation.ingest(copy.deepcopy(native_event_input))
+            for native_event_input in native_event_inputs
+        )
 
     def _policy(self) -> OperatorPolicy:
         policy = self.policy_loader()
@@ -260,6 +319,7 @@ class LiveRoomRuntime:
 
 
 __all__ = [
+    "AcceptedBatch",
     "AcceptedDelivery",
     "LiveRoomRuntime",
     "LiveRoomRuntimeError",

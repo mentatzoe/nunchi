@@ -60,6 +60,59 @@ class RuntimeCase(unittest.TestCase):
 
 
 class LiveCoalescingCases(RuntimeCase):
+    def test_backfill_batch_is_context_only_and_creates_no_wake_obligation(self):
+        runtime = self.runtime()
+        dispositions = runtime.observe_context_batch(
+            [self.delivery(index) for index in range(1, 21)]
+        )
+        self.assertEqual(dispositions, ("observed",) * 20)
+        self.assertEqual(runtime.scheduler.snapshot(), ())
+        self.assertEqual(self.participant_packets, [])
+        live = runtime.accept(self.delivery(21))
+        self.assertIsNotNone(live.opportunity)
+        result = runtime.drain(live.opportunity)
+        self.assertEqual(len(result), 1)
+        self.assertIn(
+            "e20",
+            [event["id"] for event in self.participant_packets[0]["events"]],
+        )
+
+    def test_poll_batch_records_all_context_but_starts_only_newest_opportunity(self):
+        classifier_calls = []
+
+        def record_judgment(projection, config):
+            classifier_calls.append(projection["trigger_event_id"])
+            return wake_judgment(projection, config)
+
+        runtime = self.runtime(classifier_transport=record_judgment)
+        accepted = runtime.accept_batch(
+            [self.delivery(index) for index in range(1, 21)]
+        )
+        self.assertEqual(accepted.observation_dispositions, ("observed",) * 20)
+        self.assertIsNotNone(accepted.opportunity)
+        self.assertEqual(accepted.opportunity.anchor_event_id, "e20")
+        results = runtime.drain(accepted.opportunity)
+        self.assertEqual(classifier_calls, ["e20"])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(self.participant_packets), 1)
+        self.assertIn(
+            "e20",
+            [event["id"] for event in self.participant_packets[0]["events"]],
+        )
+
+    def test_poll_batch_replaces_only_pending_anchor_while_work_is_active(self):
+        runtime = self.runtime()
+        first = runtime.accept(self.delivery(1))
+        self.assertIsNotNone(first.opportunity)
+        accepted = runtime.accept_batch(
+            [self.delivery(index) for index in range(2, 21)]
+        )
+        self.assertIsNone(accepted.opportunity)
+        self.assertEqual(
+            runtime.scheduler.snapshot()[0]["pending_anchor_event_id"],
+            "e20",
+        )
+
     def test_twenty_events_during_slow_turn_create_one_fresh_successor(self):
         entered = threading.Event()
         release = threading.Event()
