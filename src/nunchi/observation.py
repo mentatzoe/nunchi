@@ -1299,6 +1299,154 @@ class ObservationProvider:
         self._remember_request_id(issued_request_id)
         return document
 
+    @_with_state_lock
+    def participant_snapshot(
+        self,
+        *,
+        trigger_event_id: str,
+        request_id: str,
+        max_events: int,
+        max_bytes: int,
+        required_event_ids: tuple[str, ...] = (),
+    ) -> dict:
+        """Materialize a fresh current-tail view for one attested request.
+
+        This is not a second attention request and therefore does not mint or
+        consume an observation receipt.  It may be called only after this
+        provider attested ``request_id``.  The original trigger remains an
+        explanatory anchor, cited attention evidence is retained exactly, and
+        the remaining budget is filled newest-first so events that arrived
+        while attention was running are visible to the participant.
+        """
+        if not _nes(request_id) or request_id not in self._attested_request_ids:
+            raise ObservationInputError(
+                "participant refresh requires an already-attested request_id"
+            )
+        if not _is_positive_integer(max_events) or not _is_positive_integer(max_bytes):
+            raise ValueError("max_events and max_bytes must be positive integers")
+        if not isinstance(required_event_ids, tuple) or any(
+            not _nes(event_id) for event_id in required_event_ids
+        ):
+            raise ObservationInputError(
+                "required_event_ids must be a tuple of non-empty event IDs"
+            )
+
+        events = list(self._events)
+        trigger_index = self._event_index.get(trigger_event_id)
+        if trigger_index is None:
+            raise ValueError(f"trigger_event_id {trigger_event_id!r} is not an observed event")
+
+        selected: dict[int, dict] = {}
+        total_bytes = 0
+        truncated_by: set[str] = set()
+
+        def require(index: int) -> None:
+            nonlocal total_bytes
+            if index in selected:
+                return
+            candidate = events[index]
+            size = serialized_byte_size(candidate)
+            if len(selected) >= max_events:
+                raise ObservationInputError(
+                    "participant budget cannot retain required trigger and evidence events"
+                )
+            if total_bytes + size > max_bytes:
+                raise ObservationInputError(
+                    "participant byte budget cannot retain required trigger and evidence events"
+                )
+            selected[index] = candidate
+            total_bytes += size
+
+        require(trigger_index)
+        seen_required: set[str] = {trigger_event_id}
+        for event_id in required_event_ids:
+            if event_id in seen_required:
+                continue
+            seen_required.add(event_id)
+            index = self._event_index.get(event_id)
+            if index is None:
+                raise ObservationInputError(
+                    "participant refresh cannot retain missing attention evidence"
+                )
+            require(index)
+
+        # Required relations are factual context, not a routing rule.  Include
+        # them before optional tail events when retained and budget permits.
+        relation_ids: set[str] = set()
+        for index in tuple(selected):
+            relation_ids.update(self._relation_closure_ids(events[index]))
+        for event_id in tuple(relation_ids):
+            index = self._event_index.get(event_id)
+            if index is not None and index not in selected:
+                try:
+                    require(index)
+                except ObservationInputError:
+                    truncated_by.add("events" if len(selected) >= max_events else "bytes")
+
+        for index in range(len(events) - 1, -1, -1):
+            if index in selected:
+                continue
+            if len(selected) >= max_events:
+                truncated_by.add("events")
+                break
+            candidate_size = serialized_byte_size(events[index])
+            if total_bytes + candidate_size > max_bytes:
+                truncated_by.add("bytes")
+                continue
+            selected[index] = events[index]
+            total_bytes += candidate_size
+
+        included_indices = sorted(selected)
+        included_events = [deepcopy(selected[index]) for index in included_indices]
+        omitted_before = any(index < trigger_index for index in range(len(events)) if index not in selected)
+        omitted_after = any(index > trigger_index for index in range(len(events)) if index not in selected)
+        selected_ids = {event["id"] for event in included_events}
+        has_relation_gap = any(event_id not in selected_ids for event_id in relation_ids)
+        has_gaps = (
+            has_relation_gap
+            or bool(self.has_restart_gap)
+            or (self._evicted and bool(included_indices) and included_indices[0] == 0)
+            or any(b - a > 1 for a, b in zip(included_indices, included_indices[1:]))
+        )
+
+        actors_used = {
+            ref
+            for event in included_events
+            for ref in _actor_references({"self": None, "events": [event]})
+        }
+        actors_used.add(self.actor_id)
+        coverage: dict[str, Any] = {
+            "has_more_before": omitted_before,
+            "has_more_after": omitted_after,
+            "has_gaps": has_gaps,
+            "truncated_by": sorted(truncated_by),
+            "continuity": self.continuity,
+            "has_restart_gap": self.has_restart_gap,
+            "max_events": max_events,
+            "max_bytes": max_bytes,
+        }
+        if self.event_visibility:
+            coverage["event_visibility"] = dict(self.event_visibility)
+        document: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "request_id": request_id,
+            "self": self.self_block(),
+            "room": self.room_block(),
+            "actors": {
+                actor_id: deepcopy(self._actors.get(actor_id, {}))
+                for actor_id in actors_used
+            },
+            "events": included_events,
+            "trigger_event_id": trigger_event_id,
+            "coverage": coverage,
+        }
+        errors = validate_attention_request(document)
+        if errors:
+            raise ObservationInputError(
+                f"assembled participant refresh failed self-validation: {errors}"
+            )
+        return document
+
     # -- observation-stage receipt (FR-015) ----------------------------
 
     @_with_state_lock
