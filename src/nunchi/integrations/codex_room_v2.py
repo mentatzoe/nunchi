@@ -41,6 +41,8 @@ class CodexRoomV2:
         participant_name: str,
         client: TransportClient,
         session_path: Path,
+        codex_home: Path,
+        participant_workspace: Path,
         codex_bin: str = "codex",
         model: str | None = None,
         history_limit: int = 100,
@@ -86,6 +88,8 @@ class CodexRoomV2:
             codex_bin=codex_bin,
             participant_name=participant_name,
             session_path=session_path,
+            codex_home=codex_home,
+            working_directory=participant_workspace,
             model=model,
         )
         action_sink = MCPDiscordActionSinkV2(
@@ -210,6 +214,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--participant-id", required=True)
     parser.add_argument("--participant-name", default="Codex")
     parser.add_argument("--session-path", required=True, type=Path)
+    parser.add_argument("--codex-home", required=True, type=Path)
+    parser.add_argument("--participant-workspace", required=True, type=Path)
     parser.add_argument("--codex-bin", default="codex")
     parser.add_argument("--model")
     parser.add_argument("--history-limit", type=int, default=100)
@@ -235,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
             participant_name=args.participant_name,
             client=client,
             session_path=args.session_path,
+            codex_home=args.codex_home,
+            participant_workspace=args.participant_workspace,
             codex_bin=args.codex_bin,
             model=args.model,
             history_limit=args.history_limit,
