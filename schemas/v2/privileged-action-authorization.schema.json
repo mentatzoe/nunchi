@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/privileged-action-authorization.schema.json",
+  "title": "PrivilegedActionAuthorizationV2",
+  "description": "I-010F PrivilegedActionAuthorizationV2@1 — a closed union over the host request, immutable host decision, and non-secret participant result for one privileged action. The requester is never supplied by the participant: the guard derives it from the transport-attested author of the exact origin event. An ALLOW is one-use and bound to the exact action ID and SHA-256 digest; an approval challenge and approval evidence are host-only decision fields and never appear in the participant result. Sequence, origin-resolution, time, revocation, one-use, digest-recheck, and trusted-channel approval rules are runtime-only.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "actionDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+$"
+    },
+    "timestamp": {
+      "$comment": "UTC RFC 3339 form. Temporal ordering and expiry are runtime-only.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?Z$"
+    },
+    "impact": {
+      "enum": [
+        "privileged-read",
+        "mutation",
+        "destructive",
+        "external-side-effect",
+        "secret-bearing",
+        "account-configuration",
+        "transport-send",
+        "context-expansion"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "room_id", "participant_id", "resource"],
+      "properties": {
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "room_id": {"$ref": "#/$defs/opaqueId"},
+        "participant_id": {"$ref": "#/$defs/opaqueId"},
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": {"$ref": "#/$defs/nonEmptyString"},
+            "id": {"$ref": "#/$defs/opaqueId"}
+          }
+        }
+      }
+    },
+    "reasonCode": {
+      "enum": [
+        "allow-direct-grant",
+        "allow-authenticated-approval",
+        "approval-required-high-impact",
+        "approval-required-by-policy",
+        "deny-origin-not-found",
+        "deny-origin-scope-mismatch",
+        "deny-requester-unknown",
+        "deny-capability-missing",
+        "deny-scope-mismatch",
+        "deny-expired",
+        "deny-revoked",
+        "deny-approval-invalid",
+        "deny-action-digest-mismatch",
+        "deny-replay",
+        "deny-policy-invalid",
+        "deny-unsupported-seam"
+      ]
+    },
+    "approvalChallenge": {
+      "$comment": "Host-only. The containing immutable decision binds this challenge to the action, digest, requester, capability, and scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["challenge_id", "allowed_approver_actor_ids", "expires_at"],
+      "properties": {
+        "challenge_id": {"$ref": "#/$defs/opaqueId"},
+        "allowed_approver_actor_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/opaqueId"}
+        },
+        "expires_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "approvalEvidence": {
+      "$comment": "Host-only reference to an authenticated approval. No bearer secret or raw attestation is carried.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["challenge_id", "attestation_id", "approver_actor_id", "approved_at", "channel"],
+      "properties": {
+        "challenge_id": {"$ref": "#/$defs/opaqueId"},
+        "attestation_id": {"$ref": "#/$defs/opaqueId"},
+        "approver_actor_id": {"$ref": "#/$defs/opaqueId"},
+        "approved_at": {"$ref": "#/$defs/timestamp"},
+        "channel": {"enum": ["authenticated-transport", "local-operator"]}
+      }
+    },
+    "authorizationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema_version",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "impact"
+      ],
+      "properties": {
+        "kind": {"const": "authorization-request"},
+        "schema_version": {"const": 2},
+        "action_id": {"$ref": "#/$defs/opaqueId"},
+        "action_digest": {"$ref": "#/$defs/actionDigest"},
+        "origin_event_id": {"$ref": "#/$defs/opaqueId"},
+        "capability": {"$ref": "#/$defs/capability"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "impact": {"$ref": "#/$defs/impact"}
+      }
+    },
+    "authorizationDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema_version",
+        "decision_id",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "derived_requester_actor_id",
+        "capability",
+        "scope",
+        "impact",
+        "decision",
+        "reason_code",
+        "policy_provenance",
+        "evaluated_at"
+      ],
+      "properties": {
+        "kind": {"const": "authorization-decision"},
+        "schema_version": {"const": 2},
+        "decision_id": {"$ref": "#/$defs/opaqueId"},
+        "action_id": {"$ref": "#/$defs/opaqueId"},
+        "action_digest": {"$ref": "#/$defs/actionDigest"},
+        "origin_event_id": {"$ref": "#/$defs/opaqueId"},
+        "derived_requester_actor_id": {"$ref": "#/$defs/opaqueId"},
+        "capability": {"$ref": "#/$defs/capability"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "impact": {"$ref": "#/$defs/impact"},
+        "decision": {"enum": ["ALLOW", "DENY", "APPROVAL_REQUIRED"]},
+        "reason_code": {"$ref": "#/$defs/reasonCode"},
+        "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+        "evaluated_at": {"$ref": "#/$defs/timestamp"},
+        "authorization_basis": {"enum": ["direct-grant", "authenticated-approval"]},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "approval_challenge": {"$ref": "#/$defs/approvalChallenge"},
+        "approval_evidence": {"$ref": "#/$defs/approvalEvidence"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "ALLOW"}}},
+          "then": {
+            "required": ["authorization_basis", "expires_at"],
+            "not": {"required": ["approval_challenge"]},
+            "oneOf": [
+              {
+                "properties": {
+                  "authorization_basis": {"const": "direct-grant"},
+                  "reason_code": {"const": "allow-direct-grant"}
+                },
+                "not": {"required": ["approval_evidence"]}
+              },
+              {
+                "required": ["approval_evidence"],
+                "properties": {
+                  "authorization_basis": {"const": "authenticated-approval"},
+                  "reason_code": {"const": "allow-authenticated-approval"}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "APPROVAL_REQUIRED"}}},
+          "then": {
+            "required": ["approval_challenge"],
+            "properties": {
+              "reason_code": {
+                "enum": ["approval-required-high-impact", "approval-required-by-policy"]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["authorization_basis"]},
+                {"required": ["expires_at"]},
+                {"required": ["approval_evidence"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "DENY"}}},
+          "then": {
+            "properties": {
+              "reason_code": {
+                "enum": [
+                  "deny-origin-not-found",
+                  "deny-origin-scope-mismatch",
+                  "deny-requester-unknown",
+                  "deny-capability-missing",
+                  "deny-scope-mismatch",
+                  "deny-expired",
+                  "deny-revoked",
+                  "deny-approval-invalid",
+                  "deny-action-digest-mismatch",
+                  "deny-replay",
+                  "deny-policy-invalid",
+                  "deny-unsupported-seam"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["authorization_basis"]},
+                {"required": ["expires_at"]},
+                {"required": ["approval_challenge"]},
+                {"required": ["approval_evidence"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "participantResult": {
+      "$comment": "The only safe participant-facing projection. It deliberately excludes requester identity, policy provenance, approver rosters, challenge IDs, approval evidence, expiry, and bearer material.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema_version",
+        "decision_id",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "decision",
+        "reason_code"
+      ],
+      "properties": {
+        "kind": {"const": "participant-result"},
+        "schema_version": {"const": 2},
+        "decision_id": {"$ref": "#/$defs/opaqueId"},
+        "action_id": {"$ref": "#/$defs/opaqueId"},
+        "action_digest": {"$ref": "#/$defs/actionDigest"},
+        "origin_event_id": {"$ref": "#/$defs/opaqueId"},
+        "capability": {"$ref": "#/$defs/capability"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "decision": {"enum": ["ALLOW", "DENY", "APPROVAL_REQUIRED"]},
+        "reason_code": {"$ref": "#/$defs/reasonCode"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "ALLOW"}}},
+          "then": {
+            "properties": {
+              "reason_code": {
+                "enum": ["allow-direct-grant", "allow-authenticated-approval"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "APPROVAL_REQUIRED"}}},
+          "then": {
+            "properties": {
+              "reason_code": {
+                "enum": ["approval-required-high-impact", "approval-required-by-policy"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"required": ["decision"], "properties": {"decision": {"const": "DENY"}}},
+          "then": {
+            "properties": {
+              "reason_code": {
+                "enum": [
+                  "deny-origin-not-found",
+                  "deny-origin-scope-mismatch",
+                  "deny-requester-unknown",
+                  "deny-capability-missing",
+                  "deny-scope-mismatch",
+                  "deny-expired",
+                  "deny-revoked",
+                  "deny-approval-invalid",
+                  "deny-action-digest-mismatch",
+                  "deny-replay",
+                  "deny-policy-invalid",
+                  "deny-unsupported-seam"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/authorizationRequest"},
+    {"$ref": "#/$defs/authorizationDecision"},
+    {"$ref": "#/$defs/participantResult"}
+  ]
+}

@@ -93,14 +93,20 @@ SCHEMA_FILES = {
     "participant-wake": "participant-wake.schema.json",
     "context-continuation": "context-continuation.schema.json",
     "attention-receipt": "attention-receipt.schema.json",
+    "privileged-action-authorization": "privileged-action-authorization.schema.json",
 }
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 1),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 2),
     "participant-wake": ("I-010C", "ParticipantWakeV2", 1),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
-    "attention-receipt": ("I-010E", "AttentionReceiptV2", 1),
+    "attention-receipt": ("I-010E", "AttentionReceiptV2", 2),
+    "privileged-action-authorization": (
+        "I-010F",
+        "PrivilegedActionAuthorizationV2",
+        1,
+    ),
 }
 
 # FR-012 partition classes. The vocabulary is owned by the slice spec;
@@ -148,6 +154,36 @@ RECEIPT_WRITERS = (
 )
 # Staged-receipt writer map: each stage is appended only by its named owner.
 RECEIPT_WRITER_MAP = dict(zip(RECEIPT_STAGES, RECEIPT_WRITERS))
+
+AUTHORIZATION_DECISIONS = ("ALLOW", "DENY", "APPROVAL_REQUIRED")
+AUTHORIZATION_IMPACTS = (
+    "privileged-read",
+    "mutation",
+    "destructive",
+    "external-side-effect",
+    "secret-bearing",
+    "account-configuration",
+    "transport-send",
+    "context-expansion",
+)
+AUTHORIZATION_REASON_CODES = (
+    "allow-direct-grant",
+    "allow-authenticated-approval",
+    "approval-required-high-impact",
+    "approval-required-by-policy",
+    "deny-origin-not-found",
+    "deny-origin-scope-mismatch",
+    "deny-requester-unknown",
+    "deny-capability-missing",
+    "deny-scope-mismatch",
+    "deny-expired",
+    "deny-revoked",
+    "deny-approval-invalid",
+    "deny-action-digest-mismatch",
+    "deny-replay",
+    "deny-policy-invalid",
+    "deny-unsupported-seam",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1262,6 +1298,314 @@ def validate_context_continuation(doc: Any) -> list[str]:
     return list(errors)
 
 
+_ACTION_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$")
+_UTC_TIMESTAMP_RE = re.compile(
+    r"^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?Z$"
+)
+
+
+def _check_opaque_id(errors: _Errors, path: str, value: Any) -> None:
+    _check_nes(errors, path, value)
+    if isinstance(value, str) and len(value) > 512:
+        errors.add(path, "must contain at most 512 characters")
+
+
+def _check_action_digest(errors: _Errors, path: str, value: Any) -> None:
+    if not isinstance(value, str) or _ACTION_DIGEST_RE.fullmatch(value) is None:
+        errors.add(path, "must be lowercase sha256:<64 hexadecimal characters>")
+
+
+def _check_capability(errors: _Errors, path: str, value: Any) -> None:
+    if not isinstance(value, str) or _CAPABILITY_RE.fullmatch(value) is None:
+        errors.add(path, "must be a dot-namespaced lowercase capability")
+
+
+def _check_utc_timestamp(errors: _Errors, path: str, value: Any) -> None:
+    if not isinstance(value, str) or _UTC_TIMESTAMP_RE.fullmatch(value) is None:
+        errors.add(path, "must be an RFC 3339 UTC timestamp ending in Z")
+
+
+def _check_authorization_scope(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("platform", "room_id", "participant_id", "resource")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    if "platform" in value:
+        _check_nes(errors, f"{path}.platform", value["platform"])
+    for field in ("room_id", "participant_id"):
+        if field in value:
+            _check_opaque_id(errors, f"{path}.{field}", value[field])
+    resource = value.get("resource")
+    if "resource" in value and _check_closed_object(
+        errors,
+        f"{path}.resource",
+        resource,
+        ("kind", "id"),
+        ("kind", "id"),
+    ):
+        _check_nes(errors, f"{path}.resource.kind", resource.get("kind"))
+        _check_opaque_id(errors, f"{path}.resource.id", resource.get("id"))
+
+
+def _check_authorization_binding(errors: _Errors, doc: dict[str, Any]) -> None:
+    if doc.get("schema_version") != 2:
+        errors.add("schema_version", "must be the number 2")
+    for field in ("action_id", "origin_event_id"):
+        if field in doc:
+            _check_opaque_id(errors, field, doc[field])
+    if "action_digest" in doc:
+        _check_action_digest(errors, "action_digest", doc["action_digest"])
+    if "capability" in doc:
+        _check_capability(errors, "capability", doc["capability"])
+    if "scope" in doc:
+        _check_authorization_scope(errors, "scope", doc["scope"])
+    if "impact" in doc:
+        _check_enum(errors, "impact", doc["impact"], AUTHORIZATION_IMPACTS)
+
+
+def _check_approval_challenge(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("challenge_id", "allowed_approver_actor_ids", "expires_at")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    if "challenge_id" in value:
+        _check_opaque_id(errors, f"{path}.challenge_id", value["challenge_id"])
+    approvers = value.get("allowed_approver_actor_ids")
+    if "allowed_approver_actor_ids" in value:
+        if not isinstance(approvers, list) or not approvers:
+            errors.add(
+                f"{path}.allowed_approver_actor_ids",
+                "must be a non-empty array of unique opaque actor IDs",
+            )
+        else:
+            seen: set[str] = set()
+            for index, actor_id in enumerate(approvers):
+                _check_opaque_id(
+                    errors,
+                    f"{path}.allowed_approver_actor_ids[{index}]",
+                    actor_id,
+                )
+                if isinstance(actor_id, str):
+                    if actor_id in seen:
+                        errors.add(
+                            f"{path}.allowed_approver_actor_ids",
+                            "must contain unique actor IDs",
+                        )
+                    seen.add(actor_id)
+    if "expires_at" in value:
+        _check_utc_timestamp(errors, f"{path}.expires_at", value["expires_at"])
+
+
+def _check_approval_evidence(errors: _Errors, path: str, value: Any) -> None:
+    fields = (
+        "challenge_id",
+        "attestation_id",
+        "approver_actor_id",
+        "approved_at",
+        "channel",
+    )
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    for field in ("challenge_id", "attestation_id", "approver_actor_id"):
+        if field in value:
+            _check_opaque_id(errors, f"{path}.{field}", value[field])
+    if "approved_at" in value:
+        _check_utc_timestamp(errors, f"{path}.approved_at", value["approved_at"])
+    if "channel" in value:
+        _check_enum(
+            errors,
+            f"{path}.channel",
+            value["channel"],
+            ("authenticated-transport", "local-operator"),
+        )
+
+
+def _validate_authorization_request(doc: dict[str, Any]) -> list[str]:
+    errors = _Errors()
+    fields = (
+        "kind",
+        "schema_version",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "impact",
+    )
+    if not _check_closed_object(errors, "authorization", doc, fields, fields):
+        return list(errors)
+    if doc.get("kind") != "authorization-request":
+        errors.add("kind", "must be exactly 'authorization-request'")
+    _check_authorization_binding(errors, doc)
+    return list(errors)
+
+
+def _validate_authorization_decision(doc: dict[str, Any]) -> list[str]:
+    errors = _Errors()
+    required = (
+        "kind",
+        "schema_version",
+        "decision_id",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "derived_requester_actor_id",
+        "capability",
+        "scope",
+        "impact",
+        "decision",
+        "reason_code",
+        "policy_provenance",
+        "evaluated_at",
+    )
+    optional = (
+        "authorization_basis",
+        "expires_at",
+        "approval_challenge",
+        "approval_evidence",
+    )
+    if not _check_closed_object(errors, "authorization", doc, required, required + optional):
+        return list(errors)
+    if doc.get("kind") != "authorization-decision":
+        errors.add("kind", "must be exactly 'authorization-decision'")
+    _check_authorization_binding(errors, doc)
+    for field in ("decision_id", "derived_requester_actor_id"):
+        if field in doc:
+            _check_opaque_id(errors, field, doc[field])
+    if "decision" in doc:
+        _check_enum(errors, "decision", doc["decision"], AUTHORIZATION_DECISIONS)
+    if "reason_code" in doc:
+        _check_enum(errors, "reason_code", doc["reason_code"], AUTHORIZATION_REASON_CODES)
+    if "policy_provenance" in doc:
+        _check_nes(errors, "policy_provenance", doc["policy_provenance"])
+    if "evaluated_at" in doc:
+        _check_utc_timestamp(errors, "evaluated_at", doc["evaluated_at"])
+    if "expires_at" in doc:
+        _check_utc_timestamp(errors, "expires_at", doc["expires_at"])
+    if "authorization_basis" in doc:
+        _check_enum(
+            errors,
+            "authorization_basis",
+            doc["authorization_basis"],
+            ("direct-grant", "authenticated-approval"),
+        )
+    if "approval_challenge" in doc:
+        _check_approval_challenge(errors, "approval_challenge", doc["approval_challenge"])
+    if "approval_evidence" in doc:
+        _check_approval_evidence(errors, "approval_evidence", doc["approval_evidence"])
+
+    decision = doc.get("decision")
+    reason = doc.get("reason_code")
+    extras = set(doc)
+    if decision == "ALLOW":
+        for field in ("authorization_basis", "expires_at"):
+            if field not in doc:
+                errors.add("authorization", f"ALLOW requires {field!r}")
+        if "approval_challenge" in extras:
+            errors.add("approval_challenge", "must not appear on ALLOW")
+        basis = doc.get("authorization_basis")
+        if basis == "direct-grant":
+            if reason != "allow-direct-grant":
+                errors.add("reason_code", "direct-grant ALLOW requires allow-direct-grant")
+            if "approval_evidence" in extras:
+                errors.add("approval_evidence", "must not appear on direct-grant ALLOW")
+        elif basis == "authenticated-approval":
+            if reason != "allow-authenticated-approval":
+                errors.add(
+                    "reason_code",
+                    "authenticated-approval ALLOW requires allow-authenticated-approval",
+                )
+            if "approval_evidence" not in extras:
+                errors.add(
+                    "authorization",
+                    "authenticated-approval ALLOW requires 'approval_evidence'",
+                )
+    elif decision == "APPROVAL_REQUIRED":
+        if reason not in (
+            "approval-required-high-impact",
+            "approval-required-by-policy",
+        ):
+            errors.add("reason_code", "does not match APPROVAL_REQUIRED")
+        if "approval_challenge" not in extras:
+            errors.add("authorization", "APPROVAL_REQUIRED requires 'approval_challenge'")
+        for field in ("authorization_basis", "expires_at", "approval_evidence"):
+            if field in extras:
+                errors.add(field, "must not appear on APPROVAL_REQUIRED")
+    elif decision == "DENY":
+        if not isinstance(reason, str) or not reason.startswith("deny-"):
+            errors.add("reason_code", "DENY requires a deny-* reason code")
+        for field in (
+            "authorization_basis",
+            "expires_at",
+            "approval_challenge",
+            "approval_evidence",
+        ):
+            if field in extras:
+                errors.add(field, "must not appear on DENY")
+    return list(errors)
+
+
+def _validate_participant_authorization_result(doc: dict[str, Any]) -> list[str]:
+    errors = _Errors()
+    fields = (
+        "kind",
+        "schema_version",
+        "decision_id",
+        "action_id",
+        "action_digest",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "decision",
+        "reason_code",
+    )
+    if not _check_closed_object(errors, "authorization", doc, fields, fields):
+        return list(errors)
+    if doc.get("kind") != "participant-result":
+        errors.add("kind", "must be exactly 'participant-result'")
+    _check_authorization_binding(errors, doc)
+    if "decision_id" in doc:
+        _check_opaque_id(errors, "decision_id", doc["decision_id"])
+    if "decision" in doc:
+        _check_enum(errors, "decision", doc["decision"], AUTHORIZATION_DECISIONS)
+    if "reason_code" in doc:
+        _check_enum(errors, "reason_code", doc["reason_code"], AUTHORIZATION_REASON_CODES)
+    decision = doc.get("decision")
+    reason = doc.get("reason_code")
+    if decision == "ALLOW" and reason not in (
+        "allow-direct-grant",
+        "allow-authenticated-approval",
+    ):
+        errors.add("reason_code", "does not match ALLOW")
+    elif decision == "APPROVAL_REQUIRED" and reason not in (
+        "approval-required-high-impact",
+        "approval-required-by-policy",
+    ):
+        errors.add("reason_code", "does not match APPROVAL_REQUIRED")
+    elif decision == "DENY" and (
+        not isinstance(reason, str) or not reason.startswith("deny-")
+    ):
+        errors.add("reason_code", "does not match DENY")
+    return list(errors)
+
+
+def validate_privileged_action_authorization(doc: Any) -> list[str]:
+    """Mirror I-010F's closed host-request/host-decision/participant union."""
+    if not isinstance(doc, dict):
+        return ["authorization: must be an object"]
+    kind = doc.get("kind")
+    if kind == "authorization-request":
+        return _validate_authorization_request(doc)
+    if kind == "authorization-decision":
+        return _validate_authorization_decision(doc)
+    if kind == "participant-result":
+        return _validate_participant_authorization_result(doc)
+    return [
+        "kind: must be one of ('authorization-request', "
+        "'authorization-decision', 'participant-result')"
+    ]
+
+
 def _check_observation_body(errors: _Errors, path: str, value: Any) -> None:
     required = ("schema_version", "trigger_event_id", "continuity_scope_id", "event_count", "byte_count", "coverage", "included_event_ids")
     if not _check_closed_object(errors, path, value, required, required):
@@ -1461,6 +1805,7 @@ DOCUMENT_VALIDATORS: dict[str, Callable[[Any], list[str]]] = {
     "participant-wake": validate_participant_wake,
     "context-continuation": validate_context_continuation,
     "attention-receipt": validate_attention_receipt,
+    "privileged-action-authorization": validate_privileged_action_authorization,
 }
 
 
@@ -2325,6 +2670,91 @@ def make_fetch_page(**overrides: Any) -> dict[str, Any]:
             "has_restart_gap": False,
         },
         "next_cursor": "cur-2",
+    }
+    doc.update(overrides)
+    return doc
+
+
+_AUTHORIZATION_SCOPE = {
+    "platform": "discord",
+    "room_id": "room-42",
+    "participant_id": "vigil",
+    "resource": {"kind": "workspace-file", "id": "docs/release.md"},
+}
+
+
+def make_authorization_request(**overrides: Any) -> dict[str, Any]:
+    doc = {
+        "kind": "authorization-request",
+        "schema_version": 2,
+        "action_id": "action-0001",
+        "action_digest": "sha256:" + ("a" * 64),
+        "origin_event_id": "discord-message-123",
+        "capability": "workspace.file.write",
+        "scope": _deep_copy(_AUTHORIZATION_SCOPE),
+        "impact": "mutation",
+    }
+    doc.update(overrides)
+    return doc
+
+
+def make_authorization_decision(
+    decision: str = "DENY",
+    **overrides: Any,
+) -> dict[str, Any]:
+    request = make_authorization_request()
+    doc = {
+        "kind": "authorization-decision",
+        "schema_version": 2,
+        "decision_id": "decision-0001",
+        "action_id": request["action_id"],
+        "action_digest": request["action_digest"],
+        "origin_event_id": request["origin_event_id"],
+        "derived_requester_actor_id": "discord-user-1001",
+        "capability": request["capability"],
+        "scope": request["scope"],
+        "impact": request["impact"],
+        "decision": decision,
+        "reason_code": "deny-capability-missing",
+        "policy_provenance": "trusted:/etc/nunchi/policy.json#sha256:abc",
+        "evaluated_at": "2026-07-20T14:00:00Z",
+    }
+    if decision == "ALLOW":
+        doc.update(
+            {
+                "reason_code": "allow-direct-grant",
+                "authorization_basis": "direct-grant",
+                "expires_at": "2026-07-20T14:00:30Z",
+            }
+        )
+    elif decision == "APPROVAL_REQUIRED":
+        doc.update(
+            {
+                "reason_code": "approval-required-high-impact",
+                "approval_challenge": {
+                    "challenge_id": "challenge-0001",
+                    "allowed_approver_actor_ids": ["discord-user-admin"],
+                    "expires_at": "2026-07-20T14:05:00Z",
+                },
+            }
+        )
+    doc.update(overrides)
+    return doc
+
+
+def make_participant_authorization_result(**overrides: Any) -> dict[str, Any]:
+    decision = make_authorization_decision("APPROVAL_REQUIRED")
+    doc = {
+        "kind": "participant-result",
+        "schema_version": 2,
+        "decision_id": decision["decision_id"],
+        "action_id": decision["action_id"],
+        "action_digest": decision["action_digest"],
+        "origin_event_id": decision["origin_event_id"],
+        "capability": decision["capability"],
+        "scope": decision["scope"],
+        "decision": decision["decision"],
+        "reason_code": decision["reason_code"],
     }
     doc.update(overrides)
     return doc

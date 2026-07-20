@@ -1,23 +1,26 @@
-# Nunchi V2 Contracts (I-010A, I-010C, I-010D at `@1`; I-010B, I-010E at `@2`)
+# Nunchi V2 Contracts (I-010A through I-010F)
 
 **Owner**: `v2-contract-owner` (slice `010`). Only this owner edits
 `schemas/v2/**`; a dependent slice requests changes through an explicit
 return handoff followed by re-analysis, never by editing a shared schema
 directly.
 
-**Status**: these five contracts are the shared seam consumed by the V2
+**Status**: these six contracts are the shared seam consumed by the V2
 program slices. V1 remains the current product until the atomic V2 merge is
 verified on `main`; nothing in this document claims the V2 lifecycle is the
 running product today.
 
 **Field-level authority**: the selected Aleph Vault design at `c834e8c`
 (`projects/shared/nunchi/technical-design.md`) is the field-level naming and
-shape authority for all five interfaces (FR-014); the program-canonical
-interface names and versions (`I-010A`, `I-010C`, `I-010D` at `@1`;
-`I-010B`, `I-010E` at `@2`) are this slice's own vocabulary layered over
-that same field inventory. A document the selected
-design declares valid that either validator rejects is a contract defect,
-never resolved by narrowing the corpus.
+shape authority for the five attention-lifecycle interfaces (FR-014); the
+program-canonical interface names and versions (`I-010A`, `I-010C`,
+`I-010D` at `@1`; `I-010B`, `I-010E` at `@2`) are this slice's own
+vocabulary layered over that same field inventory. `I-010F@1` is the
+portable security seam added by Zoe's 2026-07-20 privileged-action decision
+and program FR-031 through FR-033; it does not alter the Vault-selected
+attention field inventory. A document the selected design declares valid
+that either attention validator rejects is a contract defect, never resolved
+by narrowing the corpus.
 
 **Machine-readable contracts** (JSON Schema Draft 2020-12):
 
@@ -28,16 +31,18 @@ never resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
-Only the request carries an explicit generation tag, `schema_version: 2`
-(the design's own field; there is no separate `interface`/`version`
-envelope pair on any of the five documents — that was an attempt-2 local
-invention the selected design does not carry). A non-empty `request_id`
-correlates the request, decision, wake, and receipt records for one
-attention pass. All five contracts are closed: an unexpected property
-rejects. V1 envelopes, reply-bearing fields, inferred-roster claims, and
-`handled`/`open`/`owed`/permission ledger state reject everywhere; there is
-no V1 translation bridge (FR-011).
+Among the five attention-lifecycle contracts, only `AttentionRequestV2`
+carries the design's explicit generation tag, `schema_version: 2`; there is
+no local interface/version wrapper. Each new I-010F document carries
+`schema_version: 2` and a closed `kind` discriminator because authorization
+is a distinct request/decision/projection union. A non-empty `request_id`
+correlates the request, decision, wake, and receipt records for one attention
+pass; authorization uses action and decision IDs instead. All six contracts
+are closed: an unexpected property rejects. V1 envelopes, reply-bearing
+fields, inferred-roster claims, and `handled`/`open`/`owed`/permission ledger
+state reject everywhere; there is no V1 translation bridge (FR-011).
 
 ## The lifecycle at a glance
 
@@ -47,6 +52,8 @@ observation  ->  AttentionRequestV2   (host assembles factual events)
              ->  ParticipantWakeV2    (WAKE | DEFER | ERROR_FALLBACK | PREATTENTION_BYPASS)
              ->  ContextContinuationV2 (optional host-mediated bounded expansion)
              ->  AttentionReceiptV2   (immutable staged telemetry, one record per stage)
+             ->  participant acts or remains silent
+                    `-> PrivilegedActionAuthorizationV2 (before any privileged effect)
 ```
 
 These are lifecycle boundaries, not social state: no contract carries a
@@ -257,6 +264,45 @@ the stream at `attention`) and from non-invocation; the observed outcome is
 attention record marks `classifier_not_invoked: true` and carries its
 trusted `cause`/`policy_provenance`.
 
+## I-010F PrivilegedActionAuthorizationV2@1
+
+This contract is separate from attention and its receipts. It cannot influence
+a later social judgment and it never treats room text as authority. It is a
+closed union over three document kinds:
+
+- **`authorization-request`** is the host-to-guard proposal. It binds
+  `action_id`, an exact lowercase `sha256:<64 hex>` `action_digest`,
+  `origin_event_id`, a dot-namespaced `capability`, an `impact`, and the exact
+  platform/room/participant/resource `scope`. It deliberately has no requester
+  field: the guard resolves the origin event from trusted observation and
+  derives the requester from its transport-attested author.
+- **`authorization-decision`** is the immutable host audit record. It repeats
+  the exact proposal binding, adds a unique `decision_id`, the derived requester
+  actor ID, trusted `policy_provenance`, evaluation time, and exactly one of
+  `ALLOW`, `DENY`, or `APPROVAL_REQUIRED`. An `ALLOW` is short-lived and names
+  either `direct-grant` or `authenticated-approval`; the latter includes only a
+  non-secret approval-evidence reference. `APPROVAL_REQUIRED` contains a
+  host-only challenge binding with the allowed exact approver actor IDs and
+  expiry. A denial carries neither challenge nor authorization material.
+- **`participant-result`** is the only participant-facing projection. It keeps
+  the action/origin/capability/scope binding, decision, and closed reason code,
+  but its closed shape rejects requester identity, policy provenance, allowed
+  approvers, challenge IDs, approval evidence, expiry, and bearer material.
+
+High-impact mutations, destructive operations, external side effects,
+secret-bearing operations, and account/configuration changes default to
+`APPROVAL_REQUIRED`; direct execution requires an explicit trusted grant for
+the exact actor, capability, and scope. Approval is valid only through an
+authenticated transport interaction or local operator channel. Ordinary room
+messages, reactions, replies, quotes, model assertions, and copied challenges
+are never approval channels.
+
+The schema makes each document closed and enforces its branch-specific fields.
+The runtime guard owns the relational behavior: exact origin resolution,
+requester derivation, policy reload, expiry and revocation, proposal/decision/
+approval binding, authenticated approver identity, one-use consumption, and a
+final action-digest and scope recheck immediately before execution.
+
 ## Validation model (FR-012)
 
 The runtime package stays dependency-free: shipped runtime validation is
@@ -274,6 +320,13 @@ conformance corpus exercises both validators:
   verbatim or field-complete from the selected design at `c834e8c`,
   schema-expressible and counted as their own manifest-tracked subset —
   never a fourth oracle-treatment class (CHK099).
+- **Authorization contract cases**:
+  `tests/v2/contract/test_privileged_action_authorization.py` runs the same
+  stdlib/oracle pair over I-010F, including requester injection, malformed
+  digests/capabilities/scopes, branch mixing, untrusted approval channels,
+  duplicate approvers, and participant-secret leakage. Runtime authorization
+  sequences are covered by the guard suite because they require trusted event,
+  policy, approval, and consumption state rather than one isolated document.
 - **Runner**: the `tests/v2/contract/` suite. The stdlib
   runtime-validation adapter lives in
   `tests/v2/contract/schema_helpers.py`.
@@ -360,6 +413,15 @@ every runtime consumer must enforce them in its stdlib adapter:
    and stream-level writer ownership. These are the multi-record checks;
    the per-record stage-to-writer binding itself is schema-expressible
    and enforced by both validators on every single record, in addition.
+8. **Privileged-action authorization** (FR-031 through FR-033): resolve the
+   exact origin event inside the requested platform/room/participant scope and
+   derive its transport-attested author; reload trusted policy; reject missing,
+   ambiguous, expired, revoked, out-of-scope, replayed, or unsupported grants;
+   authenticate an approver through a trusted non-text channel; match approval
+   evidence to the immutable challenge/action/digest/requester/capability/scope;
+   and atomically consume a still-valid `ALLOW` only after rehashing and
+   rechecking the exact operation. Schema-valid documents alone authorize
+   nothing.
 
 ## Examples
 
