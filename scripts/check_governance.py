@@ -1380,6 +1380,8 @@ def _effective_dependency_commit(
     root: Path,
     upstream: str,
     terminal_commit: str,
+    *,
+    at_commit: str | None = None,
 ) -> tuple[str, list[str]]:
     """Resolve the exact commit a dependent slice must bind to for *upstream*.
 
@@ -1395,19 +1397,24 @@ def _effective_dependency_commit(
 
     errors: list[str] = []
     amendments_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["amendments"])
-    raw_path = root / amendments_relative
-    if not raw_path.exists() and not raw_path.is_symlink():
-        return terminal_commit, errors
-    if not _repo_path_is_safe(root, amendments_relative, require_file=True):
-        return terminal_commit, [
-            f"{amendments_relative}: amendment ledger path is unsafe"
-        ]
-    try:
-        text = raw_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return terminal_commit, [
-            f"{amendments_relative}: amendment ledger is unreadable ({exc})"
-        ]
+    if at_commit is not None:
+        text = _git_file_text(root, at_commit, amendments_relative)
+        if text is None:
+            return terminal_commit, errors
+    else:
+        raw_path = root / amendments_relative
+        if not raw_path.exists() and not raw_path.is_symlink():
+            return terminal_commit, errors
+        if not _repo_path_is_safe(root, amendments_relative, require_file=True):
+            return terminal_commit, [
+                f"{amendments_relative}: amendment ledger path is unsafe"
+            ]
+        try:
+            text = raw_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            return terminal_commit, [
+                f"{amendments_relative}: amendment ledger is unreadable ({exc})"
+            ]
     records = _lifecycle_records(text)
     if not records:
         return terminal_commit, [
@@ -1906,6 +1913,25 @@ def _git_path_exists_at_commit(root: Path, commit: str, relative: Path) -> bool:
     return completed is not None and completed.returncode == 0
 
 
+def _git_first_commit_containing(
+    root: Path,
+    relative: Path,
+    needle: str,
+) -> str | None:
+    """Return the first path revision containing one immutable marker."""
+
+    history = _git(root, "log", "--format=%H", "--reverse", "--", relative.as_posix())
+    if history is None or history.returncode != 0:
+        return None
+    for commit in history.stdout.splitlines():
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            continue
+        revision = _git_file_text(root, commit, relative)
+        if revision is not None and needle in revision:
+            return commit
+    return None
+
+
 def _git_changed_paths(root: Path, older: str, newer: str) -> tuple[str, ...] | None:
     completed = _git(root, "diff", "--name-only", f"{older}..{newer}")
     if completed is None or completed.returncode != 0:
@@ -2157,6 +2183,11 @@ def _slice_lifecycle_evidence_errors(
     activation = texts.get("activation")
     if activation is not None:
         relative = Path(paths["activation"])
+        activation_record_commit = _git_first_commit_containing(
+            root,
+            relative,
+            f"**Slice**: `{dirname}`",
+        )
         activation_labels = (
             "Slice",
             "Status",
@@ -2297,26 +2328,42 @@ def _slice_lifecycle_evidence_errors(
             upstream_path = root / upstream_relative
             if not _repo_path_is_safe(root, upstream_relative, require_file=True):
                 continue
-            try:
-                upstream_records = _lifecycle_records(
-                    upstream_path.read_text(encoding="utf-8")
+            if activation_record_commit is not None:
+                upstream_text = _git_file_text(
+                    root,
+                    activation_record_commit,
+                    upstream_relative,
                 )
-            except (OSError, UnicodeDecodeError):
+            else:
+                try:
+                    upstream_text = upstream_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    upstream_text = None
+            if upstream_text is None:
+                errors.append(
+                    f"{relative}: dependency {dependency_id} packet did not exist "
+                    "when activation was recorded"
+                )
                 continue
+            upstream_records = _lifecycle_records(upstream_text)
             if upstream_records:
                 terminal_commit = _clean_metadata(
                     upstream_records[-1], "Candidate commit"
                 )
                 effective_commit, amendment_errors = _effective_dependency_commit(
-                    root, upstream, terminal_commit
+                    root,
+                    upstream,
+                    terminal_commit,
+                    at_commit=activation_record_commit,
                 )
                 errors.extend(amendment_errors)
                 if commit != effective_commit:
                     errors.append(
                         f"{relative}: dependency {dependency_id} commit must match "
                         f"the effective accepted candidate for "
-                        f"{upstream_path.relative_to(root)} (including any accepted "
-                        "amendments recorded in its slice-amendments.md ledger)"
+                        f"{upstream_path.relative_to(root)} at activation time "
+                        "(including amendments then present in its "
+                        "slice-amendments.md ledger)"
                     )
         analysis = _clean_metadata(activation, "Analysis result")
         if analysis != "PASS — zero CRITICAL/HIGH findings":
@@ -2479,24 +2526,60 @@ def _slice_lifecycle_evidence_errors(
             expected_task_ids, expected_task_hash = _task_manifest(
                 committed_task_entries
             )
-            if attempt == len(records):
+            record_commit = _git_first_commit_containing(
+                root,
+                relative,
+                commit,
+            )
+            if record_commit is None:
+                # Direct lifecycle-unit fixtures may construct an uncommitted
+                # record around an already committed candidate. Repository
+                # validation has path-history checks and takes the committed
+                # introduction branch above.
+                attested_tasks = committed_tasks
+            elif _git_commit_exists(root, commit) and not _git_is_ancestor(
+                root, commit, record_commit
+            ):
+                errors.append(
+                    f"{prefix}: candidate record must be introduced at or after "
+                    "the candidate commit"
+                )
+                attested_tasks = None
+            else:
+                attested_tasks = _git_file_text(
+                    root,
+                    record_commit,
+                    Path("specs") / dirname / "tasks.md",
+                )
+            if attested_tasks is None:
+                errors.append(
+                    f"{prefix}: record-introduction commit must contain tasks.md"
+                )
+            else:
+                try:
+                    attested_task_entries = _validated_task_entries(attested_tasks)
+                except ValueError as exc:
+                    errors.append(
+                        f"{prefix}: record-introduction tasks.md is invalid ({exc})"
+                    )
+                    attested_task_entries = ()
+                attested_task_ids, _attested_task_hash = _task_manifest(
+                    attested_task_entries
+                )
+                if attested_task_ids != expected_task_ids:
+                    errors.append(
+                        f"{prefix}: task IDs changed between candidate and "
+                        "candidate-record introduction"
+                    )
                 errors.extend(
                     _candidate_task_completion_errors(
                         tasks_complete=_clean_metadata(record, "Tasks complete"),
                         declared_completed=_clean_metadata(record, "Completed task IDs"),
-                        committed_tasks=committed_tasks or "",
-                        committed_task_entries=committed_task_entries,
+                        committed_tasks=attested_tasks,
+                        committed_task_entries=attested_task_entries,
                         prefix=prefix,
                     )
                 )
-            else:
-                if _clean_metadata(record, "Tasks complete") != "YES":
-                    errors.append(f"{prefix}: Tasks complete must be 'YES'")
-                if _clean_metadata(record, "Completed task IDs") != expected_task_ids:
-                    errors.append(
-                        f"{prefix}: Completed task IDs must be exactly "
-                        f"{expected_task_ids!r}"
-                    )
             if _clean_metadata(record, "Tasks SHA256") != expected_task_hash:
                 errors.append(
                     f"{prefix}: Tasks SHA256 must match tasks.md at Candidate commit"

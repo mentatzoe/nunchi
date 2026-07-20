@@ -167,8 +167,8 @@ attestations, not rows in an aggregate registry.
 
 | File | Establishes | Required metadata |
 |---|---|---|
-| `slice-activation.md` | `READY` | `Slice`, `Status: READY`, `Assigned participant / source`, exact `Authority record`, canonical `Accepted dependencies`, ordered `Dependency commits` as `slice=full-sha`, ordered `Dependency acceptance references` as `slice=consumer-owned-evidence-file`, `Analysis result: PASS — zero CRITICAL/HIGH findings`, `Branch`, `Worktree`, full `Starting commit`, exact plan-enumerated `Interfaces` and `Acceptance scenes`, exact planned `Evidence targets`, the complete planned `Documentation scope`, exact `Initial task IDs`, and normalized `Initial tasks SHA256`; the three dependency fields are `none` for `010` |
-| `slice-candidate.md` | `CONVERGED` | Append one attempt with `Slice`, `Status: CONVERGED`, a full `Candidate commit` descending from the activation commit and containing the bound tasks/evidence, exact commit-local `Completed task IDs`, matching normalized `Tasks SHA256`, `Tasks complete: YES`, `Verification commands / results` beginning `PASS —`, `Interface versions`, exact existing commit-local `Evidence paths`, and `Known limitations` |
+| `slice-activation.md` | `READY` | `Slice`, `Status: READY`, `Assigned participant / source`, exact `Authority record`, canonical `Accepted dependencies`, ordered `Dependency commits` as `slice=full-sha`, ordered `Dependency acceptance references` as `slice=consumer-owned-evidence-file`, `Analysis result: PASS — zero CRITICAL/HIGH findings`, `Branch`, `Worktree`, full `Starting commit`, exact plan-enumerated `Interfaces` and `Acceptance scenes`, exact planned `Evidence targets`, the complete planned `Documentation scope`, exact `Initial task IDs`, and normalized `Initial tasks SHA256`; dependency versions are evaluated at this immutable record's introduction commit, not retroactively against later amendments; the three dependency fields are `none` for `010` |
+| `slice-candidate.md` | `CONVERGED` | Append one attempt with `Slice`, `Status: CONVERGED`, a full implementation `Candidate commit` descending from the activation commit and containing the bound tasks/evidence, exact candidate task IDs and normalized `Tasks SHA256`, `Tasks complete: YES`, `Verification commands / results` beginning `PASS —`, `Interface versions`, exact existing candidate-local `Evidence paths`, and `Known limitations`; literal completion is evaluated at the later commit that first introduces this append-only record, using the same task IDs, so an exact-candidate review task can close only after that candidate exists |
 | `slice-handoff.md` | `HANDOFF_READY` or retry | Append a handoff attempt with `Slice`, `Status: HANDOFF_READY`, matching `Candidate commit`, `Acceptance owner`, `Documentation freshness: PASS`, and exact existing `Packet paths`; rejection appends `Slice`, `Status: REJECTED`, rejected `Candidate commit`, `Rejected by`, ISO `Rejected on`, durable `Decision reference`, and `Recorded by: v2-integrator` |
 | `slice-acceptance.md` | `ACCEPTED` | `Slice`, `Status: ACCEPTED`, matching `Candidate commit`, `Accepted by`, ISO `Accepted on`, durable `Decision reference`, and `Recorded by: v2-integrator` |
 | `parity/cutover-acceptance.md` | `CUTOVER_ACCEPTED` | `Program: 001-nunchi-v2-program`, `Status: CUTOVER_ACCEPTED`, `Accepted by: Zoe`, `Recorded by: v2-program-owner`, matching `Candidate commit`, ISO `Accepted on`, and durable `Decision reference` |
@@ -199,6 +199,15 @@ paths must name existing ordinary-path files. For slices `010`–`100`, `Accepte
 `v2-integrator`; for `110`, it is Zoe. Each dependent's upstream acceptance is
 also named in that dependent's activation evidence and remains separate from
 slice-level acceptance.
+
+These two time bindings prevent impossible retroactivity without weakening the
+gates. A later upstream amendment cannot make an earlier immutable activation
+false; the dependent records any newly consumed amendment separately. Likewise,
+the commit sent for independent review may still show that review task open.
+The append-only candidate record is introduced only after review finishes; its
+task-ID set must remain identical to the candidate's and every one of those IDs
+must then be literally checked. The handoff remains pinned to the reviewed
+candidate, not to unrelated later source changes.
 
 Each referenced dependency-acceptance file lives under the consumer's evidence
 directory, includes the upstream ID in its filename, and records `Consumer

@@ -810,6 +810,84 @@ class GovernanceBoundaryTests(unittest.TestCase):
             errors,
         )
 
+    def test_candidate_review_task_may_close_in_record_introduction_commit(self):
+        dirname = "010-v2-contract"
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        paths = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname]
+        assigned = "Alice — durable assignment decision 42"
+        candidate_tasks = (
+            "- [X] T001 Freeze implementation\n"
+            "- [ ] T002 Independently review the frozen candidate\n"
+        )
+        completed_tasks = candidate_tasks.replace("- [ ] T002", "- [X] T002")
+        task_ids, task_hash = self._task_fields(candidate_tasks)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            starting_sha = self._init_git_repo(root)
+            tasks_path = root / "specs" / dirname / "tasks.md"
+            tasks_path.parent.mkdir(parents=True)
+            tasks_path.write_text(candidate_tasks, encoding="utf-8")
+            self._write_lifecycle_record(
+                root,
+                "evidence/v2/contract/results.json",
+                "{}\n",
+            )
+            candidate_sha = self._commit_all(root, "freeze review candidate")
+
+            tasks_path.write_text(completed_tasks, encoding="utf-8")
+            self._write_lifecycle_record(
+                root,
+                paths["activation"],
+                f"""# Activation
+**Slice**: `{dirname}`
+**Status**: READY
+**Assigned participant / source**: {assigned}
+**Authority record**: `{check_governance.IMPLEMENTATION_AUTHORIZATION_PATH}`
+**Accepted dependencies**: none
+**Dependency commits**: none
+**Dependency acceptance references**: none
+**Analysis result**: PASS — zero CRITICAL/HIGH findings
+**Branch**: `{expected["branch"]}`
+**Worktree**: `{expected["worktree"]}`
+**Starting commit**: `{starting_sha}`
+**Interfaces**: I-010A
+**Acceptance scenes**: S01
+**Evidence targets**: evidence/v2/contract/results.json
+**Documentation scope**: README.md
+**Initial task IDs**: {task_ids}
+**Initial tasks SHA256**: {task_hash}
+""",
+            )
+            self._write_lifecycle_record(
+                root,
+                paths["candidate"],
+                f"""# Candidate
+**Slice**: `{dirname}`
+**Status**: CONVERGED
+**Candidate commit**: `{candidate_sha}`
+**Tasks complete**: YES
+**Completed task IDs**: {task_ids}
+**Tasks SHA256**: {task_hash}
+**Verification commands / results**: PASS — exact independent review
+**Interface versions**: I-010A version 1
+**Evidence paths**: evidence/v2/contract/results.json
+**Known limitations**: NONE
+""",
+            )
+            self._commit_all(root, "record independent review")
+
+            self.assertEqual(
+                check_governance._slice_lifecycle_evidence_errors(
+                    root,
+                    dirname,
+                    expected,
+                    "CONVERGED",
+                    assigned,
+                    completed_tasks,
+                ),
+                [],
+            )
+
     def test_task_manifest_rejects_gaps_and_noncanonical_checkboxes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1158,6 +1236,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 ),
                 [],
             )
+            self._commit_all(root, "record first rejected handoff")
 
             complete_tasks_v2 = "- [X] T001 Work\n- [X] T002 Rework finding\n"
             task_ids_v2, task_hash_v2 = self._task_fields(complete_tasks_v2)
@@ -1395,6 +1474,57 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
             self.assertEqual(errors, [])
             self.assertEqual(effective, a2_candidate)
+
+    def test_effective_dependency_commit_can_be_resolved_at_activation_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            amended = self._next_git_commit(root, "amended")
+            decision = self._accept_amendment_commit(
+                root,
+                "evidence/v2/contract/amendment-A1-test.md",
+                amended,
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                "amendments"
+            ]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010B
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{amended}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+""",
+            )
+            self._commit_all(root, "record amendment ledger")
+
+            historical, historical_errors = (
+                check_governance._effective_dependency_commit(
+                    root,
+                    "010-v2-contract",
+                    base,
+                    at_commit=base,
+                )
+            )
+            current, current_errors = check_governance._effective_dependency_commit(
+                root,
+                "010-v2-contract",
+                base,
+            )
+            self.assertEqual((historical, historical_errors), (base, []))
+            self.assertEqual((current, current_errors), (amended, []))
 
     def test_effective_dependency_commit_rejects_stale_summary_line(self):
         with tempfile.TemporaryDirectory() as tmp:
