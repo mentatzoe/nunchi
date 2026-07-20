@@ -140,7 +140,6 @@
         "action_id",
         "action_digest",
         "origin_event_id",
-        "derived_requester_actor_id",
         "capability",
         "scope",
         "impact",
@@ -173,7 +172,7 @@
         {
           "if": {"required": ["decision"], "properties": {"decision": {"const": "ALLOW"}}},
           "then": {
-            "required": ["authorization_basis", "expires_at"],
+            "required": ["derived_requester_actor_id", "authorization_basis", "expires_at"],
             "not": {"required": ["approval_challenge"]},
             "oneOf": [
               {
@@ -196,7 +195,7 @@
         {
           "if": {"required": ["decision"], "properties": {"decision": {"const": "APPROVAL_REQUIRED"}}},
           "then": {
-            "required": ["approval_challenge"],
+            "required": ["derived_requester_actor_id", "approval_challenge"],
             "properties": {
               "reason_code": {
                 "enum": ["approval-required-high-impact", "approval-required-by-policy"]

@@ -278,8 +278,11 @@ closed union over three document kinds:
   derives the requester from its transport-attested author.
 - **`authorization-decision`** is the immutable host audit record. It repeats
   the exact proposal binding, adds a unique `decision_id`, the derived requester
-  actor ID, trusted `policy_provenance`, evaluation time, and exactly one of
-  `ALLOW`, `DENY`, or `APPROVAL_REQUIRED`. An `ALLOW` is short-lived and names
+  actor ID when origin resolution succeeded, trusted `policy_provenance`,
+  evaluation time, and exactly one of
+  `ALLOW`, `DENY`, or `APPROVAL_REQUIRED`. Requester identity is mandatory for
+  `ALLOW` and `APPROVAL_REQUIRED`; an origin/requester-resolution denial omits
+  it instead of fabricating identity. An `ALLOW` is short-lived and names
   either `direct-grant` or `authenticated-approval`; the latter includes only a
   non-secret approval-evidence reference. `APPROVAL_REQUIRED` contains a
   host-only challenge binding with the allowed exact approver actor IDs and

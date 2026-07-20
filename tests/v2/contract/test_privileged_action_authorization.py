@@ -83,6 +83,21 @@ class AuthorizationDecisionCases(unittest.TestCase):
                     "valid",
                 )
 
+    def test_origin_not_found_denial_does_not_fabricate_requester(self):
+        doc = make_authorization_decision(
+            "DENY",
+            reason_code="deny-origin-not-found",
+        )
+        del doc["derived_requester_actor_id"]
+        assert_schema_verdict(self, SCHEMA, doc, "valid")
+
+    def test_allow_and_approval_required_require_derived_requester(self):
+        for decision in ("ALLOW", "APPROVAL_REQUIRED"):
+            with self.subTest(decision=decision):
+                doc = make_authorization_decision(decision)
+                del doc["derived_requester_actor_id"]
+                assert_schema_verdict(self, SCHEMA, doc, "invalid")
+
     def test_authenticated_approval_allow_validates(self):
         doc = make_authorization_decision(
             "ALLOW",

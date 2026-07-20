@@ -1449,7 +1449,6 @@ def _validate_authorization_decision(doc: dict[str, Any]) -> list[str]:
         "action_id",
         "action_digest",
         "origin_event_id",
-        "derived_requester_actor_id",
         "capability",
         "scope",
         "impact",
@@ -1459,6 +1458,7 @@ def _validate_authorization_decision(doc: dict[str, Any]) -> list[str]:
         "evaluated_at",
     )
     optional = (
+        "derived_requester_actor_id",
         "authorization_basis",
         "expires_at",
         "approval_challenge",
@@ -1498,7 +1498,7 @@ def _validate_authorization_decision(doc: dict[str, Any]) -> list[str]:
     reason = doc.get("reason_code")
     extras = set(doc)
     if decision == "ALLOW":
-        for field in ("authorization_basis", "expires_at"):
+        for field in ("derived_requester_actor_id", "authorization_basis", "expires_at"):
             if field not in doc:
                 errors.add("authorization", f"ALLOW requires {field!r}")
         if "approval_challenge" in extras:
@@ -1528,6 +1528,11 @@ def _validate_authorization_decision(doc: dict[str, Any]) -> list[str]:
             errors.add("reason_code", "does not match APPROVAL_REQUIRED")
         if "approval_challenge" not in extras:
             errors.add("authorization", "APPROVAL_REQUIRED requires 'approval_challenge'")
+        if "derived_requester_actor_id" not in extras:
+            errors.add(
+                "authorization",
+                "APPROVAL_REQUIRED requires 'derived_requester_actor_id'",
+            )
         for field in ("authorization_basis", "expires_at", "approval_evidence"):
             if field in extras:
                 errors.add(field, "must not appear on APPROVAL_REQUIRED")
