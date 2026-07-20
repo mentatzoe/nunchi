@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "source": "operator:local-v2",
+  "attention": {
+    "participant_id": "vigil",
+    "preattention_enabled": true,
+    "social_suppression_enabled": true,
+    "attention_max_events": 50,
+    "attention_max_bytes": 65536,
+    "participant_max_events": 50,
+    "participant_max_bytes": 65536,
+    "fetch_max_events": 20,
+    "fetch_max_bytes": 32768,
+    "error_action": "WAKE",
+    "transition_defer_margin": 0.12,
+    "transition_defer_margin_source": "operator:initial-margin"
+  },
+  "recoverability": {
+    "participant_id": "vigil",
+    "continuity_scope_id": "discord:channel:152",
+    "eligible": false
+  },
+  "classifier": {
+    "provider": "openai-compatible",
+    "endpoint": "https://provider.example/v1/chat/completions",
+    "model": "participant-shaped-model",
+    "api_key": "replace-with-secret-from-owner-only-config",
+    "timeout_seconds": 30,
+    "max_retries": 2
+  },
+  "authorization": {
+    "decision_ttl_seconds": 30,
+    "approval_ttl_seconds": 300,
+    "grants": []
+  },
+  "receipt_sink": {
+    "type": "exclusive-json-file",
+    "directory": "/absolute/path/to/nunchi-receipts",
+    "source": "operator:local-receipts"
+  }
+}
