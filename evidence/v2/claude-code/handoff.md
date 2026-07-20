@@ -342,3 +342,84 @@ pending the operator arming above.
 
 **Handoff target**: `v2-integrator` for adversarial re-review. This lane does
 not self-declare acceptance.
+
+---
+
+## Attempt 3 — 2026-07-20 (rework after two remaining fail-open paths)
+
+**Delivering lane**: `v2-claude-owner` — Station, model `claude-fable-5`.
+Attempt 2 (candidate `1990129`, evidence `1c89ea5`) closed the nine named
+Attempt-1 findings, but independent probes found two remaining fail-open
+paths plus a directory-mode gap and an arming-instruction fix. Attempts 1 and
+2 and their evidence are preserved unchanged in git history; this attempt is a
+new candidate on the same branch, appended here.
+
+### Exact candidate and commit split
+
+- **Implementation candidate**: `651313531f19ba82683a8234bcc3c0252e67adfd`
+  (descends from Attempt-2 evidence tip `1c89ea5` on branch
+  `claude/claude-code-v2-integration-3ac219`). Product, patch, test, doc only.
+- **Evidence-only binding**: the commit adding this Attempt-3 section (plus the
+  regenerated deterministic evidence and refreshed provenance) sits on top; its
+  diff from `6513135` touches only `evidence/v2/claude-code/`.
+
+Attempt-3 changed-file inventory (implementation candidate, `1990129` →
+`6513135`):
+
+```text
+M  integrations/claude-code/nunchi_claude_v2.py                 # B1,B2 fail-closed; B3 consumer dir check
+M  integrations/claude-code/transport-patch/0001-allow-bot-messages-allowfrom.patch  # rebuilt
+M  integrations/claude-code/transport-patch/0002-native-fact-sidecar.patch           # B3 dir validation
+M  integrations/claude-code/transport-patch/README.md           # new digest + dir wording
+M  integrations/claude-code/transport-patch/apply-transport-patch.sh  # new pinned PATCHED_SHA256
+M  tests/v2/test_claude_code.py                                 # B1/B2/B3 adversarial regression
+```
+
+No `src/`, `schemas/`, or other lane's surface was touched; the Attempt-2
+fixes that passed are unchanged.
+
+### Corrections (integrator's required list)
+
+| # | Required correction | Resolution | Proof |
+|---|---|---|---|
+| 1 | invalid policy → bound-room prompt passes un-gated; subsequent Bash allowed | Once a prompt is a recognized Discord channel event AND V2 is configured, `handle_user_prompt_submit` never returns a bare pass-through. Any config/policy/state failure records a durable degraded room-causal marker (`_record_marker_and_block`) so PreToolUse denies mapped privileged tools this session, and blocks the room delivery; if the marker cannot be recorded, it still blocks. The outer handler catches broadly so a crash cannot fail open. | `test_invalid_policy_blocks_prompt_and_denies_privileged`, `test_state_failure_blocks_prompt_fail_closed` |
+| 2 | foreign-room channel event passes un-gated; subsequent privileged allowed | A foreign room for the single-room binding is **declined** (blocked) with a durable degraded marker, not passed through as operator work; the marker denies the session's mapped privileged tools, and the room-binding check denies a room-action targeting the foreign room. A healthy same-session bound-room turn is never clobbered. | `test_foreign_room_declined_and_privileged_denied`, `test_foreign_room_does_not_clobber_a_healthy_bound_turn`, `test_operator_prompts_pass_but_foreign_rooms_are_declined`; live installed probe in `installed-runtime.md` |
+| 3 | sidecar dir created 0700 only when new; pre-existing 0755 unchanged; writer validates file not dir | Before every write the transport validates the containing directory is a caller-owned, non-symlink directory with mode `0700` (`nunchiSidecarDirIsSafe`), rejecting a pre-existing `0755`/`0777`/symlink/non-directory path fail-closed; the file remains created `0600`, opened `O_NOFOLLOW`, owner/regular-validated. The consumer validates the parent directory the same way (`_validate_owner_only_dir`). Directory/file mode wording corrected in `transport-patch/README.md`. | `test_group_readable_sidecar_directory_is_refused`, `test_symlinked_sidecar_directory_is_refused`; transport dir-validation asserted in `test_transport_patch_provenance_is_pinned_and_fail_closed` |
+| 4 | remove unconditional old-sidecar deletion from arming instructions | The `rm -f …/nunchi-native-events.jsonl` step is removed. The hardened path is `…/nunchi-v2/native-events.jsonl` and never reuses the old file; any cleanup is left explicit and recoverable (review and move aside). | `installed-runtime.md` §Remaining operator steps; `transport-patch/README.md` |
+| 5 | return Attempt-3 commits, inventory, results; do not arm host or run live scenes until Zoe approves | This section (commits, inventory, results below). No host arming or outbound live scene was run; the staged host copy was refreshed only (no `settings.json`, transport patch, or send). | this file + `verification.md` |
+
+### Deterministic commands and results (Attempt 3)
+
+`python3 -m unittest tests.v2.test_claude_code` → 52 OK; the four-module guard
+run → 74 OK; full baseline `python3 -m unittest` → **1173 OK (skipped=7)**;
+`python3 scripts/check_governance.py --check-cli` → OK;
+`PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>`
+→ 20 rows (19 PASS, 1 declared limitation), byte-identical across runs;
+`git diff --check` → clean. Full table in `verification.md`.
+
+### Transport and installed provenance (Attempt 3)
+
+- Pinned base `c3c79c65…`; patched result **`0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c`** (base + `0001` + `0002` with directory-safety validation; reproducible, transpiles clean under `bun build`).
+- Installed hook `nunchi_claude_v2.py` digest `e2bd2202…`; runtime manifest
+  `62746431…` at source commit `651313531f19…`. Full component digests and the
+  arming steps are in `installed-runtime.md` (Attempt 3). The host still runs
+  the V1 registration; no arming was performed.
+
+### Host-mutation approval still required (do not arm until Zoe approves)
+
+The live ladder remains NOT RUN. Per the integrator, the corrected candidate
+must be explicitly approved for host installation before arming. The exact
+operator steps are in `installed-runtime.md` (apply the pinned `0001`+`0002`,
+register the four hooks replacing the V1 entry, start a fresh session). No
+`rm` cleanup is required. This lane performed no repository-external host
+mutation beyond refreshing the staged (inert) copy, and ran no outbound
+Discord send.
+
+### Known limitations and rejected claims (Attempt 3)
+
+Unchanged from Attempt 2. **Rejected claim**: "live parity is proven" — it is
+not; live scenes are pending Zoe's explicit approval to arm the host.
+
+**Handoff target**: `v2-integrator` for adversarial re-review (the exact prior
+probes plus the prior rejection suite). This lane does not self-declare
+acceptance.

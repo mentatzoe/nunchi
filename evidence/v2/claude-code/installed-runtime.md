@@ -1,9 +1,9 @@
 # CC-06 — Installed runtime provenance (Claude Code V2)
 
-**Attempt 2**, recorded 2026-07-20 by the `v2-claude-owner` lane (Station,
-standing Claude Code agent). Attempt 1's version of this record is preserved
-in git history at candidate `6476b58`. Secrets are excluded by construction:
-no credential exists in any file this record names.
+**Attempt 3**, recorded 2026-07-20 by the `v2-claude-owner` lane (Station,
+standing Claude Code agent). The Attempt 1/2 versions of this record are
+preserved in git history at candidates `6476b58` / `1990129`. Secrets are
+excluded by construction: no credential exists in any file this record names.
 
 ## Host and harness
 
@@ -14,7 +14,7 @@ no credential exists in any file this record names.
 | Session model | `claude-fable-5` |
 | Python (hook runtime) | `3.14.3` (Homebrew) |
 | Bun (plugin runtime) | `1.3.11` |
-| Nunchi package | `0.2.0` at Attempt-2 candidate `199012901278777750671f4fc0731b779e91c2b8` |
+| Nunchi package | `0.2.0` at Attempt-3 candidate `651313531f19ba82683a8234bcc3c0252e67adfd` |
 
 ## Discord plugin (transport base)
 
@@ -24,8 +24,8 @@ no credential exists in any file this record names.
 | Install path | `/Users/zmll/.claude/plugins/cache/claude-plugins-official/discord/0.0.4` |
 | Pristine base `server.ts.orig-0.0.4` SHA-256 | `c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135` (matches the packet's pinned patch base exactly) |
 | Current installed `server.ts` SHA-256 | `b025d1c2aa7df54a03fb2b03d403276902959cc13f7327d559a96eb2a91f358b` |
-| Current installed state | An earlier, functionally partial wording of patch `0001` (self-only bot guard) applied 2026-07-09; **neither the Attempt-2 `0001` nor `0002` (hardened native-fact sidecar) is applied** |
-| Canonical patched target SHA-256 (Attempt 2) | `67900f7e0275debcfd9deabb0345c92e879b25047ce00777e3fbd9552b19bd8a` (base + `0001` + `0002`, reproduced from the pinned base in this packet's patch-build check; the patched file transpiles clean under `bun build`) |
+| Current installed state | An earlier, functionally partial wording of patch `0001` (self-only bot guard) applied 2026-07-09; **neither the Attempt-3 `0001` nor `0002` (hardened native-fact sidecar) is applied** |
+| Canonical patched target SHA-256 (Attempt 3) | `0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c` (base + `0001` + `0002` with the directory-safety validation; reproduced from the pinned base in this packet's patch-build check; the patched file transpiles clean under `bun build`) |
 | MCP registration | `.mcp.json`: `bun run --cwd ${CLAUDE_PLUGIN_ROOT} --shell=bun --silent start` (stdio) |
 | Delivery mechanism | Discord gateway (WebSocket push) → `messageCreate` → `gate()` authorization → MCP notification `notifications/claude/channel` → host-rendered `<channel>` prompt. Reactive; no polling path exists. A legacy `discord-poller.sh` exists on disk but is registered nowhere (settings/launchd/cron all checked) and is not running. |
 
@@ -33,12 +33,12 @@ no credential exists in any file this record names.
 
 | Path | SHA-256 | Notes |
 |---|---|---|
-| `/Users/zmll/.claude/hooks/nunchi_claude_v2.py` | `3fa2e76fc9d86cbaebb4b2804f94eb672f5b54abc625eb1cfb515ee99ec009bf` | Exact copy of the Attempt-2 `integrations/claude-code/nunchi_claude_v2.py` |
-| `/Users/zmll/.claude/hooks/nunchi-claude-v2-hook.sh` | `e76ff4a9deb2dcf17c397ef7b225e1e41a22e3d3767827659fe7013a90a3cc83` | Exact copy of `integrations/claude-code/nunchi-claude-v2-hook.sh` |
-| `/Users/zmll/.claude/nunchi-claude-v2.env` | `311c960415837551ef885833d69deec7edaf4a4f330b4c62524bb54d5c8f7ce6` | Room binding: channel `1522258711047831653`, self `1484970897893752902`, participant `station`; sidecar path now the owner-only `…/discord/nunchi-v2/native-events.jsonl`; no credential |
+| `/Users/zmll/.claude/hooks/nunchi_claude_v2.py` | `e2bd2202664a94f9898cfe80eb9562b8bcf833769dca0f07bb59290e24add0e5` | Exact copy of the Attempt-3 `integrations/claude-code/nunchi_claude_v2.py` |
+| `/Users/zmll/.claude/hooks/nunchi-claude-v2-hook.sh` | `e76ff4a9deb2dcf17c397ef7b225e1e41a22e3d3767827659fe7013a90a3cc83` | Exact copy of `integrations/claude-code/nunchi-claude-v2-hook.sh` (unchanged since Attempt 2) |
+| `/Users/zmll/.claude/nunchi-claude-v2.env` | `311c960415837551ef885833d69deec7edaf4a4f330b4c62524bb54d5c8f7ce6` | Room binding: channel `1522258711047831653`, self `1484970897893752902`, participant `station`; sidecar path the owner-only `…/discord/nunchi-v2/native-events.jsonl`; no credential |
 | `/Users/zmll/.claude/nunchi/claude-v2-policy.json` | `c4a74571b1d5d7f372c2558ab6f9ea05110bc2a70f10302873039b6a086c4973` | Trusted-bypass posture: `preattention_enabled=false`, `social_suppression_enabled=false`, `error_action=WAKE`, empty authorization grants, receipt sink `/Users/zmll/.claude/nunchi/claude-v2-receipts` (0700) |
 | `/Users/zmll/.claude/nunchi/claude-v2-tools.json` | `d48ef9c965ea6f53dc3218e39a43c747fdb99a97b3246bb572da8ff891daaa15` | Room-action tool patterns + privileged map (`Bash`, `Write/Edit/NotebookEdit`). With deny-unsupported semantics, every privileged room-caused proposal is denied regardless of grants |
-| `/Users/zmll/.claude/nunchi/runtime/` | manifest `f1c3b548751ca1ed452ed60f525bba3d7f158eb297a402fd54961565e66f72f9` | Copy-with-manifest deployment of `src/nunchi` (43 files, per-file SHA-256 in `DEPLOY-MANIFEST.json`, source commit `199012901278…`); no symlinks |
+| `/Users/zmll/.claude/nunchi/runtime/` | manifest `62746431a375e9d87b8ff931925ad6c45899d52587a00d79fbd213241a7cfb61` | Copy-with-manifest deployment of `src/nunchi` (43 files, per-file SHA-256 in `DEPLOY-MANIFEST.json`, source commit `651313531f19…`); no symlinks |
 
 ## Hook registration state — NOT yet armed
 
@@ -56,8 +56,14 @@ honestly:
    bound room deaf (every delivery is honestly unroutable without the
    native-fact sidecar). Fail-closed ordering requires the patch first.
 
-## Installed-hook probes (executed against the Attempt-2 staged components)
+## Installed-hook probes (executed against the Attempt-3 staged components)
 
+0. **Foreign-room channel prompt** — the installed gate produced
+   `{"decision": "block", "reason": ""}` with stderr `foreign-room-declined:
+   event from 1234567890123456789 is outside the bound room
+   1522258711047831653; degraded room-causal marker recorded, room delivery
+   blocked`. A foreign room is declined live, not passed through as operator
+   work (blocker 2 fix, exercised on the installed host).
 1. **Non-channel prompt** — wrapper exit `0`, no output, no `$HOME` writes
    (also enforced repo-wide by `tests/test_no_home_writes.py`).
 2. **Bound-channel prompt with no sidecar record** (patch-drift / not-yet-armed
@@ -73,8 +79,6 @@ honestly:
 
 ```sh
 cd <repo>/integrations/claude-code
-# 0. If a prior install left a world-readable sidecar, delete it first:
-rm -f ~/.claude/channels/discord/nunchi-native-events.jsonl
 # 1. Apply the digest-pinned transport patches (fail-closed):
 transport-patch/apply-transport-patch.sh \
   ~/.claude/plugins/cache/claude-plugins-official/discord/0.0.4
@@ -85,6 +89,12 @@ python3 nunchi_claude_v2.py print-settings   # merge into ~/.claude/settings.jso
 #    routing; the shipped posture is trusted-bypass (zero classifier calls).
 # 4. Start a fresh Claude Code session so plugin + hooks reload together.
 ```
+
+There is **no cleanup step**: the hardened sidecar lives at the new path
+`~/.claude/channels/discord/nunchi-v2/native-events.jsonl` and never reuses
+the old `~/.claude/channels/discord/nunchi-native-events.jsonl`. That old file
+does not exist on this host; if a future host has one, review it and move it
+aside explicitly and recoverably — the installer never deletes it.
 
 Rollback: `transport-patch/apply-transport-patch.sh <plugin-dir> --rollback`
 plus restoring the previous `settings.json` hook entry; operator state,

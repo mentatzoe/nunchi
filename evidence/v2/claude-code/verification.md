@@ -1,24 +1,25 @@
 # Claude Code V2 — verification index
 
-**Attempt 2**, recorded 2026-07-20, `v2-claude-owner` lane. Attempt 1's index
-is preserved in git at candidate `6476b58`. Every command below was run on the
-Attempt-2 candidate `199012901278777750671f4fc0731b779e91c2b8`; results are
-quoted exactly.
+**Attempt 3**, recorded 2026-07-20, `v2-claude-owner` lane. The Attempt 1/2
+indexes are preserved in git at candidates `6476b58` / `1990129`. Every
+command below was run on the Attempt-3 candidate
+`651313531f19ba82683a8234bcc3c0252e67adfd`; results are quoted exactly.
 
 ## Deterministic commands and results
 
 | Command | Result |
 |---|---|
-| `python3 -m unittest tests.v2.test_claude_code` | `Ran 46 tests … OK` |
-| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code` | `OK` |
-| `python3 -m unittest` (full offline baseline) | `Ran 1167 tests in 23.5s — OK (skipped=7)` |
+| `python3 -m unittest tests.v2.test_claude_code` | `Ran 52 tests … OK` |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code` | `Ran 74 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1173 tests in 18.9s — OK (skipped=7)` |
 | `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
 | `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL) |
-| `git diff --check` (staged Attempt-2 tree) | clean (a scoped `transport-patch/.gitattributes` exempts generated patch files, whose blank-context lines are single spaces by unified-diff format) |
-| Patch reproducibility (scratch build): `git apply --check 0001 && git apply 0001 && git apply --check 0002 && git apply 0002` onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `67900f7e…` equals the pinned target; `bun build` of the patched file exits 0 |
+| `git diff --check` (staged Attempt-3 tree) | clean (a scoped `transport-patch/.gitattributes` exempts generated patch files, whose blank-context lines are single spaces by unified-diff format) |
+| Patch reproducibility (scratch build): `git apply --check 0001 && git apply 0001 && git apply --check 0002 && git apply 0002` onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target; `bun build` of the patched file exits 0 |
 | Installer safety: apply against a symlinked target / rollback against a symlinked backup | exit 2 each, `symlink; refusing to follow`, referent bytes unchanged |
+| Installed-host probes (Attempt 3, no arming) | foreign-room prompt → `block` (`foreign-room-declined … room delivery blocked`); bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output |
 
-## Adversarial regression coverage (Attempt-2 rejection findings)
+## Adversarial regression coverage (Attempt-2 and Attempt-3 findings)
 
 `tests/v2/test_claude_code.py::AdversarialRegressionCases` plus the reworked
 `ActionGuardCases` prove, per finding:
@@ -34,6 +35,9 @@ quoted exactly.
 | F4 self events retained but never wake recursively | `test_self_event_is_retained_as_context_but_never_wakes` |
 | F5 malformed/unsafe sidecar records fail closed; sidecar confidential | `test_malformed_sidecar_record_fails_closed`, `test_group_readable_sidecar_is_refused`, `test_symlinked_sidecar_is_refused`, `test_sidecar_default_path_is_owner_only_directory` |
 | F6 patch target/backup symlinks rejected without touching referents | `test_apply_script_rejects_symlinked_target` (subprocess; referent bytes unchanged) plus the scratch-build symlink probes above |
+| B1 configured channel event never passes un-gated on config/policy/state failure | `test_invalid_policy_blocks_prompt_and_denies_privileged` (prompt blocked + degraded marker + mapped Bash denied), `test_state_failure_blocks_prompt_fail_closed` |
+| B2 foreign-room events declined, not an entry point | `test_foreign_room_declined_and_privileged_denied` (prompt blocked + room-action denied + privileged denied), `test_foreign_room_does_not_clobber_a_healthy_bound_turn`, `test_operator_prompts_pass_but_foreign_rooms_are_declined` |
+| B3 sidecar containing directory must be owner-only 0700 non-symlink | `test_group_readable_sidecar_directory_is_refused`, `test_symlinked_sidecar_directory_is_refused`; transport-side dir validation asserted in `test_transport_patch_provenance_is_pinned_and_fail_closed` |
 
 ## Scene outcome index
 

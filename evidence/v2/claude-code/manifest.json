@@ -2,10 +2,11 @@
  "schema_version": 1,
  "slice": "070-v2-claude-code",
  "owner_lane": "v2-claude-owner",
- "attempt": 2,
+ "attempt": 3,
  "recorded_on": "2026-07-20",
  "supersedes_attempt_1_candidate": "6476b58ca015e259fa576fd8f9ed569adc0c6913",
- "candidate_commit": "199012901278777750671f4fc0731b779e91c2b8 (Attempt-2 implementation candidate); the append-only Attempt-2 handoff addendum binds it and the later evidence-only commit",
+ "supersedes_attempt_2_candidate": "199012901278777750671f4fc0731b779e91c2b8",
+ "candidate_commit": "651313531f19ba82683a8234bcc3c0252e67adfd (Attempt-3 implementation candidate); the append-only Attempt-3 handoff section binds it and the later evidence-only commit",
  "scene_map": {
   "CC-01": {
    "s_ids": ["S01", "S02", "S11"],
