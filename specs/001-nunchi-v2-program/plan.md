@@ -376,7 +376,7 @@ src/nunchi/mcp_discord/        # shared Discord event source
 src/nunchi/adapters/           # standalone adapter bindings
 integrations/hermes/           # Hermes binding
 integrations/claude-code/      # Claude Code binding
-integrations/codex/            # Codex binding
+src/nunchi/integrations/       # shared subprocess, Codex, and MCP transport bindings
 tests/v2/                      # deterministic contract/integration/governance checks
 evals/v2/                      # reusable replay corpora and runners
 evidence/v2/                   # immutable run records and provenance
@@ -424,9 +424,12 @@ plain language and diagrams, define exact actor/capability/origin enforcement,
 state which privileged seams each surface actually guards, and distinguish
 Nunchi's guarantees from participant or third-party tool risks. At minimum the
 cutover candidate updates `docs/architecture/v2-selected-design.md`,
-`docs/security/threat-model-v2.md`, `docs/security/operational-safety.md`, each
+`docs/security/v2.md`, `docs/operators/v2.md`, `docs/INSTALL.md`, each affected
 installed-surface guide, and `README.md`; unsupported privileged-tool paths are
-named as limitations rather than implied safe.
+named as limitations rather than implied safe. These are the repository's
+coherent ordinary-path surfaces: new parallel threat-model or operational-safety
+documents are created only when they contain a genuinely separate maintained
+contract, not to satisfy a stale filename in this plan.
 
 ## Lifecycle Evidence Contract
 
