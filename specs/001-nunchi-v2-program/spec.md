@@ -18,9 +18,10 @@ implementation authority not granted
 
 **Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
-**Input**: Establish one implementation-ready V2 program from the selected
-Nunchi technical design without implementing V2 product behavior while building
-the planning baseline.
+**Input**: Establish and deliver one coherent V2 product from the selected
+Nunchi technical design, including Zoe's 2026-07-20 clarification that live
+conversation must not become FIFO response work and that privileged actions
+must be bound to exact authenticated user authority before execution.
 
 **Authority source**: Aleph Vault selected design PR 67 (`bdd1ebb`) and contract-clarification PR 68 (`c834e8c`)
 
@@ -132,6 +133,14 @@ attention-to-normal-participant-turn scenes.
    **Then** no in-tree consumer uses V1 request or verdict semantics.
 2. **Given** an unavailable platform fact, **When** parity is evaluated, **Then**
    the difference is represented as unavailable rather than invented.
+3. **Given** a burst arrives while a participant is busy, **When** that turn
+   completes, **Then** the surface assembles at most one fresh subsequent
+   attention opportunity from the current room rather than replaying every
+   message in arrival order.
+4. **Given** a participant proposes a privileged operation for a room request,
+   **When** execution is attempted, **Then** exact transport-authenticated origin
+   and scoped capability are rechecked deterministically and model output alone
+   cannot authorize it.
 
 ---
 
@@ -155,6 +164,39 @@ and final parity gate.
 2. **Given** a live surface probe, **When** it lacks exact installed commit or
    package provenance, **Then** the surface remains unverified.
 
+---
+
+### User Story 5 - Share a live room without stale replies or authority leakage (Priority: P1)
+
+People with different permissions can talk naturally with several agents in one
+room. Slow participants do not work through an obsolete message backlog, and an
+unauthorized user cannot obtain a privileged effect by wording, quoting,
+mentioning, replying to, or impersonating an authorized user.
+
+**Why this priority**: A technically correct gate is not a viable product if it
+revives dead conversations or turns adversarial room text into execution
+authority.
+
+**Independent Test**: Delay each participant during a burst that later resolves
+the original topic, restart the room processes, then replay authorized,
+unauthorized, approval-required, revoked, quoted-authority, cross-room, and
+action-mutation requests against every supported privileged seam.
+
+**Acceptance Scenarios**:
+
+1. **Given** twenty events arrive during one active turn, **When** the
+   participant becomes available, **Then** all retained events can inform one
+   current judgment and no FIFO of twenty wakes exists.
+2. **Given** backfilled history after restart, **When** the surface becomes
+   ready, **Then** history is context only and produces no wake backlog.
+3. **Given** the participant cites an origin event for a privileged action,
+   **When** the host resolves it, **Then** the requester comes from the retained
+   event's exact actor ID rather than a model-supplied name or claim.
+4. **Given** authorization is missing, ambiguous, expired, revoked, out of
+   scope, approval-gated, or bound to a different action digest, **When** the
+   action reaches execution, **Then** it does not execute and the deterministic
+   decision is auditable.
+
 ### Edge Cases
 
 - A runtime occupies two owner lanes: the program requires explicit handoff or
@@ -168,6 +210,21 @@ and final parity gate.
 - A workflow reaches implementation without valid program authority or slice
   readiness: the relevant gate is rejected and the run aborts.
 - A new product artifact appears under `specs/`: governance validation fails.
+- Events continue arriving throughout a long participant inference: only the
+  newest event remains the pending anchor, while all retained events stay
+  ordinary bounded observations.
+- A direct mention is followed by newer unrelated chatter: it remains factual
+  context and is not discarded by an age or apparent-resolution heuristic.
+- A user quotes or forwards an authorized user's instruction: the quoter is the
+  requester unless the exact authorized origin event is separately selected and
+  still passes policy.
+- A model cites an authorized user's unrelated or old event: high-impact action
+  execution still requires exact direct-execution policy or a fresh
+  authenticated approval bound to the proposed action digest.
+- Authorization changes after model inference but before execution: the
+  execution-time recheck observes revocation, expiry, approval, and scope.
+- A third-party tool path cannot invoke the shared authorization guard: the
+  surface reports privileged actions unsupported instead of claiming safety.
 
 ## Requirements
 
@@ -270,6 +327,37 @@ and final parity gate.
   `Recorded by: v2-integrator`; program cutover acceptance uses
   `Recorded by: v2-program-owner`. These records MUST NOT become a central
   mutable registry.
+- **FR-029**: Every live surface MUST treat accepted events as observations, not
+  response jobs. Per participant and room it MUST permit at most one active
+  attention/participant turn plus one replaceable newest pending anchor;
+  intermediate events MUST remain bounded factual context, and restart/backfill
+  MUST NOT replay historical wake work.
+- **FR-030**: Snapshot freshness and whether a conversational moment has passed
+  MUST remain stochastic participant-shaped judgments. Deterministic code MUST
+  NOT use age, mention topology, replies, apparent resolution, or previous
+  outcomes to discard a canonical event socially. The trigger MUST be an anchor,
+  not an obligation to answer.
+- **FR-031**: A privileged action MUST name one exact origin event, action ID and
+  digest, namespaced capability, and bounded scope. Immediately before
+  execution, the host MUST derive the requester from transport-attested event
+  identity and return `ALLOW`, `DENY`, or `APPROVAL_REQUIRED` from trusted
+  capability policy after checking scope, expiry, revocation, and approval.
+  Room content, aliases, quotes, model claims, and earlier decisions MUST NOT
+  grant or transfer authority.
+- **FR-032**: The authorization decision MUST be immutable, one-use, bound to
+  the exact action, and kept separate from attention receipts and social state.
+  Supported integrations MUST route every claimed privileged seam through the
+  shared guard; bypassing third-party paths MUST be documented as unsupported
+  and MUST NOT be represented as protected.
+- **FR-033**: Privileged mutation, destructive operation, external side effect,
+  secret-bearing operation, and account/configuration change MUST default to
+  `APPROVAL_REQUIRED` unless trusted operator policy explicitly grants the exact
+  actor direct execution for the exact capability and scope. Approval MUST use a
+  host-only challenge bound to the action ID/digest, requester, capability,
+  scope, allowed approver, and expiry; ordinary text, reactions, quotes, copied
+  challenges, and unrelated authorized-user events MUST NOT approve it. The
+  guard MUST recheck policy, revocation, expiry, scope, and digest before one-use
+  execution.
 
 ### Key Entities
 
@@ -285,6 +373,11 @@ and final parity gate.
 - **Evidence requirement**: ordinary-path deterministic or live artifact needed
   to substantiate a claim.
 - **Handoff packet**: commit and proof bundle transferred between owner lanes.
+- **Pending anchor**: ephemeral newest-event pointer retained only while one
+  participant/room turn is active; it is neither a queue nor social memory.
+- **Privileged action authorization**: deterministic binding among one proposed
+  action, one exact origin event and requester, one capability/scope policy, and
+  one one-use execution decision.
 
 ## Success Criteria
 
@@ -344,6 +437,19 @@ and final parity gate.
   attempt, appends one attributable `REJECTED` decision, derives the source
   slice as `ACTIVE`, requires a new bound run rather than resuming the completed
   run, and permits a later attempt only by appending new entries.
+- **SC-019**: In every applicable surface, a burst of twenty events during one
+  slow turn produces no more than one later attention opportunity, retains all
+  budget-fitting intermediate context, and restart/backfill produces zero
+  historical wake jobs.
+- **SC-020**: Every claimed privileged seam passes exact-origin allow, deny,
+  approval-required, expiry, revocation, cross-room replay, quoted-authority,
+  forged-policy, and post-authorization action-mutation tests; no unsupported
+  seam is described as protected.
+- **SC-021**: Every high-impact capability is approval-required by default;
+  direct execution is demonstrated only for an explicit actor/capability/scope
+  grant, and ordinary-text approval, copied approval, unrelated authorized-user
+  origin, expired challenge, changed digest, and post-approval revocation all
+  produce zero privileged effects.
 
 ## Assumptions
 
@@ -351,8 +457,9 @@ and final parity gate.
   source may assign a specific participant without rewriting slice ownership.
 - All in-tree consumers migrate even if their eventual release/product tier is
   decided later.
-- The selected Vault design is complete enough for delivery planning; this
-  program does not reopen product choices already selected by Zoe.
+- The selected Vault design plus Zoe's 2026-07-20 freshness and authorization
+  clarification is the product authority for delivery. Inherited candidates
+  may require versioned successors but do not reopen unrelated selected choices.
 - V1 ordinary-path tests and evidence remain historical inputs, not V2 proof.
 
 ## Explicit Exclusions
@@ -362,4 +469,7 @@ and final parity gate.
 - A V1-to-V2 compatibility bridge or mixed-version in-tree repository.
 - A handled/open ledger, inferred participant registry, central floor manager,
   deterministic social heuristic, or send-time social reclassification.
+- A deterministic conversational freshness heuristic, FIFO response backlog,
+  global authorization roster in classifier context, model-granted capability,
+  or claim that Nunchi secures third-party tools that bypass its guard.
 - Promotion, launch copy, community posting, or a package release promise.
