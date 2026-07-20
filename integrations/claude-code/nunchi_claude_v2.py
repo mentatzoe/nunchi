@@ -77,7 +77,6 @@ from nunchi.participant import (
 )
 from nunchi.policy import OperatorPolicySource
 from nunchi.receipts import (
-    ReloadingPolicyAuthorizationSink,
     ReloadingPolicyReceiptSink,
     transport_receipt,
 )
@@ -151,8 +150,15 @@ class ClaudeGateConfig:
         if _SNOWFLAKE_RE.fullmatch(self_user_id) is None:
             raise ClaudeGateConfigError("NUNCHI_CLAUDE_V2_SELF_USER_ID must be an exact snowflake")
         tools_raw = (environ.get("NUNCHI_CLAUDE_V2_TOOLS") or "").strip()
+        # Owner-only directory, not the plugin's 0755 Discord state dir: the
+        # sidecar carries verbatim room content and must not be world-readable.
         sidecar_default = str(
-            Path.home() / ".claude" / "channels" / "discord" / "nunchi-native-events.jsonl"
+            Path.home()
+            / ".claude"
+            / "channels"
+            / "discord"
+            / "nunchi-v2"
+            / "native-events.jsonl"
         )
         return ClaudeGateConfig(
             policy_path=Path(required("NUNCHI_CLAUDE_V2_POLICY")),
@@ -267,23 +273,93 @@ def parse_channel_tag(text: str) -> dict[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def read_sidecar_record(sidecar_path: Path, message_id: str) -> dict[str, Any] | None:
+# A malformed or unsafe sidecar is a fail-closed condition distinct from an
+# absent record: the caller must treat it as unroutable, never as "no record".
+_SIDECAR_MALFORMED = object()
+
+_SIDECAR_REQUIRED_KEYS = ("message_id", "channel_id", "author", "content")
+
+
+def _open_owner_only_regular(path: Path) -> Any:
+    """Open a file no-follow and confirm it is an owner-owned regular file.
+
+    Raises ``ClaudeGateStateError`` when the target is a symlink, not a
+    regular file, not owned by us, or group/other-accessible. Confidential
+    room content must never be read through a substituted or shared path.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ClaudeGateStateError(f"sidecar is unavailable: {exc}") from exc
+    try:
+        info = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        raise
+    if not stat.S_ISREG(info.st_mode):
+        os.close(fd)
+        raise ClaudeGateStateError("sidecar is not a regular file")
+    if info.st_uid != os.geteuid():
+        os.close(fd)
+        raise ClaudeGateStateError("sidecar is not owner-owned")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        os.close(fd)
+        raise ClaudeGateStateError("sidecar is not owner-only")
+    return fd
+
+
+def validate_sidecar_record(row: Any) -> dict[str, Any] | None:
+    """Return a validated native-fact record, or ``None`` if unusable.
+
+    A record that names a message but is structurally malformed returns
+    ``None`` so the caller fails closed rather than binding a partial actor.
+    """
+    if not isinstance(row, dict):
+        return None
+    if any(key not in row for key in _SIDECAR_REQUIRED_KEYS):
+        return None
+    author = row.get("author")
+    if not isinstance(author, dict) or not str(author.get("id") or ""):
+        return None
+    if not isinstance(row.get("content"), str):
+        return None
+    if not str(row.get("message_id") or "") or not str(row.get("channel_id") or ""):
+        return None
+    mentions = row.get("mention_user_ids", [])
+    if not isinstance(mentions, list):
+        return None
+    return row
+
+
+def read_sidecar_record(sidecar_path: Path, message_id: str) -> Any:
     """Return the transport's native-fact record for one delivered message.
 
     The Claude Code channel tag does not carry the exact native author ID,
     the bot flag, mention IDs, or the reply reference. Those facts are
-    appended by the reviewed transport patch as one JSON line per delivered
-    message. Without a record the event cannot be bound to an exact actor and
-    is honestly unroutable — it is never guessed from display names.
+    appended by the reviewed transport patch as one owner-only JSON line per
+    delivered message. Returns the validated record, ``None`` when no record
+    matches the message, or ``_SIDECAR_MALFORMED`` when a matching record
+    exists but is unsafe/malformed. Without an exact record the event cannot
+    be bound to an actor and is honestly unroutable — never guessed from a
+    display name.
     """
     try:
-        size = sidecar_path.stat().st_size
-        with sidecar_path.open("rb") as handle:
+        fd = _open_owner_only_regular(sidecar_path)
+    except ClaudeGateStateError:
+        # A missing sidecar is "no record"; an unsafe (symlinked / shared /
+        # non-regular) sidecar is a fail-closed malformed condition.
+        if not sidecar_path.exists():
+            return None
+        return _SIDECAR_MALFORMED
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
             if size > _SIDECAR_SCAN_MAX_BYTES:
                 handle.seek(size - _SIDECAR_SCAN_MAX_BYTES)
                 handle.readline()  # drop the partial first line
             needle = message_id.encode("utf-8")
-            record: dict[str, Any] | None = None
+            matched_raw: Any = None
             for line in handle:
                 if needle not in line:
                     continue
@@ -292,10 +368,85 @@ def read_sidecar_record(sidecar_path: Path, message_id: str) -> dict[str, Any] |
                 except ValueError:
                     continue
                 if isinstance(row, dict) and str(row.get("message_id") or "") == message_id:
-                    record = row  # keep the newest matching record
-            return record
+                    matched_raw = row  # keep the newest matching record
     except OSError:
+        return _SIDECAR_MALFORMED
+    if matched_raw is None:
         return None
+    validated = validate_sidecar_record(matched_raw)
+    return validated if validated is not None else _SIDECAR_MALFORMED
+
+
+def read_self_sidecar_events(sidecar_path: Path, self_user_id: str) -> list[dict[str, Any]]:
+    """Return validated self-authored native-fact records for context sync.
+
+    Self events are recorded by the transport but never re-delivered as a
+    waking notification (echo-loop guard). The consumer ingests them here as
+    retained context; the observation provider marks them
+    ``SELF_RETAINED_NO_WAKE``. An unsafe or missing sidecar yields no self
+    context rather than raising — this path only adds context, never gates.
+    """
+    try:
+        fd = _open_owner_only_regular(sidecar_path)
+    except ClaudeGateStateError:
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if size > _SIDECAR_SCAN_MAX_BYTES:
+                handle.seek(size - _SIDECAR_SCAN_MAX_BYTES)
+                handle.readline()
+            for line in handle:
+                try:
+                    row = json.loads(line.decode("utf-8", errors="replace"))
+                except ValueError:
+                    continue
+                validated = validate_sidecar_record(row)
+                if validated is None:
+                    continue
+                if str((validated.get("author") or {}).get("id") or "") == self_user_id:
+                    records.append(validated)
+    except OSError:
+        return records
+    return records
+
+
+def _message_event_from_sidecar(sidecar: dict[str, Any]) -> MessageEvent:
+    """Build one I-050A input event from a validated native-fact record.
+
+    ``content`` is the exact content the transport delivered to Claude —
+    attachment placeholders and voice transcripts included — not a raw field.
+    """
+    author = sidecar.get("author") or {}
+    mentioned = sidecar.get("mention_user_ids") or []
+    return MessageEvent(
+        guild_id=(str(sidecar["guild_id"]) if sidecar.get("guild_id") is not None else None),
+        channel_id=str(sidecar.get("channel_id") or ""),
+        message_id=str(sidecar.get("message_id") or ""),
+        author_id=str(author.get("id") or ""),
+        author_name=str(author.get("username") or ""),
+        author_is_bot=bool(author.get("bot", False)),
+        content=str(sidecar.get("content") or ""),
+        timestamp=(
+            sidecar.get("timestamp")
+            if isinstance(sidecar.get("timestamp"), str)
+            else None
+        ),
+        mentioned_user_ids=tuple(str(value) for value in mentioned),
+        reply_to_message_id=(
+            str(sidecar["reply_to_message_id"])
+            if sidecar.get("reply_to_message_id") is not None
+            else None
+        ),
+        # The sidecar records only synchronously known reference facts; the
+        # referenced author and content are honestly unavailable.
+        reply_to_author_id=None,
+        reply_to_author_name=None,
+        reply_to_author_is_bot=None,
+        reply_to_content=None,
+        mentions_room=bool(sidecar.get("mention_everyone", False)),
+    )
 
 
 def message_event_from_native_facts(
@@ -308,41 +459,8 @@ def message_event_from_native_facts(
     one there is no exact author ID, so the caller must treat the event as
     unroutable rather than inventing identity from the display name.
     """
-    if sidecar is not None:
-        author = sidecar.get("author") or {}
-        mentioned = sidecar.get("mention_user_ids") or []
-        return (
-            MessageEvent(
-                guild_id=(
-                    str(sidecar["guild_id"]) if sidecar.get("guild_id") is not None else None
-                ),
-                channel_id=str(sidecar.get("channel_id") or ""),
-                message_id=str(sidecar.get("message_id") or ""),
-                author_id=str(author.get("id") or ""),
-                author_name=str(author.get("username") or ""),
-                author_is_bot=bool(author.get("bot", False)),
-                content=str(sidecar.get("content") or ""),
-                timestamp=(
-                    sidecar.get("timestamp")
-                    if isinstance(sidecar.get("timestamp"), str)
-                    else None
-                ),
-                mentioned_user_ids=tuple(str(value) for value in mentioned),
-                reply_to_message_id=(
-                    str(sidecar["reply_to_message_id"])
-                    if sidecar.get("reply_to_message_id") is not None
-                    else None
-                ),
-                # The sidecar records only synchronously known reference facts;
-                # the referenced author and content are honestly unavailable.
-                reply_to_author_id=None,
-                reply_to_author_name=None,
-                reply_to_author_is_bot=None,
-                reply_to_content=None,
-                mentions_room=bool(sidecar.get("mention_everyone", False)),
-            ),
-            True,
-        )
+    if isinstance(sidecar, dict):
+        return (_message_event_from_sidecar(sidecar), True)
     return (
         MessageEvent(
             guild_id=None,
@@ -594,7 +712,40 @@ class ClaudeRoomV2:
         self.receipt_sink = ReloadingPolicyReceiptSink(self.policy_source.load)
         self.observation = self._build_observation()
 
+    def _sync_self_events(self) -> None:
+        """Ingest self-authored transport records as retained context.
+
+        Self events are recorded by the transport but never re-delivered as a
+        waking notification. Appending them to the event log (deduplicated)
+        lets the observation provider retain them as ``SELF_RETAINED_NO_WAKE``
+        context for future turns without ever causing a recursive wake.
+        """
+        records = read_self_sidecar_events(
+            self.config.sidecar_path, self.config.self_user_id
+        )
+        if not records:
+            return
+        existing_ids: set[str] = set()
+        for row in self.store.read_event_rows():
+            native = row.get("native") or {}
+            event = native.get("event") if isinstance(native, dict) else None
+            event_id = event.get("id") if isinstance(event, dict) else None
+            if isinstance(event_id, str):
+                existing_ids.add(event_id)
+        for record in records:
+            native = self.source.native_input(_message_event_from_sidecar(record))
+            if native.get("disposition") != "candidate-event":
+                continue
+            event_id = native["event"]["id"]
+            if event_id in existing_ids:
+                continue
+            existing_ids.add(event_id)
+            self.store.append_event_row(
+                {"kind": "native-self", "native": native, "received_at": time.time()}
+            )
+
     def _build_observation(self) -> ObservationProvider:
+        self._sync_self_events()
         provider = ObservationProvider(
             participant_id=self.config.participant_id,
             actor_id=f"discord:user:{self.config.self_user_id}",
@@ -816,6 +967,34 @@ class ClaudeRoomV2:
             policy=policy.attention,
         )
 
+    def start_degraded_turn(
+        self,
+        room: dict[str, Any],
+        session_id: str,
+        anchor_event_id: str,
+        detail: str,
+    ) -> None:
+        """Record a confined room-causal turn when attention failed operationally.
+
+        Snapshot and decision could not be built, so no participant-host stage
+        can be attested — but the wake IS caused by a transport-attested room
+        event (``anchor_event_id``). Recording the turn keeps ``PreToolUse``
+        from mistaking the resulting tools for operator-originated work: with
+        no verifiable causal snapshot, privileged effects are denied fail-closed.
+        """
+        room["turn"] = {
+            "session_id": session_id,
+            "request_id": None,
+            "anchor_event_id": anchor_event_id,
+            "snapshot": None,
+            "decision": None,
+            "wake_source": "ERROR_FALLBACK",
+            "degraded": True,
+            "detail": detail,
+            "started_at": time.time(),
+        }
+        self.store.reset_turn_actions()
+
     def complete_turn(self, room: dict[str, Any]) -> dict[str, Any] | None:
         """Close the finished native turn through the canonical host seam.
 
@@ -828,6 +1007,13 @@ class ClaudeRoomV2:
         turn = room.get("turn")
         if not isinstance(turn, dict):
             return None
+        if turn.get("degraded") or not isinstance(turn.get("snapshot"), dict):
+            # A degraded (operational-error) turn has no verifiable snapshot to
+            # attest. Its participant-host stage stays honestly absent — never
+            # fabricated — and the turn is simply cleared.
+            room["turn"] = None
+            self.store.reset_turn_actions()
+            return {"status": "degraded", "invoked": False, "outcome": "unknown"}
         observed = self.store.read_turn_actions()
         policy = self.policy_source.load()
 
@@ -925,6 +1111,22 @@ def _gate_channel_event(
     session_id: str,
 ) -> HookDecision:
     sidecar = read_sidecar_record(binding.config.sidecar_path, tag["message_id"])
+    if sidecar is _SIDECAR_MALFORMED:
+        # A matching native-fact record exists but is unsafe or malformed:
+        # fail closed. No actor is bound from a partial or substituted record.
+        store.append_event_row(
+            {
+                "kind": "unroutable",
+                "native": {"disposition": "unroutable"},
+                "reason": "sidecar record is malformed or unsafe",
+                "session_id": session_id,
+                "received_at": time.time(),
+            }
+        )
+        return _block_prompt(
+            "unroutable channel event (native-fact record malformed or unsafe); "
+            "fail-closed, actor not bound"
+        )
     event, exact_identity = message_event_from_native_facts(tag, sidecar)
     native = binding.source.native_input(event)
     if native.get("disposition") != "candidate-event":
@@ -1024,21 +1226,29 @@ def _drive_opportunity(
                 return _block_stop(context, *diagnostics)
             return _allow_with_context(context, *diagnostics)
         if route == "operational-error":
-            # Receipts and snapshots failed operationally. Widen toward the
-            # participant: the turn proceeds un-suppressed with a diagnostic,
-            # and no social outcome is fabricated for the failure.
-            opportunity = scheduler.complete(opportunity)
+            # Receipts or snapshots failed operationally. Widen toward the
+            # participant so the room is not silently dropped, but record a
+            # confined room-causal turn: the wake is caused by this exact
+            # transport-attested anchor, yet no verifiable snapshot exists, so
+            # PreToolUse denies privileged effects. No social outcome is
+            # fabricated. The successor (if any) still runs from a fresh cycle.
+            binding.start_degraded_turn(
+                room, session_id, opportunity.anchor_event_id, str(attention.get("detail"))
+            )
+            # Leave the opportunity active, exactly like a wake: Stop completes
+            # it and promotes at most one fresh coalesced successor.
             binding._persist_scheduler(room, scheduler)
             store.write_room(room)
             diagnostics.append(f"operational error: {attention.get('detail')}")
-            if stop:
-                return _allow(*diagnostics)
-            return _allow_with_context(
+            context = (
                 "[nunchi-v2] attention was operationally unavailable for this "
                 "room event; take one normal room turn (contribute or stay "
-                "silent).",
-                *diagnostics,
+                "silent). Privileged tool actions are denied for this turn "
+                "because its causal context could not be established."
             )
+            if stop:
+                return _block_stop(context, *diagnostics)
+            return _allow_with_context(context, *diagnostics)
         # suppress / no-wake: the opportunity ends without a participant turn
         # and any coalesced newest anchor gets a fresh cycle.
         diagnostics.append(f"route={route} anchor={opportunity.anchor_event_id}")
@@ -1095,113 +1305,142 @@ def handle_stop(
         return _allow(f"operational error ({exc}); stop proceeds")
 
 
+def derive_room_requester(
+    config: ClaudeGateConfig,
+    turn: dict[str, Any],
+    entry: dict[str, Any],
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """Derive the transport-attested requester for one proposed privileged tool.
+
+    Uses the shared ``PrivilegedActionGuard`` to resolve the active room
+    turn's origin event to its exact transport actor. Returns
+    ``(requester, reason_code)``. This proves the requester derivation is
+    correct; it does NOT authorize execution — the hook denies room-caused
+    privileged execution regardless (see :func:`handle_pre_tool`).
+    """
+    snapshot = turn.get("snapshot")
+    origin = turn.get("anchor_event_id")
+    if not isinstance(snapshot, dict) or not isinstance(origin, str) or not origin:
+        return None, "deny-causal-context-unavailable"
+    if entry["resource_id_input_key"] is not None:
+        resource_id = str(tool_input.get(entry["resource_id_input_key"]) or "")[:512]
+    else:
+        resource_id = entry["resource_id_const"] or tool_name
+    operation = {"tool_name": tool_name, "tool_input": tool_input}
+    seed = json.dumps(
+        {"origin_event_id": origin, "operation": operation},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = {
+        "kind": "authorization-request",
+        "schema_version": 2,
+        "action_id": "claude:" + hashlib.sha256(seed).hexdigest(),
+        "action_digest": canonical_action_digest(operation),
+        "origin_event_id": origin,
+        "capability": entry["capability"],
+        "scope": {
+            "platform": "discord",
+            "room_id": config.channel_id,
+            "participant_id": config.participant_id,
+            "resource": {"kind": entry["resource_kind"], "id": resource_id or tool_name},
+        },
+        "impact": entry["impact"],
+    }
+    try:
+        guard = PrivilegedActionGuard(OperatorPolicySource(config.policy_path).load)
+        decision = guard.authorize(request, snapshot)
+    except (AuthorizationRequestError, AuthorizationContextError, ValueError):
+        return None, "deny-authorization-error"
+    return decision.get("derived_requester_actor_id"), decision.get("reason_code")
+
+
 def handle_pre_tool(
     payload: dict[str, Any],
     environ: dict[str, str],
 ) -> HookDecision:
-    """Deterministic I-040B authorization before privileged tool actions.
+    """Mechanical send-safety and privileged-action denial before execution.
 
-    Room-participation transport tools are never socially re-gated here; the
-    guard covers only operator-configured privileged capabilities, derives
-    the requester from the transport-attested origin event of the active room
-    turn, and fails closed on internal errors while a room turn is active.
+    Two enforcement duties, both before the tool runs:
+
+    * Room-action send tools (reply/react) must target the bound room. A
+      cross-room target is denied here — ``PostToolUse`` is too late.
+    * Room-caused privileged execution is **not supported** through this
+      advisory pre-tool seam: the hook cannot perform the ``I-040B``
+      execute-time policy/digest recheck or one-use consumption around the
+      host's own tool runner, so it denies fail-closed rather than claim an
+      enforcement it does not provide. The transport-attested requester is
+      still derived for the record.
+
+    Operator-typed (non-room) turns are out of scope; the operator's own
+    authority and Claude Code's native permission system govern them.
+    Internal failure while configured denies (exit 2), never allows.
     """
     if not ClaudeGateConfig.is_configured(environ):
-        # Guard unconfigured: nothing is enforced. The evidence packet
-        # reports this state as unenforced rather than claiming safety.
+        # Guard unconfigured: nothing is enforced. The evidence packet reports
+        # this state as unenforced rather than claiming safety.
         return _allow()
     tool_name = str(payload.get("tool_name") or "")
     try:
         config = ClaudeGateConfig.from_env(environ)
         tools = _load_tools_config(config.tools_config_path)
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
         with RoomStateStore(config.state_dir) as store:
             room = store.read_room()
             turn = room.get("turn")
             session_id = str(payload.get("session_id") or "")
             if not isinstance(turn, dict) or turn.get("session_id") != session_id:
-                # Not a room-caused turn: the operator's own authority and
-                # Claude Code's native permission system govern.
+                # Not a room-caused turn: operator authority + native perms.
                 return _allow()
-            if tools["reply_tool_re"].fullmatch(tool_name) or tools[
-                "react_tool_re"
-            ].fullmatch(tool_name):
-                # Ordinary room participation — never a second social gate.
+
+            is_reply = tools["reply_tool_re"].fullmatch(tool_name) is not None
+            is_react = tools["react_tool_re"].fullmatch(tool_name) is not None
+            if is_reply or is_react:
+                # Send safety, not a social gate: a room-caused turn may only
+                # act in its own bound room.
+                target = str(tool_input.get("chat_id") or "")
+                if target != config.channel_id:
+                    return _deny_tool(
+                        "nunchi-v2 send safety: this room-caused turn may act only in "
+                        f"the bound room {config.channel_id}; tool targets {target or '<none>'}."
+                    )
                 return _allow()
+
             entry = next(
-                (
-                    item
-                    for item in tools["privileged"]
-                    if item["tool_re"].fullmatch(tool_name)
-                ),
+                (item for item in tools["privileged"] if item["tool_re"].fullmatch(tool_name)),
                 None,
             )
             if entry is None:
+                # Unmapped tool: operator/native authority governs.
                 return _allow()
-            tool_input = payload.get("tool_input")
-            if not isinstance(tool_input, dict):
-                tool_input = {}
-            if entry["resource_id_input_key"] is not None:
-                resource_id = str(tool_input.get(entry["resource_id_input_key"]) or "")[:512]
-            else:
-                resource_id = entry["resource_id_const"] or tool_name
-            operation = {"tool_name": tool_name, "tool_input": tool_input}
-            action_seed = json.dumps(
-                {
-                    "request_id": turn["request_id"],
-                    "tool_use_id": str(payload.get("tool_use_id") or ""),
-                    "operation": operation,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            request = {
-                "kind": "authorization-request",
-                "schema_version": 2,
-                "action_id": "claude:" + hashlib.sha256(action_seed).hexdigest(),
-                "action_digest": canonical_action_digest(operation),
-                "origin_event_id": turn["anchor_event_id"],
-                "capability": entry["capability"],
-                "scope": {
-                    "platform": "discord",
-                    "room_id": config.channel_id,
-                    "participant_id": config.participant_id,
-                    "resource": {"kind": entry["resource_kind"], "id": resource_id or tool_name},
-                },
-                "impact": entry["impact"],
-            }
-            policy_source = OperatorPolicySource(config.policy_path)
-            guard = PrivilegedActionGuard(policy_source.load)
-            decision = guard.authorize(request, turn["snapshot"])
-            audit_note = ""
-            try:
-                ReloadingPolicyAuthorizationSink(policy_source.load)(decision)
-            except Exception as exc:  # audit failure must not grant access
-                audit_note = f"; audit persistence unknown ({exc})"
-            verdict = decision.get("decision")
-            if verdict == "ALLOW":
-                # An allow defers to Claude Code's native permission flow; the
-                # guard never escalates beyond it.
-                return _allow(
-                    f"authorized {tool_name} decision={decision.get('decision_id')}"
-                    + audit_note
-                )
-            reason = (
-                f"nunchi-v2 privileged-action authorization: {verdict} "
-                f"({decision.get('reason_code')}) decision={decision.get('decision_id')}"
+
+            # Room-caused privileged execution: unsupported → deny fail-closed.
+            # Denial is unconditional, so no audit-persistence failure and no
+            # replay can ever produce an execution. The requester is derived
+            # for the diagnostic record only.
+            requester, reason_code = derive_room_requester(
+                config, turn, entry, tool_name, tool_input
             )
-            if audit_note:
-                return _deny_tool(reason, audit_note.lstrip("; "))
-            return _deny_tool(reason)
+            requester_note = requester or f"unresolved ({reason_code})"
+            return _deny_tool(
+                "nunchi-v2: room-caused privileged execution is not enforceable through "
+                "the PreToolUse advisory seam (no I-040B execute-time one-use recheck "
+                f"around the host tool runner); denied fail-closed. capability="
+                f"{entry['capability']} requester={requester_note}",
+                f"privileged deny: tool={tool_name} requester={requester_note}",
+            )
     except (
         ClaudeGateConfigError,
         ClaudeGateStateError,
-        AuthorizationRequestError,
-        AuthorizationContextError,
         OSError,
         ValueError,
     ) as exc:
-        # Fail closed: with the guard configured, an internal failure denies
+        # Fail closed: with enforcement configured, an internal failure denies
         # the tool action instead of silently waving it through.
         _log(f"action-guard failure: {exc}")
         return HookDecision(exit_code=2, diagnostics=(f"action guard unavailable: {exc}",))

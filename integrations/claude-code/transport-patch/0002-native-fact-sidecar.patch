@@ -1,22 +1,24 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nunchi Operators <nunchi@users.noreply.github.com>
-Date: Mon, 20 Jul 2026 18:15:05 +0100
-Subject: [PATCH 2/2] discord: append exact native facts per delivered message
+Date: Mon, 20 Jul 2026 20:39:55 +0100
+Subject: [PATCH 2/2] discord: hardened owner-only native-fact sidecar with
+ self context
 
-The rendered channel tag omits the exact author ID, bot flag, mention
-IDs, guild, and reply reference even though the gateway payload has
-them. Append those facts as one JSON line per delivered message to
-STATE_DIR/nunchi-native-events.jsonl so a Nunchi V2 consumer can bind
-exact identity and native relations without inferring them from display
-names or prose. Facts the transport does not synchronously hold (the
-referenced message's author and content) are recorded as absent rather
-than fetched or guessed. Size-capped with one rotation generation.
+Append exact native facts per message to an owner-only sidecar
+(STATE_DIR/nunchi-v2/native-events.jsonl): author ID, bot flag, mention
+IDs, guild, reply reference, and the EXACT delivered content (attachment
+placeholders and voice transcripts included). Written 0600, opened
+O_NOFOLLOW, and validated as an owner-owned regular file before every
+write; an unsafe target is refused fail-closed and an unserializable
+record is dropped, never partially written. Self-authored messages are
+recorded here as retained context before the waking-path drop, so a V2
+consumer can keep them as SELF_RETAINED_NO_WAKE without a recursive wake.
 ---
- server.ts | 43 ++++++++++++++++++++++++++++++++++++++++++-
- 1 file changed, 42 insertions(+), 1 deletion(-)
+ server.ts | 82 +++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 80 insertions(+), 2 deletions(-)
 
 diff --git a/server.ts b/server.ts
-index 9162be1..c226b57 100644
+index 9162be1..03ecab4 100644
 --- a/server.ts
 +++ b/server.ts
 @@ -31,7 +31,7 @@ import {
@@ -24,61 +26,107 @@ index 9162be1..c226b57 100644
  import { randomBytes } from 'crypto'
  import { spawn } from 'child_process'
 -import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
-+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync, appendFileSync } from 'fs'
++import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, lstatSync, renameSync, realpathSync, chmodSync, openSync, fstatSync, writeSync, closeSync, constants } from 'fs'
  import { homedir } from 'os'
  import { join, sep } from 'path'
  
-@@ -40,6 +40,45 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
+@@ -40,6 +40,74 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
  const APPROVED_DIR = join(STATE_DIR, 'approved')
  const ENV_FILE = join(STATE_DIR, '.env')
  
-+// Nunchi V2 native-fact sidecar. The channel tag rendered from the meta of
-+// the inbound notification does not carry the exact author ID, bot flag,
-+// mention IDs, or the reply reference, and the referenced-message author and
-+// content are not synchronously known here. This transport process appends
-+// the exact facts it does hold, one JSON line per delivered message, so a V2
-+// consumer can bind identity and relations without guessing from display
-+// names. Mechanical fact recording only: no filtering, no policy, and no
-+// social meaning. Absent facts stay absent.
-+const NATIVE_FACT_LOG = join(STATE_DIR, 'nunchi-native-events.jsonl')
++// -------------------------------------------------------------------------
++// Nunchi V2 native-fact sidecar (transport-owned). The channel tag rendered
++// into the inbound notification omits the exact author ID, bot flag, mention
++// IDs, guild, and reply reference. This transport process appends the exact
++// facts it holds, one JSON line per message, so a V2 consumer can bind
++// identity and native relations without guessing from display names.
++//
++// It carries verbatim room content, so it is written to an OWNER-ONLY
++// subdirectory, created 0600, opened O_NOFOLLOW, and validated as an
++// owner-owned regular file before every write. An unsafe target is refused
++// (fail closed) rather than written. Records are validated/serialized before
++// writing; an unserializable record is dropped, never partially written.
++// Mechanical fact recording only: no filtering, no policy, no social meaning.
++// -------------------------------------------------------------------------
++const NUNCHI_SIDECAR_DIR = join(STATE_DIR, 'nunchi-v2')
++const NATIVE_FACT_LOG = join(NUNCHI_SIDECAR_DIR, 'native-events.jsonl')
 +const NATIVE_FACT_LOG_MAX_BYTES = 8 * 1024 * 1024
 +
-+function recordNativeFacts(msg: Message): void {
++function recordNativeFacts(msg, content, attachments, transcripts, delivered) {
++  let fd = -1
 +  try {
++    try { mkdirSync(NUNCHI_SIDECAR_DIR, { recursive: true, mode: 0o700 }) } catch {}
++    // Best-effort size rotation using a no-follow stat: never rotate a symlink.
 +    try {
-+      if (statSync(NATIVE_FACT_LOG).size > NATIVE_FACT_LOG_MAX_BYTES) {
++      const ls = lstatSync(NATIVE_FACT_LOG)
++      if (ls.isFile() && ls.size > NATIVE_FACT_LOG_MAX_BYTES) {
 +        renameSync(NATIVE_FACT_LOG, NATIVE_FACT_LOG + '.1')
 +      }
 +    } catch {}
-+    appendFileSync(
-+      NATIVE_FACT_LOG,
-+      JSON.stringify({
++    const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND |
++      constants.O_NOFOLLOW | constants.O_CLOEXEC
++    fd = openSync(NATIVE_FACT_LOG, flags, 0o600)
++    const st = fstatSync(fd)
++    const uid = typeof process.getuid === 'function' ? process.getuid() : st.uid
++    if (!st.isFile() || st.uid !== uid || (st.mode & 0o077) !== 0) {
++      process.stderr.write('discord: native-fact sidecar is unsafe; refusing to record\n')
++      return
++    }
++    let line
++    try {
++      line = JSON.stringify({
 +        v: 1,
++        delivered,
 +        delivered_at: new Date().toISOString(),
 +        guild_id: msg.guildId ?? null,
 +        channel_id: msg.channelId,
 +        message_id: msg.id,
 +        author: { id: msg.author.id, username: msg.author.username, bot: msg.author.bot },
-+        content: msg.content,
++        content,
++        attachments,
++        transcripts,
 +        timestamp: msg.createdAt.toISOString(),
 +        mention_user_ids: [...msg.mentions.users.keys()],
 +        mention_everyone: msg.mentions.everyone,
 +        reply_to_message_id: msg.reference?.messageId ?? null,
-+      }) + '\n',
-+    )
++      }) + '\n'
++    } catch (err) {
++      process.stderr.write(`discord: native-fact record not serializable; dropped: ${err}\n`)
++      return
++    }
++    writeSync(fd, line)
 +  } catch (err) {
-+    process.stderr.write(`discord channel: native-fact record failed: ${err}\n`)
++    process.stderr.write(`discord: native-fact record failed: ${err}\n`)
++  } finally {
++    if (fd >= 0) { try { closeSync(fd) } catch {} }
 +  }
 +}
 +
  // Load ~/.claude/channels/discord/.env into process.env. Real env wins.
  // Plugin-spawned servers don't get an env block — this is where the token lives.
  try {
-@@ -990,6 +1029,8 @@ async function handleInbound(msg: Message): Promise<void> {
+@@ -911,7 +979,13 @@ client.on('messageCreate', msg => {
+   // group policy exactly like a human before its messages are delivered.
+   // Upstream: anthropics/claude-plugins-official issues #1153 and #1559;
+   // community reference chenjr0719 fix/allow-bot-messages (e0474df).
+-  if (msg.author.id === client.user?.id) return
++  if (msg.author.id === client.user?.id) {
++    // Self: record native facts as retained context, but never re-deliver
++    // as a waking notification (echo-loop guard). The V2 consumer ingests
++    // these from the sidecar and retains them as SELF_RETAINED_NO_WAKE.
++    recordNativeFacts(msg, msg.content, [], [], false)
++    return
++  }
+   handleInbound(msg).catch(e => process.stderr.write(`discord: handleInbound failed: ${e}\n`))
+ })
+ 
+@@ -990,6 +1064,10 @@ async function handleInbound(msg: Message): Promise<void> {
      transcripts.length > 0 ? `\n\n[Voice transcript]\n${transcripts.join('\n\n')}` : ''
    const content = `${baseContent}${transcriptBlock}`.trim()
  
-+  recordNativeFacts(msg)
++  // Record the exact content delivered to Claude — attachment
++  // placeholders and voice transcripts included — not raw msg.content.
++  recordNativeFacts(msg, content, atts, transcripts, true)
 +
    mcp.notification({
      method: 'notifications/claude/channel',

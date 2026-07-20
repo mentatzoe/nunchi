@@ -1,16 +1,16 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Nunchi Operators <nunchi@users.noreply.github.com>
-Date: Mon, 20 Jul 2026 18:14:46 +0100
+Date: Mon, 20 Jul 2026 20:39:22 +0100
 Subject: [PATCH 1/2] discord: drop only self-messages so allowlisted peer bots
  are heard
 
 Replace the unconditional bot-drop in the messageCreate handler with a
 self-only guard. The unconditional drop ran before gate(), so a peer bot
 explicitly allowlisted by the operator was never heard (upstream issues
-anthropics/claude-plugins-official#1153, #1559). With this patch bot
-authors flow into gate() like any other sender and must satisfy
-dmPolicy/allowFrom (DMs) or the per-channel group policy before
-delivery. The self-guard preserves the original echo-loop prevention.
+anthropics/claude-plugins-official#1153, #1559). Bot authors now flow into
+gate() like any other sender and must satisfy dmPolicy/allowFrom (DMs) or
+the per-channel group policy before delivery. Self is still dropped from
+the WAKING path here; patch 0002 records self facts for context first.
 ---
  server.ts | 8 +++++++-
  1 file changed, 7 insertions(+), 1 deletion(-)

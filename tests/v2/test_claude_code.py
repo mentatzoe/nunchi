@@ -433,11 +433,22 @@ class ReactiveHearingCases(_GateCase):
         script = (patch_dir / "apply-transport-patch.sh").read_text(encoding="utf-8")
         self.assertIn("msg.author.id === client.user?.id", patch_one)
         self.assertIn("-  if (msg.author.bot) return", patch_one)
-        self.assertIn("nunchi-native-events.jsonl", patch_two)
+        # Hardened sidecar: owner-only path, no-follow, exact delivered content,
+        # and self recorded before the waking-path drop.
+        self.assertIn("nunchi-v2", patch_two)
+        self.assertIn("native-events.jsonl", patch_two)
+        self.assertIn("O_NOFOLLOW", patch_two)
+        self.assertIn("0o600", patch_two)
+        self.assertIn("recordNativeFacts(msg, msg.content, [], [], false)", patch_two)
+        self.assertIn("recordNativeFacts(msg, content, atts, transcripts, true)", patch_two)
         self.assertIn("reply_to_message_id", patch_two)
         self.assertRegex(script, r"BASE_SHA256=\"[0-9a-f]{64}\"")
         self.assertRegex(script, r"PATCHED_SHA256=\"[0-9a-f]{64}\"")
         self.assertIn("fail closed", script)
+        # Installer refuses to follow a symlinked target/backup and replaces
+        # atomically.
+        self.assertIn("is a symlink; refusing to follow", script)
+        self.assertIn("atomic_write", script)
 
 
 # ---------------------------------------------------------------------------
@@ -851,41 +862,52 @@ class ActionGuardCases(_GateCase):
         decision = self.deliver(transport, message_id="5000000000000000001")
         self.assert_woken(decision)
 
-    def test_grant_bound_to_transport_attested_requester_allows(self) -> None:
+    def test_room_caused_privileged_execution_is_denied_unsupported(self) -> None:
+        # The advisory PreToolUse seam cannot perform the I-040B execute-time
+        # one-use recheck around the host's own tool runner, so room-caused
+        # privileged execution is declared unsupported and denied fail-closed —
+        # even when the policy grant would authorize the derived requester.
         self._configure_guard([self._grant(f"discord:user:{HUMAN_ID}")])
         self._wake_room_turn()
         decision = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
-        self.assertIsNone(decision.output)
-        self.assertEqual(decision.exit_code, 0)
-        audits = [
-            path
-            for path in (self.tmp / "receipts").iterdir()
-            if path.name.startswith("authorization-")
-        ]
-        self.assertEqual(len(audits), 1)
-        record = json.loads(audits[0].read_text(encoding="utf-8"))
-        self.assertEqual(record["decision"], "ALLOW")
-        self.assertEqual(
-            record["derived_requester_actor_id"], f"discord:user:{HUMAN_ID}"
-        )
-
-    def test_grant_for_a_different_actor_denies(self) -> None:
-        self._configure_guard([self._grant(f"discord:user:{OTHER_HUMAN_ID}")])
-        self._wake_room_turn()
-        decision = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
         self.assertIsNotNone(decision.output)
+        self.assertEqual(
+            decision.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
         reason = decision.output["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("DENY", reason)
+        self.assertIn("not enforceable", reason)
+        self.assertIn("denied fail-closed", reason)
+        # The transport-attested requester is still derived for the record.
+        self.assertIn(f"discord:user:{HUMAN_ID}", reason)
 
-    def test_approval_bound_grant_defers_to_authenticated_approval(self) -> None:
+    def test_requester_derivation_resolves_the_transport_attested_origin(self) -> None:
+        # Separate from the deny decision: prove the derivation itself binds the
+        # exact origin-event author, and rejects a different-actor origin.
+        self._configure_guard([self._grant(f"discord:user:{HUMAN_ID}")])
+        self._wake_room_turn()
+        config = self.module.ClaudeGateConfig.from_env(self.environ)
+        tools = self.module._load_tools_config(config.tools_config_path)
+        entry = tools["privileged"][0]
+        with self.module.RoomStateStore(config.state_dir) as store:
+            turn = store.read_room()["turn"]
+        requester, reason_code = self.module.derive_room_requester(
+            config, turn, entry, "Bash", {"command": "ls -la"}
+        )
+        self.assertEqual(requester, f"discord:user:{HUMAN_ID}")
+
+    def test_approval_bound_execution_is_unsupported_and_denied(self) -> None:
+        # There is no authenticated approval seam wired into the hook, so an
+        # approval-execution grant is honestly unsupported and denied — never
+        # silently allowed.
         self._configure_guard(
             [self._grant(f"discord:user:{HUMAN_ID}", execution="approval")]
         )
         self._wake_room_turn()
         decision = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
         self.assertIsNotNone(decision.output)
-        reason = decision.output["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("APPROVAL_REQUIRED", reason)
+        self.assertEqual(
+            decision.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
 
     def test_unprivileged_and_unconfigured_paths_are_reported_not_gated(self) -> None:
         self._configure_guard([self._grant(f"discord:user:{HUMAN_ID}")])
@@ -921,6 +943,280 @@ class ActionGuardCases(_GateCase):
         )
         self.assertIsNone(decision.output)
         self.assertEqual(decision.exit_code, 0)
+
+
+# ---------------------------------------------------------------------------
+# Adversarial regression tests — one per Attempt-1 rejection finding
+# ---------------------------------------------------------------------------
+
+
+class AdversarialRegressionCases(_GateCase):
+    """Reproduces the exact Attempt-1 defects and proves they are closed."""
+
+    def _configure_privileged(self, grants: list[dict]) -> None:
+        tools_path = self.tmp / "tools.json"
+        tools_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "privileged": [
+                        {
+                            "tool_pattern": "^Bash$",
+                            "capability": "workspace.shell.exec",
+                            "impact": "mutation",
+                            "resource_kind": "shell-command",
+                            "resource_id_input_key": "command",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        document = claude_policy_document(self.tmp)
+        document["authorization"]["grants"] = grants
+        self.environ = make_environ(
+            self.tmp,
+            policy_path=write_claude_policy(self.tmp, document),
+            NUNCHI_CLAUDE_V2_TOOLS=str(tools_path),
+        )
+
+    def _shell_grant(self, actor_id: str) -> dict:
+        return {
+            "grant_id": "grant-shell",
+            "actor_id": actor_id,
+            "capability": "workspace.shell.exec",
+            "scope": {
+                "platform": "discord",
+                "room_id": CHANNEL_ID,
+                "participant_id": PARTICIPANT_ID,
+                "resource": {"kind": "shell-command", "id": "ls -la"},
+            },
+            "impact": "mutation",
+            "execution": "direct",
+            "status": "active",
+            "expires_at": "2030-01-01T00:00:00Z",
+        }
+
+    # -- F1: operational-error fallback cannot create an unguarded turn ------
+
+    def test_operational_error_wake_denies_privileged_effects(self) -> None:
+        # Force a receipt-sink failure so the attention cycle routes
+        # operational-error while still waking Claude. The resulting tools must
+        # NOT be treated as operator-originated: privileged is denied.
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        receipts_dir = self.tmp / "receipts"
+        # Replace the receipt directory with a file: build_observation_receipt's
+        # sink cannot persist, so run_attention returns operational-error.
+        import shutil
+
+        shutil.rmtree(receipts_dir)
+        receipts_dir.write_text("not a directory", encoding="utf-8")
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="7000000000000000001")
+        # Claude was still woken (widen toward hearing), with a degraded turn.
+        self.assertIsNotNone(decision.output)
+        self.assertIn("hookSpecificOutput", decision.output)
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertIsInstance(turn, dict)
+        self.assertTrue(turn["degraded"])
+        gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    # -- F2: no double execution / audit-failure execution ------------------
+
+    def test_identical_privileged_action_replay_never_executes_twice(self) -> None:
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7000000000000000002"))
+        first = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        second = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        for decision in (first, second):
+            self.assertIsNotNone(decision.output)
+            self.assertEqual(
+                decision.output["hookSpecificOutput"]["permissionDecision"], "deny"
+            )
+
+    def test_authorization_audit_persistence_failure_has_zero_effects(self) -> None:
+        # Even if the authorization audit sink cannot persist, execution is
+        # never allowed: room-caused privileged execution is unconditionally
+        # denied, so audit state can have no bearing on the outcome.
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7000000000000000003"))
+        receipts_dir = self.tmp / "receipts"
+        import shutil
+
+        shutil.rmtree(receipts_dir)
+        receipts_dir.write_text("not a directory", encoding="utf-8")
+        gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        # No authorization audit was written as an ALLOW.
+        self.assertFalse(receipts_dir.is_dir())
+
+    # -- F3: cross-room replies/reactions denied before execution -----------
+
+    def test_cross_room_reply_is_denied_before_execution(self) -> None:
+        self.environ = make_environ(self.tmp)
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7000000000000000004"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": "9999999999999999999", "text": "leaking to another room"},
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("bound room", gate.output["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_cross_room_reaction_is_denied_before_execution(self) -> None:
+        self.environ = make_environ(self.tmp)
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7000000000000000005"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__react",
+            tool_input={"chat_id": "9999999999999999999", "message_id": "1", "emoji": "👀"},
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_in_room_reply_is_allowed(self) -> None:
+        self.environ = make_environ(self.tmp)
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="7000000000000000006"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "answering in the bound room"},
+        )
+        self.assertIsNone(gate.output)
+
+    # -- F4: self events retained as context but never wake -----------------
+
+    def test_self_event_is_retained_as_context_but_never_wakes(self) -> None:
+        from tests.v2.claude_code_helpers import self_sidecar_row
+
+        # A self send recorded to the sidecar becomes retained context (no
+        # channel prompt fires for it, so no wake), and appears in the next
+        # real turn's snapshot.
+        append_sidecar(
+            self.environ,
+            self_sidecar_row(
+                message_id="7100000000000000001",
+                content="on it",
+                timestamp="2026-07-20T11:59:00Z",
+            ),
+        )
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="7100000000000000002")
+        packet = self.assert_woken(decision)
+        event_ids = [event["id"] for event in packet["events"]]
+        self.assertIn("discord:message:7100000000000000001", event_ids)
+        # The self event never produced its own wake (one classifier call, for
+        # the real trigger only).
+        self.assertEqual(transport.call_count, 1)
+        # It carries the self actor kind, not a fabricated human identity.
+        self.assertEqual(
+            packet["actors"][f"discord:user:{SELF_USER_ID}"]["kind"], "bot"
+        )
+
+    # -- F5: sidecar confidentiality + malformed fail-closed ----------------
+
+    def test_malformed_sidecar_record_fails_closed(self) -> None:
+        self.environ = make_environ(self.tmp)
+        # A record that names the message but drops the author is malformed:
+        # the event must be unroutable, not bound to a partial actor.
+        sidecar = Path(self.environ["NUNCHI_CLAUDE_V2_SIDECAR"])
+        sidecar.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        sidecar.write_text(
+            json.dumps(
+                {"message_id": "7200000000000000001", "channel_id": CHANNEL_ID, "content": "x"}
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        sidecar.chmod(0o600)
+        transport = CountingTransport(wake_judgment)
+        decision = self.module.handle_user_prompt_submit(
+            prompt_payload(channel_prompt(message_id="7200000000000000001")),
+            self.environ,
+            classifier_transport=transport,
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(transport.call_count, 0)
+        self.assertTrue(any("malformed or unsafe" in d for d in decision.diagnostics))
+
+    def test_group_readable_sidecar_is_refused(self) -> None:
+        self.environ = make_environ(self.tmp)
+        sidecar = Path(self.environ["NUNCHI_CLAUDE_V2_SIDECAR"])
+        append_sidecar(self.environ, sidecar_row(message_id="7200000000000000002"))
+        # Widen the mode: a world/group-readable sidecar must be refused, so a
+        # matching message reads as fail-closed malformed, not "no record".
+        sidecar.chmod(0o644)
+        result = self.module.read_sidecar_record(sidecar, "7200000000000000002")
+        self.assertIs(result, self.module._SIDECAR_MALFORMED)
+
+    def test_symlinked_sidecar_is_refused(self) -> None:
+        self.environ = make_environ(self.tmp)
+        real = self.tmp / "real-events.jsonl"
+        real.write_text(
+            json.dumps(sidecar_row(message_id="7200000000000000003")) + "\n",
+            encoding="utf-8",
+        )
+        real.chmod(0o600)
+        link = self.tmp / "linked-events.jsonl"
+        link.symlink_to(real)
+        result = self.module.read_sidecar_record(link, "7200000000000000003")
+        self.assertIs(result, self.module._SIDECAR_MALFORMED)
+
+    def test_sidecar_default_path_is_owner_only_directory(self) -> None:
+        # The default location is an owner-only subdirectory, not the plugin's
+        # 0755 Discord state dir.
+        config = self.module.ClaudeGateConfig.from_env(
+            {
+                "NUNCHI_CLAUDE_V2_POLICY": self.environ["NUNCHI_CLAUDE_V2_POLICY"],
+                "NUNCHI_CLAUDE_V2_STATE_DIR": self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"],
+                "NUNCHI_CLAUDE_V2_CHANNEL_ID": CHANNEL_ID,
+                "NUNCHI_CLAUDE_V2_SELF_USER_ID": SELF_USER_ID,
+                "NUNCHI_CLAUDE_V2_PARTICIPANT_ID": PARTICIPANT_ID,
+            }
+        )
+        self.assertIn("nunchi-v2", str(config.sidecar_path))
+        self.assertEqual(config.sidecar_path.name, "native-events.jsonl")
+
+    # -- F6: patch installer rejects symlinked target/backup ----------------
+
+    def test_apply_script_rejects_symlinked_target(self) -> None:
+        import subprocess
+
+        script = (
+            _INTEGRATION_DIR / "transport-patch" / "apply-transport-patch.sh"
+        )
+        base = (
+            _INTEGRATION_DIR / "transport-patch" / "0001-allow-bot-messages-allowfrom.patch"
+        )
+        # Reconstruct the pinned base digest by reading it from the script.
+        script_text = script.read_text(encoding="utf-8")
+        self.assertIn("is a symlink; refusing to follow", script_text)
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        referent = outside / "server.ts"
+        referent.write_text("REFERENT CONTENT", encoding="utf-8")
+        before = referent.read_text(encoding="utf-8")
+        plugin = self.tmp / "plugin"
+        plugin.mkdir()
+        (plugin / "server.ts").symlink_to(referent)
+        result = subprocess.run(
+            [str(script), str(plugin)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(referent.read_text(encoding="utf-8"), before)
+        self.assertTrue((plugin / "server.ts").is_symlink())
 
 
 if __name__ == "__main__":

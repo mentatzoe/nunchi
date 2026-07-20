@@ -122,9 +122,30 @@ def sidecar_row(
 
 def append_sidecar(environ: dict[str, str], *rows: dict[str, Any]) -> None:
     path = Path(environ["NUNCHI_CLAUDE_V2_SIDECAR"])
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    # The hardened reader requires an owner-only regular file; the transport
+    # writes 0600, so the fixture matches that contract.
+    path.chmod(0o600)
+
+
+def self_sidecar_row(
+    *,
+    message_id: str,
+    content: str = "on it — checking the red scenes",
+    timestamp: str = "2026-07-20T12:05:00Z",
+) -> dict[str, Any]:
+    """A self-authored native-fact record (retained context, never a wake)."""
+    return sidecar_row(
+        message_id=message_id,
+        author_id=SELF_USER_ID,
+        username="station",
+        bot=True,
+        content=content,
+        timestamp=timestamp,
+    )
 
 
 def channel_prompt(

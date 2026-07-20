@@ -1,0 +1,5 @@
+# Unified-diff context lines for blank source lines are a single space by
+# format, which `git diff --check` reports as trailing whitespace. Patch files
+# are generated artifacts (git format-patch), so exempt them from the
+# whitespace check rather than corrupting the diff.
+*.patch -whitespace

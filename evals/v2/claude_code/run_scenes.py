@@ -602,6 +602,23 @@ def cc05_rows() -> list[dict]:
     return rows
 
 
+# Committed evidence rows carry only deterministic semantic results. Run-
+# variable identifiers (request IDs) and provenance digests (which embed the
+# per-run temp-dir policy path) are stripped so the JSONL is reproducible
+# byte-for-byte and `git diff --check` stays clean. Their presence is asserted
+# at run time inside the scene bodies; only their run-specific VALUE is dropped.
+_RUN_VARIABLE_KEYS = ("request_id", "trusted_provenance")
+
+
+def _reproducible(row: dict[str, Any]) -> dict[str, Any]:
+    out = {key: value for key, value in row.items() if key not in _RUN_VARIABLE_KEYS}
+    if "trusted_provenance" in row:
+        # Keep the deterministic fact (a trusted provenance was present and
+        # bound to the receipt) without the run-variable digest value.
+        out["trusted_provenance_present"] = True
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_scenes")
     parser.add_argument("--out-dir", type=Path, default=None)
@@ -613,10 +630,14 @@ def main(argv: list[str] | None = None) -> int:
         args.out_dir.mkdir(parents=True, exist_ok=True)
         with (args.out_dir / "reactive-bot-hearing.jsonl").open("w", encoding="utf-8") as f:
             for row in hearing_rows:
-                f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                f.write(
+                    json.dumps(_reproducible(row), ensure_ascii=False, sort_keys=True) + "\n"
+                )
         with (args.out_dir / "scene-results.jsonl").open("w", encoding="utf-8") as f:
             for row in scene_rows:
-                f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                f.write(
+                    json.dumps(_reproducible(row), ensure_ascii=False, sort_keys=True) + "\n"
+                )
     total = len(hearing_rows) + len(scene_rows)
     passed = sum(1 for row in hearing_rows + scene_rows if row["result"] == "PASS")
     declared = sum(1 for row in hearing_rows + scene_rows if row["result"] == "DECLARED")
