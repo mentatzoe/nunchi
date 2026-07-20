@@ -150,3 +150,43 @@ reaction deltas remain unavailable without prior-state comparison. Sends have
 a local backstop and request-correlated transport receipts, but Telegram offers
 no idempotency key for `sendMessage`, which remains an explicit transport
 limitation rather than a false guarantee.
+
+## Standalone Discord
+
+`nunchi-discord` keeps `discord.py` as the optional `discord` extra, but parses
+its command line before importing that dependency. A base installation is
+therefore inspectable and `nunchi-discord --help` works even when the gateway
+extra is absent. Runtime configuration binds one exact channel and policy per
+process; the bot token comes from `NUNCHI_DISCORD_TOKEN` by default and is used
+only by the gateway and room-bound REST client.
+
+```sh
+python -m pip install 'nunchi[discord]'
+nunchi-discord \
+  --channel-id 123456789012345678 \
+  --history-limit 50 \
+  --policy /absolute/path/to/nunchi-policy.json \
+  --participant-id vigil \
+  --participant-name Vigil \
+  --participant-workspace /absolute/owner-only/empty-workspace \
+  --participant-command /absolute/path/to/participant --json-stdio
+```
+
+The policy continuity scope is exactly
+`discord:channel:123456789012345678`. On gateway readiness the adapter captures
+up to 100 messages older than a local readiness barrier as context-only. Exact
+live gateway messages then enter the shared one-active/one-newest-pending flow;
+self-authored echoes remain context and cannot recursively wake the participant.
+The standalone gateway has no durable sequence checkpoint and therefore
+declares session continuity with a restart gap. It refuses recoverable social
+suppression rather than treating history fetch as proof of gap-free continuity.
+
+Display names and message text never bind Discord identity or routing. Native
+snowflakes, exact mentions, replies and the configured channel do. Rich-only
+messages receive a bounded text rendering. Outbound messages, exact replies,
+closed allowed-mention user IDs and reactions use the shared request-correlated
+REST action sink with Discord rate limits, a local send backstop and bounded
+at-most-once request memory. The standalone `discord.py` surface does not expose
+the gateway session/sequence needed for collision-free inbound reaction event
+IDs, so it does not invent them; the shared MCP Discord transport has that
+stronger inbound capability.

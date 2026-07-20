@@ -269,6 +269,21 @@ class DiscordActionSinkCases(unittest.TestCase):
         self.assert_transport_receipt("req-2", "failed")
         self.assertEqual(self.receipts[-1]["body"]["detail"], "send-backstop")
 
+    def test_request_capacity_fails_without_evicting_replay_identity(self):
+        sink = DiscordActionSinkV2(
+            channel_id="42",
+            rest=self.rest,
+            backstop=SendBackstop(5, 10, clock=lambda: 0),
+            receipt_sink=self.receipts.append,
+            max_request_ids=1,
+        )
+        sink("req-1", {"kind": "message", "content": "one"})
+        with self.assertRaises(Exception):
+            sink("req-2", {"kind": "message", "content": "two"})
+        with self.assertRaises(Exception):
+            sink("req-1", {"kind": "message", "content": "one"})
+        self.assertEqual([item[1] for item in self.rest.messages], ["one"])
+
 
 class V2ServerBoundaryCases(unittest.TestCase):
     def test_v2_mode_requires_exact_trusted_channels(self):

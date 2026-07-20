@@ -68,16 +68,24 @@ class DiscordActionSinkV2:
         rest: DiscordV2RestLike,
         backstop: SendBackstop,
         receipt_sink: Callable[[dict[str, Any]], None],
+        max_request_ids: int = 4096,
     ) -> None:
         resolved_channel = _snowflake(channel_id)
         if resolved_channel is None:
             raise ValueError("Discord action channel must be an exact snowflake")
         if not callable(receipt_sink) or not isinstance(backstop, SendBackstop):
             raise ValueError("Discord action transport dependency is invalid")
+        if (
+            isinstance(max_request_ids, bool)
+            or not isinstance(max_request_ids, int)
+            or not 1 <= max_request_ids <= 100000
+        ):
+            raise ValueError("Discord action capacity is invalid")
         self.channel_id = resolved_channel
         self.rest = rest
         self.backstop = backstop
         self.receipt_sink = receipt_sink
+        self.max_request_ids = max_request_ids
         self._lock = threading.RLock()
         self._consumed_request_ids: set[str] = set()
 
@@ -101,6 +109,8 @@ class DiscordActionSinkV2:
         with self._lock:
             if request_id in self._consumed_request_ids:
                 raise DiscordV2ActionError("Discord action request was already consumed")
+            if len(self._consumed_request_ids) >= self.max_request_ids:
+                raise DiscordV2ActionError("Discord action capacity is exhausted")
             self._consumed_request_ids.add(request_id)
 
         kind = accepted.get("kind") if isinstance(accepted, dict) else None
