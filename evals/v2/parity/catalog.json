@@ -114,7 +114,7 @@
       "mechanics_tests": [
         "tests.v2.test_provenance_eval"
       ],
-      "external_evidence": ["installed-wheel-manifest", "per-surface-restart-probe", "repository-v1-residue-audit"]
+      "external_evidence": ["accepted-hermes-v2-packet", "accepted-claude-code-v2-packet", "installed-wheel-manifest", "per-surface-restart-probe", "repository-v1-residue-audit", "operator-install-upgrade-rollback-probe"]
     },
     {
       "scene_id": "S13",
