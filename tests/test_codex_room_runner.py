@@ -520,8 +520,70 @@ class TestCodexSessionState(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     path = pathlib.Path(td) / "session.json"
                     path.write_text(json.dumps(state), encoding="utf-8")
+                    path.chmod(0o600)
                     with self.assertRaises(runner_mod.CodexSessionStateError):
                         runner_mod.load_codex_session(path)
+
+    def test_rejects_relative_state_paths(self):
+        path = pathlib.Path("relative-session.json")
+        with self.assertRaisesRegex(
+            runner_mod.CodexSessionStateError, "must be absolute"
+        ):
+            runner_mod.load_codex_session(path)
+        with self.assertRaisesRegex(
+            runner_mod.CodexSessionStateError, "must be absolute"
+        ):
+            runner_mod.save_codex_session(
+                path, "019f4914-a9c7-7090-bec3-0e78fa9b84e1"
+            )
+
+    def test_rejects_symlink_and_permissive_state_sources(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = pathlib.Path(td)
+            target = directory / "target.json"
+            target.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "thread_id": "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            target.chmod(0o600)
+            link = directory / "session.json"
+            link.symlink_to(target)
+            with self.assertRaises(runner_mod.CodexSessionStateError):
+                runner_mod.load_codex_session(link)
+
+            link.unlink()
+            target.chmod(0o640)
+            with self.assertRaisesRegex(
+                runner_mod.CodexSessionStateError, "source is unsafe"
+            ):
+                runner_mod.load_codex_session(target)
+
+    def test_rejects_oversized_state_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "session.json"
+            path.write_bytes(b" " * 65537)
+            path.chmod(0o600)
+            with self.assertRaisesRegex(
+                runner_mod.CodexSessionStateError, "source is unsafe"
+            ):
+                runner_mod.load_codex_session(path)
+
+    def test_rejects_unsafe_state_directory(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = pathlib.Path(td) / "sessions"
+            directory.mkdir(mode=0o755)
+            with self.assertRaisesRegex(
+                runner_mod.CodexSessionStateError, "directory is unsafe"
+            ):
+                runner_mod.save_codex_session(
+                    directory / "session.json",
+                    "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+                )
 
 
 class TestVerdictRouting(unittest.TestCase):
@@ -601,6 +663,7 @@ class TestVerdictRouting(unittest.TestCase):
     def test_corrupt_persistent_session_fails_closed_before_codex(self):
         runner = _make_runner(self.stubs)
         runner.config.session_path.write_text("not-json")
+        runner.config.session_path.chmod(0o600)
 
         action = runner.handle_notification(_event())
 

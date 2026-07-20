@@ -97,6 +97,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -208,15 +209,44 @@ def _valid_thread_id(value: Any) -> str | None:
 
 def load_codex_session(path: Path) -> dict[str, Any] | None:
     """Read and validate persistent Codex room-session state."""
+    if not path.is_absolute():
+        raise CodexSessionStateError("Codex session state path must be absolute")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        with open(path, encoding="utf-8") as handle:
-            raw = json.load(handle)
+        descriptor = os.open(path, flags)
     except FileNotFoundError:
         return None
-    except (OSError, json.JSONDecodeError) as exc:
+    except OSError as exc:
         raise CodexSessionStateError(
             f"cannot read Codex session state {path}: {exc}"
         ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+            or metadata.st_size > 65536
+        ):
+            raise CodexSessionStateError("Codex session state source is unsafe")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(8192, 65537 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 65536:
+                raise CodexSessionStateError("Codex session state is too large")
+            chunks.append(chunk)
+        try:
+            raw = json.loads(b"".join(chunks).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CodexSessionStateError(
+                f"cannot read Codex session state {path}: invalid JSON"
+            ) from exc
+    finally:
+        os.close(descriptor)
     if (
         not isinstance(raw, dict)
         or type(raw.get("version")) is not int
@@ -253,6 +283,8 @@ def save_codex_session(
     normalized = _valid_thread_id(thread_id)
     if normalized is None:
         raise CodexSessionStateError("cannot save an invalid Codex thread_id")
+    if not path.is_absolute():
+        raise CodexSessionStateError("Codex session state path must be absolute")
     now = datetime.now(timezone.utc).isoformat()
     state = {
         "version": _CODEX_SESSION_VERSION,
@@ -261,7 +293,14 @@ def save_codex_session(
         "updated_at": now,
     }
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        parent_metadata = path.parent.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent_metadata.st_mode)
+            or parent_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_metadata.st_mode) & 0o077
+        ):
+            raise CodexSessionStateError("Codex session state directory is unsafe")
         fd, temp_name = tempfile.mkstemp(
             dir=path.parent,
             prefix=".codex-room-session-",
@@ -275,6 +314,11 @@ def save_codex_session(
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_name, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         except Exception:
             try:
                 os.close(fd)
