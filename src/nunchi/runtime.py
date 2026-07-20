@@ -47,6 +47,7 @@ class LiveRoomRuntime:
         receipt_sink: Callable[[dict[str, Any]], None],
         participant: Callable[[ParticipantTurn], Any],
         action_sink: Callable[[dict[str, Any]], Any] | None = None,
+        correlated_action_sink: Callable[[str, dict[str, Any]], Any] | None = None,
         classifier_transport: Callable[[dict[str, Any], Any], Any] | None = None,
         scheduler: ConversationOpportunityScheduler | None = None,
         recover_current_history: Callable[[str], None] | None = None,
@@ -63,6 +64,7 @@ class LiveRoomRuntime:
         self.receipt_sink = receipt_sink
         self.participant = participant
         self.action_sink = action_sink
+        self.correlated_action_sink = correlated_action_sink
         self.classifier_transport = classifier_transport
         self.scheduler = scheduler or ConversationOpportunityScheduler()
         self.recover_current_history = recover_current_history
@@ -206,6 +208,7 @@ class LiveRoomRuntime:
             participant=self.participant,
             receipt_sink=self.receipt_sink,
             action_sink=self.action_sink,
+            correlated_action_sink=self.correlated_action_sink,
             continuation_fetch=self.continuation_fetch,
             authorization_guard=self.authorization_guard,
             privileged_executors=self.privileged_executors,

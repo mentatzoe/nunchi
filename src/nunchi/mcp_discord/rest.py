@@ -18,6 +18,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
@@ -93,16 +94,41 @@ class DiscordRestClient:
     # ------------------------------------------------------------------ #
 
     def create_message(
-        self, channel_id: str, content: str, *, reply_to_message_id: str | None = None
+        self,
+        channel_id: str,
+        content: str,
+        *,
+        reply_to_message_id: str | None = None,
+        allowed_mention_user_ids: tuple[str, ...] | None = None,
+        fail_if_reply_missing: bool = False,
     ) -> dict:
         body: dict = {"content": content}
+        if allowed_mention_user_ids is not None:
+            body["allowed_mentions"] = {
+                "parse": [],
+                "users": list(allowed_mention_user_ids),
+                "roles": [],
+                "replied_user": False,
+            }
         if reply_to_message_id is not None:
             body["message_reference"] = {
                 "message_id": reply_to_message_id,
                 "channel_id": channel_id,
-                "fail_if_not_exists": False,
+                "fail_if_not_exists": fail_if_reply_missing,
             }
         return self._request("POST", f"/channels/{channel_id}/messages", body=body)
+
+    def create_reaction(
+        self,
+        channel_id: str,
+        message_id: str,
+        reaction: str,
+    ) -> None:
+        encoded = urllib.parse.quote(reaction, safe="")
+        self._request(
+            "PUT",
+            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+        )
 
     def get_messages(
         self, channel_id: str, *, limit: int = 50, before: str | None = None

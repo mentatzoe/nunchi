@@ -23,8 +23,10 @@ import sys
 from dataclasses import dataclass
 
 GUILD_MESSAGES = 1 << 9
+GUILD_MESSAGE_REACTIONS = 1 << 10
 MESSAGE_CONTENT = 1 << 15
 INTENTS = GUILD_MESSAGES | MESSAGE_CONTENT
+V2_INTENTS = INTENTS | GUILD_MESSAGE_REACTIONS
 
 DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
@@ -80,6 +82,8 @@ class Dispatch:
 
     event: str
     data: dict
+    sequence: int | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -194,8 +198,12 @@ class GatewayProtocol:
         if event == "RESUMED":
             self.ready = True
             return []
-        if event == "MESSAGE_CREATE":
-            return [Dispatch("MESSAGE_CREATE", data)]
+        if event in (
+            "MESSAGE_CREATE",
+            "MESSAGE_REACTION_ADD",
+            "MESSAGE_REACTION_REMOVE",
+        ):
+            return [Dispatch(event, data, sequence=self.seq, session_id=self.session_id)]
         return []
 
     # ------------------------------------------------------------------ #

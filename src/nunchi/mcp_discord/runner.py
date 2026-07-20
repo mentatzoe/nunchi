@@ -18,7 +18,12 @@ import logging
 import random
 from typing import Awaitable, Callable
 
-from .events import MessageEvent, filter_message_create
+from .events import (
+    MessageEvent,
+    ReactionEvent,
+    filter_message_create,
+    reaction_event_from_dispatch,
+)
 from .gateway import (
     CloseAndReconnect,
     Dispatch,
@@ -45,17 +50,21 @@ class GatewayRunner:
     def __init__(
         self,
         protocol: GatewayProtocol,
-        on_event: Callable[[MessageEvent], None],
+        on_event: Callable[[MessageEvent | ReactionEvent], None],
         *,
         connect: Callable[[str], Awaitable] | None = None,
         rng: Callable[[], float] = random.random,
         initial_backoff: float = 1.0,
+        retain_self: bool = False,
+        v2_events: bool = False,
     ) -> None:
         self._protocol = protocol
         self._on_event = on_event
         self._connect = connect or WSClient.connect
         self._rng = rng
         self._initial_backoff = initial_backoff
+        self._retain_self = retain_self
+        self._v2_events = v2_events
 
     async def run(self, shutdown: asyncio.Event) -> None:
         backoff = self._initial_backoff
@@ -117,7 +126,25 @@ class GatewayRunner:
                     elif isinstance(action, Dispatch):
                         if action.event == "MESSAGE_CREATE":
                             event = filter_message_create(
-                                action.data, self._protocol.own_user_id
+                                action.data,
+                                self._protocol.own_user_id,
+                                retain_self=self._retain_self,
+                            )
+                            if event is not None:
+                                self._on_event(event)
+                        elif self._v2_events and action.event in (
+                            "MESSAGE_REACTION_ADD",
+                            "MESSAGE_REACTION_REMOVE",
+                        ):
+                            event = reaction_event_from_dispatch(
+                                action.data,
+                                operation=(
+                                    "add"
+                                    if action.event == "MESSAGE_REACTION_ADD"
+                                    else "remove"
+                                ),
+                                gateway_session_id=action.session_id,
+                                gateway_sequence=action.sequence,
                             )
                             if event is not None:
                                 self._on_event(event)

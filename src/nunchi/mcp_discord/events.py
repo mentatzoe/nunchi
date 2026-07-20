@@ -38,6 +38,7 @@ from typing import Any
 logger = logging.getLogger("nunchi.mcp_discord.events")
 
 NOTIFICATION_METHOD = "notifications/discord/message"
+V2_NOTIFICATION_METHOD = "notifications/nunchi/v2/discord/event"
 _MAX_NORMALIZED_CONTENT = 6000
 
 
@@ -192,6 +193,24 @@ class MessageEvent:
     reply_to_author_name: str | None
     reply_to_author_is_bot: bool | None
     reply_to_content: str | None
+    mentions_room: bool = False
+    thread_root_message_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ReactionEvent:
+    """One gateway reaction event with transport-owned sequence identity."""
+
+    guild_id: str | None
+    channel_id: str
+    message_id: str
+    author_id: str
+    author_name: str
+    author_is_bot: bool | None
+    reaction: str
+    operation: str
+    gateway_session_id: str
+    gateway_sequence: int
 
 
 def message_event_from_create(data: dict) -> MessageEvent:
@@ -214,6 +233,56 @@ def message_event_from_create(data: dict) -> MessageEvent:
         reply_to_author_name=addressing["reply_to_author_name"],
         reply_to_author_is_bot=addressing["reply_to_author_is_bot"],
         reply_to_content=addressing["reply_to_content"],
+        mentions_room=bool(data.get("mention_everyone", False)),
+        # Discord MESSAGE_CREATE does not ordinarily expose a thread root. A
+        # trusted wrapper may supply one when it has channel/thread metadata;
+        # absence remains honest unavailability.
+        thread_root_message_id=(
+            str(data["thread_root_message_id"])
+            if data.get("thread_root_message_id") is not None
+            else None
+        ),
+    )
+
+
+def reaction_event_from_dispatch(
+    data: dict,
+    *,
+    operation: str,
+    gateway_session_id: str | None,
+    gateway_sequence: int | None,
+) -> ReactionEvent | None:
+    """Normalize a Discord reaction dispatch or return unavailable honestly."""
+    if operation not in ("add", "remove"):
+        return None
+    if not isinstance(gateway_session_id, str) or not gateway_session_id:
+        return None
+    if isinstance(gateway_sequence, bool) or not isinstance(gateway_sequence, int):
+        return None
+    emoji = data.get("emoji") or {}
+    if not isinstance(emoji, dict):
+        return None
+    emoji_name = emoji.get("name")
+    if not isinstance(emoji_name, str) or not emoji_name:
+        return None
+    emoji_id = _snowflake(emoji.get("id"))
+    reaction = f"{emoji_name}:{emoji_id}" if emoji_id is not None else emoji_name
+    member = data.get("member") or {}
+    user = member.get("user") if isinstance(member, dict) else None
+    if not isinstance(user, dict):
+        user = {}
+    author_name = user.get("username")
+    return ReactionEvent(
+        guild_id=(str(data["guild_id"]) if data.get("guild_id") is not None else None),
+        channel_id=str(data.get("channel_id", "")),
+        message_id=str(data.get("message_id", "")),
+        author_id=str(data.get("user_id", "")),
+        author_name=author_name if isinstance(author_name, str) else "",
+        author_is_bot=(bool(user.get("bot")) if "bot" in user else None),
+        reaction=reaction,
+        operation=operation,
+        gateway_session_id=gateway_session_id,
+        gateway_sequence=gateway_sequence,
     )
 
 
@@ -230,7 +299,12 @@ def _looks_content_stripped(data: dict) -> bool:
     )
 
 
-def filter_message_create(data: dict, own_user_id: str | None) -> MessageEvent | None:
+def filter_message_create(
+    data: dict,
+    own_user_id: str | None,
+    *,
+    retain_self: bool = False,
+) -> MessageEvent | None:
     """Drop ONLY self-authored messages; warn loudly on stripped content.
 
     Returns None for self-authored messages (author.id == our bot user id).
@@ -240,7 +314,11 @@ def filter_message_create(data: dict, own_user_id: str | None) -> MessageEvent |
     is logged with the remediation step.
     """
     event = message_event_from_create(data)
-    if own_user_id is not None and event.author_id == str(own_user_id):
+    if (
+        not retain_self
+        and own_user_id is not None
+        and event.author_id == str(own_user_id)
+    ):
         return None
     if not event.content and _looks_content_stripped(data):
         logger.warning(
@@ -273,3 +351,185 @@ def notification_params(event: MessageEvent) -> dict:
         "reply_to_author_is_bot": event.reply_to_author_is_bot,
         "reply_to_content": event.reply_to_content,
     }
+
+
+def _snowflake(value: object) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text if text.isdigit() else None
+
+
+def _discord_actor_id(user_id: str) -> str:
+    return f"discord:user:{user_id}"
+
+
+def _discord_message_id(message_id: str) -> str:
+    return f"discord:message:{message_id}"
+
+
+class DiscordEventSourceV2:
+    """Trusted I-050A message projection for an exact channel allowlist.
+
+    Construction binds routing policy outside room content.  ``native_input``
+    returns the closed input accepted by :class:`ObservationProvider`; display
+    names are descriptive actor facts only and never identity or authority.
+    """
+
+    def __init__(
+        self,
+        *,
+        allowed_channel_ids: frozenset[str],
+        blocked_actor_ids: frozenset[str] = frozenset(),
+    ) -> None:
+        if not isinstance(allowed_channel_ids, frozenset) or not allowed_channel_ids:
+            raise ValueError("Discord V2 requires a non-empty trusted channel allowlist")
+        if any(_snowflake(value) != value for value in allowed_channel_ids):
+            raise ValueError("Discord channel allowlist must contain exact snowflake strings")
+        if not isinstance(blocked_actor_ids, frozenset) or any(
+            _snowflake(value) != value for value in blocked_actor_ids
+        ):
+            raise ValueError("Discord blocked actors must be exact snowflake strings")
+        self.allowed_channel_ids = allowed_channel_ids
+        self.blocked_actor_ids = blocked_actor_ids
+
+    @staticmethod
+    def _unroutable(delivery_id: str, reason: str) -> dict:
+        return {
+            "delivery_id": delivery_id,
+            "disposition": "unroutable",
+            "reason": reason,
+        }
+
+    def native_input(self, event: MessageEvent | ReactionEvent) -> dict:
+        if isinstance(event, ReactionEvent):
+            return self._reaction_native_input(event)
+        if not isinstance(event, MessageEvent):
+            raise TypeError("Discord event source requires a transport event")
+        raw_delivery = f"discord:message:{event.message_id or 'unavailable'}"
+        message_id = _snowflake(event.message_id)
+        channel_id = _snowflake(event.channel_id)
+        author_id = _snowflake(event.author_id)
+        if message_id is None or channel_id is None or author_id is None:
+            return self._unroutable(
+                raw_delivery,
+                "Discord delivery lacked an exact native message, channel, or author ID",
+            )
+        delivery_id = _discord_message_id(message_id)
+        if channel_id not in self.allowed_channel_ids:
+            return self._unroutable(
+                delivery_id,
+                "Discord channel is outside the trusted routing allowlist",
+            )
+        if author_id in self.blocked_actor_ids:
+            return self._unroutable(
+                delivery_id,
+                "Discord actor is outside the trusted routing policy",
+            )
+
+        mentioned_ids: list[str] = []
+        seen_mentions: set[str] = set()
+        for raw_id in event.mentioned_user_ids:
+            mention_id = _snowflake(raw_id)
+            if mention_id is None:
+                return self._unroutable(
+                    delivery_id,
+                    "Discord delivery carried a malformed native mention ID",
+                )
+            actor_id = _discord_actor_id(mention_id)
+            if actor_id not in seen_mentions:
+                seen_mentions.add(actor_id)
+                mentioned_ids.append(actor_id)
+
+        portable_event: dict[str, Any] = {
+            "id": delivery_id,
+            "type": "message",
+            "author_id": _discord_actor_id(author_id),
+            "text": event.content,
+            "mentioned_actor_ids": mentioned_ids,
+            "mentions_room": event.mentions_room,
+        }
+        if isinstance(event.timestamp, str) and event.timestamp:
+            portable_event["timestamp"] = event.timestamp
+        if event.reply_to_message_id is not None:
+            reply_id = _snowflake(event.reply_to_message_id)
+            if reply_id is None:
+                return self._unroutable(
+                    delivery_id,
+                    "Discord delivery carried a malformed native reply ID",
+                )
+            portable_event["reply_to_event_id"] = _discord_message_id(reply_id)
+        if event.thread_root_message_id is not None:
+            thread_root_id = _snowflake(event.thread_root_message_id)
+            if thread_root_id is None:
+                return self._unroutable(
+                    delivery_id,
+                    "Discord delivery carried a malformed native thread root ID",
+                )
+            portable_event["thread_root_event_id"] = _discord_message_id(thread_root_id)
+
+        actors: dict[str, dict[str, Any]] = {
+            _discord_actor_id(author_id): {
+                "display_name": event.author_name,
+                "kind": "bot" if event.author_is_bot else "human",
+            }
+        }
+        for actor_id in mentioned_ids:
+            actors.setdefault(actor_id, {})
+        return {
+            "delivery_id": delivery_id,
+            "disposition": "candidate-event",
+            "authorized": True,
+            "event": portable_event,
+            "actors": actors,
+        }
+
+    def _reaction_native_input(self, event: ReactionEvent) -> dict:
+        channel_id = _snowflake(event.channel_id)
+        message_id = _snowflake(event.message_id)
+        author_id = _snowflake(event.author_id)
+        event_id = (
+            f"discord:reaction:{event.gateway_session_id}:{event.gateway_sequence}"
+        )
+        if channel_id is None or message_id is None or author_id is None:
+            return self._unroutable(
+                event_id,
+                "Discord reaction lacked an exact channel, message, or actor ID",
+            )
+        if channel_id not in self.allowed_channel_ids:
+            return self._unroutable(
+                event_id,
+                "Discord channel is outside the trusted routing allowlist",
+            )
+        if author_id in self.blocked_actor_ids:
+            return self._unroutable(
+                event_id,
+                "Discord actor is outside the trusted routing policy",
+            )
+        actor: dict[str, Any] = {}
+        if event.author_name:
+            actor["display_name"] = event.author_name
+        if event.author_is_bot is not None:
+            actor["kind"] = "bot" if event.author_is_bot else "human"
+        return {
+            "delivery_id": event_id,
+            "disposition": "candidate-event",
+            "authorized": True,
+            "event": {
+                "id": event_id,
+                "type": "reaction",
+                "author_id": _discord_actor_id(author_id),
+                "target_event_id": _discord_message_id(message_id),
+                "reaction": event.reaction,
+                "operation": event.operation,
+            },
+            "actors": {_discord_actor_id(author_id): actor},
+        }
+
+    def notification_params(self, event: MessageEvent | ReactionEvent) -> dict[str, Any]:
+        """Versioned credential-free reactive notification for V2 consumers."""
+        return {
+            "schema_version": 2,
+            "platform": "discord",
+            "guild_id": event.guild_id,
+            "channel_id": event.channel_id,
+            "native_input": self.native_input(event),
+        }

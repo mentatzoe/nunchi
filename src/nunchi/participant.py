@@ -214,6 +214,7 @@ def run_participant_turn(
     participant: Callable[[ParticipantTurn], Any],
     receipt_sink: Callable[[dict[str, Any]], None],
     action_sink: Callable[[dict[str, Any]], Any] | None = None,
+    correlated_action_sink: Callable[[str, dict[str, Any]], Any] | None = None,
     continuation_fetch: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     authorization_guard: PrivilegedActionGuard | None = None,
     privileged_executors: Mapping[str, Callable[[Any], Any]] | None = None,
@@ -290,6 +291,9 @@ def run_participant_turn(
                     outcome = "sent"
                 else:
                     outcome = "silent"
+        elif correlated_action_sink is not None:
+            returned = correlated_action_sink(packet["request_id"], copy.deepcopy(action))
+            outcome = "sent" if returned is None else "unknown"
         elif action_sink is None:
             host_error = "action-sink-unavailable"
         else:
