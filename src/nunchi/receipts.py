@@ -21,8 +21,8 @@ class ReceiptSinkConstructionError(ValueError):
 class ExclusiveJSONFileReceiptSink:
     """No-follow, owner-only, exclusive-create receipt storage.
 
-    One request ID maps to one SHA-256 filename.  Existing files are never
-    touched.  Any failure after creation is ``unknown`` because durable side
+    One request ID and stage map to one SHA-256 filename. Existing files are
+    never touched. Any failure after creation is ``unknown`` because durable side
     effects may have occurred; schema rejection or a pre-create failure that
     created nothing is ``not-persisted``.
     """
@@ -53,13 +53,15 @@ class ExclusiveJSONFileReceiptSink:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _filename(request_id: str) -> str:
-        digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
-        return f"attention-{digest}.jsonl"
+    def _filename(request_id: str, stage: str) -> str:
+        digest = hashlib.sha256(
+            f"{request_id}\0{stage}".encode("utf-8")
+        ).hexdigest()
+        return f"{stage}-{digest}.jsonl"
 
     def __call__(self, record: dict[str, Any]) -> None:
         errors = validate_attention_receipt_record(record)
-        if errors or record.get("stage") != "attention":
+        if errors:
             raise ReceiptSinkPersistenceError("not-persisted")
         try:
             payload = (
@@ -74,7 +76,7 @@ class ExclusiveJSONFileReceiptSink:
             ).encode("utf-8")
         except (TypeError, ValueError) as exc:
             raise ReceiptSinkPersistenceError("not-persisted") from exc
-        filename = self._filename(record["request_id"])
+        filename = self._filename(record["request_id"], record["stage"])
         with self._lock:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             flags |= getattr(os, "O_CLOEXEC", 0)
