@@ -14,7 +14,11 @@ from tests.v2.security.helpers import clone_policy, write_policy
 
 class Response:
     def __init__(self, payload):
-        self.payload = json.dumps(payload).encode("utf-8")
+        self.payload = (
+            payload
+            if isinstance(payload, bytes)
+            else json.dumps(payload).encode("utf-8")
+        )
 
     def __enter__(self):
         return self
@@ -22,8 +26,8 @@ class Response:
     def __exit__(self, *_args):
         return False
 
-    def read(self):
-        return self.payload
+    def read(self, size=-1):
+        return self.payload if size < 0 else self.payload[:size]
 
 
 def provider_response():
@@ -124,6 +128,28 @@ class ProviderTransportCases(unittest.TestCase):
         self.assertEqual(opened.call_count, 2)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5])
         self.assertNotIn("private failure", str(caught.exception))
+
+    def test_duplicate_json_and_oversized_responses_are_rejected(self):
+        duplicate = Response(
+            b'{"choices":[],"choices":[{"message":{"content":"{}"}}]}'
+        )
+        with patch(
+            "nunchi.classifiers.urllib.request.urlopen",
+            return_value=duplicate,
+        ):
+            with self.assertRaises(Exception):
+                classify_attention_v2(self.projection, self.config)
+
+        oversized = Response(b"x" * 17)
+        with (
+            patch("nunchi.classifiers.MAX_PROVIDER_RESPONSE_BYTES", 16),
+            patch(
+                "nunchi.classifiers.urllib.request.urlopen",
+                return_value=oversized,
+            ),
+        ):
+            with self.assertRaisesRegex(Exception, "size budget"):
+                classify_attention_v2(self.projection, self.config)
 
 
 if __name__ == "__main__":

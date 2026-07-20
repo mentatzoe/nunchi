@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from ..participant import ParticipantHostError, ParticipantTurn
-from .codex_room_runner import (
+from .codex_session_v2 import (
     CodexSessionStateError,
     load_codex_session,
     save_codex_session,

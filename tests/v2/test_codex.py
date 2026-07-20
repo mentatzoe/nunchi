@@ -14,7 +14,10 @@ from nunchi.integrations.codex_participant_v2 import (
     _DISABLED_TOOL_FEATURES,
     build_participant_prompt,
 )
-from nunchi.integrations.codex_room_runner import load_codex_session, save_codex_session
+from nunchi.integrations.codex_session_v2 import (
+    load_codex_session,
+    save_codex_session,
+)
 from nunchi.integrations.codex_room_v2 import CodexRoomV2, CodexRoomV2Error
 from nunchi.mcp_discord.events import message_event_from_create
 from nunchi.participant import ParticipantTurn

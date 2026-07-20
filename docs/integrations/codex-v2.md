@@ -46,5 +46,23 @@ credential. Plain HTTP is accepted only for a loopback transport, and redirects
 are followed only when the scheme, host, and port remain identical. The bearer
 credential must not be the Discord bot token.
 
+## Operator configuration surface
+
+`nunchi-codex-config-app` is V2-only and secret-redacted. It displays the exact
+participant and continuity binding, attention controls and budgets,
+recoverability claim, classifier model/prompt provenance, capability grants,
+session health, and bounded immutable receipts. It never returns the policy
+path, receipt path, provider endpoint, API credential, Discord token, MCP
+bearer, or persistent thread ID.
+
+The app is read-only unless its local owner starts it with
+`--allow-policy-write`. That flag enables an app-only tool for exactly four
+non-secret attention controls and requires the exact inspected policy
+provenance on every write, preventing a stale panel from overwriting a newer
+operator edit. Identity, authorization, provider, budgets, receipt binding and
+recoverability remain file-authority only. Persistent session removal has a
+separate `--allow-session-reset` authority. Neither is inferred from a message,
+reaction, model result, or room actor.
+
 See [operator instructions](../operators/v2.md) and the
 [security model](../security/v2.md).

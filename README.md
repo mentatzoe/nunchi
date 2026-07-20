@@ -12,15 +12,15 @@ Nunchi is between contracts. Keep these states separate:
 | Surface | What exists | Contract |
 |---|---|---|
 | [PyPI `0.2.0`](https://pypi.org/project/nunchi/0.2.0/) | Historical release from 2026-07-02; core library plus `nunchi` and `nunchi-channel` | Older V1 `PASS / ACK / ASK / SPEAK`, including the subsequently removed deterministic fast path |
-| This repository checkout | V1 runtime plus substantial unreleased adapter and harness work | Still V1; surfaces do not yet share one parity-proven lifecycle |
-| Selected V2 target | Design, governance, interfaces, slices, and acceptance program are ready | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
+| This repository checkout | V2 integration candidate: portable contracts/core, shared transport, CLI, Codex, generic/Discord/Matrix/Telegram adapters, security and installed-surface audit | `SUPPRESS / WAKE / DEFER`; Hermes and Claude V2 packets, live parity, frozen review, version/cutover still outstanding |
+| Selected V2 target | Implemented across the shared candidate surfaces, but not yet complete or released | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
 | V2 program lifecycle | 2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED` | At that snapshot all slices were `PLANNED` and dormant; V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED` |
 
 The checkout still reports package version `0.2.0`, so the version string alone
 does not establish which source or integration artifacts are installed. Record
 and verify the source commit for any operator deployment.
 
-## Selected V2 design — not implemented
+## Selected V2 design — candidate implementation, not release
 
 V2 makes Nunchi the participant's delegated pre-attention. It receives exact
 self identity and a bounded, structured, coverage-honest observation of the
@@ -186,85 +186,35 @@ and the final integration ladder. Its ordinary-path views are the
 `specs/` are planning control plane—not product contracts or proof—and product
 documentation does not depend on them.
 
-## Current implementation: V1
+## Candidate implementation truth
 
-Until the atomic cutover, the runnable core is a pre-reply admission gate. Its
-model returns exactly one V1 verdict:
+The importable source candidate is V2-only. `nunchi` exposes
+`attention-v2`; the generic, Discord, Matrix and Telegram entry points run the
+shared observation/attention/freshness/participant/receipt lifecycle; the
+Discord MCP server is V2-only and separately authenticated; Codex is a direct
+tool-empty participant; and the old admission API, channel sentinel, prompt
+gate, send gate and V1 Codex runner are absent.
 
-| Verdict | Current V1 meaning |
-|---|---|
-| `PASS` | Hard stop; emit no ordinary room message |
-| `ACK` | A brief acknowledgement is warranted |
-| `ASK` | A clarification is warranted |
-| `SPEAK` | A substantive contribution is warranted |
+This is not yet a complete product or release. The accepted Hermes and Claude
+Code V2 packets have not been integrated, the clean package still deliberately
+reports `0.2.0`, live mixed-room/provider evidence is incomplete, and no frozen
+candidate has received the required cross-family blocker review and successor
+re-review. V1 remains current until the atomic merge is post-merge verified as
+`CUTOVER_VERIFIED`.
 
-Every admission in the current checkout's core is model-judged. The former
-deterministic social fast path was removed after it falsely silenced direct
-corrections and treated name or text equality as proof of self-causation. The
-published `0.2.0` wheel predates that removal; use it only when deliberately
-reproducing the historical release. The current source improvement still does
-not make V1 equivalent to the selected V2 observation or lifecycle contract.
+`nunchi-install` retains the required product command surface but currently
+fails closed for every lifecycle command. It will not install the inherited V1
+Hermes or Claude Code artifacts or generate a settings snippet before exact
+accepted V2 packets are integrated. See [`docs/INSTALL.md`](docs/INSTALL.md).
 
-### Current V1 surfaces and evidence
+Status labels are evidence tiers, not release promises. Historical V1 code,
+contracts, fixtures and evidence remain labeled history; the V1 verdict corpus
+is list-only and cannot execute a hidden compatibility path.
 
-| Surface | Current repository state | Committed proof | V2 slice owner(s) |
-|---|---|---|---|
-| Core CLI and generic channel adapter | Implemented; the older core/channel surface is released in `0.2.0` | Offline tests and the [V1 regression corpus](evidence/verdict-suite/README.md) | `010`, `030`, `040`, `090` |
-| Matrix, Telegram, standalone Discord | Implemented in source | Offline tests; no committed live-server evidence | `090` |
-| Shared Discord-MCP transport | Implemented in source | [Bounded transport live smoke](evidence/mcp-discord/2026-07-07-live-smoke.md) | `050` |
-| Hermes plugin | Implemented in source | Offline tests; no committed integration evidence | `060` |
-| Claude Code wake hook | Implemented in source | Offline tests; no committed integration evidence | `070` |
-| Codex runner, hooks, and config app | Implemented in source | [Bounded V1 live smokes](evidence/codex/2026-07-09-vigil-persistent-session.md) | `080` |
-
-Status labels are evidence tiers, not release promises. In particular, the
-Codex evidence proves a bounded V1 lifecycle that still includes an outbound
-social re-gate; the relevant V2 slices must replace that behavior rather than treat it as V2
-parity. All current behavior records under `evidence/` remain V1 or historical
-inputs until new V2 evidence is produced.
-
-## Install and use the current V1 surface
-
-For the current repository behavior, install a reviewed source commit. A forced
-install matters because the source checkout and historical release currently
-share the `0.2.0` package version:
-
-```sh
-git clone https://github.com/mentatzoe/nunchi.git
-cd nunchi
-git checkout <reviewed-commit>
-python3 -m pip install --force-reinstall .
-
-# Optional dependencies for the standalone Discord adapter and Discord-MCP:
-python3 -m pip install --force-reinstall ".[discord,mcp-discord]"
-```
-
-The default package remains stdlib-only; the extras add their named optional
-dependencies. `nunchi-install` copies Hermes and Claude operator artifacts from
-a checkout into stable locations—it is not present in the published `0.2.0`
-wheel. See the [operator-artifact install guide](docs/INSTALL.md).
-
-For historical reproduction only, `python3 -m pip install "nunchi==0.2.0"`
-installs the older published core and `nunchi-channel` surface. Updating this
-README does not change the long description or code embedded in that release.
-
-### Minimal V1 CLI example
-
-Configure an OpenAI-compatible classifier and submit one admission request:
-
-```sh
-export NUNCHI_CLASSIFIER_MODEL="your/provider-model"
-export OPENROUTER_API_KEY="..."
-
-printf '%s\n' \
-  '{"trigger":{"id":"m-42","content":"Could someone review the migration plan?"},"context":[],"agent":{"id":"example-agent"}}' \
-  | nunchi admit
-```
-
-The command makes a real provider call and prints one V1 result object. The
-provider endpoint and credentials are operator-owned; request payloads cannot
-redirect them. For the in-process API, generic subprocess adapter, room
-profiles, and current V1 result schema, use the explicitly versioned guides
-below.
+Candidate installation and operation are documented in
+[`docs/operators/v2.md`](docs/operators/v2.md). A clean install must be built
+from an exact reviewed commit; the version string alone is intentionally not a
+release claim during integration.
 
 ## Documentation map
 
@@ -272,11 +222,11 @@ below.
 |---|---|
 | Selected V2 flow, interfaces, owners, and diagrams | [V2 selected design](docs/architecture/v2-selected-design.md) |
 | V2 execution model, SpecKit, workflows, and reinitialization | [V2 execution spine](docs/governance/execution-spine.md) |
-| Current V1 public contract and versioning | [V1 stability contract](docs/STABILITY.md) |
-| Current V1 host integration | [V1 integration guide](docs/integration.md) |
-| Current V1 platform adapters | [V1 adapter reference](docs/adapters.md) |
+| V2 compatibility and versioning | [V2 stability contract](docs/STABILITY.md) |
+| V2 host integration | [V2 integration guide](docs/integration.md) |
+| V2 platform adapters | [V2 adapter reference](docs/adapters.md) |
 | Source-only Hermes and Claude artifact installation | [Operator-artifact install guide](docs/INSTALL.md) |
-| Current V1 evaluation corpus | [Verdict-suite guide](docs/evaluations/verdict-suite.md) |
+| Historical V1 evaluation corpus | [Archived verdict-suite guide](docs/evaluations/verdict-suite.md) |
 | Implemented and historical evidence index | [Evidence index](evidence/README.md) |
 | Unreleased source changes and release history | [Changelog](CHANGELOG.md) |
 

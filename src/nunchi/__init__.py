@@ -1,6 +1,7 @@
-"""Nunchi public Python API."""
+"""Nunchi V2 public Python API."""
 
-from .core import evaluate
-from .models import VERDICTS
+from .core import evaluate_v2
 
-__all__ = ["VERDICTS", "evaluate"]
+ATTENTION_DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
+
+__all__ = ["ATTENTION_DISPOSITIONS", "evaluate_v2"]

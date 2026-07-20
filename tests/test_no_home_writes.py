@@ -135,10 +135,11 @@ class TestHookRunnersUseSandbox(unittest.TestCase):
             ):
                 hook_referencing += 1
             violations.extend(_scan_for_bare_env(path.name, text))
-        # Guard against silent no-op: the known hook test modules must be seen.
+        # Guard against silent no-op: the remaining inherited hook test
+        # modules must be seen while the V2 packet is still pending.
         self.assertGreaterEqual(
-            hook_referencing, 3,
-            "scan looks broken: expected at least the three hook test modules",
+            hook_referencing, 2,
+            "scan looks broken: expected the inherited hook test modules",
         )
         self.assertEqual(violations, [], "\n".join(violations))
 

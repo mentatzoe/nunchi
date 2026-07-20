@@ -18,6 +18,7 @@ import math
 import os
 import re
 import stat
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -491,9 +492,7 @@ def _read_secure_file(path: Path) -> bytes:
         os.close(descriptor)
 
 
-def load_operator_policy(path: str | os.PathLike[str]) -> OperatorPolicy:
-    """Load one immutable V2 policy from a trusted operator-selected file."""
-    raw = _read_secure_file(Path(path))
+def _policy_from_raw(raw: bytes) -> OperatorPolicy:
     root = _closed_object(
         _parse(raw),
         required=(
@@ -523,6 +522,141 @@ def load_operator_policy(path: str | os.PathLike[str]) -> OperatorPolicy:
     )
 
 
+def load_operator_policy(path: str | os.PathLike[str]) -> OperatorPolicy:
+    """Load one immutable V2 policy from a trusted operator-selected file."""
+    return _policy_from_raw(_read_secure_file(Path(path)))
+
+
+def update_operator_attention_controls(
+    path: str | os.PathLike[str],
+    patch: dict[str, Any],
+    *,
+    expected_provenance: str,
+) -> OperatorPolicy:
+    """Atomically update the small non-secret attention-control surface.
+
+    The caller must present the exact provenance it inspected. Identity,
+    provider endpoint/model/credential, authorization grants, receipt binding,
+    recoverability, and all budgets are deliberately outside this mutation
+    surface.
+    """
+    allowed = {
+        "preattention_enabled",
+        "social_suppression_enabled",
+        "error_action",
+        "transition_defer_margin",
+    }
+    if (
+        not isinstance(patch, dict)
+        or not patch
+        or set(patch) - allowed
+        or not isinstance(expected_provenance, str)
+        or not expected_provenance
+    ):
+        raise _fail("policy-update-invalid")
+    policy_path = Path(path)
+    raw = _read_secure_file(policy_path)
+    current = _policy_from_raw(raw)
+    if current.provenance != expected_provenance:
+        raise _fail("policy-stale")
+    root = _parse(raw)
+    attention = root.get("attention")
+    if not isinstance(attention, dict):
+        raise _fail()
+    for key, value in patch.items():
+        if key in ("preattention_enabled", "social_suppression_enabled"):
+            if not isinstance(value, bool):
+                raise _fail("policy-update-invalid")
+            attention[key] = value
+        elif key == "error_action":
+            if value not in ("WAKE", "NO_WAKE"):
+                raise _fail("policy-update-invalid")
+            attention[key] = value
+        elif key == "transition_defer_margin":
+            if value is None:
+                attention.pop("transition_defer_margin", None)
+                attention.pop("transition_defer_margin_source", None)
+            else:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))
+                    or not 0.0 <= float(value) <= 1.0
+                ):
+                    raise _fail("policy-update-invalid")
+                attention[key] = float(value)
+                attention["transition_defer_margin_source"] = (
+                    "operator:codex-config-app"
+                )
+    try:
+        updated_raw = (
+            json.dumps(
+                root,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise _fail("policy-update-invalid") from exc
+    if len(updated_raw) > MAX_POLICY_BYTES:
+        raise _fail("policy-too-large")
+    updated = _policy_from_raw(updated_raw)
+    try:
+        parent = policy_path.parent.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid != os.geteuid()
+            or stat.S_IMODE(parent.st_mode) & 0o022
+        ):
+            raise _fail("policy-source-unsafe")
+        if _read_secure_file(policy_path) != raw:
+            raise _fail("policy-stale")
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=policy_path.parent,
+            prefix=".nunchi-policy-",
+            suffix=".tmp",
+        )
+        try:
+            os.fchmod(descriptor, 0o600)
+            view = memoryview(updated_raw)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("policy update made no progress")
+                view = view[written:]
+            os.fsync(descriptor)
+            os.close(descriptor)
+            descriptor = -1
+            os.replace(temporary_name, policy_path)
+            directory_fd = os.open(
+                policy_path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+            raise
+    except PolicyLoadError:
+        raise
+    except OSError as exc:
+        raise _fail("policy-update-failed") from exc
+    return updated
+
+
 class OperatorPolicySource:
     """Reloadable source used by hosts immediately before privileged effects."""
 
@@ -549,4 +683,5 @@ __all__ = [
     "ReceiptSinkPolicy",
     "ResourceScope",
     "load_operator_policy",
+    "update_operator_attention_controls",
 ]

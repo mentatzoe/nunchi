@@ -21,11 +21,8 @@ path this repo ships) rather than by grep.
 Allowed exceptions, each one deliberate:
   * this file (it names the patterns as literals);
   * ``CHANGELOG.md`` (immutable release history may mention removed things);
-  * ``install.py`` + its tests (they must NAME the retired files to delete them
-    from live machines) — checked separately so they may reference the retired
-    *names* but must never reinstall them;
-  * the Codex integration's own send hook (Vigil's; it enforces the wake-time
-    admission carried in-band — it is not a second judgment and not ours).
+The V2 installer is blocked until accepted external packets exist, so it has no
+exception here: even retirement vocabulary does not belong in that surface.
 """
 from __future__ import annotations
 
@@ -59,8 +56,6 @@ _RETIRED_ARTIFACTS = (
 _RETIRED_ALLOWED = {
     "tests/test_no_second_judgment.py",
     "CHANGELOG.md",
-    "src/nunchi/install.py",
-    "tests/test_install.py",
     "tests/test_no_home_writes.py",  # scanner marker history in its docstring
     # Migration instructions must NAME the retired artifacts so operators can
     # delete the right settings entry / recognize the retired files:
@@ -122,22 +117,6 @@ class RetiredSendTimeGateStaysRemoved(unittest.TestCase):
                         violations.append(f"{rel}:{lineno}: references {artifact!r}")
         self.assertGreaterEqual(scanned, 40, "scan looks broken: too few files")
         self.assertEqual(violations, [], "\n".join(violations))
-
-    def test_installer_names_retired_files_only_to_remove_them(self):
-        """The installer may reference the retired names — but only in the
-        retirement list, never in the install list."""
-        import sys
-
-        sys.path.insert(0, str(_REPO_ROOT / "src"))
-        from nunchi import install
-
-        for retired in install.CLAUDE_RETIRED_FILES:
-            self.assertNotIn(retired, install.CLAUDE_HOOK_FILES)
-            self.assertNotIn(retired, install.CLAUDE_WRAPPERS)
-            self.assertNotIn(retired, install.CLAUDE_WRAPPERS.values())
-        snippet = install.build_claude_settings_snippet(pathlib.Path("/tmp/x"))
-        self.assertNotIn("PreToolUse", snippet)
-
 
 class LedgerShapeStaysRemoved(unittest.TestCase):
     def test_no_ledger_references_anywhere(self):

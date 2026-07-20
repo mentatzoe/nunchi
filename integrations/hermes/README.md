@@ -1,5 +1,12 @@
 # Hermes Integration: nunchi-gate
 
+> **Inherited V1 packet material — do not install as V2.** This directory has
+> not yet been replaced by Aleph's accepted Hermes V2 packet. The descriptions
+> below document the inherited implementation and are retained only as packet
+> input. `nunchi-install` fails closed and will not copy it. The required V2
+> outcome is tracked in [`docs/INSTALL.md`](../../docs/INSTALL.md) and
+> [`docs/adapters.md`](../../docs/adapters.md).
+
 `nunchi-gate` is a [Hermes](https://github.com/example/hermes) gateway plugin
 that runs every incoming channel message through the `nunchi-channel` CLI and
 suppresses the agent reply when nunchi returns a `PASS` verdict (stay silent).
@@ -56,7 +63,7 @@ config key is set and the key is already exported:
 
 ---
 
-## Install
+## Historical V1 install procedure (disabled)
 
 Install the plugin by **copying** it into Hermes' plugin search path with
 `nunchi-install` (from a checkout of this repo):

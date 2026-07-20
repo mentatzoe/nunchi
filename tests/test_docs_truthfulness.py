@@ -11,7 +11,6 @@ Fully offline; reads only files inside the repo.
 
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import re
 import tomllib
@@ -38,74 +37,12 @@ _MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 
-# (module name, env var, adapters.md env-table row key)
-_ADAPTER_CASES = (
-    ("nunchi.adapters.matrix", "NUNCHI_MATRIX_HISTORY"),
-    ("nunchi.adapters.telegram", "NUNCHI_TELEGRAM_HISTORY"),
-    ("nunchi.adapters.discord", "NUNCHI_DISCORD_HISTORY"),
-)
-
-
 def _load_hermes_plugin() -> types.ModuleType:
     spec = importlib.util.spec_from_file_location("nunchi_gate_docs_check", _HERMES_PLUGIN)
     assert spec is not None and spec.loader is not None, f"missing plugin at {_HERMES_PLUGIN}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # type: ignore[union-attr]
     return module
-
-
-def _documented_default_near(text: str, env_var: str) -> int | None:
-    """Return the ``(default: N)`` value documented near *env_var*, if any."""
-    idx = text.find(env_var)
-    if idx == -1:
-        return None
-    window = text[idx : idx + 200]
-    match = re.search(r"\(default:\s*(\d+)\)", window)
-    return int(match.group(1)) if match else None
-
-
-class AdapterHistoryDefaultDocstringTest(unittest.TestCase):
-    """Module docstrings must state the same default as _DEFAULT_HISTORY_LEN."""
-
-    def test_docstring_default_matches_code_default(self) -> None:
-        for module_name, env_var in _ADAPTER_CASES:
-            with self.subTest(module=module_name):
-                mod = importlib.import_module(module_name)
-                expected = mod._DEFAULT_HISTORY_LEN
-                documented = _documented_default_near(mod.__doc__ or "", env_var)
-                self.assertIsNotNone(
-                    documented,
-                    f"{module_name} docstring does not document a default for {env_var}",
-                )
-                self.assertEqual(
-                    documented,
-                    expected,
-                    f"{module_name} docstring documents {env_var} default {documented}, "
-                    f"but the code default is {expected}",
-                )
-
-
-class AdapterHistoryDefaultDocsTableTest(unittest.TestCase):
-    """docs/adapters.md env tables must state the code defaults."""
-
-    def test_adapters_md_defaults_match_code_defaults(self) -> None:
-        text = _ADAPTERS_MD.read_text(encoding="utf-8")
-        for module_name, env_var in _ADAPTER_CASES:
-            with self.subTest(env_var=env_var):
-                mod = importlib.import_module(module_name)
-                expected = mod._DEFAULT_HISTORY_LEN
-                row = re.search(
-                    r"\|\s*`" + env_var + r"`\s*\|\s*no\s*\|\s*`(\d+)`\s*\|", text
-                )
-                self.assertIsNotNone(
-                    row, f"docs/adapters.md has no env-table row for {env_var}"
-                )
-                self.assertEqual(
-                    int(row.group(1)),
-                    expected,
-                    f"docs/adapters.md documents {env_var} default {row.group(1)}, "
-                    f"but the code default is {expected}",
-                )
 
 
 class HermesHistoryWindowDocumentedTest(unittest.TestCase):
@@ -189,8 +126,10 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
             "At slice level, `v2-integrator` accepts slices `010`–`100`, while Zoe accepts the exact slice-`110` candidate",
             "Only `110-v2-parity-cutover` may combine accepted handoffs",
             "Zoe's explicit `CUTOVER_ACCEPTED` decision",
-            "Selected V2 design — not implemented",
-            "Current implementation: V1",
+            "Selected V2 design — candidate implementation, not release",
+            "Candidate implementation truth",
+            "The importable source candidate is V2-only",
+            "accepted Hermes and Claude Code V2 packets have not been integrated",
             "Status labels are evidence tiers",
         )
         for phrase in required:
@@ -295,11 +234,13 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
                 self.assertIn("dependent", normalized)
                 self.assertIn("upstream handoff", normalized)
 
-    def test_source_only_install_guides_do_not_claim_pypi_surfaces(self) -> None:
+    def test_candidate_install_guides_do_not_claim_unavailable_surfaces(self) -> None:
         install_text = _INSTALL_MD.read_text(encoding="utf-8")
         mcp_text = _MCP_DISCORD_README.read_text(encoding="utf-8")
 
-        self.assertIn("is not present in that release", install_text)
+        self.assertIn("fails closed and never modifies the filesystem", install_text)
+        self.assertIn("accepted-v2-integration-packets-unavailable", install_text)
+        self.assertIn("not an installable product", install_text)
         self.assertIn("does not contain the", mcp_text)
         self.assertNotIn("pip install nunchi[mcp-discord]", mcp_text)
 

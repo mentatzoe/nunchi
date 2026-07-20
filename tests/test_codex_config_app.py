@@ -1,271 +1,185 @@
-"""Offline backend and bundle tests for the Codex MCP Apps config panel."""
+"""Offline security and contract tests for the Codex V2 config app."""
 
 from __future__ import annotations
 
 import asyncio
 import importlib.util
 import json
-import pathlib
-import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from nunchi.integrations.codex_config_app import (
     TEMPLATE_URI,
     ConfigAppService,
     build_mcp_server,
-    default_config_argv,
     load_ui_html,
+    main,
 )
-from nunchi.integrations.codex_room_runner import RunnerConfig, save_codex_session
-from tests.hook_sandbox import sandbox_env
+from nunchi.integrations.codex_session_v2 import save_codex_session
+from nunchi.policy import load_operator_policy
+from tests.v2.security.helpers import clone_policy, write_policy
 
 
-def _service(root: pathlib.Path) -> ConfigAppService:
-    return ConfigAppService(
-        environ={},
-        config=RunnerConfig(
-            channels=frozenset({"1522258711047831653"}),
-            channel_bin="/bin/sh",
-            codex_bin="/bin/sh",
-            state_path=root / "state.json",
-            log_path=root / "receipts.jsonl",
-            session_path=root / "session.json",
-            agent_id="vigil",
-            mention_id="1494822530643398827",
-        ),
-    )
+class ConfigAppCase(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.receipts = self.root / "receipts"
+        self.receipts.mkdir(mode=0o700)
+        document = clone_policy()
+        document["receipt_sink"]["directory"] = str(self.receipts)
+        self.policy_path = write_policy(self.root, document)
+        self.session_path = self.root / "session.json"
 
-
-class TestConfigAppService(unittest.TestCase):
-    def test_default_config_argv_discovers_conventional_runner_file(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            self.assertEqual(default_config_argv({"HOME": td}), [])
-            config = root / ".nunchi" / "codex-runner.toml"
-            config.parent.mkdir()
-            config.write_text("[runner]\nchannels = [\"123\"]\n", encoding="utf-8")
-
-            self.assertEqual(
-                default_config_argv({"HOME": td}),
-                ["--config", str(config)],
-            )
-            self.assertEqual(
-                default_config_argv(
-                    {"HOME": td, "NUNCHI_RUNNER_CONFIG": "/operator/explicit.toml"}
-                ),
-                [],
-            )
-
-    def test_snapshot_exposes_runtime_controls_without_operator_identity(self):
-        with tempfile.TemporaryDirectory() as td:
-            snapshot = _service(pathlib.Path(td)).snapshot()
-
-        self.assertEqual(snapshot["api_version"], 1)
-        self.assertIn("1522258711047831653", snapshot["effective"])
-        self.assertEqual(snapshot["baseline"]["senders"], "all")
-        self.assertNotIn("agent_id", snapshot["baseline"])
-        self.assertNotIn("mention_id", snapshot["baseline"])
-        self.assertNotIn("state_path", snapshot)
-        self.assertNotIn("log_path", snapshot)
-
-    def test_update_is_immediately_visible_in_effective_snapshot(self):
-        with tempfile.TemporaryDirectory() as td:
-            service = _service(pathlib.Path(td))
-            result = service.update(
-                {
-                    "global": {"senders": "humans", "verbosity": "debug"},
-                    "channels": {
-                        "1522258711047831653": {
-                            "model": "deepseek/deepseek-v4-flash",
-                            "pinned_rules": "Wait for a useful opening.",
-                        }
-                    },
-                }
-            )
-
-        self.assertTrue(result["ok"])
-        effective = result["snapshot"]["effective"]["1522258711047831653"]
-        self.assertEqual(effective["senders"], "humans")
-        self.assertEqual(effective["verbosity"], "debug")
-        self.assertEqual(effective["model"], "deepseek/deepseek-v4-flash")
-        self.assertEqual(effective["pinned_rules"], "Wait for a useful opening.")
-
-    def test_rejected_patch_is_all_or_nothing(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            service = _service(root)
-            result = service.update(
-                {"global": {"senders": "humans", "agent_id": "attacker"}}
-            )
-
-            self.assertFalse(result["ok"])
-            self.assertEqual(result["rejected_keys"], ["global.agent_id"])
-            self.assertFalse((root / "state.json").exists())
-
-    def test_receipts_are_newest_first(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            path = root / "receipts.jsonl"
-            path.write_text(
-                json.dumps({"message_id": "old"})
-                + "\n"
-                + json.dumps({"message_id": "new"})
-                + "\n",
-                encoding="utf-8",
-            )
-            result = _service(root).receipts(limit=10)
-
-        self.assertEqual(
-            [receipt["message_id"] for receipt in result["receipts"]],
-            ["new", "old"],
+    def service(self, **kwargs):
+        return ConfigAppService(
+            policy_path=self.policy_path,
+            session_path=self.session_path,
+            **kwargs,
         )
 
-    def test_snapshot_and_reset_expose_persistent_session_health(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            service = _service(root)
-            self.assertFalse(service.snapshot()["health"]["codex_session"]["active"])
-            save_codex_session(
-                root / "session.json",
-                "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
-            )
+    def test_snapshot_is_v2_and_never_returns_secret_or_paths(self):
+        snapshot = self.service().snapshot()
+        encoded = json.dumps(snapshot)
+        self.assertEqual(snapshot["api_version"], 2)
+        self.assertEqual(snapshot["policy"]["identity"]["participant_id"], "vigil")
+        self.assertTrue(snapshot["policy"]["classifier"]["credential_configured"])
+        self.assertNotIn("do-not-project-this-secret", encoded)
+        self.assertNotIn(str(self.policy_path), encoded)
+        self.assertNotIn(str(self.receipts), encoded)
+        self.assertNotIn("provider.invalid", encoded)
+        self.assertFalse(snapshot["capabilities"]["policy_write"])
 
-            health = service.snapshot()["health"]["codex_session"]
-            self.assertTrue(health["active"])
-            self.assertIsNotNone(health["updated_at"])
-            self.assertNotIn("thread_id", health)
-            result = service.reset_session()
+    def test_attention_write_is_explicit_optimistic_and_closed(self):
+        read_only = self.service()
+        provenance = read_only.snapshot()["policy"]["provenance"]
+        self.assertEqual(
+            read_only.update_attention(
+                {"preattention_enabled": False},
+                expected_provenance=provenance,
+            ),
+            {"ok": False, "error": "policy-write-disabled"},
+        )
 
+        service = self.service(allow_policy_write=True)
+        result = service.update_attention(
+            {
+                "preattention_enabled": False,
+                "social_suppression_enabled": False,
+                "error_action": "NO_WAKE",
+                "transition_defer_margin": None,
+            },
+            expected_provenance=provenance,
+        )
         self.assertTrue(result["ok"])
-        self.assertFalse(result["snapshot"]["health"]["codex_session"]["active"])
+        updated = load_operator_policy(self.policy_path)
+        self.assertFalse(updated.attention.preattention_enabled)
+        self.assertFalse(updated.attention.social_suppression_enabled)
+        self.assertEqual(updated.attention.error_action, "NO_WAKE")
+        self.assertIsNone(updated.attention.transition_defer_margin)
+        self.assertEqual(updated.classifier.api_key, "do-not-project-this-secret")
+        self.assertEqual(len(updated.authorization.grants), 2)
 
-    def test_corrupt_session_is_reported_and_can_be_reset(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            service = _service(root)
-            session_path = root / "session.json"
-            session_path.write_text("bad-json", encoding="utf-8")
-            session_path.chmod(0o600)
+        stale = service.update_attention(
+            {"preattention_enabled": True},
+            expected_provenance=provenance,
+        )
+        self.assertEqual(stale, {"ok": False, "error": "policy-stale"})
+        closed = service.update_attention(
+            {"participant_id": "attacker"},
+            expected_provenance=updated.provenance,
+        )
+        self.assertEqual(closed, {"ok": False, "error": "policy-update-invalid"})
 
-            health = service.snapshot()["health"]["codex_session"]
-            self.assertFalse(health["active"])
-            self.assertIn("cannot read Codex session state", health["error"])
-            service.reset_session()
+    def test_receipts_are_bounded_newest_first_and_unsafe_files_are_ignored(self):
+        older = self.receipts / "attention-old.jsonl"
+        newer = self.receipts / "transport-new.jsonl"
+        older.write_text(json.dumps({"request_id": "old"}), encoding="utf-8")
+        newer.write_text(json.dumps({"request_id": "new"}), encoding="utf-8")
+        older.chmod(0o600)
+        newer.chmod(0o600)
+        older.touch()
+        newer.touch()
+        unsafe = self.receipts / "attention-unsafe.jsonl"
+        unsafe.write_text(json.dumps({"request_id": "unsafe"}), encoding="utf-8")
+        unsafe.chmod(0o644)
+        result = self.service().receipts(limit=1)
+        self.assertTrue(result["available"])
+        self.assertEqual(len(result["receipts"]), 1)
+        self.assertNotEqual(result["receipts"][0]["request_id"], "unsafe")
 
-            self.assertIsNone(service.snapshot()["health"]["codex_session"]["error"])
+    def test_session_reset_requires_explicit_process_authority(self):
+        save_codex_session(
+            self.session_path,
+            "019f4914-a9c7-7090-bec3-0e78fa9b84e1",
+        )
+        self.assertEqual(self.service().snapshot()["health"]["codex_session"]["state"], "valid")
+        self.assertEqual(
+            self.service().reset_session(),
+            {"ok": False, "error": "session-reset-disabled"},
+        )
+        result = self.service(allow_session_reset=True).reset_session()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["snapshot"]["health"]["codex_session"]["state"], "absent")
 
-
-class TestConfigUiAsset(unittest.TestCase):
-    def test_ui_contains_settings_receipts_and_host_tool_calls(self):
+    def test_help_is_import_safe_and_ui_has_only_v2_controls(self):
+        with self.assertRaises(SystemExit) as caught:
+            main(["--help"])
+        self.assertEqual(caught.exception.code, 0)
         html = load_ui_html()
         for fragment in (
-            "Global overrides",
-            "Add channel",
-            "Receipt detail",
-            "Room governance",
-            "Confirm reset",
-            "Global senders",
-            "document.createElement",
-            "textContent",
-            "pending add",
-            "get_nunchi_config",
-            "update_nunchi_config",
-            "reset_nunchi_session",
+            "Participant-shaped pre-attention",
+            "Allow model SUPPRESS",
+            "update_nunchi_attention",
             "get_nunchi_receipts",
-            'method: "tools/call"',
+            'method:"tools/call"',
+            "textContent",
         ):
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, html)
+            self.assertIn(fragment, html)
+        self.assertNotIn("PASS", html)
+        self.assertNotIn("SPEAK", html)
         self.assertNotIn("<script src=", html)
-        self.assertNotIn("window.confirm", html)
-        self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
 
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "mcp extra not installed")
-class TestMcpAppsContract(unittest.TestCase):
-    def test_tools_and_ui_resource_publish_mcp_apps_metadata(self):
-        with tempfile.TemporaryDirectory() as td:
-            server = build_mcp_server(_service(pathlib.Path(td)))
+class MCPAppsContract(unittest.TestCase):
+    def test_tools_and_ui_are_v2_and_mutations_are_app_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipts = root / "receipts"
+            receipts.mkdir(mode=0o700)
+            document = clone_policy()
+            document["receipt_sink"]["directory"] = str(receipts)
+            service = ConfigAppService(
+                policy_path=write_policy(root, document),
+                session_path=root / "session.json",
+            )
+            server = build_mcp_server(service)
 
-            async def inspect_server():
+            async def inspect():
                 tools = {tool.name: tool for tool in await server.list_tools()}
                 resources = await server.list_resources()
                 content = list(await server.read_resource(TEMPLATE_URI))
                 return tools, resources, content
 
-            tools, resources, content = asyncio.run(inspect_server())
-
+            tools, resources, content = asyncio.run(inspect())
         self.assertEqual(
             set(tools),
             {
                 "open_nunchi_config",
                 "get_nunchi_config",
-                "update_nunchi_config",
+                "update_nunchi_attention",
                 "reset_nunchi_session",
                 "get_nunchi_receipts",
             },
         )
-        open_meta = tools["open_nunchi_config"].meta
-        self.assertEqual(open_meta["ui"]["resourceUri"], TEMPLATE_URI)
-        self.assertEqual(open_meta["openai/outputTemplate"], TEMPLATE_URI)
-        self.assertTrue(tools["open_nunchi_config"].annotations.readOnlyHint)
-        self.assertFalse(tools["update_nunchi_config"].annotations.readOnlyHint)
-        self.assertTrue(tools["reset_nunchi_session"].annotations.destructiveHint)
+        self.assertEqual(tools["update_nunchi_attention"].meta["ui"]["visibility"], ["app"])
+        self.assertEqual(tools["reset_nunchi_session"].meta["ui"]["visibility"], ["app"])
         self.assertEqual(str(resources[0].uri), TEMPLATE_URI)
-        self.assertEqual(content[0].mime_type, "text/html;profile=mcp-app")
-        self.assertIn("Nunchi", content[0].content)
-
-    def test_stdio_server_round_trip(self):
-        from mcp import ClientSession
-        from mcp.client.stdio import StdioServerParameters, stdio_client
-
-        with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td)
-            env = sandbox_env(
-                {
-                    "NUNCHI_RUNNER_STATE": str(root / "state.json"),
-                    "NUNCHI_RUNNER_LOG": str(root / "receipts.jsonl"),
-                    "NUNCHI_RUNNER_SESSION_STATE": str(root / "session.json"),
-                    "NUNCHI_CHANNEL_BIN": "/bin/sh",
-                    "NUNCHI_RUNNER_CODEX_BIN": "/bin/sh",
-                    "NUNCHI_RUNNER_CHANNELS": "1522258711047831653",
-                }
-            )
-
-            async def round_trip():
-                params = StdioServerParameters(
-                    command=sys.executable,
-                    args=["-m", "nunchi.integrations.codex_config_app"],
-                    env=env,
-                )
-                async with stdio_client(params) as (read_stream, write_stream):
-                    async with ClientSession(read_stream, write_stream) as session:
-                        await session.initialize()
-                        tools = await session.list_tools()
-                        opened = await session.call_tool("open_nunchi_config", {})
-                        updated = await session.call_tool(
-                            "update_nunchi_config",
-                            {
-                                "patch": {
-                                    "channels": {
-                                        "1522258711047831653": {"senders": "humans"}
-                                    }
-                                }
-                            },
-                        )
-                        resource = await session.read_resource(TEMPLATE_URI)
-                        return tools, opened, updated, resource
-
-            tools, opened, updated, resource = asyncio.run(round_trip())
-
-        self.assertEqual(len(tools.tools), 5)
-        self.assertEqual(opened.structuredContent["api_version"], 1)
-        self.assertTrue(updated.structuredContent["ok"])
-        effective = updated.structuredContent["snapshot"]["effective"]
-        self.assertEqual(effective["1522258711047831653"]["senders"], "humans")
-        self.assertEqual(resource.contents[0].mimeType, "text/html;profile=mcp-app")
+        self.assertIn("Nunchi V2", content[0].content)
 
 
 if __name__ == "__main__":

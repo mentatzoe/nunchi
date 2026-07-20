@@ -1,5 +1,13 @@
 # nunchi for Claude Code — one judgment per turn, at wake
 
+> **Inherited V1 packet material — do not install as V2.** This directory has
+> not yet been replaced by Claude's accepted Claude Code V2 packet. The
+> descriptions below document the inherited implementation and are retained
+> only as packet input. `nunchi-install` fails closed and will not register or
+> copy it. The required V2 outcome is tracked in
+> [`docs/INSTALL.md`](../../docs/INSTALL.md) and
+> [`docs/adapters.md`](../../docs/adapters.md).
+
 ## The shape
 
 Nunchi asks one question, once, before an agent takes a turn: *does this agent
@@ -88,7 +96,7 @@ added to the turn's context:
 **permanently fail-open** — a broken gate must never silence the operator or
 wedge the session.
 
-## settings.json configuration
+## Historical V1 settings configuration (disabled)
 
 One `UserPromptSubmit` entry (no matcher — the hook self-selects on the
 `<channel>` tag). Prefer `nunchi-install`, which writes stable wrappers under
