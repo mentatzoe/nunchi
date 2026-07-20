@@ -38,5 +38,13 @@ environment without Discord or classifier secrets. Read-only sandboxing is an
 additional boundary, not a substitute for removing tools. The host rejects any
 observed Codex tool event before it persists the thread or accepts an action.
 
+The shared Discord transport requires a separate bearer credential in
+`NUNCHI_MCP_DISCORD_AUTH_TOKEN` by default. `--transport-auth-env` may name a
+different trusted environment variable; it never accepts the secret itself on
+the command line. Every initialize, tool, and event-stream request carries that
+credential. Plain HTTP is accepted only for a loopback transport, and redirects
+are followed only when the scheme, host, and port remain identical. The bearer
+credential must not be the Discord bot token.
+
 See [operator instructions](../operators/v2.md) and the
 [security model](../security/v2.md).

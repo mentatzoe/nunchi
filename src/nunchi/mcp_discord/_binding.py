@@ -9,7 +9,7 @@ tracking, notification push, and the uvicorn/Starlette lifecycle.
 Custom vendor notifications: the SDK's ServerNotification union is closed,
 but ``ServerSession.send_notification`` serializes with ``model_dump()`` and
 only needs ``method`` and ``params`` fields, so a duck-typed pydantic model
-carries ``notifications/discord/message`` (delivered on the session's
+carries ``notifications/nunchi/v2/discord/event`` (delivered on the session's
 standalone SSE stream since it has no related request).
 
 Session tracking: the low-level Server exposes sessions only inside request
@@ -37,16 +37,14 @@ from starlette.routing import Mount
 from .config import Config
 from .events import (
     DiscordEventSourceV2,
-    NOTIFICATION_METHOD,
     V2_NOTIFICATION_METHOD,
-    notification_params,
 )
-from .gateway import GatewayProtocol, V2_INTENTS
+from .gateway import GatewayProtocol
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
-from .server import InFlight, enqueue_event, pump_notifications
-from .tools import TOOL_SCHEMAS, V2_TOOL_SCHEMAS, ToolExecutor
+from .server import BearerAuthMiddleware, InFlight, enqueue_event, pump_notifications
+from .tools import TOOL_SCHEMAS, ToolExecutor
 
 logger = logging.getLogger("nunchi.mcp_discord.binding")
 
@@ -80,9 +78,9 @@ async def broadcast(
     registry: SessionRegistry,
     params: dict,
     *,
-    method: str = NOTIFICATION_METHOD,
+    method: str = V2_NOTIFICATION_METHOD,
 ) -> None:
-    """Push one discord/message notification to every live session."""
+    """Push one versioned Discord event notification to every live session."""
     notification = _VendorNotification(method=method, params=params)
     for session in registry.sessions():
         try:
@@ -134,13 +132,13 @@ def serve(config: Config) -> int:
     executor = ToolExecutor(
         rest,
         backstop,
-        allowed_channel_ids=(config.channels if config.mode == "v2" else None),
+        allowed_channel_ids=config.channels,
     )
     server = build_server(
         executor,
         registry,
         in_flight,
-        tool_schemas=(V2_TOOL_SCHEMAS if config.mode == "v2" else TOOL_SCHEMAS),
+        tool_schemas=TOOL_SCHEMAS,
     )
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None)
 
@@ -148,24 +146,14 @@ def serve(config: Config) -> int:
     async def lifespan(_app):
         shutdown = asyncio.Event()
         queue: asyncio.Queue = asyncio.Queue(maxsize=config.queue_maxsize)
-        source = (
-            DiscordEventSourceV2(
-                allowed_channel_ids=config.channels,
-                blocked_actor_ids=config.blocked_actors,
-            )
-            if config.mode == "v2"
-            else None
+        source = DiscordEventSourceV2(
+            allowed_channel_ids=config.channels,
+            blocked_actor_ids=config.blocked_actors,
         )
-        protocol = (
-            GatewayProtocol(config.token, intents=V2_INTENTS)
-            if source is not None
-            else GatewayProtocol(config.token)
-        )
+        protocol = GatewayProtocol(config.token)
         runner = GatewayRunner(
             protocol,
             lambda event: enqueue_event(queue, event),
-            retain_self=source is not None,
-            v2_events=source is not None,
         )
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
@@ -174,10 +162,10 @@ def serve(config: Config) -> int:
                 lambda params: broadcast(
                     registry,
                     params,
-                    method=(V2_NOTIFICATION_METHOD if source is not None else NOTIFICATION_METHOD),
+                    method=V2_NOTIFICATION_METHOD,
                 ),
                 shutdown=shutdown,
-                projector=(source.notification_params if source is not None else notification_params),
+                projector=source.notification_params,
             ),
             name="notification-pump",
         )
@@ -214,13 +202,22 @@ def serve(config: Config) -> int:
                 logger.info("transport shut down cleanly")
 
     app = Starlette(
-        routes=[Mount("/mcp", app=session_manager.handle_request)],
+        routes=[
+            Mount(
+                "/mcp",
+                app=BearerAuthMiddleware(
+                    session_manager.handle_request,
+                    config.auth_token,
+                ),
+            )
+        ],
         lifespan=lifespan,
     )
 
     logger.info(
-        "nunchi-mcp-discord listening on http://%s:%d/mcp (mode=%s, transport only)",
-        config.host, config.port, config.mode,
+        "nunchi-mcp-discord V2 listening on http://%s:%d/mcp",
+        config.host,
+        config.port,
     )
     uvicorn.run(app, host=config.host, port=config.port, log_level="info")
     return 0

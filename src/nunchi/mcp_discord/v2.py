@@ -184,13 +184,21 @@ class MCPDiscordActionSinkV2:
         channel_id: str,
         client: MCPToolClientLike,
         receipt_sink: Callable[[dict[str, Any]], None],
+        max_request_ids: int = 4096,
     ) -> None:
         resolved = _snowflake(channel_id)
         if resolved is None or not callable(receipt_sink):
             raise ValueError("Discord MCP action binding is invalid")
+        if (
+            isinstance(max_request_ids, bool)
+            or not isinstance(max_request_ids, int)
+            or not 1 <= max_request_ids <= 100000
+        ):
+            raise ValueError("Discord MCP action capacity is invalid")
         self.channel_id = resolved
         self.client = client
         self.receipt_sink = receipt_sink
+        self.max_request_ids = max_request_ids
         self._lock = threading.RLock()
         self._consumed_request_ids: set[str] = set()
 
@@ -203,6 +211,8 @@ class MCPDiscordActionSinkV2:
         with self._lock:
             if request_id in self._consumed_request_ids:
                 raise DiscordV2ActionError("Discord MCP action request was already consumed")
+            if len(self._consumed_request_ids) >= self.max_request_ids:
+                raise DiscordV2ActionError("Discord MCP action capacity is exhausted")
             self._consumed_request_ids.add(request_id)
         try:
             accepted = copy.deepcopy(action)

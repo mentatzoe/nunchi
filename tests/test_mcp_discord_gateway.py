@@ -168,8 +168,11 @@ class TestGatewayIdentify(unittest.TestCase):
         payload = actions[0].payload
         self.assertEqual(payload["op"], 2)
         self.assertEqual(payload["d"]["token"], TOKEN)
-        # GUILD_MESSAGES | MESSAGE_CONTENT
-        self.assertEqual(payload["d"]["intents"], (1 << 9) | (1 << 15))
+        # GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT
+        self.assertEqual(
+            payload["d"]["intents"],
+            (1 << 9) | (1 << 10) | (1 << 15),
+        )
         self.assertEqual(payload["d"]["intents"], INTENTS)
 
     def test_ready_captures_session_state(self):
@@ -371,7 +374,7 @@ class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
             _hello(interval_ms=600000),  # huge interval: heartbeat never fires
             _ready(own_id="999"),
             _message_create("777", bot=True, seq=2),
-            _message_create("999", bot=True, seq=3),  # self — must be dropped
+            _message_create("999", bot=True, seq=3),  # self — retained as context
             wslib.WSClosed(4004, "Authentication failed."),
         ]
         ws = _ScriptedWS(script)
@@ -390,9 +393,9 @@ class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
             await runner.run(shutdown)
         self.assertIn("NUNCHI_DISCORD_TOKEN", str(ctx.exception))
 
-        # IDENTIFY was sent; only the non-self bot message was delivered
+        # IDENTIFY was sent; V2 retains exact self echoes for observation.
         self.assertEqual(ws.sent[0]["op"], 2)
-        self.assertEqual([e.author_id for e in events], ["777"])
+        self.assertEqual([e.author_id for e in events], ["777", "999"])
 
     async def test_runner_resumes_on_next_connection(self):
         first = _ScriptedWS(

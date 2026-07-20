@@ -118,16 +118,21 @@ TOOL_SCHEMAS: list[dict] = [
 ]
 
 V2_TOOL_SCHEMAS = TOOL_SCHEMAS
-TOOL_SCHEMAS = [schema for schema in V2_TOOL_SCHEMAS if schema["name"] != "add_reaction"]
 TOOL_NAMES = frozenset(schema["name"] for schema in TOOL_SCHEMAS)
-V2_TOOL_NAMES = frozenset(schema["name"] for schema in V2_TOOL_SCHEMAS)
+V2_TOOL_NAMES = TOOL_NAMES
 
 
 class RestLike(Protocol):
     """The REST surface the executor needs (real client or test fake)."""
 
     def create_message(
-        self, channel_id: str, content: str, *, reply_to_message_id: str | None = None
+        self,
+        channel_id: str,
+        content: str,
+        *,
+        reply_to_message_id: str | None = None,
+        allowed_mention_user_ids: tuple[str, ...] | None = None,
+        fail_if_reply_missing: bool = False,
     ) -> dict: ...
 
     def get_messages(
@@ -171,14 +176,22 @@ class ToolExecutor:
         rest: RestLike,
         backstop: SendBackstop,
         *,
-        allowed_channel_ids: frozenset[str] | None = None,
+        allowed_channel_ids: frozenset[str],
     ) -> None:
+        if (
+            not isinstance(allowed_channel_ids, frozenset)
+            or not allowed_channel_ids
+            or any(_snowflake(value) != value for value in allowed_channel_ids)
+        ):
+            raise ValueError("Discord tool executor requires exact trusted channels")
         self._rest = rest
         self._backstop = backstop
         self._allowed_channel_ids = allowed_channel_ids
 
     def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
         """Returns (payload, ok). Error payloads carry an 'error' string."""
+        if not isinstance(name, str) or not isinstance(arguments, dict):
+            return ({"error": "tool call is invalid"}, False)
         try:
             if name == "send_message":
                 return self._send(arguments, reply=False)
@@ -190,13 +203,24 @@ class ToolExecutor:
                 return self._reaction(arguments)
             return ({"error": f"unknown tool: {name}"}, False)
         except DiscordRestError as exc:
-            return ({"error": str(exc)}, False)
+            return (
+                {
+                    "error": (
+                        f"Discord API request failed with status {exc.status}"
+                        if exc.status is not None
+                        else "Discord network request failed"
+                    )
+                },
+                False,
+            )
+        except Exception:
+            return ({"error": "Discord transport operation failed"}, False)
 
     def _send(self, arguments: dict, *, reply: bool) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))
         if channel_id is None:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
-        if self._allowed_channel_ids is not None and channel_id not in self._allowed_channel_ids:
+        if channel_id not in self._allowed_channel_ids:
             return ({"error": "channel_id is outside the trusted allowlist"}, False)
         reply_to: str | None = None
         if reply:
@@ -239,29 +263,24 @@ class ToolExecutor:
                 },
                 False,
             )
-        if self._allowed_channel_ids is None:
-            created = self._rest.create_message(
-                channel_id,
-                content,
-                reply_to_message_id=reply_to,
-            )
-        else:
-            created = self._rest.create_message(
-                channel_id,
-                content,
-                reply_to_message_id=reply_to,
-                allowed_mention_user_ids=tuple(mention_ids),
-                fail_if_reply_missing=reply,
-            )
+        created = self._rest.create_message(
+            channel_id,
+            content,
+            reply_to_message_id=reply_to,
+            allowed_mention_user_ids=tuple(mention_ids),
+            fail_if_reply_missing=reply,
+        )
         return ({"message": shape_message(created)}, True)
 
     def _history(self, arguments: dict) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))
         if channel_id is None:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
-        if self._allowed_channel_ids is not None and channel_id not in self._allowed_channel_ids:
+        if channel_id not in self._allowed_channel_ids:
             return ({"error": "channel_id is outside the trusted allowlist"}, False)
         limit_raw = arguments.get("limit", 50)
+        if isinstance(limit_raw, bool):
+            return ({"error": "limit must be an integer between 1 and 100"}, False)
         try:
             limit = int(limit_raw)
         except (TypeError, ValueError):
@@ -282,7 +301,7 @@ class ToolExecutor:
         reaction = arguments.get("reaction")
         if channel_id is None or message_id is None:
             return ({"error": "channel_id and message_id must be numeric snowflake strings"}, False)
-        if self._allowed_channel_ids is not None and channel_id not in self._allowed_channel_ids:
+        if channel_id not in self._allowed_channel_ids:
             return ({"error": "channel_id is outside the trusted allowlist"}, False)
         if not isinstance(reaction, str) or not reaction or len(reaction) > 256:
             return ({"error": "reaction must be a non-empty string up to 256 characters"}, False)

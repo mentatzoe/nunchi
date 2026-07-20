@@ -25,8 +25,8 @@ from dataclasses import dataclass
 GUILD_MESSAGES = 1 << 9
 GUILD_MESSAGE_REACTIONS = 1 << 10
 MESSAGE_CONTENT = 1 << 15
-INTENTS = GUILD_MESSAGES | MESSAGE_CONTENT
-V2_INTENTS = INTENTS | GUILD_MESSAGE_REACTIONS
+INTENTS = GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT
+V2_INTENTS = INTENTS
 
 DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
@@ -47,7 +47,10 @@ _IDENTIFY_CLOSE_CODES = frozenset({4007, 4009})
 
 _CLOSE_HINTS = {
     4004: "authentication failed — check NUNCHI_DISCORD_TOKEN",
-    4013: "invalid intents — this build requests GUILD_MESSAGES | MESSAGE_CONTENT",
+    4013: (
+        "invalid intents — this build requests GUILD_MESSAGES | "
+        "GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT"
+    ),
     4014: (
         "disallowed intents — enable 'MESSAGE CONTENT INTENT' for this bot in the "
         "Discord Developer Portal (Bot -> Privileged Gateway Intents)"

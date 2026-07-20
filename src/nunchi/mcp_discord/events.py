@@ -1,32 +1,10 @@
-"""Message events and the MCP notification contract.
+"""Discord native events and the closed V2 MCP notification projection.
 
-The load-bearing rule of this transport: a MESSAGE_CREATE is dropped if and
-only if it was authored by our own bot user. Every other author — human or
-bot — is delivered. Plain Discord content is preserved; rich-only messages
-get a tagged text fallback from embeds/components/attachments so downstream
-admission does not mistake visible peer speech for an empty event. There is no
-gate logic in this transport.
-
-Notification contract (any MCP harness can consume this):
-
-    method: "notifications/discord/message"
-    params:
-        guild_id       str | None   (None for DMs)
-        channel_id     str
-        message_id     str
-        author_id      str
-        author_name    str
-        author_is_bot  bool
-        content        str
-        timestamp      str | None   (ISO 8601, as sent by Discord)
-        mentioned_user_ids     list[str]
-        reply_to_message_id    str | None
-        reply_to_author_id     str | None
-        reply_to_author_name   str | None
-        reply_to_author_is_bot bool | None
-        reply_to_content       str | None
-
-Snowflake IDs are strings to survive JSON consumers with 53-bit numbers.
+Humans, peer bots, and exact self-authored messages are retained as factual
+context. Rich-only messages receive a bounded literal rendering. Trusted
+routing policy and exact native IDs are projected by :class:`DiscordEventSourceV2`;
+there is no social attention judgment in this transport. Snowflake IDs remain
+strings so JSON consumers cannot lose precision.
 """
 
 from __future__ import annotations
@@ -37,7 +15,6 @@ from typing import Any
 
 logger = logging.getLogger("nunchi.mcp_discord.events")
 
-NOTIFICATION_METHOD = "notifications/discord/message"
 V2_NOTIFICATION_METHOD = "notifications/nunchi/v2/discord/event"
 _MAX_NORMALIZED_CONTENT = 6000
 
@@ -331,26 +308,6 @@ def filter_message_create(
             event.channel_id,
         )
     return event
-
-
-def notification_params(event: MessageEvent) -> dict:
-    """The exact params object for notifications/discord/message."""
-    return {
-        "guild_id": event.guild_id,
-        "channel_id": event.channel_id,
-        "message_id": event.message_id,
-        "author_id": event.author_id,
-        "author_name": event.author_name,
-        "author_is_bot": event.author_is_bot,
-        "content": event.content,
-        "timestamp": event.timestamp,
-        "mentioned_user_ids": list(event.mentioned_user_ids),
-        "reply_to_message_id": event.reply_to_message_id,
-        "reply_to_author_id": event.reply_to_author_id,
-        "reply_to_author_name": event.reply_to_author_name,
-        "reply_to_author_is_bot": event.reply_to_author_is_bot,
-        "reply_to_content": event.reply_to_content,
-    }
 
 
 def _snowflake(value: object) -> str | None:

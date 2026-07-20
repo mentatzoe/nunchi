@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import re
 import time
 import urllib.error
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -17,10 +19,11 @@ from ..policy import OperatorPolicySource
 from ..receipts import ReloadingPolicyReceiptSink
 from ..runtime import LiveRoomRuntime
 from .codex_participant_v2 import CodexParticipantV2
-from .codex_room_runner import TransportClient
+from .mcp_transport_v2 import MCPTransportClientV2, MCPTransportV2Error
 
 
 logger = logging.getLogger("nunchi.integrations.codex_room_v2")
+_ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 class CodexRoomV2Error(RuntimeError):
@@ -38,7 +41,7 @@ class CodexRoomV2:
         self_user_id: str,
         participant_id: str,
         participant_name: str,
-        client: TransportClient,
+        client: MCPTransportClientV2,
         session_path: Path,
         codex_home: Path,
         participant_workspace: Path,
@@ -207,6 +210,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("--transport-url", default="http://127.0.0.1:3993/mcp")
+    parser.add_argument(
+        "--transport-auth-env",
+        default="NUNCHI_MCP_DISCORD_AUTH_TOKEN",
+    )
     parser.add_argument("--channel-id", required=True)
     parser.add_argument("--self-user-id", required=True)
     parser.add_argument("--participant-id", required=True)
@@ -227,7 +234,18 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = _parser().parse_args(argv)
-    client = TransportClient(args.transport_url)
+    if _ENV_NAME_RE.fullmatch(args.transport_auth_env) is None:
+        logger.error("Codex V2 transport credential binding is invalid")
+        return 2
+    auth_token = os.environ.get(args.transport_auth_env)
+    if not auth_token:
+        logger.error("Codex V2 transport credential is unavailable")
+        return 2
+    try:
+        client = MCPTransportClientV2(args.transport_url, auth_token)
+    except MCPTransportV2Error:
+        logger.error("Codex V2 transport configuration is invalid")
+        return 2
     room: CodexRoomV2 | None = None
     try:
         client.initialize()
@@ -252,8 +270,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.once:
                 room.wait_idle()
                 return 0
-    except (CodexRoomV2Error, RuntimeError, OSError, urllib.error.URLError) as exc:
-        logger.error("Codex V2 room failed: %s", exc)
+    except (
+        CodexRoomV2Error,
+        MCPTransportV2Error,
+        RuntimeError,
+        OSError,
+        urllib.error.URLError,
+    ):
+        logger.error("Codex V2 room failed")
         return 1
     finally:
         if room is not None:

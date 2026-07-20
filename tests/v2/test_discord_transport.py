@@ -12,7 +12,11 @@ from nunchi.mcp_discord.events import (
 )
 from nunchi.mcp_discord.config import load_config
 from nunchi.mcp_discord.ratelimit import SendBackstop
-from nunchi.mcp_discord.v2 import DiscordActionSinkV2
+from nunchi.mcp_discord.server import BearerAuthMiddleware
+from nunchi.mcp_discord.v2 import (
+    DiscordActionSinkV2,
+    MCPDiscordActionSinkV2,
+)
 from nunchi.mcp_discord.tools import ToolExecutor, V2_TOOL_NAMES
 from nunchi.observation import ObservationProvider
 from tests.v2.contract.schema_helpers import validate_attention_receipt
@@ -285,22 +289,55 @@ class DiscordActionSinkCases(unittest.TestCase):
         self.assertEqual([item[1] for item in self.rest.messages], ["one"])
 
 
+class FakeMCPClient:
+    def __init__(self):
+        self.calls = []
+
+    def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        return {"ok": True}
+
+
+class MCPDiscordActionSinkCases(unittest.TestCase):
+    def test_request_capacity_fails_closed_without_reopening_old_ids(self):
+        client = FakeMCPClient()
+        receipts = []
+        sink = MCPDiscordActionSinkV2(
+            channel_id="42",
+            client=client,
+            receipt_sink=receipts.append,
+            max_request_ids=1,
+        )
+        sink("req-1", {"kind": "message", "content": "one"})
+        with self.assertRaises(Exception):
+            sink("req-2", {"kind": "message", "content": "two"})
+        with self.assertRaises(Exception):
+            sink("req-1", {"kind": "message", "content": "again"})
+        self.assertEqual([arguments["content"] for _, arguments in client.calls], ["one"])
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
+
 class V2ServerBoundaryCases(unittest.TestCase):
     def test_v2_mode_requires_exact_trusted_channels(self):
         with self.assertRaises(RuntimeError):
-            load_config({"NUNCHI_DISCORD_TOKEN": "secret", "NUNCHI_MCP_DISCORD_MODE": "v2"})
+            load_config(
+                {
+                    "NUNCHI_DISCORD_TOKEN": "discord-secret",
+                    "NUNCHI_MCP_DISCORD_AUTH_TOKEN": "a" * 32,
+                }
+            )
         with self.assertRaises(RuntimeError):
             load_config(
                 {
-                    "NUNCHI_DISCORD_TOKEN": "secret",
-                    "NUNCHI_MCP_DISCORD_MODE": "v2",
+                    "NUNCHI_DISCORD_TOKEN": "discord-secret",
+                    "NUNCHI_MCP_DISCORD_AUTH_TOKEN": "a" * 32,
                     "NUNCHI_MCP_DISCORD_CHANNELS": "42,../other",
                 }
             )
         config = load_config(
             {
-                "NUNCHI_DISCORD_TOKEN": "secret",
-                "NUNCHI_MCP_DISCORD_MODE": "v2",
+                "NUNCHI_DISCORD_TOKEN": "discord-secret",
+                "NUNCHI_MCP_DISCORD_AUTH_TOKEN": "a" * 32,
                 "NUNCHI_MCP_DISCORD_CHANNELS": "42,43",
                 "NUNCHI_MCP_DISCORD_BLOCKED_ACTORS": "1002",
             }
@@ -308,6 +345,40 @@ class V2ServerBoundaryCases(unittest.TestCase):
         self.assertEqual(config.channels, frozenset({"42", "43"}))
         self.assertEqual(config.blocked_actors, frozenset({"1002"}))
         self.assertNotIn("secret", repr(config))
+
+    def test_v1_switch_and_credential_reuse_are_rejected(self):
+        base = {
+            "NUNCHI_DISCORD_TOKEN": "d" * 32,
+            "NUNCHI_MCP_DISCORD_AUTH_TOKEN": "a" * 32,
+            "NUNCHI_MCP_DISCORD_CHANNELS": "42",
+        }
+        with self.assertRaises(RuntimeError):
+            load_config(dict(base, NUNCHI_MCP_DISCORD_MODE="v1"))
+        with self.assertRaises(RuntimeError):
+            load_config(
+                dict(
+                    base,
+                    NUNCHI_MCP_DISCORD_AUTH_TOKEN=base["NUNCHI_DISCORD_TOKEN"],
+                )
+            )
+        with self.assertRaises(RuntimeError):
+            load_config(dict(base, NUNCHI_MCP_DISCORD_AUTH_TOKEN="too-short"))
+
+    def test_plaintext_server_binding_is_loopback_only(self):
+        base = {
+            "NUNCHI_DISCORD_TOKEN": "discord-secret",
+            "NUNCHI_MCP_DISCORD_AUTH_TOKEN": "a" * 32,
+            "NUNCHI_MCP_DISCORD_CHANNELS": "42",
+        }
+        for host in ("0.0.0.0", "transport.example", "192.0.2.10"):
+            with self.subTest(host=host), self.assertRaises(RuntimeError):
+                load_config(dict(base, NUNCHI_MCP_DISCORD_HOST=host))
+        for host in ("127.0.0.1", "::1", "localhost"):
+            with self.subTest(host=host):
+                self.assertEqual(
+                    load_config(dict(base, NUNCHI_MCP_DISCORD_HOST=host)).host,
+                    host,
+                )
 
     def test_v2_tools_include_reaction_and_cannot_redirect_rooms(self):
         self.assertIn("add_reaction", V2_TOOL_NAMES)
@@ -334,6 +405,58 @@ class V2ServerBoundaryCases(unittest.TestCase):
         )
         self.assertTrue(ok)
         self.assertEqual(rest.reactions, [("42", "111", "👀")])
+
+
+class BearerAuthCases(unittest.IsolatedAsyncioTestCase):
+    async def _request(self, headers):
+        inner_calls = []
+        sent = []
+
+        async def inner(scope, receive, send):
+            inner_calls.append(scope)
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = BearerAuthMiddleware(inner, "a" * 32)
+
+        async def capture(message):
+            sent.append(message)
+
+        await middleware(
+            {"type": "http", "headers": headers},
+            lambda: None,
+            capture,
+        )
+        return inner_calls, sent
+
+    async def test_missing_wrong_and_duplicate_credentials_never_reach_mcp(self):
+        cases = (
+            [],
+            [(b"authorization", b"Bearer wrong")],
+            [
+                (b"authorization", b"Bearer " + b"a" * 32),
+                (b"authorization", b"Bearer " + b"a" * 32),
+            ],
+        )
+        for headers in cases:
+            with self.subTest(headers=headers):
+                calls, sent = await self._request(headers)
+                self.assertEqual(calls, [])
+                self.assertEqual(sent[0]["status"], 401)
+                self.assertNotIn(b"a" * 32, sent[-1]["body"])
+
+    async def test_exact_bearer_credential_reaches_mcp_application(self):
+        calls, sent = await self._request(
+            [(b"authorization", b"Bearer " + b"a" * 32)]
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sent[0]["status"], 204)
 
 
 if __name__ == "__main__":

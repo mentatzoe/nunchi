@@ -8,10 +8,10 @@ Requires the mcp SDK (opt-in only):
 
     pip install nunchi[mcp-discord]
 
-The server listens on http://HOST:PORT/mcp (streamable HTTP). Inbound
-Discord messages (every author except our own bot user) are pushed to
-connected MCP clients as ``notifications/discord/message``; the tools
-``send_message`` / ``reply_message`` / ``read_history`` post and read.
+The server listens on http://HOST:PORT/mcp (streamable HTTP). Inbound Discord
+events are pushed as ``notifications/nunchi/v2/discord/event``. Exact self
+events remain context; the observation owner decides the deterministic no-wake
+result. Tools are exact-channel scoped and require a separate bearer token.
 
 This module holds the import-safe plumbing (bounded queue, notification
 pump, in-flight tracking for drain-on-shutdown); everything that touches the
@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import logging
 import os
 import sys
 from typing import Awaitable, Callable
 
 from .config import Config, load_config
-from .events import MessageEvent, notification_params
+from .events import MessageEvent, ReactionEvent
 from .hygiene import install_redaction
 
 logger = logging.getLogger("nunchi.mcp_discord.server")
@@ -74,7 +75,47 @@ class InFlight:
             return False
 
 
-def enqueue_event(queue: asyncio.Queue, event: MessageEvent) -> bool:
+class BearerAuthMiddleware:
+    """Authenticate every MCP HTTP request without logging credentials."""
+
+    def __init__(self, app, token: str) -> None:
+        if not callable(app) or not isinstance(token, str) or not token:
+            raise ValueError("MCP bearer authentication is invalid")
+        self.app = app
+        self.expected = b"Bearer " + token.encode("ascii")
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") == "http":
+            values = [
+                value
+                for key, value in scope.get("headers", [])
+                if key.lower() == b"authorization"
+            ]
+            if len(values) != 1 or not hmac.compare_digest(
+                values[0],
+                self.expected,
+            ):
+                body = b'{"error":"unauthorized"}'
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                            (b"www-authenticate", b"Bearer"),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
+
+
+def enqueue_event(
+    queue: asyncio.Queue,
+    event: MessageEvent | ReactionEvent,
+) -> bool:
     """Bounded enqueue with drop-oldest backpressure.
 
     Returns False when the queue was full and the oldest event was evicted
@@ -102,7 +143,7 @@ async def pump_notifications(
     send: Callable[[dict], Awaitable[None]],
     *,
     shutdown: asyncio.Event,
-    projector: Callable[[MessageEvent], dict] = notification_params,
+    projector: Callable[[MessageEvent | ReactionEvent], dict],
 ) -> None:
     """Drain the queue into *send* (broadcast to MCP sessions) until shutdown.
 
@@ -123,25 +164,13 @@ async def pump_notifications(
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``nunchi-mcp-discord`` console script."""
-    try:
-        import mcp  # noqa: F401
-    except ImportError:
-        print(
-            "nunchi-mcp-discord: the mcp SDK is not installed.\n"
-            "Install it with: pip install nunchi[mcp-discord]",
-            file=sys.stderr,
-        )
-        return 1
-
     import argparse
 
     parser = argparse.ArgumentParser(
         prog="nunchi-mcp-discord",
         description=(
             "Standing MCP transport server for one Discord bot account. "
-            "Reads NUNCHI_DISCORD_TOKEN from env; serves streamable HTTP MCP "
-            "on NUNCHI_MCP_DISCORD_HOST:NUNCHI_MCP_DISCORD_PORT (/mcp). "
-            "Transport only — no gate logic."
+            "V2 only; exact channels and bearer authentication are required."
         ),
     )
     parser.parse_args(argv if argv is not None else sys.argv[1:])
@@ -159,7 +188,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     install_redaction(config.token)
+    install_redaction(config.auth_token)
+
+    try:
+        import mcp  # noqa: F401
+    except ImportError:
+        print(
+            "nunchi-mcp-discord: install the 'mcp-discord' extra to run the server",
+            file=sys.stderr,
+        )
+        return 2
 
     from . import _binding
 
     return _binding.serve(config)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

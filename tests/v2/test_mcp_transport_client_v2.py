@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import json
+import unittest
+import urllib.error
+from unittest import mock
+
+import nunchi.integrations.mcp_transport_v2 as transport_v2
+from nunchi.integrations.mcp_transport_v2 import (
+    MCPTransportClientV2,
+    MCPTransportV2Error,
+    iter_sse_data,
+)
+from nunchi.mcp_discord.events import V2_NOTIFICATION_METHOD
+
+
+AUTH = "mcp-client-auth-secret-0123456789abcdef"
+
+
+class Response:
+    def __init__(self, payload=b"{}", *, headers=None, lines=None):
+        self.payload = payload
+        self.headers = headers or {}
+        self.lines = list(lines or [])
+
+    def read(self, _size=-1):
+        return self.payload
+
+    def __iter__(self):
+        return iter(self.lines)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+
+class ScriptedOpen:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    def __call__(self, request, *, timeout):
+        self.requests.append((request, timeout))
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+
+class MCPTransportClientCases(unittest.TestCase):
+    def test_every_handshake_tool_and_stream_request_is_bearer_authenticated(self):
+        tool_document = {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "result": {
+                "content": [
+                    {"type": "text", "text": json.dumps({"messages": []})}
+                ]
+            },
+        }
+        event_document = {
+            "jsonrpc": "2.0",
+            "method": V2_NOTIFICATION_METHOD,
+            "params": {"schema_version": 2, "platform": "discord"},
+        }
+        scripted = ScriptedOpen(
+            [
+                Response(headers={"mcp-session-id": "session-1"}),
+                Response(),
+                Response(),
+                Response(json.dumps(tool_document).encode("utf-8")),
+                Response(
+                    lines=[
+                        f"data: {json.dumps(event_document)}\n".encode("utf-8"),
+                        b"\n",
+                    ]
+                ),
+            ]
+        )
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        self.assertEqual(client.initialize(), "session-1")
+        self.assertEqual(client.call_tool("read_history", {"channel_id": "42"}), {"messages": []})
+        self.assertEqual(next(client.stream_events())["schema_version"], 2)
+        for request, _timeout in scripted.requests:
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {AUTH}")
+
+    def test_cross_origin_redirect_is_refused_without_forwarding_credential(self):
+        redirect = urllib.error.HTTPError(
+            "http://127.0.0.1:3993/mcp",
+            307,
+            "redirect",
+            {"Location": "https://attacker.example/mcp"},
+            None,
+        )
+        scripted = ScriptedOpen([redirect])
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        with self.assertRaisesRegex(MCPTransportV2Error, "cross-origin"):
+            client.initialize()
+        self.assertEqual(len(scripted.requests), 1)
+        self.assertNotIn(AUTH, str(redirect))
+
+    def test_plain_http_is_loopback_only_and_credentials_are_strict(self):
+        with self.assertRaises(MCPTransportV2Error):
+            MCPTransportClientV2("http://transport.example/mcp", AUTH)
+        with self.assertRaises(MCPTransportV2Error):
+            MCPTransportClientV2("http://127.0.0.1:3993/mcp", "short")
+
+    def test_sse_and_tool_json_are_bounded_and_strict(self):
+        with mock.patch.object(transport_v2, "MAX_SSE_EVENT_BYTES", 16):
+            with self.assertRaisesRegex(MCPTransportV2Error, "size budget"):
+                tuple(iter_sse_data(["data: " + "x" * 17, ""]))
+        duplicate = b'{"id":10,"id":10,"result":{}}'
+        scripted = ScriptedOpen([Response(duplicate)])
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        client.session_id = "session-1"
+        with self.assertRaises(MCPTransportV2Error):
+            client.call_tool("read_history", {"channel_id": "42"})
+
+
+if __name__ == "__main__":
+    unittest.main()

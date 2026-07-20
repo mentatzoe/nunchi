@@ -24,6 +24,7 @@ import logging
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 # Ensure src is on the path
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
@@ -38,10 +39,10 @@ except ImportError:
 
 from nunchi.mcp_discord.config import load_config
 from nunchi.mcp_discord.events import (
-    NOTIFICATION_METHOD,
+    DiscordEventSourceV2,
+    V2_NOTIFICATION_METHOD,
     filter_message_create,
     message_text,
-    notification_params,
 )
 from nunchi.mcp_discord.gateway import GatewayProtocol
 from nunchi.mcp_discord.hygiene import REDACTED, TokenRedactionFilter
@@ -51,6 +52,17 @@ from nunchi.mcp_discord.server import InFlight, enqueue_event, main, pump_notifi
 from nunchi.mcp_discord.tools import TOOL_NAMES, TOOL_SCHEMAS, ToolExecutor, shape_message
 
 TOKEN = "NUNCHI-TEST-TOKEN-4f9a2bconfidential"
+AUTH_TOKEN = "MCP-CLIENT-TEST-TOKEN-9c8b7a6d5e4f3a2b"
+
+
+def _config_env(**overrides):
+    result = {
+        "NUNCHI_DISCORD_TOKEN": TOKEN,
+        "NUNCHI_MCP_DISCORD_AUTH_TOKEN": AUTH_TOKEN,
+        "NUNCHI_MCP_DISCORD_CHANNELS": "100,444555666",
+    }
+    result.update(overrides)
+    return result
 
 
 def _create_data(
@@ -115,7 +127,15 @@ class _FakeRest:
         self.sent: list[tuple[str, str, str | None]] = []
         self.history_calls: list[tuple[str, int, str | None]] = []
 
-    def create_message(self, channel_id, content, *, reply_to_message_id=None):
+    def create_message(
+        self,
+        channel_id,
+        content,
+        *,
+        reply_to_message_id=None,
+        allowed_mention_user_ids=None,
+        fail_if_reply_missing=False,
+    ):
         self.sent.append((channel_id, content, reply_to_message_id))
         return _api_message(channel_id=channel_id, content=content)
 
@@ -243,16 +263,25 @@ class TestContentBehavior(unittest.TestCase):
             },
         )
 
+        data["mentions"] = [{"id": "999"}, {"id": "999"}, {"id": "888"}]
+        data["message_reference"] = {"message_id": "555"}
+        data["referenced_message"]["id"] = "555"
         event = filter_message_create(data, "123")
-        params = notification_params(event)
+        params = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"444555666"})
+        ).notification_params(event)
+        portable = params["native_input"]["event"]
 
-        self.assertEqual(params["content"], "review complete")
-        self.assertEqual(params["mentioned_user_ids"], ["999", "888"])
-        self.assertEqual(params["reply_to_message_id"], "reply-target")
-        self.assertEqual(params["reply_to_author_id"], "999")
-        self.assertEqual(params["reply_to_author_name"], "Vigil")
-        self.assertTrue(params["reply_to_author_is_bot"])
-        self.assertEqual(params["reply_to_content"], "please review")
+        self.assertEqual(portable["text"], "review complete")
+        self.assertEqual(
+            portable["mentioned_actor_ids"],
+            ["discord:user:999", "discord:user:888"],
+        )
+        self.assertEqual(portable["reply_to_event_id"], "discord:message:555")
+        self.assertEqual(
+            params["native_input"]["actors"]["discord:user:777"]["kind"],
+            "bot",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -271,32 +300,30 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
             shutdown.set()
 
         event = filter_message_create(_create_data(), own_user_id="999")
+        source = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"444555666"})
+        )
         self.assertTrue(enqueue_event(queue, event))
         await asyncio.wait_for(
-            pump_notifications(queue, mock_client_send, shutdown=shutdown), timeout=5.0
+            pump_notifications(
+                queue,
+                mock_client_send,
+                shutdown=shutdown,
+                projector=source.notification_params,
+            ),
+            timeout=5.0,
         )
 
-        self.assertEqual(NOTIFICATION_METHOD, "notifications/discord/message")
         self.assertEqual(
-            received,
-            [
-                {
-                    "guild_id": "777888999",
-                    "channel_id": "444555666",
-                    "message_id": "111222333",
-                    "author_id": "777",
-                    "author_name": "peer-bot",
-                    "author_is_bot": True,
-                    "content": "ping",
-                    "timestamp": "2026-07-06T10:00:00.000000+00:00",
-                    "mentioned_user_ids": [],
-                    "reply_to_message_id": None,
-                    "reply_to_author_id": None,
-                    "reply_to_author_name": None,
-                    "reply_to_author_is_bot": None,
-                    "reply_to_content": None,
-                }
-            ],
+            V2_NOTIFICATION_METHOD,
+            "notifications/nunchi/v2/discord/event",
+        )
+        self.assertEqual(received[0]["schema_version"], 2)
+        self.assertEqual(received[0]["platform"], "discord")
+        self.assertEqual(received[0]["channel_id"], "444555666")
+        self.assertEqual(
+            received[0]["native_input"]["event"]["author_id"],
+            "discord:user:777",
         )
 
     async def test_failing_client_does_not_stop_the_pump(self):
@@ -314,15 +341,29 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
 
         for author in ("111", "222"):
             enqueue_event(queue, filter_message_create(_create_data(author), "999"))
-        await asyncio.wait_for(
-            pump_notifications(queue, flaky_send, shutdown=shutdown), timeout=5.0
+        source = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"444555666"})
         )
-        self.assertEqual([p["author_id"] for p in received], ["222"])
+        await asyncio.wait_for(
+            pump_notifications(
+                queue,
+                flaky_send,
+                shutdown=shutdown,
+                projector=source.notification_params,
+            ),
+            timeout=5.0,
+        )
+        self.assertEqual(
+            [p["native_input"]["event"]["author_id"] for p in received],
+            ["discord:user:222"],
+        )
 
     async def test_dm_message_has_null_guild_id(self):
         data = _create_data()
         del data["guild_id"]
-        params = notification_params(filter_message_create(data, "999"))
+        params = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"444555666"})
+        ).notification_params(filter_message_create(data, "999"))
         self.assertIsNone(params["guild_id"])
 
 
@@ -462,7 +503,10 @@ class TestSendBackstop(unittest.TestCase):
 
 class TestToolContract(unittest.TestCase):
     def test_tool_names(self):
-        self.assertEqual(TOOL_NAMES, {"send_message", "reply_message", "read_history"})
+        self.assertEqual(
+            TOOL_NAMES,
+            {"send_message", "reply_message", "read_history", "add_reaction"},
+        )
 
     def test_schemas_have_required_fields(self):
         by_name = {s["name"]: s for s in TOOL_SCHEMAS}
@@ -483,7 +527,11 @@ class TestToolExecutor(unittest.TestCase):
     def _executor(self, max_sends=5):
         rest = _FakeRest()
         backstop = SendBackstop(max_sends, 10.0, clock=_FakeClock())
-        return ToolExecutor(rest, backstop), rest
+        return ToolExecutor(
+            rest,
+            backstop,
+            allowed_channel_ids=frozenset({"100"}),
+        ), rest
 
     def test_send_message_happy_path(self):
         executor, rest = self._executor()
@@ -576,11 +624,15 @@ class TestToolExecutor(unittest.TestCase):
 
     def test_rest_error_surfaces_as_tool_error(self):
         class _FailingRest(_FakeRest):
-            def create_message(self, channel_id, content, *, reply_to_message_id=None):
+            def create_message(self, channel_id, content, **kwargs):
                 raise DiscordRestError(403, "Discord API 403 on POST: Missing Access")
 
         backstop = SendBackstop(5, 10.0, clock=_FakeClock())
-        executor = ToolExecutor(_FailingRest(), backstop)
+        executor = ToolExecutor(
+            _FailingRest(),
+            backstop,
+            allowed_channel_ids=frozenset({"100"}),
+        )
         payload, ok = executor.call("send_message", {"channel_id": "100", "content": "hi"})
         self.assertFalse(ok)
         self.assertIn("403", payload["error"])
@@ -628,7 +680,7 @@ class TestInFlightDrain(unittest.IsolatedAsyncioTestCase):
 
 class TestConfig(unittest.TestCase):
     def test_defaults(self):
-        config = load_config({"NUNCHI_DISCORD_TOKEN": TOKEN})
+        config = load_config(_config_env())
         self.assertEqual(config.host, "127.0.0.1")
         self.assertEqual(config.port, 3993)
         self.assertEqual(config.queue_maxsize, 256)
@@ -637,23 +689,27 @@ class TestConfig(unittest.TestCase):
 
     def test_missing_token_raises(self):
         with self.assertRaises(RuntimeError) as ctx:
-            load_config({})
+            load_config(
+                {
+                    "NUNCHI_MCP_DISCORD_AUTH_TOKEN": AUTH_TOKEN,
+                    "NUNCHI_MCP_DISCORD_CHANNELS": "100",
+                }
+            )
         self.assertIn("NUNCHI_DISCORD_TOKEN", str(ctx.exception))
 
     def test_overrides(self):
         config = load_config(
-            {
-                "NUNCHI_DISCORD_TOKEN": TOKEN,
-                "NUNCHI_MCP_DISCORD_PORT": "8080",
-                "NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS": "2",
-            }
+            _config_env(
+                NUNCHI_MCP_DISCORD_PORT="8080",
+                NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS="2",
+            )
         )
         self.assertEqual(config.port, 8080)
         self.assertEqual(config.backstop_max_sends, 2)
 
     def test_bad_port_raises_with_var_name(self):
         with self.assertRaises(RuntimeError) as ctx:
-            load_config({"NUNCHI_DISCORD_TOKEN": TOKEN, "NUNCHI_MCP_DISCORD_PORT": "http"})
+            load_config(_config_env(NUNCHI_MCP_DISCORD_PORT="http"))
         self.assertIn("NUNCHI_MCP_DISCORD_PORT", str(ctx.exception))
 
 
@@ -678,12 +734,17 @@ class TestTokenHygiene(unittest.TestCase):
 
         # 2. A sample notification payload
         event = filter_message_create(_create_data(), "999")
-        self.assertNotIn(TOKEN, json.dumps(notification_params(event)))
+        params = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"444555666"})
+        ).notification_params(event)
+        self.assertNotIn(TOKEN, json.dumps(params))
 
         # 3. Config repr (token is excluded from the dataclass repr)
-        config = load_config({"NUNCHI_DISCORD_TOKEN": TOKEN})
+        config = load_config(_config_env())
         self.assertNotIn(TOKEN, repr(config))
         self.assertNotIn(TOKEN, str(config))
+        self.assertNotIn(AUTH_TOKEN, repr(config))
+        self.assertNotIn(AUTH_TOKEN, str(config))
 
         # 4. REST error paths (401 body maliciously echoing the auth header)
         echo_body = json.dumps({"message": f"Bot {TOKEN} is not authorized"}).encode()
@@ -696,6 +757,7 @@ class TestTokenHygiene(unittest.TestCase):
         # truncated upstream — here we assert our own framing added nothing.
         error_text = str(ctx.exception)
         self.assertNotIn("Authorization", error_text)
+        self.assertNotIn(TOKEN, error_text)
 
         # 5. Captured log output from real code paths, with the redaction
         # filter installed exactly as main() installs it.
@@ -725,7 +787,11 @@ class TestTokenHygiene(unittest.TestCase):
             client.create_message("100", "hello")
             # Backstop warning path
             backstop = SendBackstop(0, 10.0, clock=_FakeClock())
-            ToolExecutor(_FakeRest(), backstop).call(
+            ToolExecutor(
+                _FakeRest(),
+                backstop,
+                allowed_channel_ids=frozenset({"100"}),
+            ).call(
                 "send_message", {"channel_id": "100", "content": "hi"}
             )
             # Adversarial: a hypothetical future log line that embeds the token
@@ -759,10 +825,11 @@ class TestTokenHygiene(unittest.TestCase):
 class TestMainWithoutSdk(unittest.TestCase):
     def test_main_reports_missing_sdk_with_install_hint(self):
         stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            rc = main([])
-        self.assertEqual(rc, 1)
-        self.assertIn("pip install nunchi[mcp-discord]", stderr.getvalue())
+        with mock.patch.dict("os.environ", _config_env(), clear=True):
+            with contextlib.redirect_stderr(stderr):
+                rc = main([])
+        self.assertEqual(rc, 2)
+        self.assertIn("mcp-discord", stderr.getvalue())
 
 
 @unittest.skipUnless(MCP_AVAILABLE, "mcp SDK not installed")
@@ -778,7 +845,9 @@ class TestMcpBinding(unittest.TestCase):
         from nunchi.mcp_discord import _binding
 
         executor = ToolExecutor(
-            _FakeRest(), SendBackstop(5, 10.0, clock=_FakeClock())
+            _FakeRest(),
+            SendBackstop(5, 10.0, clock=_FakeClock()),
+            allowed_channel_ids=frozenset({"100"}),
         )
         server = _binding.build_server(executor, _binding.SessionRegistry(), InFlight())
         self.assertEqual(server.name, "nunchi-mcp-discord")
@@ -787,11 +856,11 @@ class TestMcpBinding(unittest.TestCase):
         from nunchi.mcp_discord import _binding
 
         notification = _binding._VendorNotification(
-            method=NOTIFICATION_METHOD, params={"content": "x"}
+            method=V2_NOTIFICATION_METHOD, params={"schema_version": 2}
         )
         dumped = notification.model_dump()
-        self.assertEqual(dumped["method"], NOTIFICATION_METHOD)
-        self.assertEqual(dumped["params"], {"content": "x"})
+        self.assertEqual(dumped["method"], V2_NOTIFICATION_METHOD)
+        self.assertEqual(dumped["params"], {"schema_version": 2})
 
 
 if __name__ == "__main__":

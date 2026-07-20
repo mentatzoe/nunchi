@@ -55,18 +55,8 @@ def _urllib_call(
             )
     except urllib.error.HTTPError as exc:
         return (exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read())
-    except urllib.error.URLError as exc:
-        raise DiscordRestError(None, f"network error reaching Discord API: {exc.reason}") from None
-
-
-def _error_detail(body: bytes) -> str:
-    """Extract Discord's error message from a response body (never echoes headers)."""
-    try:
-        payload = json.loads(body)
-    except (ValueError, UnicodeDecodeError):
-        return ""
-    message = payload.get("message") if isinstance(payload, dict) else None
-    return str(message)[:200] if message else ""
+    except urllib.error.URLError:
+        raise DiscordRestError(None, "network error reaching Discord API") from None
 
 
 class DiscordRestClient:
@@ -176,11 +166,10 @@ class DiscordRestClient:
 
             if status in (401, 403):
                 # Permanent auth/permission failure: abort immediately, no retry.
-                detail = _error_detail(resp_body)
                 raise DiscordRestError(
                     status,
-                    f"Discord API {status} on {route}: "
-                    f"{detail or 'check the bot token and channel permissions'}",
+                    f"Discord API {status} on {route}; check the bot token "
+                    "and channel permissions",
                 )
 
             if 500 <= status < 600:
@@ -193,8 +182,7 @@ class DiscordRestClient:
                 continue
 
             if status >= 400:
-                detail = _error_detail(resp_body)
-                raise DiscordRestError(status, f"Discord API {status} on {route}: {detail}")
+                raise DiscordRestError(status, f"Discord API {status} on {route}")
 
             if not resp_body:
                 return {}
