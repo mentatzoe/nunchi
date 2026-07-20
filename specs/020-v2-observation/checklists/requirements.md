@@ -9,7 +9,7 @@ continuation, recoverability, lifecycle, and downstream-comparison requirements
 
 ## Scope and Ownership
 
-- [x] CHK001 Is the `PLANNED` slice and its `NOT_GRANTED` program authority distinguished explicitly from current V1 implementation truth, with tasks `DORMANT` until `READY`? [Clarity, Spec §Control-Plane Boundary]
+- [x] CHK001 Is the `PLANNED` slice and its `GRANTED` program authority distinguished explicitly from current V1 implementation truth, with authorization itself granting neither `READY` nor `ACTIVE` and tasks remaining `DORMANT` until `READY`? [Clarity, Spec §Control-Plane Boundary]
 - [x] CHK002 Are all product targets ordinary paths and all SpecKit-path product artifacts forbidden? [Consistency, Spec §Control-Plane Boundary, FR-014]
 - [x] CHK003 Is `v2-observation-owner` the sole owner, with 010 and downstream 040–110 file boundaries and handoffs stated? [Completeness, Spec §Interface Summary, Explicit Exclusions]
 - [x] CHK004 Are attention judgment, participant invocation, send safety, social ledgers, and release decisions excluded? [Coverage, Spec §Explicit Exclusions]
@@ -39,6 +39,7 @@ continuation, recoverability, lifecycle, and downstream-comparison requirements
 - [x] CHK019 Does readiness require the slice-specific bound delivery command `python3 scripts/run_slice_workflow.py run speckit specs/020-v2-observation`, which performs preflight atomically; a paused run with an unchanged task graph resumes only by run ID, an assigned participant plus durable external assignment source declared before readiness, the valid complete program authorization record enumerating exactly `010` through `110`, accepted `010-v2-contract`, active `v2-observation-owner`, zero CRITICAL/HIGH findings, and an isolated worktree, with `evidence/v2/observation/slice-activation.md` written afterward to copy/attest those facts and establish `READY` before `ACTIVE` or any implementation checkbox? [Lifecycle, tasks.md §Slice activation]
 
 - [x] CHK020 Does activation evidence preserve declared dependency order, use ordered `Dependency commits` as `slice=full-sha` with matching ordered `Dependency acceptance references` as `slice=repo-relative-evidence-file`, and keep candidate/handoff attempts append-only across `REJECTED` return-to-`ACTIVE` rework, which starts a new bound run rather than resuming the completed run, and do convergence-added tasks likewise require a new run while paused unchanged-task fixes may resume? [Lifecycle, Spec/Plan/Tasks metadata]
+- [x] CHK021 Does the task graph explicitly require slice 020's own stdlib runtime-validation adapter to run over and account for the complete identical attempt-6 corpus revision `bff6b463a44c1b9066fc654691042f9550da6c64`, including all seven runtime-adapter-only semantic/relational classes, before 020 handoff? [Dependency, evidence/v2/contract/handoff.md §Corpus revision and downstream adapter obligation]
 
 ## Notes
 

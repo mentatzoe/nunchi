@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-11
 
-**Slice state**: `PLANNED`
+**Slice state**: `HANDOFF_READY`
 
 **Program implementation authority**: `GRANTED`
 
@@ -72,7 +72,12 @@ unchanged. New candidate and handoff attempts append without rewriting history.
 - **Consumes**:
   - `I-010A AttentionRequestV2@1`
   - `I-010D ContextContinuationV2@1`
-  - the immutable staged-record shape of `I-010E AttentionReceiptV2@1`
+  - the immutable staged-record shape of `I-010E AttentionReceiptV2@2`,
+    accepted by this consumer in
+    `evidence/v2/observation/dependency-010-amendment-A1-acceptance.md`; the
+    observation-stage definition is byte-for-byte unchanged from the
+    previously accepted `@1`, while the amendment is confined to the
+    separately owned attention-stage body
 - **Produces**: `I-020A ObservationProviderV2@1` — native events and exact host
   bindings to a bounded `AttentionRequestV2`, plus a bound continuation seam
   only where the host can fulfill it honestly; and one immutable observation-
@@ -81,7 +86,8 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   reference replay/comparison assets, then hands the exact commit, capability
   requirements, commands, evidence, and limitations to every named downstream
   owner and `v2-integrator`. Slices 050 and 060–090 own native transport and
-  surface bindings; slice 040 owns only the common participant-turn host.
+  surface bindings; slice 030 alone owns classifier-safe projection/redaction
+  in `src/nunchi/core.py`; slice 040 owns only the common participant-turn host.
 
 ## User Scenarios & Testing
 
@@ -115,7 +121,7 @@ transport action, and unknown facts without invoking the attention model.
 
 ### User Story 2 - Build a Bounded, Expandable Observation (Priority: P1)
 
-A host can assemble a compact factual projection around the trigger under hard
+A host can assemble a compact factual snapshot around the trigger under hard
 event and byte caps, preserve exact relation closure where it fits, state every
 known omission, and expose bounded continuation when available.
 
@@ -201,8 +207,14 @@ and limitation outcomes.
   actor-targeted mention IDs and room-wide mention status MUST remain distinct,
   and unavailable facts MUST be represented honestly.
 - **FR-004**: Deterministic transport hygiene MUST be limited to exact delivery
-  deduplication, retain-but-no-wake exact self events, and payloads from which no
-  authorized and routable native event can be constructed.
+  deduplication, retain-but-no-wake exact self events, and a transport-attested
+  `unroutable` disposition proving that no authorized and routable native event
+  can be constructed. The shared provider MAY compare exact delivery IDs and
+  exact actor IDs, but MUST NOT independently decide transport authorization or
+  routability. Exact self authorship/causation means `author_id == self.actor_id`
+  for authored message/reaction events or `caused_by_actor_id == self.actor_id`
+  for membership events. A membership event where self appears only as
+  `subject_actor_id` remains `OBSERVED`: being acted upon is not self-causation.
 - **FR-005**: No provider or buffer may interpret mentions, replies, apparent
   resolution, relevance, class address, turn ownership, or any conversational
   meaning as a deterministic suppression reason.
@@ -230,20 +242,34 @@ and limitation outcomes.
   unavailable native facts. Slices 050 and 060–090 MUST apply that comparator to
   their real bindings; slice 110 alone owns the final cross-surface parity claim.
 - **FR-013**: The owner MUST provide deterministic tests, replay corpora,
-  budget/token measurements, reference recoverability evidence, capability
-  comparison rules, and complete downstream handoffs in ordinary paths.
+  serialized-byte measurements, separately labelled token-size proxy evidence,
+  reference recoverability evidence, capability comparison rules, and complete
+  downstream handoffs in ordinary paths. The slice-owned proxy is
+  `utf8-bytes-ceil-div4@1`: `(serialized_utf8_bytes + 3) // 4`, recorded with
+  `estimator_id`, `estimated_tokens`, `serialized_bytes`, and `model_id: null`.
+  It is not represented as a provider/model tokenizer result. A downstream
+  model-specific estimate MUST name its model, tokenizer, and versions.
 - **FR-014**: No product code, test, corpus, fixture, evidence, runtime asset, or
   product documentation may be created in this SpecKit slice.
 - **FR-015**: The provider MUST emit one immutable observation-stage I-010E
   record correlated by request ID. It MAY attest snapshot/coverage facts,
-  configured and delivered budgets, event IDs, bytes, and estimated tokens; it
-  MUST leave later attention, participant, and transport facts unknown and MUST
-  NOT mutate or complete another owner's receipt stage.
+  configured and delivered budgets, event IDs, and bytes exactly as allowed by
+  the accepted closed schema. It MUST NOT add estimated-token or other
+  slice-local fields to I-010E; token-size proxy results live only in separate
+  observation evidence. It MUST leave later attention, participant, and
+  transport facts unknown and MUST NOT mutate or complete another owner's
+  receipt stage. This accepted-contract limitation is recorded for
+  `v2-contract-owner` and `v2-integrator`; slice 020 does not alter I-010E.
 
 ### Key Entities
 
-- **Native Event Input**: Authenticated transport payload plus native sequence,
-  routing, and exact self binding.
+- **Native Event Input**: Transport-attested input carrying a stable delivery
+  identity, native sequence, exact self binding, and an explicit mechanical
+  disposition of `candidate-event` or `unroutable`. `candidate-event` requires
+  the native event plus the transport's authorization/routing provenance;
+  `unroutable` requires the transport-owned proof and carries no candidate
+  social event. The shared provider consumes these facts and never derives
+  authorization or routing from payload prose.
 - **Observation Buffer**: Bounded, outcome-neutral event continuity within one
   room scope; never social state.
 - **Observation Provider**: Normalizes native facts and assembles
@@ -303,6 +329,9 @@ and limitation outcomes.
   request, identity, native-relation, order, budget, gap, and continuation
   deltas for `CHANGELOG.md`, `docs/STABILITY.md`, `docs/integration.md`, `docs/adapters.md`, and
   `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.
+  `NO_IMPACT` `docs/contracts/nunchi-v2.md`: it remains the accepted 010-owned
+  contract description; slice 020 consumes I-010A/I-010D/I-010E without editing
+  their closed shapes and validates that rationale before handoff.
   `HANDOFF` the same interface-specific delta for
   `integrations/mcp-discord/README.md` and
   `integrations/mcp-discord/DESIGN.md` to accepting `v2-transport-owner`,
@@ -321,6 +350,9 @@ and limitation outcomes.
   speaker allocation, or outcome-derived retention.
 - No edits to 010-owned schemas; contract change requests return to
   `v2-contract-owner`.
+- No classifier-safe projection/redaction implementation or tests; slice 030
+  owns that behavior in `src/nunchi/core.py`. Slice 020 emits the accepted
+  I-010A continuation capability and hands the projection obligation to 030.
 - Native transport and harness bindings belong to slices 050 and 060–090;
   shared participant-turn hosting belongs to 040; final parity and cutover
   belong only to `110`/`v2-integrator`.
