@@ -53,6 +53,13 @@ class TestSlice020SecretScanner(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].matcher, "openai-style-key")
 
+    def test_scanner_docstring_declares_no_fixture_exemption(self):
+        from scripts import check_slice020_secrets
+
+        documentation = check_slice020_secrets.__doc__ or ""
+        self.assertIn("recognizes no fixture marker or source-line exemption", documentation)
+        self.assertNotIn("suppresses only its own added source line", documentation)
+
     def test_removed_secret_and_regex_matcher_source_are_not_findings(self):
         from scripts.check_slice020_secrets import scan_added_lines
 
@@ -106,6 +113,159 @@ class TestSlice020SecretScanner(unittest.TestCase):
         self.assertIn(f"base={base}", receipt)
         self.assertIn(f"head={head}", receipt)
         self.assertIn("matchers=4", receipt)
+
+    def test_exact_range_scans_lifecycle_critical_checker_and_all_changed_paths(self):
+        from scripts.check_slice020_secrets import main
+
+        secret = _synthetic_openai_key()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            checker = repo / "scripts/check_slice020_task_state.py"
+            checker.parent.mkdir(parents=True)
+            checker.write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            checker.write_text(f'SECRET = "{secret}"\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            output = io.StringIO()
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                with contextlib.redirect_stdout(output):
+                    result = main(["--base", base, "--head", head])
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(result, 1)
+        receipt = output.getvalue()
+        self.assertIn("SLICE020_SECRET_SCAN FINDINGS", receipt)
+        self.assertIn("files=1", receipt)
+        self.assertIn("scripts/check_slice020_task_state.py", receipt)
+        self.assertNotIn(secret, receipt)
+
+    def test_main_scans_header_shaped_added_content_inside_hunk(self):
+        from scripts.check_slice020_secrets import main
+
+        secret = _synthetic_openai_key()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            source = repo / "ordinary.txt"
+            source.write_text("baseline\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            source.write_text(
+                f'baseline\n++ API_KEY = "{secret}"\n', encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            output = io.StringIO()
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                with contextlib.redirect_stdout(output):
+                    result = main(["--base", base, "--head", head])
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(result, 1)
+        receipt = output.getvalue()
+        self.assertIn("SLICE020_SECRET_SCAN FINDINGS", receipt)
+        self.assertIn("files=1", receipt)
+        self.assertIn("additions=1", receipt)
+        self.assertNotIn(secret, receipt)
+
+    def test_main_scans_type_changed_path(self):
+        from scripts.check_slice020_secrets import main
+
+        secret = _synthetic_github_token()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=repo,
+                check=True,
+            )
+            source = repo / "type-change.txt"
+            source.symlink_to("missing-target")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            source.unlink()
+            source.write_text(f'TOKEN = "{secret}"\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "head"], cwd=repo, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout.strip()
+            output = io.StringIO()
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                with contextlib.redirect_stdout(output):
+                    result = main(["--base", base, "--head", head])
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(result, 1)
+        receipt = output.getvalue()
+        self.assertIn("SLICE020_SECRET_SCAN FINDINGS", receipt)
+        self.assertIn("files=1", receipt)
+        self.assertNotIn(secret, receipt)
 
 
 if __name__ == "__main__":

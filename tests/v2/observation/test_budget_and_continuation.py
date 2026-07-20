@@ -1369,7 +1369,10 @@ class TestSharedContinuationAuthorityAndRelationGaps(unittest.TestCase):
         snapshot = provider.snapshot(
             trigger_event_id="trigger", max_events=2, max_bytes=8192,
         )
-        self.assertEqual([event["id"] for event in snapshot["events"]], ["reply", "trigger"])
+        self.assertEqual(
+            [event["id"] for event in snapshot["events"]],
+            ["reply", "trigger"],
+        )
         self.assertTrue(snapshot["coverage"]["has_gaps"])
 
     def test_nearby_relation_target_excluded_by_event_cap_reports_gap_and_cause(self):
@@ -1383,7 +1386,10 @@ class TestSharedContinuationAuthorityAndRelationGaps(unittest.TestCase):
         snapshot = provider.snapshot(
             trigger_event_id="trigger", max_events=2, max_bytes=8192,
         )
-        self.assertEqual([event["id"] for event in snapshot["events"]], ["reply", "trigger"])
+        self.assertEqual(
+            [event["id"] for event in snapshot["events"]],
+            ["reply", "trigger"],
+        )
         self.assertTrue(snapshot["coverage"]["has_gaps"])
         self.assertIn("events", snapshot["coverage"]["truncated_by"])
 
@@ -1409,7 +1415,10 @@ print(','.join(event['id'] for event in s['events']))
             env["PYTHONPATH"] = "src:."
             outputs.append(
                 subprocess.check_output(
-                    [sys.executable, "-c", script], cwd=repo_root, env=env, text=True,
+                    [sys.executable, "-c", script],
+                    cwd=repo_root,
+                    env=env,
+                    text=True,
                 ).strip()
             )
         self.assertEqual(outputs, ["reply-target,trigger"] * 4)
@@ -1418,9 +1427,7 @@ print(','.join(event['id'] for event in s['events']))
         relation_events = [
             make_message("reply", "discord:1001", "reply", reply_to_event_id="missing"),
             make_message("thread", "discord:1001", "thread", thread_root_event_id="missing"),
-            make_reaction(
-                "reaction", "discord:1001", "missing", "reaction",
-            ),
+            make_reaction("reaction", "discord:1001", "missing", "reaction"),
         ]
         for relation_event in relation_events:
             with self.subTest(event_type=relation_event["type"]):
@@ -1429,19 +1436,26 @@ print(','.join(event['id'] for event in s['events']))
                 seed_room(provider, [relation_event, trigger])
                 continuation = ContinuationProvider(provider)
                 capability = continuation.issue(
-                    trigger_event_id="trigger", originating_event_ids=["trigger"],
-                    max_events_per_fetch=10, max_bytes_per_fetch=8192,
+                    trigger_event_id="trigger",
+                    originating_event_ids=["trigger"],
+                    max_events_per_fetch=10,
+                    max_bytes_per_fetch=8192,
                 )
                 page = continuation.fetch(
                     {
                         "request_id": f"page-{relation_event['type']}",
                         "handle_id": capability["handle_id"],
-                        "direction": "before", "max_events": 10, "max_bytes": 8192,
+                        "direction": "before",
+                        "max_events": 10,
+                        "max_bytes": 8192,
                     },
                     host_context=capability["bound_to"],
                     fetch_time="2026-07-19T10:00:00Z",
                 )
-                self.assertEqual([event["id"] for event in page["events"]], [relation_event["id"]])
+                self.assertEqual(
+                    [event["id"] for event in page["events"]],
+                    [relation_event["id"]],
+                )
                 self.assertTrue(page["coverage"]["has_gaps"])
 
     def test_continuation_budget_excluded_relation_target_reports_exact_cause(self):
@@ -1459,20 +1473,25 @@ print(','.join(event['id'] for event in s['events']))
                 max_events = 1 if cause == "events" else 10
                 max_bytes = 8192 if cause == "events" else reply_bytes
                 capability = continuation.issue(
-                    trigger_event_id="trigger", originating_event_ids=["trigger"],
-                    max_events_per_fetch=max_events, max_bytes_per_fetch=max_bytes,
+                    trigger_event_id="trigger",
+                    originating_event_ids=["trigger"],
+                    max_events_per_fetch=max_events,
+                    max_bytes_per_fetch=max_bytes,
                 )
                 page = continuation.fetch(
                     {
                         "request_id": f"budget-{cause}",
                         "handle_id": capability["handle_id"],
-                        "direction": "before", "max_events": max_events,
+                        "direction": "before",
+                        "max_events": max_events,
                         "max_bytes": max_bytes,
                     },
                     host_context=capability["bound_to"],
                     fetch_time="2026-07-19T10:00:00Z",
                 )
-                self.assertEqual([event["id"] for event in page["events"]], ["reply"])
+                self.assertEqual(
+                    [event["id"] for event in page["events"]], ["reply"]
+                )
                 self.assertTrue(page["coverage"]["has_gaps"])
                 self.assertIn(cause, page["coverage"]["truncated_by"])
 

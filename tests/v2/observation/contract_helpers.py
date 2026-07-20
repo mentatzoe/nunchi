@@ -1,10 +1,9 @@
-"""Slice 020's own stdlib validation-adapter driver over the exact
-attempt-6 corpus revision (T004, T037).
+"""Observation's own stdlib adapter over the effective V2 contract corpus.
 
 Loads the identical, frozen ``evals/v2/contract/{attention-request,
-attention-decision,downstream}/cases.jsonl`` corpus (202 cases, corpus
-revision ``bff6b463a44c1b9066fc654691042f9550da6c64``, the accepted 010
-attempt-6 candidate) with a minimal loader independent of
+attention-decision,downstream}/cases.jsonl`` corpus (208 cases, last corpus
+revision ``994df5606fac24b3dd1ba1201e4f0765e4e091a5``) with a minimal loader
+independent of
 ``tests/v2/contract/schema_helpers.py`` (010-owned test code; FR-013's
 "own" adapter). Every case is explicitly accounted for as either
 *consumed* — validated against ``src/nunchi/observation.py``'s own
@@ -37,11 +36,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 EVALS_DIR = REPO_ROOT / "evals" / "v2" / "contract"
 CORPUS_NAMES = ("attention-request", "attention-decision", "downstream")
 
-# Pinned per plan/spec: the exact accepted 010 attempt-6 candidate commit
-# whose corpus revision this driver must reproduce byte-for-byte.
-EXPECTED_CORPUS_REVISION = "bff6b463a44c1b9066fc654691042f9550da6c64"
-EXPECTED_CORPUS_SHA256 = "1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f"
-EXPECTED_TOTAL_CASES = 202
+# Pinned to the effective contract corpus consumed by this integrated tree.
+# I-010B@2 and I-010E@2 added six non-consumed schema cases after the
+# accepted attempt-6 baseline; observation's 100 consumed cases remain
+# byte-for-byte and verdict-for-verdict covered.
+CURRENT_CORPUS_REVISION = "994df5606fac24b3dd1ba1201e4f0765e4e091a5"
+CURRENT_CORPUS_SHA256 = "68b3a4c95daa60ea4cd12e67ff4722f857393396a4967ac7be129096924ca6aa"
+CURRENT_TOTAL_CASES = 208
 
 # I-010B (attention-decision) and I-010C (participant-wake) are never
 # consumed by slice 020; every relational class is accounted for even
@@ -59,7 +60,7 @@ class CorpusError(AssertionError):
 
 
 def corpus_digest(root: Path = EVALS_DIR) -> str:
-    """Framed SHA-256 over the exact three accepted attempt-6 corpus files."""
+    """Framed SHA-256 over the exact three effective contract corpus files."""
     digest = hashlib.sha256()
     for name in sorted(CORPUS_NAMES):
         relative = f"evals/v2/contract/{name}/cases.jsonl"

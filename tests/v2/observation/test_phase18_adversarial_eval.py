@@ -1,4 +1,4 @@
-"""Tests for the Phase 18/23/25/26/27 atomicity/resource evidence runner."""
+"""Tests for the Phase 18/23/25/26/28 authority/resource evidence runner."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class TestPhase18AdversarialEval(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "phase18.jsonl"
             rows = run_and_write(output)
-            self.assertEqual(len(rows), 25)
+            self.assertEqual(len(rows), 39)
             self.assertTrue(all(row["result"] == "PASS" for row in rows))
             self.assertEqual(
                 {row["case_id"] for row in rows},
@@ -29,9 +29,17 @@ class TestPhase18AdversarialEval(unittest.TestCase):
                     "P23-RESOURCE-001",
                     "P25-AUTH-001", "P25-AUTH-002",
                     "P25-GAP-001", "P25-GAP-002",
-                    "P26-INPUT-001", "P26-GAP-001", "P26-GAP-002",
-                    "P26-RESTART-001",
-                    "P27-EVAL-001", "P27-ORDER-001",
+                    "P26-COMP-001",
+                    "P26-AUTH-001", "P26-AUTH-002", "P26-AUTH-003",
+                    "P26-AUTH-004", "P26-AUTH-005", "P26-AUTH-006",
+                    "P26-AUTH-007",
+                    "P26-GAP-001", "P26-GAP-002", "P26-GAP-003",
+                    "P26-GAP-004",
+                    "P26-RECEIPT-001", "P26-RECEIPT-002",
+                    "P26-TIME-001",
+                    "P28-RECON-GAP-001", "P28-RECON-GAP-002",
+                    "P28-RECON-RESTART-001",
+                    "P28-RECON-EVAL-001", "P28-RECON-ORDER-001",
                 },
             )
             serialized = [json.loads(line) for line in output.read_text().splitlines()]

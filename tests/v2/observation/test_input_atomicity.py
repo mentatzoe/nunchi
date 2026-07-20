@@ -37,38 +37,6 @@ class _CountingDeque(deque):
 
 
 class TestCallerMemoryIsolation(unittest.TestCase):
-    def test_receipt_uses_one_private_request_copy_after_exact_match(self):
-        provider = make_provider()
-        seed_room(provider, [make_message("e1", "discord:1001", "x")])
-        request = provider.snapshot(
-            trigger_event_id="e1", max_events=1, max_bytes=8192,
-            request_id="receipt-copy",
-        )
-        issued_bytes = sum(
-            observation.serialized_byte_size(event) for event in request["events"]
-        )
-        checked = Event()
-        release = Event()
-        real_size = observation.serialized_byte_size
-
-        def gated_size(value):
-            checked.set()
-            if not release.wait(timeout=5):
-                raise RuntimeError("receipt test release timeout")
-            return real_size(value)
-
-        with patch.object(observation, "serialized_byte_size", gated_size):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(provider.build_observation_receipt, request)
-                self.assertTrue(checked.wait(timeout=2))
-                request["events"][0]["text"] = "M" * 200
-                release.set()
-                receipt = future.result(timeout=5)
-
-        self.assertEqual(receipt["body"]["byte_count"], issued_bytes)
-        self.assertEqual(receipt["body"]["included_event_ids"], ["e1"])
-        self.assertNotIn("receipt-copy", provider._pending_receipts)
-
     def test_fetch_uses_one_private_request_copy_after_authorization(self):
         provider = make_provider()
         seed_room(
@@ -157,16 +125,6 @@ class TestCallerMemoryIsolation(unittest.TestCase):
                 host_context=capability["bound_to"], fetch_time=FETCH_TIME,
             )
         self.assertEqual(continuation._cursors[capability["handle_id"]], set())
-
-        receipt_provider = make_provider()
-        seed_room(receipt_provider, [make_message("e1", "discord:1001", "one")])
-        pending = receipt_provider.snapshot(
-            trigger_event_id="e1", max_events=1, max_bytes=8192,
-            request_id="receipt-copy-failure",
-        )
-        with self.assertRaisesRegex(ObservationInputError, "copy"):
-            receipt_provider.build_observation_receipt(_UncopyableDict(pending))
-        self.assertIn("receipt-copy-failure", receipt_provider._pending_receipts)
 
 
 class TestEarlyCursorLimit(unittest.TestCase):

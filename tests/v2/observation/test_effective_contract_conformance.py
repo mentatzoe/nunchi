@@ -1,5 +1,6 @@
-"""T037: slice 020's own stdlib adapter over the complete, identical
-attempt-6 corpus revision (202 cases), including all seven
+"""Observation's stdlib adapter over the complete effective contract corpus.
+
+All 208 cases are accounted for, including all seven
 runtime-adapter-only semantic/relational classes, with every
 non-consumed-interface case explicitly accounted for rather than
 silently skipped."""
@@ -13,9 +14,9 @@ import unittest
 
 from tests.v2.observation.contract_helpers import (
     EVALS_DIR,
-    EXPECTED_CORPUS_SHA256,
-    EXPECTED_CORPUS_REVISION,
-    EXPECTED_TOTAL_CASES,
+    CURRENT_CORPUS_SHA256,
+    CURRENT_CORPUS_REVISION,
+    CURRENT_TOTAL_CASES,
     corpus_digest,
     run_all,
     summarize,
@@ -24,7 +25,7 @@ from tests.v2.observation.contract_helpers import (
 # Locked per-class expected (consumed, non_consumed) counts (T037): a drift
 # in either number fails loudly rather than silently shrinking coverage.
 EXPECTED_BY_CLASS = {
-    "schema-expressible": (54, 98),
+    "schema-expressible": (54, 104),
     "id-uniqueness": (4, 0),
     "timestamp-order": (2, 0),
     "advice-citation": (0, 2),
@@ -35,21 +36,21 @@ EXPECTED_BY_CLASS = {
 }
 
 
-class TestAttempt6CorpusConformance(unittest.TestCase):
+class TestEffectiveContractConformance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.results = run_all()
         cls.summary = summarize(cls.results)
 
-    def test_total_case_count_matches_the_frozen_revision(self):
-        self.assertEqual(self.summary["total_cases"], EXPECTED_TOTAL_CASES)
+    def test_total_case_count_matches_the_effective_revision(self):
+        self.assertEqual(self.summary["total_cases"], CURRENT_TOTAL_CASES)
 
     def test_consumed_and_non_consumed_split(self):
         self.assertEqual(self.summary["consumed_count"], 100)
-        self.assertEqual(self.summary["non_consumed_count"], 102)
+        self.assertEqual(self.summary["non_consumed_count"], 108)
         self.assertEqual(
             self.summary["consumed_count"] + self.summary["non_consumed_count"],
-            EXPECTED_TOTAL_CASES,
+            CURRENT_TOTAL_CASES,
         )
 
     def test_every_case_matches_its_expected_result_or_is_explicitly_non_consumed(self):
@@ -65,8 +66,8 @@ class TestAttempt6CorpusConformance(unittest.TestCase):
                 )
 
     def test_corpus_revision_and_exact_bytes_are_pinned(self):
-        self.assertEqual(len(EXPECTED_CORPUS_REVISION), 40)
-        self.assertEqual(corpus_digest(), EXPECTED_CORPUS_SHA256)
+        self.assertEqual(len(CURRENT_CORPUS_REVISION), 40)
+        self.assertEqual(corpus_digest(), CURRENT_CORPUS_SHA256)
 
     def test_any_corpus_byte_drift_changes_the_pinned_digest(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -74,7 +75,7 @@ class TestAttempt6CorpusConformance(unittest.TestCase):
             shutil.copytree(EVALS_DIR, copied)
             target = copied / "attention-request" / "cases.jsonl"
             target.write_bytes(target.read_bytes() + b"\n")
-            self.assertNotEqual(corpus_digest(copied), EXPECTED_CORPUS_SHA256)
+            self.assertNotEqual(corpus_digest(copied), CURRENT_CORPUS_SHA256)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ Invoke as a script to regenerate the aggregate evidence files:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -42,6 +43,20 @@ ROOM_KWARGS = dict(
     room_id="42",
     continuity_scope_id="discord:room:42#2026-07",
 )
+
+
+def _evidence_request_id(case_id: str) -> str:
+    """Return a stable request ID for byte-reproducible offline evidence."""
+
+    digest = hashlib.sha256(f"request:{case_id}".encode()).hexdigest()
+    return f"req-{digest[:36]}"
+
+
+def _evidence_handle_id(case_id: str) -> str:
+    """Return a stable alias; runtime continuation authority remains opaque."""
+
+    digest = hashlib.sha256(f"handle:{case_id}".encode()).hexdigest()
+    return f"cont-{digest[:12]}"
 
 
 def _load(name: str) -> list[dict[str, Any]]:
@@ -81,7 +96,12 @@ def run_identity_and_hygiene() -> list[dict]:
             outcome = provider.ingest(step)
             if outcome != expect:
                 failures.append(f"expected disposition {expect!r}, got {outcome!r}")
-        request = provider.snapshot(trigger_event_id=case["trigger_event_id"], max_events=50, max_bytes=65536)
+        request = provider.snapshot(
+            trigger_event_id=case["trigger_event_id"],
+            max_events=50,
+            max_bytes=65536,
+            request_id=_evidence_request_id(case["case_id"]),
+        )
         receipt = provider.build_observation_receipt(request)
         result = "PASS" if not failures else "FAIL"
         row = _snapshot_row(case, request, result=result, detail="; ".join(failures))
@@ -113,6 +133,7 @@ def run_budget_sweep() -> list[dict]:
                 trigger_event_id=case["trigger_event_id"],
                 max_events=case["max_events"], max_bytes=case["max_bytes"],
                 max_age_seconds=case.get("max_age_seconds"),
+                request_id=_evidence_request_id(case["case_id"]),
             )
         except ObservationInputError as exc:
             if case.get("expect") != "reject":
@@ -428,10 +449,12 @@ def run_continuation_attacks() -> list[dict]:
             if outcome == case["expect"] and not dedup_violation and not coverage_mismatch and not sequence_mismatch
             else "FAIL"
         )
+        evidence_handle_id = _evidence_handle_id(case["case_id"])
+        detail = detail.replace(capability["handle_id"], evidence_handle_id)
         row = {
             "scene_id": case["scene_id"], "case_id": case["case_id"], "title": case["title"],
             "result": result, "expected": case["expect"], "observed": outcome, "detail": detail,
-            "handle_id": capability["handle_id"],
+            "handle_id": evidence_handle_id,
             "has_more_before": observed_has_more_before, "has_more_after": observed_has_more_after,
             "final_has_more_after": observed_final_has_more_after,
             "truncated_by": observed_truncated_by, "page_event_ids": observed_page_event_ids,
@@ -470,7 +493,12 @@ def run_recoverability() -> list[dict]:
                 "delivery_id": f"delivery:{event['id']}", "disposition": "candidate-event",
                 "authorized": True, "event": event, "actors": {},
             })
-        request = reference.snapshot(trigger_event_id=case["trigger_event_id"], max_events=50, max_bytes=65536)
+        request = reference.snapshot(
+            trigger_event_id=case["trigger_event_id"],
+            max_events=50,
+            max_bytes=65536,
+            request_id=_evidence_request_id(case["case_id"]),
+        )
         failures = []
         if request["coverage"]["continuity"] != case["expect_continuity"]:
             failures.append(f"continuity {request['coverage']['continuity']!r} != {case['expect_continuity']!r}")
@@ -478,6 +506,11 @@ def run_recoverability() -> list[dict]:
         for retained in case.get("expect_retained_ids", []):
             if retained not in included_ids:
                 failures.append(f"expected retained id {retained!r} missing")
+        for gapped in case.get("expect_gap_ids", []):
+            if gapped not in reference.known_gap_event_ids:
+                failures.append(
+                    f"expected known-gap id {gapped!r} missing from reference diagnostics"
+                )
         if case.get("expect_gap_ids"):
             if request["coverage"]["has_gaps"] is not True:
                 failures.append("known restart loss was not disclosed as a coverage gap")
@@ -486,6 +519,8 @@ def run_recoverability() -> list[dict]:
         if "expect_has_restart_gap" in case and request["coverage"]["has_restart_gap"] != case["expect_has_restart_gap"]:
             failures.append("has_restart_gap did not match expectation")
         if case.get("expect_gap_nonempty"):
+            if not reference.known_gap_event_ids:
+                failures.append("expected a non-empty reference gap diagnostic")
             if request["coverage"]["has_gaps"] is not True:
                 failures.append("expected known gap missing from normalized coverage")
             if request["coverage"]["has_restart_gap"] is not True:
@@ -563,7 +598,9 @@ def run_equivalence() -> list[dict]:
             for page in (left, right):
                 page_errors = validate_context_continuation(page)
                 if page_errors:
-                    raise ValueError(f"S13 synthesized invalid continuation page: {page_errors}")
+                    raise ValueError(
+                        f"S13 synthesized invalid continuation page: {page_errors}"
+                    )
             comparison = compare_pages(left, right, right_capability=right_capability)
         else:
             comparison = compare_requests(left, right, right_capability=right_capability)

@@ -60,6 +60,8 @@ WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
 TRANSPORT_DELIVERY = ("sent", "failed", "unknown", "unavailable")
 REQUEST_ID_FILTER_BYTES = 8192
 REQUEST_ID_FILTER_HASHES = 4
+HANDLE_ID_FILTER_BYTES = 8192
+HANDLE_ID_FILTER_HASHES = 4
 
 # The FR-013 slice-owned token-size proxy. Evidence-only; never written onto
 # I-010E, whose closed observation body has no token field (FR-015).
@@ -1307,12 +1309,14 @@ class ObservationProvider:
         never adds an estimated-token field (token-proxy evidence stays
         separate, FR-015) and never mutates or completes another stage.
         """
+        if not isinstance(request, dict):
+            raise ObservationInputError("receipt request must be an object")
         try:
             request = deepcopy(request)
         except Exception as exc:
-            raise ObservationInputError("receipt request copy failed safely") from exc
-        if not isinstance(request, dict):
-            raise ObservationInputError("receipt request must be an object")
+            raise ObservationInputError(
+                "receipt request copy failed safely"
+            ) from exc
         request_errors = validate_attention_request(request)
         if request_errors:
             raise ObservationInputError(
@@ -1333,18 +1337,19 @@ class ObservationProvider:
                 f"request_id {request_id!r} does not exactly match its provider-issued snapshot"
             )
 
-        events = request["events"]
+        attested = deepcopy(issued)
+        events = attested["events"]
         body = {
             "schema_version": SCHEMA_VERSION,
-            "trigger_event_id": request["trigger_event_id"],
-            "continuity_scope_id": request["room"]["continuity_scope_id"],
+            "trigger_event_id": attested["trigger_event_id"],
+            "continuity_scope_id": attested["room"]["continuity_scope_id"],
             "event_count": len(events),
             "byte_count": sum(serialized_byte_size(event) for event in events),
-            "coverage": deepcopy(request["coverage"]),
+            "coverage": deepcopy(attested["coverage"]),
             "included_event_ids": [event["id"] for event in events],
         }
         record = {
-            "request_id": request["request_id"],
+            "request_id": request_id,
             "stage": "observation",
             "writer": "observation-provider",
             "body": body,
@@ -1399,6 +1404,7 @@ class ContinuationProvider:
                     "cursors": {},
                     "cursor_windows": {},
                     "cursor_sequences": {},
+                    "issued_handle_filter": bytearray(HANDLE_ID_FILTER_BYTES),
                 }
                 provider._continuation_state = state
             elif (
@@ -1420,6 +1426,28 @@ class ContinuationProvider:
             self._cursors = state["cursors"]
             self._cursor_windows = state["cursor_windows"]
             self._cursor_sequences = state["cursor_sequences"]
+            self._issued_handle_filter = state["issued_handle_filter"]
+
+    @staticmethod
+    def _handle_id_filter_positions(handle_id: str) -> tuple[int, ...]:
+        digest = hashlib.sha256(
+            f"continuation-handle\0{handle_id}".encode("utf-8")
+        ).digest()
+        bit_count = HANDLE_ID_FILTER_BYTES * 8
+        return tuple(
+            int.from_bytes(digest[offset:offset + 2], "big") % bit_count
+            for offset in range(0, HANDLE_ID_FILTER_HASHES * 2, 2)
+        )
+
+    def _handle_id_was_issued(self, handle_id: str) -> bool:
+        return all(
+            self._issued_handle_filter[position // 8] & (1 << (position % 8))
+            for position in self._handle_id_filter_positions(handle_id)
+        )
+
+    def _remember_handle_id(self, handle_id: str) -> None:
+        for position in self._handle_id_filter_positions(handle_id):
+            self._issued_handle_filter[position // 8] |= 1 << (position % 8)
 
     @_with_state_lock
     def issue(
@@ -1457,7 +1485,7 @@ class ContinuationProvider:
             )
         for _ in range(16):
             handle_id = f"cont-{uuid.uuid4().hex[:12]}"
-            if handle_id not in self._capabilities:
+            if not self._handle_id_was_issued(handle_id):
                 break
         else:
             raise ContinuationError(
@@ -1483,6 +1511,7 @@ class ContinuationProvider:
         _check_continuation_capability(errors, "continuation", capability)
         if errors:
             raise ValueError(f"issued capability failed self-validation: {list(errors)}")
+        self._remember_handle_id(handle_id)
         self._capabilities[handle_id] = deepcopy(capability)
         self._trigger_generations[handle_id] = self._provider._event_generations[trigger_event_id]
         self._originating_event_ids[handle_id] = origin_id_set

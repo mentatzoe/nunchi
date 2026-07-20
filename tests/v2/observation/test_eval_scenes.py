@@ -4,6 +4,7 @@ recorded scene fails the ordinary baseline, not just the evidence script."""
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import patch
 
@@ -52,6 +53,29 @@ class TestEvalScenesAllPass(unittest.TestCase):
         with patch.object(scene_runner, "compare_pages", checked_compare):
             self._assert_all_pass(scene_runner.run_equivalence())
         self.assertEqual(comparison_errors, [[], []])
+
+    def test_aggregate_evidence_is_deterministic_and_matches_committed_bytes(self):
+        runners = {
+            "identity-and-hygiene.jsonl": run_identity_and_hygiene,
+            "budget-sweep.jsonl": run_budget_sweep,
+            "continuation.jsonl": run_continuation_attacks,
+            "s05-recoverability.jsonl": run_recoverability,
+            "s13-equivalence.jsonl": run_equivalence,
+        }
+
+        first = {name: runner() for name, runner in runners.items()}
+        second = {name: runner() for name, runner in runners.items()}
+        self.assertEqual(first, second)
+
+        for name, rows in first.items():
+            rendered = "".join(
+                json.dumps(row, sort_keys=True) + "\n" for row in rows
+            ).encode("utf-8")
+            self.assertEqual(
+                (scene_runner.EVIDENCE_DIR / name).read_bytes(),
+                rendered,
+                name,
+            )
 
 
 if __name__ == "__main__":

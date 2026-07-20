@@ -2,9 +2,10 @@
 """Scan added Slice 020 diff lines for high-confidence secret signatures.
 
 The command requires an explicit committed ``--base``/``--head`` range and scans
-only Slice 020-owned implementation, test, evaluation, evidence, and scanner
-paths. Managed specification paths remain outside executable dependencies. It
-never prints matching source text or secret bytes.
+every added line in every changed repository path. A claimed whole-activation
+range therefore includes lifecycle-critical scripts, planning, shared tests,
+evidence, and implementation. It never prints matching source text or secret
+bytes.
 
 Matcher set (deliberately high confidence):
 
@@ -13,9 +14,9 @@ Matcher set (deliberately high confidence):
 3. GitHub ``gh[pousr]_`` tokens with at least 20 token characters.
 4. Long quoted values assigned to explicit key/secret/token variable names.
 
-The literal marker ``slice020-secret-fixture`` suppresses only its own added
-source line. It exists solely for synthetic detector fixtures; production and
-evidence lines have no broad path- or file-level allowlist.
+The scanner recognizes no fixture marker or source-line exemption. Synthetic
+detector fixtures construct matcher-shaped values dynamically so the scanner's
+own committed source remains subject to the same all-path policy.
 """
 
 from __future__ import annotations
@@ -27,14 +28,6 @@ import re
 import subprocess  # nosec B404
 from typing import Sequence
 
-
-SLICE020_PATHS = (
-    "src/nunchi/observation.py",
-    "tests/v2/observation",
-    "evals/v2/observation",
-    "evidence/v2/observation",
-    "scripts/check_slice020_secrets.py",
-)
 
 MATCHERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -73,28 +66,43 @@ _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 def scan_added_lines(diff_text: str) -> list[Finding]:
     """Return redacted findings from added lines in one unified diff."""
     findings: list[Finding] = []
+    for path, new_line, added in _added_lines(diff_text):
+        for label, matcher in MATCHERS:
+            if matcher.search(added):
+                findings.append(Finding(path=path, line=new_line, matcher=label))
+                break
+    return findings
+
+
+def _added_lines(diff_text: str) -> list[tuple[str, int, str]]:
+    """Parse actual hunk additions without confusing content for file headers."""
+
+    additions: list[tuple[str, int, str]] = []
     path = "<unknown>"
     new_line = 0
+    in_hunk = False
     for raw_line in diff_text.splitlines():
-        if raw_line.startswith("+++ "):
+        if raw_line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if not in_hunk and raw_line.startswith("+++ "):
             candidate = raw_line[4:]
             path = candidate[2:] if candidate.startswith("b/") else candidate
             continue
         hunk = _HUNK.match(raw_line)
         if hunk:
+            in_hunk = True
             new_line = int(hunk.group(1))
             continue
-        if raw_line.startswith("+") and not raw_line.startswith("+++"):
-            added = raw_line[1:]
-            for label, matcher in MATCHERS:
-                if matcher.search(added):
-                    findings.append(Finding(path=path, line=new_line, matcher=label))
-                    break
+        if not in_hunk:
+            continue
+        if raw_line.startswith("+"):
+            additions.append((path, new_line, raw_line[1:]))
             new_line += 1
             continue
-        if not raw_line.startswith("-") and not raw_line.startswith("diff "):
+        if raw_line.startswith(" "):
             new_line += 1
-    return findings
+    return additions
 
 
 def _git(*args: str) -> str:
@@ -119,19 +127,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     base = _commit(args.base)
     head = _commit(args.head)
     diff = _git(
-        "diff", "--no-ext-diff", "--unified=0", "--diff-filter=ACMR",
-        base, head, "--", *SLICE020_PATHS,
+        "diff", "--no-ext-diff", "--unified=0", "--diff-filter=ACMRT",
+        base, head,
     )
     changed_files_text = _git(
-        "diff", "--name-only", "--diff-filter=ACMR", base, head, "--",
-        *SLICE020_PATHS,
+        "diff", "--name-only", "--diff-filter=ACMRT", base, head,
     )
     changed_files = [line for line in changed_files_text.splitlines() if line]
-    added_lines = sum(
-        1
-        for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
+    added_lines = len(_added_lines(diff))
     findings = scan_added_lines(diff)
     status = "CLEAN" if not findings else "FINDINGS"
     print(

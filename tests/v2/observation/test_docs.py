@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 
 DOC_PATH = Path(__file__).resolve().parents[3] / "docs" / "observation" / "v2.md"
-HANDOFF_PATH = Path(__file__).resolve().parents[3] / "evidence" / "v2" / "observation" / "handoff.md"
 CODE_BLOCK_PATTERN = re.compile(r"```python\n(.*?)```", re.DOTALL)
 
 
@@ -73,16 +72,11 @@ class TestDocumentedContractClaims(unittest.TestCase):
     def test_documents_honest_unavailability_for_reaction_and_membership(self):
         self.assertIn("honest omission", self.text)
 
-    def test_names_real_v2_core_owner_lane_for_projection_handoff_not_nonexistent_lane(self):
-        # P020-01/A020-F2: no `v2-attention-owner` lane exists anywhere in the
-        # repository; slice 030's only accountable owner lane is
-        # `v2-core-owner`. Both the doc and the handoff packet must name the
-        # real lane and must contain zero occurrences of the wrong one.
+    def test_names_real_v2_core_owner_lane_for_projection_handoff(self):
+        # The product document names the actual downstream owner and does not
+        # depend on a historical slice packet to explain its public boundary.
         self.assertIn("v2-core-owner` unchanged", self.text)
         self.assertNotIn("v2-attention-owner", self.text)
-        handoff_text = HANDOFF_PATH.read_text(encoding="utf-8")
-        self.assertNotIn("v2-attention-owner", handoff_text)
-        self.assertIn("v2-core-owner", handoff_text)
 
 
 class TestLocalLinksResolve(unittest.TestCase):

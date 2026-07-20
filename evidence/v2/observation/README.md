@@ -1,7 +1,10 @@
 # Slice 020 evidence manifest
 
-Scene-to-record manifest for `020-v2-observation`, generated at the same
-candidate tree as `evidence/v2/observation/handoff.md`. Every aggregate
+Scene-to-record manifest for `020-v2-observation`, generated with the current
+superseding section of `evidence/v2/observation/handoff.md`. The packet's
+historical rewrite incident and recovery baseline are recorded separately at
+`evidence/v2/observation/handoff-history-integrity-incident-2026-07-19.md`.
+Every aggregate
 JSONL row below carries a mandatory `scene_id`; this manifest maps every
 applicable scene from the plan's Acceptance Scenes and Evidence table to
 its exact records and reproduction command, so scene coverage is never
@@ -20,7 +23,9 @@ implicit.
 - **Bounded snapshot (FR-006, FR-007)**: trigger, then exact relation
   closure, then nearby fill, under hard `max_events`/`max_bytes`/optional
   `max_age_seconds` caps, in authoritative (ingestion) order; `coverage`
-  reports every limit that actually excluded a candidate.
+  reports every limit that actually excluded a candidate, relation gaps from
+  every returned snapshot/page event, and host-attested restart loss on the
+  normalized wire rather than only in evaluator side state.
 - **Continuation (FR-008, FR-009)**: optional, host-owned, opaque,
   bound to participant/room/continuity-scope/trigger; a fetch request
   carries no inline binding fields, while the host context must exactly equal
@@ -42,10 +47,12 @@ implicit.
 - **Retention (FR-010)**: bounded (`retention_max_events`) and
   outcome-neutral; retained delivery IDs, event generations, and actor facts are
   pruned with deque eviction, and no prior attention/social outcome ever changes
-  retention behavior.
+  retention behavior. A constant-size lifetime timestamp watermark survives
+  eviction and prevents undated events from hiding parseable order regression.
 - **Receipt (FR-015)**: exactly one immutable `observation`-stage `I-010E`
   record per request, correlated by `request_id`, attesting only
-  snapshot/coverage facts; no token field, no later-stage fact.
+  snapshot/coverage facts from the private issued document after complete caller
+  input copy and exact comparison; no token field, no later-stage fact.
 
 ## Scene-to-record manifest
 
@@ -64,15 +71,24 @@ implicit.
 Total: 53 aggregate rows across the 5 evidence files, all `PASS` (0 FAIL),
 regenerated 2026-07-19.
 
-## Phase 18/23/25/26/27 atomicity/resource evidence
+The aggregate runner binds snapshot request IDs to deterministic case-derived
+values and records a deterministic case-derived alias for each opaque runtime
+continuation handle. Runtime providers keep their random, non-reusing authority
+identifiers; only persisted offline evidence is canonicalized. The ordinary eval
+test runs every suite twice and requires both runs—and the committed JSONL
+bytes—to be identical.
 
-`phase18-adversarial.jsonl` contains 25 deterministic PASS rows: five
+## Phase 18/23/25/26/28 authority/resource evidence
+
+`phase18-adversarial.jsonl` contains 39 deterministic PASS rows: five
 barrier-controlled continuation atomicity cases, three retention-gap coverage
 cases, two bounded-replay regressions, four caller-memory/early-limit cases, and
-four Phase 25 provider-wide continuation-authority/relation-gap cases, four
-Phase 26 receipt/relation/restart wire-truth cases, one Phase 27
-final-page-validity case, one cross-hash-seed relation-priority case, plus one
-explicit N=64/2N=128 replay metric row. The measured retained-deque visits
+four preserved Phase 25 provider-wide continuation-authority/relation-gap cases,
+fifteen Phase 26 comparator/permanent-handle/receipt/timestamp/direct-concurrency
+cases, five selectively reconciled product/evaluation cases from the parallel
+`3e38a70` lineage (nearby/continuation relation gaps, normalized restart-gap
+truth, final-page validation, and hash-seed-independent relation
+priority), plus one explicit N=64/2N=128 replay metric row. The measured retained-deque visits
 after initial window creation are 0 and 0; an over-limit fresh fetch also records
 zero retained-deque visits. Reproduce with:
 
@@ -80,31 +96,45 @@ zero retained-deque visits. Reproduce with:
 PYTHONPATH=src:. python3 -m evals.v2.observation.run_phase18_adversarial
 ```
 
-## Literal task-state evidence
+## Literal task-state and rejection-history evidence
 
-The shared governance graph intentionally normalizes checkbox state for stable
-task identity. Slice 020 therefore uses a separate read-only checker that
-reports checked, explicitly superseded, and genuinely open IDs without editing
-the shared oracle:
+Shared governance preserves normalized checkbox-independent graph hashing while
+separately enforcing literal completion and the exact Slice 020 T001–T160
+terminal manifest at current and candidate lifecycle transitions. Candidate
+attempt 2 and later must descend rejected Phase 27 object `abad8d85` and the
+referenced commit itself must satisfy the exact `CONVERGED` graph policy. The
+complete T107/T112/T119/T124/T131/T140/T146→T153→T160 supersession chain,
+checked-gate state, increasing successor order, and durable rejected/not-approved
+semantics live in that shared policy. The slice-owned diagnostic imports the same
+policy and reports checked, superseded, and open IDs:
 
 ```sh
 python3 scripts/check_slice020_task_state.py \
   --tasks specs/020-v2-observation/tasks.md
 ```
 
-## Exact-attempt-6 corpus conformance (I-010A/I-010D/I-010E)
+Every `review-*-rejection.md` record is explicitly registered and replayed as
+byte-immutable from introduction, with an exact SHA-256 pinned in source. The
+disclosed historical byte rewrite of
+`review-2026-07-19-80c1de2-late-rejection.md` is not erased: governance pins its
+exact recovery bytes from `abad8d85` and rejects deletion or any later change.
+Unregistered rejection additions fail the governance boundary, and the incident
+record describing the historical violation is itself hash-pinned.
 
-`evidence/v2/observation/handoff.md` §"Attempt-6 corpus conformance
-(T037)" carries the full accounting: 202 cases from the identical
-`bff6b463a44c1b9066fc654691042f9550da6c64` corpus revision, 100 consumed
-(0 mismatches), 102 explicitly non-consumed (`I-010B`/`I-010C`, never
-silently skipped). T117 additionally verifies a framed SHA-256 over exact path,
-byte length, and bytes for all three files:
-`1ce18c9e9fc3b5aa820adcb1aad649c635fcb2ed64a7e644d4d5bba6aeb5d91f`.
+## Effective-contract corpus conformance (I-010A/I-010D/I-010E)
+
+The historical handoff records the original accepted attempt-6 accounting.
+The integrated product test follows the effective contract corpus through the
+I-010E@2 and I-010B@2 amendments: 208 cases at corpus revision
+`994df5606fac24b3dd1ba1201e4f0765e4e091a5`, 100 consumed with zero
+mismatches, and 108 explicitly non-consumed (`I-010B`/`I-010C`, never
+silently skipped). It verifies a framed SHA-256 over exact path, byte length,
+and bytes for all three files:
+`68b3a4c95daa60ea4cd12e67ff4722f857393396a4967ac7be129096924ca6aa`.
 Any single-byte drift changes the digest. Reproduce with:
 
 ```sh
-PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_attempt6_corpus_conformance
+PYTHONPATH=src:. python3 -m unittest tests.v2.observation.test_effective_contract_conformance
 ```
 
 ## Downstream comparator/recoverability obligations

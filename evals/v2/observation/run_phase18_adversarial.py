@@ -1,4 +1,4 @@
-"""Reproducible Phase 18/23 atomicity and replay-resource evidence.
+"""Reproducible Phase 18/23/25/26/28 authority and resource evidence.
 
 This runner executes the deterministic barrier-controlled regression cases and
 emits one JSONL row per mechanism plus explicit N/2N deque-visit metrics.
@@ -23,8 +23,15 @@ from tests.v2.observation.test_input_atomicity import (
 from tests.v2.observation.test_budget_and_continuation import (
     TestSharedContinuationAuthorityAndRelationGaps,
 )
-from tests.v2.observation.test_recoverability import TestKnownGapVariant
+from tests.v2.observation.test_continuation_authority import (
+    TestContinuationComparatorExpiryPresence,
+    TestLifetimeTimestampWatermark,
+    TestProviderOwnedContinuationAuthority,
+    TestReceiptCallerMemoryAuthority,
+    TestRelationGapTruth,
+)
 from tests.v2.observation.test_eval_scenes import TestEvalScenesAllPass
+from tests.v2.observation.test_recoverability import TestKnownGapVariant
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = REPO_ROOT / "evidence/v2/observation/phase18-adversarial.jsonl"
@@ -48,12 +55,26 @@ CASES = (
     ("P25-AUTH-002", TestSharedContinuationAuthorityAndRelationGaps, "test_cross_wrapper_concurrent_issue_obeys_one_global_cap"),
     ("P25-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_unavailable_literal_relation_targets_are_reported_as_gaps"),
     ("P25-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_budget_excluded_known_relation_reports_actual_truncation_cause"),
-    ("P26-INPUT-001", TestCallerMemoryIsolation, "test_receipt_uses_one_private_request_copy_after_exact_match"),
-    ("P26-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_nearby_returned_relation_target_absence_is_reported_as_a_gap"),
-    ("P26-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_continuation_reports_relation_gaps_for_every_returned_event"),
-    ("P26-RESTART-001", TestKnownGapVariant, "test_known_gap_variant_reports_the_dropped_tail_honestly"),
-    ("P27-EVAL-001", TestEvalScenesAllPass, "test_equivalence_validates_final_pages_at_comparison_seam"),
-    ("P27-ORDER-001", TestSharedContinuationAuthorityAndRelationGaps, "test_capped_trigger_relation_priority_is_hash_seed_independent"),
+    ("P26-COMP-001", TestContinuationComparatorExpiryPresence, "test_expiry_presence_is_semantic_but_exact_clock_value_is_opaque"),
+    ("P26-AUTH-001", TestProviderOwnedContinuationAuthority, "test_generated_handle_collision_fails_without_overwriting_live_authority"),
+    ("P26-AUTH-002", TestProviderOwnedContinuationAuthority, "test_revoked_handle_id_never_resurrects_old_capability"),
+    ("P26-AUTH-003", TestProviderOwnedContinuationAuthority, "test_wrappers_share_one_registry_and_one_provider_wide_handle_cap"),
+    ("P26-AUTH-004", TestProviderOwnedContinuationAuthority, "test_additional_wrapper_with_different_limits_rejects"),
+    ("P26-AUTH-005", TestProviderOwnedContinuationAuthority, "test_issued_handle_filter_is_fixed_size"),
+    ("P26-AUTH-006", TestProviderOwnedContinuationAuthority, "test_concurrent_wrappers_obey_one_provider_wide_handle_cap"),
+    ("P26-AUTH-007", TestProviderOwnedContinuationAuthority, "test_concurrent_wrappers_cannot_overwrite_a_colliding_handle"),
+    ("P26-GAP-001", TestRelationGapTruth, "test_missing_reply_target_is_an_honest_gap"),
+    ("P26-GAP-002", TestRelationGapTruth, "test_missing_thread_root_is_an_honest_gap"),
+    ("P26-GAP-003", TestRelationGapTruth, "test_missing_reaction_target_is_an_honest_gap"),
+    ("P26-GAP-004", TestRelationGapTruth, "test_known_relation_target_that_cannot_fit_is_an_honest_gap"),
+    ("P26-RECEIPT-001", TestReceiptCallerMemoryAuthority, "test_receipt_attests_private_issued_document_after_caller_mutation"),
+    ("P26-RECEIPT-002", TestReceiptCallerMemoryAuthority, "test_receipt_copy_failure_does_not_consume_pending_authority"),
+    ("P26-TIME-001", TestLifetimeTimestampWatermark, "test_undated_eviction_cannot_erase_parseable_time_order"),
+    ("P28-RECON-GAP-001", TestSharedContinuationAuthorityAndRelationGaps, "test_nearby_returned_relation_target_absence_is_reported_as_a_gap"),
+    ("P28-RECON-GAP-002", TestSharedContinuationAuthorityAndRelationGaps, "test_continuation_reports_relation_gaps_for_every_returned_event"),
+    ("P28-RECON-RESTART-001", TestKnownGapVariant, "test_known_gap_variant_reports_the_dropped_tail_honestly"),
+    ("P28-RECON-EVAL-001", TestEvalScenesAllPass, "test_equivalence_validates_final_pages_at_comparison_seam"),
+    ("P28-RECON-ORDER-001", TestSharedContinuationAuthorityAndRelationGaps, "test_capped_trigger_relation_priority_is_hash_seed_independent"),
 )
 
 
