@@ -10,7 +10,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ..authorization import PrivilegedActionGuard
 from ..mcp_discord.events import DiscordEventSourceV2, MessageEvent, V2_NOTIFICATION_METHOD
 from ..mcp_discord.v2 import MCPDiscordActionSinkV2
 from ..observation import ObservationProvider
@@ -104,7 +103,6 @@ class CodexRoomV2:
             participant=participant_callable,
             correlated_action_sink=action_sink,
             classifier_transport=classifier_transport,
-            authorization_guard=PrivilegedActionGuard(self.policy_source.load),
         )
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nunchi-codex-v2")
         self._futures: set[Future] = set()

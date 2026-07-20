@@ -3,7 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 
-from nunchi.authorization import PrivilegedActionGuard, canonical_action_digest
+from nunchi.authorization import (
+    PrivilegedActionCoordinator,
+    PrivilegedActionGuard,
+    canonical_action_digest,
+)
 from nunchi.participant import ParticipantTurn, build_participant_wake, run_participant_turn
 from nunchi.policy import OperatorPolicySource, load_operator_policy
 from tests.v2.contract.schema_helpers import (
@@ -202,6 +206,12 @@ class PrivilegedActionCases(ParticipantHostCase):
         proposal = self.proposal(operation)
         guard = PrivilegedActionGuard(OperatorPolicySource(self.path).load)
         effects = []
+        audits = []
+        coordinator = PrivilegedActionCoordinator(
+            guard,
+            executors={"workspace.file.write": effects.append},
+            audit_sink=audits.append,
+        )
         result = self.run_turn(
             make_decision_ok("WAKE", "WAKE", "none"),
             lambda turn: {
@@ -209,8 +219,7 @@ class PrivilegedActionCases(ParticipantHostCase):
                 "authorization_request": proposal,
                 "operation": operation,
             },
-            authorization_guard=guard,
-            privileged_executors={"workspace.file.write": effects.append},
+            authorization_coordinator=coordinator,
         )
         self.assertEqual(result["outcome"], "sent")
         self.assertEqual(result["authorization"]["decision"], "ALLOW")
@@ -221,6 +230,11 @@ class PrivilegedActionCases(ParticipantHostCase):
         proposal = self.proposal(operation, "workspace.file.publish")
         guard = PrivilegedActionGuard(OperatorPolicySource(self.path).load)
         effects = []
+        coordinator = PrivilegedActionCoordinator(
+            guard,
+            executors={"workspace.file.publish": effects.append},
+            audit_sink=lambda _decision: None,
+        )
         result = self.run_turn(
             make_decision_ok("WAKE", "WAKE", "none"),
             lambda turn: {
@@ -228,12 +242,72 @@ class PrivilegedActionCases(ParticipantHostCase):
                 "authorization_request": proposal,
                 "operation": operation,
             },
-            authorization_guard=guard,
-            privileged_executors={"workspace.file.publish": effects.append},
+            authorization_coordinator=coordinator,
         )
         self.assertEqual(result["authorization"]["decision"], "DENY")
         self.assertEqual(result["outcome"], "silent")
         self.assertEqual(effects, [])
+
+    def test_approval_bound_action_is_retained_off_surface_and_completed_later(self):
+        approval = self.document["authorization"]["grants"][1]
+        approval["actor_id"] = "discord:1001"
+        approval["scope"]["room_id"] = "42"
+        approval["scope"]["resource"] = {
+            "kind": "workspace-file",
+            "id": "tmp/stale.txt",
+        }
+        approval["allowed_approver_actor_ids"] = ["discord:admin"]
+        write_policy(self.temporary.name, self.document)
+        operation = {"op": "delete", "path": "tmp/stale.txt"}
+        proposal = make_authorization_request(
+            action_id="action-host-approval",
+            action_digest=canonical_action_digest(operation),
+            origin_event_id="e1",
+            capability="workspace.file.delete",
+            impact="destructive",
+            scope={
+                "platform": "discord",
+                "room_id": "42",
+                "participant_id": "vigil",
+                "resource": {"kind": "workspace-file", "id": "tmp/stale.txt"},
+            },
+        )
+        effects = []
+        audits = []
+        coordinator = PrivilegedActionCoordinator(
+            PrivilegedActionGuard(OperatorPolicySource(self.path).load),
+            executors={"workspace.file.delete": effects.append},
+            audit_sink=audits.append,
+        )
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            lambda turn: {
+                "kind": "privileged",
+                "authorization_request": proposal,
+                "operation": operation,
+            },
+            authorization_coordinator=coordinator,
+        )
+        self.assertEqual(result["outcome"], "silent")
+        self.assertEqual(result["authorization"]["decision"], "APPROVAL_REQUIRED")
+        self.assertNotIn("approval_challenge", result["authorization"])
+        self.assertEqual(effects, [])
+        pending = coordinator.pending_for_operator()
+        self.assertEqual(pending[0]["operation"], operation)
+        challenge = pending[0]["authorization"]["approval_challenge"]
+
+        completed = coordinator.complete_authenticated_approval(
+            {
+                "challenge_id": challenge["challenge_id"],
+                "attestation_id": "host-attestation-1",
+                "approver_actor_id": "discord:admin",
+                "approved_at": audits[0]["evaluated_at"],
+                "channel": "authenticated-transport",
+            }
+        )
+        self.assertEqual(completed["execution"], "executed")
+        self.assertEqual(effects, [operation])
+        self.assertEqual(coordinator.pending_for_operator(), ())
 
 
 if __name__ == "__main__":

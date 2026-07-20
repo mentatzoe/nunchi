@@ -5,8 +5,14 @@ import threading
 import unittest
 from unittest import mock
 
-from nunchi.policy import load_operator_policy
-from nunchi.runtime import LiveRoomRuntime
+from nunchi.authorization import (
+    PrivilegedActionCoordinator,
+    PrivilegedActionGuard,
+    canonical_action_digest,
+)
+from nunchi.policy import OperatorPolicySource, load_operator_policy
+from nunchi.runtime import LiveRoomRuntime, LiveRoomRuntimeError
+from tests.v2.contract.schema_helpers import make_authorization_request
 from tests.v2.observation.helpers import (
     FIXTURE_ACTORS,
     candidate,
@@ -166,6 +172,78 @@ class SnapshotRecoveryCases(RuntimeCase):
         self.assertEqual(self.participant_packets, [])
         self.assertEqual(results[0]["error"], "snapshot-unavailable")
         self.assertEqual(self.receipts, [])
+
+
+class RuntimeAuthorizationSurfaceCases(RuntimeCase):
+    def test_runtime_exposes_pending_action_only_to_authenticated_host_surface(self):
+        document = clone_policy()
+        document["recoverability"][
+            "continuity_scope_id"
+        ] = "discord:room:42#2026-07"
+        grant = document["authorization"]["grants"][1]
+        grant["actor_id"] = "discord:1001"
+        grant["scope"]["room_id"] = "42"
+        grant["scope"]["resource"] = {
+            "kind": "workspace-file",
+            "id": "tmp/stale.txt",
+        }
+        grant["allowed_approver_actor_ids"] = ["discord:admin"]
+        write_policy(self.temporary.name, document)
+        operation = {"op": "delete", "path": "tmp/stale.txt"}
+        proposal = make_authorization_request(
+            action_id="runtime-action-1",
+            action_digest=canonical_action_digest(operation),
+            origin_event_id="e1",
+            capability="workspace.file.delete",
+            impact="destructive",
+            scope={
+                "platform": "discord",
+                "room_id": "42",
+                "participant_id": "vigil",
+                "resource": {"kind": "workspace-file", "id": "tmp/stale.txt"},
+            },
+        )
+        effects = []
+        audits = []
+        source = OperatorPolicySource(self.policy_path)
+        coordinator = PrivilegedActionCoordinator(
+            PrivilegedActionGuard(source.load),
+            executors={"workspace.file.delete": effects.append},
+            audit_sink=audits.append,
+        )
+        runtime = self.runtime(
+            participant=lambda turn: {
+                "kind": "privileged",
+                "authorization_request": proposal,
+                "operation": operation,
+            },
+            authorization_coordinator=coordinator,
+        )
+        result = runtime.process_delivery(self.delivery(1))[0]
+        self.assertEqual(result["participant"]["outcome"], "silent")
+        self.assertNotIn(
+            "approval_challenge", result["participant"]["authorization"]
+        )
+        pending = runtime.pending_privileged_actions()
+        challenge = pending[0]["authorization"]["approval_challenge"]
+        completed = runtime.complete_authenticated_approval(
+            {
+                "challenge_id": challenge["challenge_id"],
+                "attestation_id": "runtime-attestation-1",
+                "approver_actor_id": "discord:admin",
+                "approved_at": audits[0]["evaluated_at"],
+                "channel": "local-operator",
+            }
+        )
+        self.assertEqual(completed["execution"], "executed")
+        self.assertEqual(effects, [operation])
+
+    def test_runtime_without_privileged_seam_has_no_operator_surface(self):
+        runtime = self.runtime()
+        with self.assertRaises(LiveRoomRuntimeError):
+            runtime.pending_privileged_actions()
+        with self.assertRaises(LiveRoomRuntimeError):
+            runtime.complete_authenticated_approval({})
 
 
 if __name__ == "__main__":

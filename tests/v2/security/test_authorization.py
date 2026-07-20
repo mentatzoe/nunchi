@@ -6,8 +6,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from nunchi.authorization import (
+    AuthorizationAuditPersistenceError,
     AuthorizationExecutionDenied,
     AuthorizationRequestError,
+    PendingAuthorizationError,
+    PrivilegedActionCoordinator,
     PrivilegedActionGuard,
     canonical_action_digest,
     participant_authorization_result,
@@ -289,6 +292,29 @@ class ApprovalAuthorizationCases(GuardCase):
         )
         self.assertEqual(denied["reason_code"], "deny-approval-invalid")
 
+    def test_backdated_or_future_attestation_is_denied(self):
+        _action, proposal = self.approval_proposal()
+        for action_id, approved_at in (
+            ("backdated", "2026-07-20T13:59:59Z"),
+            ("future", "2026-07-20T14:00:01Z"),
+        ):
+            with self.subTest(approved_at=approved_at):
+                exact = dict(proposal)
+                exact["action_id"] = action_id
+                required = self.guard.authorize(exact, self.observation)
+                denied = self.guard.authorize(
+                    exact,
+                    self.observation,
+                    approval={
+                        "challenge_id": required["approval_challenge"]["challenge_id"],
+                        "attestation_id": f"attestation-{action_id}",
+                        "approver_actor_id": "discord:admin",
+                        "approved_at": approved_at,
+                        "channel": "local-operator",
+                    },
+                )
+                self.assertEqual(denied["reason_code"], "deny-approval-invalid")
+
     def test_authenticated_exact_approval_allows_and_executes(self):
         action, proposal = self.approval_proposal()
         required = self.guard.authorize(proposal, self.observation)
@@ -363,6 +389,221 @@ class ApprovalAuthorizationCases(GuardCase):
                 executor=lambda value: value,
             )
         self.assertEqual(caught.exception.reason_code, "deny-revoked")
+
+
+class CoordinatorCases(GuardCase):
+    def privileged_action(self, exact_operation, proposal):
+        return {
+            "kind": "privileged",
+            "authorization_request": proposal,
+            "operation": exact_operation,
+        }
+
+    def approval_action(self, *, action_id="approval-action-1"):
+        exact_operation = {"op": "delete", "path": "tmp/stale.txt"}
+        proposal = self.proposal(
+            exact_operation,
+            action_id=action_id,
+            capability="workspace.file.delete",
+            impact="destructive",
+            resource_id="tmp/stale.txt",
+        )
+        return exact_operation, proposal
+
+    def approval(self, challenge_id, *, approver="discord:admin", attestation="a-1"):
+        return {
+            "challenge_id": challenge_id,
+            "attestation_id": attestation,
+            "approver_actor_id": approver,
+            "approved_at": "2026-07-20T14:00:00Z",
+            "channel": "authenticated-transport",
+        }
+
+    def test_direct_effect_follows_authorization_audit_and_host_receipt(self):
+        events = []
+        exact_operation = operation()
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={
+                "workspace.file.write": lambda value: events.append(("effect", value))
+            },
+            audit_sink=lambda decision: events.append(("audit", decision["decision"])),
+        )
+        result = coordinator.propose(
+            self.privileged_action(exact_operation, self.proposal(exact_operation)),
+            self.observation,
+            before_execute=lambda: events.append(("host-receipt", None)),
+        )
+        self.assertEqual(result["execution"], "executed")
+        self.assertEqual([event[0] for event in events], ["audit", "host-receipt", "effect"])
+
+    def test_wrong_or_room_message_approval_has_zero_effect_and_keeps_pending(self):
+        exact_operation, proposal = self.approval_action()
+        effects = []
+        audits = []
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.delete": effects.append},
+            audit_sink=audits.append,
+        )
+        coordinator.propose(
+            self.privileged_action(exact_operation, proposal),
+            self.observation,
+            before_execute=lambda: None,
+        )
+        challenge = coordinator.pending_for_operator()[0]["authorization"][
+            "approval_challenge"
+        ]["challenge_id"]
+        room_evidence = self.approval(challenge)
+        room_evidence["channel"] = "room-message"
+        with self.assertRaises(AuthorizationRequestError):
+            coordinator.complete_authenticated_approval(room_evidence)
+        denied = coordinator.complete_authenticated_approval(
+            self.approval(challenge, approver="discord:not-admin")
+        )
+        self.assertEqual(denied["authorization"]["decision"], "DENY")
+        self.assertEqual(effects, [])
+        self.assertEqual(len(coordinator.pending_for_operator()), 1)
+
+        completed = coordinator.complete_authenticated_approval(
+            self.approval(challenge, attestation="a-2")
+        )
+        self.assertEqual(completed["execution"], "executed")
+        self.assertEqual(effects, [exact_operation])
+        with self.assertRaises(PendingAuthorizationError):
+            coordinator.complete_authenticated_approval(
+                self.approval(challenge, attestation="a-3")
+            )
+
+    def test_pending_capacity_is_bounded_and_fails_closed(self):
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.delete": lambda value: value},
+            audit_sink=lambda decision: None,
+            max_pending=1,
+        )
+        first_operation, first = self.approval_action(action_id="approval-action-1")
+        second_operation, second = self.approval_action(action_id="approval-action-2")
+        coordinator.propose(
+            self.privileged_action(first_operation, first),
+            self.observation,
+            before_execute=lambda: None,
+        )
+        with self.assertRaises(PendingAuthorizationError):
+            coordinator.propose(
+                self.privileged_action(second_operation, second),
+                self.observation,
+                before_execute=lambda: None,
+            )
+        self.assertEqual(len(coordinator.pending_for_operator()), 1)
+
+    def test_audit_or_host_receipt_failure_abandons_allow_with_zero_effect(self):
+        exact_operation = operation()
+        proposal = self.proposal(exact_operation)
+        effects = []
+
+        def fail_audit(_decision):
+            raise OSError("audit unavailable")
+
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.write": effects.append},
+            audit_sink=fail_audit,
+        )
+        with self.assertRaises(AuthorizationAuditPersistenceError):
+            coordinator.propose(
+                self.privileged_action(exact_operation, proposal),
+                self.observation,
+                before_execute=lambda: None,
+            )
+        self.assertEqual(effects, [])
+
+        second_guard = PrivilegedActionGuard(
+            OperatorPolicySource(self.path).load,
+            clock=self.clock,
+            id_factory=IDs(),
+        )
+        coordinator = PrivilegedActionCoordinator(
+            second_guard,
+            executors={"workspace.file.write": effects.append},
+            audit_sink=lambda decision: None,
+        )
+        with self.assertRaises(RuntimeError):
+            coordinator.propose(
+                self.privileged_action(exact_operation, proposal),
+                self.observation,
+                before_execute=lambda: (_ for _ in ()).throw(
+                    RuntimeError("host receipt unavailable")
+                ),
+            )
+        self.assertEqual(effects, [])
+
+    def test_operation_mismatch_is_rejected_before_policy_or_audit(self):
+        audits = []
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.write": lambda value: value},
+            audit_sink=audits.append,
+        )
+        proposal = self.proposal(operation(content="expected"))
+        with self.assertRaises(AuthorizationRequestError):
+            coordinator.propose(
+                self.privileged_action(operation(content="changed"), proposal),
+                self.observation,
+                before_execute=lambda: None,
+            )
+        self.assertEqual(audits, [])
+
+    def test_expiry_prunes_pending_and_restart_never_restores_it(self):
+        exact_operation, proposal = self.approval_action()
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.delete": lambda value: value},
+            audit_sink=lambda decision: None,
+        )
+        coordinator.propose(
+            self.privileged_action(exact_operation, proposal),
+            self.observation,
+            before_execute=lambda: None,
+        )
+        self.assertEqual(len(coordinator.pending_for_operator()), 1)
+        restarted = PrivilegedActionCoordinator(
+            PrivilegedActionGuard(
+                OperatorPolicySource(self.path).load,
+                clock=self.clock,
+                id_factory=IDs(),
+            ),
+            executors={"workspace.file.delete": lambda value: value},
+            audit_sink=lambda decision: None,
+        )
+        self.assertEqual(restarted.pending_for_operator(), ())
+        self.clock.advance(minutes=6)
+        self.assertEqual(coordinator.pending_for_operator(), ())
+
+    def test_operator_view_is_copy_and_revocation_blocks_completion(self):
+        exact_operation, proposal = self.approval_action()
+        effects = []
+        coordinator = PrivilegedActionCoordinator(
+            self.guard,
+            executors={"workspace.file.delete": effects.append},
+            audit_sink=lambda decision: None,
+        )
+        coordinator.propose(
+            self.privileged_action(exact_operation, proposal),
+            self.observation,
+            before_execute=lambda: None,
+        )
+        view = coordinator.pending_for_operator()[0]
+        challenge = view["authorization"]["approval_challenge"]["challenge_id"]
+        view["operation"]["path"] = "tampered"
+        self.assertEqual(
+            coordinator.pending_for_operator()[0]["operation"], exact_operation
+        )
+        self.document["authorization"]["grants"][1]["status"] = "revoked"
+        self.rewrite_policy()
+        denied = coordinator.complete_authenticated_approval(self.approval(challenge))
+        self.assertEqual(denied["authorization"]["reason_code"], "deny-revoked")
+        self.assertEqual(effects, [])
 
 
 class AuditCases(GuardCase):

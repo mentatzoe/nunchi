@@ -306,6 +306,14 @@ requester derivation, policy reload, expiry and revocation, proposal/decision/
 approval binding, authenticated approver identity, one-use consumption, and a
 final action-digest and scope recheck immediately before execution.
 
+The participant host completes that contract through one shared coordinator.
+It persists every full decision before an effect, persists the participant-host
+receipt before a direct effect, and retains an `APPROVAL_REQUIRED` proposal only
+as a bounded, expiring in-process record. A trusted operator surface may inspect
+the exact retained operation and submit a separately authenticated attestation;
+ordinary room events never enter that method. Pending approval state is not a
+public contract, receipt field, social ledger, or restart-restored queue.
+
 ## Validation model (FR-012)
 
 The runtime package stays dependency-free: shipped runtime validation is

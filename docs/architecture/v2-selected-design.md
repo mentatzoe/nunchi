@@ -245,6 +245,11 @@ classDiagram
     class PrivilegedActionGuardV2 {
         +authorizeAtExecution()
     }
+    class PrivilegedActionCoordinatorV2 {
+        +propose()
+        +pendingForOperator()
+        +completeAuthenticatedApproval()
+    }
 
     ObservationProviderV2 --> AttentionRequestV2 : constructs
     ObservationProviderV2 --> ContextContinuationV2 : hosts
@@ -252,7 +257,9 @@ classDiagram
     AttentionEngineV2 --> AttentionRequestV2 : consumes safe projection
     AttentionEngineV2 --> AttentionDecisionV2 : produces
     ParticipantTurnHostV2 --> ParticipantWakeV2 : delivers
-    ParticipantTurnHostV2 --> PrivilegedActionRequestV2 : submits proposed action
+    ParticipantTurnHostV2 --> PrivilegedActionCoordinatorV2 : submits proposed action
+    PrivilegedActionCoordinatorV2 --> PrivilegedActionRequestV2 : binds exact operation
+    PrivilegedActionCoordinatorV2 --> PrivilegedActionGuardV2 : authorize and recheck
     PrivilegedActionGuardV2 --> PrivilegedActionRequestV2 : validates origin and scope
     PrivilegedActionGuardV2 --> PrivilegedActionDecisionV2 : emits one-use decision
 ```
@@ -306,6 +313,15 @@ that identifies the approver exactly. An ordinary follow-up message saying
 cannot satisfy it. After approval, the guard rechecks policy, revocation,
 expiry, scope, and the action digest before executing once.
 
+The host coordinator retains the exact request, observation, operation and
+executor only in bounded, expiring process memory. It exposes an inspectable
+copy to the trusted operator surface, never to the room participant. Restart
+discards every pending approval: a proposal is not a durable conversational
+obligation and is never replayed. The full authorization decision and the
+participant-host receipt are persisted before a direct effect; an approval
+completion persists its new decision before the approved effect. Unknown
+persistence means zero execution.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -313,30 +329,46 @@ sequenceDiagram
     participant Transport as Authenticated transport
     participant Agent as Participant
     participant Host as Participant host
+    participant Coordinator as Host authorization coordinator
     participant Guard as Privileged action guard
     participant Policy as Trusted capability policy
-    participant Tool as Privileged operation
     participant Audit as Off-surface authorization audit
+    actor Operator as Exact authorized approver
+    participant Approval as Authenticated operator surface
+    participant Tool as Privileged operation
 
     User->>Transport: Room message requesting an action
     Transport->>Host: Canonical event with exact actor and event IDs
     Host->>Agent: Current factual room turn
-    Agent->>Host: Proposed action + origin event ID
-    Host->>Guard: Action ID, digest, capability, origin, and scope
-    Guard->>Host: Resolve exact origin event and derived requester
+    Agent->>Host: Exact operation + capability + origin event ID
+    Host->>Coordinator: Validated privileged proposal
+    Coordinator->>Guard: Action ID, digest, capability, origin, and scope
+    Guard->>Guard: Resolve origin from trusted observation; derive requester
     Guard->>Policy: Recheck actor capability, scope, expiry, revocation, approval
     alt Exactly authorized
         Policy-->>Guard: ALLOW
-        Guard->>Audit: Immutable one-use allow decision
-        Guard->>Tool: Execute exact bound action
+        Guard-->>Coordinator: One-use digest-bound allow
+        Coordinator->>Audit: Persist full allow decision
+        Coordinator->>Host: Persist participant-host sent receipt
+        Coordinator->>Tool: Execute exact operation once
     else Explicit approval required by default
         Policy-->>Guard: APPROVAL_REQUIRED
-        Guard->>Audit: Immutable approval-required decision
-        Guard-->>Agent: No execution; host-only approval challenge
+        Guard-->>Coordinator: Host-only expiring challenge
+        Coordinator->>Audit: Persist approval-required decision
+        Coordinator->>Coordinator: Hold one bounded exact proposal
+        Coordinator-->>Host: Non-secret participant result; no effect
+        Operator->>Approval: Inspect exact proposal and approve
+        Approval->>Coordinator: Authenticated actor attestation
+        Coordinator->>Guard: Same request + observation + attestation
+        Guard->>Policy: Reload and recheck grant, revocation, expiry, approver
+        Guard-->>Coordinator: New one-use allow for same digest
+        Coordinator->>Audit: Persist authenticated-approval decision
+        Coordinator->>Tool: Execute exact retained operation once
     else Missing, ambiguous, expired, revoked, or out of scope
         Policy-->>Guard: DENY
-        Guard->>Audit: Immutable denial reason
-        Guard-->>Agent: No execution
+        Guard-->>Coordinator: Denial reason
+        Coordinator->>Audit: Persist denial
+        Coordinator-->>Host: Non-secret participant result; no effect
     end
 ```
 

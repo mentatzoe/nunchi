@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
-from .authorization import PrivilegedActionGuard
+from .authorization import PrivilegedActionCoordinator
 from .core import evaluate_v2
 from .observation import OBSERVED, ObservationProvider
 from .participant import ParticipantTurn, run_participant_turn
@@ -52,8 +52,7 @@ class LiveRoomRuntime:
         scheduler: ConversationOpportunityScheduler | None = None,
         recover_current_history: Callable[[str], None] | None = None,
         continuation_fetch: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        authorization_guard: PrivilegedActionGuard | None = None,
-        privileged_executors: Mapping[str, Callable[[Any], Any]] | None = None,
+        authorization_coordinator: PrivilegedActionCoordinator | None = None,
     ) -> None:
         if not isinstance(observation, ObservationProvider):
             raise LiveRoomRuntimeError("observation provider is invalid")
@@ -69,8 +68,7 @@ class LiveRoomRuntime:
         self.scheduler = scheduler or ConversationOpportunityScheduler()
         self.recover_current_history = recover_current_history
         self.continuation_fetch = continuation_fetch
-        self.authorization_guard = authorization_guard
-        self.privileged_executors = privileged_executors
+        self.authorization_coordinator = authorization_coordinator
 
     def accept(self, native_event_input: dict[str, Any]) -> AcceptedDelivery:
         """Record one transport-attested delivery and maybe start live work."""
@@ -210,8 +208,7 @@ class LiveRoomRuntime:
             action_sink=self.action_sink,
             correlated_action_sink=self.correlated_action_sink,
             continuation_fetch=self.continuation_fetch,
-            authorization_guard=self.authorization_guard,
-            privileged_executors=self.privileged_executors,
+            authorization_coordinator=self.authorization_coordinator,
         )
         return {
             "status": participant_result["status"],
@@ -248,6 +245,18 @@ class LiveRoomRuntime:
         if accepted.opportunity is None:
             return ()
         return self.drain(accepted.opportunity)
+
+    def pending_privileged_actions(self) -> tuple[dict[str, Any], ...]:
+        """Expose inspectable proposals only to a trusted host operator surface."""
+        if self.authorization_coordinator is None:
+            raise LiveRoomRuntimeError("privileged authorization is unavailable")
+        return self.authorization_coordinator.pending_for_operator()
+
+    def complete_authenticated_approval(self, approval: Any) -> dict[str, Any]:
+        """Complete an attestation already authenticated by the host surface."""
+        if self.authorization_coordinator is None:
+            raise LiveRoomRuntimeError("privileged authorization is unavailable")
+        return self.authorization_coordinator.complete_authenticated_approval(approval)
 
 
 __all__ = [

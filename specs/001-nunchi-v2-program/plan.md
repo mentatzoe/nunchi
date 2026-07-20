@@ -249,7 +249,14 @@ must contain all in-tree consumers on one contract before acceptance.
    capability and scope. Ordinary text, reactions, quotes, and copied approvals
    never satisfy the challenge; policy and digest are rechecked before one-use
    execution.
-8. **Boundary is explicit.** Nunchi enforces its own controls and the privileged
+8. **Approval is completable without becoming a queue.** The host retains at
+   most a bounded set of exact approval-bound proposals in expiring process
+   memory and exposes them only to an authenticated operator surface. The full
+   decision and participant-host receipt persist before an effect. Unknown
+   persistence, restart, expiry, revocation, replay, or capacity exhaustion
+   yields zero execution; restart never restores a pending proposal from room
+   history.
+9. **Boundary is explicit.** Nunchi enforces its own controls and the privileged
    seams implemented by supported integrations. A third-party tool path that
    bypasses `I-040B` is not claimed safe and blocks privileged-action support on
    that surface.
@@ -312,7 +319,7 @@ checks under `tests/v2/`; run records under `evidence/v2/`.
 | `S15` Context budget | Attention and participant packets respect independent byte/event caps without a full-history context bomb. | `010`, `020`, `040`, `050`–`100`, `110` | `evidence/v2/parity/s15-context-budget/` |
 | `S16` No registry or ledger | Public boundaries, buffers, continuations, immutable receipt stages, and sends contain no roster inference, obligation queue, handled/open social state, or cross-owner mutable lifecycle record. | `010`–`110` | `evidence/v2/parity/s16-no-ledger/` |
 | `S17` Live-conversation freshness | A burst during a slow turn creates at most one later attention opportunity; intermediate events remain context, the newest pending event anchors a fresh snapshot, later resolution is visible, and restart/backfill never replays a wake backlog. | `020`, `040`, `050`–`110` | `evidence/v2/parity/s17-live-freshness/` |
-| `S18` Provenance-bound privileged action | Exact origin event and transport actor bind a capability check at execution; aliases, quotes, replies, forged policy, unrelated/old authorized-user events, stale grants, cross-room replay, revoked/expired grants, copied/ordinary-text approvals, and action mutation cannot authorize; high-impact actions default to exact digest-bound authenticated approval unless explicitly preauthorized. | `010`, `020`, `040`–`110` | `evidence/v2/security/s18-action-authorization/`, `evidence/v2/parity/s18-action-authorization/` |
+| `S18` Provenance-bound privileged action | Exact origin event and transport actor bind a capability check at execution; aliases, quotes, replies, forged policy, unrelated/old authorized-user events, stale grants, cross-room replay, revoked/expired grants, copied/ordinary-text approvals, action mutation, unknown audit persistence, and pending-capacity exhaustion cannot authorize; high-impact actions default to an inspectable, expiring, exact digest-bound authenticated approval unless explicitly preauthorized, and pending approval is never restored after restart. | `010`, `020`, `040`–`110` | `evidence/v2/security/s18-action-authorization/`, `evidence/v2/parity/s18-action-authorization/` |
 
 Every scene needs deterministic mechanics tests where deterministic facts are at
 issue. Social-quality and cross-surface claims additionally need committed

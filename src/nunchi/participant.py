@@ -12,10 +12,10 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from .authorization import (
-    PrivilegedActionGuard,
+    PrivilegedActionCoordinator,
     participant_authorization_result,
 )
 from .observation import (
@@ -216,8 +216,7 @@ def run_participant_turn(
     action_sink: Callable[[dict[str, Any]], Any] | None = None,
     correlated_action_sink: Callable[[str, dict[str, Any]], Any] | None = None,
     continuation_fetch: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-    authorization_guard: PrivilegedActionGuard | None = None,
-    privileged_executors: Mapping[str, Callable[[Any], Any]] | None = None,
+    authorization_coordinator: PrivilegedActionCoordinator | None = None,
 ) -> dict[str, Any]:
     """Invoke one normal participant turn or stop on effective suppression."""
     if not isinstance(policy, EffectiveAttentionPolicy):
@@ -270,26 +269,39 @@ def run_participant_turn(
         if action is None:
             outcome = "silent"
         elif action["kind"] == "privileged":
-            request = action["authorization_request"]
-            capability = request.get("capability") if isinstance(request, dict) else None
-            executor = (
-                privileged_executors.get(capability)
-                if privileged_executors is not None and isinstance(capability, str)
-                else None
-            )
-            if authorization_guard is None or executor is None:
+            if authorization_coordinator is None:
                 host_error = "unsupported-privileged-seam"
             else:
-                authorization = authorization_guard.authorize(request, snapshot)
-                authorization_result = participant_authorization_result(authorization)
-                if authorization["decision"] == "ALLOW":
-                    authorization_guard.execute(
-                        authorization["decision_id"],
-                        request=request,
-                        observation=snapshot,
-                        operation=action["operation"],
-                        executor=executor,
+                def persist_before_privileged_effect() -> None:
+                    nonlocal outcome, persistence, receipt_written
+                    outcome = "sent"
+                    receipt = _participant_receipt(
+                        packet=packet,
+                        expansion_calls=turn.expansion_calls,
+                        invoked=True,
+                        outcome=outcome,
                     )
+                    receipt_written = True
+                    try:
+                        returned = receipt_sink(copy.deepcopy(receipt))
+                        persistence = "persisted" if returned is None else "unknown"
+                    except Exception:
+                        persistence = "unknown"
+                        raise
+                    if persistence != "persisted":
+                        raise ParticipantHostError(
+                            "participant receipt persistence is unknown"
+                        )
+
+                coordinated = authorization_coordinator.propose(
+                    action,
+                    snapshot,
+                    before_execute=persist_before_privileged_effect,
+                )
+                authorization_result = participant_authorization_result(
+                    coordinated["authorization"]
+                )
+                if coordinated["execution"] == "executed":
                     outcome = "sent"
                 else:
                     outcome = "silent"

@@ -9,6 +9,10 @@ import stat
 import threading
 from typing import Any
 
+from .authorization import (
+    AuthorizationRequestError,
+    validate_authorization_decision,
+)
 from .core import ReceiptSinkPersistenceError
 from .observation import validate_attention_receipt_record
 from .policy import OperatorPolicy, ReceiptSinkPolicy
@@ -77,6 +81,9 @@ class ExclusiveJSONFileReceiptSink:
         except (TypeError, ValueError) as exc:
             raise ReceiptSinkPersistenceError("not-persisted") from exc
         filename = self._filename(record["request_id"], record["stage"])
+        self._write_payload(filename, payload)
+
+    def _write_payload(self, filename: str, payload: bytes) -> None:
         with self._lock:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             flags |= getattr(os, "O_CLOEXEC", 0)
@@ -138,6 +145,35 @@ class ExclusiveJSONFileReceiptSink:
         self.close()
 
 
+class ExclusiveJSONFileAuthorizationSink(ExclusiveJSONFileReceiptSink):
+    """Persist one closed host authorization decision by unique decision ID."""
+
+    @staticmethod
+    def _authorization_filename(decision_id: str) -> str:
+        digest = hashlib.sha256(decision_id.encode("utf-8")).hexdigest()
+        return f"authorization-{digest}.jsonl"
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        try:
+            accepted = validate_authorization_decision(record)
+            payload = (
+                json.dumps(
+                    accepted,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("utf-8")
+        except (AuthorizationRequestError, TypeError, ValueError) as exc:
+            raise ReceiptSinkPersistenceError("not-persisted") from exc
+        self._write_payload(
+            self._authorization_filename(accepted["decision_id"]),
+            payload,
+        )
+
+
 class ReloadingPolicyReceiptSink:
     """Route each offer through the currently trusted receipt-sink policy."""
 
@@ -174,8 +210,46 @@ class ReloadingPolicyReceiptSink:
                 self._binding = None
 
 
+class ReloadingPolicyAuthorizationSink:
+    """Route authorization audits through the current owner-only sink policy."""
+
+    def __init__(self, policy_loader) -> None:
+        if not callable(policy_loader):
+            raise ReceiptSinkConstructionError("policy loader is invalid")
+        self._policy_loader = policy_loader
+        self._lock = threading.RLock()
+        self._binding: tuple[str, str, str] | None = None
+        self._sink: ExclusiveJSONFileAuthorizationSink | None = None
+
+    def __call__(self, record: dict[str, Any]) -> None:
+        with self._lock:
+            policy = self._policy_loader()
+            if not isinstance(policy, OperatorPolicy):
+                raise ReceiptSinkConstructionError("policy loader returned an invalid policy")
+            sink_policy = policy.receipt_sink
+            binding = (sink_policy.type, sink_policy.directory, sink_policy.source)
+            if binding != self._binding:
+                replacement = ExclusiveJSONFileAuthorizationSink(sink_policy)
+                previous = self._sink
+                self._sink = replacement
+                self._binding = binding
+                if previous is not None:
+                    previous.close()
+            assert self._sink is not None
+            self._sink(record)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._sink is not None:
+                self._sink.close()
+                self._sink = None
+                self._binding = None
+
+
 __all__ = [
+    "ExclusiveJSONFileAuthorizationSink",
     "ExclusiveJSONFileReceiptSink",
     "ReceiptSinkConstructionError",
+    "ReloadingPolicyAuthorizationSink",
     "ReloadingPolicyReceiptSink",
 ]
