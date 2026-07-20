@@ -22,6 +22,29 @@ class ReceiptSinkConstructionError(ValueError):
     pass
 
 
+def transport_receipt(
+    request_id: str,
+    delivery: str,
+    *,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """Build one canonical transport-owned I-010E stage record."""
+    if not isinstance(request_id, str) or not request_id:
+        raise ValueError("transport receipt correlation is invalid")
+    body: dict[str, Any] = {"delivery": delivery}
+    if detail is not None:
+        body["detail"] = detail
+    record = {
+        "request_id": request_id,
+        "stage": "transport",
+        "writer": "transport",
+        "body": body,
+    }
+    if validate_attention_receipt_record(record):
+        raise ValueError("transport receipt is invalid")
+    return record
+
+
 class ExclusiveJSONFileReceiptSink:
     """No-follow, owner-only, exclusive-create receipt storage.
 
@@ -252,4 +275,5 @@ __all__ = [
     "ReceiptSinkConstructionError",
     "ReloadingPolicyAuthorizationSink",
     "ReloadingPolicyReceiptSink",
+    "transport_receipt",
 ]

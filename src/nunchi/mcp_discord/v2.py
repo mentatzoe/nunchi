@@ -6,7 +6,7 @@ import copy
 import threading
 from typing import Any, Callable, Protocol
 
-from ..observation import validate_attention_receipt_record
+from ..receipts import transport_receipt
 from .ratelimit import SendBackstop
 from .rest import DiscordRestError
 
@@ -51,27 +51,6 @@ def _event_snowflake(value: object, prefix: str) -> str | None:
 
 def _actor_snowflake(value: object) -> str | None:
     return _event_snowflake(value, "discord:user:")
-
-
-def transport_receipt(
-    request_id: str,
-    delivery: str,
-    *,
-    detail: str | None = None,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {"delivery": delivery}
-    if detail is not None:
-        body["detail"] = detail
-    record = {
-        "request_id": request_id,
-        "stage": "transport",
-        "writer": "transport",
-        "body": body,
-    }
-    errors = validate_attention_receipt_record(record)
-    if errors:
-        raise DiscordV2ActionError("transport receipt is invalid")
-    return record
 
 
 class DiscordActionSinkV2:

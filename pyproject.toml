@@ -48,7 +48,7 @@ Issues = "https://github.com/mentatzoe/nunchi/issues"
 [project.scripts]
 nunchi = "nunchi.cli:main"
 nunchi-install = "nunchi.install:main"
-nunchi-channel = "nunchi.adapters.channel:main"
+nunchi-channel = "nunchi.adapters.channel_v2:main"
 nunchi-matrix = "nunchi.adapters.matrix:main"
 nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"

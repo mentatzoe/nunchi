@@ -4,7 +4,7 @@
   "required_scripts": {
     "nunchi": "nunchi.cli:main",
     "nunchi-install": "nunchi.install:main",
-    "nunchi-channel": "nunchi.adapters.channel:main",
+    "nunchi-channel": "nunchi.adapters.channel_v2:main",
     "nunchi-discord": "nunchi.adapters.discord:main",
     "nunchi-matrix": "nunchi.adapters.matrix:main",
     "nunchi-telegram": "nunchi.adapters.telegram:main",
