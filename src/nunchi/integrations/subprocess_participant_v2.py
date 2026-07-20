@@ -39,7 +39,18 @@ _RESERVED_ENV = frozenset(
         "TELEGRAM_BOT_TOKEN",
         "MATRIX_ACCESS_TOKEN",
         "NUNCHI_CLASSIFIER_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "ANTHROPIC_API_KEY",
     }
+)
+_RESERVED_ENV_PREFIXES = (
+    "NUNCHI_",
+    "CODEX_",
+    "CLAUDE_",
+    "DISCORD_",
+    "MATRIX_",
+    "TELEGRAM_",
 )
 
 
@@ -77,7 +88,7 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
         pass
 
 
-def _bounded_process(
+def run_bounded_process(
     command: tuple[str, ...],
     *,
     workspace: Path,
@@ -216,11 +227,27 @@ def _command(value: Sequence[str]) -> tuple[str, ...]:
         or not 1 <= len(value) <= 64
         or any(
             not isinstance(item, str) or not item or len(item) > 4096
+            or "\0" in item
             for item in value
         )
     ):
         raise ValueError("participant command is invalid")
-    return tuple(value)
+    executable = Path(value[0])
+    if not executable.is_absolute():
+        raise ValueError("participant executable must be absolute")
+    try:
+        resolved = executable.resolve(strict=True)
+        metadata = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("participant executable is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid not in (0, os.geteuid())
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+        or not os.access(resolved, os.X_OK)
+    ):
+        raise ValueError("participant executable is unsafe")
+    return (str(resolved), *value[1:])
 
 
 def _environment(
@@ -228,21 +255,31 @@ def _environment(
     pass_env: Sequence[str],
     source: Mapping[str, str],
 ) -> dict[str, str]:
+    if isinstance(pass_env, (str, bytes)) or not isinstance(pass_env, Sequence):
+        raise ValueError("participant environment selection is invalid")
     names: list[str] = []
     for name in pass_env:
         if (
             not isinstance(name, str)
             or _ENV_NAME_RE.fullmatch(name) is None
             or name in _RESERVED_ENV
+            or name.startswith(_RESERVED_ENV_PREFIXES)
             or name in names
         ):
             raise ValueError("participant environment selection is invalid")
         if name not in source:
             raise ValueError("participant environment value is unavailable")
+        selected_value = source[name]
+        if (
+            not isinstance(selected_value, str)
+            or "\0" in selected_value
+            or len(selected_value) > 65536
+        ):
+            raise ValueError("participant environment value is invalid")
         names.append(name)
     result = {
         "HOME": str(workspace),
-        "PATH": source.get("PATH", "/usr/bin:/bin"),
+        "PATH": os.defpath,
     }
     for name in (
         "TMPDIR",
@@ -301,7 +338,7 @@ class SubprocessParticipantV2:
             )
         except (TypeError, ValueError) as exc:
             raise SubprocessParticipantError("participant packet is invalid") from exc
-        returncode, stdout, _stderr = _bounded_process(
+        returncode, stdout, _stderr = run_bounded_process(
             self.command,
             workspace=self.workspace,
             environment=self.environment,
@@ -321,4 +358,8 @@ class SubprocessParticipantV2:
         return copy.deepcopy(action)
 
 
-__all__ = ["SubprocessParticipantError", "SubprocessParticipantV2"]
+__all__ = [
+    "SubprocessParticipantError",
+    "SubprocessParticipantV2",
+    "run_bounded_process",
+]

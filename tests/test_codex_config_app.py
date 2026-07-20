@@ -52,6 +52,9 @@ class ConfigAppCase(unittest.TestCase):
         self.assertNotIn("provider.invalid", encoded)
         self.assertFalse(snapshot["capabilities"]["policy_write"])
 
+        with self.assertRaises(ValueError):
+            self.service(allow_policy_write="false")
+
     def test_attention_write_is_explicit_optimistic_and_closed(self):
         read_only = self.service()
         provenance = read_only.snapshot()["policy"]["provenance"]
@@ -105,6 +108,12 @@ class ConfigAppCase(unittest.TestCase):
         unsafe = self.receipts / "attention-unsafe.jsonl"
         unsafe.write_text(json.dumps({"request_id": "unsafe"}), encoding="utf-8")
         unsafe.chmod(0o644)
+        malformed = self.receipts / "attention-malformed.jsonl"
+        malformed.write_text(
+            '{"request_id":"first","request_id":"second"}',
+            encoding="utf-8",
+        )
+        malformed.chmod(0o600)
         result = self.service().receipts(limit=1)
         self.assertTrue(result["available"])
         self.assertEqual(len(result["receipts"]), 1)

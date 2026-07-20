@@ -29,6 +29,27 @@ def _valid_thread_id(value: Any) -> str | None:
         return None
 
 
+def _valid_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        return None
+    return parsed
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+
 def load_codex_session(path: Path) -> dict[str, Any] | None:
     """Read one no-follow, owner-only V2 session document."""
     if not isinstance(path, Path) or not path.is_absolute():
@@ -63,8 +84,14 @@ def load_codex_session(path: Path) -> dict[str, Any] | None:
                 raise CodexSessionStateError("Codex session state is too large")
             chunks.append(chunk)
         try:
-            raw = json.loads(b"".join(chunks).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raw = json.loads(
+                b"".join(chunks).decode("utf-8"),
+                object_pairs_hook=_unique_object,
+                parse_constant=lambda _value: (_ for _ in ()).throw(
+                    ValueError("non-finite")
+                ),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise CodexSessionStateError("Codex session state is invalid") from exc
     finally:
         os.close(descriptor)
@@ -78,9 +105,10 @@ def load_codex_session(path: Path) -> dict[str, Any] | None:
     thread_id = _valid_thread_id(raw.get("thread_id"))
     if thread_id is None:
         raise CodexSessionStateError("Codex session state has an invalid thread identity")
-    for field_name in ("created_at", "updated_at"):
-        if not isinstance(raw.get(field_name), str) or not raw[field_name]:
-            raise CodexSessionStateError("Codex session state has an invalid timestamp")
+    created_at = _valid_timestamp(raw.get("created_at"))
+    updated_at = _valid_timestamp(raw.get("updated_at"))
+    if created_at is None or updated_at is None or created_at > updated_at:
+        raise CodexSessionStateError("Codex session state has an invalid timestamp")
     return {
         "version": _CODEX_SESSION_VERSION,
         "thread_id": thread_id,
@@ -102,6 +130,17 @@ def save_codex_session(
     if not isinstance(path, Path) or not path.is_absolute():
         raise CodexSessionStateError("Codex session state path must be absolute")
     now = datetime.now(timezone.utc).isoformat()
+    parsed_created_at = _valid_timestamp(created_at) if created_at is not None else None
+    parsed_now = _valid_timestamp(now)
+    if (
+        created_at is not None
+        and (
+            parsed_created_at is None
+            or parsed_now is None
+            or parsed_created_at > parsed_now
+        )
+    ):
+        raise CodexSessionStateError("cannot save an invalid Codex session timestamp")
     state = {
         "version": _CODEX_SESSION_VERSION,
         "thread_id": normalized,

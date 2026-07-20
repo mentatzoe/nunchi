@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
-import subprocess
 import tempfile
 from importlib import resources
 from pathlib import Path
@@ -18,10 +18,17 @@ from .codex_session_v2 import (
     load_codex_session,
     save_codex_session,
 )
+from .subprocess_participant_v2 import (
+    SubprocessParticipantError,
+    run_bounded_process,
+)
 
 
 class CodexParticipantError(RuntimeError):
     pass
+
+
+MAX_CODEX_ACTION_BYTES = 1024 * 1024
 
 
 _DISABLED_TOOL_FEATURES = (
@@ -137,6 +144,24 @@ def _codex_environment(codex_home: Path, temporary_directory: Path) -> dict[str,
     return environment
 
 
+def _strict_json(raw: str | bytes) -> Any:
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    return json.loads(
+        raw,
+        object_pairs_hook=pairs,
+        parse_constant=lambda _value: (_ for _ in ()).throw(
+            ValueError("non-finite")
+        ),
+    )
+
+
 def _inspect_codex_jsonl(output: str) -> tuple[str | None, bool]:
     thread_ids: set[str] = set()
     tool_used = False
@@ -144,8 +169,8 @@ def _inspect_codex_jsonl(output: str) -> tuple[str | None, bool]:
         if not line.strip():
             continue
         try:
-            event = json.loads(line)
-        except json.JSONDecodeError as exc:
+            event = _strict_json(line)
+        except (json.JSONDecodeError, ValueError) as exc:
             raise CodexParticipantError("Codex event stream is invalid") from exc
         if not isinstance(event, dict) or not isinstance(event.get("type"), str):
             raise CodexParticipantError("Codex event stream is invalid")
@@ -171,6 +196,61 @@ def _inspect_codex_jsonl(output: str) -> tuple[str | None, bool]:
     if len(thread_ids) > 1:
         raise CodexParticipantError("Codex reported conflicting room threads")
     return (next(iter(thread_ids)) if thread_ids else None), tool_used
+
+
+def _trusted_executable(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 4096
+        or "\0" in value
+    ):
+        raise ValueError("Codex executable is invalid")
+    candidate = shutil.which(value, path=os.environ.get("PATH", os.defpath))
+    if candidate is None:
+        raise ValueError("Codex executable is unavailable")
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        metadata = resolved.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("Codex executable is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid not in (0, os.geteuid())
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+        or not os.access(resolved, os.X_OK)
+    ):
+        raise ValueError("Codex executable is unsafe")
+    return str(resolved)
+
+
+def _read_action_output(path: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise CodexParticipantError("Codex participant output is invalid") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+            or metadata.st_size > MAX_CODEX_ACTION_BYTES
+        ):
+            raise CodexParticipantError("Codex participant output is invalid")
+        payload = os.read(descriptor, MAX_CODEX_ACTION_BYTES + 1)
+        if len(payload) > MAX_CODEX_ACTION_BYTES or os.read(descriptor, 1):
+            raise CodexParticipantError("Codex participant output is invalid")
+    finally:
+        os.close(descriptor)
+    try:
+        result = _strict_json(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise CodexParticipantError("Codex participant output is invalid") from exc
+    if not isinstance(result, dict):
+        raise CodexParticipantError("Codex participant output is invalid")
+    return result
 
 
 def build_participant_prompt(turn: ParticipantTurn, *, participant_name: str) -> str:
@@ -220,7 +300,24 @@ class CodexParticipantV2:
         timeout_seconds: float = 300.0,
         model: str | None = None,
     ) -> None:
-        if not isinstance(session_path, Path) or timeout_seconds <= 0:
+        if (
+            not isinstance(session_path, Path)
+            or isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 1 <= float(timeout_seconds) <= 600
+            or not isinstance(participant_name, str)
+            or not participant_name
+            or len(participant_name) > 512
+            or (
+                model is not None
+                and (
+                    not isinstance(model, str)
+                    or not model
+                    or len(model) > 512
+                    or "\0" in model
+                )
+            )
+        ):
             raise ValueError("Codex participant configuration is invalid")
         _owner_only_directory(session_path.parent, "Codex session directory")
         self.codex_home = _owner_only_directory(codex_home, "Codex home")
@@ -234,7 +331,7 @@ class CodexParticipantV2:
             temporary_directory,
             "Codex temporary directory",
         )
-        self.codex_bin = codex_bin
+        self.codex_bin = _trusted_executable(codex_bin)
         self.participant_name = participant_name
         self.session_path = session_path
         self.timeout_seconds = timeout_seconds
@@ -313,17 +410,23 @@ class CodexParticipantV2:
                 prompt,
             ]
         try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                cwd=self.working_directory,
-                env=_codex_environment(self.codex_home, self.temporary_directory),
+            returncode, stdout, _stderr = run_bounded_process(
+                tuple(command),
+                workspace=self.working_directory,
+                environment=_codex_environment(
+                    self.codex_home,
+                    self.temporary_directory,
+                ),
+                payload=b"",
+                timeout_seconds=self.timeout_seconds,
             )
-            if completed.returncode != 0:
+            if returncode != 0:
                 raise CodexParticipantError("Codex participant invocation failed")
-            observed_thread_id, tool_used = _inspect_codex_jsonl(completed.stdout)
+            try:
+                event_stream = stdout.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise CodexParticipantError("Codex event stream is invalid") from exc
+            observed_thread_id, tool_used = _inspect_codex_jsonl(event_stream)
             if tool_used:
                 raise CodexParticipantError("Codex participant attempted a forbidden tool")
             if observed_thread_id is None:
@@ -338,18 +441,15 @@ class CodexParticipantV2:
                 )
             except CodexSessionStateError as exc:
                 raise CodexParticipantError("Codex room session could not be persisted") from exc
-            try:
-                result = json.loads(output_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise CodexParticipantError("Codex participant output is invalid") from exc
+            result = _read_action_output(output_path)
             if not isinstance(result, dict) or set(result) != {"action"}:
                 raise CodexParticipantError("Codex participant output is invalid")
             action = result["action"]
             if action is not None and not isinstance(action, dict):
                 raise CodexParticipantError("Codex participant output is invalid")
             return action
-        except subprocess.TimeoutExpired as exc:
-            raise CodexParticipantError("Codex participant invocation timed out") from exc
+        except SubprocessParticipantError as exc:
+            raise CodexParticipantError("Codex participant invocation failed") from exc
         except OSError as exc:
             raise CodexParticipantError("Codex participant process is unavailable") from exc
         finally:

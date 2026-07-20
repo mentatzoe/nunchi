@@ -65,12 +65,32 @@ class SubprocessParticipantCases(unittest.TestCase):
                 pass_env=("NUNCHI_DISCORD_TOKEN",),
                 environ={"NUNCHI_DISCORD_TOKEN": "secret"},
             )
+        with self.assertRaises(ValueError):
+            SubprocessParticipantV2(
+                command=[sys.executable, "-c", "print('null')"],
+                workspace=self.workspace,
+                pass_env=("OPENROUTER_API_KEY",),
+                environ={"OPENROUTER_API_KEY": "secret"},
+            )
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            SubprocessParticipantV2(
+                command=["python3", "-c", "print('null')"],
+                workspace=self.workspace,
+            )
         self.workspace.chmod(0o750)
         with self.assertRaises(ValueError):
             SubprocessParticipantV2(
                 command=[sys.executable, "-c", "print('null')"],
                 workspace=self.workspace,
             )
+
+    def test_child_path_is_fixed_instead_of_inherited(self):
+        participant = SubprocessParticipantV2(
+            command=[sys.executable, "-c", "print('null')"],
+            workspace=self.workspace,
+            environ={"PATH": f"{self.workspace}:/attacker/path"},
+        )
+        self.assertEqual(participant.environment["PATH"], os.defpath)
 
     def test_non_json_or_nonzero_child_fails_without_exposing_stderr(self):
         for program in (

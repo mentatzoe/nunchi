@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from ..mcp_discord.ratelimit import SendBackstop
+from ..net import open_no_redirect
 from ..receipts import transport_receipt
 from .native_host_v2 import (
     DurableCursorStoreV2,
@@ -103,7 +104,7 @@ def _urllib_call(
         headers=dict(headers),
     )
     try:
-        response = urllib.request.urlopen(request, timeout=timeout)
+        response = open_no_redirect(request, timeout=timeout)
     except urllib.error.HTTPError as exc:
         response = exc
     except (socket.timeout, urllib.error.URLError, OSError) as exc:

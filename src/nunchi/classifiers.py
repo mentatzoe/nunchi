@@ -11,6 +11,7 @@ import urllib.request
 from typing import Any
 
 from .errors import NunchiError, ValidationError
+from .net import open_no_redirect
 from .policy import ClassifierPolicy
 
 
@@ -160,7 +161,7 @@ def classify_attention_v2(
     last_error: Exception | None = None
     for attempt in range(config.max_retries + 1):
         try:
-            with urllib.request.urlopen(
+            with open_no_redirect(
                 request,
                 timeout=config.timeout_seconds,
             ) as response:

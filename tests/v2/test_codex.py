@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
+
+import nunchi.integrations.codex_participant_v2 as codex_participant_v2
 
 from nunchi.integrations.codex_participant_v2 import (
     CodexParticipantError,
@@ -15,9 +16,11 @@ from nunchi.integrations.codex_participant_v2 import (
     build_participant_prompt,
 )
 from nunchi.integrations.codex_session_v2 import (
+    CodexSessionStateError,
     load_codex_session,
     save_codex_session,
 )
+from nunchi.integrations.subprocess_participant_v2 import SubprocessParticipantError
 from nunchi.integrations.codex_room_v2 import CodexRoomV2, CodexRoomV2Error
 from nunchi.mcp_discord.events import message_event_from_create
 from nunchi.participant import ParticipantTurn
@@ -43,25 +46,29 @@ class CodexParticipantCases(unittest.TestCase):
         self.commands = []
 
     def participant(self):
-        return CodexParticipantV2(
-            codex_bin="codex-test",
-            participant_name="Vigil",
-            session_path=self.session_path,
-            codex_home=self.codex_home,
-            timeout_seconds=10,
-            model="gpt-test",
-            working_directory=self.workspace,
-        )
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.shutil.which",
+            return_value="/usr/bin/true",
+        ):
+            return CodexParticipantV2(
+                codex_bin="codex-test",
+                participant_name="Vigil",
+                session_path=self.session_path,
+                codex_home=self.codex_home,
+                timeout_seconds=10,
+                model="gpt-test",
+                working_directory=self.workspace,
+            )
 
     def completion(self, action, *, thread_id=THREAD_ONE, returncode=0):
         def run(command, **kwargs):
             self.commands.append((command, kwargs))
             output_index = command.index("--output-last-message") + 1
             Path(command[output_index]).write_text(json.dumps({"action": action}))
-            return SimpleNamespace(
-                returncode=returncode,
-                stdout=json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n",
-                stderr="",
+            return (
+                returncode,
+                (json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n").encode(),
+                b"",
             )
 
         return run
@@ -85,11 +92,14 @@ class CodexParticipantCases(unittest.TestCase):
                 "OPENROUTER_API_KEY": "must-not-cross",
             },
             clear=False,
-        ), mock.patch("subprocess.run", side_effect=self.completion(None)):
+        ), mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=self.completion(None),
+        ):
             result = self.participant()(self.turn)
         self.assertIsNone(result)
         command, kwargs = self.commands[0]
-        self.assertEqual(command[:2], ["codex-test", "exec"])
+        self.assertEqual(command[:2], ("/usr/bin/true", "exec"))
         self.assertNotIn("resume", command)
         self.assertIn("--ignore-user-config", command)
         self.assertIn("--ignore-rules", command)
@@ -106,11 +116,11 @@ class CodexParticipantCases(unittest.TestCase):
         self.assertIn("allow_login_shell=false", command)
         self.assertIn("--output-schema", command)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
-        self.assertEqual(kwargs["cwd"], self.workspace)
-        self.assertEqual(kwargs["env"]["CODEX_HOME"], str(self.codex_home))
-        self.assertEqual(kwargs["env"]["HOME"], str(self.codex_home))
-        self.assertNotIn("NUNCHI_DISCORD_TOKEN", kwargs["env"])
-        self.assertNotIn("OPENROUTER_API_KEY", kwargs["env"])
+        self.assertEqual(kwargs["workspace"], self.workspace)
+        self.assertEqual(kwargs["environment"]["CODEX_HOME"], str(self.codex_home))
+        self.assertEqual(kwargs["environment"]["HOME"], str(self.codex_home))
+        self.assertNotIn("NUNCHI_DISCORD_TOKEN", kwargs["environment"])
+        self.assertNotIn("OPENROUTER_API_KEY", kwargs["environment"])
         self.assertEqual(load_codex_session(self.session_path)["thread_id"], THREAD_ONE)
 
     def test_untrusted_room_text_cannot_break_the_structural_prompt_envelope(self):
@@ -142,6 +152,20 @@ class CodexParticipantCases(unittest.TestCase):
                 working_directory=unsafe,
             )
 
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.shutil.which",
+            return_value=None,
+        ):
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                CodexParticipantV2(
+                    codex_bin="missing-codex",
+                    participant_name="Vigil",
+                    session_path=self.session_path,
+                    codex_home=self.codex_home,
+                    timeout_seconds=10,
+                    working_directory=self.workspace,
+                )
+
     def test_second_turn_resumes_exact_thread_and_returns_structured_action(self):
         save_codex_session(self.session_path, THREAD_ONE)
         action = {
@@ -149,27 +173,90 @@ class CodexParticipantCases(unittest.TestCase):
             "content": "The current implementation is ready for review.",
             "reply_to_event_id": "discord:message:111",
         }
-        with mock.patch("subprocess.run", side_effect=self.completion(action)):
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=self.completion(action),
+        ):
             result = self.participant()(self.turn)
         self.assertEqual(result, action)
         command = self.commands[0][0]
-        self.assertEqual(command[:3], ["codex-test", "exec", "resume"])
+        self.assertEqual(command[:3], ("/usr/bin/true", "exec", "resume"))
         self.assertIn(THREAD_ONE, command)
 
     def test_malformed_output_fails_without_becoming_room_text(self):
         def malformed(command, **kwargs):
             output_index = command.index("--output-last-message") + 1
             Path(command[output_index]).write_text("not-json")
-            return SimpleNamespace(
-                returncode=0,
-                stdout=json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
-                stderr="",
+            return (
+                0,
+                json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}).encode(),
+                b"",
             )
 
-        with mock.patch("subprocess.run", side_effect=malformed):
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=malformed,
+        ):
             with self.assertRaises(CodexParticipantError):
                 self.participant()(self.turn)
         self.assertIsNotNone(load_codex_session(self.session_path))
+
+    def test_final_output_is_strict_bounded_and_no_follow(self):
+        invalid_outputs = (
+            b'{"action":null,"action":{}}',
+            b'{"action":NaN}',
+        )
+        for payload in invalid_outputs:
+            with self.subTest(payload=payload):
+                def invalid(command, **_kwargs):
+                    output_index = command.index("--output-last-message") + 1
+                    Path(command[output_index]).write_bytes(payload)
+                    stream = json.dumps(
+                        {"type": "thread.started", "thread_id": THREAD_ONE}
+                    ).encode()
+                    return 0, stream, b""
+
+                with mock.patch(
+                    "nunchi.integrations.codex_participant_v2.run_bounded_process",
+                    side_effect=invalid,
+                ):
+                    with self.assertRaises(CodexParticipantError):
+                        self.participant()(self.turn)
+
+        def oversized(command, **_kwargs):
+            output_index = command.index("--output-last-message") + 1
+            Path(command[output_index]).write_bytes(b"x" * 17)
+            stream = json.dumps(
+                {"type": "thread.started", "thread_id": THREAD_ONE}
+            ).encode()
+            return 0, stream, b""
+
+        with (
+            mock.patch.object(codex_participant_v2, "MAX_CODEX_ACTION_BYTES", 16),
+            mock.patch(
+                "nunchi.integrations.codex_participant_v2.run_bounded_process",
+                side_effect=oversized,
+            ),
+        ):
+            with self.assertRaises(CodexParticipantError):
+                self.participant()(self.turn)
+
+        def symlinked(command, **_kwargs):
+            output_index = command.index("--output-last-message") + 1
+            output_path = Path(command[output_index])
+            output_path.unlink()
+            os.symlink("/etc/passwd", output_path)
+            stream = json.dumps(
+                {"type": "thread.started", "thread_id": THREAD_ONE}
+            ).encode()
+            return 0, stream, b""
+
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=symlinked,
+        ):
+            with self.assertRaises(CodexParticipantError):
+                self.participant()(self.turn)
 
     def test_any_observed_tool_event_fails_before_session_or_action_acceptance(self):
         def attempted_tool(command, **kwargs):
@@ -177,9 +264,9 @@ class CodexParticipantCases(unittest.TestCase):
             Path(command[output_index]).write_text(
                 json.dumps({"action": {"kind": "message", "content": "done"}})
             )
-            return SimpleNamespace(
-                returncode=0,
-                stdout="\n".join(
+            return (
+                0,
+                "\n".join(
                     (
                         json.dumps(
                             {"type": "thread.started", "thread_id": THREAD_ONE}
@@ -191,11 +278,14 @@ class CodexParticipantCases(unittest.TestCase):
                             }
                         ),
                     )
-                ),
-                stderr="",
+                ).encode(),
+                b"",
             )
 
-        with mock.patch("subprocess.run", side_effect=attempted_tool):
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=attempted_tool,
+        ):
             with self.assertRaisesRegex(CodexParticipantError, "forbidden tool"):
                 self.participant()(self.turn)
         self.assertIsNone(load_codex_session(self.session_path))
@@ -203,6 +293,8 @@ class CodexParticipantCases(unittest.TestCase):
     def test_malformed_or_conflicting_event_stream_fails_closed(self):
         for output in (
             "not-json",
+            '{"type":"item.completed","type":"thread.started",'
+            f'"thread_id":"{THREAD_ONE}"}}',
             "\n".join(
                 (
                     json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
@@ -214,17 +306,20 @@ class CodexParticipantCases(unittest.TestCase):
                 def invalid_stream(command, **kwargs):
                     output_index = command.index("--output-last-message") + 1
                     Path(command[output_index]).write_text(json.dumps({"action": None}))
-                    return SimpleNamespace(returncode=0, stdout=output, stderr="")
+                    return 0, output.encode(), b""
 
-                with mock.patch("subprocess.run", side_effect=invalid_stream):
+                with mock.patch(
+                    "nunchi.integrations.codex_participant_v2.run_bounded_process",
+                    side_effect=invalid_stream,
+                ):
                     with self.assertRaises(CodexParticipantError):
                         self.participant()(self.turn)
                 self.assertIsNone(load_codex_session(self.session_path))
 
     def test_timeout_and_thread_mismatch_fail_closed(self):
         with mock.patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(["codex-test"], 10),
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=SubprocessParticipantError("timed out"),
         ):
             with self.assertRaises(CodexParticipantError):
                 self.participant()(self.turn)
@@ -232,12 +327,37 @@ class CodexParticipantCases(unittest.TestCase):
 
         save_codex_session(self.session_path, THREAD_ONE)
         with mock.patch(
-            "subprocess.run",
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
             side_effect=self.completion(None, thread_id=THREAD_TWO),
         ):
             with self.assertRaises(CodexParticipantError):
                 self.participant()(self.turn)
         self.assertEqual(load_codex_session(self.session_path)["thread_id"], THREAD_ONE)
+
+    def test_session_state_rejects_duplicate_keys_and_invalid_time(self):
+        invalid_documents = (
+            (
+                '{"version":2,"thread_id":"%s","created_at":"bad",'
+                '"updated_at":"2026-07-20T12:00:00+00:00"}' % THREAD_ONE
+            ),
+            (
+                '{"version":2,"thread_id":"%s","thread_id":"%s",'
+                '"created_at":"2026-07-20T12:00:00+00:00",'
+                '"updated_at":"2026-07-20T12:00:01+00:00"}'
+                % (THREAD_ONE, THREAD_TWO)
+            ),
+            (
+                '{"version":2,"thread_id":"%s",'
+                '"created_at":"2026-07-20T12:00:02+00:00",'
+                '"updated_at":"2026-07-20T12:00:01+00:00"}' % THREAD_ONE
+            ),
+        )
+        for document in invalid_documents:
+            with self.subTest(document=document):
+                self.session_path.write_text(document, encoding="utf-8")
+                self.session_path.chmod(0o600)
+                with self.assertRaises(CodexSessionStateError):
+                    load_codex_session(self.session_path)
 
 
 class FakeTransportClient:

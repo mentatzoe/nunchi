@@ -122,14 +122,29 @@ def _read_receipt(path: Path) -> tuple[int, dict[str, Any]] | None:
         if len(raw) > MAX_RECEIPT_BYTES:
             return None
         try:
-            value = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            value = json.loads(
+                raw,
+                object_pairs_hook=lambda pairs: _unique_object(pairs),
+                parse_constant=lambda _value: (_ for _ in ()).throw(
+                    ValueError("non-finite")
+                ),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             return None
         if not isinstance(value, dict):
             return None
         return metadata.st_mtime_ns, value
     finally:
         os.close(descriptor)
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
 
 
 def _tail_receipts(policy: OperatorPolicy, limit: int) -> dict[str, Any]:
@@ -176,12 +191,17 @@ class ConfigAppService:
         allow_policy_write: bool = False,
         allow_session_reset: bool = False,
     ) -> None:
-        if not policy_path.is_absolute() or not session_path.is_absolute():
+        if (
+            not policy_path.is_absolute()
+            or not session_path.is_absolute()
+            or not isinstance(allow_policy_write, bool)
+            or not isinstance(allow_session_reset, bool)
+        ):
             raise ConfigAppError("policy and session paths must be absolute")
         self.policy_path = policy_path
         self.session_path = session_path
-        self.allow_policy_write = bool(allow_policy_write)
-        self.allow_session_reset = bool(allow_session_reset)
+        self.allow_policy_write = allow_policy_write
+        self.allow_session_reset = allow_session_reset
 
     def _policy(self) -> OperatorPolicy:
         return load_operator_policy(self.policy_path)

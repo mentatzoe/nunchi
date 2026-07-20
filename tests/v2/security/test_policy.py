@@ -112,6 +112,30 @@ class ClosedTypedPolicyCases(unittest.TestCase):
                 document[section][field] = value
                 self.assert_policy_rejects(document)
 
+    def test_classifier_provider_and_endpoint_are_closed_and_transport_safe(self):
+        for provider, endpoint in (
+            ("mystery-provider", "https://provider.example/v1/chat/completions"),
+            ("openai-compatible", "http://provider.example/v1/chat/completions"),
+            ("openai-compatible", "https://user:secret@provider.example/v1"),
+            ("openai-compatible", "https://provider.example/v1?token=secret"),
+        ):
+            with self.subTest(provider=provider, endpoint=endpoint):
+                document = clone_policy()
+                document["classifier"]["provider"] = provider
+                document["classifier"]["endpoint"] = endpoint
+                self.assert_policy_rejects(document)
+
+        document = clone_policy()
+        document["classifier"]["endpoint"] = (
+            "http://127.0.0.1:11434/v1/chat/completions"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = write_policy(directory, document)
+            self.assertEqual(
+                load_operator_policy(path).classifier.endpoint,
+                document["classifier"]["endpoint"],
+            )
+
     def test_margin_fields_are_present_or_absent_together(self):
         for missing in ("transition_defer_margin", "transition_defer_margin_source"):
             with self.subTest(missing=missing):

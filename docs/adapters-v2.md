@@ -53,10 +53,22 @@ environment, and passes only operator-named extra variables. Platform tokens,
 classifier credentials, Python path/home controls and Codex home are reserved
 and cannot be passed through this interface. Use a distinct participant-only
 credential name if the participant requires a provider key.
+The executable must be an absolute path and resolves once to a regular,
+executable, non-group/other-writable file owned by root or the current user;
+the child receives the platform's fixed default executable path rather than an
+operator shell `PATH`.
 Participant output is strict JSON: duplicate keys and non-finite values are
 rejected. Nunchi terminates the whole participant process group on timeout or
 while it exceeds the one-MiB stdout or 64-KiB stderr capture budget; child
 stderr is never copied into room output or generic operator errors.
+
+An owner-only workspace is not an operating-system sandbox. The generic,
+Matrix, Telegram, and standalone Discord subprocess adapters intentionally run
+the operator-selected participant program with that user's ordinary filesystem
+authority. Run an untrusted or remotely extensible participant inside a
+separate container, VM, or service account and expose only its JSON-stdio
+boundary. Nunchi's minimal environment prevents accidental credential
+inheritance; it cannot revoke file permissions the child already has.
 
 `--silent-participant` is an explicit observation/attention-only mode and cannot
 be combined with a command. The generic command intentionally exposes no

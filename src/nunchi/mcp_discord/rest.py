@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
+from ..net import open_no_redirect
 from .ratelimit import RateLimiter
 
 logger = logging.getLogger("nunchi.mcp_discord.rest")
@@ -29,6 +30,7 @@ logger = logging.getLogger("nunchi.mcp_discord.rest")
 API_BASE_URL = "https://discord.com/api/v10"
 _USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 0.2.0)"
 _TIMEOUT_SECONDS = 15.0
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 # method, url, headers, body -> (status, lower-cased headers, body)
 HttpCall = Callable[[str, str, Mapping[str, str], "bytes | None"], "tuple[int, dict[str, str], bytes]"]
@@ -42,19 +44,49 @@ class DiscordRestError(Exception):
         self.status = status
 
 
+def _strict_json(raw: bytes):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    return json.loads(
+        raw,
+        object_pairs_hook=pairs,
+        parse_constant=lambda _value: (_ for _ in ()).throw(
+            ValueError("non-finite")
+        ),
+    )
+
+
+def _bounded_read(response) -> bytes:
+    body = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise DiscordRestError(None, "Discord API response exceeded its size budget")
+    return body
+
+
 def _urllib_call(
     method: str, url: str, headers: Mapping[str, str], body: bytes | None
 ) -> tuple[int, dict[str, str], bytes]:
     request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
+        with open_no_redirect(request, timeout=_TIMEOUT_SECONDS) as response:
             return (
                 response.status,
                 {k.lower(): v for k, v in response.headers.items()},
-                response.read(),
+                _bounded_read(response),
             )
     except urllib.error.HTTPError as exc:
-        return (exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read())
+        with exc:
+            return (
+                exc.code,
+                {k.lower(): v for k, v in exc.headers.items()},
+                _bounded_read(exc),
+            )
     except urllib.error.URLError:
         raise DiscordRestError(None, "network error reaching Discord API") from None
 
@@ -141,7 +173,11 @@ class DiscordRestClient:
             "User-Agent": _USER_AGENT,
             "Content-Type": "application/json",
         }
-        data = json.dumps(body).encode("utf-8") if body is not None else None
+        data = (
+            json.dumps(body, allow_nan=False, separators=(",", ":")).encode("utf-8")
+            if body is not None
+            else None
+        )
         attempts = 0
         while True:
             self._limiter.before_request(route)
@@ -187,7 +223,7 @@ class DiscordRestClient:
             if not resp_body:
                 return {}
             try:
-                return json.loads(resp_body)
+                return _strict_json(resp_body)
             except ValueError:
                 raise DiscordRestError(status, f"malformed JSON from Discord API on {route}") from None
 
@@ -196,7 +232,7 @@ class DiscordRestClient:
         retry_after = 1.0
         is_global = headers.get("x-ratelimit-global", "").lower() == "true"
         try:
-            payload = json.loads(body)
+            payload = _strict_json(body)
             if isinstance(payload, dict):
                 retry_after = float(payload.get("retry_after", retry_after))
                 is_global = bool(payload.get("global", is_global))

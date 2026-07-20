@@ -13,12 +13,14 @@ and must never enter classifier or participant projections.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import os
 import re
 import stat
 import tempfile
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -314,15 +316,47 @@ def _classifier(value: Any, provenance: str) -> ClassifierPolicy:
     api_key = None
     if "api_key" in data:
         api_key = _string(data["api_key"])
+    provider = _string(data["provider"])
+    if provider != "openai-compatible":
+        raise _fail()
+    endpoint = _classifier_endpoint(data["endpoint"])
     return ClassifierPolicy(
-        provider=_string(data["provider"]),
-        endpoint=_string(data["endpoint"]),
+        provider=provider,
+        endpoint=endpoint,
         model=_string(data["model"]),
         timeout_seconds=_finite_positive(data["timeout_seconds"]),
         max_retries=retries,
         source=provenance,
         api_key=api_key,
     )
+
+
+def _classifier_endpoint(value: Any) -> str:
+    endpoint = _string(value)
+    try:
+        parsed = urllib.parse.urlsplit(endpoint)
+        host = parsed.hostname
+    except ValueError as exc:
+        raise _fail() from exc
+    if (
+        host is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise _fail()
+    if parsed.scheme == "https":
+        return endpoint
+    loopback = host.lower() == "localhost"
+    if not loopback:
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = False
+    if parsed.scheme != "http" or not loopback:
+        raise _fail()
+    return endpoint
 
 
 def _grant(value: Any) -> CapabilityGrant:

@@ -65,7 +65,7 @@ class ProviderTransportCases(unittest.TestCase):
             requests.append((request, timeout))
             return provider_response()
 
-        with patch("nunchi.classifiers.urllib.request.urlopen", side_effect=open_request):
+        with patch("nunchi.classifiers.open_no_redirect", side_effect=open_request):
             result = classify_attention_v2(self.projection, self.config)
         self.assertEqual(result["disposition"], "WAKE")
         request, timeout = requests[0]
@@ -88,7 +88,7 @@ class ProviderTransportCases(unittest.TestCase):
                     return provider_response()
 
                 with (
-                    patch("nunchi.classifiers.urllib.request.urlopen", side_effect=open_request),
+                    patch("nunchi.classifiers.open_no_redirect", side_effect=open_request),
                     patch("nunchi.classifiers.time.sleep") as sleep,
                 ):
                     result = classify_attention_v2(self.projection, self.config)
@@ -103,7 +103,7 @@ class ProviderTransportCases(unittest.TestCase):
             with self.subTest(status=status):
                 with (
                     patch(
-                        "nunchi.classifiers.urllib.request.urlopen",
+                        "nunchi.classifiers.open_no_redirect",
                         side_effect=self.http_error(status),
                     ) as opened,
                     patch("nunchi.classifiers.time.sleep") as sleep,
@@ -118,7 +118,7 @@ class ProviderTransportCases(unittest.TestCase):
         self.config = load_operator_policy(write_policy(self.temporary.name, self.document)).classifier
         with (
             patch(
-                "nunchi.classifiers.urllib.request.urlopen",
+                "nunchi.classifiers.open_no_redirect",
                 side_effect=urllib.error.URLError("private failure"),
             ) as opened,
             patch("nunchi.classifiers.time.sleep") as sleep,
@@ -134,7 +134,7 @@ class ProviderTransportCases(unittest.TestCase):
             b'{"choices":[],"choices":[{"message":{"content":"{}"}}]}'
         )
         with patch(
-            "nunchi.classifiers.urllib.request.urlopen",
+            "nunchi.classifiers.open_no_redirect",
             return_value=duplicate,
         ):
             with self.assertRaises(Exception):
@@ -144,7 +144,7 @@ class ProviderTransportCases(unittest.TestCase):
         with (
             patch("nunchi.classifiers.MAX_PROVIDER_RESPONSE_BYTES", 16),
             patch(
-                "nunchi.classifiers.urllib.request.urlopen",
+                "nunchi.classifiers.open_no_redirect",
                 return_value=oversized,
             ),
         ):
