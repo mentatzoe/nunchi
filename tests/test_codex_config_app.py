@@ -144,7 +144,9 @@ class TestConfigAppService(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             service = _service(root)
-            (root / "session.json").write_text("bad-json", encoding="utf-8")
+            session_path = root / "session.json"
+            session_path.write_text("bad-json", encoding="utf-8")
+            session_path.chmod(0o600)
 
             health = service.snapshot()["health"]["codex_session"]
             self.assertFalse(health["active"])
