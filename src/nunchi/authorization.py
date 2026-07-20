@@ -20,6 +20,7 @@ import math
 import re
 import threading
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -287,16 +288,28 @@ class PrivilegedActionGuard:
         *,
         clock: Callable[[], datetime] | None = None,
         id_factory: Callable[[str], str] | None = None,
+        max_state_entries: int = 4096,
+        max_audit_records: int = 8192,
     ) -> None:
+        if (
+            isinstance(max_state_entries, bool)
+            or not isinstance(max_state_entries, int)
+            or not 1 <= max_state_entries <= 100000
+            or isinstance(max_audit_records, bool)
+            or not isinstance(max_audit_records, int)
+            or not 1 <= max_audit_records <= 200000
+        ):
+            raise ValueError("authorization state limits are invalid")
         self._policy_loader = policy_loader
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
+        self._max_state_entries = max_state_entries
         self._lock = threading.RLock()
         self._action_bindings: dict[str, bytes] = {}
         self._challenges: dict[str, _ChallengeState] = {}
         self._allows: dict[str, _AllowState] = {}
         self._used_attestations: set[str] = set()
-        self._audits: list[dict[str, Any]] = []
+        self._audits: deque[dict[str, Any]] = deque(maxlen=max_audit_records)
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -399,6 +412,13 @@ class PrivilegedActionGuard:
                     proposed,
                     policy_provenance="unavailable:action-binding-conflict",
                     reason_code="deny-action-digest-mismatch",
+                    requester=None,
+                )
+            if previous is None and len(self._action_bindings) >= self._max_state_entries:
+                return self._deny(
+                    proposed,
+                    policy_provenance="unavailable:authorization-capacity",
+                    reason_code="deny-unsupported-seam",
                     requester=None,
                 )
             self._action_bindings.setdefault(proposed["action_id"], binding)

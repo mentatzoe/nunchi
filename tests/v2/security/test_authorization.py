@@ -374,6 +374,47 @@ class AuditCases(GuardCase):
         self.assertEqual(self.guard.audit_records()[-1]["decision"], "ALLOW")
         self.assertNotIn("do-not-project-this-secret", repr(self.guard.audit_records()))
 
+    def test_replay_state_and_audits_are_bounded_without_evicting_bindings(self):
+        guard = PrivilegedActionGuard(
+            OperatorPolicySource(self.path).load,
+            clock=self.clock,
+            id_factory=IDs(),
+            max_state_entries=2,
+            max_audit_records=2,
+        )
+        first = self.proposal(action_id="action-1")
+        second = self.proposal(action_id="action-2")
+        third = self.proposal(action_id="action-3")
+        self.assertEqual(guard.authorize(first, self.observation)["decision"], "ALLOW")
+        self.assertEqual(guard.authorize(second, self.observation)["decision"], "ALLOW")
+
+        capacity = guard.authorize(third, self.observation)
+        self.assertEqual(capacity["decision"], "DENY")
+        self.assertEqual(capacity["reason_code"], "deny-unsupported-seam")
+        self.assertEqual(
+            capacity["policy_provenance"],
+            "unavailable:authorization-capacity",
+        )
+        self.assertEqual(len(guard.audit_records()), 2)
+
+        rebound = self.proposal(
+            operation(path="different"),
+            action_id="action-1",
+            origin_event_id="e2",
+        )
+        denied = guard.authorize(rebound, self.observation)
+        self.assertEqual(denied["decision"], "DENY")
+        self.assertEqual(denied["reason_code"], "deny-action-digest-mismatch")
+
+    def test_invalid_state_limits_reject_at_construction(self):
+        for value in (True, 0, 100001):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    PrivilegedActionGuard(
+                        OperatorPolicySource(self.path).load,
+                        max_state_entries=value,
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
