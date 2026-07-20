@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "scenes": [
+    {
+      "scene_id": "S01",
+      "title": "Exact self and alias collision",
+      "mechanics_tests": [
+        "tests.v2.observation.test_provider.TestExactSelfAndAliasCollision",
+        "tests.v2.test_discord_transport.DiscordEventSourceCases.test_display_names_quotes_and_content_never_change_identity_or_routing",
+        "tests.v2.test_channel_adapters.GenericSourceCases.test_host_binding_not_payload_text_controls_routing"
+      ],
+      "external_evidence": []
+    },
+    {
+      "scene_id": "S02",
+      "title": "Native relations remain literal",
+      "mechanics_tests": [
+        "tests.v2.observation.test_provider.TestNativeRelations",
+        "tests.v2.test_discord_transport.DiscordEventSourceCases.test_gateway_reaction_preserves_exact_target_actor_and_operation",
+        "tests.v2.test_channel_adapters.MatrixSourceCases",
+        "tests.v2.test_channel_adapters.TelegramSourceCases"
+      ],
+      "external_evidence": []
+    },
+    {
+      "scene_id": "S03",
+      "title": "Bounded context and current tail",
+      "mechanics_tests": [
+        "tests.v2.observation.test_budget_and_continuation.TestHardBudgets",
+        "tests.v2.observation.test_budget_and_continuation.TestRelationClosure",
+        "tests.v2.observation.test_participant_snapshot.ParticipantSnapshotCases"
+      ],
+      "external_evidence": []
+    },
+    {
+      "scene_id": "S04",
+      "title": "False-suppression scars reach the participant-shaped judge",
+      "mechanics_tests": [
+        "tests.v2.observation.test_provider.TestFalseSuppressionScars",
+        "tests.v2.attention.test_core.ParticipantShapedJudgmentCases.test_suppression_policy_and_recoverability_only_widen"
+      ],
+      "external_evidence": ["live-provider-social-evaluation"]
+    },
+    {
+      "scene_id": "S05",
+      "title": "Governed and recoverable suppression",
+      "mechanics_tests": [
+        "tests.v2.attention.test_core.ParticipantShapedJudgmentCases.test_governed_suppression_outside_margin_can_suppress",
+        "tests.v2.attention.test_core.ParticipantShapedJudgmentCases.test_suppression_policy_and_recoverability_only_widen",
+        "tests.v2.participant.test_runtime.LiveCoalescingCases.test_suppression_stops_without_participant_invocation"
+      ],
+      "external_evidence": ["restart-recoverability-probe", "live-provider-social-evaluation"]
+    },
+    {
+      "scene_id": "S06",
+      "title": "WAKE and trusted bypass lead to a normal contribution turn",
+      "mechanics_tests": [
+        "tests.v2.attention.test_core.BypassAndFailureCases.test_trusted_bypass_invokes_no_classifier_and_fabricates_no_disposition",
+        "tests.v2.participant.test_host.RoutingAndOutcomeCases.test_actual_message_and_reaction_go_directly_to_action_sink",
+        "tests.v2.test_codex.CodexRoomLifecycleCases.test_trusted_bypass_invokes_codex_with_zero_classifier_calls"
+      ],
+      "external_evidence": ["participant-behavior-evaluation"]
+    },
+    {
+      "scene_id": "S07",
+      "title": "Every waking source may end in silence",
+      "mechanics_tests": [
+        "tests.v2.participant.test_host.RoutingAndOutcomeCases.test_every_waking_source_can_end_silent",
+        "tests.v2.test_codex.CodexParticipantCases.test_first_turn_is_tool_isolated_and_can_stay_silent"
+      ],
+      "external_evidence": ["participant-behavior-evaluation"]
+    },
+    {
+      "scene_id": "S08",
+      "title": "Classifier and transition-margin DEFER remain distinct",
+      "mechanics_tests": [
+        "tests.v2.attention.test_core.ParticipantShapedJudgmentCases.test_classifier_defer_remains_distinct",
+        "tests.v2.attention.test_core.ParticipantShapedJudgmentCases.test_inside_margin_widens_suppression_to_defer"
+      ],
+      "external_evidence": ["live-provider-margin-evaluation"]
+    },
+    {
+      "scene_id": "S09",
+      "title": "Operational error recovery fabricates no social verdict",
+      "mechanics_tests": [
+        "tests.v2.attention.test_core.BypassAndFailureCases.test_provider_failure_is_error_with_wake_default",
+        "tests.v2.participant.test_runtime.SnapshotRecoveryCases.test_failed_recovery_fabricates_neither_decision_nor_participant_turn"
+      ],
+      "external_evidence": ["installed-provider-failure-probe"]
+    },
+    {
+      "scene_id": "S10",
+      "title": "No send-time social gate",
+      "mechanics_tests": [
+        "tests.v2.participant.test_host.RoutingAndOutcomeCases.test_actual_message_and_reaction_go_directly_to_action_sink",
+        "tests.v2.participant.test_host.RoutingAndOutcomeCases.test_meta_answer_is_not_a_sendable_action_and_is_not_reclassified",
+        "tests.v2.test_discord_transport.DiscordActionSinkCases.test_rate_limit_is_operational_failure_without_queue_or_classifier"
+      ],
+      "external_evidence": ["installed-action-delivery-probe"]
+    },
+    {
+      "scene_id": "S11",
+      "title": "Transport hygiene is exact and observable",
+      "mechanics_tests": [
+        "tests.v2.observation.test_provider.TestTransportHygiene",
+        "tests.v2.participant.test_runtime.LiveCoalescingCases.test_duplicate_and_self_delivery_never_create_wake_work",
+        "tests.v2.test_discord_transport.DiscordEventSourceCases.test_cross_room_blocked_actor_and_malformed_ids_are_unroutable_not_suppressed"
+      ],
+      "external_evidence": []
+    },
+    {
+      "scene_id": "S12",
+      "title": "Installed provenance, restart, and V1 residue removal",
+      "mechanics_tests": [],
+      "external_evidence": ["installed-wheel-manifest", "per-surface-restart-probe", "repository-v1-residue-audit"]
+    },
+    {
+      "scene_id": "S13",
+      "title": "Adapter equivalence with honest capability gaps",
+      "mechanics_tests": [
+        "tests.v2.test_channel_adapters",
+        "tests.v2.test_discord_transport.DiscordEventSourceCases.test_exact_native_facts_become_portable_observation",
+        "tests.v2.test_discord_transport.DiscordEventSourceCases.test_reaction_without_transport_sequence_is_unavailable_not_invented"
+      ],
+      "external_evidence": ["installed-surface-parity-probe"]
+    },
+    {
+      "scene_id": "S14",
+      "title": "Mixed-harness live room",
+      "mechanics_tests": [],
+      "external_evidence": ["six-stage-mixed-room-ladder", "cross-family-participant-behavior-review"]
+    },
+    {
+      "scene_id": "S15",
+      "title": "Independent attention and participant context budgets",
+      "mechanics_tests": [
+        "tests.v2.attention.test_core.ProjectionAndBudgetCases.test_event_or_byte_overage_has_zero_classifier_calls",
+        "tests.v2.observation.test_budget_and_continuation.TestHardBudgets",
+        "tests.v2.observation.test_participant_snapshot.ParticipantSnapshotCases.test_cited_evidence_precedes_optional_tail_and_budget_failure_is_loud"
+      ],
+      "external_evidence": []
+    },
+    {
+      "scene_id": "S16",
+      "title": "No roster, obligation queue, or social ledger",
+      "mechanics_tests": [
+        "tests.v2.observation.test_provider.TestNoSocialLedger",
+        "tests.v2.participant.test_scheduling.ConversationOpportunityCases.test_scheduler_accepts_no_semantic_or_age_inputs",
+        "tests.v2.attention.test_core.ProjectionAndBudgetCases.test_projection_removes_all_continuation_authority_and_preserves_input"
+      ],
+      "external_evidence": ["frozen-candidate-residue-audit"]
+    },
+    {
+      "scene_id": "S17",
+      "title": "Live conversation freshness coalesces rather than queues",
+      "mechanics_tests": [
+        "tests.v2.participant.test_runtime.LiveCoalescingCases.test_twenty_events_during_slow_turn_create_one_fresh_successor",
+        "tests.v2.participant.test_scheduling.ConversationOpportunityCases.test_burst_during_active_work_coalesces_to_newest_pending_anchor",
+        "tests.v2.participant.test_scheduling.ConversationOpportunityCases.test_restart_has_no_pending_wake_backlog"
+      ],
+      "external_evidence": ["delayed-participant-live-room-probe"]
+    },
+    {
+      "scene_id": "S18",
+      "title": "Provenance-bound privileged authorization",
+      "mechanics_tests": [
+        "tests.v2.security.test_policy",
+        "tests.v2.security.test_authorization",
+        "tests.v2.participant.test_host.PrivilegedActionCases"
+      ],
+      "external_evidence": ["installed-authenticated-approval-probe", "independent-security-review"]
+    }
+  ]
+}
