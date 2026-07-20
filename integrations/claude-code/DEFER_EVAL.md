@@ -1,73 +1,51 @@
-# DEFER — calibration and evaluation plan
+# DEFER in the Claude Code V2 integration
 
-DEFER ships **on by default** as part of the wake-time gate
-(`nunchi_prompt_gate.py`): an *uncertain* PASS abstains instead of silencing,
-handing the turn to the agent's own model with the gate's hesitation noted.
-The mechanism is contract-tested (`tests/test_defer.py`); what is **not** yet
-evidenced is the calibration — whether the default margin (0.25) draws the
-line between "silence" and "your call" in the right place for real rooms.
-This plan is the bar for calling the margin calibrated, and the honest counter
-to "green tests = tuned".
+V2 has two distinct DEFER sources, and this integration adds no third:
 
-DEFER is **abstention, not model routing**: no second classifier runs anywhere,
-live or hidden. "Forward to the bigger model" means the agent itself — the
-model already holding the room decides, and deciding *silence* is a success
-case, not a failure of DEFER.
+1. **Classifier-DEFER** — the participant-shaped model itself returns
+   `DEFER`: it cannot justify suppression and widens attention. Routed as
+   `effective_disposition: DEFER` with valve `classifier-defer`.
+2. **Margin-DEFER** — the model returned `SUPPRESS`, but its legacy
+   confidence vector shows the suppression margin inside the operator's
+   `transition_defer_margin`, or suppression is disabled/unproven for this
+   scope. Routed as `classifier_disposition: SUPPRESS` with
+   `effective_disposition: DEFER` and valve `margin-defer` (or
+   `policy-defer`).
 
-## Hypothesis
+Both wake the participant with `attention.source: DEFER`; neither injects
+advice. The distinction lives in the decision's `routing_audit` and receipts,
+never in the participant's instruction. DEFER is abstention toward hearing —
+it is not model routing and not a request for the participant to report an
+admission decision.
 
-When a small fast gate lacks grounded confidence to suppress a socially
-plausible bid, abstaining reduces **false silence** (over-PASS) without
-materially inflating **foam** (over-SPEAK), because the agent's own model is a
-better judge of ambiguous bids than a hard threshold. Abstention adds no gate
-latency and no extra model call — the trade is purely over-SPEAK risk, bounded
-by the agent's own judgment.
+## Where the margin lives now
 
-## Data
+The V1 gate's `NUNCHI_DEFER` / `NUNCHI_DEFER_MARGIN` environment switches are
+gone. The margin is `attention.transition_defer_margin` in the operator policy
+JSON, with `transition_defer_margin_source` recording its provenance. It is
+trusted operator configuration: room content and model output cannot change
+it, and every attention receipt carries the policy provenance that was in
+force.
 
-Receipts are self-labelling for this: every abstention is a
-`defer-uncertain-pass` row (with the cheap verdict + confidences), every hard
-block a `block-pass` row, every admit an `allow-*` row. The live room's
-timeline (which turns actually got replies, which silences read as absence)
-supplies the ground truth. The 2026-07-10 over-suppression incidents — the
-"how's everyone" chain, the review/security suppressions — are the seed
-regression set.
+The historical V1 default (`0.25`) was a placeholder, never a calibrated
+value. The current operator value is likewise uncalibrated until the
+evaluation below runs; the honest state is "chosen, provenance-recorded, not
+yet calibrated".
 
-## Scene set (acceptance behaviours, from the room)
+## Evaluation plan
 
-1. room-addressed invitation → at least one real answer
-2. soft move / joke → a visible light acknowledgment
-3. peer disagreement → a divergent take can surface
-4. no bid → silence still holds
+Deterministic routing distinctness is already enforced by
+`tests/v2/test_claude_code.py`
+(`test_classifier_defer_and_margin_defer_route_distinctly`). Calibration is a
+replay evaluation, not a runtime feature:
 
-## Method
+1. Replay the Station scar corpus (`evals/v2/claude_code/scenes.jsonl`) and
+   live-room captures against candidate margins.
+2. Count, per margin: suppressions converted to DEFER (cost: extra wakes) and
+   false suppressions surviving (cost: silence — the regression class).
+3. Prefer the smallest margin whose replayed false-suppression count is zero;
+   record the chosen value and its evidence in the policy's
+   `transition_defer_margin_source` and in `evidence/v2/claude-code/`.
 
-Replay recorded envelopes offline (same prompt, same model, fixed) and label
-each with a stronger model as **should-surface** / **should-stay-quiet** —
-the stronger model is an *offline judge over recorded cases only*, never a
-live path. Then compare, per candidate margin:
-
-- **over-PASS rate** — should-surface cases hard-blocked (primary; DEFER
-  should lower it)
-- **over-SPEAK rate** — should-stay-quiet cases that got surfaced after an
-  abstention (guardrail; must stay bounded — this measures whether the agent's
-  own judgment actually declines the bad ones)
-- **abstention rate** — fraction of PASS verdicts that defer (how often the
-  gate is punting; near 100% means the gate adds nothing, near 0% means DEFER
-  is inert)
-
-## Calibration
-
-Sweep `NUNCHI_DEFER_MARGIN` over the labelled corpus; pick the point that
-maximizes correct-surface while bounding over-SPEAK. Until that run is
-committed as evidence, **0.25 is a placeholder, not a calibrated value** — say
-so anywhere the margin is quoted.
-
-**Sweep asymmetry (Aleph):** receipts only support sweeping margins **smaller**
-than the deployed one — those cases were deferred, so the participant outcome
-exists. For margins **larger** than deployed, the historically hard-blocked
-model never woke: there is no sent/chose-silence counterfactual to join, and
-evaluating those candidates requires *replaying* the participant decision over
-the recorded envelope, not merely joining room logs. Both block and defer
-receipts now carry the full confidence vector + effective margin so either arm
-has its numbers.
+False suppression remains the highest-risk branch; when in doubt the margin
+stays wide.
