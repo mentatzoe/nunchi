@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "product_version_major": 2,
+  "required_scripts": {
+    "nunchi": "nunchi.cli:main",
+    "nunchi-install": "nunchi.install:main",
+    "nunchi-channel": "nunchi.adapters.channel:main",
+    "nunchi-discord": "nunchi.adapters.discord:main",
+    "nunchi-matrix": "nunchi.adapters.matrix:main",
+    "nunchi-telegram": "nunchi.adapters.telegram:main",
+    "nunchi-mcp-discord": "nunchi.mcp_discord.server:main",
+    "nunchi-codex-room-v2": "nunchi.integrations.codex_room_v2:main",
+    "nunchi-codex-config-app": "nunchi.integrations.codex_config_app:main"
+  },
+  "removed_scripts": {
+    "nunchi-codex-prompt-gate": "V1 wake hook is superseded by the accepted Claude Code V2 packet.",
+    "nunchi-codex-send-gate": "Send-time social reclassification is forbidden in V2.",
+    "nunchi-codex-room-runner": "The V1 PASS/ACK/ASK/SPEAK Discord runner is superseded by the direct V2 room participant."
+  },
+  "forbidden_runtime_symbols": [
+    "AdmissionRequest",
+    "AdmissionResult",
+    "ChannelGateResult",
+    "CC_CONNECT_SILENT_PASS",
+    "ProductAdmissionClassifier",
+    "RUN_SHAPE",
+    "SILENT_PASS_SENTINEL"
+  ],
+  "forbidden_runtime_fragments": [
+    "add_parser(\"admit\"",
+    "add_parser('admit'"
+  ]
+}

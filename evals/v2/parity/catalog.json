@@ -111,7 +111,9 @@
     {
       "scene_id": "S12",
       "title": "Installed provenance, restart, and V1 residue removal",
-      "mechanics_tests": [],
+      "mechanics_tests": [
+        "tests.v2.test_provenance_eval"
+      ],
       "external_evidence": ["installed-wheel-manifest", "per-surface-restart-probe", "repository-v1-residue-audit"]
     },
     {

@@ -19,7 +19,7 @@ class SceneCatalogCases(unittest.TestCase):
         )
         self.assertEqual(len(catalog["scenes"]), 18)
 
-    def test_external_only_scenes_cannot_be_reported_complete_offline(self):
+    def test_external_obligations_cannot_be_reported_complete_offline(self):
         record = runner.run(
             selected_ids=("S12", "S14"),
             deterministic_time=True,
@@ -29,7 +29,7 @@ class SceneCatalogCases(unittest.TestCase):
         self.assertFalse(record["summary"]["candidate_complete"])
         self.assertEqual(
             [scene["mechanics"] for scene in record["scenes"]],
-            ["not-applicable", "not-applicable"],
+            ["passed", "not-applicable"],
         )
 
     def test_selected_mechanics_scene_runs_its_existing_tests(self):
