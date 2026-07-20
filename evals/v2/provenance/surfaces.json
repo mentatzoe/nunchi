@@ -7,7 +7,7 @@
     "nunchi-channel": "nunchi.adapters.channel_v2:main",
     "nunchi-discord": "nunchi.adapters.discord:main",
     "nunchi-matrix": "nunchi.adapters.matrix_v2:main",
-    "nunchi-telegram": "nunchi.adapters.telegram:main",
+    "nunchi-telegram": "nunchi.adapters.telegram_v2:main",
     "nunchi-mcp-discord": "nunchi.mcp_discord.server:main",
     "nunchi-codex-room-v2": "nunchi.integrations.codex_room_v2:main",
     "nunchi-codex-config-app": "nunchi.integrations.codex_config_app:main"

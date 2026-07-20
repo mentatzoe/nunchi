@@ -105,11 +105,19 @@ class MatrixEventSourceV2:
             body = content.get("body")
             if content.get("msgtype") not in ("m.text", "m.notice") or not isinstance(body, str):
                 return _unroutable(delivery_id, "Matrix delivery is not a constructable text event")
-            mentions = content.get("m.mentions") or {}
+            mentions = content.get("m.mentions", {})
             if not isinstance(mentions, dict):
-                mentions = {}
+                return _unroutable(
+                    delivery_id,
+                    "Matrix message carries malformed native mentions",
+                )
             user_ids = mentions.get("user_ids") or []
-            if not isinstance(user_ids, list) or any(not isinstance(item, str) or not item for item in user_ids):
+            room_mention = mentions.get("room", False)
+            if (
+                not isinstance(user_ids, list)
+                or any(not isinstance(item, str) or not item for item in user_ids)
+                or not isinstance(room_mention, bool)
+            ):
                 return _unroutable(delivery_id, "Matrix message carries malformed native mentions")
             mentioned = list(dict.fromkeys(self.actor_id(item) for item in user_ids))
             event: dict[str, Any] = {
@@ -118,15 +126,24 @@ class MatrixEventSourceV2:
                 "author_id": self.actor_id(sender),
                 "text": body,
                 "mentioned_actor_ids": mentioned,
-                "mentions_room": bool(mentions.get("room", False)),
+                "mentions_room": room_mention,
             }
-            relates = content.get("m.relates_to") or {}
-            if isinstance(relates, dict):
-                reply = relates.get("m.in_reply_to") or {}
-                if isinstance(reply, dict) and isinstance(reply.get("event_id"), str) and reply["event_id"]:
-                    event["reply_to_event_id"] = self.event_id(reply["event_id"])
-                if relates.get("rel_type") == "m.thread" and isinstance(relates.get("event_id"), str) and relates["event_id"]:
-                    event["thread_root_event_id"] = self.event_id(relates["event_id"])
+            relates = content.get("m.relates_to", {})
+            if not isinstance(relates, dict):
+                return _unroutable(
+                    delivery_id,
+                    "Matrix message carries a malformed native relation",
+                )
+            reply = relates.get("m.in_reply_to", {})
+            if not isinstance(reply, dict):
+                return _unroutable(
+                    delivery_id,
+                    "Matrix message carries a malformed native reply",
+                )
+            if isinstance(reply.get("event_id"), str) and reply["event_id"]:
+                event["reply_to_event_id"] = self.event_id(reply["event_id"])
+            if relates.get("rel_type") == "m.thread" and isinstance(relates.get("event_id"), str) and relates["event_id"]:
+                event["thread_root_event_id"] = self.event_id(relates["event_id"])
             actors[self.actor_id(sender)] = {"kind": "unknown"}
             for actor in mentioned:
                 actors.setdefault(actor, {"kind": "unknown"})
@@ -228,9 +245,17 @@ class TelegramEventSourceV2:
         text = message.get("text", message.get("caption"))
         if not isinstance(text, str):
             return _unroutable(delivery_id, "Telegram message has no constructable text")
+        entities = message.get("entities", [])
+        if not isinstance(entities, list) or any(
+            not isinstance(entity, dict) for entity in entities
+        ):
+            return _unroutable(
+                delivery_id,
+                "Telegram message carries malformed native entities",
+            )
         mentioned: list[str] = []
-        for entity in message.get("entities") or []:
-            if isinstance(entity, dict) and entity.get("type") == "text_mention":
+        for entity in entities:
+            if entity.get("type") == "text_mention":
                 user = entity.get("user") or {}
                 target = user.get("id") if isinstance(user, dict) else None
                 if isinstance(target, int) and not isinstance(target, bool):
@@ -245,9 +270,21 @@ class TelegramEventSourceV2:
             "mentioned_actor_ids": mentioned,
             "mentions_room": False,
         }
-        reply = message.get("reply_to_message") or {}
-        if isinstance(reply, dict) and isinstance(reply.get("message_id"), int):
-            event["reply_to_event_id"] = self.message_id(chat_id, reply["message_id"])
+        reply = message.get("reply_to_message")
+        if reply is not None:
+            if (
+                not isinstance(reply, dict)
+                or not isinstance(reply.get("message_id"), int)
+                or isinstance(reply.get("message_id"), bool)
+            ):
+                return _unroutable(
+                    delivery_id,
+                    "Telegram message carries a malformed native reply",
+                )
+            event["reply_to_event_id"] = self.message_id(
+                chat_id,
+                reply["message_id"],
+            )
         timestamp = _iso_seconds(message.get("date"))
         if timestamp is not None:
             event["timestamp"] = timestamp
@@ -267,7 +304,11 @@ class TelegramEventSourceV2:
         change = "join" if status in ("member", "administrator", "creator") else "leave" if status in ("left", "kicked") else None
         if chat_id not in self.allowed_chat_ids:
             return _unroutable(delivery_id, "Telegram chat is outside the trusted allowlist")
-        if not isinstance(subject.get("id"), int) or change is None:
+        if (
+            isinstance(subject.get("id"), bool)
+            or not isinstance(subject.get("id"), int)
+            or change is None
+        ):
             return _unroutable(delivery_id, "Telegram membership change is unavailable in the portable vocabulary")
         event: dict[str, Any] = {
             "id": delivery_id,
@@ -277,7 +318,10 @@ class TelegramEventSourceV2:
             "change": change,
         }
         actors = {self.actor_id(subject["id"]): {"kind": "bot" if subject.get("is_bot") else "human"}}
-        if isinstance(caused_by.get("id"), int):
+        if (
+            isinstance(caused_by.get("id"), int)
+            and not isinstance(caused_by.get("id"), bool)
+        ):
             event["caused_by_actor_id"] = self.actor_id(caused_by["id"])
             actors[self.actor_id(caused_by["id"])] = {"kind": "bot" if caused_by.get("is_bot") else "human"}
         timestamp = _iso_seconds(update.get("date"))

@@ -109,6 +109,22 @@ class MatrixSourceCases(unittest.TestCase):
             "unroutable",
         )
 
+    def test_non_boolean_room_mention_is_not_coerced_into_identity_fact(self):
+        result = self.source.native_input(
+            "!room:example",
+            {
+                "event_id": "$event",
+                "type": "m.room.message",
+                "sender": "@zoe:example",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "hello",
+                    "m.mentions": {"room": "false"},
+                },
+            },
+        )
+        self.assertEqual(result["disposition"], "unroutable")
+
 
 class TelegramSourceCases(unittest.TestCase):
     def setUp(self):
@@ -174,6 +190,37 @@ class TelegramSourceCases(unittest.TestCase):
         event = native["event"]
         self.assertEqual(event["subject_actor_id"], "telegram:user:2002")
         self.assertEqual(event["caused_by_actor_id"], "telegram:user:1001")
+
+    def test_boolean_ids_and_malformed_entity_collections_are_rejected(self):
+        malformed = [
+            {
+                "update_id": 14,
+                "message": {
+                    "message_id": 7,
+                    "chat": {"id": -42},
+                    "from": {"id": 1001},
+                    "text": "hello",
+                    "entities": "not-a-list",
+                },
+            },
+            {
+                "update_id": 15,
+                "chat_member": {
+                    "chat": {"id": -42},
+                    "from": {"id": 1001},
+                    "new_chat_member": {
+                        "status": "member",
+                        "user": {"id": True},
+                    },
+                },
+            },
+        ]
+        for update in malformed:
+            with self.subTest(update=update):
+                self.assertEqual(
+                    self.source.native_input(update)["disposition"],
+                    "unroutable",
+                )
 
 
 if __name__ == "__main__":

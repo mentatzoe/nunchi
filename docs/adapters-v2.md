@@ -109,3 +109,44 @@ judgment. Matrix transaction IDs are deterministically derived from the Nunchi
 request ID, transport sends have a local backstop, and the transport receipt is
 written after the API effect. As with the generic adapter, no privileged
 executor is exposed on this room surface.
+
+## Telegram
+
+`nunchi-telegram` likewise binds one exact chat and policy per process. The bot
+token comes from `NUNCHI_TELEGRAM_TOKEN` by default, the API endpoint requires
+HTTPS unless development mode is explicitly enabled, and the token never
+crosses into participant or classifier input.
+
+```sh
+install -d -m 700 /absolute/operator-state
+nunchi-telegram \
+  --chat-id=-1001234567890 \
+  --state /absolute/operator-state/telegram-chat.json \
+  --policy /absolute/path/to/nunchi-policy.json \
+  --participant-id vigil \
+  --participant-name Vigil \
+  --participant-workspace /absolute/owner-only/empty-workspace \
+  --participant-command /absolute/path/to/participant --json-stdio
+```
+
+The matching policy continuity scope is
+`telegram:chat:-1001234567890`. On first start the adapter asks Telegram for
+only the newest pending update using the native negative-offset behavior,
+retains that update as context, forgets older queued updates, and establishes an
+owner-only checkpoint. An empty first response establishes cursor `0`, so the
+next arriving message is live rather than being silently treated as another
+initialization batch. Later update batches are checked for strict increasing
+native IDs, coalesced into one newest opportunity and checkpointed before any
+participant effect. Telegram has no Bot API room-history fetch, so the adapter
+truthfully declares live-only, session continuity with a restart gap and cannot
+make social suppression recoverable.
+
+Structured inbound `text_mention` entities bind exact user IDs; textual
+`@username` mentions do not. Exact replies are supported. Outbound exact user
+mentions are rejected because the action contract does not provide the text
+offset/entity data needed to represent them without changing participant
+content. Outbound standard-emoji reactions use `setMessageReaction`; inbound
+reaction deltas remain unavailable without prior-state comparison. Sends have
+a local backstop and request-correlated transport receipts, but Telegram offers
+no idempotency key for `sendMessage`, which remains an explicit transport
+limitation rather than a false guarantee.
