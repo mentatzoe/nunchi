@@ -2,8 +2,10 @@
  "schema_version": 1,
  "slice": "070-v2-claude-code",
  "owner_lane": "v2-claude-owner",
+ "attempt": 2,
  "recorded_on": "2026-07-20",
- "candidate_commit": "recorded in the append-only handoff addendum in handoff.md; the addendum names the exact candidate commit this manifest ships inside",
+ "supersedes_attempt_1_candidate": "6476b58ca015e259fa576fd8f9ed569adc0c6913",
+ "candidate_commit": "199012901278777750671f4fc0731b779e91c2b8 (Attempt-2 implementation candidate); the append-only Attempt-2 handoff addendum binds it and the later evidence-only commit",
  "scene_map": {
   "CC-01": {
    "s_ids": ["S01", "S02", "S11"],
@@ -45,14 +47,16 @@
    }
   },
   "CC-04": {
-   "s_ids": ["S07", "S10", "S16"],
+   "s_ids": ["S07", "S10", "S16", "S18"],
    "records": ["evidence/v2/claude-code/scene-results.jsonl"],
    "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
    "mechanics_tests": [
-    "tests.v2.test_claude_code.ParticipantTurnCases"
+    "tests.v2.test_claude_code.ParticipantTurnCases",
+    "tests.v2.test_claude_code.ActionGuardCases",
+    "tests.v2.test_claude_code.AdversarialRegressionCases"
    ],
    "post_hoc_grading_corpus": "evals/v2/claude_code/scenes.jsonl (meta-answer-grading rows)",
-   "result": "PASS — act-or-silence with singly attested receipts; silence valid; no runtime prose filter, send re-gate, social ledger, or cross-owner stage mutation; live room send NOT RUN — blockers in verification.md",
+   "result": "PASS — act-or-silence with singly attested receipts; silence valid; no runtime prose filter, send re-gate, social ledger, or cross-owner stage mutation; room-caused privileged execution denied fail-closed (unsupported through the advisory seam); cross-room sends denied before execution; live room send NOT RUN — blockers in verification.md",
    "send_time_social_calls": 0
   },
   "CC-05": {
