@@ -280,10 +280,13 @@ must contain all in-tree consumers on one contract before acceptance.
   tested platform packets; Codex and reference adapters are integrated in the
   main implementation.
 - Freeze one installable candidate only after deterministic suites, replay,
-  live delayed-room scenes, restart continuity, authorization attacks, and
-  installed-runtime provenance pass. Independent cross-family reviewers receive
-  the same frozen commit and evidence. Any blocker produces a successor commit;
-  that exact successor is reviewed again before atomic cutover.
+  repeated provider trials with classifier/effective distributions and flicker,
+  separate post-hoc social review, live delayed-room scenes, restart continuity,
+  authorization attacks, and installed-runtime provenance pass. Repeated social
+  evidence may enforce narrow false-suppression constraints but never becomes a
+  deterministic runtime oracle or send-time gate. Independent cross-family
+  reviewers receive the same frozen commit and evidence. Any blocker produces a
+  successor commit; that exact successor is reviewed again before atomic cutover.
 
 **Rework**: A rejected handoff never erases an attempt. The designated recorder
 appends `REJECTED` for the exact candidate; the slice owner returns to `ACTIVE`

@@ -487,6 +487,14 @@ that authorized and unauthorized users can share a room without authority
 leaking through identity ambiguity, quoted requests, replies, or cross-room
 replay.
 
+Provider evaluation repeats the exact factual projection rather than treating
+one sample as proof. It records classifier and effective distributions,
+ordered flicker, raw validated judgment, prompt/config/projection provenance,
+and machine-checks only narrow false-suppression constraints. Later resolution,
+referential names, peer address, ordinary flow, alias collision, and room-wide
+address remain post-hoc review questions; their observed distributions never
+become deterministic runtime rules or a send-time social gate.
+
 ## V2 execution waves
 
 ```mermaid

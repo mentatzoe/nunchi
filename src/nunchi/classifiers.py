@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -572,6 +573,13 @@ def _attention_v2_system_prompt() -> str:
         "confident the participant would not want attention. Uncertainty is DEFER. "
         "Advice is a sparse non-authoritative observation, never drafted response text."
     )
+
+
+def attention_v2_prompt_digest() -> str:
+    """Return stable provenance for the exact V2 social-judgment prompt."""
+    return "sha256:" + hashlib.sha256(
+        _attention_v2_system_prompt().encode("utf-8")
+    ).hexdigest()
 
 
 def classify_attention_v2(

@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "self": {
+      "actor_id": "eval:participant",
+      "names": ["Vigil"],
+      "role": "resident participant",
+      "description": "A collaborative participant who contributes when useful."
+    },
+    "room": {
+      "platform": "evaluation",
+      "id": "social-room",
+      "name": "Nunchi social evaluation",
+      "kind": "group"
+    },
+    "actors": {
+      "eval:participant": {"display_name": "Vigil", "kind": "bot"},
+      "eval:zoe": {"display_name": "Zoe", "kind": "human"},
+      "eval:peer": {"display_name": "Claude", "kind": "bot"},
+      "eval:alias": {"display_name": "Vigil", "kind": "bot"}
+    },
+    "coverage": {
+      "has_more_before": false,
+      "has_more_after": false,
+      "has_gaps": false,
+      "truncated_by": [],
+      "continuity": "restart-safe",
+      "has_restart_gap": false,
+      "max_events": 50,
+      "max_bytes": 65536
+    }
+  },
+  "cases": [
+    {
+      "case_id": "C01-exact-direct-request",
+      "title": "Exact participant mention with a direct request",
+      "tags": ["false-suppression-scar", "direct-address"],
+      "events": [
+        {
+          "id": "c01-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:00:00Z",
+          "text": "Vigil, can you review the migration risk with me?",
+          "mentioned_actor_ids": ["eval:participant"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c01-e1",
+      "minimum_classifier_non_suppress_fraction": 1.0,
+      "minimum_effective_non_suppress_fraction": 1.0,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the judge preserve a direct opportunity without treating the mention as floor assignment?"
+    },
+    {
+      "case_id": "C02-late-direct-correction",
+      "title": "A later correction redirects an earlier peer request",
+      "tags": ["false-suppression-scar", "current-tail", "direct-address"],
+      "events": [
+        {
+          "id": "c02-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:01:00Z",
+          "text": "Claude, could you check the rollout notes?",
+          "mentioned_actor_ids": ["eval:peer"],
+          "mentions_room": false
+        },
+        {
+          "id": "c02-e2",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:01:05Z",
+          "text": "Correction: Vigil, I need your security read specifically.",
+          "mentioned_actor_ids": ["eval:participant"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c02-e2",
+      "minimum_classifier_non_suppress_fraction": 1.0,
+      "minimum_effective_non_suppress_fraction": 1.0,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the judge follow the current correction instead of freezing on the earlier addressee?"
+    },
+    {
+      "case_id": "C03-open-group-request",
+      "title": "An open request could naturally be taken by this participant",
+      "tags": ["class-address", "uncertainty"],
+      "events": [
+        {
+          "id": "c03-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:02:00Z",
+          "text": "Could someone sanity-check the restart behavior before we ship?",
+          "mentioned_actor_ids": [],
+          "mentions_room": true
+        }
+      ],
+      "trigger_event_id": "c03-e1",
+      "minimum_classifier_non_suppress_fraction": 0.8,
+      "minimum_effective_non_suppress_fraction": 0.8,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does uncertainty remain WAKE or DEFER often enough without forcing every participant to speak?"
+    },
+    {
+      "case_id": "C04-exact-peer-request",
+      "title": "The exact native mention addresses a peer with the same room role",
+      "tags": ["other-addressee", "measurement-only"],
+      "events": [
+        {
+          "id": "c04-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:03:00Z",
+          "text": "Claude, can you summarize the last test run?",
+          "mentioned_actor_ids": ["eval:peer"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c04-e1",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the distribution avoid needlessly waking Vigil without turning native addressing into deterministic suppression?"
+    },
+    {
+      "case_id": "C05-resolved-after-direct-request",
+      "title": "A direct request is visibly resolved before the fresh judgment",
+      "tags": ["resolved-later", "no-necro", "measurement-only"],
+      "events": [
+        {
+          "id": "c05-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:04:00Z",
+          "text": "Vigil, can you find the failing configuration?",
+          "mentioned_actor_ids": ["eval:participant"],
+          "mentions_room": false
+        },
+        {
+          "id": "c05-e2",
+          "type": "message",
+          "author_id": "eval:peer",
+          "timestamp": "2026-07-20T10:04:05Z",
+          "text": "Found it: the room ID was stale. I fixed the configuration.",
+          "mentioned_actor_ids": [],
+          "mentions_room": false
+        },
+        {
+          "id": "c05-e3",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:04:10Z",
+          "text": "Confirmed fixed, thank you. Moving on.",
+          "mentioned_actor_ids": [],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c05-e1",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the judge read the current tail rather than reviving the original request as a FIFO obligation?"
+    },
+    {
+      "case_id": "C06-referential-name",
+      "title": "The participant name is discussed rather than addressed",
+      "tags": ["referential-mention", "measurement-only"],
+      "events": [
+        {
+          "id": "c06-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:05:00Z",
+          "text": "I agree with Vigil's earlier concern; Claude, what do you think?",
+          "mentioned_actor_ids": ["eval:peer"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c06-e1",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the model understand the reference without a deterministic name heuristic deciding the outcome?"
+    },
+    {
+      "case_id": "C07-ordinary-flow",
+      "title": "A completed exchange offers no obvious contribution",
+      "tags": ["suppression-opportunity", "measurement-only"],
+      "events": [
+        {
+          "id": "c07-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:06:00Z",
+          "text": "The release note looks good to me.",
+          "mentioned_actor_ids": [],
+          "mentions_room": false
+        },
+        {
+          "id": "c07-e2",
+          "type": "message",
+          "author_id": "eval:peer",
+          "timestamp": "2026-07-20T10:06:05Z",
+          "text": "Great, I will merge it now.",
+          "mentioned_actor_ids": [],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c07-e2",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Can the judge suppress a low-value wake without using a keyword rule?"
+    },
+    {
+      "case_id": "C08-display-name-collision",
+      "title": "Another actor has the participant's display name",
+      "tags": ["identity", "alias-collision", "measurement-only"],
+      "events": [
+        {
+          "id": "c08-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:07:00Z",
+          "text": "Vigil, please take the documentation pass.",
+          "mentioned_actor_ids": ["eval:alias"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c08-e1",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the judgment respect exact actor IDs while retaining freedom to contribute for another reason?"
+    },
+    {
+      "case_id": "C09-room-address",
+      "title": "The whole room is addressed without assigning a fixed roster",
+      "tags": ["class-address", "no-roster", "measurement-only"],
+      "events": [
+        {
+          "id": "c09-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:08:00Z",
+          "text": "Everyone: flag any blocker you actually see; silence is fine otherwise.",
+          "mentioned_actor_ids": [],
+          "mentions_room": true
+        }
+      ],
+      "trigger_event_id": "c09-e1",
+      "minimum_classifier_non_suppress_fraction": null,
+      "minimum_effective_non_suppress_fraction": null,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does the model make a participant-shaped choice without an inferred roster or all-talk rule?"
+    },
+    {
+      "case_id": "C10-coverage-uncertainty",
+      "title": "A direct-looking moment arrives with an explicit context gap",
+      "tags": ["uncertainty", "coverage-gap"],
+      "coverage": {
+        "has_more_before": null,
+        "has_more_after": false,
+        "has_gaps": true,
+        "truncated_by": ["events"],
+        "continuity": "unknown",
+        "has_restart_gap": null
+      },
+      "events": [
+        {
+          "id": "c10-e1",
+          "type": "message",
+          "author_id": "eval:zoe",
+          "timestamp": "2026-07-20T10:09:00Z",
+          "text": "Vigil, is this safe to cut over?",
+          "mentioned_actor_ids": ["eval:participant"],
+          "mentions_room": false
+        }
+      ],
+      "trigger_event_id": "c10-e1",
+      "minimum_classifier_non_suppress_fraction": 1.0,
+      "minimum_effective_non_suppress_fraction": 1.0,
+      "maximum_error_fraction": 0.0,
+      "review_question": "Does explicit missing context stay on the WAKE or DEFER side of uncertainty?"
+    }
+  ]
+}
