@@ -27,3 +27,8 @@ requires the clean installed provenance probe, deterministic and live parity,
 accepted platform packets, frozen-candidate cross-family review, blocker fixes,
 successor re-review, and exact-main post-merge verification described in
 [`evaluations/v2.md`](evaluations/v2.md).
+
+Packaging uses a fresh build-library directory for every wheel so a deleted
+module cannot survive from an earlier local build. The installed-provenance
+probe also compares the wheel's complete `nunchi/` file inventory with
+`src/nunchi/`; metadata and entry-point checks alone are insufficient.

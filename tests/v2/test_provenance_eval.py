@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from evals.v2.provenance import runner
@@ -120,6 +121,23 @@ class ProvenanceAuditCases(unittest.TestCase):
         self.assertEqual(
             json.dumps(first, sort_keys=True), json.dumps(second, sort_keys=True)
         )
+
+    def test_wheel_inventory_rejects_stale_deleted_runtime_modules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "src" / "nunchi"
+            package.mkdir(parents=True)
+            package.joinpath("__init__.py").write_text("\n", encoding="utf-8")
+            wheel = root / "nunchi-test.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("nunchi/__init__.py", "\n")
+                archive.writestr("nunchi/deleted_v1.py", "PASS = True\n")
+
+            inventory = runner._wheel_package_inventory(wheel, root)
+
+        self.assertFalse(inventory["matches_source"])
+        self.assertEqual(inventory["missing"], [])
+        self.assertEqual(inventory["unexpected"], ["nunchi/deleted_v1.py"])
 
 
 if __name__ == "__main__":

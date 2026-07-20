@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import zipfile
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -313,6 +314,49 @@ def _minimal_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in allowed if name in os.environ}
 
 
+def _expected_package_inventory(root: Path) -> list[str]:
+    package = root / "src" / "nunchi"
+    return sorted(
+        path.relative_to(root / "src").as_posix()
+        for path in package.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    )
+
+
+def _wheel_package_inventory(wheel: Path, root: Path) -> dict[str, Any]:
+    expected = _expected_package_inventory(root)
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            observed = sorted(
+                name
+                for name in archive.namelist()
+                if name.startswith("nunchi/")
+                and not name.endswith("/")
+                and "/__pycache__/" not in name
+                and not name.endswith(".pyc")
+            )
+    except (OSError, zipfile.BadZipFile):
+        return {
+            "expected": expected,
+            "observed": None,
+            "missing": expected,
+            "unexpected": [],
+            "matches_source": False,
+            "error": "wheel-inventory-unreadable",
+        }
+    missing = sorted(set(expected) - set(observed))
+    unexpected = sorted(set(observed) - set(expected))
+    return {
+        "expected": expected,
+        "observed": observed,
+        "missing": missing,
+        "unexpected": unexpected,
+        "matches_source": not missing and not unexpected,
+    }
+
+
 def build_and_probe(root: Path | None = None) -> dict[str, Any]:
     root = (root or _repository_root()).resolve()
     contract = load_surface_contract()
@@ -364,6 +408,7 @@ def build_and_probe(root: Path | None = None) -> dict[str, Any]:
             }
         wheel = wheels[0]
         wheel_digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
+        package_inventory = _wheel_package_inventory(wheel, root)
         create_venv = _run_command(
             [sys.executable, "-m", "venv", str(temporary_path / "venv")],
             cwd=root,
@@ -376,6 +421,7 @@ def build_and_probe(root: Path | None = None) -> dict[str, Any]:
             return {
                 "build": build,
                 "wheel": {"filename": wheel.name, "digest": wheel_digest},
+                "package_inventory": package_inventory,
                 "create_venv": create_venv,
                 "install": None,
                 "passed": False,
@@ -398,6 +444,7 @@ def build_and_probe(root: Path | None = None) -> dict[str, Any]:
             return {
                 "build": build,
                 "wheel": {"filename": wheel.name, "digest": wheel_digest},
+                "package_inventory": package_inventory,
                 "create_venv": create_venv,
                 "install": install,
                 "passed": False,
@@ -427,12 +474,17 @@ def build_and_probe(root: Path | None = None) -> dict[str, Any]:
         return {
             "build": build,
             "wheel": {"filename": wheel.name, "digest": wheel_digest},
+            "package_inventory": package_inventory,
             "create_venv": create_venv,
             "install": install,
             "installed_metadata": installed,
             "metadata_matches_surface_contract": metadata_matches,
             "help_probes": help_probes,
-            "passed": metadata_matches and all(probe["passed"] for probe in help_probes),
+            "passed": (
+                package_inventory["matches_source"]
+                and metadata_matches
+                and all(probe["passed"] for probe in help_probes)
+            ),
         }
 
 
