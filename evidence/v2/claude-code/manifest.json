@@ -1,0 +1,79 @@
+{
+ "schema_version": 1,
+ "slice": "070-v2-claude-code",
+ "owner_lane": "v2-claude-owner",
+ "recorded_on": "2026-07-20",
+ "candidate_commit": "recorded in the append-only handoff addendum in handoff.md; the addendum names the exact candidate commit this manifest ships inside",
+ "scene_map": {
+  "CC-01": {
+   "s_ids": ["S01", "S02", "S11"],
+   "records": ["evidence/v2/claude-code/reactive-bot-hearing.jsonl"],
+   "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
+   "mechanics_tests": [
+    "tests.v2.test_claude_code.ReactiveHearingCases"
+   ],
+   "result": "PASS (deterministic); live reactive hearing NOT RUN — blockers in verification.md",
+   "classifier_call_count": 1
+  },
+  "CC-02": {
+   "s_ids": ["S04"],
+   "records": ["evidence/v2/claude-code/scene-results.jsonl"],
+   "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
+   "mechanics_tests": [
+    "tests.v2.test_claude_code.AttentionRoutingCases.test_station_scars_reach_the_classifier_verbatim",
+    "tests.v2.test_claude_code.AttentionRoutingCases.test_only_the_model_judgment_suppresses_a_scar"
+   ],
+   "corpus": "evals/v2/claude_code/scenes.jsonl",
+   "result": "PASS — zero deterministic conversational suppressors; one classifier call per scar",
+   "classifier_call_count": 1
+  },
+  "CC-03": {
+   "s_ids": ["S05", "S06", "S08", "S09"],
+   "records": ["evidence/v2/claude-code/scene-results.jsonl"],
+   "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
+   "mechanics_tests": [
+    "tests.v2.test_claude_code.CanonicalContractCases.test_trusted_bypass_makes_zero_classifier_calls",
+    "tests.v2.test_claude_code.AttentionRoutingCases"
+   ],
+   "result": "PASS — one I-030A invocation per ordinary opportunity; trusted bypass zero classifier calls with classifier_not_invoked and trusted provenance; forged bypass rejected; both DEFER valves distinct; error fabricates no verdict",
+   "classifier_call_count": "1 ordinary / 0 trusted bypass",
+   "stage_owners": {
+    "observation": "observation-provider",
+    "attention": "attention-engine",
+    "participant-host": "participant-host",
+    "transport": "transport"
+   }
+  },
+  "CC-04": {
+   "s_ids": ["S07", "S10", "S16"],
+   "records": ["evidence/v2/claude-code/scene-results.jsonl"],
+   "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
+   "mechanics_tests": [
+    "tests.v2.test_claude_code.ParticipantTurnCases"
+   ],
+   "post_hoc_grading_corpus": "evals/v2/claude_code/scenes.jsonl (meta-answer-grading rows)",
+   "result": "PASS — act-or-silence with singly attested receipts; silence valid; no runtime prose filter, send re-gate, social ledger, or cross-owner stage mutation; live room send NOT RUN — blockers in verification.md",
+   "send_time_social_calls": 0
+  },
+  "CC-05": {
+   "s_ids": ["S03", "S15", "S17"],
+   "records": ["evidence/v2/claude-code/scene-results.jsonl"],
+   "command": "PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir evidence/v2/claude-code",
+   "mechanics_tests": [
+    "tests.v2.test_claude_code.CoalescingAndRestartCases",
+    "tests.v2.test_claude_code.AttentionRoutingCases.test_suppressed_event_remains_hearable_later"
+   ],
+   "corpus": "evals/v2/claude_code/recovery.jsonl",
+   "result": "PASS deterministic; cold wake DECLARED unsupported; live restart probe NOT RUN — blockers in verification.md"
+  },
+  "CC-06": {
+   "s_ids": ["S12"],
+   "records": ["evidence/v2/claude-code/installed-runtime.md"],
+   "command": "manual installed-host capture (digests, registration state, installed-hook probes) — commands quoted inside the record",
+   "result": "PASS — full staged-component provenance; hook registration and transport patch reconciliation remain enumerated operator steps; V1 host residue reported"
+  }
+ },
+ "verification_index": "evidence/v2/claude-code/verification.md",
+ "handoff_packet": "evidence/v2/claude-code/handoff.md",
+ "notes": "Consolidated JSONL rows each carry a stable scene_id; bypass and receipt rows carry request_id, stage owner, trusted provenance, and classifier_not_invoked. Meta-answer scoring is post-hoc acceptance evaluation and never a runtime output filter."
+}

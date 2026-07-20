@@ -12,7 +12,13 @@
 set -u
 HOOK_EVENT="${1:-}"
 GATE="${NUNCHI_CLAUDE_V2_GATE:-$HOME/.claude/hooks/nunchi_claude_v2.py}"
-[ -f "$HOME/.claude/nunchi-claude-v2.env" ] && . "$HOME/.claude/nunchi-claude-v2.env"
+# set -a: bare VAR=value assignments in the env file must reach the Python
+# process as real environment, not shell-local variables.
+if [ -f "$HOME/.claude/nunchi-claude-v2.env" ]; then
+  set -a
+  . "$HOME/.claude/nunchi-claude-v2.env"
+  set +a
+fi
 
 fail_exit() {
   if [ "$HOOK_EVENT" = "pre-tool" ] && [ -n "${NUNCHI_CLAUDE_V2_POLICY:-}" ]; then
