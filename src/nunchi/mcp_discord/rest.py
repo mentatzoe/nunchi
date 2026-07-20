@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +32,7 @@ API_BASE_URL = "https://discord.com/api/v10"
 _USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 0.2.0)"
 _TIMEOUT_SECONDS = 15.0
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_RETRY_AFTER_SECONDS = 300.0
 
 # method, url, headers, body -> (status, lower-cased headers, body)
 HttpCall = Callable[[str, str, Mapping[str, str], "bytes | None"], "tuple[int, dict[str, str], bytes]"]
@@ -104,6 +106,27 @@ class DiscordRestClient:
         max_retries: int = 3,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
+        if (
+            not isinstance(token, str)
+            or not token
+            or len(token) > 4096
+            or not token.isascii()
+            or any(ord(character) < 33 or ord(character) > 126 for character in token)
+        ):
+            raise ValueError("Discord token is invalid")
+        if (
+            not isinstance(base_url, str)
+            or base_url.rstrip("/") != API_BASE_URL
+        ):
+            raise ValueError("Discord REST origin is not the trusted API origin")
+        if (
+            isinstance(max_retries, bool)
+            or not isinstance(max_retries, int)
+            or not 0 <= max_retries <= 10
+            or not callable(sleeper)
+            or (http is not None and not callable(http))
+        ):
+            raise ValueError("Discord REST client configuration is invalid")
         self._token = token
         self._limiter = limiter or RateLimiter(sleeper=sleeper)
         self._http = http or _urllib_call
@@ -160,7 +183,11 @@ class DiscordRestClient:
         if before is not None:
             path += f"&before={before}"
         result = self._request("GET", path)
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list) or any(
+            not isinstance(message, dict) for message in result
+        ):
+            raise DiscordRestError(200, "malformed message history from Discord API")
+        return result
 
     # ------------------------------------------------------------------ #
     # Request core
@@ -220,6 +247,9 @@ class DiscordRestClient:
             if status >= 400:
                 raise DiscordRestError(status, f"Discord API {status} on {route}")
 
+            if not 200 <= status < 300:
+                raise DiscordRestError(status, f"unexpected Discord API status on {route}")
+
             if not resp_body:
                 return {}
             try:
@@ -235,12 +265,19 @@ class DiscordRestClient:
             payload = _strict_json(body)
             if isinstance(payload, dict):
                 retry_after = float(payload.get("retry_after", retry_after))
-                is_global = bool(payload.get("global", is_global))
+                global_value = payload.get("global", is_global)
+                if type(global_value) is bool:
+                    is_global = global_value
+                else:
+                    raise ValueError("invalid global rate-limit flag")
         except (ValueError, TypeError):
+            retry_after = 1.0
             header_val = headers.get("retry-after")
             if header_val is not None:
                 try:
                     retry_after = float(header_val)
                 except ValueError:
                     pass
-        return (retry_after, is_global)
+        if not math.isfinite(retry_after) or retry_after < 0:
+            retry_after = 1.0
+        return (min(retry_after, MAX_RETRY_AFTER_SECONDS), is_global)

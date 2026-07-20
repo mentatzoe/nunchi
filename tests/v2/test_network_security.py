@@ -8,6 +8,7 @@ from unittest import mock
 
 from nunchi.adapters import matrix_v2, telegram_v2
 from nunchi.mcp_discord import rest
+from nunchi.mcp_discord.ratelimit import RateLimiter
 from nunchi.net import NoRedirectHandler
 
 
@@ -100,6 +101,74 @@ class CredentialBearingHttpCases(unittest.TestCase):
         ):
             with self.assertRaisesRegex(rest.DiscordRestError, "size budget"):
                 rest._urllib_call("GET", "https://discord.example/x", {}, None)
+
+    def test_discord_client_rejects_untrusted_origin_and_header_injection(self) -> None:
+        for token in ("", "secret\r\nX-Injected: yes", "é"):
+            with self.subTest(token=token):
+                with self.assertRaises(ValueError):
+                    rest.DiscordRestClient(token)
+        with self.assertRaisesRegex(ValueError, "trusted API origin"):
+            rest.DiscordRestClient(
+                "secret",
+                base_url="https://attacker.example/api/v10",
+            )
+        with self.assertRaises(ValueError):
+            rest.DiscordRestClient("secret", max_retries=1000)
+
+    def test_discord_redirect_status_and_malformed_history_fail_closed(self) -> None:
+        client = rest.DiscordRestClient(
+            "secret",
+            http=lambda *_args: (302, {"location": "https://attacker.example"}, b""),
+        )
+        with self.assertRaisesRegex(rest.DiscordRestError, "unexpected"):
+            client.create_message("1", "hello")
+
+        client = rest.DiscordRestClient(
+            "secret",
+            http=lambda *_args: (200, {}, b'{"messages":[]}'),
+        )
+        with self.assertRaisesRegex(rest.DiscordRestError, "malformed message history"):
+            client.get_messages("1")
+
+    def test_discord_rate_limit_numbers_are_finite_and_bounded(self) -> None:
+        clock = lambda: 100.0
+        sleeps: list[float] = []
+        limiter = RateLimiter(clock=clock, sleeper=sleeps.append)
+        for value in ("NaN", "Infinity", "90001", "-1"):
+            limiter.after_response(
+                "GET /channels/1/messages",
+                {
+                    "x-ratelimit-remaining": "0",
+                    "x-ratelimit-reset-after": value,
+                },
+            )
+        limiter.before_request("GET /channels/1/messages")
+        self.assertEqual(sleeps, [])
+
+        limiter.note_retry_after(
+            "GET /channels/1/messages",
+            float("inf"),
+            is_global=False,
+        )
+        limiter.before_request("GET /channels/1/messages")
+        self.assertEqual(sleeps, [1.0])
+
+        self.assertEqual(
+            rest.DiscordRestClient._parse_retry_after({}, b'{"retry_after":1e1000}'),
+            (1.0, False),
+        )
+        self.assertEqual(
+            rest.DiscordRestClient._parse_retry_after(
+                {}, b'{"retry_after":900,"global":true}'
+            ),
+            (rest.MAX_RETRY_AFTER_SECONDS, True),
+        )
+        self.assertEqual(
+            rest.DiscordRestClient._parse_retry_after(
+                {}, b'{"retry_after":2,"global":"false"}'
+            ),
+            (1.0, False),
+        )
 
 
 if __name__ == "__main__":

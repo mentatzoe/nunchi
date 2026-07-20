@@ -359,6 +359,12 @@ class CodexParticipantCases(unittest.TestCase):
                 with self.assertRaises(CodexSessionStateError):
                     load_codex_session(self.session_path)
 
+    def test_session_save_never_creates_an_uninspected_directory_hierarchy(self):
+        missing_path = self.root / "missing" / "nested" / "session.json"
+        with self.assertRaises(CodexSessionStateError):
+            save_codex_session(missing_path, THREAD_ONE)
+        self.assertFalse(missing_path.parent.exists())
+
 
 class FakeTransportClient:
     def __init__(self, history=None):

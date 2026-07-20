@@ -148,7 +148,9 @@ def save_codex_session(
         "updated_at": now,
     }
     try:
-        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        # The participant constructor and operator guide require this trust
+        # boundary to exist already. Saving state must not manufacture a new
+        # directory hierarchy whose ancestors were never inspected.
         parent = path.parent.stat(follow_symlinks=False)
         if (
             not stat.S_ISDIR(parent.st_mode)
