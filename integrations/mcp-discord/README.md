@@ -94,6 +94,9 @@ accepting new live opportunities, under their declared restart gap. Notification
 writes are concurrent and individually bounded: a stalled client is evicted
 without delaying healthy clients or the Discord gateway; a global broadcast
 failure terminates the transport instead of hiding a delivery hole.
+Ambiguous raw gateway JSON (duplicate keys or non-finite numbers) also closes
+the socket and resumes from the last attested Discord sequence; the transport
+never drops that frame and then admits a falsely continuous successor.
 
 ## Security boundary
 
@@ -122,7 +125,8 @@ python3 -m unittest \
   tests.v2.test_mcp_transport_client_v2
 ```
 
-The offline suite covers gateway identify/resume, exact self retention,
+The offline suite covers gateway identify/resume, strict raw-JSON recovery,
+exact self retention,
 collision-free reaction identity, newest-preserving backpressure, channel
 scoping, bearer denial/acceptance, credential separation, rate limits,
 backstops, token hygiene and SDK-optional import behavior.

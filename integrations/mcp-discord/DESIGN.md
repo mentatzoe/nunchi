@@ -77,6 +77,7 @@ sequenceDiagram
 | Missing/wrong/duplicate bearer header | `401`; MCP handler and Discord are untouched. |
 | Channel outside allowlist | Notification becomes unroutable or tool call fails; no REST effect. |
 | Gateway resumable disconnect | Resume exact session/sequence with bounded backoff. |
+| Duplicate-key or non-finite raw gateway JSON | Close the socket and resume from the last attested sequence; do not admit a post-gap successor on the same connection. |
 | Non-Discord resume URL or malformed gateway identity/sequence | Refuse the resume target, discard resumable state, and reconnect for fresh identification. |
 | Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
 | Queue full | Refuse the new event and terminate the transport session; the client reconnects and restores bounded message history as context under its declared restart gap. |
