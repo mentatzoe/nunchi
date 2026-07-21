@@ -170,6 +170,28 @@ class GenericActionSinkCases(unittest.TestCase):
         with self.assertRaises(GenericAdapterV2Error):
             sink("req-1", {"kind": "message", "content": "one"})
 
+    def test_non_none_unknown_receipt_ack_cannot_claim_known_status(self):
+        class BrokenStream(io.StringIO):
+            def write(self, _value):
+                raise OSError("output status unknown")
+
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = JSONLinesActionSinkV2(
+            stream=BrokenStream(),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(
+            GenericAdapterV2Error,
+            "action and receipt status are unknown",
+        ):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
 
 class GenericRuntimeCases(unittest.TestCase):
     def setUp(self):

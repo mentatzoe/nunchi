@@ -244,8 +244,8 @@ def run_participant_turn(
             outcome="unknown",
         )
         try:
-            receipt_sink(copy.deepcopy(receipt))
-            persistence = "persisted"
+            returned = receipt_sink(copy.deepcopy(receipt))
+            persistence = "persisted" if returned is None else "unknown"
         except Exception:
             persistence = "unknown"
         return {

@@ -77,6 +77,23 @@ class RuntimeCase(unittest.TestCase):
 
 
 class LiveCoalescingCases(RuntimeCase):
+    def test_non_none_observation_receipt_ack_stops_before_attention(self):
+        offered = []
+
+        def ambiguous_receipt(receipt):
+            offered.append(receipt)
+            return False
+
+        runtime = self.runtime(receipt_sink=ambiguous_receipt)
+        results = runtime.process_delivery(self.delivery(1))
+        self.assertEqual(results[0]["status"], "error")
+        self.assertEqual(
+            results[0]["error"],
+            "observation-receipt-persistence-unknown",
+        )
+        self.assertEqual([record["stage"] for record in offered], ["observation"])
+        self.assertEqual(self.participant_packets, [])
+
     def test_single_delivery_schedules_from_the_exact_retained_copy(self):
         runtime = self.runtime()
         delivery = ChangesAfterCopy(self.delivery(1))

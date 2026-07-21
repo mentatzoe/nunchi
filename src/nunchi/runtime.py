@@ -202,7 +202,11 @@ class LiveRoomRuntime:
 
         try:
             observation_receipt = self.observation.build_observation_receipt(request)
-            self.receipt_sink(copy.deepcopy(observation_receipt))
+            returned = self.receipt_sink(copy.deepcopy(observation_receipt))
+            if returned is not None:
+                raise LiveRoomRuntimeError(
+                    "observation receipt persistence is unknown"
+                )
         except Exception:
             return {
                 "status": "error",

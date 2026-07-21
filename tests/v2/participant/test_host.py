@@ -164,6 +164,25 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
         self.assertEqual(calls, [])
         self.assertEqual(validate_attention_receipt(self.receipts[0]), [])
 
+    def test_no_wake_non_none_receipt_ack_is_persistence_unknown(self):
+        policy = self.operator.attention
+        object.__setattr__(policy, "error_action", "NO_WAKE")
+        offered = []
+
+        def ambiguous_receipt(receipt):
+            offered.append(receipt)
+            return False
+
+        result = self.run_turn(
+            make_decision_error(request_id="req-0001"),
+            lambda _turn: self.fail("NO_WAKE must not invoke the participant"),
+            policy=policy,
+            receipt_sink=ambiguous_receipt,
+        )
+        self.assertEqual(result["status"], "no-wake")
+        self.assertEqual(result["receipt_persistence"], "unknown")
+        self.assertEqual([record["stage"] for record in offered], ["participant-host"])
+
     def test_bound_context_expansion_is_available_without_second_judgment(self):
         pages = []
 
