@@ -44,6 +44,23 @@ def _strict_json(raw: str | bytes) -> Any:
     )
 
 
+def _same_json_value(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's bool/int or int/float coercions."""
+
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_json_value(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _same_json_value(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
 def iter_sse_data(lines: Iterable[str]) -> Iterator[str]:
     data_lines: list[str] = []
     size = 0
@@ -366,26 +383,31 @@ class MCPTransportClientV2:
         with self._post(body, with_session=True) as response:
             raw = _bounded_read(response)
         result = _jsonrpc_result(raw, request_id)
+        if "isError" in result and type(result["isError"]) is not bool:
+            raise MCPTransportV2Error("MCP tool result is invalid")
         if result.get("isError") is True:
             raise MCPTransportV2Error("MCP tool call failed")
         content = result.get("content")
-        if isinstance(content, list):
-            for item in content:
-                if not isinstance(item, dict) or item.get("type") != "text":
-                    continue
-                text = item.get("text")
-                if not isinstance(text, str):
-                    continue
-                try:
-                    parsed = _strict_json(text)
-                except (ValueError, json.JSONDecodeError) as exc:
-                    raise MCPTransportV2Error(
-                        "MCP tool content is invalid"
-                    ) from exc
-                if not isinstance(parsed, dict):
-                    raise MCPTransportV2Error("MCP tool content is invalid")
-                return parsed
-        return result
+        if not isinstance(content, list) or len(content) != 1:
+            raise MCPTransportV2Error("MCP tool content is invalid")
+        item = content[0]
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "text"
+            or not isinstance(item.get("text"), str)
+        ):
+            raise MCPTransportV2Error("MCP tool content is invalid")
+        try:
+            parsed = _strict_json(item["text"])
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise MCPTransportV2Error("MCP tool content is invalid") from exc
+        if not isinstance(parsed, dict):
+            raise MCPTransportV2Error("MCP tool content is invalid")
+        if "structuredContent" in result and not _same_json_value(
+            result["structuredContent"], parsed
+        ):
+            raise MCPTransportV2Error("MCP tool content is ambiguous")
+        return parsed
 
     def stream_events(
         self,

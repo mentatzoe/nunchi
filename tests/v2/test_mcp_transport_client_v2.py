@@ -187,6 +187,68 @@ class MCPTransportClientCases(unittest.TestCase):
         with self.assertRaises(MCPTransportV2Error):
             client.call_tool("read_history", {"channel_id": "42"})
 
+    def test_tool_result_rejects_missing_multiple_or_conflicting_content(self):
+        cases = (
+            {"content": []},
+            {"content": [{"type": "image", "data": "ignored"}]},
+            {
+                "content": [
+                    {"type": "text", "text": '{"messages":[]}'},
+                    {"type": "text", "text": '{"messages":[{"message_id":"other"}]}'},
+                ]
+            },
+            {
+                "content": [{"type": "text", "text": '{"messages":[]}'}],
+                "structuredContent": {"messages": [{"message_id": "other"}]},
+            },
+            {
+                "content": [{"type": "text", "text": '{"count":1}'}],
+                "structuredContent": {"count": True},
+            },
+            {
+                "content": [{"type": "text", "text": '{"messages":[]}'}],
+                "isError": "false",
+            },
+        )
+        for result in cases:
+            with self.subTest(result=result):
+                scripted = ScriptedOpen([self.jsonrpc_response(10, result)])
+                client = MCPTransportClientV2(
+                    "http://127.0.0.1:3993/mcp",
+                    AUTH,
+                    open_request=scripted,
+                )
+                client.session_id = "session-1"
+                with self.assertRaises(MCPTransportV2Error):
+                    client.call_tool("read_history", {"channel_id": "42"})
+
+    def test_tool_result_accepts_matching_structured_content(self):
+        payload = {"messages": []}
+        scripted = ScriptedOpen(
+            [
+                self.jsonrpc_response(
+                    10,
+                    {
+                        "content": [
+                            {"type": "text", "text": json.dumps(payload)}
+                        ],
+                        "structuredContent": payload,
+                        "isError": False,
+                    },
+                )
+            ]
+        )
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        client.session_id = "session-1"
+        self.assertEqual(
+            client.call_tool("read_history", {"channel_id": "42"}),
+            payload,
+        )
+
     def test_empty_data_lines_cannot_exceed_sse_event_budget(self):
         with mock.patch.object(transport_v2, "MAX_SSE_EVENT_BYTES", 4):
             with self.assertRaisesRegex(MCPTransportV2Error, "size budget"):
