@@ -1,134 +1,144 @@
-# nunchi-mcp-discord V2
+# nunchi-mcp-discord
 
-This is the shared Discord source/action transport for Nunchi V2. One process
-owns one Discord bot account and an exact non-empty channel allowlist. It
-normalizes gateway facts and exposes room-bound transport actions; it never
-makes a social attention decision.
+A standing Discord transport server speaking MCP (streamable HTTP). One
+server per bot account: any MCP-capable harness can hear a Discord room —
+**including other bots** — in real time and post to it. Transport only; run
+your nunchi admission gate harness-side.
 
-V1 mode no longer exists. Setting `NUNCHI_MCP_DISCORD_MODE` is a configuration
-error rather than a compatibility switch.
+Status: implemented — offline test suite in
+`tests/test_mcp_discord_gateway.py` and `tests/test_mcp_discord_server.py`;
+design record in [DESIGN.md](DESIGN.md).
 
-## Install and run
+## Install
 
-The published V1 release does not contain the V2 MCP transport. From this
-candidate source checkout, install the local project and optional SDK stack:
+The published `0.2.0` wheel predates this transport and does not contain the
+`mcp-discord` extra or `nunchi-mcp-discord` entry point. Install from current
+source:
 
-```sh
-python3 -m pip install '.[mcp-discord]'
+```bash
+pip install --force-reinstall \
+  "nunchi[mcp-discord] @ git+https://github.com/mentatzoe/nunchi.git@<reviewed-commit>"
+# or, from a reviewed checkout:
+pip install --force-reinstall ".[mcp-discord]"
+```
 
-export NUNCHI_DISCORD_TOKEN='<Discord bot token>'
-export NUNCHI_MCP_DISCORD_CHANNELS='123456789012345678'
-export NUNCHI_MCP_DISCORD_AUTH_TOKEN='<separate random secret, at least 32 ASCII characters>'
+The Discord gateway client is stdlib; the extra pins the official `mcp` SDK
+(`mcp>=1.9,<2`). Nunchi core stays dependency-free.
+
+## Discord Developer Portal setup (one-time)
+
+1. <https://discord.com/developers/applications> -> your application -> **Bot**.
+2. Under **Privileged Gateway Intents**, enable **MESSAGE CONTENT INTENT**.
+   Without it the gateway refuses the connection (close code 4014) or
+   delivers empty `content` — the server logs a loud warning either way.
+3. Copy the bot token. Invite the bot to your server with at least
+   *View Channel*, *Send Messages*, and *Read Message History*.
+
+## Run
+
+```bash
+export NUNCHI_DISCORD_TOKEN="<bot token>"   # env var only; never logged
 nunchi-mcp-discord
+# serving MCP on http://127.0.0.1:3993/mcp
 ```
 
-Enable Discord's **MESSAGE CONTENT INTENT** for the bot. The V2 gateway also
-requests guild-message-reaction events. The default endpoint is
-`http://127.0.0.1:3993/mcp`.
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `NUNCHI_DISCORD_TOKEN` | (required) | Bot token. |
+| `NUNCHI_MCP_DISCORD_HOST` | `127.0.0.1` | Bind host. The endpoint is unauthenticated — keep it local. |
+| `NUNCHI_MCP_DISCORD_PORT` | `3993` | Bind port. |
+| `NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE` | `256` | Notification queue bound (oldest dropped when full). |
+| `NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS` | `5` | Max sends per channel per window (backstop, default on). |
+| `NUNCHI_MCP_DISCORD_BACKSTOP_WINDOW_SECONDS` | `10` | Backstop window. |
+| `NUNCHI_MCP_DISCORD_DRAIN_TIMEOUT_SECONDS` | `10` | SIGTERM drain timeout for in-flight sends. |
 
-Every MCP HTTP request must carry:
+## MCP contract
 
-```text
-Authorization: Bearer <NUNCHI_MCP_DISCORD_AUTH_TOKEN>
+Every non-self message (human or bot) arrives as an unsolicited notification:
+
+```json
+{
+  "method": "notifications/discord/message",
+  "params": {
+    "guild_id": "777888999",
+    "channel_id": "444555666",
+    "message_id": "111222333",
+    "author_id": "777",
+    "author_name": "peer-bot",
+    "author_is_bot": true,
+    "content": "ping",
+    "timestamp": "2026-07-06T10:00:00.000000+00:00",
+    "mentioned_user_ids": [],
+    "reply_to_message_id": null,
+    "reply_to_author_id": null,
+    "reply_to_author_name": null,
+    "reply_to_author_is_bot": null,
+    "reply_to_content": null
+  }
+}
 ```
 
-Missing, wrong and duplicate Authorization headers receive `401` before the MCP
-application runs. The MCP credential must be different from the Discord token;
-both are excluded from configuration representations and installed as log
-redaction secrets. Configure the bearer header in the consuming MCP client via
-its secret/environment-header facility rather than committing it to a project
-file.
+Plain Discord `content` is preserved exactly. When Discord presents a message
+only through rich surfaces, the transport supplies a tagged, bounded text
+fallback from conversational embed fields, Components V2 text displays,
+attachment descriptions or names, stickers, and polls. Button labels are not
+treated as speech. Live notifications and `read_history` use the same
+normalization so admission sees the same message after a reconnect.
 
-| Environment variable | Default | Meaning |
-|---|---:|---|
-| `NUNCHI_DISCORD_TOKEN` | required | Discord bot credential; gateway/REST only. |
-| `NUNCHI_MCP_DISCORD_CHANNELS` | required | Exact comma-separated channel snowflakes available to notifications and tools. |
-| `NUNCHI_MCP_DISCORD_AUTH_TOKEN` | required | Separate MCP bearer credential, at least 32 printable non-whitespace ASCII characters. |
-| `NUNCHI_MCP_DISCORD_BLOCKED_ACTORS` | empty | Exact actor snowflakes made unroutable by transport policy. |
-| `NUNCHI_MCP_DISCORD_HOST` | `127.0.0.1` | Loopback HTTP bind only: `127.0.0.1`, `::1`, or `localhost`. |
-| `NUNCHI_MCP_DISCORD_PORT` | `3993` | HTTP bind port. |
-| `NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE` | `256` | Bounded live-notification queue; overflow terminates the transport session instead of hiding a gap. |
-| `NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS` | `5` | Maximum transport effects per channel/window. |
-| `NUNCHI_MCP_DISCORD_BACKSTOP_WINDOW_SECONDS` | `10` | Local send-backstop window. |
-| `NUNCHI_MCP_DISCORD_DRAIN_TIMEOUT_SECONDS` | `10` | Graceful in-flight tool drain deadline. |
+Discord's structured addressing is preserved separately from prose:
+`mentioned_user_ids` carries mention snowflakes, and reply messages carry the
+referenced message/author/content fields when Discord supplies them. This is
+important because a Discord reply can target a participant without placing an
+`<@id>` token in `content`. Referenced rich-only content uses the same bounded
+normalizer. Missing or deleted references remain `null` rather than being
+invented.
 
-## V2 MCP contract
+Tools: `send_message(channel_id, content)`,
+`reply_message(channel_id, message_id, content)`,
+`read_history(channel_id, limit=50, before?)`.
 
-The sole notification method is:
+Notifications begin after the client's first request (standard clients send
+`tools/list` immediately after `initialize`, which registers the session).
 
-```text
-notifications/nunchi/v2/discord/event
+## Harness configuration
+
+Codex CLI (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.nunchi-discord]
+url = "http://127.0.0.1:3993/mcp"
 ```
 
-Its params contain `schema_version: 2`, `platform: "discord"`, exact guild and
-channel IDs, and one closed `native_input`. That input is either a trusted
-`candidate-event` with canonical message/reaction and actor facts, or an
-`unroutable` audit record with no candidate payload. Display names and content
-never bind identity or routing. Self-authored messages are retained so the
-observation owner can record the exact deterministic no-wake fact.
+Goose (`~/.config/goose/config.yaml`):
 
-The closed tool set is:
-
-- `send_message(channel_id, content, mention_user_ids?)`
-- `reply_message(channel_id, message_id, content, mention_user_ids?)`
-- `add_reaction(channel_id, message_id, reaction)`
-- `read_history(channel_id, limit=50, before?)`
-
-Every channel argument must be in the startup allowlist. Message mentions are
-closed by default and only exact `mention_user_ids` may ping. Replies fail when
-their exact target is absent. Discord route limits and the local send backstop
-apply to every effect; no effect is queued for later social reconsideration.
-`read_history` is an authenticated, allowlisted privileged read and returns
-bounded factual context, never wake jobs. Its projection retains exact native
-snowflake strings, bot and room-mention booleans, replies, and structured user
-mentions; coercible or malformed API identity/addressing fields make the tool
-call fail instead of disappearing from the returned context.
-
-The notification queue is deliberately not a durable obligation queue. When it
-fills, the new event is refused and the transport session terminates; it never
-drops one event and then delivers a falsely continuous successor.
-Reconnect/resume preserves Discord's gateway session when possible, but the MCP
-transport promises neither persistent notification replay nor gap-free restart
-continuity. Consumers backfill bounded message history as context before
-accepting new live opportunities, under their declared restart gap. Notification
-writes are concurrent and individually bounded: a stalled client is evicted
-without delaying healthy clients or the Discord gateway; a global broadcast
-failure terminates the transport instead of hiding a delivery hole.
-Ambiguous raw gateway JSON (duplicate keys or non-finite numbers) also closes
-the socket and resumes from the last attested Discord sequence; the transport
-never drops that frame and then admits a falsely continuous successor.
-
-## Security boundary
-
-- Room input cannot alter the channel allowlist, bearer credential, bot
-  identity, endpoint, backstop or blocked-actor policy.
-- The bot token is used only for Discord IDENTIFY/RESUME and REST Authorization.
-- Credential-bearing gateway Resume connects only to `wss` on
-  `gateway.discord.gg` or a Discord-owned subdomain; Ready-event URLs with
-  userinfo, custom ports, paths, fragments, or nonstandard queries are refused.
-- The separate MCP token authenticates machine clients before MCP dispatch.
-- Tool errors are generic and never copy Discord response bodies or secrets.
-- Snowflake values are validated before URL construction; tool schemas reject
-  unknown fields and oversized content.
-- The built-in plaintext server is loopback-only. Bearer authentication remains
-  mandatory; remote access requires a separately secured TLS proxy.
-- There is no conversational classifier, participant roster, social ledger or
-  V1 verdict path in this transport.
-
-## Verification
-
-```sh
-python3 -m unittest \
-  tests.test_mcp_discord_gateway \
-  tests.test_mcp_discord_server \
-  tests.v2.test_discord_transport \
-  tests.v2.test_mcp_transport_client_v2
+```yaml
+extensions:
+  nunchi-discord:
+    type: streamable_http
+    uri: http://127.0.0.1:3993/mcp
+    enabled: true
 ```
 
-The offline suite covers gateway identify/resume, strict raw-JSON recovery,
-exact self retention,
-collision-free reaction identity, newest-preserving backpressure, channel
-scoping, bearer denial/acceptance, credential separation, rate limits,
-backstops, token hygiene and SDK-optional import behavior.
-The client-side suite also rejects malformed/uncorrelated MCP handshakes and
-bounds multi-line SSE framing overhead.
+Kilo Code (MCP settings JSON):
+
+```json
+{ "mcpServers": { "nunchi-discord": { "url": "http://127.0.0.1:3993/mcp" } } }
+```
+
+Check your harness version's docs for streamable-HTTP MCP support; the
+snippets above follow each harness's current remote-server syntax. The gate
+hook itself (subscribing to the notification, calling `nunchi admit`,
+obeying PASS) is harness-specific and intentionally out of scope here.
+
+## Tests
+
+```bash
+python3 -m unittest tests.test_mcp_discord_gateway tests.test_mcp_discord_server
+```
+
+Offline-only: gateway resume after simulated disconnect, the load-bearing
+bot-delivered/self-dropped filter, MESSAGE_CONTENT warning behavior, exact
+notification schema against a mock MCP client, 429/backstop enforcement, and
+token hygiene. Rich-only message normalization is covered for both live-event
+and history shapes. Tests that need the `mcp` SDK are skipped with a reason
+when it is not installed (same pattern as the discord.py-gated tests).

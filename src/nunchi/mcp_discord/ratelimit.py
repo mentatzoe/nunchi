@@ -16,7 +16,6 @@ Clock and sleep are injectable so tests run offline and instantly.
 
 from __future__ import annotations
 
-import math
 import threading
 import time
 from collections import deque
@@ -59,26 +58,14 @@ class RateLimiter:
         if remaining is None or reset_after is None:
             return
         try:
-            parsed_remaining = float(remaining)
-            parsed_reset = float(reset_after)
-            if (
-                not math.isfinite(parsed_remaining)
-                or not math.isfinite(parsed_reset)
-                or parsed_remaining < 0
-                or parsed_reset < 0
-                or parsed_reset > 86400
-            ):
-                return
-            parsed = (int(parsed_remaining), self._clock() + parsed_reset)
-        except (TypeError, ValueError, OverflowError):
+            parsed = (int(float(remaining)), self._clock() + float(reset_after))
+        except ValueError:
             return
         with self._lock:
             self._buckets[route] = parsed
 
     def note_retry_after(self, route: str, seconds: float, *, is_global: bool) -> None:
         """Record a 429's retry-after so the next attempt waits."""
-        if not math.isfinite(seconds) or seconds < 0 or seconds > 300:
-            seconds = 1.0
         with self._lock:
             until = self._clock() + max(0.0, seconds)
             if is_global:

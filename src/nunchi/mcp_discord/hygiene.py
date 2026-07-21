@@ -1,7 +1,7 @@
 """Token hygiene helpers.
 
-Hard requirement: neither the bot token nor the MCP bearer token may appear in
-any tool schema, tool result, notification payload, log line, or error message.
+Hard requirement: the bot token must never appear in any tool schema, tool
+result, notification payload, log line, or error message. Defenses:
 
 - the token is only ever read from NUNCHI_DISCORD_TOKEN (:mod:`.config`) and
   is excluded from ``Config.__repr__``;

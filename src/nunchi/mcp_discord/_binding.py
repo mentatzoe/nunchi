@@ -9,7 +9,7 @@ tracking, notification push, and the uvicorn/Starlette lifecycle.
 Custom vendor notifications: the SDK's ServerNotification union is closed,
 but ``ServerSession.send_notification`` serializes with ``model_dump()`` and
 only needs ``method`` and ``params`` fields, so a duck-typed pydantic model
-carries ``notifications/nunchi/v2/discord/event`` (delivered on the session's
+carries ``notifications/discord/message`` (delivered on the session's
 standalone SSE stream since it has no related request).
 
 Session tracking: the low-level Server exposes sessions only inside request
@@ -35,21 +35,12 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from .config import Config
-from .events import (
-    DiscordEventSourceV2,
-    V2_NOTIFICATION_METHOD,
-)
+from .events import NOTIFICATION_METHOD
 from .gateway import GatewayProtocol
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
-from .server import (
-    BearerAuthMiddleware,
-    InFlight,
-    broadcast_sessions,
-    enqueue_event,
-    pump_notifications,
-)
+from .server import InFlight, enqueue_event, pump_notifications
 from .tools import TOOL_SCHEMAS, ToolExecutor
 
 logger = logging.getLogger("nunchi.mcp_discord.binding")
@@ -80,29 +71,19 @@ class SessionRegistry:
         return list(self._sessions.values())
 
 
-async def broadcast(
-    registry: SessionRegistry,
-    params: dict,
-    *,
-    method: str = V2_NOTIFICATION_METHOD,
-    send_timeout: float = 5.0,
-) -> None:
-    """Push one event concurrently; evict clients that fail or stop reading."""
-    notification = _VendorNotification(method=method, params=params)
-    await broadcast_sessions(
-        registry.sessions(),
-        notification,
-        discard=registry.discard,
-        send_timeout=send_timeout,
-    )
+async def broadcast(registry: SessionRegistry, params: dict) -> None:
+    """Push one discord/message notification to every live session."""
+    notification = _VendorNotification(method=NOTIFICATION_METHOD, params=params)
+    for session in registry.sessions():
+        try:
+            await session.send_notification(notification)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 — one dead client must not stop the rest
+            logger.info("dropping MCP session after failed send: %s", exc)
+            registry.discard(session)
 
 
 def build_server(
-    executor: ToolExecutor,
-    registry: SessionRegistry,
-    in_flight: InFlight,
-    *,
-    tool_schemas: list[dict] = TOOL_SCHEMAS,
+    executor: ToolExecutor, registry: SessionRegistry, in_flight: InFlight
 ) -> Server:
     server: Server = Server("nunchi-mcp-discord")
 
@@ -115,7 +96,7 @@ def build_server(
                 description=schema["description"],
                 inputSchema=schema["inputSchema"],
             )
-            for schema in tool_schemas
+            for schema in TOOL_SCHEMAS
         ]
 
     @server.call_tool()
@@ -136,50 +117,20 @@ def serve(config: Config) -> int:
     in_flight = InFlight()
     backstop = SendBackstop(config.backstop_max_sends, config.backstop_window_seconds)
     rest = DiscordRestClient(config.token)
-    executor = ToolExecutor(
-        rest,
-        backstop,
-        allowed_channel_ids=config.channels,
-    )
-    server = build_server(
-        executor,
-        registry,
-        in_flight,
-        tool_schemas=TOOL_SCHEMAS,
-    )
+    executor = ToolExecutor(rest, backstop)
+    server = build_server(executor, registry, in_flight)
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         shutdown = asyncio.Event()
         queue: asyncio.Queue = asyncio.Queue(maxsize=config.queue_maxsize)
-        source = DiscordEventSourceV2(
-            allowed_channel_ids=config.channels,
-            blocked_actor_ids=config.blocked_actors,
-        )
         protocol = GatewayProtocol(config.token)
-
-        def _enqueue_or_fail(event) -> None:
-            if not enqueue_event(queue, event):
-                raise GatewayFatalError(
-                    "notification continuity lost to bounded-queue overflow"
-                )
-
-        runner = GatewayRunner(
-            protocol,
-            _enqueue_or_fail,
-        )
+        runner = GatewayRunner(protocol, lambda event: enqueue_event(queue, event))
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
             pump_notifications(
-                queue,
-                lambda params: broadcast(
-                    registry,
-                    params,
-                    method=V2_NOTIFICATION_METHOD,
-                ),
-                shutdown=shutdown,
-                projector=source.notification_params,
+                queue, lambda params: broadcast(registry, params), shutdown=shutdown
             ),
             name="notification-pump",
         )
@@ -196,21 +147,6 @@ def serve(config: Config) -> int:
                 signal.raise_signal(signal.SIGTERM)
 
         gateway_task.add_done_callback(_on_gateway_done)
-
-        def _on_pump_done(task: asyncio.Task) -> None:
-            if task.cancelled() or shutdown.is_set():
-                return
-            exc = task.exception()
-            if exc is None:
-                logger.critical("notification pump stopped — shutting down")
-            else:
-                logger.critical(
-                    "notification pump died: %s — shutting down",
-                    exc,
-                )
-            signal.raise_signal(signal.SIGTERM)
-
-        pump_task.add_done_callback(_on_pump_done)
 
         async with session_manager.run():
             try:
@@ -231,22 +167,13 @@ def serve(config: Config) -> int:
                 logger.info("transport shut down cleanly")
 
     app = Starlette(
-        routes=[
-            Mount(
-                "/mcp",
-                app=BearerAuthMiddleware(
-                    session_manager.handle_request,
-                    config.auth_token,
-                ),
-            )
-        ],
+        routes=[Mount("/mcp", app=session_manager.handle_request)],
         lifespan=lifespan,
     )
 
     logger.info(
-        "nunchi-mcp-discord V2 listening on http://%s:%d/mcp",
-        config.host,
-        config.port,
+        "nunchi-mcp-discord listening on http://%s:%d/mcp (transport only — no gate logic)",
+        config.host, config.port,
     )
     uvicorn.run(app, host=config.host, port=config.port, log_level="info")
     return 0

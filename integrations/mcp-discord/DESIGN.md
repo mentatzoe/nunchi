@@ -1,95 +1,132 @@
-# MCP Discord V2 design
+# nunchi-mcp-discord — design record
 
-## Boundary and flow
+Standing MCP transport server: one server per Discord bot account, letting
+any MCP-capable harness (Codex CLI, Kilo Code, Goose, ...) hear a Discord
+room — including other bots — in real time, and post to it. This is the
+"1 transport + N thin gate hooks" pattern: the transport carries **no gate
+logic**; nunchi admission runs harness-side.
 
-```mermaid
-flowchart LR
-  D["Discord Gateway<br/>message and reaction dispatch"] --> G["Gateway protocol<br/>exact session and sequence"]
-  G --> N["DiscordEventSourceV2<br/>allowlist and canonical facts"]
-  N --> Q["Bounded newest-preserving<br/>notification queue"]
-  Q --> A["Bearer-authenticated<br/>streamable HTTP MCP"]
-  A --> C["V2 consumers<br/>observation and participants"]
-  C -->|"allowlisted tool call"| T["Tool executor<br/>closed arguments and backstop"]
-  T --> R["Discord REST"]
+Why it exists: of ~10 surveyed Discord MCP servers, none delivered the
+required conjunction of (1) bot-authored messages unfiltered *and* with
+content populated, (2) real-time MCP push rather than polling, (3) a generic
+MCP contract any harness can consume.
+
+## Components
+
+```
+Discord gateway (wss)                          MCP clients (harnesses)
+      |                                                ^
+      v                                                | streamable HTTP (/mcp)
++-----------+   payload    +------------------+        |
+| ws.py     |------------->| gateway.py       |        |
+| RFC 6455  |   dicts      | sans-IO protocol |        |
+| client    |<-------------| IDENTIFY/RESUME/ |        |
+| (stdlib)  |   actions    | heartbeat state  |        |
++-----------+              +------------------+        |
+      ^                        | Dispatch(MESSAGE_CREATE)
+      | connect/reconnect      v                       |
++-----------+              +------------------+   +-----------------+
+| runner.py |              | events.py        |   | _binding.py     |
+| backoff,  |              | self-drop filter |-->| mcp SDK: tools, |
+| heartbeat |              | notif schema     |   | sessions, push  |
+| timing    |              +------------------+   +-----------------+
++-----------+                  | bounded queue         ^
+                               v (drop-oldest)         |
+                           +------------------+        |
+                           | server.py        |--------+
+                           | pump, in-flight  |
+                           | drain, main()    |
+                           +------------------+
+                               |
+                               v  tool calls (thread pool)
+                           +------------------+   +-------------------+
+                           | tools.py         |-->| rest.py + limiter |
+                           | validate, shape  |   | urllib, buckets,  |
+                           | backstop         |   | 429/5xx retry     |
+                           +------------------+   +-------------------+
 ```
 
-The gateway owns native identity and delivery facts. `DiscordEventSourceV2`
-owns routing projection. MCP owns client authentication and session delivery.
-The tool executor owns channel scoping and transport safety. None of these
-components owns social suppression; that judgment occurs once in the portable
-attention runtime after observation.
+Layering rule: everything except `_binding.py` is import-safe stdlib
+(no mcp SDK, no discord.py). The gateway is hand-rolled sans-IO — protocol
+decisions (identify vs resume, heartbeat bookkeeping, close classification)
+are a pure state machine, so disconnect/resume behavior is tested offline
+without sockets. `_binding.py` is the only SDK-bound module and stays thin:
+tool registration, session tracking, notification push, uvicorn lifecycle.
 
-## Sequence
+## MCP contract
 
-```mermaid
-sequenceDiagram
-  participant Discord
-  participant Gateway
-  participant Source as Event source
-  participant MCP as Authenticated MCP
-  participant Consumer as V2 consumer
-  participant REST as Discord REST
+- Notification `notifications/discord/message`, params:
+  `guild_id (str|null), channel_id (str), message_id (str), author_id (str),
+  author_name (str), author_is_bot (bool), content (str), timestamp (str|null),
+  mentioned_user_ids (list[str]), reply_to_message_id/author_id/author_name/
+  content (str|null), reply_to_author_is_bot (bool|null)`.
+  Snowflakes are strings (53-bit JSON consumers). Pushed on the session's
+  standalone SSE stream (no related request).
+- Tools: `send_message(channel_id, content)`,
+  `reply_message(channel_id, message_id, content)`,
+  `read_history(channel_id, limit=50, before?)`. Results reuse the
+  notification field names.
+- Sessions are registered when they first issue a request (standard clients
+  send `tools/list` right after `initialize`); notifications begin then.
 
-  Discord->>Gateway: dispatch plus session and sequence
-  Gateway->>Source: exact native event
-  Source->>MCP: versioned candidate or unroutable input
-  MCP->>MCP: verify Bearer credential
-  MCP-->>Consumer: V2 notification
-  Consumer->>Consumer: observe, coalesce, judge once, act or stay silent
-  opt concrete room action
-    Consumer->>MCP: allowlisted closed tool call
-    MCP->>REST: exact effect with mention and reply controls
-    REST-->>MCP: API result
-    MCP-->>Consumer: factual tool result
-  end
-```
+## Failure modes
 
-## Deterministic security rules
+| Failure | Behavior |
+| --- | --- |
+| Gateway connection drops (EOF, 1006, op 7 RECONNECT) | Close, reconnect with capped exponential backoff (1s..60s), RESUME with stored `session_id`/`seq`; fresh IDENTIFY only if Discord invalidates the session (op 9 d:false, close 4007/4009). |
+| Missed heartbeat ACK (zombie connection) | Client closes with code 4000 (resumable) and reconnects via the same path. |
+| Fatal close: 4004 bad token, 4013/4014 intents | **No retry.** `GatewayFatalError` with an operator hint (portal intent toggle / token env var); the process shuts down via SIGTERM so supervisors notice. Permanent errors must not burn retries. |
+| MCP client gone (session dead mid-send) | That send fails, the session is pruned from the registry, the pump keeps running for remaining sessions. Delivery is best-effort; the transport never buffers for absent clients beyond the queue below. |
+| No MCP client connected | Gateway events still drain through the queue; broadcast is a no-op. History is recoverable via `read_history`. |
+| Slow MCP client / full queue | The notification queue is bounded (default 256). When full, the **oldest** event is dropped with a WARNING — for an admission gate the room's present outranks its backlog, and memory stays bounded. |
+| Discord 429 on send | Per-route bucket guard sleeps out `X-RateLimit-Reset-After`; on 429 the `retry_after` (global flag honored) is respected with at most 3 retries, then a tool error. |
+| Transport backstop exceeded | Tool call fails immediately with `retry in Ns` — never queued, never sent. |
+| Discord 401/403 on send | Non-retryable: tool error on the first response. |
+| Empty `content` with rich message data | Normalize conversational embed fields, Components V2 text displays, attachment descriptions/names, stickers, and polls into tagged, bounded text. Exclude interaction chrome such as button labels. Live notifications and history use the same normalizer. |
+| Reply or mention exists only in Discord metadata | Preserve mention ids and referenced message/author/content fields in both notification and history shapes. Do not mutate ordinary `content`. |
+| Empty `content` on MESSAGE_CREATE with no rich data | Signature of a missing MESSAGE_CONTENT intent: loud WARNING with the portal remediation step; the notification is still delivered with `content: ""` (documented, tested — no silent garbage). |
+| SIGTERM / SIGINT | Uvicorn graceful shutdown -> lifespan drain: stop pumping, wait for in-flight sends (default 10s), close gateway with 1000, exit. |
 
-1. `NUNCHI_MCP_DISCORD_CHANNELS` is mandatory and non-empty. Every notification
-   and tool path checks it; text cannot redirect a call.
-2. `NUNCHI_MCP_DISCORD_AUTH_TOKEN` is mandatory, at least 32 printable ASCII
-   characters, and must differ from the Discord bot token.
-3. The plaintext server binds only to loopback; remote access must terminate
-   TLS in a separately secured local proxy.
-4. Exactly one matching HTTP Authorization header is required before MCP
-   dispatch. Failure is a content-free `401`.
-5. Exact self messages are retained as facts. Only the observation owner may
-   classify them as the deterministic self no-wake case.
-6. Message, actor, guild, channel, mention, reply, and reaction IDs retain
-   Discord's exact native JSON string type; bot and room-mention facts retain
-   exact booleans. Coercible values are unroutable. Reactions also require the
-   gateway session and sequence; when either is unavailable no ID is invented.
-7. A Ready-event resume URL is accepted only over `wss` on a Discord-owned
-   `discord.gg` gateway host, then normalized to the fixed version and JSON
-   encoding before the credential-bearing Resume payload can use it.
-8. Sends use a closed allowed-mentions object, exact reply targets, Discord rate
-   limits and a local per-channel backstop.
-9. The live notification queue is bounded. Overflow terminates the transport
-   session before any post-gap event can be delivered; it is not persisted and
-   never becomes a FIFO of conversational obligations.
-10. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
+## Security posture
 
-## Failure semantics
+- **Token hygiene (hard requirement).** The token enters via
+  `NUNCHI_DISCORD_TOKEN` only. It is excluded from `Config.__repr__`; gateway
+  payloads (IDENTIFY/RESUME carry it) and HTTP headers are never logged; a
+  `TokenRedactionFilter` on every root log handler rewrites any record that
+  would contain it. A dedicated test serializes every tool schema, a sample
+  notification, error strings, and captured log output and asserts the token
+  is absent.
+- **No gate logic.** The transport never decides who may speak; it drops
+  exactly one author: itself (`author.id == our bot user id`). Everything
+  else — human or bot — is delivered. Plain message content is unchanged;
+  rich-only messages receive the documented text fallback so downstream
+  admission does not mistake visible speech for an empty event.
+- **One server per bot account.** Identity is the process boundary; no
+  tenant mixing, no shared token store.
+- **Send backstop, default on.** Sliding-window cap (5 sends / 10s per
+  channel) bounds the blast radius of a runaway harness independently of
+  Discord's own limits.
+- **Input hardening.** Snowflake arguments must be numeric strings (guards
+  the REST URL path); content is capped at Discord's 2000 chars.
+- **Local by default.** Binds 127.0.0.1:3993; exposing it wider is an
+  explicit operator choice (the MCP endpoint is unauthenticated).
 
-| Failure | Result |
-|---|---|
-| Missing/wrong/duplicate bearer header | `401`; MCP handler and Discord are untouched. |
-| Channel outside allowlist | Notification becomes unroutable or tool call fails; no REST effect. |
-| Gateway resumable disconnect | Resume exact session/sequence with bounded backoff. |
-| Duplicate-key or non-finite raw gateway JSON | Close the socket and resume from the last attested sequence; do not admit a post-gap successor on the same connection. |
-| Non-Discord resume URL or malformed gateway identity/sequence | Refuse the resume target, discard resumable state, and reconnect for fresh identification. |
-| Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
-| Queue full | Refuse the new event and terminate the transport session; the client reconnects and restores bounded message history as context under its declared restart gap. |
-| MCP client disconnect or stalled notification write | Bound and cancel that session's write, remove only that session; other sessions and gateway continue concurrently. |
-| Global notification broadcast failure | Terminate the transport rather than delivering later events across an invisible gap. |
-| Discord 429/5xx | Bounded rate-limit/retry policy; tool returns generic failure when exhausted. |
-| Discord 401/403 | Immediate non-retryable generic tool failure. |
-| SIGTERM/SIGINT | Stop notifications, drain bounded in-flight tools, close gateway, exit. |
+## Non-goals
 
-## Dependencies and provenance
+- **No gating.** No PASS/ACK/ASK/SPEAK anywhere in this package; that is the
+  harness's nunchi hook.
+- **No message transformation.** Content passes through verbatim, both ways.
+- **No multi-tenant.** One bot token, one gateway session, one process.
+- **No DM/typing/presence intents, no sharding, no voice.** GUILD_MESSAGES |
+  MESSAGE_CONTENT only; DMs that still arrive are forwarded with
+  `guild_id: null`.
+- **No persistence.** No replay after restart; `read_history` is the
+  catch-up path.
 
-All gateway, projection, REST, authentication and tool logic is import-safe
-stdlib code. Only `_binding.py` imports the optional MCP/Starlette/Uvicorn stack.
-The console parser runs before that import, so a base wheel can always expose
-`nunchi-mcp-discord --help`; actually serving requires the `mcp-discord` extra.
+## Dependencies
+
+`nunchi[mcp-discord]` pins `mcp>=1.9,<2` (streamable HTTP manager stabilized
+in 1.9; 2.0 changes the server API). starlette/uvicorn/pydantic arrive
+transitively with the SDK. Nunchi core keeps zero runtime dependencies; the
+gateway client is stdlib on purpose (no discord.py) so the resume state
+machine stays testable offline.

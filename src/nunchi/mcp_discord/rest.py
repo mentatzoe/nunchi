@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
-from ..net import open_no_redirect
 from .ratelimit import RateLimiter
 
 logger = logging.getLogger("nunchi.mcp_discord.rest")
@@ -31,8 +28,6 @@ logger = logging.getLogger("nunchi.mcp_discord.rest")
 API_BASE_URL = "https://discord.com/api/v10"
 _USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 0.2.0)"
 _TIMEOUT_SECONDS = 15.0
-MAX_RESPONSE_BYTES = 8 * 1024 * 1024
-MAX_RETRY_AFTER_SECONDS = 300.0
 
 # method, url, headers, body -> (status, lower-cased headers, body)
 HttpCall = Callable[[str, str, Mapping[str, str], "bytes | None"], "tuple[int, dict[str, str], bytes]"]
@@ -46,51 +41,31 @@ class DiscordRestError(Exception):
         self.status = status
 
 
-def _strict_json(raw: str | bytes):
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValueError("duplicate key")
-            result[key] = value
-        return result
-
-    return json.loads(
-        raw,
-        object_pairs_hook=pairs,
-        parse_constant=lambda _value: (_ for _ in ()).throw(
-            ValueError("non-finite")
-        ),
-    )
-
-
-def _bounded_read(response) -> bytes:
-    body = response.read(MAX_RESPONSE_BYTES + 1)
-    if len(body) > MAX_RESPONSE_BYTES:
-        raise DiscordRestError(None, "Discord API response exceeded its size budget")
-    return body
-
-
 def _urllib_call(
     method: str, url: str, headers: Mapping[str, str], body: bytes | None
 ) -> tuple[int, dict[str, str], bytes]:
     request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
     try:
-        with open_no_redirect(request, timeout=_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
             return (
                 response.status,
                 {k.lower(): v for k, v in response.headers.items()},
-                _bounded_read(response),
+                response.read(),
             )
     except urllib.error.HTTPError as exc:
-        with exc:
-            return (
-                exc.code,
-                {k.lower(): v for k, v in exc.headers.items()},
-                _bounded_read(exc),
-            )
-    except urllib.error.URLError:
-        raise DiscordRestError(None, "network error reaching Discord API") from None
+        return (exc.code, {k.lower(): v for k, v in exc.headers.items()}, exc.read())
+    except urllib.error.URLError as exc:
+        raise DiscordRestError(None, f"network error reaching Discord API: {exc.reason}") from None
+
+
+def _error_detail(body: bytes) -> str:
+    """Extract Discord's error message from a response body (never echoes headers)."""
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    message = payload.get("message") if isinstance(payload, dict) else None
+    return str(message)[:200] if message else ""
 
 
 class DiscordRestClient:
@@ -106,27 +81,6 @@ class DiscordRestClient:
         max_retries: int = 3,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
-        if (
-            not isinstance(token, str)
-            or not token
-            or len(token) > 4096
-            or not token.isascii()
-            or any(ord(character) < 33 or ord(character) > 126 for character in token)
-        ):
-            raise ValueError("Discord token is invalid")
-        if (
-            not isinstance(base_url, str)
-            or base_url.rstrip("/") != API_BASE_URL
-        ):
-            raise ValueError("Discord REST origin is not the trusted API origin")
-        if (
-            isinstance(max_retries, bool)
-            or not isinstance(max_retries, int)
-            or not 0 <= max_retries <= 10
-            or not callable(sleeper)
-            or (http is not None and not callable(http))
-        ):
-            raise ValueError("Discord REST client configuration is invalid")
         self._token = token
         self._limiter = limiter or RateLimiter(sleeper=sleeper)
         self._http = http or _urllib_call
@@ -139,41 +93,16 @@ class DiscordRestClient:
     # ------------------------------------------------------------------ #
 
     def create_message(
-        self,
-        channel_id: str,
-        content: str,
-        *,
-        reply_to_message_id: str | None = None,
-        allowed_mention_user_ids: tuple[str, ...] | None = None,
-        fail_if_reply_missing: bool = False,
+        self, channel_id: str, content: str, *, reply_to_message_id: str | None = None
     ) -> dict:
         body: dict = {"content": content}
-        if allowed_mention_user_ids is not None:
-            body["allowed_mentions"] = {
-                "parse": [],
-                "users": list(allowed_mention_user_ids),
-                "roles": [],
-                "replied_user": False,
-            }
         if reply_to_message_id is not None:
             body["message_reference"] = {
                 "message_id": reply_to_message_id,
                 "channel_id": channel_id,
-                "fail_if_not_exists": fail_if_reply_missing,
+                "fail_if_not_exists": False,
             }
         return self._request("POST", f"/channels/{channel_id}/messages", body=body)
-
-    def create_reaction(
-        self,
-        channel_id: str,
-        message_id: str,
-        reaction: str,
-    ) -> None:
-        encoded = urllib.parse.quote(reaction, safe="")
-        self._request(
-            "PUT",
-            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
-        )
 
     def get_messages(
         self, channel_id: str, *, limit: int = 50, before: str | None = None
@@ -183,11 +112,7 @@ class DiscordRestClient:
         if before is not None:
             path += f"&before={before}"
         result = self._request("GET", path)
-        if not isinstance(result, list) or any(
-            not isinstance(message, dict) for message in result
-        ):
-            raise DiscordRestError(200, "malformed message history from Discord API")
-        return result
+        return result if isinstance(result, list) else []
 
     # ------------------------------------------------------------------ #
     # Request core
@@ -200,11 +125,7 @@ class DiscordRestClient:
             "User-Agent": _USER_AGENT,
             "Content-Type": "application/json",
         }
-        data = (
-            json.dumps(body, allow_nan=False, separators=(",", ":")).encode("utf-8")
-            if body is not None
-            else None
-        )
+        data = json.dumps(body).encode("utf-8") if body is not None else None
         attempts = 0
         while True:
             self._limiter.before_request(route)
@@ -229,10 +150,11 @@ class DiscordRestClient:
 
             if status in (401, 403):
                 # Permanent auth/permission failure: abort immediately, no retry.
+                detail = _error_detail(resp_body)
                 raise DiscordRestError(
                     status,
-                    f"Discord API {status} on {route}; check the bot token "
-                    "and channel permissions",
+                    f"Discord API {status} on {route}: "
+                    f"{detail or 'check the bot token and channel permissions'}",
                 )
 
             if 500 <= status < 600:
@@ -245,15 +167,13 @@ class DiscordRestClient:
                 continue
 
             if status >= 400:
-                raise DiscordRestError(status, f"Discord API {status} on {route}")
-
-            if not 200 <= status < 300:
-                raise DiscordRestError(status, f"unexpected Discord API status on {route}")
+                detail = _error_detail(resp_body)
+                raise DiscordRestError(status, f"Discord API {status} on {route}: {detail}")
 
             if not resp_body:
                 return {}
             try:
-                return _strict_json(resp_body)
+                return json.loads(resp_body)
             except ValueError:
                 raise DiscordRestError(status, f"malformed JSON from Discord API on {route}") from None
 
@@ -262,27 +182,15 @@ class DiscordRestClient:
         retry_after = 1.0
         is_global = headers.get("x-ratelimit-global", "").lower() == "true"
         try:
-            payload = _strict_json(body)
+            payload = json.loads(body)
             if isinstance(payload, dict):
-                retry_value = payload.get("retry_after", retry_after)
-                if isinstance(retry_value, bool) or not isinstance(
-                    retry_value, (int, float)
-                ):
-                    raise ValueError("invalid retry-after value")
-                retry_after = float(retry_value)
-                global_value = payload.get("global", is_global)
-                if type(global_value) is bool:
-                    is_global = global_value
-                else:
-                    raise ValueError("invalid global rate-limit flag")
+                retry_after = float(payload.get("retry_after", retry_after))
+                is_global = bool(payload.get("global", is_global))
         except (ValueError, TypeError):
-            retry_after = 1.0
             header_val = headers.get("retry-after")
             if header_val is not None:
                 try:
                     retry_after = float(header_val)
                 except ValueError:
                     pass
-        if not math.isfinite(retry_after) or retry_after < 0:
-            retry_after = 1.0
-        return (min(retry_after, MAX_RETRY_AFTER_SECONDS), is_global)
+        return (retry_after, is_global)
