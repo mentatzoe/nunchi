@@ -201,12 +201,12 @@ def shape_message(msg: dict) -> dict:
         ):
             raise ValueError("Discord message result is invalid")
     shaped = {
-        "guild_id": str(guild_id) if guild_id is not None else None,
+        "guild_id": guild_id,
         "channel_id": channel_id,
         "message_id": message_id,
-        "author_id": str(author.get("id", "")),
-        "author_name": str(author.get("username", "")),
-        "author_is_bot": bool(author.get("bot", False)),
+        "author_id": author["id"],
+        "author_name": author.get("username", ""),
+        "author_is_bot": author.get("bot", False),
         "content": message_text(msg),
         "timestamp": timestamp,
         "mentions_room": mentions_room,

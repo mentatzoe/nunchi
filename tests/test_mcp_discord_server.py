@@ -423,6 +423,16 @@ class TestRateLimit(unittest.TestCase):
         self.assertEqual(len(http.calls), 2, "must retry exactly once")
         self.assertIn(0.75, sleeps, "retry-after must be slept out before the retry")
 
+    def test_429_json_retry_after_rejects_coercible_types(self):
+        for value in (True, False, "0.01", None, [], {}):
+            with self.subTest(value=value):
+                retry_after, is_global = DiscordRestClient._parse_retry_after(
+                    {},
+                    json.dumps({"retry_after": value, "global": False}).encode(),
+                )
+                self.assertEqual(retry_after, 1.0)
+                self.assertFalse(is_global)
+
     def test_429_retries_exhausted_raises(self):
         clock = _FakeClock()
         body = json.dumps({"retry_after": 0.1, "global": False}).encode()

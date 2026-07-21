@@ -264,7 +264,12 @@ class DiscordRestClient:
         try:
             payload = _strict_json(body)
             if isinstance(payload, dict):
-                retry_after = float(payload.get("retry_after", retry_after))
+                retry_value = payload.get("retry_after", retry_after)
+                if isinstance(retry_value, bool) or not isinstance(
+                    retry_value, (int, float)
+                ):
+                    raise ValueError("invalid retry-after value")
+                retry_after = float(retry_value)
                 global_value = payload.get("global", is_global)
                 if type(global_value) is bool:
                     is_global = global_value
