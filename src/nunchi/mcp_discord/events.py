@@ -104,11 +104,17 @@ def message_addressing(data: dict) -> dict[str, Any]:
     """Normalize Discord mentions and reply context without changing content."""
     mentioned_user_ids: list[str] = []
     seen: set[str] = set()
-    for mention in data.get("mentions") or []:
-        if not isinstance(mention, dict):
+    mentions = data.get("mentions", [])
+    if not isinstance(mentions, list):
+        mentions = [None]
+    for mention in mentions:
+        user_id = mention.get("id") if isinstance(mention, dict) else None
+        if not isinstance(user_id, str) or not user_id.isdigit():
+            # Preserve malformed presence so the trusted source rejects the
+            # delivery instead of silently erasing a native addressing fact.
+            mentioned_user_ids.append("")
             continue
-        user_id = str(mention.get("id") or "").strip()
-        if user_id.isdigit() and user_id not in seen:
+        if user_id not in seen:
             seen.add(user_id)
             mentioned_user_ids.append(user_id)
 
@@ -127,24 +133,24 @@ def message_addressing(data: dict) -> dict[str, Any]:
         reply_to_message_id = referenced.get("id")
 
     reply_author_id = (
-        str(referenced_author.get("id") or "").strip()
+        referenced_author.get("id")
         if referenced_author is not None
-        else ""
+        else None
     )
     reply_author_name = (
-        str(referenced_author.get("username") or "").strip()
+        referenced_author.get("username")
         if referenced_author is not None
-        else ""
+        else None
     )
     return {
         "mentioned_user_ids": mentioned_user_ids,
         "reply_to_message_id": (
-            str(reply_to_message_id) if reply_to_message_id is not None else None
+            reply_to_message_id if reply_to_message_id is not None else None
         ),
-        "reply_to_author_id": reply_author_id or None,
-        "reply_to_author_name": reply_author_name or None,
+        "reply_to_author_id": reply_author_id,
+        "reply_to_author_name": reply_author_name,
         "reply_to_author_is_bot": (
-            bool(referenced_author.get("bot", False))
+            referenced_author.get("bot", False)
             if referenced_author is not None
             else None
         ),
@@ -192,17 +198,22 @@ class ReactionEvent:
 
 def message_event_from_create(data: dict) -> MessageEvent:
     """Normalize a MESSAGE_CREATE dispatch payload."""
-    author = data.get("author") or {}
+    author = data.get("author")
+    if not isinstance(author, dict):
+        author = {}
     guild_id = data.get("guild_id")
     addressing = message_addressing(data)
+    content: Any = message_text(data)
+    if "content" in data and not isinstance(data.get("content"), str):
+        content = None
     return MessageEvent(
-        guild_id=str(guild_id) if guild_id is not None else None,
-        channel_id=str(data.get("channel_id", "")),
-        message_id=str(data.get("id", "")),
-        author_id=str(author.get("id", "")),
-        author_name=str(author.get("username", "")),
-        author_is_bot=bool(author.get("bot", False)),
-        content=message_text(data),
+        guild_id=guild_id,
+        channel_id=data.get("channel_id", ""),
+        message_id=data.get("id", ""),
+        author_id=author.get("id", ""),
+        author_name=author.get("username", ""),
+        author_is_bot=author.get("bot", False),
+        content=content,
         timestamp=data.get("timestamp"),
         mentioned_user_ids=tuple(addressing["mentioned_user_ids"]),
         reply_to_message_id=addressing["reply_to_message_id"],
@@ -210,12 +221,12 @@ def message_event_from_create(data: dict) -> MessageEvent:
         reply_to_author_name=addressing["reply_to_author_name"],
         reply_to_author_is_bot=addressing["reply_to_author_is_bot"],
         reply_to_content=addressing["reply_to_content"],
-        mentions_room=bool(data.get("mention_everyone", False)),
+        mentions_room=data.get("mention_everyone", False),
         # Discord MESSAGE_CREATE does not ordinarily expose a thread root. A
         # trusted wrapper may supply one when it has channel/thread metadata;
         # absence remains honest unavailability.
         thread_root_message_id=(
-            str(data["thread_root_message_id"])
+            data["thread_root_message_id"]
             if data.get("thread_root_message_id") is not None
             else None
         ),
@@ -250,12 +261,12 @@ def reaction_event_from_dispatch(
         user = {}
     author_name = user.get("username")
     return ReactionEvent(
-        guild_id=(str(data["guild_id"]) if data.get("guild_id") is not None else None),
-        channel_id=str(data.get("channel_id", "")),
-        message_id=str(data.get("message_id", "")),
-        author_id=str(data.get("user_id", "")),
+        guild_id=(data["guild_id"] if data.get("guild_id") is not None else None),
+        channel_id=data.get("channel_id", ""),
+        message_id=data.get("message_id", ""),
+        author_id=data.get("user_id", ""),
         author_name=author_name if isinstance(author_name, str) else "",
-        author_is_bot=(bool(user.get("bot")) if "bot" in user else None),
+        author_is_bot=(user.get("bot") if "bot" in user else None),
         reaction=reaction,
         operation=operation,
         gateway_session_id=gateway_session_id,
@@ -311,8 +322,7 @@ def filter_message_create(
 
 
 def _snowflake(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text if text.isdigit() else None
+    return value if isinstance(value, str) and value.isdigit() else None
 
 
 def _discord_actor_id(user_id: str) -> str:
@@ -365,7 +375,39 @@ class DiscordEventSourceV2:
         message_id = _snowflake(event.message_id)
         channel_id = _snowflake(event.channel_id)
         author_id = _snowflake(event.author_id)
-        if message_id is None or channel_id is None or author_id is None:
+        if (
+            message_id is None
+            or channel_id is None
+            or author_id is None
+            or (
+                event.guild_id is not None
+                and _snowflake(event.guild_id) is None
+            )
+            or not isinstance(event.author_name, str)
+            or not isinstance(event.author_is_bot, bool)
+            or not isinstance(event.content, str)
+            or (
+                event.timestamp is not None
+                and not isinstance(event.timestamp, str)
+            )
+            or not isinstance(event.mentions_room, bool)
+            or (
+                event.reply_to_author_id is not None
+                and _snowflake(event.reply_to_author_id) is None
+            )
+            or (
+                event.reply_to_author_name is not None
+                and not isinstance(event.reply_to_author_name, str)
+            )
+            or (
+                event.reply_to_author_is_bot is not None
+                and not isinstance(event.reply_to_author_is_bot, bool)
+            )
+            or (
+                event.reply_to_content is not None
+                and not isinstance(event.reply_to_content, str)
+            )
+        ):
             return self._unroutable(
                 raw_delivery,
                 "Discord delivery lacked an exact native message, channel, or author ID",
@@ -446,7 +488,28 @@ class DiscordEventSourceV2:
         event_id = (
             f"discord:reaction:{event.gateway_session_id}:{event.gateway_sequence}"
         )
-        if channel_id is None or message_id is None or author_id is None:
+        if (
+            channel_id is None
+            or message_id is None
+            or author_id is None
+            or (
+                event.guild_id is not None
+                and _snowflake(event.guild_id) is None
+            )
+            or not isinstance(event.author_name, str)
+            or (
+                event.author_is_bot is not None
+                and not isinstance(event.author_is_bot, bool)
+            )
+            or not isinstance(event.reaction, str)
+            or not event.reaction
+            or event.operation not in ("add", "remove")
+            or not isinstance(event.gateway_session_id, str)
+            or not event.gateway_session_id
+            or isinstance(event.gateway_sequence, bool)
+            or not isinstance(event.gateway_sequence, int)
+            or event.gateway_sequence < 0
+        ):
             return self._unroutable(
                 event_id,
                 "Discord reaction lacked an exact channel, message, or actor ID",

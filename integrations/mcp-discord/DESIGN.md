@@ -56,8 +56,10 @@ sequenceDiagram
    dispatch. Failure is a content-free `401`.
 5. Exact self messages are retained as facts. Only the observation owner may
    classify them as the deterministic self no-wake case.
-6. Message and reaction IDs come from Discord. Reactions require the gateway
-   session and sequence; when either is unavailable no ID is invented.
+6. Message, actor, guild, channel, mention, reply, and reaction IDs retain
+   Discord's exact native JSON string type; bot and room-mention facts retain
+   exact booleans. Coercible values are unroutable. Reactions also require the
+   gateway session and sequence; when either is unavailable no ID is invented.
 7. A Ready-event resume URL is accepted only over `wss` on a Discord-owned
    `discord.gg` gateway host, then normalized to the fixed version and JSON
    encoding before the credential-bearing Resume payload can use it.

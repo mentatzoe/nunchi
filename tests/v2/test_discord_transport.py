@@ -111,6 +111,59 @@ class DiscordEventSourceCases(unittest.TestCase):
                 self.assertNotIn("event", native)
                 self.assertNotIn("SUPPRESS", repr(native))
 
+    def test_coercible_gateway_identity_and_addressing_types_are_unroutable(self):
+        payloads = (
+            message_payload(author_id=1001),
+            message_payload(bot="false"),
+            message_payload(mentions=[9001]),
+            message_payload(mention_everyone="false"),
+            message_payload(reply_to=99),
+            dict(message_payload(), guild_id=7),
+            dict(message_payload(), timestamp=1_752_000_000),
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                native = self.source.native_input(
+                    message_event_from_create(payload)
+                )
+                self.assertEqual(native["disposition"], "unroutable")
+                self.assertNotIn("event", native)
+
+    def test_coercible_reaction_identity_and_bot_kind_are_unroutable(self):
+        for data in (
+            {
+                "guild_id": "7",
+                "channel_id": "42",
+                "message_id": "111",
+                "user_id": 1001,
+                "emoji": {"name": "👀"},
+            },
+            {
+                "guild_id": "7",
+                "channel_id": "42",
+                "message_id": "111",
+                "user_id": "1001",
+                "emoji": {"name": "👀"},
+                "member": {
+                    "user": {
+                        "id": "1001",
+                        "username": "Zoe",
+                        "bot": "false",
+                    }
+                },
+            },
+        ):
+            with self.subTest(data=data):
+                event = reaction_event_from_dispatch(
+                    data,
+                    operation="add",
+                    gateway_session_id="session-a",
+                    gateway_sequence=38,
+                )
+                self.assertIsNotNone(event)
+                native = self.source.native_input(event)
+                self.assertEqual(native["disposition"], "unroutable")
+
     def test_self_is_retained_for_v2_and_observation_marks_no_wake(self):
         raw = message_payload(author_id="9001", bot=True)
         self.assertIsNone(filter_message_create(raw, "9001"))
