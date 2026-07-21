@@ -1,5 +1,13 @@
 # CC-06 — Installed runtime provenance (Claude Code V2)
 
+> Current-state correction (2026-07-21): the Attempt-6 snapshot below has
+> been superseded by the integrator-owned arming and exact-source remediation
+> recorded in `integrator-live-arming.md`. The host is armed with the V2
+> transport and hooks. Reactive transport, native identity binding,
+> observation, and trusted-bypass attention are live-proven; participant
+> reply/silence completion is still blocked by the installed Claude CLI's
+> expired login and is not claimed.
+
 **Attempt 6**, recorded 2026-07-21 by the `v2-claude-owner` lane (Station,
 standing Claude Code agent). The Attempt 1/2/3/4/5 versions of this record are
 preserved in git history at candidates `6476b58` / `1990129` / `6513135` /

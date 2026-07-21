@@ -697,3 +697,45 @@ is not; live scenes are pending Zoe's explicit approval to arm the host.
 **Handoff target**: `v2-integrator` for adversarial re-review (the exact
 prior probes plus these two new scenarios). This lane does not
 self-declare acceptance.
+
+---
+
+## Attempt 7 — 2026-07-21 (integrator live-source remediation)
+
+The integrator armed exact Attempt-6 evidence tip `b12726b9e01739c2faf9027b6ef5038d3cd0c969`
+using its documented recoverable ladder. The first real Discord delivery
+then proved that Claude Code 2.1.215 emits
+`source="plugin:discord:discord"`, while the packet fixture and parser used
+the synthetic shorthand `source="discord"`. The native transport sidecar
+was correct, but the hook returned the configured operator-prompt allow shape
+before joining it. This was a live fail-open mismatch and Attempt 6 was not
+accepted.
+
+**Implementation successor**:
+`7ea499be33c6260f79e10f07fe77110b147929e2` on
+`claude/claude-code-v2-integration-3ac219`. It binds the exact installed host
+source, treats any other visible channel envelope as a degraded blocked room
+event rather than operator input, changes the deterministic fixtures to the
+observed host envelope, adds both positive and fail-closed regressions, and
+updates the owned docs. No shared contract or other adapter source changed.
+
+Verification at the implementation successor:
+
+- focused Claude/guard tests: 72 tests, OK;
+- full repository suite: 1,211 tests, OK (7 skipped);
+- governance boundary and exact SpecKit CLI: OK;
+- live message `1528950867355635755` produced exact native event
+  `discord:message:1528950867355635755`, an immutable observation receipt,
+  and an attention receipt with `classifier_not_invoked=true`, cause
+  `preattention-disabled`, and policy provenance; the active turn records
+  `PREATTENTION_BYPASS`;
+- installed gate bytes are identical to the successor source at SHA-256
+`c4c55671fa41caaeaa268d98ef7d74536df44b898b5d0f8ea30cf8389a53522e`.
+
+The installed Claude CLI received the gated context but returned the host
+error `Login expired - Please run /login`. Consequently no model reply,
+silence outcome, participant-host receipt, or transport receipt is claimed.
+The exact installed transition and remaining live boundary are recorded in
+`integrator-live-arming.md`. Attempt 7 remains **REWORK / live-pending**, not
+accepted, until a freshly authenticated Claude session completes the bounded
+reply, silence, privileged-denial, error-recovery, and restart scenes.
