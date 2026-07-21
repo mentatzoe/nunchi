@@ -80,6 +80,23 @@ class AttentionV2CLICases(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("input error", stderr)
 
+    def test_duplicate_keys_and_nonfinite_numbers_reject_before_config(self):
+        missing = Path(self.temporary.name) / "missing.json"
+        cases = (
+            '{"request_id":"first","request_id":"second"}',
+            '{"nested":{"actor_id":"one","actor_id":"two"}}',
+            '{"value":NaN}',
+            '{"value":Infinity}',
+            '{"value":-Infinity}',
+        )
+        for document in cases:
+            with self.subTest(document=document):
+                code, stdout, stderr = self.run_cli(document, missing)
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout, "")
+                self.assertIn("input error: invalid JSON", stderr)
+                self.assertEqual(list(self.receipts.iterdir()), [])
+
     def test_config_failure_is_tagged_exit_3(self):
         missing = Path(self.temporary.name) / "missing.json"
         code, stdout, stderr = self.run_cli(json.dumps(make_request()), missing)
