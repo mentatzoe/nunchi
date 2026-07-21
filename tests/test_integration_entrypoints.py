@@ -13,6 +13,17 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 class InstalledV2SurfaceCases(unittest.TestCase):
+    def test_package_metadata_describes_preattention_not_a_v1_reply_gate(self):
+        project = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+            "project"
+        ]
+        description = project["description"].lower()
+        keywords = set(project["keywords"])
+        self.assertIn("pre-attention", description)
+        self.assertIn("pre-attention", keywords)
+        self.assertNotIn("admission-gate", keywords)
+        self.assertNotIn("should this agent speak", description)
+
     def test_pyproject_matches_the_closed_surface_contract(self):
         project = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         contract = json.loads(

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nunchi"
 version = "0.2.0"
-description = "Read-the-room admission gate for agents on shared chat surfaces: should this agent speak now?"
+description = "Portable pre-attention for turn-aware participants in shared conversation."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT OR Apache-2.0" }
@@ -17,11 +17,12 @@ keywords = [
   "nunchi",
   "agents",
   "llm",
-  "admission-gate",
+  "pre-attention",
+  "conversation",
   "turn-taking",
   "read-the-room",
   "moderation",
-  "openrouter",
+  "openai-compatible",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
