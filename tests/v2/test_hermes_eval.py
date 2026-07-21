@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -160,6 +161,40 @@ class HermesV2EvaluationTest(unittest.TestCase):
                 "candidate-manifest-omitted:candidate.py",
                 validate(hermes_source=HERMES_SOURCE, root=root),
             )
+
+    def test_manifest_scope_excludes_tracked_manifest_from_its_own_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=root, check=True
+            )
+            candidate = root / "candidate.py"
+            manifest = root / "evidence/v2/hermes/candidate-files.sha256"
+            manifest.parent.mkdir(parents=True)
+            candidate.write_text("before\n")
+            before = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            manifest.write_text(f"{before}  candidate.py\n")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "baseline"], cwd=root, check=True
+            )
+
+            candidate.write_text("after\n")
+            after = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            manifest.write_text(f"{after}  candidate.py\n")
+            errors = validate(hermes_source=HERMES_SOURCE, root=root)
+
+            self.assertNotIn(
+                "candidate-manifest-omitted:evidence/v2/hermes/candidate-files.sha256",
+                errors,
+            )
+            self.assertNotIn("candidate-manifest-extra:candidate.py", errors)
 
 
 if __name__ == "__main__":
