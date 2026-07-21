@@ -412,6 +412,7 @@ class MCPTransportClientV2:
                 ):
                     continue
                 yield message["params"]
+        raise MCPTransportV2Error("MCP SSE stream ended")
 
 
 __all__ = [

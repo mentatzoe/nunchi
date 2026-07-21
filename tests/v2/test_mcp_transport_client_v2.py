@@ -273,6 +273,17 @@ class MCPTransportClientCases(unittest.TestCase):
         )
         self.assertEqual(client.initialize(), "session-1")
 
+    def test_stream_eof_is_operational_failure_not_successful_completion(self):
+        scripted = ScriptedOpen([Response(lines=[])])
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        client.session_id = "session-1"
+        with self.assertRaisesRegex(MCPTransportV2Error, "stream ended"):
+            tuple(client.stream_events())
+
 
 if __name__ == "__main__":
     unittest.main()

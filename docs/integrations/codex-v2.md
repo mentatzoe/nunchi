@@ -52,6 +52,12 @@ credential. Plain HTTP is accepted only for a loopback transport, and redirects
 are followed only when the scheme, host, and port remain identical. The bearer
 credential must not be the Discord bot token.
 
+The room process treats an ended notification stream as an operational failure,
+not a successful one-shot completion. Run the standing process under an
+operator-owned supervisor. Its restart performs a fresh authenticated MCP
+handshake and bounded history backfill as context only; it never restores a
+pending wake obligation or replays the old stream as FIFO work.
+
 ## Operator configuration surface
 
 `nunchi-codex-config-app` is V2-only and secret-redacted. It displays the exact
