@@ -176,6 +176,25 @@ class MatrixActionCases(unittest.TestCase):
             "matrix-api-outcome-unknown",
         )
 
+    def test_malformed_success_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeMatrixClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                return ""
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(MatrixV2Error):
+            sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
 
 class MatrixRoomCases(unittest.TestCase):
     def setUp(self):

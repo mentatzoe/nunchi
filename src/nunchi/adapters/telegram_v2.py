@@ -417,17 +417,25 @@ class TelegramActionSinkV2:
             self._fail(request_id, "send-backstop")
         try:
             if operation[0] == "message":
-                self.client.send_message(
+                result = self.client.send_message(
                     self.chat_id,
                     operation[1],
                     reply_to_message_id=operation[2],
                 )
+                if (
+                    isinstance(result, bool)
+                    or not isinstance(result, int)
+                    or result < 1
+                ):
+                    raise TelegramV2Error("Telegram message result is invalid")
             else:
-                self.client.set_reaction(
+                result = self.client.set_reaction(
                     self.chat_id,
                     operation[1],
                     operation[2],
                 )
+                if result is not None:
+                    raise TelegramV2Error("Telegram reaction result is invalid")
         except Exception as exc:
             self._unknown(request_id, "telegram-api-outcome-unknown", exc)
         try:

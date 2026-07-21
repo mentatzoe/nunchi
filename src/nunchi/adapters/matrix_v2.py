@@ -441,7 +441,7 @@ class MatrixActionSinkV2:
             self._fail(request_id, "send-backstop")
         try:
             if operation[0] == "message":
-                self.client.send_message(
+                result = self.client.send_message(
                     self.room_id,
                     transaction,
                     operation[1],
@@ -449,12 +449,18 @@ class MatrixActionSinkV2:
                     mention_user_ids=operation[3],
                 )
             else:
-                self.client.send_reaction(
+                result = self.client.send_reaction(
                     self.room_id,
                     transaction,
                     operation[1],
                     operation[2],
                 )
+            if (
+                not isinstance(result, str)
+                or not result.startswith("$")
+                or len(result) > 512
+            ):
+                raise MatrixV2Error("Matrix action result is invalid")
         except Exception as exc:
             self._unknown(request_id, "matrix-api-outcome-unknown", exc)
         try:

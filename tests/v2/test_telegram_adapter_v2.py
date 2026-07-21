@@ -144,6 +144,51 @@ class TelegramActionCases(unittest.TestCase):
             "telegram-api-outcome-unknown",
         )
 
+    def test_malformed_success_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeTelegramClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                return True
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_malformed_reaction_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeTelegramClient):
+            def set_reaction(self, *args, **kwargs):
+                super().set_reaction(*args, **kwargs)
+                return False
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink(
+                "req-malformed-reaction",
+                {
+                    "kind": "reaction",
+                    "target_event_id": f"telegram:message:{CHAT}:12",
+                    "reaction": "👍",
+                },
+            )
+        self.assertEqual(client.actions[0], ("reaction", CHAT, 12, "👍"))
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
 
 class TelegramChatCases(unittest.TestCase):
     def setUp(self):
