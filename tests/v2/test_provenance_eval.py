@@ -10,6 +10,16 @@ from evals.v2.provenance import runner
 
 
 class ProvenanceAuditCases(unittest.TestCase):
+    def test_superseded_codex_plugin_bundle_is_absent(self):
+        root = Path(__file__).resolve().parents[2]
+        inherited = root / "integrations" / "codex" / "nunchi-codex"
+        for relative in (Path(".codex-plugin/plugin.json"), Path(".mcp.json")):
+            with self.subTest(relative=relative):
+                self.assertFalse(
+                    inherited.joinpath(relative).exists(),
+                    "the V1-style Codex plugin bundle must not survive beside the direct V2 runtime",
+                )
+
     def test_surface_contract_keeps_required_products_and_removes_only_superseded_gates(self):
         contract = runner.load_surface_contract()
         required = contract["required_scripts"]
