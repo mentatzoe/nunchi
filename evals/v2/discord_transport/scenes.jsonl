@@ -1,0 +1,4 @@
+{"scene_id":"DT-01-human-fact","fixture":"human-message.json","expected_disposition":"candidate-event","claim":"human facts survive without social filtering"}
+{"scene_id":"DT-02-other-bot-fact","fixture":"other-bot-message.json","expected_disposition":"candidate-event","claim":"other-bot facts survive without social filtering"}
+{"scene_id":"DT-02-apparent-resolution","fixture":"other-bot-message.json","expected_disposition":"candidate-event","claim":"apparent resolution is not transport suppression"}
+{"scene_id":"DT-02-referential-mention","fixture":"human-message.json","expected_disposition":"candidate-event","claim":"addressability is not inferred by transport"}

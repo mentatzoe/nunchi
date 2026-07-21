@@ -1,0 +1,3 @@
+{"scene_id":"DT-03-self-retained","fixture":"exact-self-message.json","expected_disposition":"candidate-event","claim":"exact self remains observable for deterministic no-wake ownership"}
+{"scene_id":"DT-03-exact-duplicate","fixture":"exact-duplicate-message.json","expected_disposition":"candidate-event","claim":"source preserves duplicate identity for observation-owned deduplication"}
+{"scene_id":"DT-04-suppressed-later-heard","fixture":"human-message.json","expected_disposition":"candidate-event","claim":"a prior social disposition never removes native history"}

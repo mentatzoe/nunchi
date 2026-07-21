@@ -57,6 +57,8 @@ class CodexRoomV2:
         if not participant_id or not 1 <= history_limit <= 100:
             raise ValueError("Codex V2 room configuration is invalid")
         self.channel_id = channel_id
+        self.self_user_id = self_user_id
+        self.participant_id = participant_id
         self.client = client
         self.history_limit = history_limit
         self.source = DiscordEventSourceV2(
@@ -190,15 +192,29 @@ class CodexRoomV2:
             thread_root_message_id=None,
         )
 
-    def backfill(self) -> int:
-        """Restore bounded history as context only; never schedule wake work."""
-        result = self.client.call_tool(
-            "read_history",
-            {"channel_id": self.channel_id, "limit": self.history_limit},
-        )
-        messages = result.get("messages")
-        if not isinstance(messages, list) or len(messages) > self.history_limit:
+    def backfill(self, bootstrap: dict[str, Any]) -> int:
+        """Restore the post-subscription snapshot without scheduling wake work."""
+        if not isinstance(bootstrap, dict) or set(bootstrap) != {"subscription", "history"}:
+            raise CodexRoomV2Error("Discord subscription result is invalid")
+        subscription = bootstrap["subscription"]
+        history = bootstrap["history"]
+        if (
+            not isinstance(subscription, dict)
+            or subscription.get("participant_id") != self.participant_id
+            or subscription.get("room_id") != self.channel_id
+            or subscription.get("self_actor_id") != self.self_user_id
+            or not isinstance(subscription.get("capabilities"), list)
+            or "subscribe_events" not in subscription["capabilities"]
+            or not isinstance(subscription.get("has_restart_gap"), bool)
+            or not isinstance(history, dict)
+            or set(history) != {"messages", "coverage"}
+        ):
+            raise CodexRoomV2Error("Discord subscription binding is invalid")
+        messages = history.get("messages")
+        if not isinstance(messages, list) or len(messages) > 100:
             raise CodexRoomV2Error("Discord history result is invalid")
+        messages = messages[: self.history_limit]
+        self.observation.has_restart_gap = subscription["has_restart_gap"]
         retained = 0
         for params in reversed(messages):
             event = self._message_event(params) if isinstance(params, dict) else None
@@ -214,13 +230,41 @@ class CodexRoomV2:
     def accept_notification(self, params: dict[str, Any]) -> str:
         if not isinstance(params, dict):
             raise CodexRoomV2Error("Discord V2 notification is invalid")
+        if params.get("kind") == "continuity-boundary":
+            expected_boundary = {
+                "schema_version",
+                "platform",
+                "kind",
+                "reason",
+                "previous_gateway_session_id",
+                "expected_gateway_sequence",
+                "observed_gateway_sequence",
+                "continuity",
+                "has_restart_gap",
+            }
+            if (
+                set(params) != expected_boundary
+                or params.get("schema_version") != 2
+                or params.get("platform") != "discord"
+                or params.get("continuity") != "known-gap"
+                or params.get("has_restart_gap") is not True
+                or not isinstance(params.get("reason"), str)
+            ):
+                raise CodexRoomV2Error("Discord continuity boundary is invalid")
+            self.observation.has_restart_gap = True
+            return "continuity-gap-recorded"
         expected = {
             "schema_version",
             "platform",
             "guild_id",
             "channel_id",
+            "gateway_session_id",
+            "gateway_sequence",
+            "gateway_self_user_id",
             "native_input",
         }
+        if "continuation" in params:
+            expected.add("continuation")
         guild_id = params.get("guild_id")
         channel_id = params.get("channel_id")
         if (
@@ -233,6 +277,12 @@ class CodexRoomV2:
             )
             or not isinstance(channel_id, str)
             or channel_id != self.channel_id
+            or not isinstance(params.get("gateway_session_id"), str)
+            or not params["gateway_session_id"]
+            or isinstance(params.get("gateway_sequence"), bool)
+            or not isinstance(params.get("gateway_sequence"), int)
+            or params["gateway_sequence"] < 0
+            or params.get("gateway_self_user_id") != self.self_user_id
         ):
             raise CodexRoomV2Error("Discord V2 notification binding is invalid")
         native = params.get("native_input")
@@ -323,9 +373,17 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             history_limit=args.history_limit,
         )
-        restored = room.backfill()
-        logger.info("restored %d bounded message(s) as context", restored)
-        for params in client.stream_events(V2_NOTIFICATION_METHOD):
+        restored = 0
+
+        def _restore(bootstrap: dict[str, Any]) -> None:
+            nonlocal restored
+            restored = room.backfill(bootstrap)
+            logger.info("restored %d bounded message(s) as context", restored)
+
+        for params in client.stream_events(
+            V2_NOTIFICATION_METHOD,
+            on_subscribed=_restore,
+        ):
             room.accept_notification(params)
             if args.once:
                 room.wait_idle()

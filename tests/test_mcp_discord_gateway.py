@@ -224,7 +224,7 @@ class TestGatewayResume(unittest.TestCase):
         first = proto.handle(_hello())
         self.assertEqual(first[0].payload["op"], 2)
         proto.handle(_ready(session_id="sess-abc", seq=1))
-        proto.handle(_message_create("777", seq=5))
+        proto.handle(_message_create("777", seq=2))
 
         # Simulated disconnect (network drop); 1006-style close is resumable
         self.assertEqual(classify_close(1006), "resume")
@@ -241,11 +241,11 @@ class TestGatewayResume(unittest.TestCase):
         payload = actions[0].payload
         self.assertEqual(payload["op"], 6)
         self.assertEqual(payload["d"]["session_id"], "sess-abc")
-        self.assertEqual(payload["d"]["seq"], 5)
+        self.assertEqual(payload["d"]["seq"], 2)
         self.assertEqual(payload["d"]["token"], TOKEN)
 
         # RESUMED restores ready state
-        proto.handle({"op": 0, "t": "RESUMED", "s": 6, "d": {}})
+        proto.handle({"op": 0, "t": "RESUMED", "s": 3, "d": {}})
         self.assertTrue(proto.ready)
 
     def test_invalid_session_not_resumable_forces_identify(self):
@@ -325,10 +325,11 @@ class TestGatewayResume(unittest.TestCase):
         ordered.on_connection_open()
         ordered.handle(_hello())
         ordered.handle(_ready(seq=5))
-        self.assertEqual(
-            ordered.handle(_message_create("777", seq=5)),
-            [CloseAndReconnect(resume=False)],
-        )
+        actions = ordered.handle(_message_create("777", seq=5))
+        self.assertEqual(len(actions), 1)
+        self.assertIsInstance(actions[0], CloseAndReconnect)
+        self.assertFalse(actions[0].resume)
+        self.assertEqual(actions[0].reason, "invalid-or-replayed-sequence")
         self.assertFalse(ordered.can_resume)
 
     def test_close_code_classification(self):
@@ -510,14 +511,14 @@ class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
             [
                 _hello(interval_ms=600000),
                 _ready(session_id="sess-9", own_id="999", seq=1),
-                _message_create("777", seq=8),
+                _message_create("777", seq=2),
                 wslib.WSClosed(1001, "server going away"),
             ]
         )
         second = _ScriptedWS(
             [
                 _hello(interval_ms=600000),
-                {"op": 0, "t": "RESUMED", "s": 9, "d": {}},
+                {"op": 0, "t": "RESUMED", "s": 3, "d": {}},
                 wslib.WSClosed(4004, "stop the test"),
             ]
         )
@@ -537,7 +538,7 @@ class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
         # Second connection resumed with the stored session and sequence
         self.assertEqual(second.sent[0]["op"], 6)
         self.assertEqual(second.sent[0]["d"]["session_id"], "sess-9")
-        self.assertEqual(second.sent[0]["d"]["seq"], 8)
+        self.assertEqual(second.sent[0]["d"]["seq"], 2)
 
 
 if __name__ == "__main__":

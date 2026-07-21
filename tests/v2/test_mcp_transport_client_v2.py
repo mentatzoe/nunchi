@@ -79,6 +79,7 @@ class MCPTransportClientCases(unittest.TestCase):
                 "tools": [
                     {"name": name}
                     for name in (
+                        "subscribe_events",
                         "send_message",
                         "reply_message",
                         "add_reaction",
@@ -114,6 +115,10 @@ class MCPTransportClientCases(unittest.TestCase):
                         f"data: {json.dumps(event_document)}\n".encode("utf-8"),
                         b"\n",
                     ]
+                ),
+                self.jsonrpc_response(
+                    11,
+                    {"content": [{"type": "text", "text": "{}"}]},
                 ),
             ]
         )
@@ -317,6 +322,7 @@ class MCPTransportClientCases(unittest.TestCase):
                 "tools": [
                     {"name": name}
                     for name in (
+                        "subscribe_events",
                         "send_message",
                         "reply_message",
                         "add_reaction",
@@ -343,7 +349,15 @@ class MCPTransportClientCases(unittest.TestCase):
         self.assertEqual(client.initialize(), "session-1")
 
     def test_stream_eof_is_operational_failure_not_successful_completion(self):
-        scripted = ScriptedOpen([Response(lines=[])])
+        scripted = ScriptedOpen(
+            [
+                Response(lines=[]),
+                self.jsonrpc_response(
+                    10,
+                    {"content": [{"type": "text", "text": "{}"}]},
+                ),
+            ]
+        )
         client = MCPTransportClientV2(
             "http://127.0.0.1:3993/mcp",
             AUTH,

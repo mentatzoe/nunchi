@@ -523,13 +523,33 @@ class FakeTransportClient:
         if name == "read_history":
             return {"messages": self.history}
         if name == "add_reaction":
-            return {"reaction": "sent", "message_id": arguments["message_id"]}
+            return {
+                "request_id": arguments["request_id"],
+                "reaction": "sent",
+                "channel_id": arguments["channel_id"],
+                "message_id": arguments["message_id"],
+            }
         return {
+            "request_id": arguments["request_id"],
             "message": {
                 "message_id": "999",
                 "channel_id": arguments["channel_id"],
             }
         }
+
+
+class MemoryReceiptSink:
+    def __init__(self):
+        self.records = []
+        self.claims = set()
+
+    def __call__(self, record):
+        self.records.append(record)
+
+    def claim_transport_action(self, request_id):
+        if request_id in self.claims:
+            raise ValueError("duplicate request")
+        self.claims.add(request_id)
 
 
 def discord_params(message_id, content, *, author_id="1001", timestamp="2026-07-20T12:00:00Z"):
@@ -564,7 +584,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         document = clone_policy()
         document["recoverability"]["continuity_scope_id"] = "discord:channel:42"
         self.policy_path = write_policy(self.temporary.name, document)
-        self.receipts = []
+        self.receipts = MemoryReceiptSink()
         self.turns = []
         self.classifier_calls = []
 
@@ -589,8 +609,32 @@ class CodexRoomLifecycleCases(unittest.TestCase):
             participant_workspace=self.workspace,
             classifier_transport=classifier or self.classifier,
             participant=participant or self.participant,
-            receipt_sink=self.receipts.append,
+            receipt_sink=self.receipts,
         )
+
+    @staticmethod
+    def bootstrap(history):
+        return {
+            "subscription": {
+                "participant_id": "vigil",
+                "room_id": "42",
+                "self_actor_id": "9001",
+                "capabilities": ["subscribe_events"],
+                "gateway_session_id": "gateway-1",
+                "gateway_sequence": 10,
+                "has_restart_gap": False,
+            },
+            "history": {
+                "messages": history,
+                "coverage": {
+                    "max_events": 100,
+                    "max_bytes": 32768,
+                    "returned_events": len(history),
+                    "returned_bytes": 0,
+                    "truncated": False,
+                },
+            },
+        }
 
     def participant(self, turn):
         self.turns.append(turn.packet)
@@ -617,7 +661,10 @@ class CodexRoomLifecycleCases(unittest.TestCase):
                 "mentions": [],
                 "embeds": [],
                 "attachments": [],
-            }
+            },
+            gateway_session_id="gateway-1",
+            gateway_sequence=int(message_id),
+            gateway_self_user_id="9001",
         )
         return room.source.notification_params(event)
 
@@ -630,7 +677,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         )
         room = self.room(client)
         self.addCleanup(room.close)
-        self.assertEqual(room.backfill(), 2)
+        self.assertEqual(room.backfill(self.bootstrap(client.history)), 2)
         self.assertEqual(self.classifier_calls, [])
         self.assertEqual(self.turns, [])
 
@@ -647,7 +694,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         self.assertEqual(client.calls[-1][1]["channel_id"], "42")
         self.assertEqual(client.calls[-1][1]["message_id"], "3")
         self.assertEqual(
-            [record["stage"] for record in self.receipts],
+            [record["stage"] for record in self.receipts.records],
             ["observation", "attention", "participant-host", "transport"],
         )
 
@@ -663,7 +710,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
                 room = self.room(FakeTransportClient(history=history))
                 self.addCleanup(room.close)
                 with self.assertRaises(CodexRoomV2Error):
-                    room.backfill()
+                    room.backfill(self.bootstrap(history))
 
     def test_self_and_wrong_room_cannot_wake_codex(self):
         client = FakeTransportClient()
@@ -720,10 +767,10 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         self.assertEqual(len(self.turns), 1)
         self.assertEqual(self.turns[0]["attention"], {"source": "PREATTENTION_BYPASS"})
         self.assertEqual(
-            [record["stage"] for record in self.receipts],
+            [record["stage"] for record in self.receipts.records],
             ["observation", "attention", "participant-host"],
         )
-        self.assertTrue(self.receipts[1]["body"]["classifier_not_invoked"])
+        self.assertTrue(self.receipts.records[1]["body"]["classifier_not_invoked"])
 
 if __name__ == "__main__":
     unittest.main()
