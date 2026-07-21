@@ -78,14 +78,14 @@ class LiveRoomRuntime:
 
     def accept(self, native_event_input: dict[str, Any]) -> AcceptedDelivery:
         """Record one transport-attested delivery and maybe start live work."""
-        disposition = self.observation.ingest(copy.deepcopy(native_event_input))
+        accepted_input = copy.deepcopy(native_event_input)
+        disposition = self.observation.ingest(accepted_input)
         opportunity = None
         if disposition == OBSERVED:
-            event = native_event_input.get("event")
+            event = accepted_input.get("event")
             event_id = event.get("id") if isinstance(event, dict) else None
             if not isinstance(event_id, str) or not event_id:
-                # ``ingest`` already validated this; keep the host boundary
-                # explicit if a hostile mutable mapping behaved inconsistently.
+                # ``ingest`` already validated this exact defensive copy.
                 raise LiveRoomRuntimeError("accepted event identity is unavailable")
             opportunity = self.scheduler.observe(
                 participant_id=self.observation.participant_id,
@@ -114,10 +114,11 @@ class LiveRoomRuntime:
         dispositions: list[str] = []
         newest_event_id: str | None = None
         for native_event_input in native_event_inputs:
-            disposition = self.observation.ingest(copy.deepcopy(native_event_input))
+            accepted_input = copy.deepcopy(native_event_input)
+            disposition = self.observation.ingest(accepted_input)
             dispositions.append(disposition)
             if disposition == OBSERVED:
-                event = native_event_input.get("event")
+                event = accepted_input.get("event")
                 event_id = event.get("id") if isinstance(event, dict) else None
                 if not isinstance(event_id, str) or not event_id:
                     raise LiveRoomRuntimeError(
@@ -292,8 +293,10 @@ class LiveRoomRuntime:
                     "anchor_event_id": current.anchor_event_id,
                     "participant_invoked": False,
                 }
-            finally:
-                next_opportunity = self.scheduler.complete(current)
+            except BaseException:
+                self.scheduler.abort(current)
+                raise
+            next_opportunity = self.scheduler.complete(current)
             results.append(result)
             current = next_opportunity
         return tuple(results)

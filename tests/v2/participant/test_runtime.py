@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import tempfile
 import threading
 import unittest
@@ -28,6 +29,22 @@ def wake_judgment(projection, _config):
         "reasons": ["the current room warrants a participant turn"],
         "evidence_event_ids": [projection["trigger_event_id"]],
     }
+
+
+class ChangesAfterCopy(dict):
+    """Mapping whose caller-owned view changes after the defensive copy."""
+
+    def __deepcopy__(self, memo):
+        return copy.deepcopy(dict(self), memo)
+
+    def get(self, key, default=None):
+        if key == "event":
+            return None
+        return super().get(key, default)
+
+
+class HostCancellation(BaseException):
+    pass
 
 
 class RuntimeCase(unittest.TestCase):
@@ -60,6 +77,23 @@ class RuntimeCase(unittest.TestCase):
 
 
 class LiveCoalescingCases(RuntimeCase):
+    def test_single_delivery_schedules_from_the_exact_retained_copy(self):
+        runtime = self.runtime()
+        delivery = ChangesAfterCopy(self.delivery(1))
+        accepted = runtime.accept(delivery)
+        self.assertEqual(accepted.observation_disposition, "observed")
+        self.assertIsNotNone(accepted.opportunity)
+        self.assertEqual(accepted.opportunity.anchor_event_id, "e1")
+
+    def test_batch_schedules_from_the_exact_retained_copy(self):
+        runtime = self.runtime()
+        accepted = runtime.accept_batch(
+            [ChangesAfterCopy(self.delivery(1)), ChangesAfterCopy(self.delivery(2))]
+        )
+        self.assertEqual(accepted.observation_dispositions, ("observed", "observed"))
+        self.assertIsNotNone(accepted.opportunity)
+        self.assertEqual(accepted.opportunity.anchor_event_id, "e2")
+
     def test_backfill_batch_is_context_only_and_creates_no_wake_obligation(self):
         runtime = self.runtime()
         dispositions = runtime.observe_context_batch(
@@ -151,6 +185,29 @@ class LiveCoalescingCases(RuntimeCase):
         self.assertEqual(
             [record["stage"] for record in self.receipts],
             ["observation", "attention", "participant-host"] * 2,
+        )
+
+    def test_host_cancellation_discards_pending_wake_but_retains_context(self):
+        holder = {}
+
+        def cancel_after_pending(_projection, _config):
+            accepted = holder["runtime"].accept(self.delivery(2))
+            self.assertIsNone(accepted.opportunity)
+            raise HostCancellation()
+
+        runtime = self.runtime(classifier_transport=cancel_after_pending)
+        holder["runtime"] = runtime
+        first = runtime.accept(self.delivery(1))
+        with self.assertRaises(HostCancellation):
+            runtime.drain(first.opportunity)
+        self.assertEqual(runtime.scheduler.snapshot(), ())
+
+        successor = runtime.accept(self.delivery(3))
+        self.assertIsNotNone(successor.opportunity)
+        self.assertEqual(successor.opportunity.anchor_event_id, "e3")
+        self.assertEqual(
+            [event["id"] for event in self.provider._events],
+            ["e1", "e2", "e3"],
         )
 
     def test_suppression_stops_without_participant_invocation(self):

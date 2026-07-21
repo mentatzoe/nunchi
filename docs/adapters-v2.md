@@ -18,7 +18,9 @@ features.
 
 All surfaces feed `LiveRoomRuntime`: one active attention/participant turn, one
 replaceable newest pending anchor, a fresh current-tail participant view, and no
-send-time social reclassification.
+send-time social reclassification. Host cancellation atomically drops active
+and pending wake work while leaving already observed events as context; a later
+live event starts a new opportunity rather than replaying the cancelled anchor.
 
 ## Generic JSON-lines host
 

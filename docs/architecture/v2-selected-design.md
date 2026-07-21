@@ -130,6 +130,8 @@ stateDiagram-v2
     ActiveWithPending --> ActiveWithPending: replace pending anchor
     Active --> Idle: active work completes, no newer event
     ActiveWithPending --> Active: active work completes; immediately assemble one fresh snapshot
+    Active --> Idle: host cancellation; discard wake work
+    ActiveWithPending --> Idle: host cancellation; discard pending wake work
     Active --> Idle: restart; observations may be restored as context
     ActiveWithPending --> Idle: restart; discard pending anchor
 ```
@@ -137,6 +139,9 @@ stateDiagram-v2
 There is no handled/open state, response debt, speaker allocation, or per-event
 participant job. A continuously active room may create successive fresh
 considerations, but Nunchi never catches up message by message.
+Cancellation drops both the exact active generation and any pending anchor;
+already retained events remain factual context for a later live opportunity
+but are not promoted into orphaned or replayed wake work.
 
 ## Attention and contribution
 
