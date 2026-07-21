@@ -332,37 +332,31 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
             "discord:user:777",
         )
 
-    async def test_failing_client_does_not_stop_the_pump(self):
+    async def test_global_send_failure_stops_before_a_post_gap_event(self):
         queue: asyncio.Queue = asyncio.Queue(maxsize=8)
         shutdown = asyncio.Event()
         received: list[dict] = []
-        calls = {"n": 0}
-
-        async def flaky_send(params: dict) -> None:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise ConnectionError("MCP client went away")
+        async def failed_broadcast(params: dict) -> None:
             received.append(params)
-            shutdown.set()
+            raise ConnectionError("global broadcast failed")
 
         for author in ("111", "222"):
             enqueue_event(queue, filter_message_create(_create_data(author), "999"))
         source = DiscordEventSourceV2(
             allowed_channel_ids=frozenset({"444555666"})
         )
-        await asyncio.wait_for(
-            pump_notifications(
-                queue,
-                flaky_send,
-                shutdown=shutdown,
-                projector=source.notification_params,
-            ),
-            timeout=5.0,
-        )
-        self.assertEqual(
-            [p["native_input"]["event"]["author_id"] for p in received],
-            ["discord:user:222"],
-        )
+        with self.assertRaises(ConnectionError):
+            await asyncio.wait_for(
+                pump_notifications(
+                    queue,
+                    failed_broadcast,
+                    shutdown=shutdown,
+                    projector=source.notification_params,
+                ),
+                timeout=5.0,
+            )
+        self.assertEqual(len(received), 1)
+        self.assertEqual(queue.qsize(), 1)
 
     async def test_dm_message_has_null_guild_id(self):
         data = _create_data()
@@ -379,7 +373,7 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBackpressure(unittest.IsolatedAsyncioTestCase):
-    async def test_drop_oldest_when_queue_full(self):
+    async def test_queue_overflow_refuses_post_gap_event_without_eviction(self):
         queue: asyncio.Queue = asyncio.Queue(maxsize=2)
         events = [
             filter_message_create(_create_data(str(i), content=f"msg{i}"), "999")
@@ -392,7 +386,11 @@ class TestBackpressure(unittest.IsolatedAsyncioTestCase):
         self.assertIn("queue full", "\n".join(captured.output))
 
         remaining = [queue.get_nowait().content for _ in range(queue.qsize())]
-        self.assertEqual(remaining, ["msg2", "msg3"], "oldest must be dropped, newest kept")
+        self.assertEqual(
+            remaining,
+            ["msg1", "msg2"],
+            "a post-gap event must not replace retained continuity",
+        )
         self.assertEqual(queue.qsize(), 0)
 
 

@@ -158,9 +158,16 @@ def serve(config: Config) -> int:
             blocked_actor_ids=config.blocked_actors,
         )
         protocol = GatewayProtocol(config.token)
+
+        def _enqueue_or_fail(event) -> None:
+            if not enqueue_event(queue, event):
+                raise GatewayFatalError(
+                    "notification continuity lost to bounded-queue overflow"
+                )
+
         runner = GatewayRunner(
             protocol,
-            lambda event: enqueue_event(queue, event),
+            _enqueue_or_fail,
         )
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
@@ -189,6 +196,21 @@ def serve(config: Config) -> int:
                 signal.raise_signal(signal.SIGTERM)
 
         gateway_task.add_done_callback(_on_gateway_done)
+
+        def _on_pump_done(task: asyncio.Task) -> None:
+            if task.cancelled() or shutdown.is_set():
+                return
+            exc = task.exception()
+            if exc is None:
+                logger.critical("notification pump stopped — shutting down")
+            else:
+                logger.critical(
+                    "notification pump died: %s — shutting down",
+                    exc,
+                )
+            signal.raise_signal(signal.SIGTERM)
+
+        pump_task.add_done_callback(_on_pump_done)
 
         async with session_manager.run():
             try:

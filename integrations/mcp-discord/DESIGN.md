@@ -65,8 +65,9 @@ sequenceDiagram
    encoding before the credential-bearing Resume payload can use it.
 8. Sends use a closed allowed-mentions object, exact reply targets, Discord rate
    limits and a local per-channel backstop.
-9. The live notification queue is bounded and drops oldest when full. It is not
-   persisted and never becomes a FIFO of conversational obligations.
+9. The live notification queue is bounded. Overflow terminates the transport
+   session before any post-gap event can be delivered; it is not persisted and
+   never becomes a FIFO of conversational obligations.
 10. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
 
 ## Failure semantics
@@ -78,8 +79,9 @@ sequenceDiagram
 | Gateway resumable disconnect | Resume exact session/sequence with bounded backoff. |
 | Non-Discord resume URL or malformed gateway identity/sequence | Refuse the resume target, discard resumable state, and reconnect for fresh identification. |
 | Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
-| Queue full | Drop oldest queued notification, retain newest, log one operational warning. |
+| Queue full | Refuse the new event and terminate the transport session; the client reconnects and restores bounded message history as context under its declared restart gap. |
 | MCP client disconnect or stalled notification write | Bound and cancel that session's write, remove only that session; other sessions and gateway continue concurrently. |
+| Global notification broadcast failure | Terminate the transport rather than delivering later events across an invisible gap. |
 | Discord 429/5xx | Bounded rate-limit/retry policy; tool returns generic failure when exhausted. |
 | Discord 401/403 | Immediate non-retryable generic tool failure. |
 | SIGTERM/SIGINT | Stop notifications, drain bounded in-flight tools, close gateway, exit. |

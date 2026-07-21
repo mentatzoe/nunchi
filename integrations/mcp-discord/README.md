@@ -47,7 +47,7 @@ file.
 | `NUNCHI_MCP_DISCORD_BLOCKED_ACTORS` | empty | Exact actor snowflakes made unroutable by transport policy. |
 | `NUNCHI_MCP_DISCORD_HOST` | `127.0.0.1` | Loopback HTTP bind only: `127.0.0.1`, `::1`, or `localhost`. |
 | `NUNCHI_MCP_DISCORD_PORT` | `3993` | HTTP bind port. |
-| `NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE` | `256` | Bounded live-notification queue; oldest is replaced when full. |
+| `NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE` | `256` | Bounded live-notification queue; overflow terminates the transport session instead of hiding a gap. |
 | `NUNCHI_MCP_DISCORD_BACKSTOP_MAX_SENDS` | `5` | Maximum transport effects per channel/window. |
 | `NUNCHI_MCP_DISCORD_BACKSTOP_WINDOW_SECONDS` | `10` | Local send-backstop window. |
 | `NUNCHI_MCP_DISCORD_DRAIN_TIMEOUT_SECONDS` | `10` | Graceful in-flight tool drain deadline. |
@@ -84,14 +84,16 @@ snowflake strings, bot and room-mention booleans, replies, and structured user
 mentions; coercible or malformed API identity/addressing fields make the tool
 call fail instead of disappearing from the returned context.
 
-The notification queue is deliberately not a durable obligation queue. When a
-client falls behind, the oldest queued event is replaced by the newest and a
-warning is logged. Reconnect/resume preserves Discord's gateway session when
-possible, but the MCP transport promises neither persistent notification replay
-nor gap-free restart continuity. Consumers backfill bounded history as context
-before accepting new live opportunities. Notification writes are concurrent
-and individually bounded: a stalled client is evicted without delaying healthy
-clients or the Discord gateway.
+The notification queue is deliberately not a durable obligation queue. When it
+fills, the new event is refused and the transport session terminates; it never
+drops one event and then delivers a falsely continuous successor.
+Reconnect/resume preserves Discord's gateway session when possible, but the MCP
+transport promises neither persistent notification replay nor gap-free restart
+continuity. Consumers backfill bounded message history as context before
+accepting new live opportunities, under their declared restart gap. Notification
+writes are concurrent and individually bounded: a stalled client is evicted
+without delaying healthy clients or the Discord gateway; a global broadcast
+failure terminates the transport instead of hiding a delivery hole.
 
 ## Security boundary
 
