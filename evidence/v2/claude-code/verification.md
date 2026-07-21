@@ -1,24 +1,45 @@
 # Claude Code V2 — verification index
 
-**Attempt 5**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt 1/2/3/4
-indexes are preserved in git at candidates `6476b58` / `1990129` / `6513135` /
-`a6a7a8b`. Every command below was run on the Attempt-5 candidate
-`f6c34d12af907bad114ebceda6b1f52c0c026665`; results are quoted exactly.
+**Attempt 6**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt
+1/2/3/4/5 indexes are preserved in git at candidates `6476b58` / `1990129` /
+`6513135` / `a6a7a8b` / `f6c34d1`. Every command below was run on the
+Attempt-6 candidate `4ca9d8bbb6fc40c33b9fc54a7dd027922472994e`; results are
+quoted exactly.
 
 ## Deterministic commands and results
 
 | Command | Result |
 |---|---|
-| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 22 tests … OK` |
+| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 36 tests … OK` |
 | `python3 -m unittest tests.v2.test_claude_code` | `Ran 52 tests … OK` |
-| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 96 tests … OK` |
-| `python3 -m unittest` (full offline baseline) | `Ran 1195 tests in 19.6s — OK (skipped=7)` |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 110 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1209 tests in 23.5s — OK (skipped=7)` |
 | `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
-| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL; the gate/wrapper fix does not touch attention/scene mechanics) |
-| `git diff --check` (staged Attempt-5 tree) | clean |
-| Patch reproducibility (scratch build) onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target (unchanged since Attempt 3 — this attempt touches only the gate and shell wrapper, not the transport patches) |
+| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (byte-identical across runs; the JSON-validation fix does not touch attention/scene mechanics) |
+| `git diff --check` (staged Attempt-6 tree) | clean |
+| Patch reproducibility (scratch build) onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target (unchanged since Attempt 3 — this attempt touches only the shell wrapper, not the transport patches) |
 | Installer safety: apply against a symlinked target / rollback against a symlinked backup | exit 2 each, `symlink; refusing to follow`, referent bytes unchanged |
-| Installed-host probes (Attempt 5, no arming) | foreign-room prompt → `block`; bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output; wrapper fault injection (syntax-broken gate) → `block`; **wrapper fault injection (genuinely empty/zero-byte gate file — the exact `[N2-CLAUDE-A4-REWORK-01]` reproduction) → `block` with the recovery-hint reason, gate restored and digest re-verified afterward** |
+| Transport-patch state, re-confirmed read-only | `--verify` against the installed plugin → exit `2` `UNRECOGNIZED`, digest `b025d1c2…` (matches Codex's independent finding exactly); pristine backup confirmed to match pinned base `c3c79c65…` exactly — no write performed |
+| Installed-host probes (Attempt 6, no arming) | foreign-room prompt → `block`; bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output; wrapper fault injection (syntax-broken gate) → `block`; wrapper fault injection (empty gate file) → `block`; **wrapper fault injection (well-formed but unsupported `{"decision":"allow"}`) → `block`, gate restored and digest re-verified afterward** |
+
+## Strict JSON output validation (Attempt-6 correction)
+
+`tests/test_claude_code_hook_wrapper.py::StrictOutputValidationCases` proves
+brace-wrapping alone is not proof of a real decision — every case below is
+brace-shaped and would have passed Attempt 5's shell pattern check, but must
+still be blocked under strict, independent validation:
+
+| Case | Result |
+|---|---|
+| `{not-json}` (brace-wrapped, invalid JSON) | blocked |
+| `{"decision":"allow"}` (valid JSON, unsupported decision value) | blocked |
+| `{"decision":"block","reason":"","decision":"allow"}` (duplicate key — a naive parser resolves this to "allow") | blocked |
+| `{"unexpected":true}` (valid JSON, unrecognized shape) | blocked |
+| Block shape missing `reason`, or with an extra key, or wrong `reason` type | blocked (each independently) |
+| Context shape missing `additionalContext`, with an extra key, wrong `hookEventName`, or wrong `additionalContext` type | blocked (each independently) |
+| `{"decision":"block","reason":NaN}` (non-finite constant, a non-standard JSON extension some parsers accept) | blocked |
+| Exact gate-owned block shape, byte-for-byte | passes unmodified (control) |
+| Exact gate-owned context shape, byte-for-byte | passes unmodified (control) |
 
 ## Empty/truncated-gate process-boundary fault injection (Attempt-5 correction)
 

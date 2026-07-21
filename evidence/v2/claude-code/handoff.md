@@ -592,3 +592,108 @@ not; live scenes are pending Zoe's explicit approval to arm the host.
 **Handoff target**: `v2-integrator` for adversarial re-review (the exact
 prior probes plus this new fault-injection scenario). This lane does not
 self-declare acceptance.
+
+---
+
+## Attempt 6 — 2026-07-21 (rework: strict JSON validation + arming-ladder correction)
+
+**Delivering lane**: `v2-claude-owner` — Station, model `claude-fable-5`.
+Attempt 5 (candidate `f6c34d1`, evidence `3ca8589`) closed the empty/truncated
+gate defect, but exact-object adversarial re-review of that exact candidate
+found two further HIGH blockers: the brace-check was too loose, and the
+documented arming ladder would fail immediately on this specific host.
+Attempts 1–5 and their evidence are preserved unchanged in git history; this
+attempt is a new candidate on the same branch, appended here.
+
+### Exact candidate and commit split
+
+- **Implementation candidate**: `4ca9d8bbb6fc40c33b9fc54a7dd027922472994e`
+  (descends from Attempt-5 evidence tip `3ca8589` on branch
+  `claude/claude-code-v2-integration-3ac219`).
+- **Evidence-only binding**: the commit adding this Attempt-6 section (plus
+  refreshed provenance and the arming-ladder correction) sits on top; its
+  diff from `4ca9d8b` touches only `evidence/v2/claude-code/`.
+
+Attempt-6 changed-file inventory (implementation candidate, `3ca8589` →
+`4ca9d8b`, the immediate parent):
+
+```text
+M  integrations/claude-code/nunchi-claude-v2-hook.sh   # strict JSON validation
+M  tests/test_claude_code_hook_wrapper.py              # StrictOutputValidationCases
+```
+
+`nunchi_claude_v2.py` (the Python gate) is unchanged since Attempt 5; the
+transport patches are unchanged since Attempt 3. No `src/`, `schemas/`, or
+other lane's surface changed.
+
+### First correction — HIGH: brace-wrapping is not proof of a valid decision
+
+| Required correction | Resolution | Proof |
+|---|---|---|
+| the Attempt-5 wrapper only checked `{`…`}` shell pattern-matching; `{not-json}`, `{"decision":"allow"}`, and duplicate-key `{"decision":"block","reason":"","decision":"allow"}` all pass that check and were forwarded unchanged at exit 0 | The wrapper now pipes stdout through a `python3 -c` validator that parses strictly (`object_pairs_hook` rejects duplicate keys; `parse_constant` rejects `NaN`/`Infinity`/`-Infinity`) and accepts **only** an exact match, by key set and type, against the gate's two owned output shapes: `{"decision": "block", "reason": <str>}` or `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": <str>}}`. Every other configured `user-prompt-submit` path already emits one of those two exact shapes (confirmed by code trace, unchanged since Attempt 5), so anything else — invalid JSON, an unsupported decision value, duplicate keys, an unrecognized shape, missing/extra keys, wrong types, wrong event name, non-finite constants — is treated exactly like a crash. | `tests/test_claude_code_hook_wrapper.py::StrictOutputValidationCases` — the exact three reported reproductions plus `{"unexpected":true}`, missing/extra keys on both shapes, wrong `reason`/`additionalContext` types, wrong `hookEventName`, and a non-finite constant, each independently proven blocked; plus two byte-for-byte pass-through controls for the exact gate-owned shapes. Live installed-host reproduction of `{"decision":"allow"}` below. |
+
+### Second correction — HIGH: arming ladder would fail immediately on this host (REWORK-02)
+
+The prior "Remaining operator steps" ladder applied the transport patch
+directly. On this exact host that fails immediately: the installed
+`server.ts` (`b025d1c2…`) is neither the pinned base (`c3c79c65…`) nor the
+pinned patched result (`0d1ffaa0…`) — it is a historical, functionally
+partial hand-patch predating this packet — so `apply-transport-patch.sh`'s
+own fail-closed check refuses it (`UNRECOGNIZED`, exit 2) before ever
+touching it. **Independently re-confirmed live and read-only this session**
+(no host mutation performed): `--verify` against the installed file exits
+`2` `UNRECOGNIZED` with digest `b025d1c2…`, exactly matching Codex's
+finding; the pristine backup `server.ts.orig-0.0.4` exists, is a
+caller-owned regular file, and matches the pinned base digest `c3c79c65…`
+exactly, so `--rollback` will succeed. `installed-runtime.md`'s ladder is
+corrected to `--rollback` first, `--verify` (expect exit 1, pristine),
+apply, `--verify` (expect exit 0, `0d1ffaa0…`), then settings/restart, with
+the observed/expected digest transition recorded (`b025d1c2…` →
+`c3c79c65…` → `0d1ffaa0…`). **No rollback or apply was performed** — both
+confirmation checks are read-only.
+
+### Deterministic commands and results (Attempt 6)
+
+`python3 -m unittest tests.test_claude_code_hook_wrapper` → **36 OK** (14
+new); `python3 -m unittest tests.v2.test_claude_code` → 52 OK; the
+five-module guard run → **110 OK**; full baseline `python3 -m unittest` →
+**1209 OK (skipped=7)**; `python3 scripts/check_governance.py --check-cli` →
+OK; scene replay → 20 rows (19 PASS, 1 declared), byte-identical across
+runs; patch reproducibility unchanged (`0d1ffaa0…` — this attempt touches
+no `.ts` or patch file); `git diff --check` → clean. Full table in
+`verification.md`.
+
+### Installed provenance and live fault-injection probes (Attempt 6)
+
+Staged wrapper digest
+`5443e928575e9832255d3fb53712a08130b7f2b37e05fc0552b08335d6b98feb` (gate
+digest unchanged at `398dff63…`). With the installed wrapper live,
+`nunchi_claude_v2.py` was temporarily replaced with a stub emitting the
+well-formed but unsupported `{"decision":"allow"}` — a bound-room channel
+prompt was submitted, and the installed wrapper produced the fail-closed
+block decision; the forged allow was never forwarded. The gate file was
+restored and its SHA-256 re-verified to match the pre-probe digest exactly.
+Separately, `apply-transport-patch.sh --verify` (read-only) was re-run
+against the installed plugin and independently confirmed exit `2`
+`UNRECOGNIZED` at `b025d1c2…`, and the pristine backup was confirmed
+(read-only) to match `c3c79c65…` exactly. Full digests and transcripts are
+in `installed-runtime.md`.
+
+### Host-mutation approval still required (do not arm until Zoe approves)
+
+Unchanged: the live ladder remains NOT RUN pending Zoe's explicit approval
+to arm the host. The corrected operator steps are in `installed-runtime.md`.
+This lane performed no repository-external host mutation beyond refreshing
+the staged (inert) copy and two restore-verified fault-injection probes,
+plus two read-only transport-patch confirmation checks; no `settings.json`
+edit, no `--rollback`, no patch application, no outbound Discord send
+beyond textual status replies.
+
+### Known limitations and rejected claims (Attempt 6)
+
+Unchanged from Attempt 5. **Rejected claim**: "live parity is proven" — it
+is not; live scenes are pending Zoe's explicit approval to arm the host.
+
+**Handoff target**: `v2-integrator` for adversarial re-review (the exact
+prior probes plus these two new scenarios). This lane does not
+self-declare acceptance.
