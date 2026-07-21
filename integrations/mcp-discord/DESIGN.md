@@ -73,7 +73,7 @@ sequenceDiagram
 | Gateway resumable disconnect | Resume exact session/sequence with bounded backoff. |
 | Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
 | Queue full | Drop oldest queued notification, retain newest, log one operational warning. |
-| MCP client disconnect | Remove that session; other sessions and gateway continue. |
+| MCP client disconnect or stalled notification write | Bound and cancel that session's write, remove only that session; other sessions and gateway continue concurrently. |
 | Discord 429/5xx | Bounded rate-limit/retry policy; tool returns generic failure when exhausted. |
 | Discord 401/403 | Immediate non-retryable generic tool failure. |
 | SIGTERM/SIGINT | Stop notifications, drain bounded in-flight tools, close gateway, exit. |

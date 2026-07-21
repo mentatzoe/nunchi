@@ -48,7 +48,13 @@ from nunchi.mcp_discord.gateway import GatewayProtocol
 from nunchi.mcp_discord.hygiene import REDACTED, TokenRedactionFilter
 from nunchi.mcp_discord.ratelimit import RateLimiter, SendBackstop
 from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
-from nunchi.mcp_discord.server import InFlight, enqueue_event, main, pump_notifications
+from nunchi.mcp_discord.server import (
+    InFlight,
+    broadcast_sessions,
+    enqueue_event,
+    main,
+    pump_notifications,
+)
 from nunchi.mcp_discord.tools import TOOL_NAMES, TOOL_SCHEMAS, ToolExecutor, shape_message
 
 TOKEN = "NUNCHI-TEST-TOKEN-4f9a2bconfidential"
@@ -861,6 +867,56 @@ class TestMcpBinding(unittest.TestCase):
         dumped = notification.model_dump()
         self.assertEqual(dumped["method"], V2_NOTIFICATION_METHOD)
         self.assertEqual(dumped["params"], {"schema_version": 2})
+
+
+class TestMcpBroadcast(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_session_is_bounded_and_does_not_delay_healthy_session(self):
+        class SlowSession:
+            async def send_notification(self, _notification):
+                await asyncio.Event().wait()
+
+        class HealthySession:
+            def __init__(self):
+                self.notifications = []
+
+            async def send_notification(self, notification):
+                self.notifications.append(notification)
+
+        slow = SlowSession()
+        healthy = HealthySession()
+        sessions = [slow, healthy]
+        discarded = []
+        await broadcast_sessions(
+            sessions,
+            {"schema_version": 2},
+            discard=discarded.append,
+            send_timeout=0.01,
+        )
+        self.assertEqual(len(healthy.notifications), 1)
+        self.assertEqual(discarded, [slow])
+
+    async def test_failed_session_does_not_remove_other_sessions(self):
+        class Session:
+            def __init__(self, fail=False):
+                self.fail = fail
+                self.called = False
+
+            async def send_notification(self, _notification):
+                self.called = True
+                if self.fail:
+                    raise OSError("gone")
+
+        failed = Session(fail=True)
+        healthy = Session()
+        discarded = []
+        await broadcast_sessions(
+            [failed, healthy],
+            {"schema_version": 2},
+            discard=discarded.append,
+        )
+        self.assertTrue(failed.called)
+        self.assertTrue(healthy.called)
+        self.assertEqual(discarded, [failed])
 
 
 if __name__ == "__main__":

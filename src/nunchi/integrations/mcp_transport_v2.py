@@ -16,6 +16,7 @@ from ..mcp_discord.events import V2_NOTIFICATION_METHOD
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_SSE_EVENT_BYTES = 1024 * 1024
+MAX_SSE_EVENT_LINES = 16384
 HTTP_TIMEOUT_SECONDS = 30.0
 STREAM_TIMEOUT_SECONDS = 65.0
 
@@ -61,8 +62,8 @@ def iter_sse_data(lines: Iterable[str]) -> Iterator[str]:
         if field != "data":
             continue
         value = value.removeprefix(" ")
-        size += len(value.encode("utf-8"))
-        if size > MAX_SSE_EVENT_BYTES:
+        size += len(value.encode("utf-8")) + (1 if data_lines else 0)
+        if size > MAX_SSE_EVENT_BYTES or len(data_lines) >= MAX_SSE_EVENT_LINES:
             raise MCPTransportV2Error("MCP SSE event exceeded its size budget")
         data_lines.append(value)
     if data_lines:
@@ -119,6 +120,48 @@ def _bounded_read(response) -> bytes:
     if len(payload) > MAX_RESPONSE_BYTES:
         raise MCPTransportV2Error("MCP response exceeded its size budget")
     return payload
+
+
+def _jsonrpc_result(raw: bytes, request_id: int) -> dict[str, Any]:
+    """Return one strict, correlated JSON-RPC result from JSON or SSE."""
+
+    candidates: list[Any] = []
+    try:
+        candidates.append(_strict_json(raw))
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise MCPTransportV2Error("MCP JSON-RPC response is invalid") from exc
+        for data in iter_sse_data(text.splitlines(keepends=True)):
+            try:
+                candidate = _strict_json(data)
+            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(candidate, dict)
+                and type(candidate.get("id")) is int
+                and candidate.get("id") == request_id
+            ):
+                candidates.append(candidate)
+    matches = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and type(candidate.get("id")) is int
+        and candidate.get("id") == request_id
+    ]
+    if len(matches) != 1:
+        raise MCPTransportV2Error("MCP JSON-RPC response is invalid")
+    document = matches[0]
+    if document.get("jsonrpc") != "2.0":
+        raise MCPTransportV2Error("MCP JSON-RPC response is invalid")
+    if "error" in document:
+        raise MCPTransportV2Error("MCP JSON-RPC request failed")
+    result = document.get("result")
+    if not isinstance(result, dict):
+        raise MCPTransportV2Error("MCP JSON-RPC result is invalid")
+    return result
 
 
 class MCPTransportClientV2:
@@ -192,9 +235,12 @@ class MCPTransportClientV2:
             try:
                 return self._open_request(retry, timeout=timeout)
             except urllib.error.HTTPError as retry_error:
-                raise MCPTransportV2Error(
-                    f"MCP HTTP request failed with status {retry_error.code}"
-                ) from retry_error
+                try:
+                    retry_error.close()
+                finally:
+                    raise MCPTransportV2Error(
+                        f"MCP HTTP request failed with status {retry_error.code}"
+                    ) from retry_error
             except (urllib.error.URLError, OSError) as retry_error:
                 raise MCPTransportV2Error("MCP network request failed") from retry_error
         except (urllib.error.URLError, OSError) as exc:
@@ -220,6 +266,7 @@ class MCPTransportClientV2:
         return self._open(request, self.http_timeout)
 
     def initialize(self) -> str:
+        self.session_id = None
         initialize = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -232,7 +279,7 @@ class MCPTransportClientV2:
         }
         with self._post(initialize, with_session=False) as response:
             session_id = response.headers.get("mcp-session-id")
-            _bounded_read(response)
+            initialize_raw = _bounded_read(response)
         if (
             not isinstance(session_id, str)
             or not session_id
@@ -241,17 +288,50 @@ class MCPTransportClientV2:
             or any(ord(character) < 33 or ord(character) > 126 for character in session_id)
         ):
             raise MCPTransportV2Error("MCP session identity is invalid")
+        initialize_result = _jsonrpc_result(initialize_raw, 1)
+        if (
+            initialize_result.get("protocolVersion") != "2025-03-26"
+            or not isinstance(initialize_result.get("capabilities"), dict)
+            or not isinstance(initialize_result.get("serverInfo"), dict)
+        ):
+            raise MCPTransportV2Error("MCP initialize result is invalid")
         self.session_id = session_id
-        with self._post(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            with_session=True,
-        ) as response:
-            _bounded_read(response)
-        with self._post(
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-            with_session=True,
-        ) as response:
-            _bounded_read(response)
+        try:
+            with self._post(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                with_session=True,
+            ) as response:
+                initialized_raw = _bounded_read(response)
+            if initialized_raw.strip():
+                raise MCPTransportV2Error(
+                    "MCP initialized notification response is invalid"
+                )
+            with self._post(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                with_session=True,
+            ) as response:
+                tools_raw = _bounded_read(response)
+            tools_result = _jsonrpc_result(tools_raw, 2)
+            tools = tools_result.get("tools")
+            if not isinstance(tools, list) or any(
+                not isinstance(tool, dict) or not isinstance(tool.get("name"), str)
+                for tool in tools
+            ):
+                raise MCPTransportV2Error("MCP tool inventory is invalid")
+            tool_names = [tool["name"] for tool in tools]
+            names = set(tool_names)
+            if len(names) != len(tool_names):
+                raise MCPTransportV2Error("MCP tool inventory is invalid")
+            if not {
+                "send_message",
+                "reply_message",
+                "add_reaction",
+                "read_history",
+            }.issubset(names):
+                raise MCPTransportV2Error("MCP tool inventory is incomplete")
+        except Exception:
+            self.session_id = None
+            raise
         return session_id
 
     def open_stream(self):
@@ -279,29 +359,7 @@ class MCPTransportClientV2:
         }
         with self._post(body, with_session=True) as response:
             raw = _bounded_read(response)
-        try:
-            document = _strict_json(raw)
-        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
-            document = None
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise MCPTransportV2Error("MCP tool response is invalid") from exc
-            for data in iter_sse_data(text.splitlines(keepends=True)):
-                try:
-                    candidate = _strict_json(data)
-                except (ValueError, json.JSONDecodeError):
-                    continue
-                if isinstance(candidate, dict) and candidate.get("id") == request_id:
-                    document = candidate
-                    break
-        if not isinstance(document, dict) or document.get("id") != request_id:
-            raise MCPTransportV2Error("MCP tool response is invalid")
-        if document.get("error") is not None:
-            raise MCPTransportV2Error("MCP tool call failed")
-        result = document.get("result")
-        if not isinstance(result, dict):
-            raise MCPTransportV2Error("MCP tool result is invalid")
+        result = _jsonrpc_result(raw, request_id)
         if result.get("isError") is True:
             raise MCPTransportV2Error("MCP tool call failed")
         content = result.get("content")
@@ -347,6 +405,8 @@ class MCPTransportClientV2:
                     continue
                 if (
                     not isinstance(message, dict)
+                    or message.get("jsonrpc") != "2.0"
+                    or "id" in message
                     or message.get("method") != notification_method
                     or not isinstance(message.get("params"), dict)
                 ):

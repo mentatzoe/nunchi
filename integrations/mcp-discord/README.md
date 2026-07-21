@@ -86,7 +86,9 @@ client falls behind, the oldest queued event is replaced by the newest and a
 warning is logged. Reconnect/resume preserves Discord's gateway session when
 possible, but the MCP transport promises neither persistent notification replay
 nor gap-free restart continuity. Consumers backfill bounded history as context
-before accepting new live opportunities.
+before accepting new live opportunities. Notification writes are concurrent
+and individually bounded: a stalled client is evicted without delaying healthy
+clients or the Discord gateway.
 
 ## Security boundary
 
@@ -108,10 +110,13 @@ before accepting new live opportunities.
 python3 -m unittest \
   tests.test_mcp_discord_gateway \
   tests.test_mcp_discord_server \
-  tests.v2.test_discord_transport
+  tests.v2.test_discord_transport \
+  tests.v2.test_mcp_transport_client_v2
 ```
 
 The offline suite covers gateway identify/resume, exact self retention,
 collision-free reaction identity, newest-preserving backpressure, channel
 scoping, bearer denial/acceptance, credential separation, rate limits,
 backstops, token hygiene and SDK-optional import behavior.
+The client-side suite also rejects malformed/uncorrelated MCP handshakes and
+bounds multi-line SSE framing overhead.

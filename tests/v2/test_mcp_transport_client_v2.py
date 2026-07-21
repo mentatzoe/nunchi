@@ -18,7 +18,7 @@ AUTH = "mcp-client-auth-secret-0123456789abcdef"
 
 
 class Response:
-    def __init__(self, payload=b"{}", *, headers=None, lines=None):
+    def __init__(self, payload=b"", *, headers=None, lines=None):
         self.payload = payload
         self.headers = headers or {}
         self.lines = list(lines or [])
@@ -50,6 +50,44 @@ class ScriptedOpen:
 
 
 class MCPTransportClientCases(unittest.TestCase):
+    @staticmethod
+    def jsonrpc_response(request_id, result):
+        return Response(
+            json.dumps(
+                {"jsonrpc": "2.0", "id": request_id, "result": result}
+            ).encode("utf-8")
+        )
+
+    @classmethod
+    def initialize_response(cls, *, headers=None):
+        response = cls.jsonrpc_response(
+            1,
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "serverInfo": {"name": "nunchi-mcp-discord", "version": "2"},
+            },
+        )
+        response.headers = headers or {"mcp-session-id": "session-1"}
+        return response
+
+    @classmethod
+    def tools_response(cls):
+        return cls.jsonrpc_response(
+            2,
+            {
+                "tools": [
+                    {"name": name}
+                    for name in (
+                        "send_message",
+                        "reply_message",
+                        "add_reaction",
+                        "read_history",
+                    )
+                ]
+            },
+        )
+
     def test_every_handshake_tool_and_stream_request_is_bearer_authenticated(self):
         tool_document = {
             "jsonrpc": "2.0",
@@ -67,9 +105,9 @@ class MCPTransportClientCases(unittest.TestCase):
         }
         scripted = ScriptedOpen(
             [
-                Response(headers={"mcp-session-id": "session-1"}),
+                self.initialize_response(),
                 Response(),
-                Response(),
+                self.tools_response(),
                 Response(json.dumps(tool_document).encode("utf-8")),
                 Response(
                     lines=[
@@ -129,6 +167,111 @@ class MCPTransportClientCases(unittest.TestCase):
         client.session_id = "session-1"
         with self.assertRaises(MCPTransportV2Error):
             client.call_tool("read_history", {"channel_id": "42"})
+
+        scripted = ScriptedOpen(
+            [Response(b'{"id":10,"result":{"messages":[]}}')]
+        )
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        client.session_id = "session-1"
+        with self.assertRaises(MCPTransportV2Error):
+            client.call_tool("read_history", {"channel_id": "42"})
+
+    def test_empty_data_lines_cannot_exceed_sse_event_budget(self):
+        with mock.patch.object(transport_v2, "MAX_SSE_EVENT_BYTES", 4):
+            with self.assertRaisesRegex(MCPTransportV2Error, "size budget"):
+                tuple(iter_sse_data(["data:\n"] * 6 + ["\n"]))
+
+    def test_initialize_rejects_uncorrelated_error_and_incomplete_handshakes(self):
+        cases = (
+            Response(
+                json.dumps(
+                    {"jsonrpc": "2.0", "id": 99, "result": {}}
+                ).encode("utf-8"),
+                headers={"mcp-session-id": "session-1"},
+            ),
+            Response(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "error": {"code": -32000, "message": "no"},
+                    }
+                ).encode("utf-8"),
+                headers={"mcp-session-id": "session-1"},
+            ),
+        )
+        for response in cases:
+            with self.subTest(payload=response.payload):
+                client = MCPTransportClientV2(
+                    "http://127.0.0.1:3993/mcp",
+                    AUTH,
+                    open_request=ScriptedOpen([response]),
+                )
+                with self.assertRaises(MCPTransportV2Error):
+                    client.initialize()
+                self.assertIsNone(client.session_id)
+
+        scripted = ScriptedOpen(
+            [
+                self.initialize_response(),
+                Response(),
+                self.jsonrpc_response(2, {"tools": [{"name": "read_history"}]}),
+            ]
+        )
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        with self.assertRaisesRegex(MCPTransportV2Error, "incomplete"):
+            client.initialize()
+        self.assertIsNone(client.session_id)
+
+    def test_initialize_accepts_strict_sse_jsonrpc_result(self):
+        initialize = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "serverInfo": {"name": "nunchi-mcp-discord", "version": "2"},
+            },
+        }
+        tools = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "tools": [
+                    {"name": name}
+                    for name in (
+                        "send_message",
+                        "reply_message",
+                        "add_reaction",
+                        "read_history",
+                    )
+                ]
+            },
+        }
+        scripted = ScriptedOpen(
+            [
+                Response(
+                    f"event: message\ndata: {json.dumps(initialize)}\n\n".encode(),
+                    headers={"mcp-session-id": "session-1"},
+                ),
+                Response(),
+                Response(f"data: {json.dumps(tools)}\n\n".encode()),
+            ]
+        )
+        client = MCPTransportClientV2(
+            "http://127.0.0.1:3993/mcp",
+            AUTH,
+            open_request=scripted,
+        )
+        self.assertEqual(client.initialize(), "session-1")
 
 
 if __name__ == "__main__":

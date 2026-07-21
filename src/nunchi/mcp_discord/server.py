@@ -41,6 +41,7 @@ from .hygiene import install_redaction
 logger = logging.getLogger("nunchi.mcp_discord.server")
 
 _PUMP_POLL_SECONDS = 0.25
+_SESSION_SEND_TIMEOUT_SECONDS = 5.0
 
 
 class InFlight:
@@ -160,6 +161,28 @@ async def pump_notifications(
             await send(params)
         except Exception as exc:  # noqa: BLE001 — transport must outlive one client
             logger.warning("notification delivery failed (client gone?): %s", exc)
+
+
+async def broadcast_sessions(
+    sessions: list[object],
+    notification: object,
+    *,
+    discard: Callable[[object], None],
+    send_timeout: float = _SESSION_SEND_TIMEOUT_SECONDS,
+) -> None:
+    """Bound each session write so one stalled client cannot block its peers."""
+
+    async def deliver(session: object) -> None:
+        try:
+            await asyncio.wait_for(
+                session.send_notification(notification),  # type: ignore[attr-defined]
+                timeout=send_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 — transport isolates clients
+            logger.info("dropping MCP session after failed send: %s", exc)
+            discard(session)
+
+    await asyncio.gather(*(deliver(session) for session in sessions))
 
 
 def main(argv: list[str] | None = None) -> int:

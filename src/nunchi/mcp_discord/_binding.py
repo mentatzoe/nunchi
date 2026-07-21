@@ -43,7 +43,13 @@ from .gateway import GatewayProtocol
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
-from .server import BearerAuthMiddleware, InFlight, enqueue_event, pump_notifications
+from .server import (
+    BearerAuthMiddleware,
+    InFlight,
+    broadcast_sessions,
+    enqueue_event,
+    pump_notifications,
+)
 from .tools import TOOL_SCHEMAS, ToolExecutor
 
 logger = logging.getLogger("nunchi.mcp_discord.binding")
@@ -79,15 +85,16 @@ async def broadcast(
     params: dict,
     *,
     method: str = V2_NOTIFICATION_METHOD,
+    send_timeout: float = 5.0,
 ) -> None:
-    """Push one versioned Discord event notification to every live session."""
+    """Push one event concurrently; evict clients that fail or stop reading."""
     notification = _VendorNotification(method=method, params=params)
-    for session in registry.sessions():
-        try:
-            await session.send_notification(notification)  # type: ignore[arg-type]
-        except Exception as exc:  # noqa: BLE001 — one dead client must not stop the rest
-            logger.info("dropping MCP session after failed send: %s", exc)
-            registry.discard(session)
+    await broadcast_sessions(
+        registry.sessions(),
+        notification,
+        discard=registry.discard,
+        send_timeout=send_timeout,
+    )
 
 
 def build_server(
