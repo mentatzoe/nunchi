@@ -13,11 +13,13 @@ import contextvars
 import copy
 import hashlib
 import importlib.util
+import inspect
 import json
 import logging
 import os
 import sys
 import threading
+import uuid
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,10 +47,21 @@ def _load_runtime_module():
 _v2 = _load_runtime_module()
 HermesV2BoundaryError = _v2.HermesV2BoundaryError
 
+_NON_PRIVILEGED_TOOLS = frozenset({"web_search", "web_extract"})
+
+from nunchi.authorization import (
+    PrivilegedActionCoordinator,
+    PrivilegedActionGuard,
+    canonical_action_digest,
+)
 from nunchi.core import evaluate_v2
 from nunchi.participant import build_participant_wake
 from nunchi.policy import OperatorPolicy, OperatorPolicySource
-from nunchi.receipts import ReloadingPolicyReceiptSink, transport_receipt
+from nunchi.receipts import (
+    ReloadingPolicyAuthorizationSink,
+    ReloadingPolicyReceiptSink,
+    transport_receipt,
+)
 
 
 @dataclass(frozen=True)
@@ -64,6 +77,7 @@ class OpportunityEvaluation:
     promoted: Any = None
     policy_identity: str | None = None
     policy_fingerprint: str | None = None
+    policy_loader: Callable[[], OperatorPolicy] | None = None
 
 
 @dataclass(frozen=True)
@@ -109,9 +123,17 @@ def _operator_policy_fingerprint(policy: OperatorPolicy) -> str:
 class HermesV2Controller:
     """Process-local owner of exact bindings and one-use participant tickets."""
 
-    def __init__(self, *, participant_id: str, max_participants: int = 64) -> None:
+    def __init__(
+        self,
+        *,
+        participant_id: str,
+        max_participants: int = 64,
+        authorization_sink_factory: Callable[[Callable[[], OperatorPolicy]], Any] = ReloadingPolicyAuthorizationSink,
+    ) -> None:
         if not isinstance(max_participants, int) or max_participants < 1:
             raise HermesV2BoundaryError("participant registry limit is invalid")
+        if not callable(authorization_sink_factory):
+            raise HermesV2BoundaryError("authorization sink factory is invalid")
         self.max_participants = max_participants
         self._default_participant = str(participant_id)
         self.registry = _v2.BindingRegistry(participant_id=participant_id)
@@ -130,6 +152,9 @@ class HermesV2Controller:
         self._turns: dict[str, OpportunityEvaluation] = {}
         self._host_deliveries: dict[tuple[str, Any, str], HostDelivery] = {}
         self._control_output_boundaries: dict[str, int] = {}
+        self._authorization_sink_factory = authorization_sink_factory
+        self._participant_receipts: dict[str, OpportunityEvaluation] = {}
+        self._pending_authorizations: dict[str, tuple[Any, Any]] = {}
 
     def registry_for(self, participant_id: str):
         participant = str(participant_id).strip()
@@ -272,14 +297,18 @@ class HermesV2Controller:
     ) -> DeliveryResult:
         if accepted.opportunity is None:
             return DeliveryResult("observed")
-        evaluation = self.evaluate_opportunity(
-            binding=accepted.binding,
-            opportunity=accepted.opportunity,
-            policy_loader=accepted.host.policy_loader,
-            receipt_sink=accepted.host.receipt_sink,
-            classifier_transport=accepted.host.classifier_transport,
-            policy_identity=accepted.host.policy_identity,
-        )
+        try:
+            evaluation = self.evaluate_opportunity(
+                binding=accepted.binding,
+                opportunity=accepted.opportunity,
+                policy_loader=accepted.host.policy_loader,
+                receipt_sink=accepted.host.receipt_sink,
+                classifier_transport=accepted.host.classifier_transport,
+                policy_identity=accepted.host.policy_identity,
+            )
+        except BaseException:
+            self.fail_delivery(accepted)
+            raise
         if evaluation.status == "wake":
             if cancellation is None:
                 self.stage_turn(
@@ -355,7 +384,11 @@ class HermesV2Controller:
             max_events=policy.attention.attention_max_events,
             max_bytes=policy.attention.attention_max_bytes,
         )
-        receipt_sink(copy.deepcopy(binding.observation.build_observation_receipt(request)))
+        self._persist_receipt(
+            receipt_sink,
+            binding.observation.build_observation_receipt(request),
+            stage="observation",
+        )
         decision = evaluate_v2(
             request,
             policy=policy.attention,
@@ -376,16 +409,6 @@ class HermesV2Controller:
                 policy_identity=policy_identity,
                 policy_fingerprint=policy_fingerprint,
             )
-        if decision.get("status") == "error" and policy.attention.error_action == "NO_WAKE":
-            promoted = binding.scheduler.complete(opportunity)
-            return OpportunityEvaluation(
-                "no-wake", binding, opportunity, copy.deepcopy(request),
-                copy.deepcopy(decision), None, None, receipt_sink,
-                promoted=promoted,
-                policy_identity=policy_identity,
-                policy_fingerprint=policy_fingerprint,
-            )
-
         cited = tuple(
             dict.fromkeys(
                 event_id
@@ -405,12 +428,37 @@ class HermesV2Controller:
         packet = build_participant_wake(
             participant_snapshot, decision, policy=policy.attention
         )
+        if decision.get("status") == "error" and policy.attention.error_action == "NO_WAKE":
+            evaluation = OpportunityEvaluation(
+                "no-wake", binding, opportunity, copy.deepcopy(request),
+                copy.deepcopy(decision), copy.deepcopy(participant_snapshot),
+                copy.deepcopy(packet), receipt_sink,
+                policy_identity=policy_identity,
+                policy_fingerprint=policy_fingerprint,
+            )
+            self._persist_receipt(
+                receipt_sink,
+                self._participant_receipt(
+                    evaluation, outcome="unknown", invoked=False
+                ),
+                stage="participant-host",
+            )
+            promoted = binding.scheduler.complete(opportunity)
+            return OpportunityEvaluation(
+                "no-wake", binding, opportunity, copy.deepcopy(request),
+                copy.deepcopy(decision), copy.deepcopy(participant_snapshot),
+                copy.deepcopy(packet), receipt_sink,
+                promoted=promoted,
+                policy_identity=policy_identity,
+                policy_fingerprint=policy_fingerprint,
+            )
         return OpportunityEvaluation(
             "wake", binding, opportunity, copy.deepcopy(request),
             copy.deepcopy(decision), copy.deepcopy(participant_snapshot),
             copy.deepcopy(packet), receipt_sink,
             policy_identity=policy_identity,
             policy_fingerprint=policy_fingerprint,
+            policy_loader=policy_loader,
         )
 
     def stage_turn(
@@ -436,6 +484,19 @@ class HermesV2Controller:
             )
             self._turns[session_key] = evaluation
             return ticket
+
+    @staticmethod
+    def _persist_receipt(
+        receipt_sink: Callable[[dict[str, Any]], None],
+        receipt: dict[str, Any],
+        *,
+        stage: str,
+    ) -> None:
+        returned = receipt_sink(copy.deepcopy(receipt))
+        if returned is not None:
+            raise HermesV2BoundaryError(
+                f"{stage} receipt persistence is unknown"
+            )
 
     @staticmethod
     def _participant_receipt(
@@ -466,6 +527,33 @@ class HermesV2Controller:
             },
         }
 
+    def _persist_participant_receipt_once(
+        self,
+        session_key: str,
+        evaluation: OpportunityEvaluation,
+        *,
+        outcome: str,
+    ) -> None:
+        with self._lock:
+            if self._turns.get(session_key) is not evaluation:
+                raise HermesV2BoundaryError("Hermes turn provenance expired")
+            if self._participant_receipts.get(session_key) is evaluation:
+                return
+            self._persist_receipt(
+                evaluation.receipt_sink,
+                self._participant_receipt(evaluation, outcome=outcome),
+                stage="participant-host",
+            )
+            self._participant_receipts[session_key] = evaluation
+
+    def _prepare_tool_effect(
+        self, session_key: str, evaluation: OpportunityEvaluation
+    ) -> None:
+        self._persist_participant_receipt_once(
+            session_key, evaluation, outcome="sent"
+        )
+        self.set_transport_session(session_key)
+
     def complete_participant_turn(self, session_key: str, response: Any) -> dict[str, Any] | None:
         with self._lock:
             evaluation = self._turns.get(session_key)
@@ -477,16 +565,41 @@ class HermesV2Controller:
         elif isinstance(response, str):
             action = {"kind": "message", "content": response}
             outcome = "sent"
+        elif isinstance(response, dict) and response.get("kind") == "message":
+            if (
+                set(response) - {"kind", "content", "reply_to_event_id", "mention_actor_ids"}
+                or not isinstance(response.get("content"), str)
+                or not response["content"]
+            ):
+                raise HermesV2BoundaryError("Hermes participant message is invalid")
+            action = copy.deepcopy(response)
+            outcome = "sent"
+        elif isinstance(response, dict) and response.get("kind") == "reaction":
+            if set(response) != {"kind", "target_event_id", "reaction"} or not all(
+                isinstance(response.get(field), str) and response[field]
+                for field in ("target_event_id", "reaction")
+            ):
+                raise HermesV2BoundaryError("Hermes participant reaction is invalid")
+            action = copy.deepcopy(response)
+            outcome = "sent"
         else:
             raise HermesV2BoundaryError("Hermes participant outcome is unsupported")
+        already_persisted = False
+        with self._lock:
+            already_persisted = self._participant_receipts.get(session_key) is evaluation
         try:
-            evaluation.receipt_sink(
-                copy.deepcopy(self._participant_receipt(evaluation, outcome=outcome))
+            self._persist_participant_receipt_once(
+                session_key, evaluation, outcome=outcome
             )
         except BaseException:
             self._finish_turn(session_key, evaluation)
             raise
-        if action is None:
+        if action is None and already_persisted:
+            # A tool/reaction effect already supplied this turn's concrete action.
+            # Keep transport ownership alive until the enclosing process wrapper
+            # records that effect's delivery result.
+            action = {"kind": "tool"}
+        elif action is None:
             self._finish_turn(session_key, evaluation)
         return action
 
@@ -508,10 +621,12 @@ class HermesV2Controller:
         if evaluation is None:
             raise HermesV2BoundaryError("Hermes transport is not Nunchi-ticketed")
         try:
-            evaluation.receipt_sink(
+            self._persist_receipt(
+                evaluation.receipt_sink,
                 transport_receipt(
                     evaluation.request["request_id"], delivery, detail=detail
-                )
+                ),
+                stage="transport",
             )
         finally:
             promoted = self._finish_turn(session_key, evaluation)
@@ -528,6 +643,7 @@ class HermesV2Controller:
             if self._turns.get(session_key) is not evaluation:
                 return None
             self._turns.pop(session_key, None)
+            self._participant_receipts.pop(session_key, None)
             self.tickets.complete_session(session_key)
         self._tool_session.set(None)
         promoted = evaluation.binding.scheduler.complete(evaluation.opportunity)
@@ -620,6 +736,14 @@ class HermesV2Controller:
             current_source = normalizer(source)
         current_event = copy.copy(event)
         current_event.source = current_source
+        current_event_id = _canonical_event_id(current_event)
+        packet_event_id = (
+            evaluation.packet.get("trigger_event_id")
+            if isinstance(evaluation.packet, dict)
+            else None
+        )
+        if current_event_id is None or current_event_id != packet_event_id:
+            raise HermesV2BoundaryError("participant trigger changed after admission")
         current_key = _v2.resolve_binding_key(current_event, gateway)
         if current_key != evaluation.binding.key:
             raise HermesV2BoundaryError("authenticated binding changed after admission")
@@ -819,6 +943,7 @@ class HermesV2Controller:
         session_key: str,
         *,
         discard_pending: bool = False,
+        invoked: bool = False,
         expected_evaluation: OpportunityEvaluation | None = None,
     ) -> None:
         with self._lock:
@@ -829,19 +954,210 @@ class HermesV2Controller:
         ):
             return
         try:
-            evaluation.receipt_sink(
-                copy.deepcopy(
-                    self._participant_receipt(
-                        evaluation, outcome="unknown", invoked=False
-                    )
+            with self._lock:
+                already_persisted = (
+                    self._participant_receipts.get(session_key) is evaluation
                 )
-            )
+            if not already_persisted:
+                self._persist_receipt(
+                    evaluation.receipt_sink,
+                    self._participant_receipt(
+                        evaluation, outcome="unknown", invoked=invoked
+                    ),
+                    stage="participant-host",
+                )
         finally:
             self._finish_turn(
                 session_key,
                 evaluation,
                 promote_pending=not discard_pending,
             )
+
+    @staticmethod
+    def _invoke_tool(
+        next_call: Callable[..., Any], arguments: dict[str, Any]
+    ) -> Any:
+        try:
+            signature = inspect.signature(next_call)
+            signature.bind(arguments)
+        except (TypeError, ValueError):
+            return next_call()
+        return next_call(arguments)
+
+    @staticmethod
+    def _close_authorization_sink(sink: Any) -> None:
+        close = getattr(sink, "close", None)
+        if callable(close):
+            close()
+
+    @staticmethod
+    def _reaction_scope(
+        platform: str, room_id: str
+    ) -> tuple[set[str], str]:
+        parts = room_id.split(":")
+        if platform == "discord":
+            if len(parts) == 3 and parts[:2] == ["discord", "channel"]:
+                native_target = parts[2]
+            elif len(parts) == 4 and parts[:2] == ["discord", "thread"]:
+                native_target = parts[3]
+            else:
+                raise HermesV2BoundaryError("Discord reaction room is invalid")
+            return {room_id, f"discord:{native_target}"}, "discord:message:"
+        if platform == "telegram":
+            if len(parts) == 3 and parts[:2] == ["telegram", "chat"]:
+                chat_id = parts[2]
+                target = f"telegram:{chat_id}"
+            elif (
+                len(parts) == 5
+                and parts[:2] == ["telegram", "chat"]
+                and parts[3] == "topic"
+            ):
+                chat_id = parts[2]
+                target = f"telegram:{chat_id}:{parts[4]}"
+            else:
+                raise HermesV2BoundaryError("Telegram reaction room is invalid")
+            return {room_id, target}, f"telegram:message:{chat_id}:"
+        raise HermesV2BoundaryError("reaction platform is unsupported")
+
+    @staticmethod
+    def _privileged_action(
+        evaluation: OpportunityEvaluation,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        if evaluation.packet is None:
+            raise HermesV2BoundaryError("participant packet is unavailable")
+        packet = evaluation.packet
+        room = packet.get("room")
+        self_facts = packet.get("self")
+        if not isinstance(room, dict) or not isinstance(self_facts, dict):
+            raise HermesV2BoundaryError("participant scope is unavailable")
+        platform = room.get("platform")
+        room_id = room.get("id")
+        participant_id = self_facts.get("participant_id")
+        if (
+            not isinstance(platform, str)
+            or not platform
+            or not isinstance(room_id, str)
+            or not room_id
+            or not isinstance(participant_id, str)
+            or not participant_id
+        ):
+            raise HermesV2BoundaryError("participant scope is unavailable")
+
+        capability: str
+        impact = "mutation"
+        resource: dict[str, str]
+        if tool_name == "write_file":
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path:
+                raise HermesV2BoundaryError("write_file path is invalid")
+            capability = "workspace.file.write"
+            resource = {"kind": "workspace-file", "id": path}
+        elif tool_name == "delete_file":
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path:
+                raise HermesV2BoundaryError("delete_file path is invalid")
+            capability = "workspace.file.delete"
+            impact = "destructive"
+            resource = {"kind": "workspace-file", "id": path}
+        elif tool_name == "terminal":
+            command = arguments.get("command")
+            if not isinstance(command, str) or not command:
+                raise HermesV2BoundaryError("terminal command is invalid")
+            capability = "host.command.execute"
+            resource = {
+                "kind": "host-command",
+                "id": canonical_action_digest(command),
+            }
+        elif tool_name == "send_message" and arguments.get("action") in {
+            "react", "unreact"
+        }:
+            target = arguments.get("target")
+            allowed_targets, event_prefix = HermesV2Controller._reaction_scope(
+                platform, room_id
+            )
+            if target not in allowed_targets:
+                raise HermesV2BoundaryError("cross-room reaction is forbidden")
+            message_id = arguments.get("message_id")
+            if (
+                not isinstance(message_id, str)
+                or not message_id
+                or ":" in message_id
+            ):
+                raise HermesV2BoundaryError("reaction message ID is invalid")
+            event_id = f"{event_prefix}{message_id}"
+            event_ids = {
+                event.get("id")
+                for event in packet.get("events", [])
+                if isinstance(event, dict)
+            }
+            if event_id not in event_ids:
+                raise HermesV2BoundaryError("reaction target is outside the turn snapshot")
+            capability = (
+                "room.reaction.add"
+                if arguments["action"] == "react"
+                else "room.reaction.remove"
+            )
+            resource = {"kind": "room-message", "id": event_id}
+        else:
+            raise HermesV2BoundaryError(
+                f"tool {tool_name!r} has no accepted Nunchi capability mapping"
+            )
+
+        operation = {
+            "tool_name": tool_name,
+            "arguments": copy.deepcopy(arguments),
+        }
+        request = {
+            "kind": "authorization-request",
+            "schema_version": 2,
+            "action_id": f"hermes-{uuid.uuid4().hex}",
+            "action_digest": canonical_action_digest(operation),
+            "origin_event_id": packet["trigger_event_id"],
+            "capability": capability,
+            "scope": {
+                "platform": platform,
+                "room_id": room_id,
+                "participant_id": participant_id,
+                "resource": resource,
+            },
+            "impact": impact,
+        }
+        return {
+            "kind": "privileged",
+            "authorization_request": request,
+            "operation": operation,
+        }
+
+    def pending_authorizations(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            pending = tuple(self._pending_authorizations.values())
+        return tuple(
+            row
+            for coordinator, _sink in pending
+            for row in coordinator.pending_for_operator()
+        )
+
+    def complete_authenticated_approval(self, approval: Any) -> dict[str, Any]:
+        if not isinstance(approval, dict):
+            raise HermesV2BoundaryError("authenticated approval is invalid")
+        challenge_id = approval.get("challenge_id")
+        if not isinstance(challenge_id, str) or not challenge_id:
+            raise HermesV2BoundaryError("authenticated approval is invalid")
+        with self._lock:
+            pending = self._pending_authorizations.get(challenge_id)
+        if pending is None:
+            raise HermesV2BoundaryError("approval challenge is unavailable")
+        coordinator, sink = pending
+        try:
+            result = coordinator.complete_authenticated_approval(approval)
+        finally:
+            with self._lock:
+                self._pending_authorizations.pop(challenge_id, None)
+            self._close_authorization_sink(sink)
+        return result
 
     def tool_execution(
         self,
@@ -850,25 +1166,83 @@ class HermesV2Controller:
         arguments: dict[str, Any],
         next_call: Callable[..., Any],
     ) -> Any:
-        """Fail closed for ticketed effects until I-040B authorizes exact bytes.
-
-        Non-Nunchi turns are outside this plugin's authority and pass through
-        unchanged.  A ticketed turn may still produce a normal text response or
-        silence, but no model-generated tool effect is allowed to escape merely
-        because Hermes middleware exceptions fail open.
-        """
+        """Execute one explicitly classified tool under turn-bound ownership."""
         session_key = self._tool_session.get()
         if session_key is None:
-            try:
-                return next_call(arguments)
-            except TypeError:
-                return next_call()
+            return self._invoke_tool(next_call, arguments)
         if not self.tickets.context_for_session(session_key):
             raise HermesV2BoundaryError("Nunchi turn provenance expired")
-        raise HermesV2BoundaryError(
-            f"tool {str(tool_name)!r} is unsupported for this Nunchi V2 turn "
-            "without a canonical I-040B authorization"
+        with self._lock:
+            evaluation = self._turns.get(session_key)
+        if evaluation is None:
+            raise HermesV2BoundaryError("Nunchi turn provenance expired")
+        if not isinstance(tool_name, str) or not isinstance(arguments, dict):
+            raise HermesV2BoundaryError("Hermes tool call is malformed")
+
+        if tool_name in _NON_PRIVILEGED_TOOLS:
+            self._prepare_tool_effect(session_key, evaluation)
+            try:
+                result = self._invoke_tool(next_call, arguments)
+            except BaseException as failure:
+                self.record_output_attempt(error=failure)
+                raise
+            self.record_output_attempt(result=result)
+            return result
+
+        if evaluation.policy_loader is None:
+            raise HermesV2BoundaryError("authorization policy source is unavailable")
+        action = self._privileged_action(
+            evaluation, tool_name=tool_name, arguments=arguments
         )
+        authorization_sink = self._authorization_sink_factory(
+            evaluation.policy_loader
+        )
+        result_box: dict[str, Any] = {}
+
+        def execute(_operation: Any) -> None:
+            result_box["value"] = self._invoke_tool(next_call, arguments)
+
+        capability = action["authorization_request"]["capability"]
+        coordinator = PrivilegedActionCoordinator(
+            PrivilegedActionGuard(evaluation.policy_loader),
+            executors={capability: execute},
+            audit_sink=authorization_sink,
+        )
+        try:
+            coordinated = coordinator.propose(
+                action,
+                evaluation.participant_snapshot,
+                before_execute=lambda: self._prepare_tool_effect(
+                    session_key, evaluation
+                ),
+            )
+        except BaseException as failure:
+            self.record_output_attempt(error=failure)
+            self._close_authorization_sink(authorization_sink)
+            raise
+
+        execution = coordinated["execution"]
+        if execution == "executed":
+            self.record_output_attempt(result=result_box.get("value"))
+            self._close_authorization_sink(authorization_sink)
+            return result_box.get("value")
+
+        self._persist_participant_receipt_once(
+            session_key, evaluation, outcome="silent"
+        )
+        if execution == "pending":
+            challenge = coordinated["authorization"]["approval_challenge"]
+            with self._lock:
+                self._pending_authorizations[challenge["challenge_id"]] = (
+                    coordinator,
+                    authorization_sink,
+                )
+            raise HermesV2BoundaryError(
+                "privileged action requires authenticated approval; room prose is not approval"
+            )
+
+        self._close_authorization_sink(authorization_sink)
+        raise HermesV2BoundaryError("privileged action was denied")
 
 
 _CONTROLLER = HermesV2Controller(
@@ -1231,6 +1605,27 @@ def _discord_context_event(adapter: Any, message: Any, discord_module: Any) -> A
     is_thread = isinstance(thread_cls, type) and isinstance(channel, thread_cls)
     parent_id = adapter._get_parent_channel_id(channel) if is_thread else None
     thread_id = str(channel.id) if is_thread else None
+    self_user = getattr(getattr(adapter, "_client", None), "user", None)
+    authenticated_self = self_user is not None and message.author == self_user
+    native_is_bot = getattr(message.author, "bot", False)
+    if type(native_is_bot) is not bool:
+        raise HermesV2BoundaryError("Discord context author bot flag is invalid")
+    role_authorized = False
+    if not authenticated_self and not native_is_bot and bool(
+        getattr(adapter, "_allowed_role_ids", set())
+    ):
+        allowed_user = getattr(adapter, "_is_allowed_user", None)
+        if callable(allowed_user):
+            channel_ids = None if is_dm else {str(channel.id)}
+            if channel_ids is not None and parent_id:
+                channel_ids.add(str(parent_id))
+            role_authorized = allowed_user(
+                str(message.author.id),
+                message.author,
+                guild=guild,
+                is_dm=is_dm,
+                channel_ids=channel_ids,
+            ) is True
     source = adapter.build_source(
         chat_id=str(channel.id),
         chat_name=getattr(channel, "name", str(channel.id)),
@@ -1240,10 +1635,11 @@ def _discord_context_event(adapter: Any, message: Any, discord_module: Any) -> A
             message.author, "display_name", getattr(message.author, "name", "")
         ),
         thread_id=thread_id,
-        is_bot=bool(getattr(message.author, "bot", False)),
+        is_bot=native_is_bot,
         guild_id=str(guild.id) if guild is not None else None,
         parent_chat_id=parent_id,
         message_id=str(message.id),
+        role_authorized=role_authorized,
     )
     reference = getattr(message, "reference", None)
     reply_id = getattr(reference, "message_id", None) if reference else None
@@ -1255,6 +1651,7 @@ def _discord_context_event(adapter: Any, message: Any, discord_module: Any) -> A
         reply_to_message_id=str(reply_id) if reply_id is not None else None,
         timestamp=getattr(message, "created_at", None),
         internal=False,
+        _nunchi_authenticated_self=authenticated_self,
     )
 
 
@@ -1262,6 +1659,22 @@ def _gateway_authorizes_event(event: Any, gateway: Any) -> bool:
     authorize = getattr(gateway, "_is_user_authorized", None)
     source = getattr(event, "source", None)
     if not callable(authorize) or source is None:
+        return False
+    if getattr(event, "_nunchi_authenticated_self", False) is True:
+        try:
+            binding = _v2.resolve_binding_key(event, gateway)
+            source_user_id = getattr(source, "user_id", None)
+            source_is_bot = getattr(source, "is_bot", None)
+        except Exception:
+            return False
+        if (
+            isinstance(source_user_id, str)
+            and source_user_id
+            and source_is_bot is True
+            and binding.platform == "discord"
+            and binding.self_actor_id == f"discord:user:{source_user_id}"
+        ):
+            return True
         return False
     try:
         decision = authorize(source)
@@ -1533,42 +1946,44 @@ def install_discord_raw_observer(
 def install_telegram_exact_text(adapter_cls: Any) -> bool:
     """Bypass lossy Hermes text batching for scoped Telegram V2 events."""
     original_name = "_nunchi_v2_original_enqueue_text_event"
-    if original_name not in adapter_cls.__dict__:
+    original = adapter_cls.__dict__.get(original_name)
+    if not callable(original):
         original = adapter_cls.__dict__.get("_enqueue_text_event")
-        if not callable(original):
-            return False
-        setattr(adapter_cls, original_name, original)
-        typed_original: Any = original
+        if callable(original):
+            setattr(adapter_cls, original_name, original)
+    if not callable(original):
+        return False
+    typed_original: Any = original
 
-        def wrapped_enqueue(self, event):
-            gateway = _gateway_for_adapter(self)
-            if not _event_in_scope(event, gateway):
-                return typed_original(self, event)
-            handle_message = getattr(self, "handle_message", None)
-            if not callable(handle_message):
-                raise HermesV2BoundaryError(
-                    "Telegram exact-event dispatch seam is unavailable"
-                )
-            pending: Any = handle_message(event)
-            task = asyncio.create_task(pending)
-            background = getattr(self, "_background_tasks", None)
-            if isinstance(background, set):
-                background.add(task)
-                task.add_done_callback(background.discard)
+    def wrapped_enqueue(self, event):
+        gateway = _gateway_for_adapter(self)
+        if not _event_in_scope(event, gateway):
+            return typed_original(self, event)
+        handle_message = getattr(self, "handle_message", None)
+        if not callable(handle_message):
+            raise HermesV2BoundaryError(
+                "Telegram exact-event dispatch seam is unavailable"
+            )
+        pending: Any = handle_message(event)
+        task = asyncio.create_task(pending)
+        background = getattr(self, "_background_tasks", None)
+        if isinstance(background, set):
+            background.add(task)
+            task.add_done_callback(background.discard)
 
-            def exact_event_done(done):
-                try:
-                    done.result()
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logger.exception("Hermes V2 Telegram exact-event dispatch failed")
+        def exact_event_done(done):
+            try:
+                done.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Hermes V2 Telegram exact-event dispatch failed")
 
-            task.add_done_callback(exact_event_done)
-            return None
+        task.add_done_callback(exact_event_done)
+        return None
 
-        setattr(adapter_cls, "_enqueue_text_event", wrapped_enqueue)
-    return hasattr(adapter_cls, original_name)
+    setattr(adapter_cls, "_enqueue_text_event", wrapped_enqueue)
+    return True
 
 
 def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) -> dict[str, bool]:
@@ -1638,6 +2053,7 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
                     await _run_turn_cleanup(
                         _CONTROLLER.abort_participant_turn,
                         key,
+                        invoked=True,
                         expected_evaluation=entry_evaluation,
                         in_flight=failure,
                     )
@@ -1685,93 +2101,90 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
             setattr(adapter_cls, "handle_message", wrapped_handle_message)
 
         busy_original_name = "_nunchi_v2_original_set_busy_session_handler"
-        if (
-            busy_original_name not in adapter_cls.__dict__
-            and "set_busy_session_handler" in adapter_cls.__dict__
-        ):
+        busy_original = adapter_cls.__dict__.get(busy_original_name)
+        if not callable(busy_original):
             busy_original = adapter_cls.__dict__.get("set_busy_session_handler")
             if callable(busy_original):
                 setattr(adapter_cls, busy_original_name, busy_original)
-                typed_busy_original: Any = busy_original
+        if callable(busy_original):
+            typed_busy_original: Any = busy_original
 
-                def wrapped_set_busy_handler(self, fallback_handler):
-                    typed_fallback_handler: Any = fallback_handler
+            def wrapped_set_busy_handler(self, fallback_handler):
+                typed_fallback_handler: Any = fallback_handler
 
-                    async def nunchi_first(event, session_key):
-                        gateway = _gateway_for_adapter(self)
-                        event_id = _canonical_event_id(event)
-                        if (
-                            gateway is not None
-                            and event_id is not None
-                            and _CONTROLLER.tickets.has_dispatch(
-                                event_id, str(session_key)
-                            )
-                        ):
-                            owner = getattr(self, "_session_tasks", {}).get(
-                                str(session_key)
-                            )
-                            delayed = getattr(
-                                self, "_nunchi_v2_delayed_dispatches", None
-                            )
-                            if delayed is None:
-                                delayed = set()
-                                setattr(
-                                    self, "_nunchi_v2_delayed_dispatches", delayed
-                                )
-                            dispatch_key = (event_id, str(session_key))
-                            if dispatch_key not in delayed:
-                                delayed.add(dispatch_key)
+                async def nunchi_first(event, session_key):
+                    gateway = _gateway_for_adapter(self)
+                    event_id = _canonical_event_id(event)
+                    if (
+                        gateway is not None
+                        and event_id is not None
+                        and _CONTROLLER.tickets.has_dispatch(
+                            event_id, str(session_key)
+                        )
+                    ):
+                        owner = getattr(self, "_session_tasks", {}).get(
+                            str(session_key)
+                        )
+                        delayed = getattr(
+                            self, "_nunchi_v2_delayed_dispatches", None
+                        )
+                        if delayed is None:
+                            delayed = set()
+                            setattr(self, "_nunchi_v2_delayed_dispatches", delayed)
+                        dispatch_key = (event_id, str(session_key))
+                        if dispatch_key not in delayed:
+                            delayed.add(dispatch_key)
 
-                                async def dispatch_after_owner():
-                                    try:
-                                        if owner is not None:
-                                            try:
-                                                await asyncio.shield(owner)
-                                            except (asyncio.CancelledError, Exception):
-                                                pass
-                                        handle_message: Any = getattr(
-                                            self, "handle_message"
-                                        )
-                                        accepted = await handle_message(event)
-                                        if accepted is False:
-                                            await asyncio.to_thread(
-                                                _CONTROLLER.abort_participant_turn,
-                                                str(session_key),
-                                            )
-                                    except BaseException:
+                            async def dispatch_after_owner():
+                                try:
+                                    if owner is not None:
+                                        try:
+                                            await asyncio.shield(owner)
+                                        except (asyncio.CancelledError, Exception):
+                                            pass
+                                    handle_message: Any = getattr(
+                                        self, "handle_message"
+                                    )
+                                    accepted = await handle_message(event)
+                                    if accepted is False:
                                         await asyncio.to_thread(
                                             _CONTROLLER.abort_participant_turn,
                                             str(session_key),
                                         )
-                                        raise
-                                    finally:
-                                        delayed.discard(dispatch_key)
+                                except BaseException:
+                                    await asyncio.to_thread(
+                                        _CONTROLLER.abort_participant_turn,
+                                        str(session_key),
+                                    )
+                                    raise
+                                finally:
+                                    delayed.discard(dispatch_key)
 
-                                task = asyncio.create_task(dispatch_after_owner())
-                                background = getattr(self, "_background_tasks", None)
-                                if isinstance(background, set):
-                                    background.add(task)
-                                    task.add_done_callback(background.discard)
+                            task = asyncio.create_task(dispatch_after_owner())
+                            background = getattr(self, "_background_tasks", None)
+                            if isinstance(background, set):
+                                background.add(task)
+                                task.add_done_callback(background.discard)
+                        return True
+                    if gateway is not None:
+                        result = on_pre_gateway_dispatch(
+                            event=event, gateway=gateway
+                        )
+                        if isinstance(result, dict) and result.get("action") == "skip":
                             return True
-                        if gateway is not None:
-                            result = on_pre_gateway_dispatch(
-                                event=event, gateway=gateway
-                            )
-                            if isinstance(result, dict) and result.get("action") == "skip":
-                                return True
-                        if callable(typed_fallback_handler):
-                            return bool(
-                                await typed_fallback_handler(event, session_key)
-                            )
-                        return False
+                    if callable(typed_fallback_handler):
+                        return bool(
+                            await typed_fallback_handler(event, session_key)
+                        )
+                    return False
 
-                    return typed_busy_original(self, nunchi_first)
+                return typed_busy_original(self, nunchi_first)
 
-                setattr(
-                    adapter_cls,
-                    "set_busy_session_handler",
-                    wrapped_set_busy_handler,
-                )
+            setattr(
+                adapter_cls,
+                "set_busy_session_handler",
+                wrapped_set_busy_handler,
+            )
 
         process_original_name = "_nunchi_v2_original_process_message_background"
         process_original = adapter_cls.__dict__.get(process_original_name)
@@ -1859,35 +2272,34 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
         )
         for method_name in output_method_names:
             original_name = f"_nunchi_v2_original_{method_name.lstrip('_')}"
-            if (
-                original_name not in adapter_cls.__dict__
-                and method_name in adapter_cls.__dict__
-            ):
+            original = adapter_cls.__dict__.get(original_name)
+            if not callable(original):
                 original = adapter_cls.__dict__.get(method_name)
-                if not callable(original):
-                    continue
-                setattr(adapter_cls, original_name, original)
-                typed_output_original: Any = original
+                if callable(original):
+                    setattr(adapter_cls, original_name, original)
+            if not callable(original):
+                continue
+            typed_output_original: Any = original
 
-                def make_output_wrapper(adapter_original):
-                    async def wrapped_output(self, *args, **kwargs):
-                        _CONTROLLER.assert_terminal_output_allowed()
-                        try:
-                            result = await adapter_original(self, *args, **kwargs)
-                        except BaseException as exc:
-                            _CONTROLLER.record_output_attempt(error=exc)
-                            raise
-                        _CONTROLLER.record_output_attempt(result=result)
-                        return result
+            def make_output_wrapper(adapter_original):
+                async def wrapped_output(self, *args, **kwargs):
+                    _CONTROLLER.assert_terminal_output_allowed()
+                    try:
+                        result = await adapter_original(self, *args, **kwargs)
+                    except BaseException as exc:
+                        _CONTROLLER.record_output_attempt(error=exc)
+                        raise
+                    _CONTROLLER.record_output_attempt(result=result)
+                    return result
 
-                    return wrapped_output
+                return wrapped_output
 
-                setattr(
-                    adapter_cls,
-                    method_name,
-                    make_output_wrapper(typed_output_original),
-                )
-            send_wrapped = send_wrapped or hasattr(adapter_cls, original_name)
+            setattr(
+                adapter_cls,
+                method_name,
+                make_output_wrapper(typed_output_original),
+            )
+            send_wrapped = True
 
         for method_name in (
             "send_typing",
@@ -1897,29 +2309,28 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
             "play_ack_in_voice",
         ):
             original_name = f"_nunchi_v2_original_{method_name}"
-            if (
-                original_name not in adapter_cls.__dict__
-                and method_name in adapter_cls.__dict__
-            ):
+            original = adapter_cls.__dict__.get(original_name)
+            if not callable(original):
                 original = adapter_cls.__dict__.get(method_name)
-                if not callable(original):
-                    continue
-                setattr(adapter_cls, original_name, original)
-                typed_telemetry_original: Any = original
+                if callable(original):
+                    setattr(adapter_cls, original_name, original)
+            if not callable(original):
+                continue
+            typed_telemetry_original: Any = original
 
-                def make_telemetry_wrapper(adapter_original):
-                    async def wrapped_telemetry(self, *args, **kwargs):
-                        if _CONTROLLER.suppress_host_telemetry():
-                            return None
-                        return await adapter_original(self, *args, **kwargs)
+            def make_telemetry_wrapper(adapter_original):
+                async def wrapped_telemetry(self, *args, **kwargs):
+                    if _CONTROLLER.suppress_host_telemetry():
+                        return None
+                    return await adapter_original(self, *args, **kwargs)
 
-                    return wrapped_telemetry
+                return wrapped_telemetry
 
-                setattr(
-                    adapter_cls,
-                    method_name,
-                    make_telemetry_wrapper(typed_telemetry_original),
-                )
+            setattr(
+                adapter_cls,
+                method_name,
+                make_telemetry_wrapper(typed_telemetry_original),
+            )
         concrete_output_methods = tuple(
             name
             for name in output_method_names
@@ -2133,6 +2544,96 @@ def on_pre_llm_call(*, session_key: str | None = None, **_: Any):
     )
 
 
+def install_reaction_bridge(
+    adapter_cls: Any,
+    *,
+    platform: str,
+    reaction_factory: Callable[[str], Any] | None = None,
+) -> bool:
+    """Expose Hermes' live reaction protocol on pinned Discord/Telegram adapters."""
+    if platform == "discord":
+
+        async def fetch_message(adapter: Any, chat_id: str, message_id: str) -> Any:
+            client = getattr(adapter, "_client", None)
+            if client is None:
+                raise HermesV2BoundaryError("Discord reaction client is unavailable")
+            channel_id = int(chat_id)
+            native_message_id = int(message_id)
+            channel = client.get_channel(channel_id)
+            if channel is None:
+                channel = await client.fetch_channel(channel_id)
+            return await channel.fetch_message(native_message_id)
+
+        async def add_reaction(
+            adapter: Any, *, chat_id: str, emoji: str, message_id: str
+        ) -> bool:
+            message = await fetch_message(adapter, chat_id, message_id)
+            await message.add_reaction(emoji)
+            return True
+
+        async def remove_reaction(
+            adapter: Any, *, chat_id: str, message_id: str
+        ) -> bool:
+            message = await fetch_message(adapter, chat_id, message_id)
+            client = getattr(adapter, "_client", None)
+            actor = getattr(client, "user", None)
+            if actor is None:
+                raise HermesV2BoundaryError("Discord reaction actor is unavailable")
+            removed = False
+            for reaction in tuple(getattr(message, "reactions", ())):
+                if getattr(reaction, "me", False) is True:
+                    await message.remove_reaction(reaction.emoji, actor)
+                    removed = True
+            return removed
+
+    elif platform == "telegram":
+        if reaction_factory is None:
+
+            def default_factory(emoji: str) -> Any:
+                telegram_module = __import__(
+                    "telegram", fromlist=["ReactionTypeEmoji"]
+                )
+                return telegram_module.ReactionTypeEmoji(emoji)
+
+            resolved_factory: Callable[[str], Any] = default_factory
+        else:
+            resolved_factory = reaction_factory
+
+        def bot_for(adapter: Any) -> Any:
+            app = getattr(adapter, "_app", None)
+            bot = getattr(app, "bot", None) or getattr(adapter, "_bot", None)
+            if bot is None or not callable(getattr(bot, "set_message_reaction", None)):
+                raise HermesV2BoundaryError("Telegram reaction bot is unavailable")
+            return bot
+
+        async def add_reaction(
+            adapter: Any, *, chat_id: str, emoji: str, message_id: str
+        ) -> bool:
+            bot = bot_for(adapter)
+            await bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=int(message_id),
+                reaction=[resolved_factory(emoji)],
+            )
+            return True
+
+        async def remove_reaction(
+            adapter: Any, *, chat_id: str, message_id: str
+        ) -> bool:
+            bot = bot_for(adapter)
+            await bot.set_message_reaction(
+                chat_id=int(chat_id), message_id=int(message_id), reaction=[]
+            )
+            return True
+
+    else:
+        return False
+
+    setattr(adapter_cls, "add_reaction", add_reaction)
+    setattr(adapter_cls, "remove_reaction", remove_reaction)
+    return True
+
+
 def on_tool_execution(
     *,
     tool_name: str = "",
@@ -2197,6 +2698,11 @@ def register(ctx: Any) -> None:
             raise HermesV2BoundaryError(
                 f"Hermes 0.19.0 {class_name} output wrappers are required"
             )
+        platform = "discord" if class_name == "DiscordAdapter" else "telegram"
+        if not install_reaction_bridge(platform_adapter_cls, platform=platform):
+            raise HermesV2BoundaryError(
+                f"Hermes 0.19.0 {class_name} reaction bridge is required"
+            )
         if class_name == "DiscordAdapter":
             if not install_discord_control_guard(platform_adapter_cls):
                 raise HermesV2BoundaryError(
@@ -2222,6 +2728,7 @@ __all__ = [
     "install_discord_control_guard",
     "install_discord_raw_observer",
     "install_host_wrappers",
+    "install_reaction_bridge",
     "on_pre_gateway_dispatch",
     "on_pre_llm_call",
     "on_tool_execution",

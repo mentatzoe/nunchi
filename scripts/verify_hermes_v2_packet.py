@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CANDIDATE_BASE = "a03eeb95c7d569895e1171993c7a5748fc250bd8"
 REQUIRED_PATHS = (
     "integrations/hermes/nunchi-gate/__init__.py",
     "integrations/hermes/nunchi-gate/v2_runtime.py",
@@ -72,20 +73,35 @@ def _scene_errors(rows: list[dict], catalog_rows: list[dict]) -> list[str]:
     return errors
 
 
-def _dirty_candidate_paths(root: Path) -> set[str]:
+def _candidate_paths(root: Path) -> set[str]:
+    base = "HEAD"
+    if subprocess.run(
+        ["git", "cat-file", "-e", f"{CANDIDATE_BASE}^{{commit}}"],
+        cwd=root,
+        capture_output=True,
+    ).returncode == 0:
+        base = CANDIDATE_BASE
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=ACDMRTUXB", base, "--"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
     raw = subprocess.run(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=root, check=True, capture_output=True,
     ).stdout.decode()
-    paths: set[str] = set()
+    paths: set[str] = {path for path in changed if path}
     for entry in raw.split("\0"):
         if not entry:
             continue
         relative = entry[3:]
         if " -> " in relative:
             relative = relative.split(" -> ", 1)[1]
-        if relative != "evidence/v2/hermes/candidate-files.sha256":
+        if entry.startswith("?? ") and relative != "evidence/v2/hermes/candidate-files.sha256":
             paths.add(relative)
+    paths.discard("evidence/v2/hermes/candidate-files.sha256")
     return paths
 
 
@@ -161,9 +177,14 @@ def validate(
             if relative in listed_paths:
                 errors.append(f"candidate-manifest-duplicate:{relative}")
             listed_paths.add(relative)
-            if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            if expected != "DELETE" and not re.fullmatch(r"[0-9a-f]{64}", expected):
                 errors.append(f"candidate-manifest-hash-shape:{relative}")
             candidate_path = root / relative
+            if expected == "DELETE":
+                if candidate_path.exists():
+                    errors.append(f"candidate-manifest-not-deleted:{relative}")
+                listed += 1
+                continue
             if not candidate_path.is_file():
                 errors.append(f"candidate-manifest-missing:{relative}")
                 continue
@@ -174,13 +195,13 @@ def validate(
         if listed == 0:
             errors.append("candidate-manifest-empty")
         try:
-            dirty_paths = _dirty_candidate_paths(root)
+            candidate_paths = _candidate_paths(root)
         except (OSError, subprocess.CalledProcessError) as exc:
             errors.append(f"candidate-git-status:{type(exc).__name__}")
         else:
-            for relative in sorted(dirty_paths - listed_paths):
+            for relative in sorted(candidate_paths - listed_paths):
                 errors.append(f"candidate-manifest-omitted:{relative}")
-            for relative in sorted(listed_paths - dirty_paths):
+            for relative in sorted(listed_paths - candidate_paths):
                 errors.append(f"candidate-manifest-extra:{relative}")
 
     telegram_path = root / "evidence/v2/hermes/telegram-scenes.jsonl"

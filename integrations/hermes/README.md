@@ -11,10 +11,11 @@ structured observation, schedules one attention opportunity, and either
 suppresses the wake or redispatches the exact event into one ordinary Hermes
 act-or-silence turn.
 
-The active plugin path is V2-only. The inherited V1 helpers remain in
-`__init__.py` as inactive migration material, but `register()` does not register
-the V1 subprocess gate, its slash command, aliases-as-self logic, or its
-`PASS / ACK / ASK / SPEAK` route.
+The candidate plugin path is V2-only. It was verified against the pinned
+installed Hermes source below but was not installed or armed. Retired V1
+verdict, command, and quiet-room machinery is absent from the executable
+packet; migration history is preserved only in
+[`../../docs/archive/v1/hermes-nunchi-gate.md`](../../docs/archive/v1/hermes-nunchi-gate.md).
 
 ## Pinned host
 
@@ -148,10 +149,12 @@ canonical recovery valve: an unproven suppression widens to `DEFER`.
 |---|---|
 | Normal non-streaming final message | Supported; participant-host precedes platform I/O and one transport receipt follows whole-process output closure |
 | Normal participant silence | Supported; participant-host records `silent`, no transport is fabricated |
-| Ordinary model tool effect during a ticketed turn | Fails closed unless canonical `I-040B` authorization is present; this candidate currently supplies no automatic grant mapping |
+| Explicit non-privileged model tool during a ticketed turn | Supported only after participant-host receipt persistence and exact transport-session binding |
+| Privileged file/terminal/host-command effect | Supported only through the shared `I-040B` guard/coordinator, exact operation digest, canonical room scope, matching active grant, audit persistence, and re-attestation |
+| Model-requested reaction | Supported only for exact native target aliases in the canonical room and after `I-040B` authorization |
 | Concurrent registry tool, nested `execute_code`, detached/background effect | Unsupported and fail-closed/not claimable |
 | Hermes processing typing/reactions/voice acknowledgement | Suppressed for scoped V2 processing; never counted as participant output |
-| Model-requested reaction, direct platform send/edit/delete, slash command, auto-TTS | Outside the verified effect boundary; unsupported |
+| Direct platform send/edit/delete, model-issued slash command, auto-TTS | Outside the verified effect boundary; unsupported |
 | Gateway proxy or `codex_app_server` runtime | Outside V2 scope; rejected at admission and participant-time re-attestation |
 | Streaming final reply | Unsupported; Nunchi and effective Hermes profile/platform streaming must both be disabled |
 | Cron/script-only, plugin direct dispatch, MCP bridge send | Unsupported because exact origin-event provenance is absent |

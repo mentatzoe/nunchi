@@ -23,6 +23,30 @@ class HermesV2EvaluationTest(unittest.TestCase):
         cases = {row["hm_case_id"] for row in fixture["cases"]}
         self.assertTrue({"HM-01", "HM-02", "HM-03", "HM-04", "HM-05"} <= cases)
         self.assertIn("hermes-action-surface-matrix", ids)
+        matrix = next(
+            row
+            for row in fixture["cases"]
+            if row["fixture_id"] == "hermes-action-surface-matrix"
+        )
+        self.assertEqual(
+            set(matrix["supported"]),
+            {
+                "normal-final-message",
+                "normal-silence",
+                "explicit-non-privileged-tool-after-participant-receipt",
+                "I-040B-authorized-file-terminal-host-command",
+                "I-040B-authorized-canonical-room-reaction",
+            },
+        )
+        self.assertEqual(
+            set(matrix["fail_closed"]),
+            {
+                "privileged-model-tool-effect-without-I-040B-authorization",
+                "cross-room-reaction",
+                "approval-required-effect-from-room-prose",
+            },
+        )
+        self.assertNotIn("reaction", matrix["unsupported"])
 
     def test_hm01_through_hm06_pass_against_pinned_installed_source(self):
         rows = run_all(hermes_source=HERMES_SOURCE)

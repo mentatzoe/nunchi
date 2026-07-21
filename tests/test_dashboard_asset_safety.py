@@ -1,21 +1,15 @@
-"""Enforcement: served dashboard assets must not use HTML-injection sinks.
+"""Enforcement: served web assets must not use HTML-injection sinks.
 
-The hermes dashboard tab (integrations/hermes/nunchi-gate/dashboard/index.js)
-renders untrusted content: receipt fields (message text, author names,
-reasons) come straight from the gate JSONL log, and channel names come from
-the hermes channel directory. A single ``innerHTML``-style sink would let a
-chat message execute script in the operator's dashboard session.
-
-The renderer builds all DOM through ``React.createElement`` with plain-string
-children (text nodes — auto-escaped). This test keeps it that way:
+The retired Hermes V1 dashboard is no longer part of the executable product
+surface. This repository-wide guard remains for every served asset that does
+exist:
 
 - Scans the ENTIRE repository for served web assets (.js/.mjs/.cjs/.jsx/
   .ts/.tsx/.html/.htm/.vue/.svelte) — not a hand-picked file list — and
   fails on any forbidden sink.
 - Self-tests the detector against known-bad samples so the enforcement
   itself is verified.
-- Asserts the known dashboard bundle was actually scanned (guards against a
-  silently-empty scan if the directory layout changes).
+- Asserts the scan is non-empty so layout changes cannot silently disable it.
 """
 
 from __future__ import annotations
@@ -46,11 +40,6 @@ FORBIDDEN_SINKS = (
     "dangerouslySetInnerHTML",
     "srcdoc",
 )
-
-_DASHBOARD_JS = (
-    _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "dashboard" / "index.js"
-)
-
 
 def _iter_served_assets() -> list[pathlib.Path]:
     assets: list[pathlib.Path] = []
@@ -83,17 +72,7 @@ class TestNoInjectionSinksInServedAssets(unittest.TestCase):
             violations.extend(_scan_asset(rel, path.read_text(encoding="utf-8")))
         self.assertEqual(violations, [], "\n".join(violations))
         # Guard against a silently-empty scan.
-        self.assertIn(
-            _DASHBOARD_JS, scanned,
-            "dashboard bundle not found by the scan — update _DASHBOARD_JS "
-            "and keep this enforcement pointed at every served asset",
-        )
-
-    def test_dashboard_bundle_exists_and_uses_react_createelement_only(self):
-        """The renderer must keep building DOM via createElement text nodes."""
-        text = _DASHBOARD_JS.read_text(encoding="utf-8")
-        self.assertIn("React.createElement", text)
-        self.assertEqual(_scan_asset("index.js", text), [])
+        self.assertTrue(scanned, "served-asset scan unexpectedly found no files")
 
 
 class TestSinkDetectorSelfTest(unittest.TestCase):

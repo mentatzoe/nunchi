@@ -43,9 +43,19 @@
     {
       "fixture_id": "hermes-action-surface-matrix",
       "hm_case_id": "HM-02",
-      "supported": ["normal-final-message", "normal-silence"],
-      "fail_closed": ["ordinary-model-tool-effect-without-I-040B-authorization"],
-      "unsupported": ["streaming-final-reply", "reaction", "direct-platform-send", "slash-command", "auto-tts", "script-only-cron", "nested-code-effect", "detached-background-effect", "plugin-direct-dispatch", "mcp-bridge-send"]
+      "supported": [
+        "normal-final-message",
+        "normal-silence",
+        "explicit-non-privileged-tool-after-participant-receipt",
+        "I-040B-authorized-file-terminal-host-command",
+        "I-040B-authorized-canonical-room-reaction"
+      ],
+      "fail_closed": [
+        "privileged-model-tool-effect-without-I-040B-authorization",
+        "cross-room-reaction",
+        "approval-required-effect-from-room-prose"
+      ],
+      "unsupported": ["streaming-final-reply", "direct-platform-send", "model-issued-slash-command", "auto-tts", "script-only-cron", "nested-code-effect", "detached-background-effect", "plugin-direct-dispatch", "mcp-bridge-send"]
     }
   ]
 }

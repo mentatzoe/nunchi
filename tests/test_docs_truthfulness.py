@@ -11,10 +11,7 @@ Fully offline; reads only files inside the repo.
 
 from __future__ import annotations
 
-import importlib.util
-import re
 import tomllib
-import types
 import unittest
 from pathlib import Path
 
@@ -35,38 +32,11 @@ _LIFECYCLE_AMENDMENT = (
 _INSTALL_MD = _REPO_ROOT / "docs" / "INSTALL.md"
 _MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
-_HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 _V1_CONTRACTS = (
     _REPO_ROOT / "docs" / "contracts" / "channel-adapter-v1.md",
     _REPO_ROOT / "docs" / "contracts" / "verdict-suite-data-model-v1.md",
     _REPO_ROOT / "docs" / "contracts" / "verdict-suite-requirements-v1.md",
 )
-
-def _load_hermes_plugin() -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location("nunchi_gate_docs_check", _HERMES_PLUGIN)
-    assert spec is not None and spec.loader is not None, f"missing plugin at {_HERMES_PLUGIN}"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    return module
-
-
-class HermesHistoryWindowDocumentedTest(unittest.TestCase):
-    """The functional history_window config key must be documented."""
-
-    def test_docstring_documents_history_window_with_code_default(self) -> None:
-        mod = _load_hermes_plugin()
-        doc = mod.__doc__ or ""
-        match = re.search(r"history_window\s*\(int,\s*default\s*(\d+)\)", doc)
-        self.assertIsNotNone(
-            match,
-            "hermes nunchi-gate docstring does not document the history_window "
-            "config key (it is read at runtime from the global config block)",
-        )
-        self.assertEqual(
-            int(match.group(1)),
-            mod._DEFAULT_HISTORY_WINDOW,
-            "documented history_window default does not match _DEFAULT_HISTORY_WINDOW",
-        )
 
 
 class AdapterStatusClaimDisciplineTest(unittest.TestCase):

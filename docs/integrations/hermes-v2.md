@@ -109,17 +109,18 @@ capability is an explicit limitation, not silently upgraded to proof.
    unsupported and put the room outside V2 scope.
 3. The adapter truthfully exposes session-only continuity with a restart gap;
    no Discord/Telegram restart recovery is claimed by this packet.
-4. Normal text and silence are verified. Privileged/effectful tool actions are
-   fail-closed until exact `I-040B` request/grant mapping is supplied. Hermes
-   processing reactions/typing/voice acknowledgements are suppressed; model-
-   requested reactions, slash commands, TTS, cron, nested code, background,
-   plugin, and MCP paths remain unsupported.
+4. Normal text, silence, and explicit non-privileged tool execution are
+   verified. Privileged/effectful tools use exact `I-040B` request/grant
+   mapping through the shared guard and coordinator; reactions are bound to
+   the canonical room and native target aliases. Hermes processing
+   reactions/typing/voice acknowledgements are suppressed. Native slash
+   control output is receipt-closed, but TTS, cron, nested code, background,
+   plugin, and MCP effect paths remain outside this packet.
 5. HM-04/HM-05 are synthetic. No genuine live Discord/Telegram/provider evidence
    was available while constructing this packet.
-6. The inherited V1 implementation remains physically present as inactive
-   migration material. The registered path and manifest are V2; final atomic
-   integration may remove the dead material once downstream consumers no longer
-   require the historical test surface.
+6. The executable Hermes packet is V2-only. The retired V1 verdict, command,
+   state, resolver, dashboard, and obsolete test surface are removed; only a
+   non-executable historical archive remains under `docs/archive/v1/`.
 
 ## Commands
 

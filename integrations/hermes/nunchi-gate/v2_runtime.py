@@ -64,13 +64,40 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
+def _native_identifier(name: str, value: Any) -> str | int:
+    if isinstance(value, str):
+        result = value.strip()
+        if result and len(result) <= 512:
+            return result
+    elif type(value) is int:
+        return value
+    raise HermesV2BoundaryError(f"{name} is unavailable")
+
+
 def _identifier(name: str, value: Any) -> str:
-    if value is None or isinstance(value, bool):
-        raise HermesV2BoundaryError(f"{name} is unavailable")
-    result = str(value).strip()
-    if not result or len(result) > 512:
-        raise HermesV2BoundaryError(f"{name} is unavailable")
-    return result
+    return str(_native_identifier(name, value))
+
+
+def _boolean(name: str, value: Any, *, default: bool | object = _MISSING) -> bool:
+    if value is _MISSING and default is not _MISSING:
+        return bool(default)
+    if type(value) is not bool:
+        raise HermesV2BoundaryError(f"{name} must be a boolean")
+    return value
+
+
+def _text(name: str, value: Any, *, default: str | object = _MISSING) -> str:
+    if value is _MISSING and default is not _MISSING:
+        return str(default)
+    if not isinstance(value, str):
+        raise HermesV2BoundaryError(f"{name} must be text")
+    return value
+
+
+def _integer(name: str, value: Any) -> int:
+    if type(value) is not int:
+        raise HermesV2BoundaryError(f"{name} must be an integer")
+    return value
 
 
 def _platform_name(source: Any) -> str:
@@ -160,11 +187,19 @@ def _discord_native_event(event: Any, key: BindingKey) -> dict[str, Any]:
     author_id = _identifier("Discord author", _field(author, "id"))
     delivery_id = f"discord:message:{_identifier('Discord message', message_id)}"
     actor_id = f"discord:user:{author_id}"
-    raw_content = str(
-        _field(raw, "_nunchi_v2_raw_content")
-        or _field(raw, "content")
-        or _field(event, "text", "")
-        or ""
+    raw_content_value = _field(raw, "_nunchi_v2_raw_content", _MISSING)
+    if raw_content_value is _MISSING:
+        raw_content_value = _field(raw, "content", _MISSING)
+    if raw_content_value is _MISSING:
+        raw_content_value = _field(event, "text", "")
+    raw_content = _text("Discord native content", raw_content_value)
+    author_is_bot = _boolean(
+        "Discord author bot flag", _field(author, "bot", _MISSING), default=False
+    )
+    mentions_room = _boolean(
+        "Discord room mention flag",
+        _field(raw, "mention_everyone", _MISSING),
+        default=False,
     )
 
     mentioned: list[str] = []
@@ -181,9 +216,9 @@ def _discord_native_event(event: Any, key: BindingKey) -> dict[str, Any]:
         "id": delivery_id,
         "type": "message",
         "author_id": actor_id,
-        "text": str(_field(event, "text", "") or ""),
+        "text": raw_content,
         "mentioned_actor_ids": mentioned,
-        "mentions_room": bool(_field(raw, "mention_everyone", False)),
+        "mentions_room": mentions_room,
     }
     timestamp = _discord_timestamp(raw)
     if timestamp is not None:
@@ -197,10 +232,11 @@ def _discord_native_event(event: Any, key: BindingKey) -> dict[str, Any]:
 
     actors: dict[str, dict[str, Any]] = {
         actor_id: {
-            "display_name": str(
-                _field(author, "display_name", _field(author, "name", "")) or ""
+            "display_name": _text(
+                "Discord author display name",
+                _field(author, "display_name", _field(author, "name", "")),
             ),
-            "kind": "bot" if bool(_field(author, "bot", False)) else "human",
+            "kind": "bot" if author_is_bot else "human",
         }
     }
     for target in mentioned:
@@ -232,6 +268,16 @@ def _telegram_update(event: Any) -> dict[str, Any]:
     text = _field(event, "text")
     if text is None:
         text = _field(raw, "text", _field(raw, "caption", ""))
+    text = _text("Telegram message text", text)
+    update_id = _native_identifier("Telegram update", update_id)
+    message_id = _native_identifier("Telegram message", message_id)
+    author_id = _native_identifier("Telegram author", _field(author, "id"))
+    chat_id = _native_identifier("Telegram chat", chat_id)
+    author_is_bot = _boolean(
+        "Telegram author bot flag",
+        _field(author, "is_bot", _MISSING),
+        default=False,
+    )
     raw_entities = _field(raw, "entities", None)
     if raw_entities is None:
         raw_entities = _field(raw, "caption_entities", [])
@@ -243,15 +289,21 @@ def _telegram_update(event: Any) -> dict[str, Any]:
         entity_type = _field(entity, "type")
         entity_type = _field(entity_type, "value", entity_type)
         portable_entity = {
-            "type": str(entity_type),
-            "offset": _field(entity, "offset"),
-            "length": _field(entity, "length"),
+            "type": _text("Telegram entity type", entity_type),
+            "offset": _integer("Telegram entity offset", _field(entity, "offset")),
+            "length": _integer("Telegram entity length", _field(entity, "length")),
         }
         user = _field(entity, "user")
         if user is not None:
             portable_entity["user"] = {
-                "id": _field(user, "id"),
-                "is_bot": bool(_field(user, "is_bot", False)),
+                "id": _native_identifier(
+                    "Telegram entity user", _field(user, "id")
+                ),
+                "is_bot": _boolean(
+                    "Telegram entity user bot flag",
+                    _field(user, "is_bot", _MISSING),
+                    default=False,
+                ),
             }
         for field in ("url", "language", "custom_emoji_id"):
             value = _field(entity, field)
@@ -267,8 +319,8 @@ def _telegram_update(event: Any) -> dict[str, Any]:
     message = {
         "message_id": message_id,
         "from": {
-            "id": _field(author, "id"),
-            "is_bot": bool(_field(author, "is_bot", False)),
+            "id": author_id,
+            "is_bot": author_is_bot,
         },
         "chat": {"id": chat_id},
         "text": text,
@@ -276,7 +328,9 @@ def _telegram_update(event: Any) -> dict[str, Any]:
         "date": date,
     }
     if reply_id is not None:
-        message["reply_to_message"] = {"message_id": reply_id}
+        message["reply_to_message"] = {
+            "message_id": _native_identifier("Telegram reply", reply_id)
+        }
     return {
         "update_id": update_id,
         "message": message,
@@ -287,7 +341,10 @@ def project_native_event(event: Any, key: BindingKey) -> dict[str, Any]:
     """Project one authorized Hermes native delivery into I-020A input."""
     if not isinstance(key, BindingKey):
         raise HermesV2BoundaryError("binding key is invalid")
-    if bool(_field(event, "internal", False)):
+    internal = _boolean(
+        "Hermes internal flag", _field(event, "internal", _MISSING), default=False
+    )
+    if internal:
         raise HermesV2BoundaryError("internal Hermes events are not room observations")
     source = _field(event, "source")
     if source is None or _platform_name(source) != key.platform:
@@ -422,7 +479,7 @@ class BindingRegistry:
 
 
 class TurnTicketStore:
-    """One-use admission tickets and ephemeral I-010C context by session."""
+    """Reserved redispatch tickets and active I-010C context by session."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -437,10 +494,13 @@ class TurnTicketStore:
         ticket = TurnTicket(event_key, session, copy.deepcopy(packet))
         dispatch_key = (event_key, session)
         with self._lock:
-            if dispatch_key in self._dispatch or session in self._sessions:
+            if (
+                dispatch_key in self._dispatch
+                or session in self._sessions
+                or any(key[1] == session for key in self._dispatch)
+            ):
                 raise HermesV2BoundaryError("a wake ticket already exists")
             self._dispatch[dispatch_key] = ticket
-            self._sessions[session] = ticket
         return ticket
 
     def has_dispatch(self, event_id: str, session_key: str) -> bool:
@@ -449,7 +509,14 @@ class TurnTicketStore:
 
     def consume_dispatch(self, event_id: str, session_key: str) -> TurnTicket | None:
         with self._lock:
-            return self._dispatch.pop((str(event_id), str(session_key)), None)
+            session = str(session_key)
+            ticket = self._dispatch.pop((str(event_id), session), None)
+            if ticket is None:
+                return None
+            if session in self._sessions:
+                raise HermesV2BoundaryError("Hermes session already has active context")
+            self._sessions[session] = ticket
+            return ticket
 
     def context_for_session(self, session_key: str) -> str:
         with self._lock:
@@ -464,7 +531,12 @@ class TurnTicketStore:
             ticket = self._sessions.pop(session, None)
             if ticket is not None:
                 self._dispatch.pop((ticket.event_id, session), None)
-            return ticket
+                return ticket
+            for dispatch_key, reserved in tuple(self._dispatch.items()):
+                if dispatch_key[1] == session:
+                    self._dispatch.pop(dispatch_key, None)
+                    return reserved
+            return None
 
 
 def render_participant_wake(packet: dict[str, Any]) -> str:
