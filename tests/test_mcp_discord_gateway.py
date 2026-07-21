@@ -427,25 +427,38 @@ class _ScriptedWS:
 
 
 class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
-    async def test_runner_drops_duplicate_keys_and_nonfinite_gateway_json(self):
+    async def test_runner_resumes_after_ambiguous_gateway_json_without_a_gap(self):
         duplicate = json.dumps(_message_create("666", seq=2)).replace(
             '"id": "111222333"',
             '"id": "111222333", "id": "999999999"',
             1,
         )
-        ws = _ScriptedWS(
+        first = _ScriptedWS(
             [
                 _hello(interval_ms=600000),
                 _ready(own_id="999"),
                 duplicate,
+            ]
+        )
+        second = _ScriptedWS(
+            [
+                _hello(interval_ms=600000),
+                {"op": 0, "t": "RESUMED", "s": 2, "d": {}},
                 '{"op":1,"d":NaN}',
-                _message_create("777", seq=3),
+            ]
+        )
+        third = _ScriptedWS(
+            [
+                _hello(interval_ms=600000),
+                {"op": 0, "t": "RESUMED", "s": 3, "d": {}},
+                _message_create("777", seq=4),
                 wslib.WSClosed(4004, "stop the test"),
             ]
         )
+        sockets = [first, second, third]
 
         async def fake_connect(_url: str):
-            return ws
+            return sockets.pop(0)
 
         events = []
         runner = GatewayRunner(
@@ -458,7 +471,11 @@ class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
             await runner.run(asyncio.Event())
 
         self.assertEqual([event.author_id for event in events], ["777"])
-        self.assertEqual([payload["op"] for payload in ws.sent], [2])
+        self.assertEqual(first.close_codes, [4000])
+        self.assertEqual(second.close_codes, [4000])
+        self.assertEqual([payload["op"] for payload in first.sent], [2])
+        self.assertEqual([payload["op"] for payload in second.sent], [6])
+        self.assertEqual([payload["op"] for payload in third.sent], [6])
 
     async def test_runner_identifies_dispatches_and_raises_on_fatal_close(self):
         script = [

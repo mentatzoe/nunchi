@@ -113,8 +113,12 @@ class GatewayRunner:
                 try:
                     payload = _strict_json(text)
                 except ValueError:
-                    logger.warning("dropping malformed gateway payload")
-                    continue
+                    logger.warning(
+                        "malformed gateway payload; reconnecting from the last "
+                        "attested sequence"
+                    )
+                    await ws.send_close(_RECONNECT_CLOSE_CODE)
+                    return None
                 for action in self._protocol.handle(payload):
                     if isinstance(action, SendPayload):
                         await ws.send_text(json.dumps(action.payload))
