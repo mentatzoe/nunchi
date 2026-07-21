@@ -1,0 +1,6 @@
+{"scene_id":"hermes-hm01-exact-identity","hm_case_id":"HM-01","claim":"same loose names do not establish self; profile and native actor bindings remain isolated","evidence_grade":"deterministic"}
+{"scene_id":"hermes-hm02-disposition-routing","hm_case_id":"HM-02","claim":"SUPPRESS invokes zero turns; WAKE, both DEFER forms, bypass, and error fallback admit one act-or-silence turn","evidence_grade":"deterministic"}
+{"scene_id":"hermes-hm03-later-hearing-restart","hm_case_id":"HM-03","claim":"suppressed events remain in bounded context and restart restores context without scheduler work","evidence_grade":"deterministic"}
+{"scene_id":"hermes-hm04-shared-discord","hm_case_id":"HM-04","claim":"synthetic multi-human/multi-agent Discord facts preserve participant-specific decisions and exact mentions","evidence_grade":"deterministic-synthetic-not-live"}
+{"scene_id":"hermes-hm05-telegram-capability","hm_case_id":"HM-05","claim":"synthetic Hermes Telegram native IDs normalize equivalently and unavailable facts remain absent","evidence_grade":"deterministic-synthetic-not-live"}
+{"scene_id":"hermes-hm06-installed-provenance","hm_case_id":"HM-06","claim":"installed Hermes source revision, package version, required hooks, middleware, and private seams match the pinned target","evidence_grade":"installed-source-inspection-not-live"}

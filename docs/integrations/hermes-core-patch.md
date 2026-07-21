@@ -1,5 +1,12 @@
 # Core Patch: channel-scoped gateway display overrides
 
+> **Optional inherited host patch; not part of the Hermes V2 candidate.** The
+> V2 plugin does not apply this patch, does not register the inherited
+> quiet-room monkeypatches, and makes no claim that this asset is installed in
+> Hermes `0.19.0`. It remains available as a separately reviewed operator
+> customization. Its tests are not evidence for Nunchi V2 attention, receipt,
+> or action enforcement.
+
 This guide covers the optional Hermes core patch used to quiet gateway/tool
 chatter only in the Nunchi lane.
 

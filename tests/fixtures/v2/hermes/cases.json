@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "fixture_id": "hermes-exact-profile-alias-collision",
+      "hm_case_id": "HM-01",
+      "profiles": [
+        {"profile_name": "profile-a", "participant_id": "resident", "self_actor_id": "discord:user:9001", "loose_name": "SharedName"},
+        {"profile_name": "profile-b", "participant_id": "resident", "self_actor_id": "discord:user:9002", "loose_name": "SharedName"}
+      ],
+      "expected": {"bindings": 2, "alias_establishes_self": false}
+    },
+    {
+      "fixture_id": "hermes-disposition-routing",
+      "hm_case_id": "HM-02",
+      "routes": {
+        "SUPPRESS": {"participant_turns": 0},
+        "WAKE": {"participant_turns": 1, "wake_source": "WAKE"},
+        "CLASSIFIER_DEFER": {"participant_turns": 1, "wake_source": "DEFER"},
+        "MARGIN_DEFER": {"participant_turns": 1, "wake_source": "DEFER"},
+        "PREATTENTION_BYPASS": {"participant_turns": 1, "wake_source": "PREATTENTION_BYPASS", "classifier_calls": 0},
+        "ERROR_FALLBACK": {"participant_turns": 1, "wake_source": "ERROR_FALLBACK"}
+      }
+    },
+    {
+      "fixture_id": "hermes-later-hearing-restart",
+      "hm_case_id": "HM-03",
+      "expected": {"suppressed_event_retained": true, "scheduler_restored": false, "continuity": "session-only", "has_restart_gap": true}
+    },
+    {
+      "fixture_id": "hermes-shared-discord-synthetic",
+      "hm_case_id": "HM-04",
+      "evidence_grade": "deterministic-synthetic-not-live",
+      "expected": {"participant_specific_state": true, "exact_mentions": true}
+    },
+    {
+      "fixture_id": "hermes-telegram-synthetic",
+      "hm_case_id": "HM-05",
+      "evidence_grade": "deterministic-synthetic-not-live",
+      "native": {"chat_id": "-10042", "topic_id": "7", "message_id": "55", "self_bot_id": "9001"},
+      "expected": {"room_scope_id": "telegram:chat:-10042:topic:7", "event_id": "telegram:message:-10042:55"}
+    },
+    {
+      "fixture_id": "hermes-action-surface-matrix",
+      "hm_case_id": "HM-02",
+      "supported": ["normal-final-message", "normal-silence"],
+      "fail_closed": ["ordinary-model-tool-effect-without-I-040B-authorization"],
+      "unsupported": ["streaming-final-reply", "reaction", "direct-platform-send", "slash-command", "auto-tts", "script-only-cron", "nested-code-effect", "detached-background-effect", "plugin-direct-dispatch", "mcp-bridge-send"]
+    }
+  ]
+}

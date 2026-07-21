@@ -585,8 +585,11 @@ class TestFailSafePatchTargets(unittest.TestCase):
 
     def test_display_resolver_patch_noop_without_module(self):
         plugin = _load_plugin()
-        # No display_config module object -> import fails -> no-op, no raise.
-        self.assertFalse(plugin._patch_display_resolver(display_config_module=None))
+        # Explicit empty module double keeps this independent of modules loaded
+        # by earlier repository tests in the same interpreter.
+        self.assertFalse(
+            plugin._patch_display_resolver(display_config_module=types.SimpleNamespace())
+        )
 
 
 class TestRegisterVisibility(unittest.TestCase):
@@ -627,30 +630,49 @@ class TestRegisterVisibility(unittest.TestCase):
             self.assertIsInstance(v, bool)
 
     def test_install_summary_reports_inert_targets_when_missing(self):
-        """Offline (no gateway.* modules) every target is missing → the summary
-        must flag them INERT so the operator knows those emitters stay visible."""
+        """Explicitly absent inherited targets are reported INERT."""
         plugin = _load_plugin()
-        with self.assertLogs(plugin.logger, level="INFO") as cm:
+        inert_patchers = tuple(
+            (name, target, lambda: False)
+            for name, target, _patcher in plugin._QUIET_EMITTER_PATCHES
+        )
+        with (
+            patch.object(plugin, "_QUIET_EMITTER_PATCHES", inert_patchers),
+            self.assertLogs(plugin.logger, level="INFO") as cm,
+        ):
             results = plugin._install_quiet_room_patches()
         blob = "\n".join(cm.output)
         self.assertIn("INERT", blob)
         self.assertIn("stays VISIBLE", blob)
         self.assertTrue(all(v is False for v in results.values()), results)
 
-    def test_register_emits_the_install_summary(self):
+    def test_v2_register_does_not_install_inherited_quiet_room_patches(self):
         plugin = _load_plugin()
 
         class FakeCtx:
             def register_hook(self, name, fn):
                 pass
 
-            def register_command(self, *a, **k):
+            def register_middleware(self, *a, **k):
                 pass
 
-        with self.assertLogs(plugin.logger, level="INFO") as cm:
+        def register_v2(ctx):
+            ctx.register_hook(
+                "pre_gateway_dispatch",
+                plugin._v2_plugin.on_pre_gateway_dispatch,
+            )
+            ctx.register_hook("pre_llm_call", plugin._v2_plugin.on_pre_llm_call)
+            ctx.register_middleware(
+                "tool_execution", plugin._v2_plugin.on_tool_execution
+            )
+
+        with patch.object(
+            plugin, "_install_quiet_room_patches"
+        ) as install, patch.object(
+            plugin._v2_plugin, "register", side_effect=register_v2
+        ):
             plugin.register(FakeCtx())
-        blob = "\n".join(cm.output)
-        self.assertIn("installed emission suppression", blob)
+        install.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,15 +1,11 @@
-"""Nunchi admission gate for Hermes gateway messages.
+"""Nunchi V2 admission and participant-turn boundary for Hermes 0.19.0.
 
-Install shape:
-- Hermes calls this plugin through the synchronous ``pre_gateway_dispatch`` hook.
-- The plugin is deliberately channel-scoped, so rollout can start in a smoke lane.
-- The payload targets nunchi's *channel adapter* (``nunchi-channel``): trigger
-  with author/author_kind/message_id, recent history parsed from the
-  backfilled ``event.channel_context``, and the agent's id + mention_id.
-- A ``silent`` directive suppresses the Hermes reply via ``{"action": "skip"}``;
-  everything else allows the normal Hermes agent path to continue.
+The active ``register()`` entrypoint at the end of this module installs only
+the V2 ``SUPPRESS / WAKE / DEFER`` path in :mod:`v2_plugin`.  The V1
+``PASS / ACK / ASK / SPEAK`` helpers retained in this file are inactive
+compatibility source: they are not registered, current, installed, or live.
 
-Config block (in Hermes config.yaml):
+Historical V1 configuration reference (inactive):
 
     nunchi:
       # enabled (bool, default false) — gate is inactive unless explicitly enabled.
@@ -54,8 +50,8 @@ Config block (in Hermes config.yaml):
       # payload so the classifier can detect direct @-mentions.  This is the
       # PLATFORM mention token (the numeric snowflake), NOT the display name:
       # a display name here makes the gate blind to real @-mentions — a direct
-      # @<snowflake> mention reads as "someone else" and PASSes (observed live
-      # 2026-07-08).  Display names belong in `aliases`.
+      # @<snowflake> mention read as "someone else" and PASSed in the retired
+      # V1 implementation. Display names belonged in `aliases`.
       # mention_id: "1496355876234199040"
 
       # aliases (str CSV or list, optional) — additional identities this one
@@ -82,7 +78,7 @@ Config block (in Hermes config.yaml):
 
       # senders (str, default "all") — controls which message senders are gated.
       # Can be overridden per channel in the map form of `channels`.
-      #   all       — gate every message (current default behaviour).
+      #   all       — gate every message (retired V1 default).
       #   humans    — bot-authored messages are dropped without calling the
       #               classifier.  Requires DISCORD_ALLOW_BOTS=all globally so
       #               bot messages reach the plugin at all.
@@ -167,7 +163,7 @@ Config block (in Hermes config.yaml):
       # of `channels`.
       # history_window: 20
 
-Legacy support:
+Retired V1 helper support:
 - Config block ``turnaware:`` is accepted when ``nunchi:`` is absent and a
   deprecation warning is emitted.  Rename the block to migrate.
 
@@ -179,6 +175,7 @@ Security / trust chain:
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import inspect
@@ -273,6 +270,22 @@ try:
         _state = _state_mod
 except Exception:
     pass  # state module unavailable → fall back to baseline config only
+
+# Canonical V2 entrypoint.  Like state.py, load by file location so both Hermes
+# directory-plugin discovery and stdlib tests (which have no package parent)
+# resolve the same bytes.
+_v2_plugin: Any = None
+try:
+    _v2_file = Path(__file__).parent / "v2_plugin.py"
+    _v2_spec = importlib.util.spec_from_file_location("nunchi_hermes_v2_plugin", _v2_file)
+    if _v2_spec and _v2_spec.loader:
+        _v2_mod = importlib.util.module_from_spec(_v2_spec)
+        import sys as _sys
+        _sys.modules[_v2_spec.name] = _v2_mod
+        _v2_spec.loader.exec_module(_v2_mod)  # type: ignore[union-attr]
+        _v2_plugin = _v2_mod
+except Exception:
+    _v2_plugin = None
 
 # One backfilled channel_context line: "[DisplayName] content" with an
 # optional " [bot]" tag inside the brackets.
@@ -1724,23 +1737,110 @@ def _install_quiet_room_patches() -> dict[str, bool]:
 
 
 def register(ctx):
-    # Portable quiet-room monkeypatches: each is idempotent and fails safe on a
-    # Hermes that lacks the target (no-op, gateway stays verbose).  One INFO
-    # summary names exactly what was patched and which emitters are inert, so
-    # the mechanism is auditable — see _install_quiet_room_patches.
-    _install_quiet_room_patches()
-    ctx.register_hook("pre_gateway_dispatch", _gate_event)
-    register_cmd = getattr(ctx, "register_command", None)
-    if callable(register_cmd):
-        register_cmd(
-            "nunchi",
-            _nunchi_command,
-            "Configure the nunchi admission gate",
-            args_hint=(
-                "status | enable|disable <channel|global> | "
-                "senders <all|humans|allowlist> [channel] | "
-                "verbosity <minimal|normal|debug> [channel] | "
-                "chatter <quiet|visible> [channel] | "
-                "reset [channel]"
-            ),
+    if _v2_plugin is None:
+        raise RuntimeError("nunchi-gate V2 entrypoint is unavailable")
+    initial_config = _nunchi_config()
+    participant_id = str(
+        initial_config.get("participant_id")
+        or os.environ.get("NUNCHI_HERMES_PARTICIPANT_ID")
+        or "hermes"
+    ).strip()
+
+    def resolved_profile_config(source: Any, gateway: Any) -> dict[str, Any]:
+        config = dict(_nunchi_config())
+        full_config = _load_config()
+        platform = _platform_name(source)
+        try:
+            display_module = importlib.import_module("gateway.display_config")
+            resolve_display_setting = getattr(
+                display_module, "resolve_display_setting"
+            )
+            platform_streaming = resolve_display_setting(
+                full_config, platform, "streaming"
+            )
+        except Exception:
+            platform_streaming = None
+        raw_streaming = full_config.get("streaming", {})
+        if isinstance(raw_streaming, dict):
+            global_streaming = bool(raw_streaming.get("enabled", False)) and str(
+                raw_streaming.get("transport", "auto")
+            ).strip().lower() != "off"
+        else:
+            global_streaming = bool(raw_streaming)
+        effective_streaming = (
+            global_streaming
+            if platform_streaming is None
+            else bool(platform_streaming)
         )
+        config["_host_streaming_disabled"] = not effective_streaming
+        model_config = full_config.get("model")
+        openai_runtime = (
+            str(model_config.get("openai_runtime") or "").strip().lower()
+            if isinstance(model_config, dict)
+            else ""
+        )
+        proxy_resolver = getattr(gateway, "_get_proxy_url", None)
+        try:
+            proxy_url = proxy_resolver() if callable(proxy_resolver) else None
+        except Exception:
+            proxy_url = "unknown"
+        config["_host_effect_runtime_supported"] = (
+            openai_runtime != "codex_app_server" and not proxy_url
+        )
+        return config
+
+    def profile_config(event: Any, gateway: Any) -> dict[str, Any]:
+        source = getattr(event, "source", None)
+        resolve_home = getattr(gateway, "_resolve_profile_home_for_source", None)
+        profile_home = resolve_home(source) if callable(resolve_home) else None
+        if profile_home:
+            try:
+                run_module = importlib.import_module("gateway.run")
+                profile_scope = getattr(run_module, "_profile_runtime_scope")
+                with profile_scope(profile_home):
+                    return resolved_profile_config(source, gateway)
+            except Exception:
+                return {}
+        return resolved_profile_config(source, gateway)
+
+    def schedule_redispatch(event: Any, gateway: Any) -> None:
+        source = getattr(event, "source", None)
+        adapter_for_source = getattr(gateway, "_adapter_for_source", None)
+        adapter = adapter_for_source(source) if callable(adapter_for_source) else None
+        handle_message = getattr(adapter, "handle_message", None)
+        if not callable(handle_message):
+            raise RuntimeError("Hermes adapter redispatch seam is unavailable")
+        loop = asyncio.get_running_loop()
+        session_resolver = getattr(gateway, "_session_key_for_source", None)
+        session_key = str(
+            session_resolver(source) if callable(session_resolver) else ""
+        )
+
+        async def owned_redispatch() -> None:
+            try:
+                pending: Any = handle_message(event)
+                accepted = await pending
+                if accepted is False:
+                    await asyncio.to_thread(
+                        _v2_plugin._CONTROLLER.abort_participant_turn,
+                        session_key,
+                    )
+            except BaseException:
+                await asyncio.to_thread(
+                    _v2_plugin._CONTROLLER.abort_participant_turn,
+                    session_key,
+                )
+                raise
+
+        task = loop.create_task(owned_redispatch())
+        background = getattr(adapter, "_background_tasks", None)
+        if isinstance(background, set):
+            background.add(task)
+            task.add_done_callback(background.discard)
+
+    _v2_plugin.configure(
+        config_loader=profile_config,
+        participant_id=participant_id,
+        schedule_redispatch=schedule_redispatch,
+    )
+    _v2_plugin.register(ctx)

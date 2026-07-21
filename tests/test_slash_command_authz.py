@@ -126,9 +126,8 @@ class TestAuthorizationSeam(_TmpStateMixin):
         self.assertIn("OVERRIDABLE_KEYS", doc)
         self.assertIn("state_path", doc)
 
-    def test_register_exposes_exactly_one_command_surface(self):
-        """The only slash surface is 'nunchi' -> _nunchi_command; no other
-        command name can reach state mutation."""
+    def test_v2_register_exposes_no_mutating_command_surface(self):
+        """The inherited V1 slash command is not part of the active V2 path."""
         p = _load_plugin()
         registered: dict[str, object] = {}
 
@@ -139,9 +138,23 @@ class TestAuthorizationSeam(_TmpStateMixin):
             def register_command(self, name, handler, description="", args_hint=""):
                 registered[name] = handler
 
-        p.register(FakeCtx())
-        self.assertEqual(set(registered), {"nunchi"})
-        self.assertIs(registered["nunchi"], p._nunchi_command)
+            def register_middleware(self, name, handler):
+                pass
+
+        def register_v2(ctx):
+            ctx.register_hook(
+                "pre_gateway_dispatch", p._v2_plugin.on_pre_gateway_dispatch
+            )
+            ctx.register_hook("pre_llm_call", p._v2_plugin.on_pre_llm_call)
+            ctx.register_middleware(
+                "tool_execution", p._v2_plugin.on_tool_execution
+            )
+
+        with unittest.mock.patch.object(
+            p._v2_plugin, "register", side_effect=register_v2
+        ):
+            p.register(FakeCtx())
+        self.assertEqual(registered, {})
 
 
 class TestSlashBlastRadius(_TmpStateMixin):

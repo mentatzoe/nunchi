@@ -1,5 +1,9 @@
 # Test Plan: channel-scoped display overrides
 
+> **Separate optional-host-patch test plan.** These checks do not validate the
+> Hermes V2 plugin and were not run as part of HM-01 through HM-06. The V2
+> candidate neither applies nor depends on this patch.
+
 Run from `$HERMES_HOME/hermes-agent` after applying
 `integrations/hermes/core-patches/0001-channel-scoped-display-overrides.patch`
 from the Nunchi source checkout.

@@ -571,19 +571,37 @@ class TestPlatformChannelWildcards(unittest.TestCase):
 
 
 class TestRegisterHook(unittest.TestCase):
-    """register() wires the pre_gateway_dispatch hook."""
+    """register() wires the V2 hooks and action middleware."""
 
     def test_register_calls_hook_registration(self) -> None:
         p = _load_plugin()
         registered: dict[str, object] = {}
+        middleware: dict[str, object] = {}
 
         class FakeCtx:
             def register_hook(self, name: str, fn: object) -> None:
                 registered[name] = fn
 
-        p.register(FakeCtx())
-        self.assertIn("pre_gateway_dispatch", registered)
-        self.assertIs(registered["pre_gateway_dispatch"], p._gate_event)
+            def register_middleware(self, name: str, fn: object) -> None:
+                middleware[name] = fn
+
+        def register_v2(ctx):
+            ctx.register_hook(
+                "pre_gateway_dispatch", p._v2_plugin.on_pre_gateway_dispatch
+            )
+            ctx.register_hook("pre_llm_call", p._v2_plugin.on_pre_llm_call)
+            ctx.register_middleware(
+                "tool_execution", p._v2_plugin.on_tool_execution
+            )
+
+        with unittest.mock.patch.object(
+            p._v2_plugin, "register", side_effect=register_v2
+        ):
+            p.register(FakeCtx())
+        self.assertEqual(set(registered), {"pre_gateway_dispatch", "pre_llm_call"})
+        self.assertIs(registered["pre_gateway_dispatch"], p._v2_plugin.on_pre_gateway_dispatch)
+        self.assertIs(middleware["tool_execution"], p._v2_plugin.on_tool_execution)
+        self.assertIsNot(registered["pre_gateway_dispatch"], p._gate_event)
 
 
 # ---------------------------------------------------------------------------
@@ -1438,9 +1456,9 @@ class TestNunchiCommand(unittest.TestCase):
         result = state_mod.filter_overridable({"agent_id": "evil-bot", "senders": "all"})
         self.assertNotIn("agent_id", result)
 
-    # --- register() wires the command ---
+    # --- V2 register removes the inherited mutation command ---
 
-    def test_register_wires_command(self) -> None:
+    def test_register_does_not_wire_v1_command(self) -> None:
         p = _load_plugin()
         registered_hooks: dict = {}
         registered_cmds: dict = {}
@@ -1452,13 +1470,27 @@ class TestNunchiCommand(unittest.TestCase):
             def register_command(self, name, handler, description="", args_hint=""):
                 registered_cmds[name] = {"handler": handler, "description": description}
 
-        p.register(FakeCtx())
-        self.assertIn("pre_gateway_dispatch", registered_hooks)
-        self.assertIn("nunchi", registered_cmds)
-        self.assertIs(registered_cmds["nunchi"]["handler"], p._nunchi_command)
+            def register_middleware(self, name, fn):
+                pass
 
-    def test_register_graceful_without_register_command(self) -> None:
-        """register() does not error when ctx lacks register_command (older Hermes)."""
+        def register_v2(ctx):
+            ctx.register_hook(
+                "pre_gateway_dispatch", p._v2_plugin.on_pre_gateway_dispatch
+            )
+            ctx.register_hook("pre_llm_call", p._v2_plugin.on_pre_llm_call)
+            ctx.register_middleware(
+                "tool_execution", p._v2_plugin.on_tool_execution
+            )
+
+        with unittest.mock.patch.object(
+            p._v2_plugin, "register", side_effect=register_v2
+        ):
+            p.register(FakeCtx())
+        self.assertIn("pre_gateway_dispatch", registered_hooks)
+        self.assertEqual(registered_cmds, {})
+
+    def test_register_requires_v2_execution_middleware(self) -> None:
+        """A host without tool middleware cannot silently run the V2 plugin."""
         p = _load_plugin()
         registered: dict = {}
 
@@ -1466,8 +1498,8 @@ class TestNunchiCommand(unittest.TestCase):
             def register_hook(self, name, fn):
                 registered[name] = fn
 
-        p.register(FakeCtxNoCmd())  # must not raise
-        self.assertIn("pre_gateway_dispatch", registered)
+        with self.assertRaises(Exception):
+            p.register(FakeCtxNoCmd())
 
 
 class TestSendBackstop(unittest.TestCase):
