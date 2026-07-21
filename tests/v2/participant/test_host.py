@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 
 from nunchi.authorization import (
     PrivilegedActionCoordinator,
     PrivilegedActionGuard,
     canonical_action_digest,
 )
-from nunchi.participant import ParticipantTurn, build_participant_wake, run_participant_turn
+from nunchi.participant import (
+    MAX_EXPANSION_CALLS_PER_TURN,
+    ParticipantHostError,
+    ParticipantTurn,
+    build_participant_wake,
+    run_participant_turn,
+)
 from nunchi.policy import OperatorPolicySource, load_operator_policy
 from tests.v2.contract.schema_helpers import (
     make_advice,
@@ -50,6 +57,12 @@ class ParticipantHostCase(unittest.TestCase):
         arguments.update(overrides)
         return run_participant_turn(self.snapshot, decision, **arguments)
 
+    def policy_for(self, decision):
+        return replace(
+            self.operator.attention,
+            preattention_enabled=decision.get("status") != "bypass",
+        )
+
 
 class WakePacketCases(ParticipantHostCase):
     def test_wake_packet_materializes_current_facts_and_grounded_advice(self):
@@ -81,13 +94,45 @@ class WakePacketCases(ParticipantHostCase):
                 packet = build_participant_wake(
                     self.snapshot,
                     decision,
-                    policy=self.operator.attention,
+                    policy=self.policy_for(decision),
                 )
                 self.assertEqual(validate_participant_wake(packet), [])
                 self.assertEqual(packet["attention"], {"source": source})
 
+    def test_stale_suppression_malformed_advice_and_policy_inconsistent_bypass_fail_closed(self):
+        stale = make_decision_ok("SUPPRESS", "SUPPRESS", "none")
+        stale["request_id"] = "different-request"
+        malformed = make_decision_ok("WAKE", "WAKE", "none")
+        malformed["attention_advice"] = [{}]
+        for decision in (stale, malformed, make_decision_bypass(request_id="req-0001")):
+            with self.subTest(decision=decision):
+                with self.assertRaises(ParticipantHostError):
+                    run_participant_turn(
+                        self.snapshot,
+                        decision,
+                        policy=self.operator.attention,
+                        participant=lambda _turn: self.fail("invalid decision must not invoke"),
+                        receipt_sink=self.receipts.append,
+                    )
+
 
 class RoutingAndOutcomeCases(ParticipantHostCase):
+    def _enable_continuation(self):
+        self.snapshot["continuation"] = {
+            "handle_id": "cont-7f3a",
+            "bound_to": {
+                "participant_id": "vigil",
+                "room_id": "42",
+                "continuity_scope_id": "discord:room:42#2026-07",
+                "trigger_event_id": "e3",
+            },
+            "can_fetch_before": True,
+            "can_fetch_after": True,
+            "can_fetch_around_event": True,
+            "max_events_per_fetch": 20,
+            "max_bytes_per_fetch": 32768,
+        }
+
     def test_suppress_invokes_no_participant_and_writes_no_host_stage(self):
         calls = []
         result = self.run_turn(
@@ -108,7 +153,11 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
         for decision in cases:
             with self.subTest(decision=decision["status"]):
                 self.receipts.clear()
-                result = self.run_turn(decision, lambda turn: None)
+                result = self.run_turn(
+                    decision,
+                    lambda turn: None,
+                    policy=self.policy_for(decision),
+                )
                 self.assertEqual(result["outcome"], "silent")
                 self.assertEqual(len(self.receipts), 1)
                 self.assertEqual(validate_attention_receipt(self.receipts[0]), [])
@@ -154,7 +203,7 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
         self.assertEqual(result["outcome"], "unknown")
         self.assertEqual(offered, [action])
         self.assertEqual(len(self.receipts), 1)
-        self.assertEqual(self.receipts[0]["body"]["outcome"], "sent")
+        self.assertEqual(self.receipts[0]["body"]["outcome"], "unknown")
 
     def test_ambiguous_correlated_action_sink_ack_is_an_error_and_not_retried(self):
         action = {"kind": "reaction", "target_event_id": "e1", "reaction": "👀"}
@@ -175,7 +224,7 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
         self.assertEqual(result["outcome"], "unknown")
         self.assertEqual(offered, [("req-0001", action)])
         self.assertEqual(len(self.receipts), 1)
-        self.assertEqual(self.receipts[0]["body"]["outcome"], "sent")
+        self.assertEqual(self.receipts[0]["body"]["outcome"], "unknown")
 
     def test_meta_answer_is_not_a_sendable_action_and_is_not_reclassified(self):
         calls = []
@@ -221,19 +270,51 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
             policy=policy,
             receipt_sink=ambiguous_receipt,
         )
-        self.assertEqual(result["status"], "no-wake")
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], "participant-receipt-persistence-unknown")
         self.assertEqual(result["receipt_persistence"], "unknown")
         self.assertEqual([record["stage"] for record in offered], ["participant-host"])
 
     def test_bound_context_expansion_is_available_without_second_judgment(self):
+        self._enable_continuation()
         pages = []
 
         def fetch(request):
             pages.append(request)
-            return {"events": [], "coverage": {}}
+            return {
+                "request_id": request["request_id"],
+                "handle_id": request["handle_id"],
+                "room_id": "42",
+                "continuity_scope_id": "discord:room:42#2026-07",
+                "direction": request["direction"],
+                "anchor_event_id": "e3",
+                "actors": {},
+                "events": [],
+                "coverage": {
+                    "has_more_before": False,
+                    "has_more_after": None,
+                    "has_gaps": False,
+                    "truncated_by": [],
+                    "continuity": "restart-safe",
+                    "has_restart_gap": False,
+                    "max_events": request["max_events"],
+                    "max_bytes": request["max_bytes"],
+                },
+            }
 
         def participant(turn: ParticipantTurn):
-            self.assertEqual(turn.fetch_context({"direction": "before"})["events"], [])
+            self.assertEqual(
+                turn.fetch_context(
+                    {
+                        "request_id": "req-0001",
+                        "handle_id": "cont-7f3a",
+                        "direction": "before",
+                        "max_events": 20,
+                        "max_bytes": 32768,
+                    }
+                )["events"],
+                [],
+            )
             return None
 
         result = self.run_turn(
@@ -242,8 +323,165 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
             continuation_fetch=fetch,
         )
         self.assertEqual(result["outcome"], "silent")
-        self.assertEqual(pages, [{"direction": "before"}])
+        self.assertEqual(pages[0]["direction"], "before")
         self.assertEqual(self.receipts[0]["body"]["expansion_calls"], 1)
+
+    def test_turn_capabilities_are_explicit_and_expire_with_context_fetch(self):
+        self._enable_continuation()
+        retained = []
+
+        def fetch(request):
+            return {
+                "request_id": request["request_id"],
+                "handle_id": request["handle_id"],
+                "room_id": "42",
+                "continuity_scope_id": "discord:room:42#2026-07",
+                "direction": request["direction"],
+                "anchor_event_id": "e3",
+                "actors": {},
+                "events": [],
+                "coverage": {
+                    "has_more_before": False,
+                    "has_more_after": None,
+                    "has_gaps": False,
+                    "truncated_by": [],
+                    "continuity": "restart-safe",
+                    "has_restart_gap": False,
+                    "max_events": request["max_events"],
+                    "max_bytes": request["max_bytes"],
+                },
+            }
+
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            lambda turn: retained.append(turn),
+            continuation_fetch=fetch,
+            action_sink=lambda _action: None,
+        )
+        self.assertEqual(result["outcome"], "silent")
+        self.assertEqual(
+            retained[0].capabilities,
+            ("context-expansion", "message", "reaction"),
+        )
+        with self.assertRaisesRegex(ParticipantHostError, "closed"):
+            retained[0].fetch_context(
+                {
+                    "request_id": "req-0001",
+                    "handle_id": "cont-7f3a",
+                    "direction": "before",
+                    "max_events": 1,
+                    "max_bytes": 1024,
+                }
+            )
+
+    def test_action_references_must_name_delivered_facts(self):
+        for action in (
+            {"kind": "message", "content": "x", "reply_to_event_id": "missing"},
+            {"kind": "message", "content": "x", "mention_actor_ids": ["discord:missing"]},
+            {"kind": "reaction", "target_event_id": "missing", "reaction": "x"},
+        ):
+            effects = []
+            result = self.run_turn(
+                make_decision_ok("WAKE", "WAKE", "none"),
+                lambda _turn, action=action: action,
+                action_sink=effects.append,
+            )
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(effects, [])
+
+    def test_context_expansion_rejects_request_and_page_budget_overruns(self):
+        self._enable_continuation()
+        cases = (
+            (
+                {"max_events": 21, "max_bytes": 32768},
+                lambda request: self.fail("over-budget request must not fetch"),
+            ),
+            (
+                {"max_events": 1, "max_bytes": 32768},
+                lambda request: self._continuation_page(
+                    request,
+                    events=[self.snapshot["events"][0], self.snapshot["events"][1]],
+                ),
+            ),
+        )
+        for request_limits, fetch in cases:
+            with self.subTest(request_limits=request_limits):
+                def participant(turn):
+                    turn.fetch_context(
+                        {
+                            "request_id": "req-0001",
+                            "handle_id": "cont-7f3a",
+                            "direction": "before",
+                            **request_limits,
+                        }
+                    )
+
+                result = self.run_turn(
+                    make_decision_ok("WAKE", "WAKE", "none"),
+                    participant,
+                    continuation_fetch=fetch,
+                )
+                self.assertEqual(result["status"], "error")
+                self.assertEqual(result["outcome"], "unknown")
+
+    def test_context_expansion_has_an_absolute_per_turn_call_ceiling(self):
+        self._enable_continuation()
+        def fetch(request):
+            page = self._continuation_page(request)
+            page["next_cursor"] = f"cursor-{request.get('cursor', 'root')}-{len(calls)}"
+            return page
+
+        calls = []
+
+        def participant(turn):
+            cursor = None
+            for _ in range(MAX_EXPANSION_CALLS_PER_TURN + 1):
+                request = {
+                    "request_id": "req-0001",
+                    "handle_id": "cont-7f3a",
+                    "direction": "before",
+                    "max_events": 1,
+                    "max_bytes": 32768,
+                }
+                if cursor is not None:
+                    request["cursor"] = cursor
+                page = turn.fetch_context(request)
+                calls.append(request)
+                cursor = page["next_cursor"]
+
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            participant,
+            continuation_fetch=fetch,
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(len(calls), MAX_EXPANSION_CALLS_PER_TURN)
+        self.assertEqual(
+            self.receipts[0]["body"]["expansion_calls"],
+            MAX_EXPANSION_CALLS_PER_TURN,
+        )
+
+    def _continuation_page(self, request, *, events=None):
+        return {
+            "request_id": request["request_id"],
+            "handle_id": request["handle_id"],
+            "room_id": "42",
+            "continuity_scope_id": "discord:room:42#2026-07",
+            "direction": request["direction"],
+            "anchor_event_id": request.get("anchor_event_id", "e3"),
+            "actors": {},
+            "events": list(events or []),
+            "coverage": {
+                "has_more_before": False,
+                "has_more_after": None,
+                "has_gaps": False,
+                "truncated_by": [],
+                "continuity": "restart-safe",
+                "has_restart_gap": False,
+                "max_events": request["max_events"],
+                "max_bytes": request["max_bytes"],
+            },
+        }
 
 
 class PrivilegedActionCases(ParticipantHostCase):
