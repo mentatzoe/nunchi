@@ -1,5 +1,42 @@
 # Claude Code V2 — verification index
 
+**Attempt 8**, recorded 2026-07-21, `v2-claude-owner` lane, on top of the
+integrator's Attempt-7 live-source remediation (`7ea499b` / evidence
+`7e3d970`). The Attempt 1–6 indexes below are preserved as originally
+recorded at their own candidates; the table immediately following this note
+is the current (Attempt-8) index.
+
+## Attempt-8 deterministic commands and results
+
+Every command below was run on the Attempt-8 implementation candidate
+`d594b29c1bca487da38f025b1a46de21c183b8f6`.
+
+| Command | Result |
+|---|---|
+| `python3 -m unittest tests.v2.test_claude_code` | `Ran 90 tests … OK` (38 new: `StrictJsonParsingCases`, `SidecarExactTypeCases`, `ReservationAndPostToolFailureCases`, `ReceiptSinkStrictAckCases`, `ToolsConfigStrictCases`) |
+| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 43 tests … OK` (7 new: `MalformedStdinFailsClosedCases` ×6, `post-tool-failure` fail-open/inert coverage) |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 155 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1254 tests … OK (skipped=7)` |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` (×2, diffed) | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations`; byte-identical across two independent runs, and byte-identical to the committed `scene-results.jsonl`/`reactive-bot-hearing.jsonl` (this attempt touches no attention/scene mechanics, so those evidence files are unchanged) |
+| `git diff --check` | clean |
+
+## Attempt-8 defect coverage
+
+| Blocker | Proven by |
+|---|---|
+| Strict UTF-8/JSON parsing (duplicate-key, non-finite-constant rejection) wired into stdin, tools config, sidecar, and state-file reads | `StrictJsonParsingCases` |
+| Exact native sidecar types (no `str()`/`bool()` coercion) | `SidecarExactTypeCases` |
+| Real `PostToolUseFailure` hook + exact `tool_use_id` correlation | `ReservationAndPostToolFailureCases`, wrapper `PreToolAndStopDirectionCases`/`UnconfiguredInertAcrossAllHookEventsCase` post-tool-failure cases |
+| One atomic reply-or-reaction reservation per turn; unresolved outcome is `unknown`, never silence | `ReservationAndPostToolFailureCases` |
+| Receipt sinks accept only exact `None` as persistence acknowledgement | `ReceiptSinkStrictAckCases` |
+| Tools configuration rejects coercion/ambiguity/unknown keys/malformed patterns | `ToolsConfigStrictCases` |
+| Self-found: `main()`'s stdin read/parse failure must crash uncaught (wrapper is the fail-closed/open boundary), not synthesize an empty payload | `tests/test_claude_code_hook_wrapper.py::MalformedStdinFailsClosedCases` |
+
+Full finding-by-finding narrative is in `handoff.md` (Attempt 8).
+
+---
+
 **Attempt 6**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt
 1/2/3/4/5 indexes are preserved in git at candidates `6476b58` / `1990129` /
 `6513135` / `a6a7a8b` / `f6c34d1`. Every command below was run on the

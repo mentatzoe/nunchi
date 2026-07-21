@@ -739,3 +739,131 @@ The exact installed transition and remaining live boundary are recorded in
 `integrator-live-arming.md`. Attempt 7 remains **REWORK / live-pending**, not
 accepted, until a freshly authenticated Claude session completes the bounded
 reply, silence, privileged-denial, error-recovery, and restart scenes.
+
+---
+
+## Attempt 8 — 2026-07-21 (rework: strict validation, PostToolUseFailure,
+atomic room-action reservation, strict receipt acks, strict tools config)
+
+**Delivering lane**: `v2-claude-owner`, fresh Claude Code session (model
+`claude-sonnet-5`), commissioned directly by Codex as the human-authorized V2
+DRI to close five evidence-backed blockers identified after Attempt 7's
+live-source fix (Zoe's standing instruction to finish V2 without acting as a
+clipboard; this session had direct scoped implementation authority for the
+Claude packet). Attempt 7 (product `7ea499b`, evidence `7e3d970`) was
+REWORK, not acceptance — the host is armed with the transport and hooks, but
+`integrator-live-arming.md` records only reactive transport, native identity,
+observation, and trusted-bypass attention as live-proven; participant
+completion remained blocked on the installed Claude CLI's expired login and
+was never re-attempted this session (no host mutation was performed or
+requested).
+
+### Exact candidate
+
+- **Implementation candidate**: `d594b29c1bca487da38f025b1a46de21c183b8f6`
+  (descends from Attempt-7 evidence tip `7e3d970` on branch
+  `claude/claude-code-v2-integration-3ac219`). Product, test, and owned-docs
+  changes only.
+- **Evidence-only binding**: this commit (adding this Attempt-8 section) sits
+  on top; its diff from `d594b29` touches only `evidence/v2/claude-code/`.
+
+Attempt-8 changed-file inventory (implementation candidate, `7e3d970` →
+`d594b29`):
+
+```text
+M  docs/integrations/claude-code-v2.md
+M  evals/v2/claude_code/run_scenes.py
+M  integrations/claude-code/README.md
+M  integrations/claude-code/nunchi-claude-v2-hook.sh
+M  integrations/claude-code/nunchi_claude_v2.py
+M  tests/test_claude_code_hook_wrapper.py
+M  tests/v2/test_claude_code.py
+```
+
+No `src/`, `schemas/`, or other lane's surface changed; the transport patches
+(`0001`/`0002`) and `nunchi_claude_v2.py`'s exact-source binding from Attempt
+7 are otherwise unchanged.
+
+### Finding-by-finding disposition
+
+| # | Blocker (commissioned) | Resolution | Proof |
+|---|---|---|---|
+| 1 | Strict UTF-8/JSON parsing with duplicate-key/non-finite rejection, exact native sidecar types | `_strict_json_loads` (strict UTF-8 decode, `object_pairs_hook` rejects duplicate keys, `parse_constant` rejects `NaN`/`Infinity`/`-Infinity`) now backs every JSON source the gate reads: hook stdin, the tools-config file, sidecar lines, and this integration's own state files (`RoomStateStore.read_event_rows`/`read_room`/`read_turn_actions`). `validate_sidecar_record` requires each field's EXACT JSON type — no `str()`/`bool()` coercion — so a JSON string `"false"` for `author.bot` or `mention_everyone` can no longer coerce to `True`, and a numeric `author.id`/`message_id`/`guild_id` or non-string mention ID is refused rather than silently stringified. | `StrictJsonParsingCases`, `SidecarExactTypeCases` (`tests/v2/test_claude_code.py`) |
+| 2 | Real `PostToolUseFailure` hook registration and handler with exact `tool_use_id` correlation | `handle_post_tool_failure` added, registered in `_SETTINGS_TEMPLATE` and the CLI (`post-tool-failure` subcommand); correlates strictly by `tool_use_id` via the same `_resolve_reservation` exact-match path `PostToolUse` uses. | `ReservationAndPostToolFailureCases.test_post_tool_failure_records_a_failed_delivery`, `..._mismatched_tool_use_id_does_not_resolve`; wrapper: `MalformedStdinFailsClosedCases`, `PreToolAndStopDirectionCases.test_post_tool_failure_configured_broken_gate_still_fails_open`, `UnconfiguredInertAcrossAllHookEventsCase.test_post_tool_failure_inert_when_unconfigured` |
+| 3 | One atomic reply-or-reaction reservation per woken turn, bound to exact tool identity/input, truthfully closed by `PostToolUse`/`PostToolUseFailure`/`Stop` so unresolved outcomes are never silence | `_reserve_room_action` (at `PreToolUse`) creates exactly one reservation per turn — a second reply/react attempt in the same turn is denied regardless of whether the first resolved — bound to the exact `tool_use_id`, tool name, and a SHA-256 digest of the exact `tool_input`. `_resolve_reservation` (at `PostToolUse`/`PostToolUseFailure`) closes it only on an exact match; a mismatched `tool_use_id` or `tool_input` neither closes the reservation nor gets attested as the turn's action. `complete_turn`'s `replay_observed_native_turn` now raises (routing the outcome to `unknown`, never `None`/silent) whenever a reservation was made but is still unresolved at `Stop`, or resolved with no attestable action. | `ReservationAndPostToolFailureCases` (`test_second_room_action_in_the_same_turn_is_denied`, `test_reservation_without_tool_use_id_is_denied`, `test_unresolved_reservation_reports_unknown_not_silence`, `test_mismatched_tool_use_id_post_tool_does_not_attest`, `test_mismatched_tool_input_post_tool_does_not_attest`) |
+| 4 | Receipt sinks accept only exact `None` as persistence acknowledgement | `run_attention`'s observation-receipt persistence and `_ObservedDeliveryRecorder.__call__` now require the sink's return value to be exactly `None` before treating it as a persisted receipt — matching the strict contract `src/nunchi/participant.py` already enforces for every other receipt call in this turn. A non-raising sink that returns a falsy-but-not-`None` value (`0`, `""`) is now treated exactly like a raised persistence failure. | `ReceiptSinkStrictAckCases` (`test_observation_receipt_sink_returning_non_none_is_treated_as_failure`, `test_observed_delivery_recorder_forwards_non_none_ack`, `test_observed_delivery_recorder_forwards_none_ack`) |
+| 5 | Tools configuration rejects coercion, ambiguity, unknown keys, and malformed patterns | `_load_tools_config` rewritten: rejects any unknown key at the top level, inside `room_action_tools`, or inside a `privileged[]` entry; requires `tool_pattern`/`capability`/`impact`/`resource_kind`/`resource_id_input_key`/`resource_id_const` to be real JSON strings (`_require_config_str`) instead of coercing via `str()`; rejects an entry that sets both `resource_id_input_key` and `resource_id_const` (ambiguous resource-identity source); and `_compile_config_pattern` catches `re.error` — which is **not** a `ValueError` subclass and previously escaped every handler's `except (..., ValueError)` clause uncaught — converting it into `ClaudeGateConfigError`. | `ToolsConfigStrictCases` (11 tests: unknown top-level/room_action_tools/privileged keys, non-string pattern, malformed room-action and privileged patterns, missing required key, coerced capability, ambiguous resource-identity source, `test_pre_tool_denies_fail_closed_on_malformed_tools_config`, `test_well_formed_example_config_still_loads`) |
+
+### Self-found sixth defect (adversarial self-review before handoff)
+
+Before returning this candidate, an independent adversarial review
+(`silent-failure-hunter`) of this exact diff was run against the working tree.
+It found that wiring `_strict_json_loads` into `main()`'s stdin parsing had
+introduced a **new** regression: `main()` began catching both the stdin-read
+exception and the JSON-parse `ValueError` into a silently-synthesized
+`payload = {}`. An empty payload reads to every handler as "no room event, no
+session" — exactly the shape of a legitimate operator prompt (for
+`user-prompt-submit`) or a session-mismatched turn (for `pre-tool`) — so a
+merely truncated or malformed hook stdin would have been silently admitted or
+allowed a privileged tool through, undetectable by the wrapper (exit 0, no
+crash). The pre-existing (Attempt 1–7) code had the same JSON-parse fallback,
+but the stdin-read catch was new to this attempt and is the more severe half
+of the regression, since the read failure previously crashed uncaught and was
+already caught by the wrapper's fail-closed/fail-open-per-event contract.
+
+**Fixed**: `main()` no longer catches either failure. A stdin read failure, a
+strict-parse failure, or a well-formed-but-non-object payload now crashes the
+process uncaught — exactly like any other gate failure — so the already
+fully-tested wrapper (`nunchi-claude-v2-hook.sh`) remains the single
+fail-closed/fail-open boundary for a gate that cannot produce a real decision:
+block for `user-prompt-submit`, deny (exit 2) for `pre-tool`, open for
+`stop`/`post-tool`/`post-tool-failure`. No new bespoke logic was added to the
+Python gate. Six new regression tests exercise this end-to-end through the
+real wrapper and real gate. | `tests/test_claude_code_hook_wrapper.py::MalformedStdinFailsClosedCases` (malformed JSON and duplicate-key stdin block `user-prompt-submit`; a non-object payload blocks `user-prompt-submit`; malformed stdin denies `pre-tool` exit 2; unconfigured stays inert even with malformed stdin)
+
+### Deterministic commands and results (Attempt 8)
+
+`python3 -m unittest tests.v2.test_claude_code` → **90 OK** (38 new);
+`python3 -m unittest tests.test_claude_code_hook_wrapper` → **43 OK** (7 new);
+the five-module guard run (`test_no_home_writes`, `test_sentinel_forgery`,
+`test_no_second_judgment`, `test_claude_code`,
+`test_claude_code_hook_wrapper`) → **155 OK**; full baseline
+`python3 -m unittest` → **1254 OK (skipped=7)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay
+(`PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>`)
+→ 20 rows (19 PASS, 1 declared limitation), byte-identical to the Attempt-7
+evidence rows already committed at `evidence/v2/claude-code/scene-results.jsonl`
+/ `reactive-bot-hearing.jsonl` (confirmed by direct diff — this attempt
+touches no attention/scene mechanics, so those files are not regenerated);
+`git diff --check` → clean. Full table in `verification.md`.
+
+### Installed provenance (Attempt 8)
+
+Repository gate SHA-256 at the implementation candidate:
+`ba3948f23ec2e6e4b37d4132256285af3d0690472a8f67fd5af78967c9822d9d`; wrapper
+SHA-256: `eb510f86c91e15ec029d942034d54c8cd057df768bf3d4d7bbeb6798a41aecd0`.
+**No host mutation was performed or requested this session** — no
+`settings.json` edit, no transport-patch application, no outbound Discord
+send, no staged-install refresh. The installed host state, the Attempt-7
+`integrator-live-arming.md` record, and the remaining operator boundary
+(participant completion blocked on the installed Claude CLI's expired login)
+are unchanged; re-arming the staged gate/wrapper with these exact bytes and
+re-running the live ladder from a freshly authenticated session is unchanged
+process, not repeated here.
+
+### Known limitations and rejected claims (Attempt 8)
+
+Unchanged from Attempt 7, plus the reservation-coverage limitation now
+documented in `integrations/claude-code/README.md` (`PreToolUse` disabled
+while `PostToolUse` stays registered cannot bind a reservation, so an
+unreserved send is reported unattested rather than "sent" — the same
+disabled-hooks unenforced-path category as guard coverage, not a new gap).
+**Rejected claim**: "live parity is proven" — it is not; this session
+performed no live scenes and no host mutation. **Rejected claim**: "the
+self-found sixth defect exhausts adversarial review" — one independent
+review pass found one defect; it does not prove no others remain, and this
+lane does not self-declare acceptance.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`d594b29c1bca487da38f025b1a46de21c183b8f6`). This lane does
+not self-accept and did not integrate.
