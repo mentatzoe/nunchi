@@ -666,6 +666,29 @@ def _allow(*diagnostics: str) -> HookDecision:
     return HookDecision(diagnostics=tuple(diagnostics))
 
 
+def _explicit_allow(*diagnostics: str) -> HookDecision:
+    """A non-blocking, non-empty UserPromptSubmit decision.
+
+    Semantically identical to ``_allow()`` — proceed normally, no additional
+    context — but never emits empty stdout. The wrapper requires every
+    configured, successfully-run UserPromptSubmit path to write *something*,
+    so a gate that legitimately has nothing to add (an operator prompt while
+    configured) must say so explicitly rather than fall silent. Silence and a
+    genuine crash/truncation would otherwise be indistinguishable to the
+    wrapper, which is exactly the gap an empty or truncated gate file
+    exploited.
+    """
+    return HookDecision(
+        output={
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "",
+            }
+        },
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def _block_prompt(*diagnostics: str) -> HookDecision:
     # Effective suppression stops only the participant turn. The empty reason
     # keeps the room and session surface free of a social diagnostic; the
@@ -1184,11 +1207,17 @@ def handle_user_prompt_submit(
     classifier_transport: Callable[..., Any] | None = None,
 ) -> HookDecision:
     tag = parse_channel_tag(str(payload.get("prompt") or ""))
+    configured = ClaudeGateConfig.is_configured(environ)
     if tag is None:
         # Operator-typed prompts are direct instruction, not room events: no
-        # observation, no attention call, no receipts.
+        # observation, no attention call, no receipts. While configured this
+        # is the one legitimate path that would otherwise emit empty stdout
+        # at exit 0 — the same shape as an empty/truncated gate file failing
+        # silently — so say so explicitly instead of falling silent.
+        if configured:
+            return _explicit_allow()
         return _allow()
-    if not ClaudeGateConfig.is_configured(environ):
+    if not configured:
         return _allow("not configured; channel prompt passes through un-gated")
     # INVARIANT: from here the prompt is a recognized Discord channel event and
     # V2 is configured. It MUST NOT pass through un-gated. Every failure below

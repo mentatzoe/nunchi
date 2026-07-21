@@ -14,7 +14,15 @@
 #     safeguards (foreign-room decline, degraded-marker recording, invalid
 #     policy handling) run inside the gate, so a gate that cannot run must not
 #     let a room prompt through. The gate's stdout is captured so a partial
-#     crash cannot leak an admission.
+#     crash cannot leak an admission. A gate that runs and exits 0 but is
+#     empty or truncated (a corrupted/zero-byte gate file executes cleanly
+#     and silently) is exit-status-invisible, so a configured
+#     user-prompt-submit additionally requires the gate's stdout to be
+#     non-empty and structurally JSON-shaped; the Python gate always emits an
+#     explicit decision for every successful configured path, including a
+#     plain operator prompt with nothing to add — so genuinely empty or
+#     malformed output can only mean the gate itself failed to run for real,
+#     and is treated exactly like a crash.
 #   * pre-tool — fails CLOSED when configured: a privileged-action guard that
 #     cannot run must deny (exit 2), not wave privileged tools through.
 #   * stop / post-tool — fail OPEN: a broken turn-completion or observation
@@ -68,6 +76,18 @@ OUTPUT=$(python3 "$GATE" "$HOOK_EVENT")
 STATUS=$?
 if [ "$STATUS" -ne 0 ]; then
   gate_unavailable "gate exit $STATUS"
+fi
+if [ "$HOOK_EVENT" = "user-prompt-submit" ] && configured; then
+  # exit 0 alone does not prove the gate produced a real decision: an empty
+  # or truncated gate FILE executes without error and prints nothing. The
+  # Python gate always writes an explicit, non-empty, JSON-object decision
+  # for every successful configured path, so empty or non-object output here
+  # can only mean the gate itself did not really run — treat it exactly like
+  # a crash rather than forwarding it as an implicit allow.
+  case "$OUTPUT" in
+    '{'*'}') : ;;
+    *) gate_unavailable "gate produced empty or malformed output" ;;
+  esac
 fi
 printf '%s' "$OUTPUT"
 exit 0

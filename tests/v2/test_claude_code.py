@@ -404,7 +404,19 @@ class ReactiveHearingCases(_GateCase):
             self.environ,
             classifier_transport=transport,
         )
-        self.assertIsNone(plain.output)  # operator-typed prompt untouched
+        # Operator-typed prompt while configured: no observation/attention/
+        # receipts occur, but the gate now emits an explicit, inert allow
+        # (Attempt 5) rather than empty output, so a truncated/empty gate can
+        # never be confused with this legitimate no-op path.
+        self.assertEqual(
+            plain.output,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": "",
+                }
+            },
+        )
         foreign = self.module.handle_user_prompt_submit(
             prompt_payload(
                 channel_prompt(message_id="9000000000000000099", chat_id="9999999999999999999")

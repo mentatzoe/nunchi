@@ -13,11 +13,16 @@ These tests invoke the real wrapper as a subprocess (never the Python gate
 directly — that would miss the exact defect) with a *configured* policy
 (`NUNCHI_CLAUDE_V2_POLICY` set) and a deliberately broken/missing gate, and
 assert the wrapper's stdout is never interpretable as admission: for
-`user-prompt-submit` that means either nothing is printed, or a `{"decision":
-"block", ...}` object is printed — never `{"decision": "allow", ...}`, never a
-`hookSpecificOutput.additionalContext` wake packet, and never empty output
-with exit 0 read as silent allow (the wrapper must print the block JSON in
-that case, which is verified directly).
+`user-prompt-submit` the wrapper must print an actual `{"decision": "block",
+...}` object — never `{"decision": "allow", ...}`, never a
+`hookSpecificOutput.additionalContext` wake packet, and (Attempt 5) never
+empty or truncated output either. Claude Code's own contract treats empty
+stdout at exit 0 as an implicit allow, so an empty/truncated gate FILE that
+executes cleanly (crashes without a nonzero exit) is just as dangerous as a
+crash — the wrapper must treat empty/malformed configured
+`user-prompt-submit` output exactly like a crash, and the Python gate must
+never legitimately produce empty output on any successful configured path
+(including a plain operator prompt with nothing to add).
 
 Every subprocess environment is built through ``tests.hook_sandbox.sandbox_env``
 so ``HOME`` is sandboxed — this module references the hook wrapper by name and
@@ -64,10 +69,19 @@ def _run_wrapper(hook_event: str, payload: dict, env: dict) -> subprocess.Comple
 
 
 def _cannot_be_interpreted_as_admission(stdout: str) -> bool:
-    """True if *stdout* cannot be read as an allow/wake by Claude Code."""
+    """True if *stdout* cannot be read as an allow/wake by Claude Code.
+
+    Correction (Attempt 5): Claude Code's UserPromptSubmit hook contract
+    treats empty stdout at exit 0 as an implicit allow — proceed normally,
+    same as an explicit non-blocking decision. Empty output IS admissible;
+    treating it as "safe" here was the exact class of bug Attempt 5 fixes
+    (a gate that runs and exits 0 but is empty/truncated silently admits the
+    room prompt). Only a parseable ``{"decision": "block", ...}`` object is
+    unambiguously NOT an admission.
+    """
     stripped = stdout.strip()
     if not stripped:
-        return True  # empty stdout with a block decision printed nowhere
+        return False  # empty stdout at exit 0 is an implicit allow
     try:
         parsed = json.loads(stripped)
     except ValueError:
@@ -151,6 +165,65 @@ class ConfiguredGateFailureCases(_FaultInjectionCase):
         parsed = json.loads(result.stdout.strip())
         self.assertEqual(parsed["decision"], "block")
         self.assertNotIn("allow-looking-but-not-trustworthy", result.stdout)
+
+    def test_empty_gate_file_blocks_not_admits(self) -> None:
+        # [N2-CLAUDE-A4-REWORK-01]: an empty (zero-byte) gate FILE executes
+        # cleanly under python3 — no syntax error, exit 0, zero bytes of
+        # stdout. Exit-status checking alone cannot catch this; it is
+        # exit-status-invisible by construction.
+        empty = self.tmp / "empty_gate.py"
+        empty.write_text("", encoding="utf-8")
+        env = self._configured_env(gate_path=empty)
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(_cannot_be_interpreted_as_admission(result.stdout))
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+        self.assertIn("empty or malformed", result.stderr)
+
+    def test_truncated_gate_file_blocks_not_admits(self) -> None:
+        # A gate file with only a trailing comment: parses, executes, exits
+        # 0, produces nothing — the "truncated" half of the reported defect.
+        truncated = self.tmp / "truncated_gate.py"
+        truncated.write_text("# truncated mid-write\n", encoding="utf-8")
+        env = self._configured_env(gate_path=truncated)
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_gate_exits_zero_with_malformed_output_blocks(self) -> None:
+        # A gate that runs, exits 0 (not a crash the STATUS check would
+        # catch), but writes non-JSON garbage instead of a real decision.
+        malformed = self.tmp / "malformed_gate.py"
+        malformed.write_text(
+            "import sys\nsys.stdout.write('not json at all')\nsys.exit(0)\n",
+            encoding="utf-8",
+        )
+        env = self._configured_env(gate_path=malformed)
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+        self.assertNotIn("not json at all", result.stdout)
+
+    def test_gate_exits_zero_with_truncated_json_blocks(self) -> None:
+        # Exit 0, output that looks like the start of a real decision but
+        # cuts off mid-object — must not be forwarded as-is.
+        truncated_json = self.tmp / "truncated_json_gate.py"
+        truncated_json.write_text(
+            'import sys\nsys.stdout.write(\'{"decision": "bl\')\nsys.exit(0)\n',
+            encoding="utf-8",
+        )
+        env = self._configured_env(gate_path=truncated_json)
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        # The gate's own truncated fragment must not be forwarded verbatim —
+        # the wrapper's manufactured, complete block JSON replaces it.
+        self.assertNotEqual(result.stdout, '{"decision": "bl')
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+        self.assertIn("gate unavailable", parsed.get("reason", ""))
 
     def test_gate_killed_by_signal_blocks(self) -> None:
         killed = self.tmp / "killed_gate.py"
@@ -273,6 +346,171 @@ class WrapperHealthyRoundTripCase(_FaultInjectionCase):
         # wrapper is not just special-casing a stub gate.
         parsed = json.loads(result.stdout.strip())
         self.assertEqual(parsed["decision"], "block")
+
+    def test_healthy_configured_operator_prompt_gets_explicit_non_empty_allow(self) -> None:
+        # [N2-CLAUDE-A4-REWORK-01]: the plain-operator-prompt-while-configured
+        # path used to be the one legitimate source of empty stdout at exit
+        # 0. It must now emit an explicit, non-empty, semantically inert
+        # decision — proving the fix closes the gap without changing real
+        # operator-prompt behavior (still no observation/attention/receipts).
+        env = self._configured_env(gate_path=None)
+        home = Path(env["HOME"])
+        (home / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+        real_gate = (
+            _REPO_ROOT / "integrations" / "claude-code" / "nunchi_claude_v2.py"
+        )
+        target = home / ".claude" / "hooks" / "nunchi_claude_v2.py"
+        target.write_text(real_gate.read_text(encoding="utf-8"), encoding="utf-8")
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+        result = _run_wrapper(
+            "user-prompt-submit",
+            {"session_id": "s", "prompt": "run the tests please"},
+            env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertNotEqual(result.stdout, "")
+        self.assertFalse(_cannot_be_interpreted_as_admission(result.stdout))
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(
+            parsed,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": "",
+                }
+            },
+        )
+
+
+class WrapperHealthyRoomRoundTripCases(_FaultInjectionCase):
+    """The real gate's room-event outcomes (wake, block) survive the wrapper
+    end to end — not just its config-error fallback."""
+
+    def _real_gate_env(self, **policy_overrides) -> dict:
+        from tests.v2 import claude_code_helpers as helpers
+
+        env = sandbox_env()
+        home = Path(env["HOME"])
+        (home / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+        real_gate = (
+            _REPO_ROOT / "integrations" / "claude-code" / "nunchi_claude_v2.py"
+        )
+        (home / ".claude" / "hooks" / "nunchi_claude_v2.py").write_text(
+            real_gate.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        config_dir = home / "nunchi-v2-config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        document = helpers.claude_policy_document(config_dir, **policy_overrides)
+        policy_path = helpers.write_claude_policy(config_dir, document)
+        env.update(
+            {
+                "PYTHONPATH": str(_REPO_ROOT / "src"),
+                "NUNCHI_CLAUDE_V2_POLICY": str(policy_path),
+                "NUNCHI_CLAUDE_V2_STATE_DIR": str(home / "state"),
+                "NUNCHI_CLAUDE_V2_CHANNEL_ID": helpers.CHANNEL_ID,
+                "NUNCHI_CLAUDE_V2_SELF_USER_ID": helpers.SELF_USER_ID,
+                "NUNCHI_CLAUDE_V2_PARTICIPANT_ID": helpers.PARTICIPANT_ID,
+                "NUNCHI_CLAUDE_V2_PARTICIPANT_NAME": "Station",
+                "NUNCHI_CLAUDE_V2_SIDECAR": str(
+                    home / ".claude" / "channels" / "discord" / "nunchi-v2" / "native-events.jsonl"
+                ),
+            }
+        )
+        return env
+
+    def test_healthy_room_wake_through_real_gate_and_wrapper(self) -> None:
+        from tests.v2 import claude_code_helpers as helpers
+
+        # Trusted preattention bypass: zero classifier calls, deterministic
+        # WAKE for any authorized event — no live classifier endpoint needed.
+        env = self._real_gate_env(preattention_enabled=False)
+        message_id = "9000000000000000001"
+        helpers.append_sidecar(
+            env, helpers.sidecar_row(message_id=message_id, content="hello room")
+        )
+        payload = helpers.prompt_payload(
+            helpers.channel_prompt(message_id=message_id, body="hello room"),
+            session_id="sess-real-wake",
+        )
+        result = _run_wrapper("user-prompt-submit", payload, env)
+        self.assertEqual(result.returncode, 0)
+        self.assertNotEqual(result.stdout, "")
+        parsed = json.loads(result.stdout.strip())
+        self.assertIn("hookSpecificOutput", parsed)
+        self.assertIn(
+            "source=PREATTENTION_BYPASS",
+            parsed["hookSpecificOutput"]["additionalContext"],
+        )
+
+    def test_healthy_room_block_through_real_gate_and_wrapper(self) -> None:
+        from tests.v2 import claude_code_helpers as helpers
+
+        # An exact self-authored event is a transport-proven non-event
+        # (SELF_RETAINED_NO_WAKE) — deterministic block, no classifier
+        # involved, exercised through the real gate and wrapper.
+        env = self._real_gate_env()
+        message_id = "9000000000000000002"
+        helpers.append_sidecar(
+            env,
+            helpers.sidecar_row(
+                message_id=message_id,
+                author_id=helpers.SELF_USER_ID,
+                username="station",
+                bot=True,
+                content="on it",
+            ),
+        )
+        payload = helpers.prompt_payload(
+            helpers.channel_prompt(message_id=message_id, user="station", body="on it"),
+            session_id="sess-real-block",
+        )
+        result = _run_wrapper("user-prompt-submit", payload, env)
+        self.assertEqual(result.returncode, 0)
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+
+class UnconfiguredInertAcrossAllHookEventsCase(_FaultInjectionCase):
+    """Unconfigured mode is fully inert regardless of hook event or gate
+    health — a broken/missing gate must never surface when there is no
+    policy to enforce in the first place."""
+
+    def _unconfigured_broken_env(self) -> dict:
+        env = sandbox_env()  # no nunchi-claude-v2.env written: unconfigured
+        broken = self.tmp / "broken_gate.py"
+        broken.write_text("this is not python (\n", encoding="utf-8")
+        env["NUNCHI_CLAUDE_V2_GATE"] = str(broken)
+        return env
+
+    def test_user_prompt_submit_inert_when_unconfigured(self) -> None:
+        env = self._unconfigured_broken_env()
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_pre_tool_inert_when_unconfigured(self) -> None:
+        env = self._unconfigured_broken_env()
+        result = _run_wrapper(
+            "pre-tool", {"session_id": "s", "tool_name": "Bash", "tool_input": {}}, env
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_stop_inert_when_unconfigured(self) -> None:
+        env = self._unconfigured_broken_env()
+        result = _run_wrapper("stop", {"session_id": "s"}, env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_post_tool_inert_when_unconfigured(self) -> None:
+        env = self._unconfigured_broken_env()
+        result = _run_wrapper(
+            "post-tool",
+            {"session_id": "s", "tool_name": "x", "tool_input": {}, "tool_response": {}},
+            env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":
