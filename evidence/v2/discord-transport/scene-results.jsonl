@@ -1,0 +1,6 @@
+{"scene_id":"DT-01","result":"PASS","evidence":"evals.v2.discord_transport.runner: human and other-bot candidate facts retained","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}
+{"scene_id":"DT-02","result":"PASS","evidence":"apparent-resolution and referential-addressing replay remain transport facts","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}
+{"scene_id":"DT-03","result":"PASS","evidence":"gateway lineage, explicit gap, self retention, duplicate identity, subscription barrier and SSE replay tests","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}
+{"scene_id":"DT-04","result":"PASS","evidence":"signed I-010D request/page binding, cursor and byte/event budget adversarial tests","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}
+{"scene_id":"DT-05","result":"PASS","evidence":"closed request-correlated mutation, durable claim, nonce, response binding, retry and cancellation tests","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}
+{"scene_id":"DT-07","result":"NOT_RUN","evidence":"no authenticated live Discord credential was available in the review process","classifier_calls":0,"candidate_commit":"fd2278e05b835bcaff0a93bf2fc681ab860c6a15"}

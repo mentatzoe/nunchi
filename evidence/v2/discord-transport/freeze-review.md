@@ -1,8 +1,8 @@
 # Slice 050 Discord-transport source freeze
 
-**Review status**: FROZEN FOR INDEPENDENT SOURCE REVIEW
+**Review status**: SUCCESSOR FROZEN FOR INDEPENDENT SOURCE RE-REVIEW
 
-**Effective source commit**: `adc8b645791e217eea5d4704a5fcb53be1e18e38`
+**Effective successor implementation commit**: `fd2278e05b835bcaff0a93bf2fc681ab860c6a15`
 
 **Pre-surface comparison commit**: `09e204a`
 
@@ -29,22 +29,25 @@ paths assigned to slice 050 by
 `ws.py` member of the owned package even though it does not appear in the PR
 diff.
 
-## Known packet gaps exposed for review
+## Successor closure and remaining lifecycle boundary
 
-The effective integration commit contains no `tests/fixtures/v2/discord/`, no
-`evals/v2/discord_transport/`, no product guide at
-`docs/integrations/discord-mcp-v2.md`, and no pre-existing transport scene,
-installed-runtime, mixed-room, or manifest evidence under
-`evidence/v2/discord-transport/`. This freeze records those absences rather
-than manufacturing completion evidence. Reviewers should report any missing
-claim support or ordinary-path requirement as a finding.
+The successor closes every source defect reported on the original head and now
+includes native fixtures, deterministic replay material, the product guide, DT
+scene results, a clean-installed `mcp==1.28.1` record, and an evidence manifest.
+The exact 31-file source/test/doc/eval surface is pinned below.
+
+Live DT-07 mixed-room evidence is truthfully `NOT_RUN` because no authenticated
+Discord credential was available to this review process. Source approval and
+installed-runtime verification are deliberately decoupled from that remaining
+lifecycle gate: this PR does not claim `HANDOFF_READY` or `ACCEPTED`.
 
 ## Review requirements
 
-1. Verify every listed SHA-256 and Git blob against effective source commit
-   `adc8b645791e217eea5d4704a5fcb53be1e18e38` and confirm the PR does not move.
-2. Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v
-   tests.v2.test_discord_transport`.
+1. Verify every listed SHA-256 and Git blob against successor implementation
+   commit `fd2278e05b835bcaff0a93bf2fc681ab860c6a15` and confirm the PR does not move.
+2. Run the focused ordinary and clean-installed SDK commands recorded in
+   `evidence/v2/discord-transport/installed-runtime.md` and the deterministic
+   replay runner `python3 -m evals.v2.discord_transport.runner`.
 3. Adversarially inspect exact actor/self/room binding, canonical
    authorization before observation, raw event identity and relation
    preservation, ordering/deduplication, resume and gap recovery, bounded
