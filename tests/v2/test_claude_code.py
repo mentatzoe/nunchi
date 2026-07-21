@@ -174,7 +174,6 @@ class _GateCase(unittest.TestCase):
         self.assertIn("hookSpecificOutput", decision.output)
         return wake_packet_from_context(decision.output)
 
-
 # ---------------------------------------------------------------------------
 # T001 — canonical contract, no V1 bridge, trusted bypass, receipt ownership
 # ---------------------------------------------------------------------------
@@ -267,6 +266,36 @@ class CanonicalContractCases(_GateCase):
 
 
 class ReactiveHearingCases(_GateCase):
+    def test_installed_host_channel_source_is_gated(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(
+            transport,
+            message_id="7199999999999999999",
+        )
+        self.assert_woken(decision)
+        self.assertEqual(transport.call_count, 1)
+
+    def test_unexpected_channel_source_fails_closed_not_operator_open(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        prompt = channel_prompt(message_id="7199999999999999998").replace(
+            'source="plugin:discord:discord"',
+            'source="discord"',
+            1,
+        )
+        decision = self.module.handle_user_prompt_submit(
+            prompt_payload(prompt),
+            self.environ,
+            classifier_transport=transport,
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(transport.call_count, 0)
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertTrue(turn["degraded"])
+        self.assertEqual(turn["degraded_kind"], "degraded-channel-event")
+
     def test_allowlisted_bot_message_reaches_observation_exactly(self) -> None:
         fixture = _FIXTURES["allowlisted_bot_message"]["sidecar"]
         append_sidecar(self.environ, fixture)

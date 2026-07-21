@@ -40,6 +40,9 @@ sequenceDiagram
   zero classifier calls and wakes with `PREATTENTION_BYPASS`. Effective
   `SUPPRESS` blocks only the participant turn; the event remains hearable
   later.
+  The pinned Claude Code 2.1.215 host identifies this envelope as
+  `source="plugin:discord:discord"`; any other or ambiguous channel source is
+  blocked as a degraded room event rather than treated as operator input.
 - **Stop** — closes the finished native turn through `run_participant_turn`
   (the participant callable replays the directly observed native room action
   or silence), writes the participant-host stage and, for executed sends, the

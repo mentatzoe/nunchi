@@ -157,7 +157,7 @@ def channel_prompt(
     ts: str = "2026-07-20T12:00:00Z",
 ) -> str:
     return (
-        f'<channel source="discord" chat_id="{chat_id}" message_id="{message_id}"'
+        f'<channel source="plugin:discord:discord" chat_id="{chat_id}" message_id="{message_id}"'
         f' user="{user}" ts="{ts}">{body}</channel>'
     )
 

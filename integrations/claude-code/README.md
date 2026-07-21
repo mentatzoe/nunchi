@@ -86,6 +86,7 @@ files are operator data and are never deleted by install or rollback.
 
 An authorized human or allowlisted-bot room event arrives reactively (no
 polling), is bound to its exact native author through the transport sidecar,
+uses Claude Code 2.1.215's exact `source="plugin:discord:discord"` envelope,
 and becomes at most one conversation opportunity: one canonical attention call
 (`SUPPRESS`/`WAKE`/both `DEFER` forms; trusted bypass makes zero classifier
 calls; operational errors widen by policy) and, on every waking route, one
