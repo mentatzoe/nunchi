@@ -7,6 +7,22 @@
 > observation, and trusted-bypass attention are live-proven; participant
 > reply/silence completion is still blocked by the installed Claude CLI's
 > expired login and is not claimed.
+>
+> Further correction (2026-07-21, Attempt 9): the installed transport digest
+> below (`0d1ffaa0…`, two patches) is now stale. Attempt 9's product
+> candidate adds a third digest-pinned patch, `0003-nunchi-bound-room-safety.patch`,
+> closing two independent-review findings (native permission-reply room-text
+> bypass; pre-attention typing/ack-reaction leaking SUPPRESS activity). The
+> new pinned patched-result digest is
+> `46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775`; the
+> pinned base is unchanged. No host mutation was performed this attempt — the
+> installed host is still at the two-patch `0d1ffaa0…` result. Re-arming
+> requires the corrected ladder in `README.md` §Install plus the new
+> `NUNCHI_CLAUDE_V2_CHANNEL_ID` line in the Discord plugin's own `.env`
+> (see `transport-patch/README.md`), then the same `--rollback` → `--verify`
+> → apply → `--verify` sequence, expecting the digest transition
+> `b025d1c2…` (or whatever is currently installed) → `c3c79c65…` (pristine) →
+> `46420d46…` (patched, three patches).
 
 **Attempt 6**, recorded 2026-07-21 by the `v2-claude-owner` lane (Station,
 standing Claude Code agent). The Attempt 1/2/3/4/5 versions of this record are

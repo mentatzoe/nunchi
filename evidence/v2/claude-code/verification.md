@@ -1,5 +1,44 @@
 # Claude Code V2 — verification index
 
+**Attempt 9**, recorded 2026-07-21, `v2-claude-owner` lane, closing
+`pc-vigil`'s (Codex) CHANGES_REQUESTED review of Attempt-8 candidate
+`d594b29` on [mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15).
+The Attempt 1–8 indexes below are preserved as originally recorded at their
+own candidates; the table immediately following this note is the current
+(Attempt-9) index.
+
+## Attempt-9 deterministic commands and results
+
+Every command below was run on the Attempt-9 implementation candidate
+`2389a9b48b471273e6856ca0430b8a58891091d6`.
+
+| Command | Result |
+|---|---|
+| `python3 -m unittest tests.v2.test_claude_code` | `Ran 104 tests … OK` (14 new: `NativeToolCoverageCases` ×7, `StateSchemaStrictCases` ×3, backlog-coalescing case, 2 schema-version tools-config cases, extended transport-patch provenance assertions) |
+| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 46 tests … OK` (3 new: empty/whitespace-stdin cases in `MalformedStdinFailsClosedCases`) |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 172 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1271 tests … OK (skipped=7)` |
+| `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
+| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` (×2, diffed) | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations`; byte-identical across two runs and to the committed `scene-results.jsonl`/`reactive-bot-hearing.jsonl` |
+| `git diff --check` | clean |
+| Transport patch reproducibility (manual scratch rebuild: pristine base → `0001` → `0002` → `0003`) | each `git apply --check`/apply clean; final digest `46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775` matches the pinned `PATCHED_SHA256` exactly; `bun build` transpiles clean |
+| `apply-transport-patch.sh` full apply/`--verify`/`--rollback`/`--verify` cycle (scratch plugin dir, not the installed host) | apply → patched result matches pinned digest; `--verify` → `PATCHED (exact expected result)`; `--rollback` → restores pristine; `--verify` → `PRISTINE BASE 0.0.4` |
+
+## Attempt-9 defect coverage
+
+| Finding (pc-vigil, PR #15) | Proven by |
+|---|---|
+| 1 HIGH — empty/whitespace stdin still fails open | `MalformedStdinFailsClosedCases` (3 new tests) |
+| 2 HIGH — native Discord tools beyond reply/react escape all controls | `NativeToolCoverageCases` |
+| 3 HIGH — `SUPPRESS` leaks pre-attention typing/ack-reaction | transport patch `0003` + provenance assertions |
+| 4 HIGH — native permission room-text bypasses I-040B | transport patch `0003` + provenance assertions; DM/button leg honestly reported unaddressed |
+| 5 HIGH — sidecar backlog becomes FIFO wake work | `test_already_delivered_backlog_coalesces_to_one_wake` |
+| 6 MEDIUM — `schema_version` equality accepts `True`/`1.0` | `ToolsConfigStrictCases` (2 new), `StateSchemaStrictCases` (3 new) |
+
+Full finding-by-finding narrative is in `handoff.md` (Attempt 9).
+
+---
+
 **Attempt 8**, recorded 2026-07-21, `v2-claude-owner` lane, on top of the
 integrator's Attempt-7 live-source remediation (`7ea499b` / evidence
 `7e3d970`). The Attempt 1–6 indexes below are preserved as originally

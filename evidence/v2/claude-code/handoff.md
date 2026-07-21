@@ -867,3 +867,127 @@ lane does not self-declare acceptance.
 **Handoff target**: Codex, for independent adversarial re-review of this
 exact candidate (`d594b29c1bca487da38f025b1a46de21c183b8f6`). This lane does
 not self-accept and did not integrate.
+
+---
+
+## Attempt 9 — 2026-07-21 (rework: close pc-vigil's five findings on PR #15)
+
+**Delivering lane**: `v2-claude-owner`, same session as Attempt 8 (model
+`claude-sonnet-5`), continuing under Codex's direct scoped implementation
+authority for the Claude packet. Attempt 8 (candidate `d594b29`, evidence
+`2bec439`) was reviewed on the newly-opened GitHub PR
+([mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15), base
+`codex/v2-integration`) by `pc-vigil` (Codex's review identity) and returned
+**CHANGES_REQUESTED** with five HIGH and one MEDIUM finding, plus a CI note
+attributing the PR's red checks to an unrelated, already-owned base-branch
+issue (Codex PR #16: shallow checkout vs. `check_governance.py`'s historical
+commit requirement) — not to this packet's content.
+
+### Exact candidate
+
+- **Implementation candidate**: `2389a9b48b471273e6856ca0430b8a58891091d6`
+  (descends from Attempt-8 evidence tip `2bec439` on branch
+  `claude/claude-code-v2-integration-3ac219`). Product, test, and owned-docs
+  changes only.
+- **Evidence-only binding**: this commit (adding this Attempt-9 section)
+  sits on top; its diff from `2389a9b` touches only
+  `evidence/v2/claude-code/`.
+
+Attempt-9 changed-file inventory (implementation candidate, `2bec439` →
+`2389a9b`):
+
+```text
+M  docs/integrations/claude-code-v2.md
+M  integrations/claude-code/README.md
+M  integrations/claude-code/nunchi_claude_v2.py
+A  integrations/claude-code/transport-patch/0003-nunchi-bound-room-safety.patch
+M  integrations/claude-code/transport-patch/README.md
+M  integrations/claude-code/transport-patch/apply-transport-patch.sh
+M  tests/test_claude_code_hook_wrapper.py
+M  tests/v2/test_claude_code.py
+```
+
+No `src/`, `schemas/`, or other lane's surface changed.
+
+### Finding-by-finding disposition
+
+| # | pc-vigil finding | Resolution | Proof |
+|---|---|---|---|
+| 1 | HIGH — empty/whitespace-only configured hook stdin still fails open | `main()`'s `raw_stdin.strip() else {}` special case is removed entirely. `json.loads` already rejects empty/whitespace as invalid JSON, so it now crashes uncaught exactly like any other malformed stdin, and the already-tested wrapper crash-handling (block for `user-prompt-submit`, deny for `pre-tool`) is the single fail-closed boundary — no new bespoke logic. | `tests/test_claude_code_hook_wrapper.py::MalformedStdinFailsClosedCases` (`test_empty_stdin_blocks_user_prompt_submit`, `test_whitespace_only_stdin_blocks_user_prompt_submit`, `test_empty_stdin_denies_pre_tool_fail_closed`) |
+| 2 | HIGH — native Discord effect/output tools (`edit_message`, `download_attachment`, `fetch_messages`) escape send safety, the reservation, and receipts | A Discord-namespace catch-all (`_DEFAULT_DISCORD_NAMESPACE_RE`) default-denies any tool the plugin exposes beyond reply/react/`fetch_messages`. `fetch_messages` (read-only) is allowed once room-scoped (its own `channel` input key, not `chat_id`). `edit_message`/`download_attachment` are denied unconditionally for a room-caused turn — they have no reservation/receipt shape the canonical participant-action schema understands. Defense in depth: if one executes anyway (disabled/bypassed guard), `PostToolUse`/`PostToolUseFailure` record an `unattested_effect` marker so `Stop` reports `unknown`, never `silent`. | `tests/v2/test_claude_code.py::NativeToolCoverageCases` (7 tests) |
+| 3 | HIGH — `SUPPRESS` leaks room-visible activity (typing indicator, ack reaction) before attention runs | New transport patch `0003-nunchi-bound-room-safety.patch`: reads an optional `NUNCHI_CLAUDE_V2_CHANNEL_ID`; for the exact bound room, skips the pre-attention typing indicator and configured ack reaction entirely. Every other room is byte-for-byte unaffected (both behaviors run exactly as before when the env var is unset or the message is in a different room). | `ReactiveHearingCases.test_transport_patch_provenance_is_pinned_and_fail_closed` (patch-content assertions); manual reproducible-apply verification below |
+| 4 | HIGH — the plugin's native permission-reply/button channel bypasses I-040B | Patch `0003` also skips the "yes/no `<code>`" room-TEXT permission-reply intercept for the bound room (ordinary room text can no longer satisfy a privileged approval there). The DM/button leg (`interactionCreate`) is a separate, cross-session surface reached only via direct message, keyed by a short code with no room/turn provenance in the plugin's own notification payload — not room-scoped by construction, and not addressed by a transport-layer patch. Honestly reported, not claimed safe, in `README.md` and `transport-patch/README.md`. | Same patch-content assertions as finding 3; residual limitation documented, not silently omitted |
+| 5 | HIGH — transport backlog can become FIFO wake work (one attention cycle per already-delivered message instead of coalescing) | New `read_channel_backlog` + `_coalesce_backlog_anchor`: before committing to an anchor, the handler scans the sidecar for other not-yet-ingested authorized messages in the bound room, ingests them as context, and anchors the opportunity on the newest one found. Each older message's own later hook invocation then finds itself already known (`duplicate-retained`) and is coalesced away rather than spending its own attention cycle — the exact reported reproduction (two already-delivered rows before the host processes the first queued prompt) now produces exactly one classifier call, anchored on the newer message. | `CoalescingAndRestartCases.test_already_delivered_backlog_coalesces_to_one_wake` |
+| 6 | MEDIUM — `schema_version` equality (`!=`) accepts `True`/`1.0`, not exact `int` | `_is_exact_schema_version` requires `isinstance(value, int) and not isinstance(value, bool)`, applied to both the tools-config loader and the state-file (`room.json`) reader. | `ToolsConfigStrictCases.test_boolean_schema_version_is_not_accepted_as_one` / `test_float_schema_version_is_not_accepted_as_one`; `StateSchemaStrictCases` (3 tests) |
+
+One pre-existing test, `test_native_reply_and_mentions_are_preserved`, wrote
+both its sidecar rows before either prompt was processed — a burst shape
+that fix 5 now correctly coalesces, which is not what that test was
+checking. Its sidecar-append timing was split to match the real temporal
+order (the `relation` message is recorded only after `upstream`'s own turn
+completes), preserving its actual intent (reply/mention preservation across
+two genuinely sequential turns) without weakening fix 5.
+
+### Deterministic commands and results (Attempt 9)
+
+`python3 -m unittest tests.v2.test_claude_code` → **104 OK** (14 new since
+Attempt 8's 90); `python3 -m unittest tests.test_claude_code_hook_wrapper`
+→ **46 OK** (3 new since Attempt 8's 43); the five-module guard run
+(`test_no_home_writes`, `test_sentinel_forgery`, `test_no_second_judgment`,
+`test_claude_code`, `test_claude_code_hook_wrapper`) → **172 OK**; full
+baseline `python3 -m unittest` → **1271 OK (skipped=7)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay
+(`PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>`,
+run twice) → 20 rows (19 PASS, 1 declared limitation) each time,
+byte-identical to each other and to the already-committed
+`scene-results.jsonl`/`reactive-bot-hearing.jsonl` (this attempt touches no
+attention/scene mechanics); `git diff --check` → clean.
+
+Transport patch reproducibility (manual, since the real pristine plugin
+source is third-party and not vendored into this repo — the same
+verification class every prior attempt records here rather than as an
+automated test): rebuilt from the pinned pristine base
+(`c3c79c65…`) with `0001` → `0002` → `0003` applied in sequence via
+`git apply`, each `--check` and apply clean; final digest
+`46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775` matches
+the pinned `PATCHED_SHA256` in `apply-transport-patch.sh` exactly; the
+result transpiles clean under `bun build`. A full `apply-transport-patch.sh`
+apply/`--verify`/`--rollback`/`--verify` cycle was also run end-to-end
+against a scratch copy of the pristine base (not the installed host) and
+produced the expected digest transitions and messages at every step.
+
+### Installed provenance (Attempt 9)
+
+Repository gate SHA-256 at the implementation candidate:
+`11267794f63c075f2ffe0aa3f92b46bb6a643eee92f814cd82f6613ca0d0d2ef`; new
+transport patch SHA-256:
+`b1231a8778944c10dff165a622eeb07365128cd3549b13e6f1df599130cf940b`.
+**No host mutation was performed or requested this session** — no
+`settings.json` edit, no transport-patch application, no outbound Discord
+send, no staged-install refresh. The installed host remains at Attempt-7's
+armed two-patch state (`0d1ffaa0…`); re-arming to this candidate requires
+the corrected ladder in `integrations/claude-code/README.md` (now including
+the `NUNCHI_CLAUDE_V2_CHANNEL_ID` line in the Discord plugin's own `.env`)
+plus a fresh `--rollback` → `--verify` → apply → `--verify` cycle expecting
+the new three-patch result digest. Full detail in `installed-runtime.md`'s
+Attempt-9 correction note.
+
+### Known limitations and rejected claims (Attempt 9)
+
+Unchanged from Attempt 8, plus the new, honestly-reported residual from
+finding 4: the plugin's DM/button native permission-approval path
+(`interactionCreate`) remains unaddressed — it is a cross-session surface
+keyed by a short code with no room/turn provenance in the notification
+payload, not room-scoped by construction, and closing it fully would
+require the plugin itself to thread Nunchi turn context through that
+payload (outside what a transport-layer patch can do). **Rejected claim**:
+"live parity is proven" — it is not; this session performed no live scenes
+and no host mutation. **Rejected claim**: "this candidate closes every
+finding an adversarial reviewer could find" — six were found and closed
+this round; that does not prove none remain, and this lane does not
+self-declare acceptance.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`2389a9b48b471273e6856ca0430b8a58891091d6`) on
+[mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
+lane does not self-accept and did not integrate.
