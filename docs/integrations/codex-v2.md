@@ -32,11 +32,17 @@ free-form tool call.
 
 The participant runs from a dedicated owner-only Codex home and empty
 workspace. Strict invocation removes shell, code, browser, app, plugin, skill,
-MCP-like, and multi-agent tools; ignores user/project instructions; disables
-shell environment inheritance and login profiles; and passes a minimal host
-environment without Discord or classifier secrets. Read-only sandboxing is an
-additional boundary, not a substitute for removing tools. The host rejects any
-observed Codex tool event before it persists the thread or accepts an action.
+MCP-like, web-search, and multi-agent tools; ignores user/project instructions;
+disables shell environment inheritance and login profiles; and passes a minimal
+host environment without Discord or classifier secrets. Read-only sandboxing is
+an additional boundary, not a substitute for removing tools. The host rejects any
+observed Codex tool event and any unknown JSONL event or item shape. It advances
+the persistent thread only after the JSONL lifecycle and the bounded structured
+action artifact both validate; a failed or malformed turn cannot become the
+continuity base for the next room wake. The integration-private action schema
+uses the strict Structured Outputs subset (nested `anyOf`, required object
+fields, and nullable optional values), then normalizes those values to the
+portable participant-host action contract.
 
 The shared Discord transport requires a separate bearer credential in
 `NUNCHI_MCP_DISCORD_AUTH_TOKEN` by default. `--transport-auth-env` may name a

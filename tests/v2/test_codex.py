@@ -60,14 +60,38 @@ class CodexParticipantCases(unittest.TestCase):
                 working_directory=self.workspace,
             )
 
+    @staticmethod
+    def event_stream(thread_id=THREAD_ONE):
+        return "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": thread_id}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"id": "item_1", "type": "agent_message"},
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {}}),
+            )
+        ).encode()
+
     def completion(self, action, *, thread_id=THREAD_ONE, returncode=0):
         def run(command, **kwargs):
             self.commands.append((command, kwargs))
             output_index = command.index("--output-last-message") + 1
-            Path(command[output_index]).write_text(json.dumps({"action": action}))
+            structured = action
+            if isinstance(action, dict) and action.get("kind") == "message":
+                structured = {
+                    "kind": "message",
+                    "content": action["content"],
+                    "reply_to_event_id": action.get("reply_to_event_id"),
+                    "mention_actor_ids": action.get("mention_actor_ids"),
+                }
+            Path(command[output_index]).write_text(json.dumps({"action": structured}))
             return (
                 returncode,
-                (json.dumps({"type": "thread.started", "thread_id": thread_id}) + "\n").encode(),
+                self.event_stream(thread_id),
                 b"",
             )
 
@@ -113,6 +137,7 @@ class CodexParticipantCases(unittest.TestCase):
         ]
         self.assertEqual(disabled, list(_DISABLED_TOOL_FEATURES))
         self.assertIn('shell_environment_policy.inherit="none"', command)
+        self.assertIn('web_search="disabled"', command)
         self.assertIn("allow_login_shell=false", command)
         self.assertIn("--output-schema", command)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
@@ -183,13 +208,57 @@ class CodexParticipantCases(unittest.TestCase):
         self.assertEqual(command[:3], ("/usr/bin/true", "exec", "resume"))
         self.assertIn(THREAD_ONE, command)
 
+    def test_reaction_output_normalizes_to_portable_action(self):
+        action = {
+            "kind": "reaction",
+            "target_event_id": "discord:message:111",
+            "reaction": "eyes",
+        }
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=self.completion(action),
+        ):
+            self.assertEqual(self.participant()(self.turn), action)
+
+    def test_invalid_structured_actions_fail_before_session_persistence(self):
+        invalid_actions = (
+            {"kind": "message", "content": "missing nullable fields"},
+            {
+                "kind": "message",
+                "content": "duplicate mentions",
+                "reply_to_event_id": None,
+                "mention_actor_ids": ["discord:user:1", "discord:user:1"],
+            },
+            {
+                "kind": "reaction",
+                "target_event_id": "discord:message:111",
+                "reaction": "x" * 257,
+            },
+        )
+        for action in invalid_actions:
+            with self.subTest(action=action):
+                def invalid(command, **_kwargs):
+                    output_index = command.index("--output-last-message") + 1
+                    Path(command[output_index]).write_text(
+                        json.dumps({"action": action})
+                    )
+                    return 0, self.event_stream(), b""
+
+                with mock.patch(
+                    "nunchi.integrations.codex_participant_v2.run_bounded_process",
+                    side_effect=invalid,
+                ):
+                    with self.assertRaises(CodexParticipantError):
+                        self.participant()(self.turn)
+                self.assertIsNone(load_codex_session(self.session_path))
+
     def test_malformed_output_fails_without_becoming_room_text(self):
         def malformed(command, **kwargs):
             output_index = command.index("--output-last-message") + 1
             Path(command[output_index]).write_text("not-json")
             return (
                 0,
-                json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}).encode(),
+                self.event_stream(),
                 b"",
             )
 
@@ -199,7 +268,24 @@ class CodexParticipantCases(unittest.TestCase):
         ):
             with self.assertRaises(CodexParticipantError):
                 self.participant()(self.turn)
-        self.assertIsNotNone(load_codex_session(self.session_path))
+        self.assertIsNone(load_codex_session(self.session_path))
+
+    def test_failed_resumed_output_does_not_advance_session_state(self):
+        save_codex_session(self.session_path, THREAD_ONE)
+        before = load_codex_session(self.session_path)
+
+        def malformed(command, **_kwargs):
+            output_index = command.index("--output-last-message") + 1
+            Path(command[output_index]).write_text("not-json")
+            return 0, self.event_stream(), b""
+
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=malformed,
+        ):
+            with self.assertRaises(CodexParticipantError):
+                self.participant()(self.turn)
+        self.assertEqual(load_codex_session(self.session_path), before)
 
     def test_final_output_is_strict_bounded_and_no_follow(self):
         invalid_outputs = (
@@ -211,10 +297,7 @@ class CodexParticipantCases(unittest.TestCase):
                 def invalid(command, **_kwargs):
                     output_index = command.index("--output-last-message") + 1
                     Path(command[output_index]).write_bytes(payload)
-                    stream = json.dumps(
-                        {"type": "thread.started", "thread_id": THREAD_ONE}
-                    ).encode()
-                    return 0, stream, b""
+                    return 0, self.event_stream(), b""
 
                 with mock.patch(
                     "nunchi.integrations.codex_participant_v2.run_bounded_process",
@@ -226,10 +309,7 @@ class CodexParticipantCases(unittest.TestCase):
         def oversized(command, **_kwargs):
             output_index = command.index("--output-last-message") + 1
             Path(command[output_index]).write_bytes(b"x" * 17)
-            stream = json.dumps(
-                {"type": "thread.started", "thread_id": THREAD_ONE}
-            ).encode()
-            return 0, stream, b""
+            return 0, self.event_stream(), b""
 
         with (
             mock.patch.object(codex_participant_v2, "MAX_CODEX_ACTION_BYTES", 16),
@@ -246,10 +326,7 @@ class CodexParticipantCases(unittest.TestCase):
             output_path = Path(command[output_index])
             output_path.unlink()
             os.symlink("/etc/passwd", output_path)
-            stream = json.dumps(
-                {"type": "thread.started", "thread_id": THREAD_ONE}
-            ).encode()
-            return 0, stream, b""
+            return 0, self.event_stream(), b""
 
         with mock.patch(
             "nunchi.integrations.codex_participant_v2.run_bounded_process",
@@ -271,12 +348,14 @@ class CodexParticipantCases(unittest.TestCase):
                         json.dumps(
                             {"type": "thread.started", "thread_id": THREAD_ONE}
                         ),
+                        json.dumps({"type": "turn.started"}),
                         json.dumps(
                             {
                                 "type": "item.completed",
                                 "item": {"type": "command_execution", "command": "env"},
                             }
                         ),
+                        json.dumps({"type": "turn.completed", "usage": {}}),
                     )
                 ).encode(),
                 b"",
@@ -315,6 +394,74 @@ class CodexParticipantCases(unittest.TestCase):
                     with self.assertRaises(CodexParticipantError):
                         self.participant()(self.turn)
                 self.assertIsNone(load_codex_session(self.session_path))
+
+    def test_unknown_or_incomplete_event_stream_fails_closed(self):
+        streams = (
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps({"type": "future.safe-looking.event"}),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                )
+            ),
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {"id": "item_1", "type": "future_tool_shape"},
+                        }
+                    ),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                )
+            ),
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
+                    json.dumps({"type": "turn.started"}),
+                )
+            ),
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
+                    json.dumps({"type": "turn.completed", "usage": {}}),
+                    json.dumps({"type": "turn.started"}),
+                )
+            ),
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": THREAD_ONE}),
+                    json.dumps({"type": "turn.started"}),
+                    json.dumps({"type": "turn.failed", "error": {"message": "failed"}}),
+                )
+            ),
+        )
+        for stream in streams:
+            with self.subTest(stream=stream):
+                def invalid(command, **_kwargs):
+                    output_index = command.index("--output-last-message") + 1
+                    Path(command[output_index]).write_text(json.dumps({"action": None}))
+                    return 0, stream.encode(), b""
+
+                with mock.patch(
+                    "nunchi.integrations.codex_participant_v2.run_bounded_process",
+                    side_effect=invalid,
+                ):
+                    with self.assertRaises(CodexParticipantError):
+                        self.participant()(self.turn)
+                self.assertIsNone(load_codex_session(self.session_path))
+
+    def test_structured_output_schema_uses_supported_required_union(self):
+        schema = json.loads(CodexParticipantV2._schema_path().read_text())
+        action = schema["properties"]["action"]
+        self.assertIn("anyOf", action)
+        self.assertNotIn("oneOf", action)
+        message = action["anyOf"][1]
+        self.assertEqual(set(message["properties"]), set(message["required"]))
+        self.assertFalse(message["additionalProperties"])
 
     def test_timeout_and_thread_mismatch_fail_closed(self):
         with mock.patch(

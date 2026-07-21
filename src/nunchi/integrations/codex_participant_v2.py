@@ -59,8 +59,6 @@ _DISABLED_TOOL_FEATURES = (
     "tool_suggest",
     "unified_exec",
     "unified_exec_zsh_fork",
-    "web_search_cached",
-    "web_search_request",
     "workspace_dependencies",
 )
 _TOOL_EVENT_TYPES = frozenset(
@@ -107,6 +105,27 @@ _TOOL_ITEM_TYPES = frozenset(
         "tool_search_call",
         "web_search",
         "web_search_call",
+    }
+)
+_CODEX_JSONL_EVENT_TYPES = frozenset(
+    {
+        "thread.started",
+        "turn.started",
+        "turn.completed",
+        "turn.failed",
+        "item.started",
+        "item.updated",
+        "item.completed",
+        "error",
+    }
+)
+_SAFE_CODEX_ITEM_TYPES = frozenset(
+    {
+        "agent_message",
+        "context_compaction",
+        "error",
+        "plan",
+        "reasoning",
     }
 )
 
@@ -165,6 +184,10 @@ def _strict_json(raw: str | bytes) -> Any:
 def _inspect_codex_jsonl(output: str) -> tuple[str | None, bool]:
     thread_ids: set[str] = set()
     tool_used = False
+    thread_started = 0
+    turn_started = 0
+    turn_completed = 0
+    phase = "before-turn"
     for line in output.splitlines():
         if not line.strip():
             continue
@@ -175,26 +198,57 @@ def _inspect_codex_jsonl(output: str) -> tuple[str | None, bool]:
         if not isinstance(event, dict) or not isinstance(event.get("type"), str):
             raise CodexParticipantError("Codex event stream is invalid")
         event_type = event["type"]
+        if (
+            event_type not in _CODEX_JSONL_EVENT_TYPES
+            and event_type not in _TOOL_EVENT_TYPES
+        ):
+            raise CodexParticipantError("Codex event stream is unsupported")
         if event_type == "thread.started":
+            if thread_started or phase != "before-turn":
+                raise CodexParticipantError("Codex event stream is invalid")
+            thread_started += 1
             value = event.get("thread_id")
             try:
                 thread_ids.add(str(UUID(value)))
             except (TypeError, ValueError, AttributeError) as exc:
                 raise CodexParticipantError("Codex reported an invalid room thread") from exc
+        elif event_type == "turn.started":
+            if thread_started != 1 or phase != "before-turn":
+                raise CodexParticipantError("Codex event stream is invalid")
+            turn_started += 1
+            phase = "in-turn"
+        elif event_type == "turn.completed":
+            if phase != "in-turn":
+                raise CodexParticipantError("Codex event stream is invalid")
+            turn_completed += 1
+            phase = "completed"
+        elif event_type in ("turn.failed", "error"):
+            raise CodexParticipantError("Codex event stream reported a failed turn")
         if event_type in _TOOL_EVENT_TYPES:
             tool_used = True
         item = event.get("item")
-        if (
-            event_type in ("item.started", "item.completed")
-            and isinstance(item, dict)
-            and item.get("type") in _TOOL_ITEM_TYPES
-        ):
-            tool_used = True
-        raw_item = event.get("item") if event_type == "raw_response_item" else None
-        if isinstance(raw_item, dict) and raw_item.get("type") in _TOOL_ITEM_TYPES:
-            tool_used = True
-    if len(thread_ids) > 1:
-        raise CodexParticipantError("Codex reported conflicting room threads")
+        if event_type in ("item.started", "item.updated", "item.completed"):
+            if (
+                thread_started != 1
+                or phase == "completed"
+                or not isinstance(item, dict)
+                or not isinstance(item.get("type"), str)
+            ):
+                raise CodexParticipantError("Codex event stream is invalid")
+            item_type = item["type"]
+            if item_type in _TOOL_ITEM_TYPES:
+                tool_used = True
+            elif item_type not in _SAFE_CODEX_ITEM_TYPES:
+                raise CodexParticipantError("Codex event stream item is unsupported")
+            if item_type != "error" and phase != "in-turn":
+                raise CodexParticipantError("Codex event stream is invalid")
+    if (
+        len(thread_ids) != 1
+        or thread_started != 1
+        or turn_started != 1
+        or turn_completed != 1
+    ):
+        raise CodexParticipantError("Codex event stream is incomplete or conflicting")
     return (next(iter(thread_ids)) if thread_ids else None), tool_used
 
 
@@ -251,6 +305,61 @@ def _read_action_output(path: Path) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise CodexParticipantError("Codex participant output is invalid")
     return result
+
+
+def _normalize_action_output(result: Any) -> dict[str, Any] | None:
+    """Validate the provider artifact and return the canonical host action shape."""
+    if not isinstance(result, dict) or set(result) != {"action"}:
+        raise CodexParticipantError("Codex participant output is invalid")
+    action = result["action"]
+    if action is None:
+        return None
+    if not isinstance(action, dict):
+        raise CodexParticipantError("Codex participant output is invalid")
+    kind = action.get("kind")
+    if kind == "message":
+        expected = {"kind", "content", "reply_to_event_id", "mention_actor_ids"}
+        if set(action) != expected:
+            raise CodexParticipantError("Codex participant output is invalid")
+        content = action["content"]
+        reply_to = action["reply_to_event_id"]
+        mentions = action["mention_actor_ids"]
+        if (
+            not isinstance(content, str)
+            or not content
+            or len(content) > 2000
+            or (
+                reply_to is not None
+                and (not isinstance(reply_to, str) or not reply_to)
+            )
+            or (
+                mentions is not None
+                and (
+                    not isinstance(mentions, list)
+                    or not all(isinstance(value, str) and value for value in mentions)
+                    or len(set(mentions)) != len(mentions)
+                )
+            )
+        ):
+            raise CodexParticipantError("Codex participant output is invalid")
+        normalized: dict[str, Any] = {"kind": "message", "content": content}
+        if reply_to is not None:
+            normalized["reply_to_event_id"] = reply_to
+        if mentions is not None:
+            normalized["mention_actor_ids"] = list(mentions)
+        return normalized
+    if kind == "reaction":
+        if (
+            set(action) != {"kind", "target_event_id", "reaction"}
+            or not all(
+                isinstance(action[field], str) and action[field]
+                for field in ("target_event_id", "reaction")
+            )
+            or len(action["reaction"]) > 256
+        ):
+            raise CodexParticipantError("Codex participant output is invalid")
+        return dict(action)
+    raise CodexParticipantError("Codex participant output is invalid")
 
 
 def build_participant_prompt(turn: ParticipantTurn, *, participant_name: str) -> str:
@@ -388,6 +497,8 @@ class CodexParticipantV2:
             "skills.include_instructions=false",
             "-c",
             "skills.bundled.enabled=false",
+            "-c",
+            'web_search="disabled"',
             "--output-schema",
             str(self._schema_path()),
             "--output-last-message",
@@ -433,6 +544,7 @@ class CodexParticipantV2:
                 raise CodexParticipantError("Codex did not report its room thread identity")
             if expected_thread_id is not None and observed_thread_id != expected_thread_id:
                 raise CodexParticipantError("Codex resumed an unexpected room thread")
+            action = _normalize_action_output(_read_action_output(output_path))
             try:
                 save_codex_session(
                     self.session_path,
@@ -441,12 +553,6 @@ class CodexParticipantV2:
                 )
             except CodexSessionStateError as exc:
                 raise CodexParticipantError("Codex room session could not be persisted") from exc
-            result = _read_action_output(output_path)
-            if not isinstance(result, dict) or set(result) != {"action"}:
-                raise CodexParticipantError("Codex participant output is invalid")
-            action = result["action"]
-            if action is not None and not isinstance(action, dict):
-                raise CodexParticipantError("Codex participant output is invalid")
             return action
         except SubprocessParticipantError as exc:
             raise CodexParticipantError("Codex participant invocation failed") from exc

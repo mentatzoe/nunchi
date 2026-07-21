@@ -7,19 +7,18 @@
   "required": ["action"],
   "properties": {
     "action": {
-      "oneOf": [
+      "anyOf": [
         {"type": "null"},
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "content"],
+          "required": ["kind", "content", "reply_to_event_id", "mention_actor_ids"],
           "properties": {
-            "kind": {"const": "message"},
+            "kind": {"type": "string", "const": "message"},
             "content": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "reply_to_event_id": {"type": "string", "minLength": 1},
+            "reply_to_event_id": {"type": ["string", "null"], "minLength": 1},
             "mention_actor_ids": {
-              "type": "array",
-              "uniqueItems": true,
+              "type": ["array", "null"],
               "items": {"type": "string", "minLength": 1}
             }
           }
@@ -29,7 +28,7 @@
           "additionalProperties": false,
           "required": ["kind", "target_event_id", "reaction"],
           "properties": {
-            "kind": {"const": "reaction"},
+            "kind": {"type": "string", "const": "reaction"},
             "target_event_id": {"type": "string", "minLength": 1},
             "reaction": {"type": "string", "minLength": 1, "maxLength": 256}
           }
