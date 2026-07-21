@@ -214,10 +214,25 @@ class CodexRoomV2:
     def accept_notification(self, params: dict[str, Any]) -> str:
         if not isinstance(params, dict):
             raise CodexRoomV2Error("Discord V2 notification is invalid")
+        expected = {
+            "schema_version",
+            "platform",
+            "guild_id",
+            "channel_id",
+            "native_input",
+        }
+        guild_id = params.get("guild_id")
+        channel_id = params.get("channel_id")
         if (
-            params.get("schema_version") != 2
+            set(params) != expected
+            or params.get("schema_version") != 2
             or params.get("platform") != "discord"
-            or str(params.get("channel_id") or "") != self.channel_id
+            or (
+                guild_id is not None
+                and (not isinstance(guild_id, str) or not guild_id.isdigit())
+            )
+            or not isinstance(channel_id, str)
+            or channel_id != self.channel_id
         ):
             raise CodexRoomV2Error("Discord V2 notification binding is invalid")
         native = params.get("native_input")

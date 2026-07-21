@@ -679,6 +679,30 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         with self.assertRaises(CodexRoomV2Error):
             room.accept_notification(bad)
 
+    def test_live_notification_rejects_coercible_or_open_envelope_facts(self):
+        room = self.room(FakeTransportClient())
+        self.addCleanup(room.close)
+        cases = []
+        numeric_channel = self.notification(room)
+        numeric_channel["channel_id"] = 42
+        cases.append(numeric_channel)
+        numeric_guild = self.notification(room)
+        numeric_guild["guild_id"] = 7
+        cases.append(numeric_guild)
+        extra_field = self.notification(room)
+        extra_field["credential"] = "must-not-be-accepted"
+        cases.append(extra_field)
+        missing_field = self.notification(room)
+        missing_field.pop("guild_id")
+        cases.append(missing_field)
+
+        for notification in cases:
+            with self.subTest(notification=notification):
+                with self.assertRaises(CodexRoomV2Error):
+                    room.accept_notification(notification)
+        self.assertEqual(self.classifier_calls, [])
+        self.assertEqual(self.turns, [])
+
     def test_trusted_bypass_invokes_codex_with_zero_classifier_calls(self):
         document = clone_policy()
         document["recoverability"]["continuity_scope_id"] = "discord:channel:42"

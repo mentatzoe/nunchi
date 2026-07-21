@@ -60,7 +60,11 @@ pending wake obligation or replays the old stream as FIFO work. The backfill
 accepts at most the configured row limit and requires the transport's exact
 closed message shape, snowflake strings, boolean bot/room-mention facts, and
 native reply/mention identities. Malformed authenticated history fails startup
-instead of being silently omitted and overstating context coverage.
+instead of being silently omitted and overstating context coverage. Each live
+notification likewise requires the exact closed V2 envelope: version, platform,
+optional string guild snowflake, string channel snowflake, and native input.
+Missing, extra, or coercible envelope facts are rejected before observation or
+wake scheduling.
 
 ## Operator configuration surface
 
