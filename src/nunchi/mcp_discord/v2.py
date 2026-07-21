@@ -53,6 +53,17 @@ def _actor_snowflake(value: object) -> str | None:
     return _event_snowflake(value, "discord:user:")
 
 
+def _created_message(value: object, channel_id: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DiscordV2ActionError("Discord create-message result is invalid")
+    if (
+        _snowflake(value.get("id")) is None
+        or _snowflake(value.get("channel_id")) != channel_id
+    ):
+        raise DiscordV2ActionError("Discord create-message result is invalid")
+    return value
+
+
 class DiscordActionSinkV2:
     """Send one request-correlated room action without social reclassification.
 
@@ -138,12 +149,15 @@ class DiscordActionSinkV2:
         try:
             if operation[0] == "message":
                 content, reply_to, mention_ids = operation[1]
-                self.rest.create_message(
+                _created_message(
+                    self.rest.create_message(
+                        self.channel_id,
+                        content,
+                        reply_to_message_id=reply_to,
+                        allowed_mention_user_ids=mention_ids,
+                        fail_if_reply_missing=reply_to is not None,
+                    ),
                     self.channel_id,
-                    content,
-                    reply_to_message_id=reply_to,
-                    allowed_mention_user_ids=mention_ids,
-                    fail_if_reply_missing=reply_to is not None,
                 )
             else:
                 target, reaction = operation[1]
@@ -285,7 +299,21 @@ class MCPDiscordActionSinkV2:
                 ) from receipt_exc
             raise DiscordV2ActionError("Discord MCP action failed") from exc
         try:
-            self.client.call_tool(tool, arguments)
+            response = self.client.call_tool(tool, arguments)
+            if not isinstance(response, dict):
+                raise DiscordV2ActionError("Discord MCP action result is invalid")
+            if tool in ("send_message", "reply_message"):
+                message = response.get("message")
+                if (
+                    not isinstance(message, dict)
+                    or _snowflake(message.get("message_id")) is None
+                    or _snowflake(message.get("channel_id")) != self.channel_id
+                ):
+                    raise DiscordV2ActionError(
+                        "Discord MCP message result is invalid"
+                    )
+            elif response != {"reaction": "sent", "message_id": arguments["message_id"]}:
+                raise DiscordV2ActionError("Discord MCP reaction result is invalid")
         except Exception as exc:
             try:
                 self._receipt(

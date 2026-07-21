@@ -146,12 +146,27 @@ class RestLike(Protocol):
 
 def shape_message(msg: dict) -> dict:
     """Normalize an API message object to the notification field names."""
-    author = msg.get("author") or {}
+    if not isinstance(msg, dict):
+        raise ValueError("Discord message result is invalid")
+    message_id = _snowflake(msg.get("id"))
+    channel_id = _snowflake(msg.get("channel_id"))
+    author = msg.get("author")
+    if (
+        message_id is None
+        or channel_id is None
+        or not isinstance(author, dict)
+        or _snowflake(author.get("id")) is None
+        or not isinstance(author.get("username", ""), str)
+        or not isinstance(author.get("bot", False), bool)
+    ):
+        raise ValueError("Discord message result is invalid")
     guild_id = msg.get("guild_id")
+    if guild_id is not None and _snowflake(guild_id) is None:
+        raise ValueError("Discord message result is invalid")
     shaped = {
         "guild_id": str(guild_id) if guild_id is not None else None,
-        "channel_id": str(msg.get("channel_id", "")),
-        "message_id": str(msg.get("id", "")),
+        "channel_id": channel_id,
+        "message_id": message_id,
         "author_id": str(author.get("id", "")),
         "author_name": str(author.get("username", "")),
         "author_is_bot": bool(author.get("bot", False)),

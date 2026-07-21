@@ -643,6 +643,24 @@ class TestToolExecutor(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("403", payload["error"])
 
+    def test_malformed_success_response_is_not_reported_as_a_sent_message(self):
+        class _MalformedRest(_FakeRest):
+            def create_message(self, channel_id, content, **kwargs):
+                self.sent.append((channel_id, content, None))
+                return {"id": "", "channel_id": channel_id, "author": {}}
+
+        executor = ToolExecutor(
+            _MalformedRest(),
+            SendBackstop(5, 10.0, clock=_FakeClock()),
+            allowed_channel_ids=frozenset({"100"}),
+        )
+        payload, ok = executor.call(
+            "send_message",
+            {"channel_id": "100", "content": "hi"},
+        )
+        self.assertFalse(ok)
+        self.assertIn("error", payload)
+
 
 # --------------------------------------------------------------------------- #
 # Shutdown drain

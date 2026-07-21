@@ -188,7 +188,7 @@ class FakeRest:
 
     def create_message(self, channel_id, content, **kwargs):
         self.messages.append((channel_id, content, kwargs))
-        return {"id": "sent-1"}
+        return {"id": "999", "channel_id": channel_id}
 
     def create_reaction(self, channel_id, message_id, reaction):
         self.reactions.append((channel_id, message_id, reaction))
@@ -288,6 +288,16 @@ class DiscordActionSinkCases(unittest.TestCase):
             "discord-api-outcome-unknown",
         )
 
+    def test_malformed_success_response_records_unknown_not_sent(self):
+        def effect_then_malformed_response(channel_id, content, **kwargs):
+            self.rest.messages.append((channel_id, content, kwargs))
+            return {"id": "", "channel_id": channel_id}
+
+        self.rest.create_message = effect_then_malformed_response
+        with self.assertRaises(Exception):
+            self.sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assert_transport_receipt("req-malformed", "unknown")
+
     def test_request_capacity_fails_without_evicting_replay_identity(self):
         sink = DiscordActionSinkV2(
             channel_id="42",
@@ -310,7 +320,14 @@ class FakeMCPClient:
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return {"ok": True}
+        if name == "add_reaction":
+            return {"reaction": "sent", "message_id": arguments["message_id"]}
+        return {
+            "message": {
+                "message_id": "999",
+                "channel_id": arguments["channel_id"],
+            }
+        }
 
 
 class MCPDiscordActionSinkCases(unittest.TestCase):
@@ -352,6 +369,23 @@ class MCPDiscordActionSinkCases(unittest.TestCase):
             receipts[-1]["body"]["detail"],
             "mcp-discord-action-outcome-unknown",
         )
+
+    def test_malformed_mcp_success_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeMCPClient):
+            def call_tool(self, name, arguments):
+                self.calls.append((name, arguments))
+                return {"ok": True}
+
+        client = MalformedResponseClient()
+        receipts = []
+        sink = MCPDiscordActionSinkV2(
+            channel_id="42",
+            client=client,
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(Exception):
+            sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
 
 
 class V2ServerBoundaryCases(unittest.TestCase):

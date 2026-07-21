@@ -522,7 +522,14 @@ class FakeTransportClient:
         self.calls.append((name, arguments))
         if name == "read_history":
             return {"messages": self.history}
-        return {"ok": True}
+        if name == "add_reaction":
+            return {"reaction": "sent", "message_id": arguments["message_id"]}
+        return {
+            "message": {
+                "message_id": "999",
+                "channel_id": arguments["channel_id"],
+            }
+        }
 
 
 def discord_params(message_id, content, *, author_id="1001", timestamp="2026-07-20T12:00:00Z"):
