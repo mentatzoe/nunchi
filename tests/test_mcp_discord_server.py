@@ -591,6 +591,28 @@ class TestToolExecutor(unittest.TestCase):
         self.assertEqual(shaped["reply_to_author_id"], "999")
         self.assertEqual(shaped["reply_to_content"], "prior message")
 
+    def test_read_history_preserves_exact_room_mention_boolean(self):
+        shaped = shape_message(_api_message(mention_everyone=True))
+        self.assertIs(shaped["mentions_room"], True)
+        with self.assertRaises(ValueError):
+            shape_message(_api_message(mention_everyone="true"))
+
+    def test_read_history_rejects_coercible_native_addressing(self):
+        cases = (
+            {"mentions": [{"id": 999}]},
+            {"message_reference": {"message_id": 41}},
+            {
+                "referenced_message": {
+                    "id": "41",
+                    "content": "prior",
+                    "author": {"id": "999", "username": "Vigil", "bot": "true"},
+                }
+            },
+        )
+        for override in cases:
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                shape_message(_api_message(**override))
+
     def test_non_numeric_channel_id_rejected(self):
         executor, rest = self._executor()
         payload, ok = executor.call(

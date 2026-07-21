@@ -79,7 +79,10 @@ closed by default and only exact `mention_user_ids` may ping. Replies fail when
 their exact target is absent. Discord route limits and the local send backstop
 apply to every effect; no effect is queued for later social reconsideration.
 `read_history` is an authenticated, allowlisted privileged read and returns
-bounded factual context, never wake jobs.
+bounded factual context, never wake jobs. Its projection retains exact native
+snowflake strings, bot and room-mention booleans, replies, and structured user
+mentions; coercible or malformed API identity/addressing fields make the tool
+call fail instead of disappearing from the returned context.
 
 The notification queue is deliberately not a durable obligation queue. When a
 client falls behind, the oldest queued event is replaced by the newest and a

@@ -548,6 +548,7 @@ def discord_params(message_id, content, *, author_id="1001", timestamp="2026-07-
         "reply_to_author_name": None,
         "reply_to_author_is_bot": None,
         "reply_to_content": None,
+        "mentions_room": False,
     }
 
 
@@ -649,6 +650,20 @@ class CodexRoomLifecycleCases(unittest.TestCase):
             [record["stage"] for record in self.receipts],
             ["observation", "attention", "participant-host", "transport"],
         )
+
+    def test_backfill_rejects_malformed_or_over_budget_authenticated_history(self):
+        cases = (
+            [dict(discord_params("1", "bad bot"), author_is_bot="false")],
+            [dict(discord_params("1", "bad room"), channel_id=42)],
+            [dict(discord_params("1", "bad mention"), mentioned_user_ids=[9001])],
+            [discord_params(str(index + 1), "too many") for index in range(101)],
+        )
+        for history in cases:
+            with self.subTest(history=history[:1], size=len(history)):
+                room = self.room(FakeTransportClient(history=history))
+                self.addCleanup(room.close)
+                with self.assertRaises(CodexRoomV2Error):
+                    room.backfill()
 
     def test_self_and_wrong_room_cannot_wake_codex(self):
         client = FakeTransportClient()

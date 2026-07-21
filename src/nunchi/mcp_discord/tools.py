@@ -161,8 +161,45 @@ def shape_message(msg: dict) -> dict:
     ):
         raise ValueError("Discord message result is invalid")
     guild_id = msg.get("guild_id")
-    if guild_id is not None and _snowflake(guild_id) is None:
+    mentions_room = msg.get("mention_everyone", False)
+    timestamp = msg.get("timestamp")
+    mentions = msg.get("mentions", [])
+    reference = msg.get("message_reference")
+    referenced = msg.get("referenced_message")
+    if (
+        (guild_id is not None and _snowflake(guild_id) is None)
+        or not isinstance(mentions_room, bool)
+        or (timestamp is not None and not isinstance(timestamp, str))
+        or not isinstance(mentions, list)
+        or any(
+            not isinstance(mention, dict)
+            or _snowflake(mention.get("id")) is None
+            for mention in mentions
+        )
+        or (reference is not None and not isinstance(reference, dict))
+        or (
+            isinstance(reference, dict)
+            and reference.get("message_id") is not None
+            and _snowflake(reference.get("message_id")) is None
+        )
+        or (referenced is not None and not isinstance(referenced, dict))
+    ):
         raise ValueError("Discord message result is invalid")
+    if isinstance(referenced, dict):
+        referenced_author = referenced.get("author")
+        if (
+            _snowflake(referenced.get("id")) is None
+            or (
+                referenced_author is not None
+                and (
+                    not isinstance(referenced_author, dict)
+                    or _snowflake(referenced_author.get("id")) is None
+                    or not isinstance(referenced_author.get("username", ""), str)
+                    or not isinstance(referenced_author.get("bot", False), bool)
+                )
+            )
+        ):
+            raise ValueError("Discord message result is invalid")
     shaped = {
         "guild_id": str(guild_id) if guild_id is not None else None,
         "channel_id": channel_id,
@@ -171,7 +208,8 @@ def shape_message(msg: dict) -> dict:
         "author_name": str(author.get("username", "")),
         "author_is_bot": bool(author.get("bot", False)),
         "content": message_text(msg),
-        "timestamp": msg.get("timestamp"),
+        "timestamp": timestamp,
+        "mentions_room": mentions_room,
     }
     shaped.update(message_addressing(msg))
     return shaped

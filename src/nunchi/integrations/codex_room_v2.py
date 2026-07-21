@@ -112,37 +112,82 @@ class CodexRoomV2:
 
     @staticmethod
     def _message_event(params: dict[str, Any]) -> MessageEvent | None:
-        required = ("channel_id", "message_id", "author_id", "content")
-        if any(name not in params for name in required):
+        required = {
+            "guild_id",
+            "channel_id",
+            "message_id",
+            "author_id",
+            "author_name",
+            "author_is_bot",
+            "content",
+            "timestamp",
+            "mentioned_user_ids",
+            "reply_to_message_id",
+            "reply_to_author_id",
+            "reply_to_author_name",
+            "reply_to_author_is_bot",
+            "reply_to_content",
+            "mentions_room",
+        }
+        if set(params) != required:
             return None
-        mentioned = params.get("mentioned_user_ids") or []
-        if not isinstance(mentioned, list):
+        guild_id = params["guild_id"]
+        channel_id = params["channel_id"]
+        message_id = params["message_id"]
+        author_id = params["author_id"]
+        mentioned = params["mentioned_user_ids"]
+        reply_id = params["reply_to_message_id"]
+        reply_author_id = params["reply_to_author_id"]
+        reply_author_name = params["reply_to_author_name"]
+        reply_author_is_bot = params["reply_to_author_is_bot"]
+        reply_content = params["reply_to_content"]
+        timestamp = params["timestamp"]
+        if (
+            (guild_id is not None and (not isinstance(guild_id, str) or not guild_id.isdigit()))
+            or not isinstance(channel_id, str)
+            or not channel_id.isdigit()
+            or not isinstance(message_id, str)
+            or not message_id.isdigit()
+            or not isinstance(author_id, str)
+            or not author_id.isdigit()
+            or not isinstance(params["author_name"], str)
+            or not isinstance(params["author_is_bot"], bool)
+            or not isinstance(params["content"], str)
+            or (timestamp is not None and not isinstance(timestamp, str))
+            or not isinstance(mentioned, list)
+            or any(not isinstance(value, str) or not value.isdigit() for value in mentioned)
+            or len(set(mentioned)) != len(mentioned)
+            or (reply_id is not None and (not isinstance(reply_id, str) or not reply_id.isdigit()))
+            or (
+                reply_author_id is not None
+                and (
+                    not isinstance(reply_author_id, str)
+                    or not reply_author_id.isdigit()
+                )
+            )
+            or (reply_author_name is not None and not isinstance(reply_author_name, str))
+            or (reply_author_is_bot is not None and not isinstance(reply_author_is_bot, bool))
+            or (reply_content is not None and not isinstance(reply_content, str))
+            or not isinstance(params["mentions_room"], bool)
+        ):
             return None
         return MessageEvent(
-            guild_id=params.get("guild_id"),
-            channel_id=str(params.get("channel_id") or ""),
-            message_id=str(params.get("message_id") or ""),
-            author_id=str(params.get("author_id") or ""),
-            author_name=str(params.get("author_name") or ""),
-            author_is_bot=bool(params.get("author_is_bot", False)),
-            content=params.get("content") if isinstance(params.get("content"), str) else "",
-            timestamp=(params.get("timestamp") if isinstance(params.get("timestamp"), str) else None),
-            mentioned_user_ids=tuple(str(value) for value in mentioned),
-            reply_to_message_id=(
-                str(params["reply_to_message_id"])
-                if params.get("reply_to_message_id") is not None
-                else None
-            ),
-            reply_to_author_id=None,
-            reply_to_author_name=None,
-            reply_to_author_is_bot=None,
-            reply_to_content=None,
-            mentions_room=bool(params.get("mentions_room", False)),
-            thread_root_message_id=(
-                str(params["thread_root_message_id"])
-                if params.get("thread_root_message_id") is not None
-                else None
-            ),
+            guild_id=guild_id,
+            channel_id=channel_id,
+            message_id=message_id,
+            author_id=author_id,
+            author_name=params["author_name"],
+            author_is_bot=params["author_is_bot"],
+            content=params["content"],
+            timestamp=timestamp,
+            mentioned_user_ids=tuple(mentioned),
+            reply_to_message_id=reply_id,
+            reply_to_author_id=reply_author_id,
+            reply_to_author_name=reply_author_name,
+            reply_to_author_is_bot=reply_author_is_bot,
+            reply_to_content=reply_content,
+            mentions_room=params["mentions_room"],
+            thread_root_message_id=None,
         )
 
     def backfill(self) -> int:
@@ -152,16 +197,16 @@ class CodexRoomV2:
             {"channel_id": self.channel_id, "limit": self.history_limit},
         )
         messages = result.get("messages")
-        if not isinstance(messages, list):
+        if not isinstance(messages, list) or len(messages) > self.history_limit:
             raise CodexRoomV2Error("Discord history result is invalid")
         retained = 0
         for params in reversed(messages):
             event = self._message_event(params) if isinstance(params, dict) else None
             if event is None:
-                continue
+                raise CodexRoomV2Error("Discord history message is invalid")
             native = self.source.native_input(event)
             if native.get("disposition") != "candidate-event":
-                continue
+                raise CodexRoomV2Error("Discord history message binding is invalid")
             self.observation.ingest(native)
             retained += 1
         return retained
