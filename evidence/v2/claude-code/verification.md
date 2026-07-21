@@ -1,23 +1,44 @@
 # Claude Code V2 — verification index
 
-**Attempt 3**, recorded 2026-07-20, `v2-claude-owner` lane. The Attempt 1/2
-indexes are preserved in git at candidates `6476b58` / `1990129`. Every
-command below was run on the Attempt-3 candidate
-`651313531f19ba82683a8234bcc3c0252e67adfd`; results are quoted exactly.
+**Attempt 4**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt 1/2/3
+indexes are preserved in git at candidates `6476b58` / `1990129` / `6513135`.
+Every command below was run on the Attempt-4 candidate
+`a6a7a8be8af1bf1e55f84113bc6db7e7a686c3fb`; results are quoted exactly.
 
 ## Deterministic commands and results
 
 | Command | Result |
 |---|---|
+| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 11 tests … OK` |
 | `python3 -m unittest tests.v2.test_claude_code` | `Ran 52 tests … OK` |
-| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code` | `Ran 74 tests … OK` |
-| `python3 -m unittest` (full offline baseline) | `Ran 1173 tests in 18.9s — OK (skipped=7)` |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 85 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1184 tests in 27.2s — OK (skipped=7)` |
 | `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
-| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL) |
-| `git diff --check` (staged Attempt-3 tree) | clean (a scoped `transport-patch/.gitattributes` exempts generated patch files, whose blank-context lines are single spaces by unified-diff format) |
-| Patch reproducibility (scratch build): `git apply --check 0001 && git apply 0001 && git apply --check 0002 && git apply 0002` onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target; `bun build` of the patched file exits 0 |
+| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL; the wrapper fix does not touch scene mechanics) |
+| `git diff --check` (staged Attempt-4 tree) | clean |
+| Patch reproducibility (scratch build) onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target (unchanged since Attempt 3 — this attempt touches only the shell wrapper) |
 | Installer safety: apply against a symlinked target / rollback against a symlinked backup | exit 2 each, `symlink; refusing to follow`, referent bytes unchanged |
-| Installed-host probes (Attempt 3, no arming) | foreign-room prompt → `block` (`foreign-room-declined … room delivery blocked`); bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output |
+| Installed-host probes (Attempt 4, no arming) | foreign-room prompt → `block`; bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output; **wrapper fault injection (syntax-broken gate) → `block` with the recovery-hint reason, gate restored and digest re-verified afterward** |
+
+## Wrapper process-boundary fault injection (Attempt-4 correction)
+
+`tests/test_claude_code_hook_wrapper.py` invokes the real
+`nunchi-claude-v2-hook.sh` as a subprocess (never the Python gate directly)
+with a *configured* policy and a deliberately broken/missing gate, and asserts
+the wrapper's stdout can never be read as admission:
+
+| Case | Result |
+|---|---|
+| Syntax error in gate | wrapper prints `{"decision": "block", ...}`; the crash traceback stays on stderr |
+| Missing gate file | same block decision |
+| Gate killed by signal (SIGKILL) | same block decision |
+| Missing `python3` on `PATH` | same block decision, stderr names `python3 missing` |
+| Gate exits nonzero but prints plausible-looking stdout | wrapper's own block decision is emitted; the gate's untrustworthy (nonzero-exit) stdout is **not** forwarded |
+| Healthy gate, exit 0 | gate's exact decision passes through byte-for-byte |
+| Unconfigured install, broken gate | fails open (empty stdout, exit 0) — inert installs are unaffected |
+| `pre-tool`, configured, broken gate | exit `2` (unchanged fail-closed direction) |
+| `stop` / `post-tool`, configured, broken gate | exit `0`, no output (unchanged fail-open direction, deliberate) |
+| Real gate (not a stub), unresolvable policy path | wrapper forwards the real gate's own config-error block decision end-to-end |
 
 ## Adversarial regression coverage (Attempt-2 and Attempt-3 findings)
 

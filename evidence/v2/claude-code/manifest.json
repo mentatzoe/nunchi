@@ -2,11 +2,12 @@
  "schema_version": 1,
  "slice": "070-v2-claude-code",
  "owner_lane": "v2-claude-owner",
- "attempt": 3,
- "recorded_on": "2026-07-20",
+ "attempt": 4,
+ "recorded_on": "2026-07-21",
  "supersedes_attempt_1_candidate": "6476b58ca015e259fa576fd8f9ed569adc0c6913",
  "supersedes_attempt_2_candidate": "199012901278777750671f4fc0731b779e91c2b8",
- "candidate_commit": "651313531f19ba82683a8234bcc3c0252e67adfd (Attempt-3 implementation candidate); the append-only Attempt-3 handoff section binds it and the later evidence-only commit",
+ "supersedes_attempt_3_candidate": "651313531f19ba82683a8234bcc3c0252e67adfd",
+ "candidate_commit": "a6a7a8be8af1bf1e55f84113bc6db7e7a686c3fb (Attempt-4 implementation candidate); the append-only Attempt-4 handoff section binds it and the later evidence-only commit",
  "scene_map": {
   "CC-01": {
    "s_ids": ["S01", "S02", "S11"],
@@ -74,8 +75,9 @@
   "CC-06": {
    "s_ids": ["S12"],
    "records": ["evidence/v2/claude-code/installed-runtime.md"],
-   "command": "manual installed-host capture (digests, registration state, installed-hook probes) — commands quoted inside the record",
-   "result": "PASS — full staged-component provenance; hook registration and transport patch reconciliation remain enumerated operator steps; V1 host residue reported"
+   "command": "manual installed-host capture (digests, registration state, installed-hook probes, wrapper fault injection) — commands quoted inside the record",
+   "mechanics_tests": ["tests.test_claude_code_hook_wrapper"],
+   "result": "PASS — full staged-component provenance; hook registration and transport patch reconciliation remain enumerated operator steps; V1 host residue reported; wrapper enforces fail-closed-on-gate-failure for user-prompt-submit at the process boundary (Attempt-4), verified both deterministically and live on the installed host"
   }
  },
  "verification_index": "evidence/v2/claude-code/verification.md",

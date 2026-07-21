@@ -423,3 +423,87 @@ not; live scenes are pending Zoe's explicit approval to arm the host.
 **Handoff target**: `v2-integrator` for adversarial re-review (the exact prior
 probes plus the prior rejection suite). This lane does not self-declare
 acceptance.
+
+---
+
+## Attempt 4 — 2026-07-21 (rework: wrapper process-boundary fail-open)
+
+**Delivering lane**: `v2-claude-owner` — Station, model `claude-fable-5`.
+Attempt 3 (candidate `6513135`, evidence `c3442d7`) closed the four required
+corrections and passed independent re-review, but one bounded process-boundary
+blocker remained: the shell wrapper converted a configured
+`user-prompt-submit` gate failure into a silent `exit 0`. Attempts 1–3 and
+their evidence are preserved unchanged in git history; this attempt is a new
+candidate on the same branch, appended here. The Attempt-3 corrections
+themselves are unchanged and were not revisited.
+
+### Exact candidate and commit split
+
+- **Implementation candidate**: `a6a7a8be8af1bf1e55f84113bc6db7e7a686c3fb`
+  (descends from Attempt-3 evidence tip `c3442d7` on branch
+  `claude/claude-code-v2-integration-3ac219`).
+- **Evidence-only binding**: the commit adding this Attempt-4 section (plus
+  refreshed provenance) sits on top; its diff from `a6a7a8b` touches only
+  `evidence/v2/claude-code/`.
+
+Attempt-4 changed-file inventory (implementation candidate, `6513135` →
+`a6a7a8b`):
+
+```text
+M  integrations/claude-code/README.md               # wrapper role description
+M  integrations/claude-code/nunchi-claude-v2-hook.sh # fail-closed on gate failure
+A  tests/test_claude_code_hook_wrapper.py            # subprocess fault injection
+```
+
+No other file changed. `nunchi_claude_v2.py`, both transport patches, the
+installer, and the Attempt-1/2/3 test files are byte-identical to Attempt 3.
+
+### Correction (integrator's single required item)
+
+| Required correction | Resolution | Proof |
+|---|---|---|
+| a configured `user-prompt-submit` wrapper failure (missing python3, missing gate, import/startup failure, signal/nonzero exit) must block, not succeed | The wrapper now captures the gate's stdout and, on any nonzero exit (crash, syntax error, missing file, missing `python3`, killed by signal), emits `{"decision": "block", "reason": "nunchi-v2 gate unavailable; failing closed. Fix the gate or unset NUNCHI_CLAUDE_V2_POLICY to bypass."}` instead of exiting silently. A healthy gate's own decision passes through unmodified. `stop`/`post-tool` keep their deliberate fail-open direction (unchanged per the integrator's instruction); `pre-tool` keeps exit-2 fail-closed; unconfigured installs remain fully inert. | `tests/test_claude_code_hook_wrapper.py` (11 subprocess tests against the real wrapper: syntax error, missing file, killed-by-signal, missing `python3`, nonzero-exit-with-plausible-stdout, healthy passthrough, unconfigured fail-open, and the pre-tool/stop/post-tool direction controls) + a live installed-host fault-injection probe (below) |
+
+### Deterministic commands and results (Attempt 4)
+
+`python3 -m unittest tests.test_claude_code_hook_wrapper` → 11 OK;
+`python3 -m unittest tests.v2.test_claude_code` → 52 OK; the five-module guard
+run (`test_no_home_writes`, `test_sentinel_forgery`, `test_no_second_judgment`,
+`test_claude_code`, `test_claude_code_hook_wrapper`) → 85 OK; full baseline
+`python3 -m unittest` → **1184 OK (skipped=7)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay → 20 rows
+(19 PASS, 1 declared), byte-identical across runs (the wrapper fix does not
+touch scene mechanics); patch reproducibility unchanged (`0d1ffaa0…`, this
+attempt touches no `.ts` or patch file); `git diff --check` → clean. Full
+table in `verification.md`.
+
+### Installed provenance and live fault-injection probe (Attempt 4)
+
+Staged wrapper digest `39988bfe3b8184fa077c95fa054c3bbaef785a62475b5ca3503be5f6baea2cbf`
+(the Python gate `nunchi_claude_v2.py`, digest `e2bd2202…`, is unchanged since
+Attempt 3). With the installed wrapper live, `nunchi_claude_v2.py` was
+temporarily replaced with a syntax-broken file, a bound-room channel prompt
+was submitted, and the installed wrapper produced the block decision above
+(exit 0, stdout carrying the block JSON, stderr carrying the Python traceback
+and the wrapper's own diagnostic) — the prompt was never admitted. The gate
+file was restored immediately and its SHA-256 re-verified to match the
+pre-probe digest exactly, so the probe left no drift in the staged install.
+Full digests and the probe transcript are in `installed-runtime.md`. This
+probe exercised only the staged (inert) components; no `settings.json` edit,
+no transport patch application, and no outbound Discord send occurred.
+
+### Host-mutation approval still required (do not arm until Zoe approves)
+
+Unchanged from Attempt 3: the live ladder remains NOT RUN pending Zoe's
+explicit approval to arm the host. The operator steps are unchanged
+(`installed-runtime.md`).
+
+### Known limitations and rejected claims (Attempt 4)
+
+Unchanged from Attempt 3. **Rejected claim**: "live parity is proven" — it is
+not; live scenes are pending Zoe's explicit approval to arm the host.
+
+**Handoff target**: `v2-integrator` for adversarial re-review (the wrapper
+fault injection, the prior Attempt-3 probes, focused/full tests, scenes,
+patch reproduction, and installed-digest comparison). This lane does not
+self-declare acceptance.
