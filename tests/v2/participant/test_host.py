@@ -135,6 +135,48 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
                 self.assertEqual(sent, [action])
                 self.assertEqual(validate_attention_receipt(self.receipts[0]), [])
 
+    def test_ambiguous_action_sink_ack_is_an_error_and_is_not_retried(self):
+        action = {"kind": "message", "content": "I can take the deploy."}
+        offered = []
+
+        def ambiguous_sink(value):
+            offered.append(value)
+            return False
+
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            lambda _turn: action,
+            action_sink=ambiguous_sink,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], "action-sink-outcome-unknown")
+        self.assertEqual(result["outcome"], "unknown")
+        self.assertEqual(offered, [action])
+        self.assertEqual(len(self.receipts), 1)
+        self.assertEqual(self.receipts[0]["body"]["outcome"], "sent")
+
+    def test_ambiguous_correlated_action_sink_ack_is_an_error_and_not_retried(self):
+        action = {"kind": "reaction", "target_event_id": "e1", "reaction": "👀"}
+        offered = []
+
+        def ambiguous_sink(request_id, value):
+            offered.append((request_id, value))
+            return {"accepted": True}
+
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            lambda _turn: action,
+            correlated_action_sink=ambiguous_sink,
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], "action-sink-outcome-unknown")
+        self.assertEqual(result["outcome"], "unknown")
+        self.assertEqual(offered, [("req-0001", action)])
+        self.assertEqual(len(self.receipts), 1)
+        self.assertEqual(self.receipts[0]["body"]["outcome"], "sent")
+
     def test_meta_answer_is_not_a_sendable_action_and_is_not_reclassified(self):
         calls = []
 

@@ -330,10 +330,18 @@ def run_participant_turn(
                 returned = correlated_action_sink(
                     packet["request_id"], copy.deepcopy(action)
                 )
-                outcome = "sent" if returned is None else "unknown"
+                if returned is None:
+                    outcome = "sent"
+                else:
+                    outcome = "unknown"
+                    host_error = "action-sink-outcome-unknown"
             else:
                 returned = action_sink(copy.deepcopy(action))
-                outcome = "sent" if returned is None else "unknown"
+                if returned is None:
+                    outcome = "sent"
+                else:
+                    outcome = "unknown"
+                    host_error = "action-sink-outcome-unknown"
         elif action_sink is None:
             host_error = "action-sink-unavailable"
     except Exception:
