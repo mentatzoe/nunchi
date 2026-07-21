@@ -273,6 +273,21 @@ class DiscordActionSinkCases(unittest.TestCase):
         self.assert_transport_receipt("req-2", "failed")
         self.assertEqual(self.receipts[-1]["body"]["detail"], "send-backstop")
 
+    def test_lost_api_response_records_unknown_not_failed(self):
+        def effect_then_disconnect(channel_id, content, **kwargs):
+            self.rest.messages.append((channel_id, content, kwargs))
+            raise OSError("response lost after dispatch")
+
+        self.rest.create_message = effect_then_disconnect
+        with self.assertRaises(Exception):
+            self.sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual([item[1] for item in self.rest.messages], ["once"])
+        self.assert_transport_receipt("req-unknown", "unknown")
+        self.assertEqual(
+            self.receipts[-1]["body"]["detail"],
+            "discord-api-outcome-unknown",
+        )
+
     def test_request_capacity_fails_without_evicting_replay_identity(self):
         sink = DiscordActionSinkV2(
             channel_id="42",
@@ -315,6 +330,28 @@ class MCPDiscordActionSinkCases(unittest.TestCase):
             sink("req-1", {"kind": "message", "content": "again"})
         self.assertEqual([arguments["content"] for _, arguments in client.calls], ["one"])
         self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
+    def test_lost_mcp_response_records_unknown_not_failed(self):
+        class LostResponseClient(FakeMCPClient):
+            def call_tool(self, name, arguments):
+                super().call_tool(name, arguments)
+                raise OSError("response lost after tool dispatch")
+
+        client = LostResponseClient()
+        receipts = []
+        sink = MCPDiscordActionSinkV2(
+            channel_id="42",
+            client=client,
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(Exception):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(client.calls[0][1]["content"], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+        self.assertEqual(
+            receipts[-1]["body"]["detail"],
+            "mcp-discord-action-outcome-unknown",
+        )
 
 
 class V2ServerBoundaryCases(unittest.TestCase):

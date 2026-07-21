@@ -99,6 +99,15 @@ class DiscordActionSinkV2:
             raise DiscordV2ActionError("Discord action and receipt status are unknown") from exc
         raise DiscordV2ActionError(f"Discord action failed: {detail}")
 
+    def _unknown(self, request_id: str, detail: str, cause: Exception) -> None:
+        try:
+            self._write(request_id, "unknown", detail)
+        except Exception as receipt_error:
+            raise DiscordV2ActionError(
+                "Discord action and receipt status are unknown"
+            ) from receipt_error
+        raise DiscordV2ActionError(f"Discord action outcome is unknown: {detail}") from cause
+
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise DiscordV2ActionError("Discord action request correlation is invalid")
@@ -113,29 +122,43 @@ class DiscordActionSinkV2:
                 raise DiscordV2ActionError("Discord action capacity is exhausted")
             self._consumed_request_ids.add(request_id)
 
-        kind = accepted.get("kind") if isinstance(accepted, dict) else None
+        try:
+            kind = accepted.get("kind") if isinstance(accepted, dict) else None
+            if kind == "message":
+                operation = ("message", self._message_arguments(accepted))
+            elif kind == "reaction":
+                operation = ("reaction", self._reaction_arguments(accepted))
+            else:
+                raise ValueError("unsupported action")
+        except Exception as exc:
+            self._fail(request_id, "invalid-action")
         wait = self.backstop.try_acquire(self.channel_id)
         if wait > 0:
             self._fail(request_id, "send-backstop")
         try:
-            if kind == "message":
-                self._send_message(accepted)
-            elif kind == "reaction":
-                self._send_reaction(accepted)
+            if operation[0] == "message":
+                content, reply_to, mention_ids = operation[1]
+                self.rest.create_message(
+                    self.channel_id,
+                    content,
+                    reply_to_message_id=reply_to,
+                    allowed_mention_user_ids=mention_ids,
+                    fail_if_reply_missing=reply_to is not None,
+                )
             else:
-                self._fail(request_id, "unsupported-action")
-        except DiscordV2ActionError:
-            raise
-        except (DiscordRestError, OSError, ValueError):
-            self._fail(request_id, "discord-api-failure")
-        except Exception:
-            self._fail(request_id, "transport-failure")
+                target, reaction = operation[1]
+                self.rest.create_reaction(self.channel_id, target, reaction)
+        except Exception as exc:
+            self._unknown(request_id, "discord-api-outcome-unknown", exc)
         try:
             self._write(request_id, "sent")
         except Exception as exc:
             raise DiscordV2ActionError("Discord send receipt persistence is unknown") from exc
 
-    def _send_message(self, action: dict[str, Any]) -> None:
+    def _message_arguments(
+        self,
+        action: dict[str, Any],
+    ) -> tuple[str, str | None, tuple[str, ...]]:
         content = action.get("content")
         if not isinstance(content, str) or not content or len(content) > 2000:
             raise ValueError("invalid content")
@@ -156,15 +179,9 @@ class DiscordActionSinkV2:
             if user_id not in seen:
                 seen.add(user_id)
                 mention_ids.append(user_id)
-        self.rest.create_message(
-            self.channel_id,
-            content,
-            reply_to_message_id=reply_to,
-            allowed_mention_user_ids=tuple(mention_ids),
-            fail_if_reply_missing=reply_to is not None,
-        )
+        return content, reply_to, tuple(mention_ids)
 
-    def _send_reaction(self, action: dict[str, Any]) -> None:
+    def _reaction_arguments(self, action: dict[str, Any]) -> tuple[str, str]:
         target = _event_snowflake(
             action.get("target_event_id"),
             "discord:message:",
@@ -172,7 +189,7 @@ class DiscordActionSinkV2:
         reaction = action.get("reaction")
         if target is None or not isinstance(reaction, str) or not reaction:
             raise ValueError("invalid reaction")
-        self.rest.create_reaction(self.channel_id, target, reaction)
+        return target, reaction
 
 
 class MCPDiscordActionSinkV2:
@@ -243,7 +260,6 @@ class MCPDiscordActionSinkV2:
                         raise ValueError("invalid reply")
                     tool = "reply_message"
                     arguments["message_id"] = reply_id
-                self.client.call_tool(tool, arguments)
             elif kind == "reaction":
                 target = _event_snowflake(
                     accepted.get("target_event_id"),
@@ -252,24 +268,36 @@ class MCPDiscordActionSinkV2:
                 reaction = accepted.get("reaction")
                 if target is None or not isinstance(reaction, str) or not reaction:
                     raise ValueError("invalid reaction")
-                self.client.call_tool(
-                    "add_reaction",
-                    {
-                        "channel_id": self.channel_id,
-                        "message_id": target,
-                        "reaction": reaction,
-                    },
-                )
+                tool = "add_reaction"
+                arguments = {
+                    "channel_id": self.channel_id,
+                    "message_id": target,
+                    "reaction": reaction,
+                }
             else:
                 raise ValueError("unsupported action")
         except Exception as exc:
             try:
-                self._receipt(request_id, "failed", "mcp-discord-action-failure")
+                self._receipt(request_id, "failed", "invalid-action")
             except Exception as receipt_exc:
                 raise DiscordV2ActionError(
                     "Discord MCP action and receipt status are unknown"
                 ) from receipt_exc
             raise DiscordV2ActionError("Discord MCP action failed") from exc
+        try:
+            self.client.call_tool(tool, arguments)
+        except Exception as exc:
+            try:
+                self._receipt(
+                    request_id,
+                    "unknown",
+                    "mcp-discord-action-outcome-unknown",
+                )
+            except Exception as receipt_exc:
+                raise DiscordV2ActionError(
+                    "Discord MCP action and receipt status are unknown"
+                ) from receipt_exc
+            raise DiscordV2ActionError("Discord MCP action outcome is unknown") from exc
         try:
             self._receipt(request_id, "sent")
         except Exception as exc:

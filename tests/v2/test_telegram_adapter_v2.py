@@ -121,6 +121,29 @@ class TelegramActionCases(unittest.TestCase):
                 self.assertEqual(client.actions, [])
                 self.assertEqual(receipts[0]["body"]["delivery"], "failed")
 
+    def test_lost_api_response_records_unknown_not_failed(self):
+        class LostResponseClient(FakeTelegramClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                raise OSError("response lost after dispatch")
+
+        client = LostResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+        self.assertEqual(
+            receipts[-1]["body"]["detail"],
+            "telegram-api-outcome-unknown",
+        )
+
 
 class TelegramChatCases(unittest.TestCase):
     def setUp(self):

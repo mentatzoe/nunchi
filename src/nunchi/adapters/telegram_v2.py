@@ -359,6 +359,15 @@ class TelegramActionSinkV2:
             ) from receipt_error
         raise TelegramV2Error("Telegram action failed") from cause
 
+    def _unknown(self, request_id: str, detail: str, cause: Exception) -> None:
+        try:
+            self._receipt(request_id, "unknown", detail)
+        except Exception as receipt_error:
+            raise TelegramV2Error(
+                "Telegram action and receipt status are unknown"
+            ) from receipt_error
+        raise TelegramV2Error("Telegram action outcome is unknown") from cause
+
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise TelegramV2Error("Telegram action correlation is invalid")
@@ -368,8 +377,6 @@ class TelegramActionSinkV2:
             if len(self._consumed) >= self.max_request_ids:
                 raise TelegramV2Error("Telegram action capacity is exhausted")
             self._consumed.add(request_id)
-        if self.backstop.try_acquire(self.chat_id) > 0:
-            self._fail(request_id, "send-backstop")
         try:
             accepted = copy.deepcopy(action)
             if accepted.get("kind") == "message":
@@ -381,10 +388,10 @@ class TelegramActionSinkV2:
                         "Telegram exact outbound mentions are unavailable"
                     )
                 reply = accepted.get("reply_to_event_id")
-                self.client.send_message(
-                    self.chat_id,
+                operation = (
+                    "message",
                     content,
-                    reply_to_message_id=(
+                    (
                         _telegram_target(reply, self.chat_id)
                         if reply is not None
                         else None
@@ -394,8 +401,8 @@ class TelegramActionSinkV2:
                 reaction = accepted.get("reaction")
                 if not isinstance(reaction, str) or not reaction:
                     raise TelegramV2Error("Telegram reaction is invalid")
-                self.client.set_reaction(
-                    self.chat_id,
+                operation = (
+                    "reaction",
                     _telegram_target(
                         accepted.get("target_event_id"),
                         self.chat_id,
@@ -405,7 +412,24 @@ class TelegramActionSinkV2:
             else:
                 raise TelegramV2Error("Telegram action kind is unsupported")
         except Exception as exc:
-            self._fail(request_id, "telegram-api-failure", exc)
+            self._fail(request_id, "invalid-action", exc)
+        if self.backstop.try_acquire(self.chat_id) > 0:
+            self._fail(request_id, "send-backstop")
+        try:
+            if operation[0] == "message":
+                self.client.send_message(
+                    self.chat_id,
+                    operation[1],
+                    reply_to_message_id=operation[2],
+                )
+            else:
+                self.client.set_reaction(
+                    self.chat_id,
+                    operation[1],
+                    operation[2],
+                )
+        except Exception as exc:
+            self._unknown(request_id, "telegram-api-outcome-unknown", exc)
         try:
             self._receipt(request_id, "sent")
         except Exception as exc:

@@ -153,6 +153,29 @@ class MatrixActionCases(unittest.TestCase):
         self.assertEqual(client.actions, [])
         self.assertEqual(receipts[0]["body"]["delivery"], "failed")
 
+    def test_lost_api_response_records_unknown_not_failed(self):
+        class LostResponseClient(FakeMatrixClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                raise OSError("response lost after dispatch")
+
+        client = LostResponseClient([])
+        receipts = []
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(MatrixV2Error):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+        self.assertEqual(
+            receipts[-1]["body"]["detail"],
+            "matrix-api-outcome-unknown",
+        )
+
 
 class MatrixRoomCases(unittest.TestCase):
     def setUp(self):

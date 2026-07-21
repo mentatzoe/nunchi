@@ -21,6 +21,10 @@ replaceable newest pending anchor, a fresh current-tail participant view, and no
 send-time social reclassification. Host cancellation atomically drops active
 and pending wake work while leaving already observed events as context; a later
 live event starts a new opportunity rather than replaying the cancelled anchor.
+Each action is fully validated before its send backstop and remote dispatch.
+Invalid actions and backstop rejection are receipted `failed`; once a remote
+call begins, any lost/error response is conservatively receipted `unknown`,
+never `failed`, and is not automatically retried as if zero effect were proven.
 
 ## Generic JSON-lines host
 
