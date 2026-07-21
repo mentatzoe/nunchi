@@ -1,8 +1,13 @@
 # V1 Data Contract: Classifier Verdict Test Suite
 
-> **Relocated 2026-07-11:** This is the ordinary-path V1 data contract for
-> `evals/verdict_suite/`. It is not a SpecKit planning artifact and does not
-> describe the selected, still-unimplemented V2 attention schema.
+**Status**: Historical V1 data contract; list-only provenance material in the
+V2 candidate.
+
+> **Relocated 2026-07-11; retired from execution 2026-07-21:** This is the
+> historical V1 data contract for the list-only `evals/verdict_suite/` corpus.
+> It is not a SpecKit planning artifact, an executable compatibility path, or
+> the implemented V2 attention schema. Commands and examples below describe
+> the archived V1 runner rather than a callable surface in this candidate.
 
 **Feature**: 003-classifier-test-suite | **Date**: 2026-05-25
 
