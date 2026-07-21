@@ -16,7 +16,7 @@ This README is the operator install/verify guide.
 | Path | Role |
 |---|---|
 | `nunchi_claude_v2.py` | The integration: `user-prompt-submit`, `stop`, `pre-tool`, `post-tool` subcommands plus `print-settings` |
-| `nunchi-claude-v2-hook.sh` | Hook wrapper (fail-open for hearing, fail-closed for the action guard) |
+| `nunchi-claude-v2-hook.sh` | Hook wrapper. Enforces fail direction at the process boundary, not only inside the Python gate: a configured `user-prompt-submit` whose gate cannot run (missing `python3`, missing gate file, import/startup crash, killed by signal, any nonzero exit) blocks the room prompt rather than admitting it; `pre-tool` fails closed (exit 2); `stop`/`post-tool` fail open. Unconfigured (no policy) is inert and fails open everywhere. |
 | `nunchi-claude-v2.env.example` | Trusted operator environment template |
 | `nunchi-claude-v2-tools.example.json` | Deterministic tool classification map (room-action tools + privileged capabilities) |
 | `transport-patch/` | Digest-pinned patches for the upstream Discord plugin and the fail-closed installer (see [transport-patch/README.md](transport-patch/README.md)) |

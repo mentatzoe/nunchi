@@ -3,12 +3,23 @@
 # Installed to ~/.claude/hooks/ by the operator; settings entries pass the
 # hook event as $1 (user-prompt-submit | stop | pre-tool | post-tool).
 #
-# Failure direction is per event and deliberate:
-#   * user-prompt-submit / stop / post-tool fail OPEN — a broken gate must
-#     never deafen or trap the participant; attention errors widen toward
-#     hearing and the missing receipts stay an honest gap.
-#   * pre-tool fails CLOSED — a configured privileged-action guard that
-#     cannot run must deny, not silently wave privileged tools through.
+# Failure direction is per event and deliberate, and is enforced HERE at the
+# process boundary — not only inside the Python gate. "Configured" means
+# NUNCHI_CLAUDE_V2_POLICY is set; when it is not, the integration is inert and
+# every event fails open.
+#
+#   * user-prompt-submit — fails CLOSED when configured. A missing python3,
+#     a missing gate file, an import/startup crash, or any signal/nonzero
+#     exit must BLOCK the prompt, never admit it: the Python fail-closed
+#     safeguards (foreign-room decline, degraded-marker recording, invalid
+#     policy handling) run inside the gate, so a gate that cannot run must not
+#     let a room prompt through. The gate's stdout is captured so a partial
+#     crash cannot leak an admission.
+#   * pre-tool — fails CLOSED when configured: a privileged-action guard that
+#     cannot run must deny (exit 2), not wave privileged tools through.
+#   * stop / post-tool — fail OPEN: a broken turn-completion or observation
+#     hook must not trap or deafen the participant, and neither can admit a
+#     room turn on its own. Missing receipts stay an honest gap.
 set -u
 HOOK_EVENT="${1:-}"
 GATE="${NUNCHI_CLAUDE_V2_GATE:-$HOME/.claude/hooks/nunchi_claude_v2.py}"
@@ -20,22 +31,43 @@ if [ -f "$HOME/.claude/nunchi-claude-v2.env" ]; then
   set +a
 fi
 
-fail_exit() {
-  if [ "$HOOK_EVENT" = "pre-tool" ] && [ -n "${NUNCHI_CLAUDE_V2_POLICY:-}" ]; then
-    echo "nunchi-claude-v2: action guard unavailable; failing closed" >&2
-    exit 2
-  fi
-  exit 0
+configured() { [ -n "${NUNCHI_CLAUDE_V2_POLICY:-}" ]; }
+
+# The gate could not run to a clean decision. Fail per event direction; a
+# configured user-prompt-submit failure emits the same block shape the Python
+# handler uses, with an operator recovery hint, so the room prompt is never
+# admitted by a broken gate.
+gate_unavailable() {
+  reason="$1"
+  case "$HOOK_EVENT" in
+    user-prompt-submit)
+      if configured; then
+        printf '%s' '{"decision": "block", "reason": "nunchi-v2 gate unavailable; failing closed. Fix the gate or unset NUNCHI_CLAUDE_V2_POLICY to bypass."}'
+        echo "nunchi-claude-v2: user-prompt-submit gate unavailable ($reason); blocking fail-closed" >&2
+      fi
+      exit 0 ;;
+    pre-tool)
+      if configured; then
+        echo "nunchi-claude-v2: action guard unavailable ($reason); failing closed" >&2
+        exit 2
+      fi
+      exit 0 ;;
+    *)
+      # stop / post-tool: fail open.
+      exit 0 ;;
+  esac
 }
 
-command -v python3 >/dev/null 2>&1 || fail_exit
-[ -f "$GATE" ] || fail_exit
-python3 "$GATE" "$HOOK_EVENT"
+command -v python3 >/dev/null 2>&1 || gate_unavailable "python3 missing"
+[ -f "$GATE" ] || gate_unavailable "gate file missing"
+
+# Capture stdout so (a) a crash cannot leak partial output as an admission and
+# (b) a nonzero exit can be converted to a fail-closed block. stderr and stdin
+# pass through: the gate still reads the payload and logs diagnostics.
+OUTPUT=$(python3 "$GATE" "$HOOK_EVENT")
 STATUS=$?
 if [ "$STATUS" -ne 0 ]; then
-  if [ "$HOOK_EVENT" = "pre-tool" ]; then
-    exit "$STATUS"
-  fi
-  exit 0
+  gate_unavailable "gate exit $STATUS"
 fi
+printf '%s' "$OUTPUT"
 exit 0
