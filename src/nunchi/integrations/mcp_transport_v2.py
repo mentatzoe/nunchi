@@ -12,6 +12,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any, Callable
 
 from ..mcp_discord.events import V2_NOTIFICATION_METHOD
+from ..net import is_loopback_hostname
 
 
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -76,10 +77,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _url(value: str) -> str:
-    if not isinstance(value, str) or not value or len(value) > 8192:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 8192
+        or any(ord(character) <= 32 or ord(character) == 127 for character in value)
+    ):
         raise MCPTransportV2Error("MCP transport URL is invalid")
     parsed = urllib.parse.urlsplit(value)
-    loopback = parsed.hostname in ("127.0.0.1", "::1", "localhost")
+    loopback = is_loopback_hostname(parsed.hostname)
     try:
         parsed_port = parsed.port
     except ValueError as exc:

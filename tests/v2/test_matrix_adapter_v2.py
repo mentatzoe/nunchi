@@ -267,6 +267,13 @@ class MatrixClientCases(unittest.TestCase):
     def test_https_is_required_unless_operator_explicitly_allows_http(self):
         with self.assertRaises(MatrixV2Error):
             MatrixClientV2("http://matrix.example.test", "secret", room_id=ROOM)
+        with self.assertRaises(MatrixV2Error):
+            MatrixClientV2(
+                "http://matrix.example.test",
+                "secret",
+                room_id=ROOM,
+                allow_insecure_http=True,
+            )
         client = MatrixClientV2(
             "http://127.0.0.1:8008",
             "secret",
@@ -275,6 +282,32 @@ class MatrixClientCases(unittest.TestCase):
             http=lambda *_args: (200, b'{"user_id":"@vigil:example.test"}'),
         )
         self.assertEqual(client.whoami(), SELF)
+
+    def test_malformed_or_ambiguous_homeserver_is_rejected(self):
+        for value, flag in (
+            ("http://127.0.0.1:bad", True),
+            ("http://localhost.example.test:8008", True),
+            ("https://matrix.example.test\n", False),
+            (123, False),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(MatrixV2Error):
+                    MatrixClientV2(
+                        value,
+                        "secret",
+                        room_id=ROOM,
+                        allow_insecure_http=flag,
+                    )
+
+    def test_http_credential_is_bounded_visible_ascii(self):
+        for token in ("secret\nheader", "snowman-☃", "x" * 4097, 123):
+            with self.subTest(token=token):
+                with self.assertRaises(MatrixV2Error):
+                    MatrixClientV2(
+                        "https://matrix.example.test",
+                        token,
+                        room_id=ROOM,
+                    )
 
     def test_duplicate_or_nonfinite_server_json_is_rejected(self):
         for payload in (b'{"user_id":"a","user_id":"b"}', b'{"x":NaN}'):

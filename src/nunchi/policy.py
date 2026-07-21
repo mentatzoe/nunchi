@@ -13,7 +13,6 @@ and must never enter classifier or participant projections.
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import math
 import os
@@ -25,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+from .net import is_bounded_ascii_credential, is_loopback_hostname
 
 
 MAX_POLICY_BYTES = 1024 * 1024
@@ -315,7 +316,9 @@ def _classifier(value: Any, provenance: str) -> ClassifierPolicy:
         raise _fail()
     api_key = None
     if "api_key" in data:
-        api_key = _string(data["api_key"])
+        api_key = data["api_key"]
+        if not is_bounded_ascii_credential(api_key):
+            raise _fail()
     provider = _string(data["provider"])
     if provider != "openai-compatible":
         raise _fail()
@@ -333,9 +336,12 @@ def _classifier(value: Any, provenance: str) -> ClassifierPolicy:
 
 def _classifier_endpoint(value: Any) -> str:
     endpoint = _string(value)
+    if any(ord(character) <= 32 or ord(character) == 127 for character in endpoint):
+        raise _fail()
     try:
         parsed = urllib.parse.urlsplit(endpoint)
         host = parsed.hostname
+        port = parsed.port
     except ValueError as exc:
         raise _fail() from exc
     if (
@@ -344,17 +350,12 @@ def _classifier_endpoint(value: Any) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or port is not None and not 1 <= port <= 65535
     ):
         raise _fail()
     if parsed.scheme == "https":
         return endpoint
-    loopback = host.lower() == "localhost"
-    if not loopback:
-        try:
-            loopback = ipaddress.ip_address(host).is_loopback
-        except ValueError:
-            loopback = False
-    if parsed.scheme != "http" or not loopback:
+    if parsed.scheme != "http" or not is_loopback_hostname(host):
         raise _fail()
     return endpoint
 

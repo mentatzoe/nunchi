@@ -150,6 +150,13 @@ class MCPTransportClientCases(unittest.TestCase):
     def test_plain_http_is_loopback_only_and_credentials_are_strict(self):
         with self.assertRaises(MCPTransportV2Error):
             MCPTransportClientV2("http://transport.example/mcp", AUTH)
+        for endpoint in (
+            "https://transport.example/bad\npath",
+            "https://transport.example:bad/mcp",
+        ):
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(MCPTransportV2Error):
+                    MCPTransportClientV2(endpoint, AUTH)
         with self.assertRaises(MCPTransportV2Error):
             MCPTransportClientV2("http://127.0.0.1:3993/mcp", "short")
 

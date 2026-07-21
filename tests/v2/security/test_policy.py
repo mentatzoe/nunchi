@@ -118,11 +118,19 @@ class ClosedTypedPolicyCases(unittest.TestCase):
             ("openai-compatible", "http://provider.example/v1/chat/completions"),
             ("openai-compatible", "https://user:secret@provider.example/v1"),
             ("openai-compatible", "https://provider.example/v1?token=secret"),
+            ("openai-compatible", "https://provider.example/bad\npath"),
+            ("openai-compatible", "https://provider.example:bad/v1"),
         ):
             with self.subTest(provider=provider, endpoint=endpoint):
                 document = clone_policy()
                 document["classifier"]["provider"] = provider
                 document["classifier"]["endpoint"] = endpoint
+                self.assert_policy_rejects(document)
+
+        for credential in ("secret\nheader", "snowman-☃", "x" * 4097):
+            with self.subTest(credential=credential):
+                document = clone_policy()
+                document["classifier"]["api_key"] = credential
                 self.assert_policy_rejects(document)
 
         document = clone_policy()

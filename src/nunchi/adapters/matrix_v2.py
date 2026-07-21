@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from ..mcp_discord.ratelimit import SendBackstop
-from ..net import open_no_redirect
+from ..net import (
+    is_bounded_ascii_credential,
+    is_loopback_hostname,
+    open_no_redirect,
+)
 from ..receipts import transport_receipt
 from .native_host_v2 import (
     DurableCursorStoreV2,
@@ -116,11 +120,23 @@ def _urllib_call(
 
 
 def _homeserver(value: str, *, allow_insecure_http: bool) -> str:
-    if not isinstance(value, str) or not value:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 8192
+        or any(ord(character) <= 32 or ord(character) == 127 for character in value)
+        or not isinstance(allow_insecure_http, bool)
+    ):
         raise MatrixV2Error("Matrix homeserver is invalid")
-    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise MatrixV2Error("Matrix homeserver is invalid") from exc
     permitted = parsed.scheme == "https" or (
-        allow_insecure_http and parsed.scheme == "http"
+        allow_insecure_http
+        and parsed.scheme == "http"
+        and is_loopback_hostname(parsed.hostname)
     )
     if (
         not permitted
@@ -129,6 +145,7 @@ def _homeserver(value: str, *, allow_insecure_http: bool) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or port is not None and not 1 <= port <= 65535
     ):
         raise MatrixV2Error("Matrix homeserver is invalid")
     return value.rstrip("/")
@@ -145,8 +162,7 @@ class MatrixClientV2:
         http: HttpCall = _urllib_call,
     ) -> None:
         if (
-            not isinstance(token, str)
-            or not token
+            not is_bounded_ascii_credential(token)
             or not isinstance(room_id, str)
             or not room_id
         ):

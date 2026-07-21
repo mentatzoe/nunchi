@@ -237,6 +237,12 @@ class TelegramClientCases(unittest.TestCase):
     def test_https_default_and_strict_server_json(self):
         with self.assertRaises(TelegramV2Error):
             TelegramClientV2("123:secret", api_base="http://api.example.test")
+        with self.assertRaises(TelegramV2Error):
+            TelegramClientV2(
+                "123:secret",
+                api_base="http://api.example.test",
+                allow_insecure_http=True,
+            )
         for payload in (
             b'{"ok":true,"result":{},"result":{}}',
             b'{"ok":true,"result":NaN}',
@@ -248,6 +254,36 @@ class TelegramClientCases(unittest.TestCase):
                 )
                 with self.assertRaises(TelegramV2Error):
                     client.get_me()
+
+    def test_plaintext_override_is_exact_loopback_only(self):
+        client = TelegramClientV2(
+            "123:secret",
+            api_base="http://[::1]:8081",
+            allow_insecure_http=True,
+            http=lambda *_args: (
+                200,
+                b'{"ok":true,"result":{"id":9001,"is_bot":true}}',
+            ),
+        )
+        self.assertEqual(client.get_me()["id"], 9001)
+        for value in (
+            "http://localhost.example.test:8081",
+            "http://127.0.0.1:bad",
+            "https://api.telegram.org\t",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramClientV2(
+                        "123:secret",
+                        api_base=value,
+                        allow_insecure_http=True,
+                    )
+
+    def test_url_credential_is_bounded_visible_ascii(self):
+        for token in ("123:secret\npath", "123:snowman-☃", "x" * 4097, 123):
+            with self.subTest(token=token):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramClientV2(token)
 
     def test_api_errors_never_echo_token(self):
         client = TelegramClientV2(
