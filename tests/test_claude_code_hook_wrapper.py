@@ -509,6 +509,33 @@ class MalformedStdinFailsClosedCases(_FaultInjectionCase):
         result = self._run_raw("pre-tool", "{not-valid-json", env)
         self.assertEqual(result.returncode, 2)
 
+    def test_empty_stdin_blocks_user_prompt_submit(self) -> None:
+        # [pc-vigil finding 1]: empty stdin used to be special-cased to an
+        # empty payload — the same shape as a legitimate operator prompt.
+        # Claude Code never legitimately sends zero bytes for any hook event.
+        env = self._real_gate_env()
+        result = self._run_raw("user-prompt-submit", "", env)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(
+            _cannot_be_interpreted_as_admission(result.stdout),
+            f"empty stdin was admissible: {result.stdout!r}",
+        )
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_whitespace_only_stdin_blocks_user_prompt_submit(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw("user-prompt-submit", "   \n\t  \n", env)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(_cannot_be_interpreted_as_admission(result.stdout))
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_empty_stdin_denies_pre_tool_fail_closed(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw("pre-tool", "", env)
+        self.assertEqual(result.returncode, 2)
+
     def test_unconfigured_malformed_stdin_still_fails_open(self) -> None:
         # Unconfigured (no policy) stays inert regardless: a crash here must
         # not newly surface as a block for a host that never opted in.

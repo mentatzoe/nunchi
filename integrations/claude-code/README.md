@@ -57,6 +57,16 @@ inside the env file), and the supported Claude Code Discord plugin.
    canonical policy shape used by every V2 surface; keep it `0600` and
    owner-only, with the receipt directory `0700`.
 
+   Also add `NUNCHI_CLAUDE_V2_CHANNEL_ID=<the same exact channel snowflake>`
+   to the Discord plugin's OWN environment file
+   (`~/.claude/channels/discord/.env`). The plugin process and the gate's
+   hook process do not share an environment, so this exact value is
+   configured twice; the transport patch reads it to skip two plugin-native
+   behaviors for the bound room only (see
+   [docs/integrations/claude-code-v2.md](../../docs/integrations/claude-code-v2.md#identity-hearing-and-honest-limits)).
+   Leaving it unset keeps the patched plugin byte-for-byte behavior-identical
+   to unpatched for every room.
+
 4. **Register the hooks** — merge the output of
 
    ```sh
@@ -92,15 +102,21 @@ and becomes at most one conversation opportunity: one canonical attention call
 calls; operational errors widen by policy) and, on every waking route, one
 normal Claude turn that replies, reacts, or ends silently. There is no
 send-time social judgment, no prose filter, no admission meta-answer, and no
-per-message response queue: bursts coalesce to one fresh successor. A woken
+per-message response queue: bursts coalesce to one fresh successor, whether
+they arrive while a turn is active or are already fully recorded in the
+sidecar before the first queued prompt's own hook even runs. A woken
 turn's reply or reaction is reserved atomically at `PreToolUse` — bound to the
 exact `tool_use_id`, tool name, and input — and only `PostToolUse` or
 `PostToolUseFailure` reporting that same `tool_use_id` can close it; if `Stop`
 finds an open reservation neither hook closed, the turn's outcome is honestly
-`unknown`, never silently reported as silence. Suppressed and self events stay
-retained for later hearing; restarts drop pending wake work and keep retained
-context. Privileged tool actions in room-caused turns require a deterministic
-guard decision derived from the transport-attested requester.
+`unknown`, never silently reported as silence. Every other native Discord
+tool (`edit_message`, `download_attachment`, and anything the plugin adds
+later) is denied by default for a room-caused turn — only `fetch_messages`
+(read-only, room-scoped) and the reply/react reservation are supported.
+Suppressed and self events stay retained for later hearing; restarts drop
+pending wake work and keep retained context. Privileged tool actions in
+room-caused turns require a deterministic guard decision derived from the
+transport-attested requester.
 
 ## Verification
 
@@ -140,3 +156,12 @@ under `evidence/v2/claude-code/`.
 - **Suppression surface**: an effectively suppressed prompt is blocked with an
   empty reason; the Claude Code host may still render a generic blocked-prompt
   marker in the local session transcript. The room never sees it.
+- **Native permission DM/button approval**: the plugin's own
+  `notifications/claude/channel/permission_request` bridge (Discord DM +
+  button click, answering Claude Code's native interactive tool-permission
+  prompt) is a separate, cross-session surface reached only via DM and is
+  not scoped to the Nunchi-bound room by construction — a `pendingPermissions`
+  request is keyed only by a short code, with no room/turn provenance
+  attached. The transport patch disables the room-TEXT leg of this bridge
+  (`yes/no <code>` typed in the bound room) but the DM/button leg remains
+  outside this integration's control; it is reported, not claimed safe.

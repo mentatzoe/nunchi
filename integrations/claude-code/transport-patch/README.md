@@ -1,18 +1,22 @@
 # Transport patches for the Claude Code Discord plugin
 
-Two operator-applied patches for the **official Claude Code Discord plugin**
+Three operator-applied patches for the **official Claude Code Discord plugin**
 (`claude-plugins-official`, plugin `discord`, version **0.0.4**, file
-`server.ts`). They are transport-layer fact plumbing only: no social logic, no
-filtering beyond the plugin's own `gate()`/`allowFrom` authorization.
+`server.ts`). They are transport-layer fact plumbing and bound-room safety
+only: no social logic, no filtering beyond the plugin's own
+`gate()`/`allowFrom` authorization.
 
 | Patch | What it does |
 |---|---|
 | `0001-allow-bot-messages-allowfrom.patch` | Replaces the unconditional bot-drop in `messageCreate` with a self-only echo guard, so **allowlisted peer bots** flow into the plugin's own access control like any other sender (upstream issues anthropics/claude-plugins-official#1153/#1559; community reference `chenjr0719` branch `fix/allow-bot-messages`, commit `e0474df`). |
 | `0002-native-fact-sidecar.patch` | Appends one JSON line per message to an **owner-only** sidecar at `STATE_DIR/nunchi-v2/native-events.jsonl` with the exact native facts the rendered channel tag omits: author ID, bot flag, mention IDs, `mention_everyone`, guild ID, the reply-to message ID, and the **exact content delivered to Claude** (attachment placeholders and voice transcripts included, not raw `msg.content`). Facts the transport does not synchronously hold (the referenced message's author/content) stay absent. **Self-authored** messages are recorded here as retained context *before* the waking-path drop, so a V2 consumer keeps them as `SELF_RETAINED_NO_WAKE` without a recursive wake. |
+| `0003-nunchi-bound-room-safety.patch` | Reads an optional `NUNCHI_CLAUDE_V2_CHANNEL_ID` (null unless the operator sets it in this plugin's own `.env`). For the exact bound room only, skips the plugin's "yes/no `<code>`" room-text permission-reply intercept (ordinary room text must never satisfy a privileged approval outside Nunchi's own `I-040B` contract) and the pre-attention typing indicator + configured ack reaction (so an effective `SUPPRESS` produces zero room-visible bot activity). Every other room is byte-for-byte unaffected. |
 
 Without `0001` a peer agent can never be heard; without `0002` the hook has no
 exact author identity to bind (the channel tag carries only a display name)
-and every room event is honestly unroutable. Apply both, in order.
+and every room event is honestly unroutable; without `0003` the bound room
+gets the unpatched plugin's pre-attention Discord activity and room-text
+permission bypass. Apply all three, in order.
 
 ### Sidecar confidentiality (patch `0002`)
 
@@ -45,8 +49,8 @@ installer never deletes it for you.
 - **Base**: `server.ts` from installed plugin `discord@claude-plugins-official`
   version `0.0.4`, SHA-256
   `c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135`.
-- **Result** after `0001` + `0002`, SHA-256
-  `0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c`.
+- **Result** after `0001` + `0002` + `0003`, SHA-256
+  `46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775`.
 
 Both digests are pinned inside `apply-transport-patch.sh`; the patches
 themselves were generated with `git format-patch` against that exact base and
@@ -55,7 +59,7 @@ the patched result transpiles cleanly under `bun build`.
 ## Applying — fail closed
 
 ```sh
-./apply-transport-patch.sh <plugin-dir>            # apply both patches
+./apply-transport-patch.sh <plugin-dir>            # apply all three patches
 ./apply-transport-patch.sh <plugin-dir> --verify   # report state, change nothing
 ./apply-transport-patch.sh <plugin-dir> --rollback # restore the pristine base
 ```
@@ -90,3 +94,10 @@ process reloads.
   transport limitations, recorded in the integration's evidence.
 - It does not fetch the replied-to message: only the reference ID that the
   gateway payload already carries is recorded.
+- It does not touch the plugin's DM/button native permission-approval path
+  (`interactionCreate`, answering Claude Code's own interactive
+  tool-permission prompts): that surface is reached only via direct message,
+  keyed by a short code with no room/turn provenance, and is not room-scoped
+  by construction — patching it would require threading Nunchi turn context
+  through the plugin's own permission-request notification payload, which
+  this transport-layer patch does not attempt. Reported, not claimed safe.

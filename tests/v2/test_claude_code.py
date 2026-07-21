@@ -409,7 +409,13 @@ class ReactiveHearingCases(_GateCase):
     def test_native_reply_and_mentions_are_preserved(self) -> None:
         upstream = _FIXTURES["allowlisted_bot_message"]["sidecar"]
         relation = _FIXTURES["native_relations_message"]["sidecar"]
-        append_sidecar(self.environ, upstream, relation)
+        # relation's sidecar row is written only AFTER upstream's own prompt
+        # is fully processed — matching the real temporal order (upstream
+        # arrives and is suppressed before relation exists at all) rather
+        # than a burst where both are already recorded before either prompt
+        # is processed (that scenario is ReactiveHearingCases's own
+        # coalescing case below).
+        append_sidecar(self.environ, upstream)
         transport = CountingTransport(wake_judgment)
         self.module.handle_user_prompt_submit(
             prompt_payload(
@@ -423,6 +429,7 @@ class ReactiveHearingCases(_GateCase):
             self.environ,
             classifier_transport=CountingTransport(suppress_judgment),
         )
+        append_sidecar(self.environ, relation)
         decision = self.module.handle_user_prompt_submit(
             prompt_payload(
                 channel_prompt(
@@ -535,6 +542,9 @@ class ReactiveHearingCases(_GateCase):
         patch_two = (patch_dir / "0002-native-fact-sidecar.patch").read_text(
             encoding="utf-8"
         )
+        patch_three = (patch_dir / "0003-nunchi-bound-room-safety.patch").read_text(
+            encoding="utf-8"
+        )
         script = (patch_dir / "apply-transport-patch.sh").read_text(encoding="utf-8")
         self.assertIn("msg.author.id === client.user?.id", patch_one)
         self.assertIn("-  if (msg.author.bot) return", patch_one)
@@ -551,8 +561,31 @@ class ReactiveHearingCases(_GateCase):
         self.assertIn("recordNativeFacts(msg, msg.content, [], [], false)", patch_two)
         self.assertIn("recordNativeFacts(msg, content, atts, transcripts, true)", patch_two)
         self.assertIn("reply_to_message_id", patch_two)
+        # [pc-vigil findings 3+4]: bound-room safety — the permission-text
+        # intercept and pre-attention typing/ack-reaction are both skipped
+        # for the exact Nunchi-bound room.
+        self.assertIn("NUNCHI_CLAUDE_V2_CHANNEL_ID", patch_three)
+        self.assertIn("nunchiV2Bound", patch_three)
+        self.assertIn(
+            "const permMatch = nunchiV2Bound ? null : PERMISSION_REPLY_RE.exec(msg.content)",
+            patch_three,
+        )
+        self.assertIn("if (!nunchiV2Bound) {", patch_three)
+        self.assertIn("sendTyping", patch_three)
+        self.assertIn("ackReaction", patch_three)
         self.assertRegex(script, r"BASE_SHA256=\"[0-9a-f]{64}\"")
         self.assertRegex(script, r"PATCHED_SHA256=\"[0-9a-f]{64}\"")
+        # Exact pinned digests: catches drift between the patch content and
+        # the script's own pinned target if either changes without the other.
+        self.assertIn(
+            'BASE_SHA256="c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135"',
+            script,
+        )
+        self.assertIn(
+            'PATCHED_SHA256="46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775"',
+            script,
+        )
+        self.assertIn("0003-nunchi-bound-room-safety.patch", script)
         self.assertIn("fail closed", script)
         # Installer refuses to follow a symlinked target/backup and replaces
         # atomically.
@@ -775,6 +808,50 @@ class CoalescingAndRestartCases(_GateCase):
 
         final = self.stop(stop_transport)
         self.assertIsNone(final.output)
+
+    def test_already_delivered_backlog_coalesces_to_one_wake(self) -> None:
+        # [pc-vigil finding 5]: reproduces the exact reported scenario — two
+        # messages are ALREADY recorded in the sidecar (the transport
+        # delivered both) before the host processes the first queued
+        # prompt's own hook invocation. This must not spend one attention
+        # cycle per message; it must coalesce to exactly one wake anchored
+        # at the newest message, the same "never queued as an obligation"
+        # contract a burst arriving while a turn is active already gets.
+        older_ts = self.next_ts()
+        newer_ts = self.next_ts()
+        append_sidecar(
+            self.environ,
+            sidecar_row(message_id="4750000000000000001", content="first", timestamp=older_ts),
+            sidecar_row(message_id="4750000000000000002", content="second", timestamp=newer_ts),
+        )
+        transport = CountingTransport(wake_judgment)
+        first_decision = self.module.handle_user_prompt_submit(
+            prompt_payload(
+                channel_prompt(message_id="4750000000000000001", body="first", ts=older_ts)
+            ),
+            self.environ,
+            classifier_transport=transport,
+        )
+        packet = self.assert_woken(first_decision)
+        self.assertEqual(packet["trigger_event_id"], "discord:message:4750000000000000002")
+        self.assertEqual(transport.call_count, 1)
+
+        # The newer message's OWN later prompt (Claude Code eventually
+        # dispatches it too, since it was genuinely queued) must find itself
+        # already known and be blocked — never a second classifier call.
+        second_decision = self.module.handle_user_prompt_submit(
+            prompt_payload(
+                channel_prompt(message_id="4750000000000000002", body="second", ts=newer_ts)
+            ),
+            self.environ,
+            classifier_transport=transport,
+        )
+        self.assert_blocked(second_decision)
+        self.assertEqual(transport.call_count, 1)
+        self.assertTrue(
+            any("duplicate-retained" in d for d in second_decision.diagnostics),
+            second_decision.diagnostics,
+        )
 
     def test_restart_drops_pending_anchor_but_retains_context(self) -> None:
         rows = {row["case"] for row in _load_jsonl(_EVAL_DIR / "recovery.jsonl")}
@@ -1758,6 +1835,123 @@ class ReceiptSinkStrictAckCases(_GateCase):
         self.assertIn("sink returned", outcome["detail"])
 
 
+class NativeToolCoverageCases(_GateCase):
+    """[pc-vigil finding 2]: every native Discord-plugin tool must be covered,
+    not just reply/react — edit_message and download_attachment have no
+    reservation/receipt shape and must be denied for a room-caused turn;
+    fetch_messages is read-only but still room-scoped."""
+
+    def test_edit_message_targeting_bound_room_is_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000001"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__edit_message",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "message_id": "8600000000000000001",
+                "text": "edited",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "not a supported room-caused action",
+            gate.output["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_edit_message_targeting_foreign_room_is_also_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000002"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__edit_message",
+            tool_input={
+                "chat_id": "9999999999999999999",
+                "message_id": "1",
+                "text": "edited",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_download_attachment_is_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000003"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__download_attachment",
+            tool_input={"chat_id": CHANNEL_ID, "message_id": "8600000000000000003"},
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_fetch_messages_targeting_bound_room_is_allowed(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000004"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__fetch_messages",
+            tool_input={"channel": CHANNEL_ID, "limit": 20},
+        )
+        self.assertIsNone(gate.output)
+
+    def test_fetch_messages_targeting_foreign_room_is_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000005"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__fetch_messages",
+            tool_input={"channel": "9999999999999999999"},
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_unrecognized_discord_tool_is_denied_by_default(self) -> None:
+        # A future tool the plugin adds is caught by the namespace catch-all
+        # even though this integration has never heard of it by name.
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000006"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__pin_message",
+            tool_input={"chat_id": CHANNEL_ID, "message_id": "1"},
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_unrelated_non_discord_tool_is_still_unenforced_operator_work(self) -> None:
+        # The default-deny is scoped to the Discord plugin's own namespace —
+        # a totally unrelated tool remains the pre-existing "unlisted tool,
+        # operator/native authority governs" limitation, unchanged.
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8600000000000000007"))
+        gate = self.pre_tool(tool_name="WebSearch", tool_input={"query": "x"})
+        self.assertIsNone(gate.output)
+
+    def test_edit_message_observed_despite_denial_reports_unknown_not_silence(self) -> None:
+        # Defense in depth: if PreToolUse were ever bypassed (disabled hook,
+        # host bug) and edit_message executed anyway, PostToolUse must not
+        # let Stop read the turn as silent.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8600000000000000008")
+        self.assert_woken(decision)
+        result = self.module.handle_post_tool(
+            {
+                "session_id": "sess-1",
+                "tool_name": "mcp__discord__edit_message",
+                "tool_input": {
+                    "chat_id": CHANNEL_ID,
+                    "message_id": "8600000000000000008",
+                    "text": "edited",
+                },
+                "tool_response": {"ok": True},
+                "tool_use_id": "toolu-bypass-1",
+            },
+            self.environ,
+        )
+        self.assertIsNone(result.output)
+        self.assertIsNone(self.stop(transport).output)
+        records = read_receipts(self.tmp)
+        host = [r for r in records if r["stage"] == "participant-host"]
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
+        self.assertFalse(any(r["stage"] == "transport" for r in records))
+
+
 class ToolsConfigStrictCases(_GateCase):
     def _write_tools(self, document: dict) -> Path:
         path = self.tmp / "tools.json"
@@ -1768,6 +1962,18 @@ class ToolsConfigStrictCases(_GateCase):
         example = _INTEGRATION_DIR / "nunchi-claude-v2-tools.example.json"
         loaded = self.module._load_tools_config(example)
         self.assertEqual(len(loaded["privileged"]), 2)
+
+    def test_boolean_schema_version_is_not_accepted_as_one(self) -> None:
+        # [pc-vigil finding 6]: bool is an int subclass in Python, so a naive
+        # `!= 1` comparison lets JSON `true` (which equals 1) through.
+        path = self._write_tools({"schema_version": True, "privileged": []})
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_float_schema_version_is_not_accepted_as_one(self) -> None:
+        path = self._write_tools({"schema_version": 1.0, "privileged": []})
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
 
     def test_unknown_top_level_key_is_rejected(self) -> None:
         path = self._write_tools({"schema_version": 1, "unexpected": True})
@@ -1894,6 +2100,50 @@ class ToolsConfigStrictCases(_GateCase):
         self.assert_woken(self.deliver(transport, message_id="8500000000000000001"))
         decision = self.pre_tool(tool_name="Bash", tool_input={"command": "ls"})
         self.assertEqual(decision.exit_code, 2)
+
+
+class StateSchemaStrictCases(_GateCase):
+    """[pc-vigil finding 6]: the state file's own schema_version check must
+    be exact-int too, not just the tools-config one."""
+
+    def test_boolean_state_schema_version_is_not_accepted(self) -> None:
+        self.environ = make_environ(self.tmp)
+        config = self.module.ClaudeGateConfig.from_env(self.environ)
+        config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        (config.state_dir / "room.json").write_text(
+            json.dumps({"schema_version": True, "session_id": "sess-poisoned"}),
+            encoding="utf-8",
+        )
+        with self.module.RoomStateStore(config.state_dir) as store:
+            room = store.read_room()
+        # A rejected schema_version resets to fresh state, not the
+        # attacker/corruption-controlled session_id from the bad file.
+        self.assertIsNone(room["session_id"])
+        self.assertEqual(room["schema_version"], self.module._STATE_SCHEMA_VERSION)
+
+    def test_float_state_schema_version_is_not_accepted(self) -> None:
+        self.environ = make_environ(self.tmp)
+        config = self.module.ClaudeGateConfig.from_env(self.environ)
+        config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        (config.state_dir / "room.json").write_text(
+            json.dumps({"schema_version": 1.0, "session_id": "sess-poisoned"}),
+            encoding="utf-8",
+        )
+        with self.module.RoomStateStore(config.state_dir) as store:
+            room = store.read_room()
+        self.assertIsNone(room["session_id"])
+
+    def test_exact_int_state_schema_version_is_accepted(self) -> None:
+        self.environ = make_environ(self.tmp)
+        config = self.module.ClaudeGateConfig.from_env(self.environ)
+        config.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        (config.state_dir / "room.json").write_text(
+            json.dumps({"schema_version": 1, "session_id": "sess-real"}),
+            encoding="utf-8",
+        )
+        with self.module.RoomStateStore(config.state_dir) as store:
+            room = store.read_room()
+        self.assertEqual(room["session_id"], "sess-real")
 
 
 if __name__ == "__main__":

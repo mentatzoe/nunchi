@@ -116,6 +116,19 @@ _STATE_SCHEMA_VERSION = 1
 # identifiers, never conversational rules.
 _DEFAULT_REPLY_TOOL_RE = r"^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__reply$"
 _DEFAULT_REACT_TOOL_RE = r"^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__react$"
+# fetch_messages is a read-only room-history lookup: no reservation is needed,
+# but its target must still be the bound room (its input key is "channel",
+# not "chat_id", unlike every other tool below).
+_DEFAULT_FETCH_MESSAGES_TOOL_RE = r"^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__fetch_messages$"
+# Matches ANY tool the Discord MCP server exposes — reply/react/fetch_messages
+# included. The pinned plugin surface also has edit_message and
+# download_attachment, and may add more later; none of those have a
+# reservation/receipt shape this integration understands (the canonical
+# participant action schema only knows "message" and "reaction"). A
+# room-caused turn therefore denies any Discord-namespaced tool that is not
+# explicitly reply/react/fetch_messages by default, rather than silently
+# treating an unrecognized native effect as operator work.
+_DEFAULT_DISCORD_NAMESPACE_RE = r"^mcp__[A-Za-z0-9_]*discord[A-Za-z0-9_]*__\w+$"
 
 
 class ClaudeGateConfigError(ValueError):
@@ -238,11 +251,22 @@ class ClaudeGateConfig:
 
 
 _TOOLS_CONFIG_TOP_KEYS = frozenset({"schema_version", "room_action_tools", "privileged"})
-_TOOLS_ROOM_ACTION_KEYS = frozenset({"reply_pattern", "react_pattern"})
+_TOOLS_ROOM_ACTION_KEYS = frozenset({"reply_pattern", "react_pattern", "fetch_messages_pattern"})
 _TOOLS_PRIVILEGED_REQUIRED_KEYS = frozenset(
     {"tool_pattern", "capability", "impact", "resource_kind"}
 )
 _TOOLS_PRIVILEGED_OPTIONAL_KEYS = frozenset({"resource_id_input_key", "resource_id_const"})
+
+
+def _is_exact_schema_version(value: Any, expected: int) -> bool:
+    """True iff ``value`` is an exact ``int`` equal to ``expected``.
+
+    Plain ``!=`` comparison is not exact: ``bool`` is an ``int`` subclass in
+    Python, so JSON ``true`` compares equal to ``1``, and JSON ``1.0`` also
+    compares equal to the int ``1``. Both would silently pass a schema-version
+    gate that is supposed to require the literal integer.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value == expected
 
 
 def _require_config_str(value: Any, what: str) -> str:
@@ -281,6 +305,12 @@ def _load_tools_config(path: Path | None) -> dict[str, Any]:
     config: dict[str, Any] = {
         "reply_tool_re": re.compile(_DEFAULT_REPLY_TOOL_RE),
         "react_tool_re": re.compile(_DEFAULT_REACT_TOOL_RE),
+        "fetch_messages_tool_re": re.compile(_DEFAULT_FETCH_MESSAGES_TOOL_RE),
+        # Not operator-configurable: this is the safety-net catch-all that
+        # default-denies any Discord-plugin tool this integration does not
+        # explicitly support, so it cannot be narrowed away by a tools.json
+        # that only intended to customize reply/react/fetch_messages.
+        "discord_namespace_re": re.compile(_DEFAULT_DISCORD_NAMESPACE_RE),
         "privileged": [],
     }
     if path is None:
@@ -296,7 +326,7 @@ def _load_tools_config(path: Path | None) -> dict[str, Any]:
         raise ClaudeGateConfigError(
             f"tools configuration has unknown keys: {sorted(unknown_top)}"
         )
-    if raw.get("schema_version") != 1:
+    if not _is_exact_schema_version(raw.get("schema_version"), 1):
         raise ClaudeGateConfigError("tools configuration schema_version must be exactly 1")
     if "room_action_tools" in raw:
         room = raw["room_action_tools"]
@@ -314,6 +344,10 @@ def _load_tools_config(path: Path | None) -> dict[str, Any]:
         if "react_pattern" in room:
             config["react_tool_re"] = _compile_config_pattern(
                 room["react_pattern"], "room_action_tools.react_pattern"
+            )
+        if "fetch_messages_pattern" in room:
+            config["fetch_messages_tool_re"] = _compile_config_pattern(
+                room["fetch_messages_pattern"], "room_action_tools.fetch_messages_pattern"
             )
     privileged = raw.get("privileged", [])
     if not isinstance(privileged, list):
@@ -610,6 +644,50 @@ def read_self_sidecar_events(sidecar_path: Path, self_user_id: str) -> list[dict
     return records
 
 
+def read_channel_backlog(
+    sidecar_path: Path, channel_id: str, self_user_id: str
+) -> list[dict[str, Any]]:
+    """Return every validated, non-self sidecar record for the bound channel.
+
+    Oldest-first, since the sidecar is an append-only log. Used to coalesce a
+    fresh opportunity toward the newest already-delivered message instead of
+    anchoring on whichever single message this exact hook invocation named:
+    if a burst of authorized messages is already fully recorded in the
+    sidecar before this invocation's own hook even runs (Claude Code
+    processes queued prompts one at a time), the older ones must not each
+    spend their own attention cycle — the same "one active, one newest
+    pending, never one obligation per message" contract the scheduler
+    already gives a burst that arrives WHILE a turn is active.
+    """
+    try:
+        fd = _open_owner_only_regular(sidecar_path)
+    except ClaudeGateStateError:
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if size > _SIDECAR_SCAN_MAX_BYTES:
+                handle.seek(size - _SIDECAR_SCAN_MAX_BYTES)
+                handle.readline()
+            for line in handle:
+                try:
+                    row = _strict_json_loads(line)
+                except ValueError:
+                    continue
+                validated = validate_sidecar_record(row)
+                if validated is None:
+                    continue
+                if validated.get("channel_id") != channel_id:
+                    continue
+                if (validated.get("author") or {}).get("id") == self_user_id:
+                    continue
+                records.append(validated)
+    except OSError:
+        return records
+    return records
+
+
 def _message_event_from_sidecar(sidecar: dict[str, Any]) -> MessageEvent:
     """Build one I-050A input event from a validated native-fact record.
 
@@ -762,7 +840,9 @@ class RoomStateStore:
             data = _strict_json_loads(self.room_path.read_bytes())
         except (OSError, ValueError):
             data = {}
-        if not isinstance(data, dict) or data.get("schema_version") != _STATE_SCHEMA_VERSION:
+        if not isinstance(data, dict) or not _is_exact_schema_version(
+            data.get("schema_version"), _STATE_SCHEMA_VERSION
+        ):
             data = {}
         data.setdefault("schema_version", _STATE_SCHEMA_VERSION)
         data.setdefault("session_id", None)
@@ -1250,6 +1330,17 @@ class ClaudeRoomV2:
         reservation = turn.get("reservation")
 
         def replay_observed_native_turn(_turn: Any) -> dict[str, Any] | None:
+            if any(row.get("unattested_effect") for row in observed):
+                # A native Discord effect/read tool this integration does not
+                # support (edit_message, download_attachment, or anything
+                # PreToolUse should have denied) executed anyway this turn.
+                # Whatever happened is not something Nunchi sanctioned or can
+                # attest as an action — but it is definitely not silence.
+                raise ParticipantHostError(
+                    "an unsupported native Discord effect executed this turn "
+                    "without a sanctioned reservation; outcome is unknown, "
+                    "not silence"
+                )
             if isinstance(reservation, dict):
                 # This turn reserved one reply-or-reaction attempt at
                 # PreToolUse time. Silence is only ever a legitimate outcome
@@ -1481,6 +1572,53 @@ def handle_user_prompt_submit(
         )
 
 
+def _coalesce_backlog_anchor(
+    binding: ClaudeRoomV2,
+    store: RoomStateStore,
+    tag: dict[str, str],
+    current_native: dict[str, Any],
+    session_id: str,
+) -> str:
+    """Ingest any other already-delivered channel backlog; return the newest
+    anchor among the current message and that backlog.
+
+    Claude Code processes one queued prompt at a time, so a burst that fully
+    lands in the sidecar before this invocation's own hook even runs would
+    otherwise be seen as N separate messages, each getting its own hook
+    invocation and — without this — its own attention cycle. Ingesting the
+    rest of the backlog here means each OLDER message's own later invocation
+    finds it already ingested (``DUPLICATE_RETAINED``) and is blocked without
+    spending a second attention cycle, exactly like a burst that arrives
+    while a turn is already active.
+    """
+    anchor = current_native["event"]["id"]
+    newest_ts = str(current_native["event"].get("timestamp") or "")
+    backlog = read_channel_backlog(
+        binding.config.sidecar_path, binding.config.channel_id, binding.config.self_user_id
+    )
+    for record in backlog:
+        if record.get("message_id") == tag.get("message_id"):
+            continue  # this invocation's own message; already ingested above
+        native = binding.source.native_input(_message_event_from_sidecar(record))
+        if native.get("disposition") != "candidate-event":
+            continue
+        store.append_event_row(
+            {
+                "kind": "native",
+                "native": native,
+                "session_id": session_id,
+                "received_at": time.time(),
+            }
+        )
+        if binding.observation.ingest(native) != OBSERVED:
+            continue
+        ts = str(native["event"].get("timestamp") or "")
+        if ts >= newest_ts:
+            newest_ts = ts
+            anchor = native["event"]["id"]
+    return anchor
+
+
 def _gate_channel_event(
     binding: ClaudeRoomV2,
     store: RoomStateStore,
@@ -1559,7 +1697,7 @@ def _gate_channel_event(
         return _block_prompt(f"unroutable at observation: {disposition}")
 
     scheduler, active = binding._scheduler(room)
-    anchor = native["event"]["id"]
+    anchor = _coalesce_backlog_anchor(binding, store, tag, native, session_id)
     opportunity = scheduler.observe(
         participant_id=binding.config.participant_id,
         platform="discord",
@@ -1810,13 +1948,19 @@ def handle_pre_tool(
 ) -> HookDecision:
     """Mechanical send-safety and privileged-action denial before execution.
 
-    Three enforcement duties, all before the tool runs:
+    Four enforcement duties, all before the tool runs:
 
     * Room-action send tools (reply/react) must target the bound room. A
       cross-room target is denied here — ``PostToolUse`` is too late.
     * An in-room reply/react reserves this turn's one atomic room-action slot
       (see :func:`_reserve_room_action`), so ``Stop`` can tell a genuinely
       silent turn from one whose outcome is honestly unknown.
+    * ``fetch_messages`` (read-only room history) is allowed once its target
+      matches the bound room; every OTHER tool the Discord plugin exposes
+      (``edit_message``, ``download_attachment``, and anything the plugin
+      adds later) has no reservation/receipt shape this integration
+      understands and is denied by default for a room-caused turn, rather
+      than silently treated as operator work.
     * Room-caused privileged execution is **not supported** through this
       advisory pre-tool seam: the hook cannot perform the ``I-040B``
       execute-time policy/digest recheck or one-use consumption around the
@@ -1866,12 +2010,37 @@ def handle_pre_tool(
                 store.write_room(room)
                 return _allow()
 
+            if tools["fetch_messages_tool_re"].fullmatch(tool_name) is not None:
+                # Read-only room-history lookup: no reservation (nothing is
+                # sent), but its target must still be the bound room. This
+                # tool's own input key is "channel", not "chat_id".
+                target = str(tool_input.get("channel") or "")
+                if target != config.channel_id:
+                    return _deny_tool(
+                        "nunchi-v2 send safety: this room-caused turn may act only in "
+                        f"the bound room {config.channel_id}; tool targets {target or '<none>'}."
+                    )
+                return _allow()
+
+            if tools["discord_namespace_re"].fullmatch(tool_name) is not None:
+                # A Discord-plugin tool this integration does not explicitly
+                # support (edit_message, download_attachment, or anything the
+                # plugin adds later): it has no reservation/receipt shape, so
+                # it is denied by default for a room-caused turn rather than
+                # silently treated as operator work.
+                return _deny_tool(
+                    f"nunchi-v2: {tool_name} is not a supported room-caused action "
+                    "(only reply, react, and fetch_messages are); denied."
+                )
+
             entry = next(
                 (item for item in tools["privileged"] if item["tool_re"].fullmatch(tool_name)),
                 None,
             )
             if entry is None:
-                # Unmapped tool: operator/native authority governs.
+                # Unmapped, non-Discord tool: operator/native authority
+                # governs (the "Guard coverage" limitation already reported —
+                # unlisted tools outside this plugin's own namespace).
                 return _allow()
 
             # Room-caused privileged execution: unsupported → deny fail-closed.
@@ -1903,25 +2072,38 @@ def handle_pre_tool(
 
 def _room_action_context(
     payload: dict[str, Any], environ: dict[str, str]
-) -> tuple[ClaudeGateConfig, dict[str, Any], bool, bool, str, dict[str, Any], str] | None:
+) -> tuple[ClaudeGateConfig, dict[str, Any], bool, bool, bool, str, dict[str, Any], str] | None:
     """Shared PostToolUse / PostToolUseFailure setup, or ``None`` to allow inert.
 
-    Returns ``(config, tools, is_reply, is_react, tool_name, tool_input,
-    tool_use_id)`` when this event names a room-action tool; ``None`` when the
-    caller should return a bare allow (unconfigured, or an unmapped tool).
+    Returns ``(config, tools, is_reply, is_react, is_other_discord, tool_name,
+    tool_input, tool_use_id)`` when this event names a Discord-plugin tool
+    this integration observes; ``None`` when the caller should return a bare
+    allow (unconfigured, or a tool outside this plugin's namespace).
+    ``is_other_discord`` is true for a native effect/read tool that is not
+    reply/react/fetch_messages (``edit_message``, ``download_attachment``, or
+    anything the plugin adds later) — PreToolUse denies these unconditionally
+    for a room-caused turn, so observing one execute anyway is itself the
+    anomaly the caller records.
     """
     config = ClaudeGateConfig.from_env(environ)
     tools = _load_tools_config(config.tools_config_path)
     tool_name = str(payload.get("tool_name") or "")
     is_reply = tools["reply_tool_re"].fullmatch(tool_name) is not None
     is_react = tools["react_tool_re"].fullmatch(tool_name) is not None
-    if not (is_reply or is_react):
+    is_fetch = tools["fetch_messages_tool_re"].fullmatch(tool_name) is not None
+    is_other_discord = (
+        not is_reply
+        and not is_react
+        and not is_fetch
+        and tools["discord_namespace_re"].fullmatch(tool_name) is not None
+    )
+    if not (is_reply or is_react or is_other_discord):
         return None
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         tool_input = {}
     tool_use_id = str(payload.get("tool_use_id") or "")
-    return config, tools, is_reply, is_react, tool_name, tool_input, tool_use_id
+    return config, tools, is_reply, is_react, is_other_discord, tool_name, tool_input, tool_use_id
 
 
 def handle_post_tool(
@@ -1934,13 +2116,35 @@ def handle_post_tool(
         context = _room_action_context(payload, environ)
         if context is None:
             return _allow()
-        config, _tools, is_reply, _is_react, tool_name, tool_input, tool_use_id = context
+        (
+            config,
+            _tools,
+            is_reply,
+            _is_react,
+            is_other_discord,
+            tool_name,
+            tool_input,
+            tool_use_id,
+        ) = context
         with RoomStateStore(config.state_dir) as store:
             room = store.read_room()
             turn = room.get("turn")
             session_id = str(payload.get("session_id") or "")
             if not isinstance(turn, dict) or turn.get("session_id") != session_id:
                 return _allow()
+            if is_other_discord:
+                # PreToolUse denies this tool unconditionally for a
+                # room-caused turn; observing it execute anyway (a disabled
+                # or bypassed guard, a host bug) means the turn's true
+                # outcome can no longer be trusted as silence.
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
+                return _allow(f"post-tool: unsupported native effect {tool_name} observed")
             if str(tool_input.get("chat_id") or "") != config.channel_id:
                 return _allow()
             matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
@@ -1998,13 +2202,33 @@ def handle_post_tool_failure(
         context = _room_action_context(payload, environ)
         if context is None:
             return _allow()
-        config, _tools, is_reply, _is_react, tool_name, tool_input, tool_use_id = context
+        (
+            config,
+            _tools,
+            is_reply,
+            _is_react,
+            is_other_discord,
+            tool_name,
+            tool_input,
+            tool_use_id,
+        ) = context
         with RoomStateStore(config.state_dir) as store:
             room = store.read_room()
             turn = room.get("turn")
             session_id = str(payload.get("session_id") or "")
             if not isinstance(turn, dict) or turn.get("session_id") != session_id:
                 return _allow()
+            if is_other_discord:
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
+                return _allow(
+                    f"post-tool-failure: unsupported native effect {tool_name} observed"
+                )
             if str(tool_input.get("chat_id") or "") != config.channel_id:
                 return _allow()
             matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
@@ -2112,22 +2336,27 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
     # Deliberately uncaught: a stdin read failure, a strict-parse failure
-    # (malformed JSON, a duplicate key, a non-finite constant), or a
-    # well-formed-but-wrong-shaped payload (not a JSON object) all crash this
-    # process rather than silently synthesizing an empty payload. An empty
-    # payload reads to every handler below as "no room event, no session" —
-    # exactly the shape of a legitimate operator prompt or an inert
-    # unconfigured call — so quietly manufacturing one here would let a
-    # corrupted hook invocation bypass both the user-prompt-submit gate and
-    # the pre-tool privileged-action guard. The wrapper (not this process)
-    # is the fail-closed/fail-open boundary for a gate that cannot run: it
-    # already converts any nonzero exit into the correct per-event outcome
-    # (block for user-prompt-submit, deny for pre-tool, open for
+    # (malformed JSON, a duplicate key, a non-finite constant), empty or
+    # whitespace-only stdin, or a well-formed-but-wrong-shaped payload (not a
+    # JSON object) all crash this process rather than silently synthesizing
+    # an empty payload. An empty payload reads to every handler below as "no
+    # room event, no session" — exactly the shape of a legitimate operator
+    # prompt or an inert unconfigured call — so quietly manufacturing one
+    # here would let a corrupted hook invocation bypass both the
+    # user-prompt-submit gate and the pre-tool privileged-action guard.
+    # Claude Code always sends a real payload for every one of these hook
+    # events; there is no legitimate case where stdin is genuinely empty, so
+    # empty/whitespace input gets no special-cased pass — ``json.loads``
+    # already rejects it as invalid JSON, the same as any other malformed
+    # content. The wrapper (not this process) is the fail-closed/fail-open
+    # boundary for a gate that cannot run: it already converts any nonzero
+    # exit into the correct per-event outcome (block for
+    # user-prompt-submit, deny for pre-tool, open for
     # stop/post-tool/post-tool-failure), and it already passes stderr
     # through, so the traceback below reaches the same diagnostic surface
     # every other gate crash does.
     raw_stdin = sys.stdin.buffer.read()
-    payload = _strict_json_loads(raw_stdin) if raw_stdin.strip() else {}
+    payload = _strict_json_loads(raw_stdin)
     if not isinstance(payload, dict):
         raise ValueError("hook stdin payload must be a JSON object")
     environ = dict(os.environ)

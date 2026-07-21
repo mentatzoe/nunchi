@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nunchi Operators <nunchi@users.noreply.github.com>
+Date: Tue, 21 Jul 2026 11:40:00 +0100
+Subject: [PATCH 3/3] discord: skip native permission-reply and
+ typing/ack-reaction for the Nunchi-bound room
+
+Adds an optional NUNCHI_CLAUDE_V2_CHANNEL_ID environment read (null unless
+the operator sets it; every other room's behavior stays byte-identical to
+the unpatched plugin). For the exact bound room:
+
+* the "yes/no <code>" room-text intercept that answers a pending native
+  permission request is skipped, so ordinary room text can never satisfy a
+  privileged approval outside Nunchi's own I-040B authorization contract;
+* the pre-attention typing indicator and configured ack reaction are
+  skipped, so an effective SUPPRESS produces zero room-visible bot
+  activity — both previously fired before Nunchi's channel notification
+  was even emitted, regardless of the eventual attention decision.
+
+The button-click permission-approval path (interactionCreate) is a
+separate, cross-session surface reached only via DM and is not room-scoped
+by construction; it is not addressed by this patch and remains a reported,
+not claimed-safe, limitation (see integrations/claude-code/README.md).
+---
+ server.ts | 36 +++++++++++++++++++++++++++---------
+ 1 file changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/server.ts b/server.ts
+index 9d879bd..80ed481 100644
+--- a/server.ts
++++ b/server.ts
+@@ -147,6 +147,14 @@ const STT_ENTRY = process.env.DISCORD_STT_ENTRY || join(homedir(), '.local', 'sh
+ const STT_MODEL = process.env.DISCORD_STT_MODEL || 'base.en'
+ const STT_TOOL = process.env.DISCORD_STT_TOOL || 'transcribe'
+ 
++// Nunchi V2 bound-room safety (transport-owned). Set by the operator to the
++// exact same snowflake as NUNCHI_CLAUDE_V2_CHANNEL_ID in the Python gate's
++// own environment file — this process and the gate's hook process do not
++// share an environment, so the operator configures the one value twice.
++// null (unset) means Nunchi V2 is not installed/configured for this host and
++// every behavior below stays byte-identical to the unpatched plugin.
++const NUNCHI_V2_CHANNEL_ID = process.env.NUNCHI_CLAUDE_V2_CHANNEL_ID || null
++
+ if (!TOKEN) {
+   process.stderr.write(
+     `discord channel: DISCORD_BOT_TOKEN required\n` +
+@@ -1027,12 +1035,20 @@ async function handleInbound(msg: Message): Promise<void> {
+   }
+ 
+   const chat_id = msg.channelId
++  // The Nunchi-bound room owns its own attention/authorization contract:
++  // ordinary room text must never satisfy a privileged approval outside
++  // I-040B, and an effective SUPPRESS must produce zero room-visible bot
++  // activity. Both plugin-native behaviors below are transport-owned
++  // conveniences that run BEFORE Nunchi ever sees this message, so they are
++  // skipped entirely for the bound room; every other room keeps the
++  // unpatched behavior unchanged.
++  const nunchiV2Bound = NUNCHI_V2_CHANNEL_ID !== null && chat_id === NUNCHI_V2_CHANNEL_ID
+ 
+   // Permission-reply intercept: if this looks like "yes xxxxx" for a
+   // pending permission request, emit the structured event instead of
+   // relaying as chat. The sender is already gate()-approved at this point
+   // (non-allowlisted senders were dropped above), so we trust the reply.
+-  const permMatch = PERMISSION_REPLY_RE.exec(msg.content)
++  const permMatch = nunchiV2Bound ? null : PERMISSION_REPLY_RE.exec(msg.content)
+   if (permMatch) {
+     void mcp.notification({
+       method: 'notifications/claude/channel/permission',
+@@ -1046,15 +1062,17 @@ async function handleInbound(msg: Message): Promise<void> {
+     return
+   }
+ 
+-  // Typing indicator — signals "processing" until we reply (or ~10s elapses).
+-  if ('sendTyping' in msg.channel) {
+-    void msg.channel.sendTyping().catch(() => {})
+-  }
++  if (!nunchiV2Bound) {
++    // Typing indicator — signals "processing" until we reply (or ~10s elapses).
++    if ('sendTyping' in msg.channel) {
++      void msg.channel.sendTyping().catch(() => {})
++    }
+ 
+-  // Ack reaction — lets the user know we're processing. Fire-and-forget.
+-  const access = result.access
+-  if (access.ackReaction) {
+-    void msg.react(access.ackReaction).catch(() => {})
++    // Ack reaction — lets the user know we're processing. Fire-and-forget.
++    const access = result.access
++    if (access.ackReaction) {
++      void msg.react(access.ackReaction).catch(() => {})
++    }
+   }
+ 
+   // Attachments are listed (name/type/size) but not downloaded — the model
+-- 
+2.43.0

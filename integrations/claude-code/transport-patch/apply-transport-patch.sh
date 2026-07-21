@@ -3,7 +3,7 @@
 # Discord transport patches.
 #
 # Usage:
-#   apply-transport-patch.sh <plugin-dir>            apply both patches
+#   apply-transport-patch.sh <plugin-dir>            apply all three patches
 #   apply-transport-patch.sh <plugin-dir> --verify   report state, change nothing
 #   apply-transport-patch.sh <plugin-dir> --rollback restore the pristine base
 #
@@ -26,7 +26,7 @@ MODE="${2:-apply}"
 PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 BASE_SHA256="c3c79c6519e23470fcc5f07e38415e50b4f054e42e670e89bd037fa64659e135"
-PATCHED_SHA256="0d1ffaa0c51e60b09646e9e78ff92820f375695c0dbeac59f5393e6367b43b4c"
+PATCHED_SHA256="46420d46dcff14bf486a7291e6790e91c4bb09a887c1fe29ada9f3e5f9106775"
 BASE_VERSION="0.0.4"
 
 [ -d "$PLUGIN_DIR" ] || { echo "fail closed: $PLUGIN_DIR is not a directory" >&2; exit 2; }
@@ -107,7 +107,9 @@ case "$MODE" in
       && git apply --check "$PATCH_DIR/0001-allow-bot-messages-allowfrom.patch" \
       && git apply "$PATCH_DIR/0001-allow-bot-messages-allowfrom.patch" \
       && git apply --check "$PATCH_DIR/0002-native-fact-sidecar.patch" \
-      && git apply "$PATCH_DIR/0002-native-fact-sidecar.patch" ) \
+      && git apply "$PATCH_DIR/0002-native-fact-sidecar.patch" \
+      && git apply --check "$PATCH_DIR/0003-nunchi-bound-room-safety.patch" \
+      && git apply "$PATCH_DIR/0003-nunchi-bound-room-safety.patch" ) \
       || { echo "fail closed: patches did not apply exactly" >&2; exit 2; }
     RESULT="$(sha "$WORK/server.ts")"
     [ "$RESULT" = "$PATCHED_SHA256" ] || { echo "fail closed: patched result digest mismatch ($RESULT)" >&2; exit 2; }
