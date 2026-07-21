@@ -178,9 +178,18 @@ def shape_message(msg: dict) -> dict:
 
 
 def _snowflake(value: object) -> str | None:
-    """Coerce to a snowflake string; None if invalid (guards URL paths)."""
-    text = str(value).strip() if value is not None else ""
-    return text if text.isdigit() else None
+    """Return an exact JSON snowflake string; never coerce another type."""
+    return value if isinstance(value, str) and value.isdigit() else None
+
+
+def _closed_arguments(
+    arguments: dict,
+    *,
+    required: frozenset[str],
+    optional: frozenset[str] = frozenset(),
+) -> bool:
+    keys = set(arguments)
+    return required.issubset(keys) and keys.issubset(required | optional)
 
 
 class ToolExecutor:
@@ -232,6 +241,15 @@ class ToolExecutor:
             return ({"error": "Discord transport operation failed"}, False)
 
     def _send(self, arguments: dict, *, reply: bool) -> tuple[dict, bool]:
+        required = {"channel_id", "content"}
+        if reply:
+            required.add("message_id")
+        if not _closed_arguments(
+            arguments,
+            required=frozenset(required),
+            optional=frozenset({"mention_user_ids"}),
+        ):
+            return ({"error": "message arguments do not match the closed tool contract"}, False)
         channel_id = _snowflake(arguments.get("channel_id"))
         if channel_id is None:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
@@ -288,6 +306,12 @@ class ToolExecutor:
         return ({"message": shape_message(created)}, True)
 
     def _history(self, arguments: dict) -> tuple[dict, bool]:
+        if not _closed_arguments(
+            arguments,
+            required=frozenset({"channel_id"}),
+            optional=frozenset({"limit", "before"}),
+        ):
+            return ({"error": "history arguments do not match the closed tool contract"}, False)
         channel_id = _snowflake(arguments.get("channel_id"))
         if channel_id is None:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
@@ -296,10 +320,9 @@ class ToolExecutor:
         limit_raw = arguments.get("limit", 50)
         if isinstance(limit_raw, bool):
             return ({"error": "limit must be an integer between 1 and 100"}, False)
-        try:
-            limit = int(limit_raw)
-        except (TypeError, ValueError):
+        if not isinstance(limit_raw, int):
             return ({"error": "limit must be an integer between 1 and 100"}, False)
+        limit = limit_raw
         if not 1 <= limit <= 100:
             return ({"error": "limit must be an integer between 1 and 100"}, False)
         before: str | None = None
@@ -311,6 +334,11 @@ class ToolExecutor:
         return ({"messages": [shape_message(m) for m in messages]}, True)
 
     def _reaction(self, arguments: dict) -> tuple[dict, bool]:
+        if not _closed_arguments(
+            arguments,
+            required=frozenset({"channel_id", "message_id", "reaction"}),
+        ):
+            return ({"error": "reaction arguments do not match the closed tool contract"}, False)
         channel_id = _snowflake(arguments.get("channel_id"))
         message_id = _snowflake(arguments.get("message_id"))
         reaction = arguments.get("reaction")

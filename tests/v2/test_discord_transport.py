@@ -477,6 +477,54 @@ class V2ServerBoundaryCases(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(rest.reactions, [("42", "111", "👀")])
 
+    def test_v2_tool_executor_enforces_closed_typed_schemas_without_coercion(self):
+        class HistoryRest(FakeRest):
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.history_call = (channel_id, limit, before)
+                return []
+
+        rest = HistoryRest()
+        cases = (
+            (
+                "send_message",
+                {"channel_id": 42, "content": "integer identity"},
+            ),
+            (
+                "send_message",
+                {"channel_id": "42", "content": "extra", "message_id": "111"},
+            ),
+            (
+                "read_history",
+                {"channel_id": "42", "limit": 1.5},
+            ),
+            (
+                "read_history",
+                {"channel_id": "42", "limit": "1"},
+            ),
+            (
+                "add_reaction",
+                {
+                    "channel_id": "42",
+                    "message_id": "111",
+                    "reaction": "👀",
+                    "unexpected": True,
+                },
+            ),
+        )
+        for name, arguments in cases:
+            with self.subTest(name=name, arguments=arguments):
+                executor = ToolExecutor(
+                    rest,
+                    SendBackstop(5, 10, clock=lambda: 0),
+                    allowed_channel_ids=frozenset({"42"}),
+                )
+                payload, ok = executor.call(name, arguments)
+                self.assertFalse(ok)
+                self.assertIn("error", payload)
+        self.assertEqual(rest.messages, [])
+        self.assertEqual(rest.reactions, [])
+        self.assertFalse(hasattr(rest, "history_call"))
+
 
 class BearerAuthCases(unittest.IsolatedAsyncioTestCase):
     async def _request(self, headers):
