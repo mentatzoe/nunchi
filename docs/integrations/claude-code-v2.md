@@ -51,15 +51,26 @@ sequenceDiagram
 - **PreToolUse** — deterministic `PrivilegedActionGuard` authorization for
   operator-configured privileged capabilities during room-caused turns. The
   requester is derived from the transport-attested origin event, never from
-  model output. Room-participation tools (reply, react) are never re-gated.
-  The guard fails closed on internal errors while configured.
+  model output. Room-participation tools (reply, react) are never re-gated on
+  content — but an in-room reply/react reserves this turn's one atomic
+  room-action slot, bound to the exact `tool_use_id`, tool name, and input
+  digest; a second attempt in the same turn is denied. The guard fails closed
+  on internal errors while configured.
 - **PostToolUse** — records the exact executed room actions so the transport
-  stage attests what actually happened, including failed deliveries.
+  stage attests what actually happened, including failed deliveries, and
+  resolves the matching reservation by its exact `tool_use_id`.
+- **PostToolUseFailure** — resolves the matching reservation when the reserved
+  tool call itself failed, recording the attempt as a failed delivery rather
+  than leaving it unattested.
 
 Every stage record is immutable, request-correlated, and singly attested:
 observation by the observation provider, attention by the engine, the
 participant-host and observed-transport stages by this integration for its own
 native turn only. The wrapper never rewrites or fills another owner's stage.
+If a turn's reservation is never closed by `PostToolUse` or
+`PostToolUseFailure` — a crash, a disabled hook, a host bug — `Stop` reports
+the turn's outcome as honestly `unknown` rather than reinterpreting the
+missing report as silence.
 
 ## Identity, hearing, and honest limits
 
@@ -80,7 +91,7 @@ Installation is an explicit operator step documented in
 [the integration README](../../integrations/claude-code/README.md): apply the
 digest-pinned transport patches with the fail-closed
 `apply-transport-patch.sh`, copy `nunchi_claude_v2.py` and the hook wrapper,
-register the four hook events, and create the owner-only operator policy and
+register the five hook events, and create the owner-only operator policy and
 environment files. All trusted configuration lives in the operator policy JSON
 (budgets, margin, bypass, error action, grants, receipt sink) and the
 `NUNCHI_CLAUDE_V2_*` environment file; nothing is configurable from room

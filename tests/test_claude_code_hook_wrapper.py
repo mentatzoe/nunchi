@@ -413,6 +413,119 @@ class PreToolAndStopDirectionCases(_FaultInjectionCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
+    def test_post_tool_failure_configured_broken_gate_still_fails_open(self) -> None:
+        broken = self.tmp / "broken_gate.py"
+        broken.write_text("this is not python (\n", encoding="utf-8")
+        env = self._configured_env(gate_path=broken)
+        result = _run_wrapper(
+            "post-tool-failure",
+            {
+                "session_id": "s",
+                "tool_name": "x",
+                "tool_input": {},
+                "error": "boom",
+                "tool_use_id": "toolu-1",
+            },
+            env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+
+class MalformedStdinFailsClosedCases(_FaultInjectionCase):
+    """A configured gate that cannot even read/parse its OWN stdin must still
+    block/deny — never silently treat the unreadable input as an empty,
+    harmless (operator-prompt-shaped) payload.
+
+    Unlike the fault-injection cases above (a broken/missing gate FILE), this
+    exercises the real gate against a corrupted hook INVOCATION: the process
+    starts and runs, but the JSON Claude Code piped to its stdin cannot be
+    read as a well-formed object. ``main()`` deliberately lets this crash
+    uncaught rather than synthesizing ``payload = {}`` — an empty payload
+    reads to every handler as "no room event, no session", which is exactly
+    the shape of a legitimate operator prompt or an inert unconfigured call.
+    """
+
+    def _real_gate_env(self) -> dict:
+        env = sandbox_env()
+        home = Path(env["HOME"])
+        (home / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+        real_gate = (
+            _REPO_ROOT / "integrations" / "claude-code" / "nunchi_claude_v2.py"
+        )
+        (home / ".claude" / "hooks" / "nunchi_claude_v2.py").write_text(
+            real_gate.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        (home / ".claude" / "nunchi-claude-v2.env").write_text(
+            "NUNCHI_CLAUDE_V2_POLICY=/tmp/does-not-exist-for-this-test.json\n"
+            f"NUNCHI_CLAUDE_V2_STATE_DIR={home / 'state'}\n",
+            encoding="utf-8",
+        )
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+        return env
+
+    def _run_raw(self, hook_event: str, raw_stdin: str, env: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["/bin/sh", str(_WRAPPER), hook_event],
+            input=raw_stdin,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_malformed_json_stdin_blocks_user_prompt_submit(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw("user-prompt-submit", "{not-valid-json", env)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(
+            _cannot_be_interpreted_as_admission(result.stdout),
+            f"malformed stdin was admissible: {result.stdout!r}",
+        )
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_duplicate_key_stdin_blocks_user_prompt_submit(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw(
+            "user-prompt-submit",
+            '{"session_id": "s", "prompt": "hi", "session_id": "s"}',
+            env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(_cannot_be_interpreted_as_admission(result.stdout))
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_non_object_stdin_blocks_user_prompt_submit(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw("user-prompt-submit", "[1, 2, 3]", env)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(_cannot_be_interpreted_as_admission(result.stdout))
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+
+    def test_malformed_json_stdin_denies_pre_tool_fail_closed(self) -> None:
+        env = self._real_gate_env()
+        result = self._run_raw("pre-tool", "{not-valid-json", env)
+        self.assertEqual(result.returncode, 2)
+
+    def test_unconfigured_malformed_stdin_still_fails_open(self) -> None:
+        # Unconfigured (no policy) stays inert regardless: a crash here must
+        # not newly surface as a block for a host that never opted in.
+        env = sandbox_env()
+        home = Path(env["HOME"])
+        (home / ".claude" / "hooks").mkdir(parents=True, exist_ok=True)
+        real_gate = (
+            _REPO_ROOT / "integrations" / "claude-code" / "nunchi_claude_v2.py"
+        )
+        (home / ".claude" / "hooks" / "nunchi_claude_v2.py").write_text(
+            real_gate.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+        result = self._run_raw("user-prompt-submit", "{not-valid-json", env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
 
 class WrapperHealthyRoundTripCase(_FaultInjectionCase):
     """The wrapper still round-trips to the real gate correctly."""
@@ -603,6 +716,22 @@ class UnconfiguredInertAcrossAllHookEventsCase(_FaultInjectionCase):
         result = _run_wrapper(
             "post-tool",
             {"session_id": "s", "tool_name": "x", "tool_input": {}, "tool_response": {}},
+            env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_post_tool_failure_inert_when_unconfigured(self) -> None:
+        env = self._unconfigured_broken_env()
+        result = _run_wrapper(
+            "post-tool-failure",
+            {
+                "session_id": "s",
+                "tool_name": "x",
+                "tool_input": {},
+                "error": "boom",
+                "tool_use_id": "toolu-1",
+            },
             env,
         )
         self.assertEqual(result.returncode, 0)

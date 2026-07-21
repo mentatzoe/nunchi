@@ -1,7 +1,8 @@
 #!/bin/sh
 # nunchi-claude-v2-hook.sh — wrapper for the Nunchi V2 Claude Code hooks.
 # Installed to ~/.claude/hooks/ by the operator; settings entries pass the
-# hook event as $1 (user-prompt-submit | stop | pre-tool | post-tool).
+# hook event as $1 (user-prompt-submit | stop | pre-tool | post-tool |
+# post-tool-failure).
 #
 # Failure direction is per event and deliberate, and is enforced HERE at the
 # process boundary — not only inside the Python gate. "Configured" means
@@ -29,9 +30,12 @@
 #     really produce a decision, and is treated exactly like a crash.
 #   * pre-tool — fails CLOSED when configured: a privileged-action guard that
 #     cannot run must deny (exit 2), not wave privileged tools through.
-#   * stop / post-tool — fail OPEN: a broken turn-completion or observation
-#     hook must not trap or deafen the participant, and neither can admit a
-#     room turn on its own. Missing receipts stay an honest gap.
+#   * stop / post-tool / post-tool-failure — fail OPEN: a broken
+#     turn-completion or observation hook must not trap or deafen the
+#     participant, and none of the three can admit a room turn on their own.
+#     Missing receipts stay an honest gap; an open reply-or-reaction
+#     reservation that a broken post-tool/post-tool-failure never closes is
+#     reported by Stop as an unknown outcome, not fabricated as silence.
 set -u
 HOOK_EVENT="${1:-}"
 GATE="${NUNCHI_CLAUDE_V2_GATE:-$HOME/.claude/hooks/nunchi_claude_v2.py}"

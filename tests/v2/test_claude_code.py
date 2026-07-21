@@ -77,6 +77,7 @@ class _GateCase(unittest.TestCase):
         self.module = load_gate_module()
         self.environ = make_environ(self.tmp)
         self._ts = 0
+        self._tool_use_seq = 0
 
     def _cleanup(self) -> None:
         import shutil
@@ -86,6 +87,10 @@ class _GateCase(unittest.TestCase):
     def next_ts(self) -> str:
         self._ts += 1
         return f"2026-07-20T12:{self._ts // 60:02d}:{self._ts % 60:02d}Z"
+
+    def next_tool_use_id(self) -> str:
+        self._tool_use_seq += 1
+        return f"toolu-test-{self._tool_use_seq}"
 
     def deliver(
         self,
@@ -136,14 +141,60 @@ class _GateCase(unittest.TestCase):
         tool_input: dict | None = None,
         tool_response: dict | None = None,
         session_id: str = "sess-1",
+        tool_use_id: str | None = None,
+        reserve: bool = True,
     ):
+        resolved_input = tool_input or {"chat_id": CHANNEL_ID, "text": "the sweep looks fixable"}
+        if tool_use_id is None:
+            tool_use_id = self.next_tool_use_id()
+        if reserve:
+            # Every real PostToolUse follows a PreToolUse for the identical
+            # tool_use_id/tool_input: create that reservation here so the
+            # helper models one real tool call, not two unrelated ones.
+            self.pre_tool(
+                tool_name=tool_name,
+                tool_input=resolved_input,
+                session_id=session_id,
+                tool_use_id=tool_use_id,
+            )
         return self.module.handle_post_tool(
             {
                 "session_id": session_id,
                 "tool_name": tool_name,
-                "tool_input": tool_input
-                or {"chat_id": CHANNEL_ID, "text": "the sweep looks fixable"},
+                "tool_input": resolved_input,
                 "tool_response": tool_response if tool_response is not None else {"ok": True},
+                "tool_use_id": tool_use_id,
+            },
+            self.environ,
+        )
+
+    def post_tool_failure(
+        self,
+        *,
+        tool_name: str = "mcp__discord__reply",
+        tool_input: dict | None = None,
+        error: str = "delivery failed",
+        session_id: str = "sess-1",
+        tool_use_id: str | None = None,
+        reserve: bool = True,
+    ):
+        resolved_input = tool_input or {"chat_id": CHANNEL_ID, "text": "the sweep looks fixable"}
+        if tool_use_id is None:
+            tool_use_id = self.next_tool_use_id()
+        if reserve:
+            self.pre_tool(
+                tool_name=tool_name,
+                tool_input=resolved_input,
+                session_id=session_id,
+                tool_use_id=tool_use_id,
+            )
+        return self.module.handle_post_tool_failure(
+            {
+                "session_id": session_id,
+                "tool_name": tool_name,
+                "tool_input": resolved_input,
+                "error": error,
+                "tool_use_id": tool_use_id,
             },
             self.environ,
         )
@@ -154,15 +205,18 @@ class _GateCase(unittest.TestCase):
         tool_name: str,
         tool_input: dict | None = None,
         session_id: str = "sess-1",
+        tool_use_id: str | None = None,
     ):
-        return self.module.handle_pre_tool(
-            {
-                "session_id": session_id,
-                "tool_name": tool_name,
-                "tool_input": tool_input or {},
-            },
-            self.environ,
-        )
+        if tool_use_id is None:
+            tool_use_id = self.next_tool_use_id()
+        payload = {
+            "session_id": session_id,
+            "tool_name": tool_name,
+            "tool_input": tool_input or {},
+        }
+        if tool_use_id:
+            payload["tool_use_id"] = tool_use_id
+        return self.module.handle_pre_tool(payload, self.environ)
 
     def assert_blocked(self, decision) -> None:
         self.assertIsNotNone(decision.output)
@@ -463,8 +517,15 @@ class ReactiveHearingCases(_GateCase):
         for token in ("urllib", "socket", "requests.get", "poll("):
             self.assertNotIn(token, _MODULE_SOURCE)
         settings = self.module._SETTINGS_TEMPLATE
-        for event in ("UserPromptSubmit", "Stop", "PreToolUse", "PostToolUse"):
+        for event in (
+            "UserPromptSubmit",
+            "Stop",
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+        ):
             self.assertIn(event, settings)
+        self.assertIn("post-tool-failure", settings)
 
     def test_transport_patch_provenance_is_pinned_and_fail_closed(self) -> None:
         patch_dir = _INTEGRATION_DIR / "transport-patch"
@@ -819,12 +880,6 @@ class ParticipantTurnCases(_GateCase):
     def test_no_send_time_social_gate_and_no_prose_filter(self) -> None:
         transport = CountingTransport(wake_judgment)
         self.assert_woken(self.deliver(transport, message_id="4900000000000000005"))
-        gate = self.pre_tool(
-            tool_name="mcp__discord__reply",
-            tool_input={"chat_id": CHANNEL_ID, "text": "any text"},
-        )
-        self.assertIsNone(gate.output)
-        self.assertEqual(gate.exit_code, 0)
         # A meta-answer-shaped sentence is recorded verbatim: grading is a
         # post-hoc evaluation concern (scenes corpus), never a runtime filter.
         grading_rows = [
@@ -836,7 +891,15 @@ class ParticipantTurnCases(_GateCase):
         meta_text = next(
             row["sent_text"] for row in grading_rows if row["grade"] == "meta-answer"
         )
-        self.post_tool(tool_input={"chat_id": CHANNEL_ID, "text": meta_text})
+        tool_input = {"chat_id": CHANNEL_ID, "text": meta_text}
+        # PreToolUse does not filter based on the prose content of the
+        # proposed reply — a meta-answer-shaped sentence reserves cleanly.
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply", tool_input=tool_input, tool_use_id="toolu-meta-1"
+        )
+        self.assertIsNone(gate.output)
+        self.assertEqual(gate.exit_code, 0)
+        self.post_tool(tool_input=tool_input, tool_use_id="toolu-meta-1", reserve=False)
         self.assertIsNone(self.stop(transport).output)
         records = read_receipts(self.tmp)
         host = [r for r in records if r["stage"] == "participant-host"]
@@ -1393,6 +1456,444 @@ class AdversarialRegressionCases(_GateCase):
         self.assertIn("symlink", result.stderr)
         self.assertEqual(referent.read_text(encoding="utf-8"), before)
         self.assertTrue((plugin / "server.ts").is_symlink())
+
+
+# ---------------------------------------------------------------------------
+# Rework-round adversarial regressions: strict JSON parsing, exact sidecar
+# types, PostToolUseFailure correlation, atomic reply-or-reaction
+# reservation, strict receipt-sink acknowledgement, and tools-configuration
+# strictness.
+# ---------------------------------------------------------------------------
+
+
+class StrictJsonParsingCases(_GateCase):
+    def test_strict_loader_rejects_duplicate_keys(self) -> None:
+        # A naive parser resolves a duplicate key to its LAST value — here
+        # silently flipping "block" into "allow". Strict parsing must refuse
+        # the whole document rather than pick either interpretation.
+        with self.assertRaises(ValueError):
+            self.module._strict_json_loads(
+                '{"decision": "block", "decision": "allow"}'
+            )
+
+    def test_strict_loader_rejects_non_finite_constants(self) -> None:
+        for literal in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(literal=literal):
+                with self.assertRaises(ValueError):
+                    self.module._strict_json_loads(f'{{"x": {literal}}}')
+
+    def test_strict_loader_rejects_invalid_utf8_bytes(self) -> None:
+        with self.assertRaises(ValueError):
+            self.module._strict_json_loads(b'{"x": "\xff\xfe"}')
+
+    def test_strict_loader_accepts_well_formed_input(self) -> None:
+        self.assertEqual(self.module._strict_json_loads('{"a": 1}'), {"a": 1})
+        self.assertEqual(self.module._strict_json_loads(b'{"a": 1}'), {"a": 1})
+
+    def test_duplicate_key_sidecar_record_blocks_the_channel_event(self) -> None:
+        # A naive parser resolves the duplicate "author" key to its LAST
+        # value (bot=true here) — proving the record is silently admitted
+        # under either interpretation would be a real identity-forging bug.
+        # Strict parsing must refuse the whole line instead.
+        self.environ = make_environ(self.tmp)
+        sidecar = Path(self.environ["NUNCHI_CLAUDE_V2_SIDECAR"])
+        sidecar.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        message_id = "8100000000000000001"
+        line = (
+            '{"message_id": "%s", "channel_id": "%s", "content": "x", '
+            '"author": {"id": "%s", "bot": false}, '
+            '"author": {"id": "%s", "bot": true}}'
+        ) % (message_id, CHANNEL_ID, HUMAN_ID, PEER_BOT_ID)
+        sidecar.write_bytes((line + "\n").encode("utf-8"))
+        sidecar.chmod(0o600)
+        transport = CountingTransport(wake_judgment)
+        decision = self.module.handle_user_prompt_submit(
+            prompt_payload(channel_prompt(message_id=message_id)),
+            self.environ,
+            classifier_transport=transport,
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(transport.call_count, 0)
+
+    def test_duplicate_key_tools_config_is_rejected(self) -> None:
+        path = self.tmp / "tools.json"
+        path.write_text(
+            '{"schema_version": 1, "schema_version": 1, "privileged": []}',
+            encoding="utf-8",
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+
+class SidecarExactTypeCases(_GateCase):
+    def test_well_typed_record_still_validates(self) -> None:
+        row = sidecar_row(message_id="8200000000000000001")
+        self.assertIsNotNone(self.module.validate_sidecar_record(row))
+
+    def test_string_bot_flag_is_not_coerced_to_true(self) -> None:
+        # The JSON string "false" is truthy under a permissive bool(...): a
+        # coercing validator would misclassify a human as a bot.
+        row = sidecar_row(message_id="8200000000000000002")
+        row["author"]["bot"] = "false"
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_string_mention_everyone_is_rejected(self) -> None:
+        row = sidecar_row(message_id="8200000000000000003")
+        row["mention_everyone"] = "false"
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_numeric_author_id_is_rejected(self) -> None:
+        row = sidecar_row(message_id="8200000000000000004")
+        row["author"]["id"] = int(HUMAN_ID)
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_numeric_message_id_is_rejected(self) -> None:
+        row = sidecar_row(message_id="8200000000000000005")
+        row["message_id"] = 8200000000000000005
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_numeric_guild_id_is_rejected(self) -> None:
+        row = sidecar_row(message_id="8200000000000000006")
+        row["guild_id"] = 2000000000000000001
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_non_string_mention_id_is_rejected(self) -> None:
+        row = sidecar_row(message_id="8200000000000000007")
+        row["mention_user_ids"] = [int(SELF_USER_ID)]
+        self.assertIsNone(self.module.validate_sidecar_record(row))
+
+    def test_type_coerced_sidecar_record_fails_closed_end_to_end(self) -> None:
+        self.environ = make_environ(self.tmp)
+        row = sidecar_row(message_id="8200000000000000008")
+        row["author"]["bot"] = "false"
+        append_sidecar(self.environ, row)
+        transport = CountingTransport(wake_judgment)
+        decision = self.module.handle_user_prompt_submit(
+            prompt_payload(channel_prompt(message_id="8200000000000000008")),
+            self.environ,
+            classifier_transport=transport,
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(transport.call_count, 0)
+
+
+class ReservationAndPostToolFailureCases(_GateCase):
+    def test_post_tool_failure_records_a_failed_delivery(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8300000000000000001")
+        request_id = wake_request_id(decision.output)
+        result = self.post_tool_failure(error="discord API 500")
+        self.assertIsNone(result.output)
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["participant-host"]["body"]["outcome"], "sent")
+        self.assertEqual(stages["transport"]["body"]["delivery"], "failed")
+
+    def test_second_room_action_in_the_same_turn_is_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000002"))
+        first = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "first"},
+        )
+        self.assertIsNone(first.output)
+        second = self.pre_tool(
+            tool_name="mcp__discord__react",
+            tool_input={"chat_id": CHANNEL_ID, "message_id": "1", "emoji": "👀"},
+        )
+        self.assertIsNotNone(second.output)
+        self.assertEqual(
+            second.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.assertIn(
+            "only one reply or reaction",
+            second.output["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_reservation_without_tool_use_id_is_denied(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000003"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "no id"},
+            tool_use_id="",
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "tool_use_id", gate.output["hookSpecificOutput"]["permissionDecisionReason"]
+        )
+
+    def test_unresolved_reservation_reports_unknown_not_silence(self) -> None:
+        # PreToolUse reserves the turn's one room action, but PostToolUse (or
+        # PostToolUseFailure) never fires — a crash, a disabled hook, a host
+        # bug. The outcome must be honestly unknown, never fabricated as
+        # silence.
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000004"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "never confirmed"},
+        )
+        self.assertIsNone(gate.output)
+        self.assertIsNone(self.stop(transport).output)
+        records = read_receipts(self.tmp)
+        host = [r for r in records if r["stage"] == "participant-host"]
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
+        self.assertFalse(any(r["stage"] == "transport" for r in records))
+
+    def test_mismatched_tool_use_id_post_tool_does_not_attest(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000005"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "reserved text"},
+            tool_use_id="toolu-real-1",
+        )
+        self.assertIsNone(gate.output)
+        # A PostToolUse report under a DIFFERENT tool_use_id must not close
+        # this turn's reservation or be attested as its action.
+        result = self.post_tool(
+            tool_input={"chat_id": CHANNEL_ID, "text": "reserved text"},
+            tool_use_id="toolu-spoofed-2",
+            reserve=False,
+        )
+        self.assertIsNone(result.output)
+        self.assertIsNone(self.stop(transport).output)
+        records = read_receipts(self.tmp)
+        host = [r for r in records if r["stage"] == "participant-host"]
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
+
+    def test_mismatched_tool_input_post_tool_does_not_attest(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000006"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "reserved text"},
+            tool_use_id="toolu-real-3",
+        )
+        self.assertIsNone(gate.output)
+        # Same tool_use_id, but DIFFERENT tool input: the exact-input digest
+        # binding must still refuse the mismatch.
+        result = self.post_tool(
+            tool_input={"chat_id": CHANNEL_ID, "text": "a completely different message"},
+            tool_use_id="toolu-real-3",
+            reserve=False,
+        )
+        self.assertIsNone(result.output)
+        self.assertIsNone(self.stop(transport).output)
+        records = read_receipts(self.tmp)
+        host = [r for r in records if r["stage"] == "participant-host"]
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
+
+    def test_post_tool_failure_mismatched_tool_use_id_does_not_resolve(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000007"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "reserved text"},
+            tool_use_id="toolu-real-4",
+        )
+        self.assertIsNone(gate.output)
+        self.post_tool_failure(
+            tool_input={"chat_id": CHANNEL_ID, "text": "reserved text"},
+            tool_use_id="toolu-other-4",
+            reserve=False,
+        )
+        self.assertIsNone(self.stop(transport).output)
+        records = read_receipts(self.tmp)
+        host = [r for r in records if r["stage"] == "participant-host"]
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
+
+    def test_post_tool_failure_is_registered_and_fails_open_unconfigured(self) -> None:
+        bare = make_environ(self.tmp, policy_path=Path(self.environ["NUNCHI_CLAUDE_V2_POLICY"]))
+        del bare["NUNCHI_CLAUDE_V2_POLICY"]
+        result = self.module.handle_post_tool_failure(
+            {
+                "session_id": "sess-1",
+                "tool_name": "mcp__discord__reply",
+                "tool_input": {"chat_id": CHANNEL_ID, "text": "x"},
+                "error": "boom",
+                "tool_use_id": "toolu-1",
+            },
+            bare,
+        )
+        self.assertIsNone(result.output)
+        self.assertEqual(result.exit_code, 0)
+
+
+class ReceiptSinkStrictAckCases(_GateCase):
+    def test_observed_delivery_recorder_forwards_non_none_ack(self) -> None:
+        calls = []
+
+        def fake_sink(record):
+            calls.append(record)
+            return "not-none"
+
+        recorder = self.module._ObservedDeliveryRecorder(fake_sink, [])
+        result = recorder("req-1", {"kind": "message", "content": "x"})
+        self.assertEqual(result, "not-none")
+        self.assertEqual(len(calls), 1)
+
+    def test_observed_delivery_recorder_forwards_none_ack(self) -> None:
+        recorder = self.module._ObservedDeliveryRecorder(lambda record: None, [])
+        result = recorder("req-1", {"kind": "message", "content": "x"})
+        self.assertIsNone(result)
+
+    def test_observation_receipt_sink_returning_non_none_is_treated_as_failure(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8400000000000000001")
+        packet = self.assert_woken(decision)
+        anchor_event_id = packet["trigger_event_id"]
+        config = self.module.ClaudeGateConfig.from_env(self.environ)
+        with self.module.RoomStateStore(config.state_dir) as store:
+            binding = self.module.ClaudeRoomV2(
+                config, store, classifier_transport=transport
+            )
+            # A sink that "succeeds" (does not raise) but returns a falsy,
+            # non-None value must NOT be treated as a persisted receipt.
+            binding.receipt_sink = lambda record: 0
+            outcome = binding.run_attention(anchor_event_id)
+        self.assertEqual(outcome["route"], "operational-error")
+        self.assertIn("sink returned", outcome["detail"])
+
+
+class ToolsConfigStrictCases(_GateCase):
+    def _write_tools(self, document: dict) -> Path:
+        path = self.tmp / "tools.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return path
+
+    def test_well_formed_example_config_still_loads(self) -> None:
+        example = _INTEGRATION_DIR / "nunchi-claude-v2-tools.example.json"
+        loaded = self.module._load_tools_config(example)
+        self.assertEqual(len(loaded["privileged"]), 2)
+
+    def test_unknown_top_level_key_is_rejected(self) -> None:
+        path = self._write_tools({"schema_version": 1, "unexpected": True})
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_unknown_room_action_tools_key_is_rejected(self) -> None:
+        path = self._write_tools(
+            {"schema_version": 1, "room_action_tools": {"reply_pattern": "^x$", "extra": 1}}
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_non_string_pattern_is_not_coerced(self) -> None:
+        path = self._write_tools(
+            {"schema_version": 1, "room_action_tools": {"reply_pattern": 12345}}
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_malformed_room_action_pattern_is_rejected_not_uncaught(self) -> None:
+        path = self._write_tools(
+            {"schema_version": 1, "room_action_tools": {"reply_pattern": "(unclosed"}}
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_privileged_entry_unknown_key_is_rejected(self) -> None:
+        path = self._write_tools(
+            {
+                "schema_version": 1,
+                "privileged": [
+                    {
+                        "tool_pattern": "^Bash$",
+                        "capability": "workspace.shell.exec",
+                        "impact": "mutation",
+                        "resource_kind": "shell-command",
+                        "unexpected_key": "x",
+                    }
+                ],
+            }
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_privileged_entry_missing_required_key_is_rejected(self) -> None:
+        path = self._write_tools(
+            {
+                "schema_version": 1,
+                "privileged": [
+                    {
+                        "tool_pattern": "^Bash$",
+                        "capability": "workspace.shell.exec",
+                        "impact": "mutation",
+                    }
+                ],
+            }
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_privileged_entry_coerced_capability_is_rejected(self) -> None:
+        path = self._write_tools(
+            {
+                "schema_version": 1,
+                "privileged": [
+                    {
+                        "tool_pattern": "^Bash$",
+                        "capability": 12345,
+                        "impact": "mutation",
+                        "resource_kind": "shell-command",
+                    }
+                ],
+            }
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_ambiguous_resource_identity_source_is_rejected(self) -> None:
+        path = self._write_tools(
+            {
+                "schema_version": 1,
+                "privileged": [
+                    {
+                        "tool_pattern": "^Bash$",
+                        "capability": "workspace.shell.exec",
+                        "impact": "mutation",
+                        "resource_kind": "shell-command",
+                        "resource_id_input_key": "command",
+                        "resource_id_const": "fixed",
+                    }
+                ],
+            }
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_malformed_privileged_pattern_is_rejected(self) -> None:
+        path = self._write_tools(
+            {
+                "schema_version": 1,
+                "privileged": [
+                    {
+                        "tool_pattern": "(unclosed",
+                        "capability": "workspace.shell.exec",
+                        "impact": "mutation",
+                        "resource_kind": "shell-command",
+                    }
+                ],
+            }
+        )
+        with self.assertRaises(self.module.ClaudeGateConfigError):
+            self.module._load_tools_config(path)
+
+    def test_pre_tool_denies_fail_closed_on_malformed_tools_config(self) -> None:
+        # A malformed tools config must surface as ClaudeGateConfigError (not
+        # an uncaught re.error) so the pre-tool advisory seam still denies
+        # cleanly instead of crashing with a raw, uncaught traceback.
+        path = self._write_tools(
+            {"schema_version": 1, "room_action_tools": {"reply_pattern": "(unclosed"}}
+        )
+        self.environ = make_environ(self.tmp, NUNCHI_CLAUDE_V2_TOOLS=str(path))
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8500000000000000001"))
+        decision = self.pre_tool(tool_name="Bash", tool_input={"command": "ls"})
+        self.assertEqual(decision.exit_code, 2)
 
 
 if __name__ == "__main__":

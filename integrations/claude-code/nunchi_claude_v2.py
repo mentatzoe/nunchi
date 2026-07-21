@@ -24,18 +24,29 @@ contract:
   stages stay immutable and singly attested; this wrapper never rewrites or
   fabricates another owner's stage.
 
-Claude Code drives the lifecycle through four hook events, each handled by a
+Claude Code drives the lifecycle through five hook events, each handled by a
 subcommand of this file:
 
     user-prompt-submit   ingest + coalesce + attention + wake-or-suppress
     stop                 turn completion receipts + fresh coalesced successor
-    pre-tool             deterministic privileged-action authorization
-    post-tool            observed native room-action attestation
+    pre-tool             deterministic privileged-action authorization;
+                          reserves the turn's one reply-or-reaction attempt
+    post-tool            observed native room-action attestation; resolves
+                          the matching reservation on success
+    post-tool-failure    resolves the matching reservation on failure
 
 State persists across hook processes in an owner-only directory so the
 scheduler and observation semantics survive Claude Code's process-per-hook
 model. A Claude session restart intentionally drops pending wake work (the
 scheduler contract) while retained events remain honest context.
+
+A woken turn's reply-or-reaction attempt is reserved atomically by
+``PreToolUse``, bound to the exact ``tool_use_id``, tool name, and tool-input
+digest of that one proposed call. Only ``PostToolUse`` or ``PostToolUseFailure``
+reporting that same ``tool_use_id`` can close it. If ``Stop`` finds an open
+reservation — the tool ran but neither outcome hook closed it (a crash, a
+disabled hook, a host bug) — the turn's outcome is honestly ``unknown``, never
+silently reported as silence.
 """
 
 from __future__ import annotations
@@ -120,6 +131,52 @@ def _log(message: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Strict JSON parsing — every JSON source this gate reads (the hook stdin
+# payload, the tools configuration file, sidecar lines, and this integration's
+# own state files) goes through here. Three properties a permissive
+# ``json.loads`` does not give us for free:
+#
+# * strict UTF-8 — a byte sequence that is not valid UTF-8 is rejected, never
+#   silently repaired with U+FFFD replacement characters that would change
+#   what content a participant is shown or what a value compares equal to;
+# * no duplicate keys — Python's default object hook resolves a duplicate key
+#   to its LAST value, so ``{"decision":"block","decision":"allow"}`` reads as
+#   an allow; a payload whose meaning depends on which parser sees it first is
+#   untrustworthy by construction, so it is rejected outright;
+# * no non-finite constants — ``NaN``/``Infinity``/``-Infinity`` are a
+#   non-standard extension some parsers accept and others reject; a value that
+#   only means one thing under a specific parser's leniency is rejected.
+# ---------------------------------------------------------------------------
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_constant(name: str) -> Any:
+    raise ValueError(f"non-finite JSON constant {name!r} is not permitted")
+
+
+def _strict_json_loads(data: bytes | bytearray | str) -> Any:
+    """Parse JSON strictly: exact UTF-8, no duplicate keys, no non-finite constants.
+
+    Raises ``ValueError`` (covering both ``json.JSONDecodeError`` and
+    ``UnicodeDecodeError``, itself a ``ValueError`` subclass) on any violation.
+    """
+    text = data.decode("utf-8", errors="strict") if isinstance(data, (bytes, bytearray)) else data
+    return json.loads(
+        text,
+        object_pairs_hook=_no_duplicate_keys,
+        parse_constant=_reject_non_finite_constant,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Configuration — trusted operator environment, never room or model content
 # ---------------------------------------------------------------------------
 
@@ -180,12 +237,46 @@ class ClaudeGateConfig:
         return bool((environ.get("NUNCHI_CLAUDE_V2_POLICY") or "").strip())
 
 
+_TOOLS_CONFIG_TOP_KEYS = frozenset({"schema_version", "room_action_tools", "privileged"})
+_TOOLS_ROOM_ACTION_KEYS = frozenset({"reply_pattern", "react_pattern"})
+_TOOLS_PRIVILEGED_REQUIRED_KEYS = frozenset(
+    {"tool_pattern", "capability", "impact", "resource_kind"}
+)
+_TOOLS_PRIVILEGED_OPTIONAL_KEYS = frozenset({"resource_id_input_key", "resource_id_const"})
+
+
+def _require_config_str(value: Any, what: str) -> str:
+    """Require an exact, non-empty JSON string — never coerce another type.
+
+    A permissive ``str(value)`` would silently accept an integer, a bool, or a
+    list as if the operator had written a string, changing what the
+    configuration actually says without any parse error to notice it by.
+    """
+    if not isinstance(value, str) or not value:
+        raise ClaudeGateConfigError(f"tools configuration: {what} must be a non-empty string")
+    return value
+
+
+def _compile_config_pattern(value: Any, what: str) -> re.Pattern[str]:
+    pattern = _require_config_str(value, what)
+    try:
+        return re.compile(pattern)
+    except re.error as exc:
+        raise ClaudeGateConfigError(
+            f"tools configuration: {what} is not a valid pattern ({exc})"
+        ) from exc
+
+
 def _load_tools_config(path: Path | None) -> dict[str, Any]:
     """Load the deterministic tool classification map.
 
     ``room_action_tools`` names the transport tools whose executions this
     integration attests; ``privileged`` maps exact tool patterns to I-010F
-    capabilities. Neither entry may encode conversational meaning.
+    capabilities. Neither entry may encode conversational meaning. The whole
+    document is rejected — never partially accepted — on any unknown key,
+    coerced type, ambiguous resource-identity source, or malformed pattern:
+    a operator-authored file that means something other than what it appears
+    to say is exactly as dangerous as a missing one.
     """
     config: dict[str, Any] = {
         "reply_tool_re": re.compile(_DEFAULT_REPLY_TOOL_RE),
@@ -194,39 +285,83 @@ def _load_tools_config(path: Path | None) -> dict[str, Any]:
     }
     if path is None:
         return config
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
-        raise ClaudeGateConfigError("tools configuration is invalid")
-    room = raw.get("room_action_tools") or {}
-    if not isinstance(room, dict):
-        raise ClaudeGateConfigError("tools configuration is invalid")
-    if "reply_pattern" in room:
-        config["reply_tool_re"] = re.compile(str(room["reply_pattern"]))
-    if "react_pattern" in room:
-        config["react_tool_re"] = re.compile(str(room["react_pattern"]))
+    try:
+        raw = _strict_json_loads(path.read_bytes())
+    except ValueError as exc:
+        raise ClaudeGateConfigError(f"tools configuration is invalid ({exc})") from exc
+    if not isinstance(raw, dict):
+        raise ClaudeGateConfigError("tools configuration must be a JSON object")
+    unknown_top = set(raw) - _TOOLS_CONFIG_TOP_KEYS
+    if unknown_top:
+        raise ClaudeGateConfigError(
+            f"tools configuration has unknown keys: {sorted(unknown_top)}"
+        )
+    if raw.get("schema_version") != 1:
+        raise ClaudeGateConfigError("tools configuration schema_version must be exactly 1")
+    if "room_action_tools" in raw:
+        room = raw["room_action_tools"]
+        if not isinstance(room, dict):
+            raise ClaudeGateConfigError("tools configuration room_action_tools must be an object")
+        unknown_room = set(room) - _TOOLS_ROOM_ACTION_KEYS
+        if unknown_room:
+            raise ClaudeGateConfigError(
+                f"tools configuration room_action_tools has unknown keys: {sorted(unknown_room)}"
+            )
+        if "reply_pattern" in room:
+            config["reply_tool_re"] = _compile_config_pattern(
+                room["reply_pattern"], "room_action_tools.reply_pattern"
+            )
+        if "react_pattern" in room:
+            config["react_tool_re"] = _compile_config_pattern(
+                room["react_pattern"], "room_action_tools.react_pattern"
+            )
     privileged = raw.get("privileged", [])
     if not isinstance(privileged, list):
-        raise ClaudeGateConfigError("tools configuration is invalid")
+        raise ClaudeGateConfigError("tools configuration privileged must be a list")
     accepted = []
-    for entry in privileged:
+    for index, entry in enumerate(privileged):
         if not isinstance(entry, dict):
-            raise ClaudeGateConfigError("tools configuration is invalid")
-        required = {"tool_pattern", "capability", "impact", "resource_kind"}
-        if not required <= set(entry):
-            raise ClaudeGateConfigError("tools configuration is invalid")
+            raise ClaudeGateConfigError(f"tools configuration privileged[{index}] must be an object")
+        keys = set(entry)
+        missing = _TOOLS_PRIVILEGED_REQUIRED_KEYS - keys
+        if missing:
+            raise ClaudeGateConfigError(
+                f"tools configuration privileged[{index}] is missing keys: {sorted(missing)}"
+            )
+        unknown = keys - (_TOOLS_PRIVILEGED_REQUIRED_KEYS | _TOOLS_PRIVILEGED_OPTIONAL_KEYS)
+        if unknown:
+            raise ClaudeGateConfigError(
+                f"tools configuration privileged[{index}] has unknown keys: {sorted(unknown)}"
+            )
+        if "resource_id_input_key" in entry and "resource_id_const" in entry:
+            raise ClaudeGateConfigError(
+                f"tools configuration privileged[{index}] sets both resource_id_input_key and "
+                "resource_id_const; exactly one resource-identity source is required, not both"
+            )
         accepted.append(
             {
-                "tool_re": re.compile(str(entry["tool_pattern"])),
-                "capability": str(entry["capability"]),
-                "impact": str(entry["impact"]),
-                "resource_kind": str(entry["resource_kind"]),
+                "tool_re": _compile_config_pattern(
+                    entry["tool_pattern"], f"privileged[{index}].tool_pattern"
+                ),
+                "capability": _require_config_str(
+                    entry["capability"], f"privileged[{index}].capability"
+                ),
+                "impact": _require_config_str(entry["impact"], f"privileged[{index}].impact"),
+                "resource_kind": _require_config_str(
+                    entry["resource_kind"], f"privileged[{index}].resource_kind"
+                ),
                 "resource_id_input_key": (
-                    str(entry["resource_id_input_key"])
+                    _require_config_str(
+                        entry["resource_id_input_key"],
+                        f"privileged[{index}].resource_id_input_key",
+                    )
                     if "resource_id_input_key" in entry
                     else None
                 ),
                 "resource_id_const": (
-                    str(entry["resource_id_const"])
+                    _require_config_str(
+                        entry["resource_id_const"], f"privileged[{index}].resource_id_const"
+                    )
                     if "resource_id_const" in entry
                     else None
                 ),
@@ -342,20 +477,50 @@ def validate_sidecar_record(row: Any) -> dict[str, Any] | None:
 
     A record that names a message but is structurally malformed returns
     ``None`` so the caller fails closed rather than binding a partial actor.
+    Every field's JSON type is checked EXACTLY — never coerced. Coercion is
+    not a convenience here, it is a meaning change an attacker or a buggy
+    transport could exploit: a numeric ``author.id`` silently becomes a
+    different string than the platform's own string ID; a truthy non-bool
+    ``author.bot`` (for example the JSON string ``"false"``, which is
+    truthy) would silently coerce to ``True`` and misclassify a human as a
+    bot or vice versa. A wrong-typed field is exactly as unusable as an
+    absent one.
     """
     if not isinstance(row, dict):
         return None
     if any(key not in row for key in _SIDECAR_REQUIRED_KEYS):
         return None
-    author = row.get("author")
-    if not isinstance(author, dict) or not str(author.get("id") or ""):
+    if not isinstance(row.get("message_id"), str) or not row["message_id"]:
+        return None
+    if not isinstance(row.get("channel_id"), str) or not row["channel_id"]:
         return None
     if not isinstance(row.get("content"), str):
         return None
-    if not str(row.get("message_id") or "") or not str(row.get("channel_id") or ""):
+    author = row.get("author")
+    if not isinstance(author, dict):
+        return None
+    if not isinstance(author.get("id"), str) or not author["id"]:
+        return None
+    if "username" in author and author["username"] is not None and not isinstance(
+        author["username"], str
+    ):
+        return None
+    if "bot" in author and not isinstance(author["bot"], bool):
+        return None
+    if "guild_id" in row and row["guild_id"] is not None and not isinstance(row["guild_id"], str):
+        return None
+    if "timestamp" in row and row["timestamp"] is not None and not isinstance(
+        row["timestamp"], str
+    ):
+        return None
+    if "reply_to_message_id" in row and row["reply_to_message_id"] is not None and not isinstance(
+        row["reply_to_message_id"], str
+    ):
         return None
     mentions = row.get("mention_user_ids", [])
-    if not isinstance(mentions, list):
+    if not isinstance(mentions, list) or not all(isinstance(item, str) for item in mentions):
+        return None
+    if "mention_everyone" in row and not isinstance(row["mention_everyone"], bool):
         return None
     return row
 
@@ -392,10 +557,15 @@ def read_sidecar_record(sidecar_path: Path, message_id: str) -> Any:
                 if needle not in line:
                     continue
                 try:
-                    row = json.loads(line.decode("utf-8", errors="replace"))
+                    row = _strict_json_loads(line)
                 except ValueError:
+                    # Invalid UTF-8, malformed JSON, a duplicate key, or a
+                    # non-finite constant: this candidate line is unusable.
+                    # Do not fall back to a lossy decode that could silently
+                    # substitute replacement characters into the actor or
+                    # content this event would be bound to.
                     continue
-                if isinstance(row, dict) and str(row.get("message_id") or "") == message_id:
+                if isinstance(row, dict) and row.get("message_id") == message_id:
                     matched_raw = row  # keep the newest matching record
     except OSError:
         return _SIDECAR_MALFORMED
@@ -427,13 +597,13 @@ def read_self_sidecar_events(sidecar_path: Path, self_user_id: str) -> list[dict
                 handle.readline()
             for line in handle:
                 try:
-                    row = json.loads(line.decode("utf-8", errors="replace"))
+                    row = _strict_json_loads(line)
                 except ValueError:
                     continue
                 validated = validate_sidecar_record(row)
                 if validated is None:
                     continue
-                if str((validated.get("author") or {}).get("id") or "") == self_user_id:
+                if (validated.get("author") or {}).get("id") == self_user_id:
                     records.append(validated)
     except OSError:
         return records
@@ -443,37 +613,32 @@ def read_self_sidecar_events(sidecar_path: Path, self_user_id: str) -> list[dict
 def _message_event_from_sidecar(sidecar: dict[str, Any]) -> MessageEvent:
     """Build one I-050A input event from a validated native-fact record.
 
-    ``content`` is the exact content the transport delivered to Claude —
-    attachment placeholders and voice transcripts included — not a raw field.
+    ``sidecar`` has already passed :func:`validate_sidecar_record`, so every
+    field read here is already the exact type it claims to be — nothing is
+    coerced. ``content`` is the exact content the transport delivered to
+    Claude — attachment placeholders and voice transcripts included — not a
+    raw field.
     """
     author = sidecar.get("author") or {}
     mentioned = sidecar.get("mention_user_ids") or []
     return MessageEvent(
-        guild_id=(str(sidecar["guild_id"]) if sidecar.get("guild_id") is not None else None),
-        channel_id=str(sidecar.get("channel_id") or ""),
-        message_id=str(sidecar.get("message_id") or ""),
-        author_id=str(author.get("id") or ""),
-        author_name=str(author.get("username") or ""),
-        author_is_bot=bool(author.get("bot", False)),
-        content=str(sidecar.get("content") or ""),
-        timestamp=(
-            sidecar.get("timestamp")
-            if isinstance(sidecar.get("timestamp"), str)
-            else None
-        ),
-        mentioned_user_ids=tuple(str(value) for value in mentioned),
-        reply_to_message_id=(
-            str(sidecar["reply_to_message_id"])
-            if sidecar.get("reply_to_message_id") is not None
-            else None
-        ),
+        guild_id=sidecar.get("guild_id"),
+        channel_id=sidecar.get("channel_id") or "",
+        message_id=sidecar.get("message_id") or "",
+        author_id=author.get("id") or "",
+        author_name=author.get("username") or "",
+        author_is_bot=author.get("bot", False),
+        content=sidecar.get("content") or "",
+        timestamp=sidecar.get("timestamp"),
+        mentioned_user_ids=tuple(mentioned),
+        reply_to_message_id=sidecar.get("reply_to_message_id"),
         # The sidecar records only synchronously known reference facts; the
         # referenced author and content are honestly unavailable.
         reply_to_author_id=None,
         reply_to_author_name=None,
         reply_to_author_is_bot=None,
         reply_to_content=None,
-        mentions_room=bool(sidecar.get("mention_everyone", False)),
+        mentions_room=sidecar.get("mention_everyone", False),
     )
 
 
@@ -564,7 +729,7 @@ class RoomStateStore:
                     if not line:
                         continue
                     try:
-                        row = json.loads(line)
+                        row = _strict_json_loads(line)
                     except ValueError:
                         continue
                     if isinstance(row, dict) and isinstance(row.get("native"), dict):
@@ -594,7 +759,7 @@ class RoomStateStore:
 
     def read_room(self) -> dict[str, Any]:
         try:
-            data = json.loads(self.room_path.read_text(encoding="utf-8"))
+            data = _strict_json_loads(self.room_path.read_bytes())
         except (OSError, ValueError):
             data = {}
         if not isinstance(data, dict) or data.get("schema_version") != _STATE_SCHEMA_VERSION:
@@ -637,7 +802,7 @@ class RoomStateStore:
                     if not line:
                         continue
                     try:
-                        row = json.loads(line)
+                        row = _strict_json_loads(line)
                     except ValueError:
                         continue
                     if isinstance(row, dict):
@@ -880,11 +1045,25 @@ class ClaudeRoomV2:
             return {"route": "operational-error", "detail": f"snapshot-unavailable: {exc}"}
         try:
             observation_receipt = self.observation.build_observation_receipt(request)
-            self.receipt_sink(copy.deepcopy(observation_receipt))
+            acknowledged = self.receipt_sink(copy.deepcopy(observation_receipt))
         except Exception as exc:
             return {
                 "route": "operational-error",
                 "detail": f"observation-receipt-persistence-unknown: {exc}",
+            }
+        if acknowledged is not None:
+            # A sink that returns without raising still only means "persisted"
+            # when it returns exactly ``None`` — the same contract
+            # ``run_participant_turn`` enforces on every other receipt call.
+            # Any other return value (even a falsy one, like ``0`` or ``""``)
+            # is treated exactly like a raised persistence failure, never
+            # silently accepted as an acknowledgement it did not give.
+            return {
+                "route": "operational-error",
+                "detail": (
+                    "observation-receipt-persistence-unknown: sink returned "
+                    f"{acknowledged!r} instead of None"
+                ),
             }
         decision = evaluate_v2(
             request,
@@ -1005,6 +1184,7 @@ class ClaudeRoomV2:
             "snapshot": attention["snapshot"],
             "decision": attention["decision"],
             "wake_source": packet["attention"]["source"],
+            "reservation": None,
             "started_at": time.time(),
         }
         self.store.reset_turn_actions()
@@ -1067,12 +1247,32 @@ class ClaudeRoomV2:
             return {"status": "degraded", "invoked": False, "outcome": "unknown"}
         observed = self.store.read_turn_actions()
         policy = self.policy_source.load()
+        reservation = turn.get("reservation")
 
         def replay_observed_native_turn(_turn: Any) -> dict[str, Any] | None:
-            for row in observed:
-                action = row.get("action")
-                if isinstance(action, dict):
-                    return copy.deepcopy(action)
+            if isinstance(reservation, dict):
+                # This turn reserved one reply-or-reaction attempt at
+                # PreToolUse time. Silence is only ever a legitimate outcome
+                # when no such attempt was ever reserved — once one was, the
+                # turn's true outcome is either a recorded, attested action or
+                # genuinely unknown; it is never quietly reinterpreted as "no
+                # attempt was made".
+                if not reservation.get("resolved", False):
+                    raise ParticipantHostError(
+                        "reply-or-reaction reservation "
+                        f"(tool_use_id={reservation.get('tool_use_id')}) was never "
+                        "closed by PostToolUse or PostToolUseFailure this turn; "
+                        "outcome is unknown, not silence"
+                    )
+                for row in observed:
+                    action = row.get("action")
+                    if isinstance(action, dict) and row.get("matched_reservation"):
+                        return copy.deepcopy(action)
+                raise ParticipantHostError(
+                    "reply-or-reaction reservation "
+                    f"(tool_use_id={reservation.get('tool_use_id')}) closed with no "
+                    "attestable action; outcome is unknown, not silence"
+                )
             return None
 
         sink = _ObservedDeliveryRecorder(self.receipt_sink, observed)
@@ -1096,8 +1296,12 @@ class _ObservedDeliveryRecorder:
         self.receipt_sink = receipt_sink
         self.observed = observed
 
-    def __call__(self, request_id: str, action: dict[str, Any]) -> None:
-        delivered = [row for row in self.observed if isinstance(row.get("action"), dict)]
+    def __call__(self, request_id: str, action: dict[str, Any]) -> Any:
+        delivered = [
+            row
+            for row in self.observed
+            if isinstance(row.get("action"), dict) and row.get("matched_reservation")
+        ]
         failed = [row for row in delivered if not row.get("delivered", False)]
         delivery = "failed" if (not delivered or failed) else "sent"
         detail = json.dumps(
@@ -1112,7 +1316,12 @@ class _ObservedDeliveryRecorder:
             ensure_ascii=False,
             sort_keys=True,
         )
-        self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
+        # Forward the underlying sink's exact acknowledgement rather than
+        # assuming success just because it did not raise: the caller's
+        # contract (``src/nunchi/participant.py``) treats this callable's
+        # return value as the persistence acknowledgement, and only exact
+        # ``None`` may mean "persisted".
+        return self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
 
 
 # ---------------------------------------------------------------------------
@@ -1526,16 +1735,88 @@ def derive_room_requester(
     return decision.get("derived_requester_actor_id"), decision.get("reason_code")
 
 
+def _tool_input_digest(tool_input: dict[str, Any]) -> str:
+    """A canonical binding digest for one proposed tool call's exact input."""
+    return hashlib.sha256(
+        json.dumps(tool_input, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _reserve_room_action(
+    turn: dict[str, Any],
+    tool_use_id: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> str | None:
+    """Create the turn's one reply-or-reaction reservation, in place.
+
+    Returns ``None`` on success (``turn`` is mutated), or a denial reason
+    string. A woken turn gets exactly one atomic room-action reservation —
+    win or lose, resolved or not — never a second attempt while the state
+    directory's lock proves no concurrent PreToolUse invocation can race this
+    check. The reservation is bound to the exact ``tool_use_id``, tool name,
+    and a digest of the exact tool input: only a ``PostToolUse`` or
+    ``PostToolUseFailure`` report of that same exact call can close it.
+    """
+    if not tool_use_id:
+        return "tool call carries no tool_use_id; cannot bind a closeable reservation"
+    existing = turn.get("reservation")
+    if isinstance(existing, dict):
+        return (
+            "this turn already reserved one room action (tool_use_id="
+            f"{existing.get('tool_use_id')}); only one reply or reaction is "
+            "permitted per woken turn"
+        )
+    turn["reservation"] = {
+        "tool_use_id": tool_use_id,
+        "tool_name": tool_name,
+        "input_digest": _tool_input_digest(tool_input),
+        "resolved": False,
+        "reserved_at": time.time(),
+    }
+    return None
+
+
+def _resolve_reservation(
+    turn: dict[str, Any],
+    tool_use_id: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> bool:
+    """Close the turn's open reservation iff it exactly matches, in place.
+
+    Matching requires the exact same ``tool_use_id``, tool name, and input
+    digest the reservation was created with — never a lenient match. Returns
+    ``True`` iff the reservation was matched and closed.
+    """
+    reservation = turn.get("reservation")
+    if not isinstance(reservation, dict) or reservation.get("resolved", False):
+        return False
+    if not tool_use_id or reservation.get("tool_use_id") != tool_use_id:
+        return False
+    if reservation.get("tool_name") != tool_name:
+        return False
+    if reservation.get("input_digest") != _tool_input_digest(tool_input):
+        return False
+    reservation["resolved"] = True
+    return True
+
+
 def handle_pre_tool(
     payload: dict[str, Any],
     environ: dict[str, str],
 ) -> HookDecision:
     """Mechanical send-safety and privileged-action denial before execution.
 
-    Two enforcement duties, both before the tool runs:
+    Three enforcement duties, all before the tool runs:
 
     * Room-action send tools (reply/react) must target the bound room. A
       cross-room target is denied here — ``PostToolUse`` is too late.
+    * An in-room reply/react reserves this turn's one atomic room-action slot
+      (see :func:`_reserve_room_action`), so ``Stop`` can tell a genuinely
+      silent turn from one whose outcome is honestly unknown.
     * Room-caused privileged execution is **not supported** through this
       advisory pre-tool seam: the hook cannot perform the ``I-040B``
       execute-time policy/digest recheck or one-use consumption around the
@@ -1577,6 +1858,12 @@ def handle_pre_tool(
                         "nunchi-v2 send safety: this room-caused turn may act only in "
                         f"the bound room {config.channel_id}; tool targets {target or '<none>'}."
                     )
+                tool_use_id = str(payload.get("tool_use_id") or "")
+                denial = _reserve_room_action(turn, tool_use_id, tool_name, tool_input)
+                if denial is not None:
+                    return _deny_tool(f"nunchi-v2: {denial}.")
+                room["turn"] = turn
+                store.write_room(room)
                 return _allow()
 
             entry = next(
@@ -1614,6 +1901,29 @@ def handle_pre_tool(
         return HookDecision(exit_code=2, diagnostics=(f"action guard unavailable: {exc}",))
 
 
+def _room_action_context(
+    payload: dict[str, Any], environ: dict[str, str]
+) -> tuple[ClaudeGateConfig, dict[str, Any], bool, bool, str, dict[str, Any], str] | None:
+    """Shared PostToolUse / PostToolUseFailure setup, or ``None`` to allow inert.
+
+    Returns ``(config, tools, is_reply, is_react, tool_name, tool_input,
+    tool_use_id)`` when this event names a room-action tool; ``None`` when the
+    caller should return a bare allow (unconfigured, or an unmapped tool).
+    """
+    config = ClaudeGateConfig.from_env(environ)
+    tools = _load_tools_config(config.tools_config_path)
+    tool_name = str(payload.get("tool_name") or "")
+    is_reply = tools["reply_tool_re"].fullmatch(tool_name) is not None
+    is_react = tools["react_tool_re"].fullmatch(tool_name) is not None
+    if not (is_reply or is_react):
+        return None
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    tool_use_id = str(payload.get("tool_use_id") or "")
+    return config, tools, is_reply, is_react, tool_name, tool_input, tool_use_id
+
+
 def handle_post_tool(
     payload: dict[str, Any],
     environ: dict[str, str],
@@ -1621,27 +1931,33 @@ def handle_post_tool(
     if not ClaudeGateConfig.is_configured(environ):
         return _allow()
     try:
-        config = ClaudeGateConfig.from_env(environ)
-        tools = _load_tools_config(config.tools_config_path)
-        tool_name = str(payload.get("tool_name") or "")
-        is_reply = tools["reply_tool_re"].fullmatch(tool_name) is not None
-        is_react = tools["react_tool_re"].fullmatch(tool_name) is not None
-        if not (is_reply or is_react):
+        context = _room_action_context(payload, environ)
+        if context is None:
             return _allow()
+        config, _tools, is_reply, _is_react, tool_name, tool_input, tool_use_id = context
         with RoomStateStore(config.state_dir) as store:
             room = store.read_room()
             turn = room.get("turn")
             session_id = str(payload.get("session_id") or "")
             if not isinstance(turn, dict) or turn.get("session_id") != session_id:
                 return _allow()
-            tool_input = payload.get("tool_input")
-            if not isinstance(tool_input, dict):
-                tool_input = {}
             if str(tool_input.get("chat_id") or "") != config.channel_id:
                 return _allow()
+            matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
+            if not matched:
+                # No open reservation binds this exact tool_use_id/input: do
+                # not attest an action the turn never reserved. This can only
+                # happen from a misconfiguration (PreToolUse not registered)
+                # or a mismatched/duplicate report — either way, silently
+                # trusting it would let an unbound send masquerade as the
+                # turn's attested action.
+                room["turn"] = turn
+                store.write_room(room)
+                return _allow(
+                    f"post-tool: no open reservation matches tool_use_id={tool_use_id!r}; "
+                    "action not attested"
+                )
             action = _observed_action(is_reply, tool_input)
-            if action is None:
-                return _allow()
             response = payload.get("tool_response")
             delivered = not (
                 isinstance(response, dict)
@@ -1650,14 +1966,71 @@ def handle_post_tool(
             store.append_turn_action(
                 {
                     "action": action,
+                    "matched_reservation": True,
                     "delivered": delivered,
                     "tool_name": tool_name,
                     "recorded_at": time.time(),
                 }
             )
+            room["turn"] = turn
+            store.write_room(room)
         return _allow()
     except (ClaudeGateConfigError, ClaudeGateStateError, OSError, ValueError) as exc:
         return _allow(f"observation of native action failed ({exc})")
+
+
+def handle_post_tool_failure(
+    payload: dict[str, Any],
+    environ: dict[str, str],
+) -> HookDecision:
+    """Resolve the matching reservation when a reserved room-action tool fails.
+
+    ``PostToolUseFailure`` fires instead of ``PostToolUse`` when the tool call
+    itself failed; it carries the same ``tool_use_id`` the corresponding
+    ``PreToolUse`` reserved. Closing the reservation here — not just on
+    success — is what lets ``Stop`` distinguish "the send failed" (attested,
+    ``outcome=sent``, transport stage ``failed``) from "nothing ever closed
+    the reservation" (honestly ``unknown``, never silence).
+    """
+    if not ClaudeGateConfig.is_configured(environ):
+        return _allow()
+    try:
+        context = _room_action_context(payload, environ)
+        if context is None:
+            return _allow()
+        config, _tools, is_reply, _is_react, tool_name, tool_input, tool_use_id = context
+        with RoomStateStore(config.state_dir) as store:
+            room = store.read_room()
+            turn = room.get("turn")
+            session_id = str(payload.get("session_id") or "")
+            if not isinstance(turn, dict) or turn.get("session_id") != session_id:
+                return _allow()
+            if str(tool_input.get("chat_id") or "") != config.channel_id:
+                return _allow()
+            matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
+            if not matched:
+                room["turn"] = turn
+                store.write_room(room)
+                return _allow(
+                    f"post-tool-failure: no open reservation matches "
+                    f"tool_use_id={tool_use_id!r}; action not attested"
+                )
+            action = _observed_action(is_reply, tool_input)
+            store.append_turn_action(
+                {
+                    "action": action,
+                    "matched_reservation": True,
+                    "delivered": False,
+                    "tool_name": tool_name,
+                    "error": str(payload.get("error") or ""),
+                    "recorded_at": time.time(),
+                }
+            )
+            room["turn"] = turn
+            store.write_room(room)
+        return _allow()
+    except (ClaudeGateConfigError, ClaudeGateStateError, OSError, ValueError) as exc:
+        return _allow(f"observation of native action failure failed ({exc})")
 
 
 def _observed_action(is_reply: bool, tool_input: dict[str, Any]) -> dict[str, Any] | None:
@@ -1704,6 +2077,9 @@ _SETTINGS_TEMPLATE = """{
     ],
     "PostToolUse": [
       {"hooks": [{"type": "command", "command": "%(wrapper)s post-tool", "timeout": 20}]}
+    ],
+    "PostToolUseFailure": [
+      {"hooks": [{"type": "command", "command": "%(wrapper)s post-tool-failure", "timeout": 20}]}
     ]
   }
 }"""
@@ -1716,7 +2092,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "hook",
-        choices=["user-prompt-submit", "stop", "pre-tool", "post-tool", "print-settings"],
+        choices=[
+            "user-prompt-submit",
+            "stop",
+            "pre-tool",
+            "post-tool",
+            "post-tool-failure",
+            "print-settings",
+        ],
     )
     parser.add_argument(
         "--wrapper",
@@ -1728,12 +2111,25 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(_SETTINGS_TEMPLATE % {"wrapper": args.wrapper, "timeout": 120})
         sys.stdout.write("\n")
         return 0
-    try:
-        payload = json.loads(sys.stdin.read() or "{}")
-    except ValueError:
-        payload = {}
+    # Deliberately uncaught: a stdin read failure, a strict-parse failure
+    # (malformed JSON, a duplicate key, a non-finite constant), or a
+    # well-formed-but-wrong-shaped payload (not a JSON object) all crash this
+    # process rather than silently synthesizing an empty payload. An empty
+    # payload reads to every handler below as "no room event, no session" —
+    # exactly the shape of a legitimate operator prompt or an inert
+    # unconfigured call — so quietly manufacturing one here would let a
+    # corrupted hook invocation bypass both the user-prompt-submit gate and
+    # the pre-tool privileged-action guard. The wrapper (not this process)
+    # is the fail-closed/fail-open boundary for a gate that cannot run: it
+    # already converts any nonzero exit into the correct per-event outcome
+    # (block for user-prompt-submit, deny for pre-tool, open for
+    # stop/post-tool/post-tool-failure), and it already passes stderr
+    # through, so the traceback below reaches the same diagnostic surface
+    # every other gate crash does.
+    raw_stdin = sys.stdin.buffer.read()
+    payload = _strict_json_loads(raw_stdin) if raw_stdin.strip() else {}
     if not isinstance(payload, dict):
-        payload = {}
+        raise ValueError("hook stdin payload must be a JSON object")
     environ = dict(os.environ)
     if args.hook == "user-prompt-submit":
         decision = handle_user_prompt_submit(payload, environ)
@@ -1741,8 +2137,10 @@ def main(argv: list[str] | None = None) -> int:
         decision = handle_stop(payload, environ)
     elif args.hook == "pre-tool":
         decision = handle_pre_tool(payload, environ)
-    else:
+    elif args.hook == "post-tool":
         decision = handle_post_tool(payload, environ)
+    else:
+        decision = handle_post_tool_failure(payload, environ)
     return decision.emit()
 
 

@@ -15,8 +15,8 @@ This README is the operator install/verify guide.
 
 | Path | Role |
 |---|---|
-| `nunchi_claude_v2.py` | The integration: `user-prompt-submit`, `stop`, `pre-tool`, `post-tool` subcommands plus `print-settings` |
-| `nunchi-claude-v2-hook.sh` | Hook wrapper. Enforces fail direction at the process boundary, not only inside the Python gate: a configured `user-prompt-submit` whose gate cannot run (missing `python3`, missing gate file, import/startup crash, killed by signal, any nonzero exit) blocks the room prompt rather than admitting it; `pre-tool` fails closed (exit 2); `stop`/`post-tool` fail open. Unconfigured (no policy) is inert and fails open everywhere. |
+| `nunchi_claude_v2.py` | The integration: `user-prompt-submit`, `stop`, `pre-tool`, `post-tool`, `post-tool-failure` subcommands plus `print-settings` |
+| `nunchi-claude-v2-hook.sh` | Hook wrapper. Enforces fail direction at the process boundary, not only inside the Python gate: a configured `user-prompt-submit` whose gate cannot run (missing `python3`, missing gate file, import/startup crash, killed by signal, any nonzero exit) blocks the room prompt rather than admitting it; `pre-tool` fails closed (exit 2); `stop`/`post-tool`/`post-tool-failure` fail open. Unconfigured (no policy) is inert and fails open everywhere. |
 | `nunchi-claude-v2.env.example` | Trusted operator environment template |
 | `nunchi-claude-v2-tools.example.json` | Deterministic tool classification map (room-action tools + privileged capabilities) |
 | `transport-patch/` | Digest-pinned patches for the upstream Discord plugin and the fail-closed installer (see [transport-patch/README.md](transport-patch/README.md)) |
@@ -64,7 +64,7 @@ inside the env file), and the supported Claude Code Discord plugin.
    ```
 
    into `~/.claude/settings.json` (`UserPromptSubmit`, `Stop`, `PreToolUse`,
-   `PostToolUse`).
+   `PostToolUse`, `PostToolUseFailure`).
 
 5. **Restart the Claude Code session** so the patched plugin process and the
    hooks load together, then verify:
@@ -78,7 +78,7 @@ inside the env file), and the supported Claude Code Discord plugin.
 Upgrading the plugin replaces `server.ts` with a new upstream base: re-run the
 apply script, which refuses (exit 2) unless the base matches the pinned
 digest — an unreviewed upstream never gets patched silently. Roll back with
-`--rollback` (restores the pristine backup) and remove the four hook entries
+`--rollback` (restores the pristine backup) and remove the five hook entries
 from `settings.json` to disable the integration; state, receipts, and policy
 files are operator data and are never deleted by install or rollback.
 
@@ -92,11 +92,15 @@ and becomes at most one conversation opportunity: one canonical attention call
 calls; operational errors widen by policy) and, on every waking route, one
 normal Claude turn that replies, reacts, or ends silently. There is no
 send-time social judgment, no prose filter, no admission meta-answer, and no
-per-message response queue: bursts coalesce to one fresh successor. Suppressed
-and self events stay retained for later hearing; restarts drop pending wake
-work and keep retained context. Privileged tool actions in room-caused turns
-require a deterministic guard decision derived from the transport-attested
-requester.
+per-message response queue: bursts coalesce to one fresh successor. A woken
+turn's reply or reaction is reserved atomically at `PreToolUse` — bound to the
+exact `tool_use_id`, tool name, and input — and only `PostToolUse` or
+`PostToolUseFailure` reporting that same `tool_use_id` can close it; if `Stop`
+finds an open reservation neither hook closed, the turn's outcome is honestly
+`unknown`, never silently reported as silence. Suppressed and self events stay
+retained for later hearing; restarts drop pending wake work and keep retained
+context. Privileged tool actions in room-caused turns require a deterministic
+guard decision derived from the transport-attested requester.
 
 ## Verification
 
@@ -126,6 +130,13 @@ under `evidence/v2/claude-code/`.
 - **Guard coverage**: only tools named in the configured privileged map are
   guarded; unlisted tools, sessions with hooks disabled, and hook-bypassing
   host features are unenforced paths and are reported as such in evidence.
+- **Reservation coverage**: the one-reservation-per-turn and
+  `PostToolUse`/`PostToolUseFailure` correlation only see room-action tools
+  named by `room_action_tools.reply_pattern`/`react_pattern`, and only when
+  `PreToolUse` actually ran (a session with `PreToolUse` disabled but
+  `PostToolUse` still registered cannot bind a reservation, so an unreserved
+  send is reported as an unattested action, not "sent" — this is the same
+  disabled-hooks limitation as guard coverage, not a separate gap).
 - **Suppression surface**: an effectively suppressed prompt is blocked with an
   empty reason; the Claude Code host may still render a generic blocked-prompt
   marker in the local session transcript. The room never sees it.

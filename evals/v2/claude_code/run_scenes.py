@@ -47,6 +47,7 @@ class _Ctx:
             self.tmp, policy_path=helpers.write_claude_policy(self.tmp, document)
         )
         self._ts = 0
+        self._tool_use_seq = 0
 
     def close(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -78,13 +79,36 @@ class _Ctx:
             {"session_id": session_id}, self.environ, classifier_transport=transport
         )
 
+    def next_tool_use_id(self) -> str:
+        self._tool_use_seq += 1
+        return f"toolu-scene-{self._tool_use_seq}"
+
+    def pre_tool(self, tool_input, *, tool_name="mcp__discord__reply", session_id="sess-e1", tool_use_id):
+        return self.module.handle_pre_tool(
+            {
+                "session_id": session_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_use_id": tool_use_id,
+            },
+            self.environ,
+        )
+
     def post_tool(self, tool_input, *, tool_name="mcp__discord__reply", ok=True, session_id="sess-e1"):
+        # A real PostToolUse always follows the PreToolUse that reserved the
+        # turn's one room action for the identical tool_use_id/input: create
+        # that reservation here so the scene models one real tool call.
+        tool_use_id = self.next_tool_use_id()
+        self.pre_tool(
+            tool_input, tool_name=tool_name, session_id=session_id, tool_use_id=tool_use_id
+        )
         return self.module.handle_post_tool(
             {
                 "session_id": session_id,
                 "tool_name": tool_name,
                 "tool_input": tool_input,
                 "tool_response": {"ok": True} if ok else {"isError": True},
+                "tool_use_id": tool_use_id,
             },
             self.environ,
         )
