@@ -95,6 +95,9 @@ clients or the Discord gateway.
 - Room input cannot alter the channel allowlist, bearer credential, bot
   identity, endpoint, backstop or blocked-actor policy.
 - The bot token is used only for Discord IDENTIFY/RESUME and REST Authorization.
+- Credential-bearing gateway Resume connects only to `wss` on
+  `gateway.discord.gg` or a Discord-owned subdomain; Ready-event URLs with
+  userinfo, custom ports, paths, fragments, or nonstandard queries are refused.
 - The separate MCP token authenticates machine clients before MCP dispatch.
 - Tool errors are generic and never copy Discord response bodies or secrets.
 - Snowflake values are validated before URL construction; tool schemas reject

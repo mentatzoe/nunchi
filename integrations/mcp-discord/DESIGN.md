@@ -58,11 +58,14 @@ sequenceDiagram
    classify them as the deterministic self no-wake case.
 6. Message and reaction IDs come from Discord. Reactions require the gateway
    session and sequence; when either is unavailable no ID is invented.
-7. Sends use a closed allowed-mentions object, exact reply targets, Discord rate
+7. A Ready-event resume URL is accepted only over `wss` on a Discord-owned
+   `discord.gg` gateway host, then normalized to the fixed version and JSON
+   encoding before the credential-bearing Resume payload can use it.
+8. Sends use a closed allowed-mentions object, exact reply targets, Discord rate
    limits and a local per-channel backstop.
-8. The live notification queue is bounded and drops oldest when full. It is not
+9. The live notification queue is bounded and drops oldest when full. It is not
    persisted and never becomes a FIFO of conversational obligations.
-9. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
+10. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
 
 ## Failure semantics
 
@@ -71,6 +74,7 @@ sequenceDiagram
 | Missing/wrong/duplicate bearer header | `401`; MCP handler and Discord are untouched. |
 | Channel outside allowlist | Notification becomes unroutable or tool call fails; no REST effect. |
 | Gateway resumable disconnect | Resume exact session/sequence with bounded backoff. |
+| Non-Discord resume URL or malformed gateway identity/sequence | Refuse the resume target, discard resumable state, and reconnect for fresh identification. |
 | Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
 | Queue full | Drop oldest queued notification, retain newest, log one operational warning. |
 | MCP client disconnect or stalled notification write | Bound and cancel that session's write, remove only that session; other sessions and gateway continue concurrently. |

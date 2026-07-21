@@ -50,7 +50,7 @@ def _ready(session_id: str = "sess-1", own_id: str = "999", seq: int = 1) -> dic
         "s": seq,
         "d": {
             "session_id": session_id,
-            "resume_gateway_url": "wss://resume.example.gg",
+            "resume_gateway_url": "wss://gateway-us-east1-b.discord.gg",
             "user": {"id": own_id, "username": "our-bot", "bot": True},
         },
     }
@@ -229,7 +229,10 @@ class TestGatewayResume(unittest.TestCase):
         # Simulated disconnect (network drop); 1006-style close is resumable
         self.assertEqual(classify_close(1006), "resume")
         self.assertTrue(proto.can_resume)
-        self.assertEqual(proto.connect_url(), "wss://resume.example.gg/?v=10&encoding=json")
+        self.assertEqual(
+            proto.connect_url(),
+            "wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json",
+        )
 
         # Second connection: HELLO must trigger RESUME, not IDENTIFY
         proto.on_connection_open()
@@ -274,6 +277,59 @@ class TestGatewayResume(unittest.TestCase):
         proto.handle(_hello())
         actions = proto.handle({"op": 7, "d": None})
         self.assertEqual(actions, [CloseAndReconnect(resume=True)])
+
+    def test_ready_refuses_non_discord_resume_origins_before_token_reuse(self):
+        cases = (
+            "wss://attacker.example/gateway",
+            "https://gateway.discord.gg/",
+            "wss://gateway.discord.gg.attacker.example/",
+            "wss://token@gateway.discord.gg/",
+            "wss://gateway.discord.gg:444/",
+            "wss://gateway.discord.gg/?v=10&encoding=json&token=secret",
+        )
+        for url in cases:
+            with self.subTest(url=url):
+                proto = GatewayProtocol(TOKEN)
+                proto.on_connection_open()
+                proto.handle(_hello())
+                ready = _ready()
+                ready["d"]["resume_gateway_url"] = url
+                self.assertEqual(
+                    proto.handle(ready),
+                    [CloseAndReconnect(resume=False)],
+                )
+                self.assertFalse(proto.can_resume)
+                self.assertEqual(
+                    proto.connect_url(),
+                    "wss://gateway.discord.gg/?v=10&encoding=json",
+                )
+
+    def test_malformed_gateway_types_never_coerce_or_dispatch(self):
+        proto = GatewayProtocol(TOKEN)
+        self.assertEqual(proto.handle([]), [])
+        self.assertEqual(proto.handle({"op": True}), [])
+        self.assertEqual(
+            proto.handle({"op": 10, "d": {"heartbeat_interval": "45000"}}),
+            [CloseAndReconnect(resume=False)],
+        )
+        self.assertEqual(
+            proto.handle({"op": 9, "d": "false"}),
+            [CloseAndReconnect(resume=False)],
+        )
+        self.assertEqual(
+            proto.handle(_message_create("777")),
+            [CloseAndReconnect(resume=False)],
+        )
+
+        ordered = GatewayProtocol(TOKEN)
+        ordered.on_connection_open()
+        ordered.handle(_hello())
+        ordered.handle(_ready(seq=5))
+        self.assertEqual(
+            ordered.handle(_message_create("777", seq=5)),
+            [CloseAndReconnect(resume=False)],
+        )
+        self.assertFalse(ordered.can_resume)
 
     def test_close_code_classification(self):
         self.assertEqual(classify_close(4004), "fatal")  # bad token
