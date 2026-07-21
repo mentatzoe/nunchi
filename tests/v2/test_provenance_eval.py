@@ -100,6 +100,36 @@ class ProvenanceAuditCases(unittest.TestCase):
         self.assertTrue(audit["passed"])
         self.assertEqual(audit["failures"], [])
 
+    def test_repository_audit_includes_integration_runtime_sources(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "src" / "nunchi"
+            package.mkdir(parents=True)
+            package.joinpath("__init__.py").write_text("\n", encoding="utf-8")
+            legacy = root / "integrations" / "owner" / "plugin.py"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text('if verdict == "PASS":\n    suppress()\n', encoding="utf-8")
+            contract = runner.load_surface_contract()
+            scripts = "\n".join(
+                f'{json.dumps(name)} = {json.dumps(target)}'
+                for name, target in contract["required_scripts"].items()
+            )
+            root.joinpath("pyproject.toml").write_text(
+                "[project]\n"
+                'name = "nunchi"\n'
+                'version = "2.0.0rc1"\n'
+                "[project.scripts]\n"
+                f"{scripts}\n",
+                encoding="utf-8",
+            )
+            audit = runner.audit_repository(root)
+
+        self.assertIn("v1-runtime-residue-present", audit["failures"])
+        self.assertEqual(
+            audit["residue_findings"][0]["path"],
+            "integrations/owner/plugin.py",
+        )
+
     def test_unexpected_entrypoint_is_a_failure_even_when_not_named_legacy(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
