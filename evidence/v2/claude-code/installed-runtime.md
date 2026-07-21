@@ -1,10 +1,10 @@
 # CC-06 — Installed runtime provenance (Claude Code V2)
 
-**Attempt 4**, recorded 2026-07-21 by the `v2-claude-owner` lane (Station,
-standing Claude Code agent). The Attempt 1/2/3 versions of this record are
-preserved in git history at candidates `6476b58` / `1990129` / `6513135`.
-Secrets are excluded by construction: no credential exists in any file this
-record names.
+**Attempt 5**, recorded 2026-07-21 by the `v2-claude-owner` lane (Station,
+standing Claude Code agent). The Attempt 1/2/3/4 versions of this record are
+preserved in git history at candidates `6476b58` / `1990129` / `6513135` /
+`a6a7a8b`. Secrets are excluded by construction: no credential exists in any
+file this record names.
 
 ## Host and harness
 
@@ -15,7 +15,7 @@ record names.
 | Session model | `claude-fable-5` |
 | Python (hook runtime) | `3.14.3` (Homebrew) |
 | Bun (plugin runtime) | `1.3.11` |
-| Nunchi package | `0.2.0` at Attempt-4 candidate `a6a7a8be8af1bf1e55f84113bc6db7e7a686c3fb` |
+| Nunchi package | `0.2.0` at Attempt-5 candidate `f6c34d12af907bad114ebceda6b1f52c0c026665` |
 
 ## Discord plugin (transport base)
 
@@ -34,12 +34,12 @@ record names.
 
 | Path | SHA-256 | Notes |
 |---|---|---|
-| `/Users/zmll/.claude/hooks/nunchi_claude_v2.py` | `e2bd2202664a94f9898cfe80eb9562b8bcf833769dca0f07bb59290e24add0e5` | Exact copy of `integrations/claude-code/nunchi_claude_v2.py` (unchanged since Attempt 3 — this attempt fixes only the shell wrapper) |
-| `/Users/zmll/.claude/hooks/nunchi-claude-v2-hook.sh` | `39988bfe3b8184fa077c95fa054c3bbaef785a62475b5ca3503be5f6baea2cbf` | Exact copy of the Attempt-4 `integrations/claude-code/nunchi-claude-v2-hook.sh` (fails closed on a configured `user-prompt-submit` gate failure) |
+| `/Users/zmll/.claude/hooks/nunchi_claude_v2.py` | `398dff634429bfbd25dd1ae525cb05af1aa95b0e5f7b3e59897f39cace08a9eb` | Exact copy of the Attempt-5 `integrations/claude-code/nunchi_claude_v2.py` (adds `_explicit_allow` for the operator-prompt-while-configured path) |
+| `/Users/zmll/.claude/hooks/nunchi-claude-v2-hook.sh` | `563423ef1e7d16489170ade417ec0b57059924d24eeb6eb0a1d88099db23e89f` | Exact copy of the Attempt-5 `integrations/claude-code/nunchi-claude-v2-hook.sh` (requires non-empty, brace-wrapped stdout for a configured `user-prompt-submit` at exit 0) |
 | `/Users/zmll/.claude/nunchi-claude-v2.env` | `311c960415837551ef885833d69deec7edaf4a4f330b4c62524bb54d5c8f7ce6` | Room binding: channel `1522258711047831653`, self `1484970897893752902`, participant `station`; sidecar path the owner-only `…/discord/nunchi-v2/native-events.jsonl`; no credential |
 | `/Users/zmll/.claude/nunchi/claude-v2-policy.json` | `c4a74571b1d5d7f372c2558ab6f9ea05110bc2a70f10302873039b6a086c4973` | Trusted-bypass posture: `preattention_enabled=false`, `social_suppression_enabled=false`, `error_action=WAKE`, empty authorization grants, receipt sink `/Users/zmll/.claude/nunchi/claude-v2-receipts` (0700) |
 | `/Users/zmll/.claude/nunchi/claude-v2-tools.json` | `d48ef9c965ea6f53dc3218e39a43c747fdb99a97b3246bb572da8ff891daaa15` | Room-action tool patterns + privileged map (`Bash`, `Write/Edit/NotebookEdit`). With deny-unsupported semantics, every privileged room-caused proposal is denied regardless of grants |
-| `/Users/zmll/.claude/nunchi/runtime/` | manifest `de543b54287dae1dbff09932aea9c532003882f16edd2bfce2e285c86e15e917` | Copy-with-manifest deployment of `src/nunchi` (43 files, per-file SHA-256 in `DEPLOY-MANIFEST.json`, source commit `a6a7a8be8af1…`); no symlinks |
+| `/Users/zmll/.claude/nunchi/runtime/` | manifest `6a6a1e749e0e2be9b6e4d382d312803c4a575922b3df9a7a56e80bec7faa3a48` | Copy-with-manifest deployment of `src/nunchi` (43 files, per-file SHA-256 in `DEPLOY-MANIFEST.json`, source commit `f6c34d12af90…`); no symlinks |
 
 ## Hook registration state — NOT yet armed
 
@@ -57,7 +57,7 @@ honestly:
    bound room deaf (every delivery is honestly unroutable without the
    native-fact sidecar). Fail-closed ordering requires the patch first.
 
-## Installed-hook probes (executed against the Attempt-4 staged components)
+## Installed-hook probes (executed against the Attempt-5 staged components)
 
 0. **Foreign-room channel prompt** — the installed gate produced
    `{"decision": "block", "reason": ""}` with stderr `foreign-room-declined:
@@ -75,7 +75,7 @@ honestly:
    `/Users/zmll/.claude/nunchi/claude-v2-state/events.jsonl`. This is the live
    fail-closed behavior for an unpatched/partially-armed transport: no
    identity is guessed and no social result is fabricated.
-3. **Wrapper-level fault injection (the Attempt-4 fix, exercised live)** —
+3. **Wrapper-level fault injection, Attempt-4 fix (exercised live)** —
    with a bound-room channel prompt, `nunchi_claude_v2.py` was temporarily
    replaced on disk with a syntax-broken file (`this is not python (`), the
    original preserved by exact byte content beforehand. The installed
@@ -84,9 +84,21 @@ honestly:
    to bypass."}` on stdout (exit `0`) with the Python `SyntaxError` traceback
    and `user-prompt-submit gate unavailable (gate exit 1); blocking
    fail-closed` on stderr — the prompt was never admitted. The gate file was
-   then restored and its SHA-256 (`e2bd2202…`) re-verified to match the
-   pre-probe digest exactly, so this probe left no drift in the staged
-   install.
+   then restored and re-verified by SHA-256 to match the pre-probe digest
+   exactly.
+4. **Wrapper-level fault injection, Attempt-5 fix (exercised live) — the
+   exact scenario Codex/Vigil reported** — with a bound-room channel prompt,
+   `nunchi_claude_v2.py` was temporarily replaced on disk with a genuinely
+   empty (zero-byte) file — no syntax error, executes cleanly, exits 0,
+   writes nothing — reproducing `[N2-CLAUDE-A4-REWORK-01]` exactly. The
+   installed wrapper produced `{"decision": "block", "reason": "nunchi-v2
+   gate unavailable; failing closed. Fix the gate or unset
+   NUNCHI_CLAUDE_V2_POLICY to bypass."}` on stdout (exit `0`) with
+   `user-prompt-submit gate unavailable (gate produced empty or malformed
+   output); blocking fail-closed` on stderr — the prompt was never admitted.
+   The gate file was then restored and its SHA-256 (`398dff63…`)
+   re-verified to match the pre-probe digest exactly, so this probe left no
+   drift in the staged install.
 
 ## Remaining operator steps to arm the live V2 runtime
 

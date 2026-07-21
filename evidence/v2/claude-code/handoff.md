@@ -507,3 +507,88 @@ not; live scenes are pending Zoe's explicit approval to arm the host.
 fault injection, the prior Attempt-3 probes, focused/full tests, scenes,
 patch reproduction, and installed-digest comparison). This lane does not
 self-declare acceptance.
+
+---
+
+## Attempt 5 — 2026-07-21 (rework: empty/truncated gate file no longer silently admits)
+
+**Delivering lane**: `v2-claude-owner` — Station, model `claude-fable-5`.
+Attempt 4 (candidate `a6a7a8b`, evidence `9cbc18d`) fixed the wrapper's
+crash/nonzero-exit handling, but Codex/Vigil's independent review found a
+distinct, exit-status-invisible failure mode: a configured, existing-but-
+empty/truncated gate FILE executes cleanly under `python3` (no syntax error,
+exit 0, zero bytes of stdout), which the Attempt-4 wrapper still forwarded as
+silent admission. Reproduced by Codex against `9cbc18d`
+(`[N2-CLAUDE-A4-REWORK-01]`): `exit=0 stdout_bytes=0`. Attempts 1–4 and their
+evidence are preserved unchanged in git history; this attempt is a new
+candidate on the same branch, appended here.
+
+### Exact candidate and commit split
+
+- **Implementation candidate**: `f6c34d12af907bad114ebceda6b1f52c0c026665`
+  (descends from Attempt-4 evidence tip `9cbc18d` on branch
+  `claude/claude-code-v2-integration-3ac219`).
+- **Evidence-only binding**: the commit adding this Attempt-5 section (plus
+  refreshed provenance) sits on top; its diff from `f6c34d1` touches only
+  `evidence/v2/claude-code/`.
+
+Attempt-5 changed-file inventory (implementation candidate, `9cbc18d` →
+`f6c34d1`, the immediate parent — not `a6a7a8b`, which would also show the
+intervening Attempt-4 evidence commit's changes):
+
+```text
+M  integrations/claude-code/nunchi-claude-v2-hook.sh   # non-empty/brace-wrapped stdout required
+M  integrations/claude-code/nunchi_claude_v2.py        # _explicit_allow for the operator-prompt path
+M  tests/test_claude_code_hook_wrapper.py              # empty/truncated/malformed regressions + oracle fix
+M  tests/v2/test_claude_code.py                        # one assertion updated to the new inert-allow shape
+```
+
+No `src/`, `schemas/`, transport patches, or other lane's surface changed.
+
+### Correction (integrator's single required item)
+
+| Required correction | Resolution | Proof |
+|---|---|---|
+| a configured, empty/truncated gate file that exits 0 with zero bytes admits a bound-room prompt; the test oracle's prose was also inverted for this case | Traced every configured `user-prompt-submit` code path: the **only** legitimate exit-0-empty-output case was a plain operator (non-channel-tagged) prompt while configured — every other path already returned a real decision. Added `_explicit_allow()` (Python) so that path now emits a non-empty, semantically inert `hookSpecificOutput` with an empty `additionalContext` instead of nothing. With that gap closed, a real gate can never legitimately produce empty output for a configured `user-prompt-submit`, so the wrapper now requires non-empty, brace-wrapped stdout at exit 0 for that event and treats empty/malformed output exactly like a crash. Corrected `_cannot_be_interpreted_as_admission`'s inverted semantics: empty stdout at exit 0 **is** an implicit allow per Claude Code's actual contract — that was the exact gap the defect exploited, not a safe case. | `tests/test_claude_code_hook_wrapper.py`: `test_empty_gate_file_blocks_not_admits`, `test_truncated_gate_file_blocks_not_admits`, `test_gate_exits_zero_with_malformed_output_blocks`, `test_gate_exits_zero_with_truncated_json_blocks`, `test_healthy_configured_operator_prompt_gets_explicit_non_empty_allow`, `test_healthy_room_wake_through_real_gate_and_wrapper`, `test_healthy_room_block_through_real_gate_and_wrapper`, `UnconfiguredInertAcrossAllHookEventsCase` (all four hook events) + a live installed-host reproduction of the exact reported scenario (below) |
+
+### Deterministic commands and results (Attempt 5)
+
+`python3 -m unittest tests.test_claude_code_hook_wrapper` → **22 OK** (11 new);
+`python3 -m unittest tests.v2.test_claude_code` → 52 OK; the five-module guard
+run → **96 OK**; full baseline `python3 -m unittest` → **1195 OK (skipped=7)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay → 20 rows
+(19 PASS, 1 declared), byte-identical across runs (gate/wrapper fix does not
+touch attention/scene mechanics); patch reproducibility unchanged (`0d1ffaa0…`
+— this attempt touches no `.ts` or patch file); `git diff --check` → clean.
+Full table in `verification.md`.
+
+### Installed provenance and live fault-injection probe (Attempt 5)
+
+Staged gate digest `398dff634429bfbd25dd1ae525cb05af1aa95b0e5f7b3e59897f39cace08a9eb`,
+wrapper digest `563423ef1e7d16489170ade417ec0b57059924d24eeb6eb0a1d88099db23e89f`.
+With the installed wrapper live, `nunchi_claude_v2.py` was temporarily
+replaced with a genuinely empty (zero-byte) file — the exact reported
+reproduction — a bound-room channel prompt was submitted, and the installed
+wrapper produced the block decision with `gate produced empty or malformed
+output` on stderr — the prompt was never admitted. The gate file was then
+restored and its SHA-256 re-verified to match the pre-probe digest exactly,
+so the probe left no drift in the staged install. Full digests and the probe
+transcript are in `installed-runtime.md`.
+
+### Host-mutation approval still required (do not arm until Zoe approves)
+
+Unchanged: the live ladder remains NOT RUN pending Zoe's explicit approval to
+arm the host. The operator steps are unchanged (`installed-runtime.md`). This
+lane performed no repository-external host mutation beyond refreshing the
+staged (inert) copy and the one restore-verified fault-injection probe; no
+`settings.json` edit, no transport patch application, no outbound Discord
+send beyond textual status replies.
+
+### Known limitations and rejected claims (Attempt 5)
+
+Unchanged from Attempt 4. **Rejected claim**: "live parity is proven" — it is
+not; live scenes are pending Zoe's explicit approval to arm the host.
+
+**Handoff target**: `v2-integrator` for adversarial re-review (the exact
+prior probes plus this new fault-injection scenario). This lane does not
+self-declare acceptance.

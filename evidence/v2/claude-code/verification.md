@@ -1,24 +1,47 @@
 # Claude Code V2 — verification index
 
-**Attempt 4**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt 1/2/3
-indexes are preserved in git at candidates `6476b58` / `1990129` / `6513135`.
-Every command below was run on the Attempt-4 candidate
-`a6a7a8be8af1bf1e55f84113bc6db7e7a686c3fb`; results are quoted exactly.
+**Attempt 5**, recorded 2026-07-21, `v2-claude-owner` lane. The Attempt 1/2/3/4
+indexes are preserved in git at candidates `6476b58` / `1990129` / `6513135` /
+`a6a7a8b`. Every command below was run on the Attempt-5 candidate
+`f6c34d12af907bad114ebceda6b1f52c0c026665`; results are quoted exactly.
 
 ## Deterministic commands and results
 
 | Command | Result |
 |---|---|
-| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 11 tests … OK` |
+| `python3 -m unittest tests.test_claude_code_hook_wrapper` | `Ran 22 tests … OK` |
 | `python3 -m unittest tests.v2.test_claude_code` | `Ran 52 tests … OK` |
-| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 85 tests … OK` |
-| `python3 -m unittest` (full offline baseline) | `Ran 1184 tests in 27.2s — OK (skipped=7)` |
+| `python3 -m unittest tests.test_no_home_writes tests.test_sentinel_forgery tests.test_no_second_judgment tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` | `Ran 96 tests … OK` |
+| `python3 -m unittest` (full offline baseline) | `Ran 1195 tests in 19.6s — OK (skipped=7)` |
 | `python3 scripts/check_governance.py --check-cli` | `governance boundary + CLI: OK (SpecKit 0.12.11)` |
-| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL; the wrapper fix does not touch scene mechanics) |
-| `git diff --check` (staged Attempt-4 tree) | clean |
-| Patch reproducibility (scratch build) onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target (unchanged since Attempt 3 — this attempt touches only the shell wrapper) |
+| `PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes --out-dir <tmp>` | `cc-scenes: 20 rows, 19 PASS, 1 declared limitations` (two independent runs to separate temp dirs produced byte-identical JSONL; the gate/wrapper fix does not touch attention/scene mechanics) |
+| `git diff --check` (staged Attempt-5 tree) | clean |
+| Patch reproducibility (scratch build) onto pinned base `c3c79c65…` | `BOTH APPLY CLEAN`; result digest `0d1ffaa0…` equals the pinned target (unchanged since Attempt 3 — this attempt touches only the gate and shell wrapper, not the transport patches) |
 | Installer safety: apply against a symlinked target / rollback against a symlinked backup | exit 2 each, `symlink; refusing to follow`, referent bytes unchanged |
-| Installed-host probes (Attempt 4, no arming) | foreign-room prompt → `block`; bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output; **wrapper fault injection (syntax-broken gate) → `block` with the recovery-hint reason, gate restored and digest re-verified afterward** |
+| Installed-host probes (Attempt 5, no arming) | foreign-room prompt → `block`; bound-room prompt with no sidecar → `block` fail-closed; non-channel prompt → exit 0 no output; wrapper fault injection (syntax-broken gate) → `block`; **wrapper fault injection (genuinely empty/zero-byte gate file — the exact `[N2-CLAUDE-A4-REWORK-01]` reproduction) → `block` with the recovery-hint reason, gate restored and digest re-verified afterward** |
+
+## Empty/truncated-gate process-boundary fault injection (Attempt-5 correction)
+
+`tests/test_claude_code_hook_wrapper.py` adds coverage for the class of
+failure that exit-status checking alone cannot see — a gate that runs
+cleanly (exit 0) but never produces a real decision:
+
+| Case | Result |
+|---|---|
+| Empty (zero-byte) gate file | wrapper prints `{"decision": "block", ...}`; stderr names "empty or malformed output" |
+| Gate file with only a comment (truncated-write shape) | same block decision |
+| Gate exits 0 with non-JSON garbage stdout | wrapper's own block decision is emitted; the garbage is **not** forwarded |
+| Gate exits 0 with truncated JSON (`{"decision": "bl`) | wrapper's own complete block decision is emitted; the fragment is **not** forwarded verbatim |
+| Healthy configured operator prompt (real gate) | now emits an explicit, non-empty, semantically inert decision (`hookSpecificOutput.additionalContext: ""`) instead of empty stdout — closing the one legitimate empty-output path the defect exploited |
+| Healthy room WAKE (real gate + wrapper, trusted bypass) | `hookSpecificOutput.additionalContext` containing `source=PREATTENTION_BYPASS`, end to end through the actual wrapper |
+| Healthy room BLOCK (real gate + wrapper, self-retention) | `{"decision": "block"}`, end to end through the actual wrapper |
+| Unconfigured + broken gate, all four hook events | every event fully inert (empty stdout, exit 0) — explicitly tested per event, not just `user-prompt-submit` |
+
+The test oracle `_cannot_be_interpreted_as_admission` was also corrected: it
+previously treated empty stdout as safe/blocked, which is backwards — Claude
+Code's actual UserPromptSubmit contract treats empty stdout at exit 0 as an
+implicit allow. That inversion is exactly why the original defect was
+possible; the corrected oracle now matches the real contract.
 
 ## Wrapper process-boundary fault injection (Attempt-4 correction)
 
