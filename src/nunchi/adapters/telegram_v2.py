@@ -473,7 +473,12 @@ class TelegramChatAdapterV2:
         self.client = client
         identity = copy.deepcopy(self_user if self_user is not None else client.get_me())
         user_id = identity.get("id") if isinstance(identity, dict) else None
-        if isinstance(user_id, bool) or not isinstance(user_id, int):
+        if (
+            isinstance(user_id, bool)
+            or not isinstance(user_id, int)
+            or user_id < 1
+            or identity.get("is_bot") is not True
+        ):
             raise TelegramV2Error("Telegram self identity is invalid")
         self.source = TelegramEventSourceV2(
             allowed_chat_ids=frozenset({arguments.chat_id})

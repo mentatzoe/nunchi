@@ -230,6 +230,20 @@ class TelegramChatCases(unittest.TestCase):
             send_window_seconds=30,
         )
 
+    def test_self_identity_must_be_an_exact_bot_attestation(self):
+        for identity in (
+            {"id": 9001, "is_bot": False},
+            {"id": 9001, "is_bot": "true"},
+            {"id": "9001", "is_bot": True},
+        ):
+            with self.subTest(identity=identity):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramChatAdapterV2(
+                        self.arguments(),
+                        client=FakeTelegramClient([]),
+                        self_user=identity,
+                    )
+
     def test_initial_tail_is_context_only_then_live_batch_uses_newest_update(self):
         client = FakeTelegramClient(
             [

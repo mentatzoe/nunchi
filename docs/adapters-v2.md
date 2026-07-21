@@ -33,7 +33,8 @@ participant, platform, room, continuity scope and recoverability facts on the
 command line; room input cannot change them. Each stdin line is one closed host
 delivery with `delivery_id`, exact boolean `authorized`, `routing_room_id`,
 canonical `event`, and optional actor facts. Duplicate JSON keys, non-finite
-numbers, unknown fields and non-boolean authorization claims are rejected.
+numbers, unknown fields, non-boolean authorization claims, and a non-object
+actor map are rejected.
 
 ```sh
 nunchi-channel \
@@ -175,6 +176,14 @@ reaction deltas remain unavailable without prior-state comparison. Sends have
 a local backstop and request-correlated transport receipts, but Telegram offers
 no idempotency key for `sendMessage`, which remains an explicit transport
 limitation rather than a false guarantee.
+
+Chat, message, update, user, and structured-mention IDs must arrive in the
+Telegram Bot API's exact native integer types; stringified or boolean IDs are
+unroutable. The configured chat uses one canonical nonzero numeric string, and
+`getMe` must attest that the exact self ID is a bot before the adapter starts.
+Native `is_bot` booleans become human/bot facts, an absent field remains
+honestly `unknown`, and any present non-boolean value is rejected rather than
+coerced.
 
 ## Standalone Discord
 

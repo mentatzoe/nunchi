@@ -36,6 +36,14 @@ class GenericSourceCases(unittest.TestCase):
             routing_room_id="room-1",
         )
         self.assertEqual(accepted["event"]["author_id"], "reference:user:1")
+        malformed_actors = source.native_input(
+            delivery_id="reference:delivery:2",
+            event=event,
+            actors=[],
+            authorized=True,
+            routing_room_id="room-1",
+        )
+        self.assertEqual(malformed_actors["disposition"], "unroutable")
 
 
 class MatrixSourceCases(unittest.TestCase):
@@ -120,6 +128,22 @@ class MatrixSourceCases(unittest.TestCase):
                     "msgtype": "m.text",
                     "body": "hello",
                     "m.mentions": {"room": "false"},
+                },
+            },
+        )
+        self.assertEqual(result["disposition"], "unroutable")
+
+    def test_present_malformed_matrix_mention_list_is_not_treated_as_absent(self):
+        result = self.source.native_input(
+            "!room:example",
+            {
+                "event_id": "$event",
+                "type": "m.room.message",
+                "sender": "@zoe:example",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "hello",
+                    "m.mentions": {"user_ids": ""},
                 },
             },
         )
@@ -212,6 +236,36 @@ class TelegramSourceCases(unittest.TestCase):
                         "status": "member",
                         "user": {"id": True},
                     },
+                },
+            },
+            {
+                "update_id": 16,
+                "message": {
+                    "message_id": 8,
+                    "chat": {"id": "-42"},
+                    "from": {"id": 1001},
+                    "text": "wrong chat type",
+                },
+            },
+            {
+                "update_id": 17,
+                "message": {
+                    "message_id": 9,
+                    "chat": {"id": -42},
+                    "from": {"id": 1001, "is_bot": "false"},
+                    "text": "wrong actor kind",
+                },
+            },
+            {
+                "update_id": 18,
+                "message": {
+                    "message_id": 10,
+                    "chat": {"id": -42},
+                    "from": {"id": 1001},
+                    "text": "bad structured mention",
+                    "entities": [
+                        {"type": "text_mention", "user": {"id": "9001"}}
+                    ],
                 },
             },
         ]
