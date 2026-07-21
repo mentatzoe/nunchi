@@ -32,6 +32,7 @@ from .gateway import (
     classify_close,
     close_hint,
 )
+from .rest import _strict_json
 from .ws import WSClient, WSClosed, WSError
 
 logger = logging.getLogger("nunchi.mcp_discord.runner")
@@ -110,7 +111,7 @@ class GatewayRunner:
                 except WSClosed as exc:
                     return exc.code
                 try:
-                    payload = json.loads(text)
+                    payload = _strict_json(text)
                 except ValueError:
                     logger.warning("dropping malformed gateway payload")
                     continue

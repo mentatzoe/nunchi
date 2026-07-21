@@ -46,7 +46,7 @@ class DiscordRestError(Exception):
         self.status = status
 
 
-def _strict_json(raw: bytes):
+def _strict_json(raw: str | bytes):
     def pairs(items):
         result = {}
         for key, value in items:
