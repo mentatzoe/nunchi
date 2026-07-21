@@ -189,6 +189,25 @@ class TelegramActionCases(unittest.TestCase):
         self.assertEqual(client.actions[0], ("reaction", CHAT, 12, "👍"))
         self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
 
+    def test_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        client = FakeTelegramClient([])
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(TelegramV2Error, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
 
 class TelegramChatCases(unittest.TestCase):
     def setUp(self):

@@ -195,6 +195,25 @@ class MatrixActionCases(unittest.TestCase):
         self.assertEqual(client.actions[0][3], "once")
         self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
 
+    def test_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        client = FakeMatrixClient([])
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(MatrixV2Error, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
 
 class MatrixRoomCases(unittest.TestCase):
     def setUp(self):

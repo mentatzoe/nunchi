@@ -351,6 +351,90 @@ class DiscordActionSinkCases(unittest.TestCase):
             self.sink("req-malformed", {"kind": "message", "content": "once"})
         self.assert_transport_receipt("req-malformed", "unknown")
 
+    def test_coercible_success_identity_records_unknown_not_sent(self):
+        def effect_then_coercible_response(channel_id, content, **kwargs):
+            self.rest.messages.append((channel_id, content, kwargs))
+            return {"id": 999, "channel_id": channel_id}
+
+        self.rest.create_message = effect_then_coercible_response
+        with self.assertRaises(Exception):
+            self.sink("req-coercible", {"kind": "message", "content": "once"})
+        self.assert_transport_receipt("req-coercible", "unknown")
+
+    def test_non_none_reaction_result_records_unknown_not_sent(self):
+        def effect_then_ambiguous_result(channel_id, message_id, reaction):
+            self.rest.reactions.append((channel_id, message_id, reaction))
+            return False
+
+        self.rest.create_reaction = effect_then_ambiguous_result
+        with self.assertRaises(Exception):
+            self.sink(
+                "req-reaction-ambiguous",
+                {
+                    "kind": "reaction",
+                    "target_event_id": "discord:message:111",
+                    "reaction": "👀",
+                },
+            )
+        self.assert_transport_receipt("req-reaction-ambiguous", "unknown")
+
+    def test_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = DiscordActionSinkV2(
+            channel_id="42",
+            rest=self.rest,
+            backstop=SendBackstop(5, 10, clock=lambda: 0),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(Exception, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
+    def test_ambiguous_failure_receipt_cannot_claim_known_failure(self):
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = DiscordActionSinkV2(
+            channel_id="42",
+            rest=self.rest,
+            backstop=SendBackstop(5, 10, clock=lambda: 0),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(Exception, "action and receipt status are unknown"):
+            sink("req-invalid", {"kind": "message", "content": ""})
+        self.assertEqual(self.rest.messages, [])
+        self.assertEqual(receipts[-1]["body"]["delivery"], "failed")
+
+    def test_ambiguous_unknown_receipt_cannot_claim_known_outcome(self):
+        def effect_then_disconnect(channel_id, content, **kwargs):
+            self.rest.messages.append((channel_id, content, kwargs))
+            raise OSError("response lost after dispatch")
+
+        self.rest.create_message = effect_then_disconnect
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = DiscordActionSinkV2(
+            channel_id="42",
+            rest=self.rest,
+            backstop=SendBackstop(5, 10, clock=lambda: 0),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(Exception, "action and receipt status are unknown"):
+            sink("req-unknown-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
     def test_request_capacity_fails_without_evicting_replay_identity(self):
         sink = DiscordActionSinkV2(
             channel_id="42",
@@ -439,6 +523,43 @@ class MCPDiscordActionSinkCases(unittest.TestCase):
         with self.assertRaises(Exception):
             sink("req-malformed", {"kind": "message", "content": "once"})
         self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_coercible_mcp_success_identity_records_unknown_not_sent(self):
+        class CoercibleResponseClient(FakeMCPClient):
+            def call_tool(self, name, arguments):
+                self.calls.append((name, arguments))
+                return {
+                    "message": {
+                        "message_id": 999,
+                        "channel_id": arguments["channel_id"],
+                    }
+                }
+
+        receipts = []
+        sink = MCPDiscordActionSinkV2(
+            channel_id="42",
+            client=CoercibleResponseClient(),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(Exception):
+            sink("req-coercible", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_mcp_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = MCPDiscordActionSinkV2(
+            channel_id="42",
+            client=FakeMCPClient(),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(Exception, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
 
 
 class V2ServerBoundaryCases(unittest.TestCase):

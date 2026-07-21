@@ -39,8 +39,8 @@ class MCPToolClientLike(Protocol):
 
 
 def _snowflake(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text if text.isdigit() else None
+    """Return an exact JSON snowflake string without coercing its type."""
+    return value if isinstance(value, str) and value.isdigit() else None
 
 
 def _event_snowflake(value: object, prefix: str) -> str | None:
@@ -101,7 +101,13 @@ class DiscordActionSinkV2:
         self._consumed_request_ids: set[str] = set()
 
     def _write(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
+        returned = self.receipt_sink(
+            transport_receipt(request_id, delivery, detail=detail)
+        )
+        if returned is not None:
+            raise DiscordV2ActionError(
+                "Discord action receipt persistence is unknown"
+            )
 
     def _fail(self, request_id: str, detail: str) -> None:
         try:
@@ -161,7 +167,15 @@ class DiscordActionSinkV2:
                 )
             else:
                 target, reaction = operation[1]
-                self.rest.create_reaction(self.channel_id, target, reaction)
+                returned = self.rest.create_reaction(
+                    self.channel_id,
+                    target,
+                    reaction,
+                )
+                if returned is not None:
+                    raise DiscordV2ActionError(
+                        "Discord reaction result is invalid"
+                    )
         except Exception as exc:
             self._unknown(request_id, "discord-api-outcome-unknown", exc)
         try:
@@ -234,7 +248,13 @@ class MCPDiscordActionSinkV2:
         self._consumed_request_ids: set[str] = set()
 
     def _receipt(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
+        returned = self.receipt_sink(
+            transport_receipt(request_id, delivery, detail=detail)
+        )
+        if returned is not None:
+            raise DiscordV2ActionError(
+                "Discord MCP action receipt persistence is unknown"
+            )
 
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:

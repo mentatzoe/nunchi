@@ -346,9 +346,13 @@ class TelegramActionSinkV2:
         self._lock = threading.RLock()
 
     def _receipt(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(
+        returned = self.receipt_sink(
             transport_receipt(request_id, delivery, detail=detail)
         )
+        if returned is not None:
+            raise TelegramV2Error(
+                "Telegram action receipt persistence is unknown"
+            )
 
     def _fail(self, request_id: str, detail: str, cause: Exception | None = None) -> None:
         try:

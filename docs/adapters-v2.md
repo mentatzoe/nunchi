@@ -25,6 +25,9 @@ Each action is fully validated before its send backstop and remote dispatch.
 Invalid actions and backstop rejection are receipted `failed`; once a remote
 call begins, any lost/error response is conservatively receipted `unknown`,
 never `failed`, and is not automatically retried as if zero effect were proven.
+Every transport receipt sink must acknowledge persistence with exactly no
+return value. An exception or any non-`None` result leaves persistence unknown;
+the adapter never promotes that ambiguous write into a known terminal fact.
 
 ## Generic JSON-lines host
 
