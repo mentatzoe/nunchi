@@ -254,6 +254,7 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
             with self.subTest(path=path.relative_to(_REPO_ROOT)):
                 text = path.read_text(encoding="utf-8")
                 self.assertNotIn("still-unimplemented V2", text)
+                self.assertNotIn("contract remains current", text.lower())
                 self.assertIn("Historical", text)
 
 

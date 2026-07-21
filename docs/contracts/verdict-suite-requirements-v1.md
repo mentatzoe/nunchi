@@ -4,16 +4,17 @@
 
 **Created**: 2026-05-25
 
-**Status**: Implemented V1 regression contract
+**Status**: Historical V1 regression contract; list-only provenance material
 
 > **Relocated 2026-07-11:** This ordinary-path document preserves the FR/SC
 > identifiers referenced by `evals/verdict_suite/fixtures/**`. It is a product
 > evaluation contract, not an active SpecKit plan and not the selected V2
 > product contract. The dated 2026-07-11 reset recorded program `READY`,
 > implementation authority `NOT_GRANTED`, and every V2 slice `PLANNED` and
-> dormant; live state comes from the execution spine. This V1 regression
-> contract remains current until the atomic V2 merge is post-merge verified as
-> `CUTOVER_VERIFIED`.
+> dormant; live state comes from the execution spine. The installed V1 release
+> remains the verified current product until atomic V2 cutover, but this
+> contract is not a callable compatibility surface: its corpus is list-only and
+> current evaluation belongs to `evals/v2`.
 
 **Input**: User description: "Design a comprehensive test suite from the failure modes observed [in the TUR-12 adversarial classifier corpus] as its own standalone spec." Expanded on 2026-05-25 with the operator instruction "expand the test suite to also cover some of the usual failures that could come from human-shaped conversations. There should be some logs on the pilot-bot folder I'd like you to look at."
 
