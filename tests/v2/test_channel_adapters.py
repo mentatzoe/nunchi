@@ -149,6 +149,34 @@ class MatrixSourceCases(unittest.TestCase):
         )
         self.assertEqual(result["disposition"], "unroutable")
 
+    def test_present_matrix_timestamp_must_be_an_exact_native_integer(self):
+        for timestamp in (1_752_000_000_000.0, "1752000000000", True, None):
+            with self.subTest(timestamp=timestamp):
+                result = self.source.native_input(
+                    "!room:example",
+                    {
+                        "event_id": "$event",
+                        "type": "m.room.message",
+                        "sender": "@zoe:example",
+                        "origin_server_ts": timestamp,
+                        "content": {"msgtype": "m.text", "body": "hello"},
+                    },
+                )
+                self.assertEqual(result["disposition"], "unroutable")
+                self.assertIn("timestamp", result["reason"])
+
+        without_timestamp = self.source.native_input(
+            "!room:example",
+            {
+                "event_id": "$event-without-time",
+                "type": "m.room.message",
+                "sender": "@zoe:example",
+                "content": {"msgtype": "m.text", "body": "hello"},
+            },
+        )
+        self.assertEqual(without_timestamp["disposition"], "candidate-event")
+        self.assertNotIn("timestamp", without_timestamp["event"])
+
 
 class TelegramSourceCases(unittest.TestCase):
     def setUp(self):
@@ -275,6 +303,56 @@ class TelegramSourceCases(unittest.TestCase):
                     self.source.native_input(update)["disposition"],
                     "unroutable",
                 )
+
+    def test_present_telegram_timestamps_must_be_exact_native_integers(self):
+        for timestamp in (1_752_000_000.0, "1752000000", False, None):
+            with self.subTest(kind="message", timestamp=timestamp):
+                message = self.source.native_input(
+                    {
+                        "update_id": 20,
+                        "message": {
+                            "message_id": 11,
+                            "date": timestamp,
+                            "chat": {"id": -42},
+                            "from": {"id": 1001},
+                            "text": "hello",
+                        },
+                    }
+                )
+                self.assertEqual(message["disposition"], "unroutable")
+                self.assertIn("timestamp", message["reason"])
+
+            with self.subTest(kind="membership", timestamp=timestamp):
+                membership = self.source.native_input(
+                    {
+                        "update_id": 21,
+                        "chat_member": {
+                            "date": timestamp,
+                            "chat": {"id": -42},
+                            "from": {"id": 1001},
+                            "new_chat_member": {
+                                "status": "member",
+                                "user": {"id": 2002},
+                            },
+                        },
+                    }
+                )
+                self.assertEqual(membership["disposition"], "unroutable")
+                self.assertIn("timestamp", membership["reason"])
+
+        without_timestamp = self.source.native_input(
+            {
+                "update_id": 22,
+                "message": {
+                    "message_id": 12,
+                    "chat": {"id": -42},
+                    "from": {"id": 1001},
+                    "text": "hello",
+                },
+            }
+        )
+        self.assertEqual(without_timestamp["disposition"], "candidate-event")
+        self.assertNotIn("timestamp", without_timestamp["event"])
 
 
 if __name__ == "__main__":

@@ -12,19 +12,19 @@ def _unroutable(delivery_id: str, reason: str) -> dict[str, Any]:
 
 
 def _iso_millis(value: object) -> str | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
     try:
-        return datetime.fromtimestamp(float(value) / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(value / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
     except (OverflowError, OSError, ValueError):
         return None
 
 
 def _iso_seconds(value: object) -> str | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
     try:
-        return datetime.fromtimestamp(float(value), timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -124,6 +124,8 @@ class MatrixEventSourceV2:
         if not isinstance(content, dict):
             return _unroutable(delivery_id, "Matrix delivery content is malformed")
         timestamp = _iso_millis(native.get("origin_server_ts"))
+        if "origin_server_ts" in native and timestamp is None:
+            return _unroutable(delivery_id, "Matrix delivery timestamp is malformed")
         actors: dict[str, dict[str, Any]] = {}
 
         if event_type == "m.room.message":
@@ -346,6 +348,8 @@ class TelegramEventSourceV2:
                 reply["message_id"],
             )
         timestamp = _iso_seconds(message.get("date"))
+        if "date" in message and timestamp is None:
+            return _unroutable(delivery_id, "Telegram message timestamp is malformed")
         if timestamp is not None:
             event["timestamp"] = timestamp
         actors = {self.actor_id(user_id): author_facts}
@@ -413,6 +417,8 @@ class TelegramEventSourceV2:
             event["caused_by_actor_id"] = self.actor_id(caused_by["id"])
             actors[self.actor_id(caused_by["id"])] = caused_by_facts
         timestamp = _iso_seconds(update.get("date"))
+        if "date" in update and timestamp is None:
+            return _unroutable(delivery_id, "Telegram membership timestamp is malformed")
         if timestamp is not None:
             event["timestamp"] = timestamp
         return {"delivery_id": delivery_id, "disposition": "candidate-event", "authorized": True, "event": event, "actors": actors}
