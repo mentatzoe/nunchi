@@ -47,8 +47,8 @@ not be inferred from source approval.
 
 ## Review requirements
 
-1. Verify every listed SHA-256 and Git blob against effective source commit
-   `adc8b645791e217eea5d4704a5fcb53be1e18e38` and confirm the PR does not move.
+1. Verify every listed SHA-256 and Git blob against effective successor
+   implementation commit `91e97bad7c50de70d3fd41805c206c9a5804a7ef` and confirm the PR does not move.
 2. Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v
    tests.v2.participant.test_host tests.v2.participant.test_runtime
    tests.v2.participant.test_scheduling` (45 tests in the successor packet).
