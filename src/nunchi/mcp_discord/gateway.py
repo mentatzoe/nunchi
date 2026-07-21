@@ -20,13 +20,17 @@ logs opcodes and event names only (see :mod:`.hygiene`).
 from __future__ import annotations
 
 import sys
+import urllib.parse
 from dataclasses import dataclass
 
 GUILD_MESSAGES = 1 << 9
+GUILD_MESSAGE_REACTIONS = 1 << 10
 MESSAGE_CONTENT = 1 << 15
-INTENTS = GUILD_MESSAGES | MESSAGE_CONTENT
+INTENTS = GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT
+V2_INTENTS = INTENTS
 
 DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
+_GATEWAY_QUERY = "v=10&encoding=json"
 
 # Gateway opcodes (client-relevant subset)
 OP_DISPATCH = 0
@@ -45,12 +49,69 @@ _IDENTIFY_CLOSE_CODES = frozenset({4007, 4009})
 
 _CLOSE_HINTS = {
     4004: "authentication failed — check NUNCHI_DISCORD_TOKEN",
-    4013: "invalid intents — this build requests GUILD_MESSAGES | MESSAGE_CONTENT",
+    4013: (
+        "invalid intents — this build requests GUILD_MESSAGES | "
+        "GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT"
+    ),
     4014: (
         "disallowed intents — enable 'MESSAGE CONTENT INTENT' for this bot in the "
         "Discord Developer Portal (Bot -> Privileged Gateway Intents)"
     ),
 }
+
+
+def _gateway_url(value: object) -> str | None:
+    """Bind credential-bearing gateway connections to Discord TLS origins."""
+
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "wss"
+        or not isinstance(hostname, str)
+        or not hostname.isascii()
+        or not (
+            hostname == "gateway.discord.gg"
+            or hostname.endswith(".discord.gg")
+        )
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.path not in ("", "/")
+        or parsed.fragment
+    ):
+        return None
+    if parsed.query:
+        try:
+            query = urllib.parse.parse_qs(
+                parsed.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError:
+            return None
+        if query != {"v": ["10"], "encoding": ["json"]}:
+            return None
+    authority = hostname if port is None else f"{hostname}:{port}"
+    return f"wss://{authority}/?{_GATEWAY_QUERY}"
+
+
+def _nonempty_ascii(value: object, *, maximum: int = 512) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= maximum
+        and value.isascii()
+        and all(33 <= ord(character) <= 126 for character in value)
+    )
+
+
+def _snowflake(value: object) -> str | None:
+    return value if isinstance(value, str) and value.isdigit() else None
 
 
 def classify_close(code: int | None) -> str:
@@ -80,6 +141,8 @@ class Dispatch:
 
     event: str
     data: dict
+    sequence: int | None = None
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -117,10 +180,7 @@ class GatewayProtocol:
     def connect_url(self) -> str:
         """URL for the next connection (resume URL when resuming)."""
         if self.can_resume and self.resume_gateway_url:
-            url = self.resume_gateway_url
-            if "?" not in url:
-                url = url.rstrip("/") + "/?v=10&encoding=json"
-            return url
+            return self.resume_gateway_url
         return DEFAULT_GATEWAY_URL
 
     def on_connection_open(self) -> None:
@@ -134,6 +194,8 @@ class GatewayProtocol:
         self.session_id = None
         self.resume_gateway_url = None
         self.seq = None
+        self.own_user_id = None
+        self.ready = False
 
     # ------------------------------------------------------------------ #
     # Heartbeat bookkeeping (timing lives in the runner)
@@ -154,10 +216,22 @@ class GatewayProtocol:
     # ------------------------------------------------------------------ #
 
     def handle(self, payload: dict) -> list[Action]:
+        if not isinstance(payload, dict):
+            return []
         op = payload.get("op")
+        if isinstance(op, bool) or not isinstance(op, int):
+            return []
         if op == OP_HELLO:
-            data = payload.get("d") or {}
-            self.heartbeat_interval_ms = int(data.get("heartbeat_interval", 41250))
+            data = payload.get("d")
+            interval = data.get("heartbeat_interval") if isinstance(data, dict) else None
+            if (
+                isinstance(interval, bool)
+                or not isinstance(interval, int)
+                or interval < 1
+            ):
+                self.invalidate_session()
+                return [CloseAndReconnect(resume=False)]
+            self.heartbeat_interval_ms = interval
             if self.can_resume:
                 return [SendPayload(self._resume_payload())]
             return [SendPayload(self._identify_payload())]
@@ -169,7 +243,13 @@ class GatewayProtocol:
         if op == OP_RECONNECT:
             return [CloseAndReconnect(resume=True)]
         if op == OP_INVALID_SESSION:
-            resumable = bool(payload.get("d"))
+            resumable = payload.get("d")
+            if not isinstance(resumable, bool):
+                self.invalidate_session()
+                return [CloseAndReconnect(resume=False)]
+            if resumable and not self.can_resume:
+                self.invalidate_session()
+                return [CloseAndReconnect(resume=False)]
             if not resumable:
                 self.invalidate_session()
             return [CloseAndReconnect(resume=resumable)]
@@ -179,23 +259,61 @@ class GatewayProtocol:
 
     def _handle_dispatch(self, payload: dict) -> list[Action]:
         seq = payload.get("s")
-        if seq is not None:
-            self.seq = seq
         event = payload.get("t")
-        data = payload.get("d") or {}
+        data = payload.get("d")
+        if (
+            isinstance(seq, bool)
+            or not isinstance(seq, int)
+            or seq < 0
+            or not isinstance(event, str)
+            or not event
+            or not isinstance(data, dict)
+            or (self.seq is not None and seq <= self.seq)
+        ):
+            self.invalidate_session()
+            return [CloseAndReconnect(resume=False)]
+        self.seq = seq
         if event == "READY":
-            self.session_id = data.get("session_id")
-            self.resume_gateway_url = data.get("resume_gateway_url")
-            user = data.get("user") or {}
-            if user.get("id") is not None:
-                self.own_user_id = str(user["id"])
+            session_id = data.get("session_id")
+            resume_gateway_url = _gateway_url(data.get("resume_gateway_url"))
+            user = data.get("user")
+            own_user_id = (
+                _snowflake(user.get("id")) if isinstance(user, dict) else None
+            )
+            if (
+                not _nonempty_ascii(session_id)
+                or resume_gateway_url is None
+                or own_user_id is None
+            ):
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(resume=False)]
+            self.session_id = session_id
+            self.resume_gateway_url = resume_gateway_url
+            self.own_user_id = own_user_id
             self.ready = True
             return []
         if event == "RESUMED":
+            if (
+                not _nonempty_ascii(self.session_id)
+                or self.resume_gateway_url is None
+                or _snowflake(self.own_user_id) is None
+            ):
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(resume=False)]
             self.ready = True
             return []
-        if event == "MESSAGE_CREATE":
-            return [Dispatch("MESSAGE_CREATE", data)]
+        if event in (
+            "MESSAGE_CREATE",
+            "MESSAGE_REACTION_ADD",
+            "MESSAGE_REACTION_REMOVE",
+        ):
+            if not self.ready or _snowflake(self.own_user_id) is None:
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(resume=False)]
+            return [Dispatch(event, data, sequence=self.seq, session_id=self.session_id)]
         return []
 
     # ------------------------------------------------------------------ #

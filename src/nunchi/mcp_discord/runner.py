@@ -18,7 +18,12 @@ import logging
 import random
 from typing import Awaitable, Callable
 
-from .events import MessageEvent, filter_message_create
+from .events import (
+    MessageEvent,
+    ReactionEvent,
+    filter_message_create,
+    reaction_event_from_dispatch,
+)
 from .gateway import (
     CloseAndReconnect,
     Dispatch,
@@ -27,6 +32,7 @@ from .gateway import (
     classify_close,
     close_hint,
 )
+from .rest import _strict_json
 from .ws import WSClient, WSClosed, WSError
 
 logger = logging.getLogger("nunchi.mcp_discord.runner")
@@ -45,7 +51,7 @@ class GatewayRunner:
     def __init__(
         self,
         protocol: GatewayProtocol,
-        on_event: Callable[[MessageEvent], None],
+        on_event: Callable[[MessageEvent | ReactionEvent], None],
         *,
         connect: Callable[[str], Awaitable] | None = None,
         rng: Callable[[], float] = random.random,
@@ -105,10 +111,14 @@ class GatewayRunner:
                 except WSClosed as exc:
                     return exc.code
                 try:
-                    payload = json.loads(text)
+                    payload = _strict_json(text)
                 except ValueError:
-                    logger.warning("dropping malformed gateway payload")
-                    continue
+                    logger.warning(
+                        "malformed gateway payload; reconnecting from the last "
+                        "attested sequence"
+                    )
+                    await ws.send_close(_RECONNECT_CLOSE_CODE)
+                    return None
                 for action in self._protocol.handle(payload):
                     if isinstance(action, SendPayload):
                         await ws.send_text(json.dumps(action.payload))
@@ -117,7 +127,25 @@ class GatewayRunner:
                     elif isinstance(action, Dispatch):
                         if action.event == "MESSAGE_CREATE":
                             event = filter_message_create(
-                                action.data, self._protocol.own_user_id
+                                action.data,
+                                self._protocol.own_user_id,
+                                retain_self=True,
+                            )
+                            if event is not None:
+                                self._on_event(event)
+                        elif action.event in (
+                            "MESSAGE_REACTION_ADD",
+                            "MESSAGE_REACTION_REMOVE",
+                        ):
+                            event = reaction_event_from_dispatch(
+                                action.data,
+                                operation=(
+                                    "add"
+                                    if action.event == "MESSAGE_REACTION_ADD"
+                                    else "remove"
+                                ),
+                                gateway_session_id=action.session_id,
+                                gateway_sequence=action.sequence,
                             )
                             if event is not None:
                                 self._on_event(event)
