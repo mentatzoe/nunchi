@@ -91,7 +91,11 @@ receipt under one closed binding; run another process with another policy for a
 second room. The Matrix access token is read from `NUNCHI_MATRIX_TOKEN` by
 default and is never placed in room, classifier or participant projections.
 HTTPS is mandatory unless the operator explicitly supplies
-`--allow-insecure-http` for a controlled development homeserver.
+`--allow-insecure-http` for an exact `localhost` or loopback-IP development
+homeserver. The override never admits a plaintext DNS or remote address.
+Malformed ports, literal URL whitespace/control characters, embedded
+credentials, queries and fragments fail during configuration, before the
+access token can be sent.
 
 ```sh
 install -d -m 700 /absolute/operator-state
@@ -126,8 +130,11 @@ executor is exposed on this room surface.
 
 `nunchi-telegram` likewise binds one exact chat and policy per process. The bot
 token comes from `NUNCHI_TELEGRAM_TOKEN` by default, the API endpoint requires
-HTTPS unless development mode is explicitly enabled, and the token never
-crosses into participant or classifier input.
+HTTPS unless development mode is explicitly enabled for an exact `localhost`
+or loopback-IP endpoint, and the token never crosses into participant or
+classifier input. The plaintext override cannot target a DNS or remote host;
+malformed ports, literal URL whitespace/control characters, embedded
+credentials, queries and fragments fail before a request.
 
 ```sh
 install -d -m 700 /absolute/operator-state
