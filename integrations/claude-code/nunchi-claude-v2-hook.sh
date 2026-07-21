@@ -14,15 +14,19 @@
 #     safeguards (foreign-room decline, degraded-marker recording, invalid
 #     policy handling) run inside the gate, so a gate that cannot run must not
 #     let a room prompt through. The gate's stdout is captured so a partial
-#     crash cannot leak an admission. A gate that runs and exits 0 but is
-#     empty or truncated (a corrupted/zero-byte gate file executes cleanly
-#     and silently) is exit-status-invisible, so a configured
-#     user-prompt-submit additionally requires the gate's stdout to be
-#     non-empty and structurally JSON-shaped; the Python gate always emits an
-#     explicit decision for every successful configured path, including a
-#     plain operator prompt with nothing to add — so genuinely empty or
-#     malformed output can only mean the gate itself failed to run for real,
-#     and is treated exactly like a crash.
+#     crash cannot leak an admission. exit 0 alone does not prove the gate
+#     produced a real decision: an empty/truncated gate FILE executes without
+#     error and prints nothing, and brace-wrapped text is not proof either —
+#     {not-json}, an unsupported {"decision":"allow"}, and a duplicate-key
+#     object can all look brace-shaped while being invalid or semantically
+#     wrong (duplicate JSON keys silently resolve to the LAST value). A
+#     configured user-prompt-submit therefore validates stdout with strict
+#     JSON parsing (rejecting duplicate keys and non-finite constants) against
+#     the gate's own exact output contract — only a real block decision or a
+#     real UserPromptSubmit hookSpecificOutput context, with exact keys and
+#     types, passes; every other successful configured path already emits one
+#     of those two shapes, so anything else can only mean the gate did not
+#     really produce a decision, and is treated exactly like a crash.
 #   * pre-tool — fails CLOSED when configured: a privileged-action guard that
 #     cannot run must deny (exit 2), not wave privileged tools through.
 #   * stop / post-tool — fail OPEN: a broken turn-completion or observation
@@ -78,16 +82,66 @@ if [ "$STATUS" -ne 0 ]; then
   gate_unavailable "gate exit $STATUS"
 fi
 if [ "$HOOK_EVENT" = "user-prompt-submit" ] && configured; then
-  # exit 0 alone does not prove the gate produced a real decision: an empty
-  # or truncated gate FILE executes without error and prints nothing. The
-  # Python gate always writes an explicit, non-empty, JSON-object decision
-  # for every successful configured path, so empty or non-object output here
-  # can only mean the gate itself did not really run — treat it exactly like
-  # a crash rather than forwarding it as an implicit allow.
-  case "$OUTPUT" in
-    '{'*'}') : ;;
-    *) gate_unavailable "gate produced empty or malformed output" ;;
-  esac
+  # Strict, independent validation of the gate's stdout — not the gate's own
+  # json.dumps call, which a compromised or buggy gate need not have used.
+  # Accepts ONLY an exact block decision or an exact UserPromptSubmit
+  # hookSpecificOutput context, by exact key set and type; python3 is already
+  # a hard dependency at this point (used above to run the gate itself).
+  if ! printf '%s' "$OUTPUT" | python3 -c '
+import json
+import sys
+
+
+def _no_duplicate_keys(pairs):
+    seen = set()
+    result = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate key")
+        seen.add(key)
+        result[key] = value
+    return result
+
+
+def _reject_constant(name):
+    raise ValueError("non-finite constant")
+
+
+def _is_block(value):
+    return (
+        isinstance(value, dict)
+        and set(value) == {"decision", "reason"}
+        and value["decision"] == "block"
+        and isinstance(value["reason"], str)
+    )
+
+
+def _is_context(value):
+    if not isinstance(value, dict) or set(value) != {"hookSpecificOutput"}:
+        return False
+    hso = value["hookSpecificOutput"]
+    return (
+        isinstance(hso, dict)
+        and set(hso) == {"hookEventName", "additionalContext"}
+        and hso["hookEventName"] == "UserPromptSubmit"
+        and isinstance(hso["additionalContext"], str)
+    )
+
+
+try:
+    parsed = json.loads(
+        sys.stdin.read(),
+        object_pairs_hook=_no_duplicate_keys,
+        parse_constant=_reject_constant,
+    )
+except Exception:
+    sys.exit(1)
+
+sys.exit(0 if (_is_block(parsed) or _is_context(parsed)) else 1)
+'
+  then
+    gate_unavailable "gate produced empty, malformed, or unsupported output"
+  fi
 fi
 printf '%s' "$OUTPUT"
 exit 0

@@ -179,7 +179,7 @@ class ConfiguredGateFailureCases(_FaultInjectionCase):
         self.assertTrue(_cannot_be_interpreted_as_admission(result.stdout))
         parsed = json.loads(result.stdout.strip())
         self.assertEqual(parsed["decision"], "block")
-        self.assertIn("empty or malformed", result.stderr)
+        self.assertIn("empty, malformed, or unsupported", result.stderr)
 
     def test_truncated_gate_file_blocks_not_admits(self) -> None:
         # A gate file with only a trailing comment: parses, executes, exits
@@ -283,6 +283,102 @@ class ConfiguredGateFailureCases(_FaultInjectionCase):
         result = _run_wrapper("user-prompt-submit", {"session_id": "s", "prompt": "hi"}, env)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
+
+
+class StrictOutputValidationCases(_FaultInjectionCase):
+    """[N2-CLAUDE-A5-REWORK-01]: brace-wrapping alone is not proof of a real
+    decision. A configured user-prompt-submit at exit 0 must independently,
+    strictly validate stdout against the gate's own exact output contract —
+    every one of these reproductions is brace-wrapped (would have passed
+    Attempt 5's shell pattern check) but must still be blocked."""
+
+    def _stub_gate(self, literal_stdout: str) -> Path:
+        gate = self.tmp / "stub_gate.py"
+        gate.write_text(
+            "import sys\n"
+            "sys.stdin.read()\n"
+            f"sys.stdout.write({literal_stdout!r})\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
+        return gate
+
+    def _assert_blocked(self, literal_stdout: str) -> None:
+        env = self._configured_env(gate_path=self._stub_gate(literal_stdout))
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        parsed = json.loads(result.stdout.strip())
+        self.assertEqual(parsed["decision"], "block")
+        # The rejected output must never be forwarded verbatim.
+        self.assertNotEqual(result.stdout, literal_stdout)
+
+    def test_invalid_json_but_brace_wrapped_blocks(self) -> None:
+        self._assert_blocked('{not-json}')
+
+    def test_unsupported_decision_value_blocks(self) -> None:
+        # Well-formed JSON, brace-wrapped, but "allow" is not a decision the
+        # gate ever legitimately emits.
+        self._assert_blocked('{"decision":"allow"}')
+
+    def test_duplicate_key_json_blocks(self) -> None:
+        # A naive parser resolves this to {"decision": "allow"} (last key
+        # wins) while looking like a block on the surface.
+        self._assert_blocked('{"decision":"block","reason":"","decision":"allow"}')
+
+    def test_unrecognized_shape_blocks(self) -> None:
+        self._assert_blocked('{"unexpected":true}')
+
+    def test_block_missing_reason_key_blocks(self) -> None:
+        self._assert_blocked('{"decision":"block"}')
+
+    def test_block_extra_key_blocks(self) -> None:
+        self._assert_blocked('{"decision":"block","reason":"","extra":1}')
+
+    def test_block_wrong_reason_type_blocks(self) -> None:
+        self._assert_blocked('{"decision":"block","reason":5}')
+
+    def test_context_missing_additional_context_key_blocks(self) -> None:
+        self._assert_blocked('{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit"}}')
+
+    def test_context_extra_key_blocks(self) -> None:
+        self._assert_blocked(
+            '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit",'
+            '"additionalContext":"","extra":1}}'
+        )
+
+    def test_context_wrong_event_name_blocks(self) -> None:
+        self._assert_blocked(
+            '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":""}}'
+        )
+
+    def test_context_wrong_additional_context_type_blocks(self) -> None:
+        self._assert_blocked(
+            '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":5}}'
+        )
+
+    def test_non_finite_constant_blocks(self) -> None:
+        # NaN/Infinity are a non-standard JSON extension some parsers accept.
+        self._assert_blocked('{"decision":"block","reason":NaN}')
+
+    def test_exact_block_shape_passes(self) -> None:
+        # Control: the real gate-owned block shape, byte for byte, passes.
+        env = self._configured_env(
+            gate_path=self._stub_gate('{"decision": "block", "reason": "why"}')
+        )
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '{"decision": "block", "reason": "why"}')
+
+    def test_exact_context_shape_passes(self) -> None:
+        # Control: the real gate-owned context shape, byte for byte, passes.
+        shape = (
+            '{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", '
+            '"additionalContext": "note"}}'
+        )
+        env = self._configured_env(gate_path=self._stub_gate(shape))
+        result = _run_wrapper("user-prompt-submit", _prompt_payload(), env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, shape)
 
 
 class PreToolAndStopDirectionCases(_FaultInjectionCase):
