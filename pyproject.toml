@@ -21,7 +21,6 @@ keywords = [
   "conversation",
   "turn-taking",
   "read-the-room",
-  "moderation",
   "openai-compatible",
 ]
 classifiers = [

@@ -22,6 +22,7 @@ class InstalledV2SurfaceCases(unittest.TestCase):
         self.assertIn("pre-attention", description)
         self.assertIn("pre-attention", keywords)
         self.assertNotIn("admission-gate", keywords)
+        self.assertNotIn("moderation", keywords)
         self.assertNotIn("should this agent speak", description)
 
     def test_pyproject_matches_the_closed_surface_contract(self):
