@@ -108,7 +108,13 @@ any non-contiguous sequence before a successor is delivered. Fresh identity or
 unverifiable lineage emits an explicit continuity-boundary notification.
 The bounded MCP event store replays a disconnected SSE stream within the live
 process; process restart is reported honestly through the subscription binding
-and history snapshot rather than claimed gap-free. Notification
+and history snapshot rather than claimed gap-free. A known gateway restart gap
+also remains set in signed history-handle/page coverage; REST history cannot by
+itself prove that every missed gateway event was recovered. Event-limit
+truncation uses a one-extra bounded probe and is reported as `events`, while
+byte truncation is reported independently. Replay-store exhaustion raises a
+supervised global health failure and terminates the transport even though the
+pinned MCP SDK catches its router-task exception internally. Notification
 writes are concurrent and individually bounded: a stalled client is evicted
 without delaying healthy clients or the Discord gateway; a global broadcast
 failure terminates the transport instead of hiding a delivery hole.

@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import threading
 from typing import Any
 
 
@@ -62,6 +63,17 @@ class DiscordHistoryContinuations:
         self.continuity_scope_id = continuity_scope_id
         self.max_events = max_events
         self.max_bytes = max_bytes
+        self._state_lock = threading.Lock()
+        self._has_restart_gap = False
+
+    def mark_restart_gap(self) -> None:
+        """Conservatively retain known gateway discontinuity for this process."""
+        with self._state_lock:
+            self._has_restart_gap = True
+
+    def _restart_gap(self) -> bool:
+        with self._state_lock:
+            return self._has_restart_gap
 
     def _token(self, payload: dict[str, Any]) -> str:
         raw = json.dumps(
@@ -105,7 +117,13 @@ class DiscordHistoryContinuations:
             "continuity_scope_id": self.continuity_scope_id,
             "trigger_event_id": trigger_event_id,
         }
-        handle = self._token({"kind": "handle", **binding})
+        handle = self._token(
+            {
+                "kind": "handle",
+                **binding,
+                "has_restart_gap": self._restart_gap(),
+            }
+        )
         return {
             "handle_id": handle,
             "bound_to": binding,
@@ -141,8 +159,9 @@ class DiscordHistoryContinuations:
             "room_id": self.room_id,
             "continuity_scope_id": self.continuity_scope_id,
             "trigger_event_id": handle.get("trigger_event_id"),
+            "has_restart_gap": handle.get("has_restart_gap"),
         }
-        if handle != expected:
+        if handle != expected or not isinstance(handle.get("has_restart_gap"), bool):
             raise DiscordContinuationError("continuation binding is invalid")
         anchor = request.get("anchor_event_id", handle["trigger_event_id"])
         if anchor != handle["trigger_event_id"]:
@@ -158,6 +177,20 @@ class DiscordHistoryContinuations:
                 raise DiscordContinuationError("continuation cursor binding is invalid")
             before = cursor["before"]
         return handle, before
+
+    def coverage(self, handle: dict[str, Any]) -> dict[str, Any]:
+        """Return conservative coverage for an issued/verified handle.
+
+        A gap learned after handle issuance still taints that handle.  This
+        state is intentionally not cleared: bounded REST history alone cannot
+        prove recovery of every gateway event kind in the missed interval.
+        """
+        has_restart_gap = bool(handle.get("has_restart_gap")) or self._restart_gap()
+        return {
+            "has_gaps": has_restart_gap,
+            "continuity": "session-only" if has_restart_gap else "restart-safe",
+            "has_restart_gap": has_restart_gap,
+        }
 
     def cursor(self, handle_id: str, before: str) -> str:
         if not isinstance(before, str) or not before.isdigit():

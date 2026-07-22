@@ -76,17 +76,35 @@ class BoundedEventStore(EventStore):
     """
 
     def __init__(self, max_events: int = 4096) -> None:
+        if isinstance(max_events, bool) or not isinstance(max_events, int) or max_events < 1:
+            raise ValueError("MCP replay store capacity is invalid")
         self._max_events = max_events
         self._counter = 0
         self._events: collections.OrderedDict[str, tuple[str, object | None]] = (
             collections.OrderedDict()
         )
         self._lock = asyncio.Lock()
+        self._failed = asyncio.Event()
+        self._failure: RuntimeError | None = None
+
+    def raise_if_failed(self) -> None:
+        if self._failure is not None:
+            raise self._failure
+
+    async def wait_failed(self) -> RuntimeError:
+        await self._failed.wait()
+        assert self._failure is not None
+        return self._failure
 
     async def store_event(self, stream_id: str, message: object | None) -> str:
         async with self._lock:
             if len(self._events) >= self._max_events:
-                raise RuntimeError("MCP replay store capacity is exhausted")
+                if self._failure is None:
+                    self._failure = RuntimeError(
+                        "MCP replay store capacity is exhausted; continuity is lost"
+                    )
+                    self._failed.set()
+                raise self._failure
             self._counter += 1
             event_id = f"nunchi-{self._counter}"
             self._events[event_id] = (stream_id, message)
@@ -129,6 +147,7 @@ class SessionRegistry:
         room_id: str,
         self_actor_id: str,
         capabilities: frozenset[str],
+        on_restart_gap=None,
     ) -> None:
         self._participant_id = participant_id
         self._room_id = room_id
@@ -138,6 +157,7 @@ class SessionRegistry:
         self._gateway_session_id: str | None = None
         self._gateway_sequence: int | None = None
         self._has_restart_gap = False
+        self._on_restart_gap = on_restart_gap
 
     def add(self, session: object) -> dict:
         if id(session) not in self._sessions:
@@ -171,6 +191,8 @@ class SessionRegistry:
             raise RuntimeError("notification crossed the bound MCP room")
         if params.get("kind") == "continuity-boundary":
             self._has_restart_gap = True
+            if self._on_restart_gap is not None:
+                self._on_restart_gap()
             self._gateway_session_id = None
             self._gateway_sequence = None
         else:
@@ -188,8 +210,11 @@ async def broadcast(
     *,
     method: str = V2_NOTIFICATION_METHOD,
     send_timeout: float = 5.0,
+    replay_store: BoundedEventStore | None = None,
 ) -> None:
     """Push one event concurrently; evict clients that fail or stop reading."""
+    if replay_store is not None:
+        replay_store.raise_if_failed()
     notification = _VendorNotification(method=method, params=params)
     await broadcast_sessions(
         registry.sessions(params),
@@ -197,6 +222,12 @@ async def broadcast(
         discard=registry.discard,
         send_timeout=send_timeout,
     )
+    # The pinned SDK routes store_event in a separate task and swallows that
+    # task's exception. Yield once, then surface its durable health bit here;
+    # the lifespan watcher below independently guarantees eventual shutdown.
+    await asyncio.sleep(0)
+    if replay_store is not None:
+        replay_store.raise_if_failed()
 
 
 def build_server(
@@ -255,12 +286,6 @@ def build_server(
 
 
 def serve(config: Config) -> int:
-    registry = SessionRegistry(
-        participant_id=config.participant_id,
-        room_id=config.channel_id,
-        self_actor_id=config.self_actor_id,
-        capabilities=frozenset(schema["name"] for schema in TOOL_SCHEMAS),
-    )
     in_flight = InFlight()
     backstop = SendBackstop(config.backstop_max_sends, config.backstop_window_seconds)
     rest = DiscordRestClient(config.token)
@@ -270,6 +295,13 @@ def serve(config: Config) -> int:
         participant_id=config.participant_id,
         room_id=config.channel_id,
         continuity_scope_id=f"discord:channel:{config.channel_id}",
+    )
+    registry = SessionRegistry(
+        participant_id=config.participant_id,
+        room_id=config.channel_id,
+        self_actor_id=config.self_actor_id,
+        capabilities=frozenset(schema["name"] for schema in TOOL_SCHEMAS),
+        on_restart_gap=continuations.mark_restart_gap,
     )
     executor = ToolExecutor(
         rest,
@@ -284,9 +316,10 @@ def serve(config: Config) -> int:
         in_flight,
         tool_schemas=TOOL_SCHEMAS,
     )
+    replay_store = BoundedEventStore(config.queue_maxsize * 16)
     session_manager = StreamableHTTPSessionManager(
         app=server,
-        event_store=BoundedEventStore(config.queue_maxsize * 16),
+        event_store=replay_store,
     )
 
     @contextlib.asynccontextmanager
@@ -321,11 +354,16 @@ def serve(config: Config) -> int:
                     registry,
                     params,
                     method=V2_NOTIFICATION_METHOD,
+                    replay_store=replay_store,
                 ),
                 shutdown=shutdown,
                 projector=source.notification_params,
             ),
             name="notification-pump",
+        )
+        replay_store_task = asyncio.create_task(
+            replay_store.wait_failed(),
+            name="mcp-replay-store-health",
         )
 
         def _on_gateway_done(task: asyncio.Task) -> None:
@@ -356,6 +394,15 @@ def serve(config: Config) -> int:
 
         pump_task.add_done_callback(_on_pump_done)
 
+        def _on_replay_store_done(task: asyncio.Task) -> None:
+            if task.cancelled() or shutdown.is_set():
+                return
+            exc = task.result()
+            logger.critical("%s — shutting down", exc)
+            signal.raise_signal(signal.SIGTERM)
+
+        replay_store_task.add_done_callback(_on_replay_store_done)
+
         async with session_manager.run():
             try:
                 yield
@@ -369,9 +416,14 @@ def serve(config: Config) -> int:
                         "%d send(s) still in flight after %.0fs drain timeout",
                         in_flight.count, config.drain_timeout_seconds,
                     )
-                for task in (gateway_task, pump_task):
+                for task in (gateway_task, pump_task, replay_store_task):
                     task.cancel()
-                await asyncio.gather(gateway_task, pump_task, return_exceptions=True)
+                await asyncio.gather(
+                    gateway_task,
+                    pump_task,
+                    replay_store_task,
+                    return_exceptions=True,
+                )
                 logger.info("transport shut down cleanly")
                 claims.close()
 

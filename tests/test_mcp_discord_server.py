@@ -642,7 +642,7 @@ class TestToolExecutor(unittest.TestCase):
             "read_history", self._history_request()
         )
         self.assertTrue(ok)
-        self.assertEqual(rest.history_calls, [("100", 10, "77")])
+        self.assertEqual(rest.history_calls, [("100", 11, "77")])
         self.assertEqual(len(payload["events"]), 2)
         self.assertEqual(payload["room_id"], "100")
 
@@ -1041,6 +1041,35 @@ class TestMcpBinding(unittest.TestCase):
         self.assertEqual(dumped["method"], V2_NOTIFICATION_METHOD)
         self.assertEqual(dumped["params"], {"schema_version": 2})
 
+    def test_registry_restart_boundary_taints_history_continuations(self):
+        from nunchi.mcp_discord import _binding
+
+        continuations = DiscordHistoryContinuations(
+            AUTH_TOKEN,
+            participant_id="vigil",
+            room_id="100",
+            continuity_scope_id="discord:channel:100",
+        )
+        capability = continuations.issue("discord:message:77")
+        registry = _binding.SessionRegistry(
+            participant_id="vigil",
+            room_id="100",
+            self_actor_id="999",
+            capabilities=TOOL_NAMES,
+            on_restart_gap=continuations.mark_restart_gap,
+        )
+        registry.sessions({"kind": "continuity-boundary", "channel_id": "100"})
+        handle, _before = continuations.verify_request(
+            {
+                "request_id": "req-gap",
+                "handle_id": capability["handle_id"],
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 1024,
+            }
+        )
+        self.assertTrue(continuations.coverage(handle)["has_restart_gap"])
+
     def test_bounded_event_store_replays_notifications_sent_without_live_stream(self):
         from nunchi.mcp_discord import _binding
 
@@ -1060,6 +1089,10 @@ class TestMcpBinding(unittest.TestCase):
             self.assertNotEqual(priming, second)
             with self.assertRaises(RuntimeError):
                 await store.store_event("_GET_stream", {"message": 3})
+            failure = await asyncio.wait_for(store.wait_failed(), 0.1)
+            self.assertIn("continuity is lost", str(failure))
+            with self.assertRaisesRegex(RuntimeError, "continuity is lost"):
+                store.raise_if_failed()
 
         asyncio.run(scenario())
 

@@ -71,7 +71,9 @@ sequenceDiagram
    message nonces, exact reply targets, shared Discord bucket limits and a local
    per-channel backstop.
 9. SSE registration precedes bounded history restoration. The process-local
-   event store replays disconnected streams and fails closed on capacity.
+   event store replays disconnected streams. Capacity exhaustion sets a
+   supervised global health failure and terminates the transport, including
+   when the pinned SDK swallows the router task's exception.
 10. The live notification queue is bounded. Overflow terminates the transport
    session before any post-gap event can be delivered; it is not persisted and
    never becomes a FIFO of conversational obligations.
@@ -90,6 +92,7 @@ sequenceDiagram
 | Queue full | Refuse the new event and terminate the transport session; the client reconnects and restores bounded message history as context under its declared restart gap. |
 | MCP client disconnect or stalled notification write | Replay from the event-store cursor when possible; evict only a client whose bounded write fails. |
 | Global notification broadcast failure | Terminate the transport rather than delivering later events across an invisible gap. |
+| MCP replay-store exhaustion/router death | Signal global continuity failure and terminate the transport; never degrade to zero-session success. |
 | Discord 429/5xx | Shared bucket/429 limits are honored. Ambiguous POST is retried only with enforced nonce; otherwise outcome is unknown. |
 | Discord 401/403 | Immediate non-retryable generic tool failure. |
 | SIGTERM/SIGINT | Stop notifications, drain bounded in-flight tools, close gateway, exit. |

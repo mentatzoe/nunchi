@@ -451,11 +451,22 @@ class ToolExecutor:
         except Exception:
             return ({"error": "history continuation request is invalid"}, False)
         limit = arguments["max_events"]
+        fetch_limit = min(limit + 1, 100)
         messages = self._rest.get_messages(
             self._channel_id,
-            limit=limit,
+            limit=fetch_limit,
             before=before,
         )
+        truncated_by_events = len(messages) > limit
+        if truncated_by_events:
+            messages = messages[:limit]
+        elif len(messages) == limit and limit == 100 and messages:
+            # Discord caps one history call at 100, so a one-extra probe needs
+            # a second bounded request at that exact edge.
+            oldest = shape_message(messages[-1])["message_id"]
+            truncated_by_events = bool(
+                self._rest.get_messages(self._channel_id, limit=1, before=oldest)
+            )
         shaped = [shape_message(message) for message in messages]
         if any(message["channel_id"] != self._channel_id for message in shaped):
             return ({"error": "Discord history response crossed the bound room"}, False)
@@ -491,7 +502,13 @@ class ToolExecutor:
             }
             for actor_id in event["mentioned_actor_ids"]:
                 actors.setdefault(actor_id, {})
-        has_more = truncated_by_bytes or len(messages) == limit
+        has_more = truncated_by_bytes or truncated_by_events
+        truncated_by = []
+        if truncated_by_events:
+            truncated_by.append("events")
+        if truncated_by_bytes:
+            truncated_by.append("bytes")
+        continuity = self._continuations.coverage(handle)
         page = {
             "request_id": arguments["request_id"],
             "handle_id": arguments["handle_id"],
@@ -504,10 +521,10 @@ class ToolExecutor:
             "coverage": {
                 "has_more_before": has_more,
                 "has_more_after": None,
-                "has_gaps": False,
-                "truncated_by": ["bytes"] if truncated_by_bytes else [],
-                "continuity": "restart-safe",
-                "has_restart_gap": False,
+                "has_gaps": continuity["has_gaps"],
+                "truncated_by": truncated_by,
+                "continuity": continuity["continuity"],
+                "has_restart_gap": continuity["has_restart_gap"],
                 "max_events": arguments["max_events"],
                 "max_bytes": arguments["max_bytes"],
             },

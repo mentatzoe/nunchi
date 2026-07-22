@@ -945,11 +945,89 @@ class AdversarialTransportClosureCases(unittest.TestCase):
         )
         self.assertTrue(ok)
         self.assertEqual(validate_context_continuation(page), [])
-        self.assertEqual(rest.history, ("42", 10, "111"))
+        self.assertEqual(rest.history, ("42", 11, "111"))
         self.assertEqual(
             [event["id"] for event in page["events"]],
             ["discord:message:108", "discord:message:109"],
         )
+
+    def test_history_coverage_preserves_known_restart_gap_and_event_truncation(self):
+        class HistoryRest(FakeRest):
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.history = (channel_id, limit, before)
+                return [
+                    message_payload(message_id="109", channel_id=channel_id),
+                    message_payload(message_id="108", channel_id=channel_id),
+                ]
+
+        rest = HistoryRest()
+        continuations = DiscordHistoryContinuations(
+            "a" * 32,
+            participant_id="vigil",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+        )
+        capability = continuations.issue("discord:message:111")
+        continuations.mark_restart_gap()
+        executor = ToolExecutor(
+            rest,
+            SendBackstop(5, 10, clock=lambda: 0),
+            allowed_channel_ids=frozenset({"42"}),
+            action_claim=MemoryClaims().claim,
+            continuations=continuations,
+        )
+        page, ok = executor.call(
+            "read_history",
+            {
+                "request_id": "req-gap",
+                "handle_id": capability["handle_id"],
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 32768,
+            },
+        )
+        self.assertTrue(ok)
+        self.assertEqual(rest.history, ("42", 2, "111"))
+        self.assertTrue(page["coverage"]["has_gaps"])
+        self.assertTrue(page["coverage"]["has_restart_gap"])
+        self.assertEqual(page["coverage"]["continuity"], "session-only")
+        self.assertEqual(page["coverage"]["truncated_by"], ["events"])
+        self.assertTrue(page["coverage"]["has_more_before"])
+        self.assertIn("next_cursor", page)
+
+    def test_exact_event_limit_without_one_extra_does_not_claim_truncation(self):
+        class HistoryRest(FakeRest):
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                return [message_payload(message_id="109", channel_id=channel_id)]
+
+        continuations = DiscordHistoryContinuations(
+            "a" * 32,
+            participant_id="vigil",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+        )
+        capability = continuations.issue("discord:message:111")
+        executor = ToolExecutor(
+            HistoryRest(),
+            SendBackstop(5, 10, clock=lambda: 0),
+            allowed_channel_ids=frozenset({"42"}),
+            action_claim=MemoryClaims().claim,
+            continuations=continuations,
+        )
+        page, ok = executor.call(
+            "read_history",
+            {
+                "request_id": "req-exact",
+                "handle_id": capability["handle_id"],
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 32768,
+            },
+        )
+        self.assertTrue(ok)
+        self.assertFalse(page["coverage"]["has_more_before"])
+        self.assertEqual(page["coverage"]["truncated_by"], [])
+        self.assertNotIn("next_cursor", page)
 
     def test_ambiguous_post_is_not_retried_without_enforced_nonce(self):
         calls = []

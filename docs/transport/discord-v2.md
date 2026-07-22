@@ -16,7 +16,9 @@ binding.
    capability binding before restoring the bounded history snapshot.
 4. Live notifications carry Discord session, sequence, and READY-attested self
    identity. Sequence gaps produce an explicit continuity boundary before any
-   successor.
+   successor. Once known, that restart gap taints signed history handles and
+   page coverage until a separate bounded recovery can prove closure; bounded
+   REST history alone never upgrades it to `restart-safe`.
 
 The state directory contains exclusive request-claim files. Preserve it across
 restart and backup/upgrade; deleting it reopens request IDs and is therefore a
@@ -45,7 +47,10 @@ receipt stages, and other control fields are rejected before an effect.
 - `unknown` transport outcome means an effect may have happened but was not
   safely confirmed. Reusing the same request ID remains prohibited.
 - Queue, replay-store, or durable-claim capacity exhaustion stops delivery. An
-  operator must restore capacity or migrate state before restart.
+  event-store health signal terminates the whole transport even though the MCP
+  SDK internally catches its router exception; later sessions are never shown
+  a falsely continuous successor. An operator must restore capacity or migrate
+  state before restart.
 - Cancellation of the MCP await does not mark shutdown idle while its native
   worker still runs; shutdown waits for the actual worker future up to the
   configured drain deadline.
