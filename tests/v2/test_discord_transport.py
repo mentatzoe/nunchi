@@ -819,6 +819,51 @@ class V2ServerBoundaryCases(unittest.TestCase):
         self.assertEqual(rest.reactions, [])
         self.assertFalse(hasattr(rest, "history_call"))
 
+    def test_bootstrap_history_probes_one_extra_and_reports_event_truncation(self):
+        class HistoryRest(FakeRest):
+            def __init__(self):
+                super().__init__()
+                self.calls = []
+
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.calls.append((channel_id, limit, before))
+                return [
+                    message_payload(message_id="110", channel_id=channel_id),
+                    message_payload(message_id="109", channel_id=channel_id),
+                ][:limit]
+
+        rest = HistoryRest()
+        history = self.executor(rest).bootstrap_history(max_events=1)
+        self.assertEqual(rest.calls, [("42", 2, None)])
+        self.assertEqual(len(history["messages"]), 1)
+        self.assertEqual(history["coverage"]["truncated_by"], ["events"])
+
+    def test_bootstrap_history_probes_before_oldest_at_discord_100_edge(self):
+        class HistoryRest(FakeRest):
+            def __init__(self):
+                super().__init__()
+                self.calls = []
+
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.calls.append((channel_id, limit, before))
+                if before is not None:
+                    return [
+                        message_payload(message_id="99", channel_id=channel_id)
+                    ]
+                return [
+                    message_payload(
+                        message_id=str(200 - index),
+                        channel_id=channel_id,
+                    )
+                    for index in range(100)
+                ]
+
+        rest = HistoryRest()
+        history = self.executor(rest).bootstrap_history(max_events=100)
+        self.assertEqual(rest.calls, [("42", 100, None), ("42", 1, "101")])
+        self.assertLessEqual(len(history["messages"]), 100)
+        self.assertIn("events", history["coverage"]["truncated_by"])
+
 
 class AdversarialTransportClosureCases(unittest.TestCase):
     def test_process_restart_taints_pre_and_post_restart_history_handles(self):

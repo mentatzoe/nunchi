@@ -72,7 +72,7 @@ accepts at most the configured row limit and requires the transport's exact
 closed message shape, snowflake strings, boolean bot/room-mention facts, and
 native reply/mention identities. Malformed authenticated history or
 inconsistent returned event/byte counts fail startup instead of being silently
-omitted. Remote byte truncation and any smaller local history limit remain
+omitted. Remote event/byte truncation and any smaller local history limit remain
 visible in later attention and participant coverage as `has_more_before` plus
 their distinct truncation causes. Each live
 notification likewise requires the exact closed V2 envelope: version, platform,

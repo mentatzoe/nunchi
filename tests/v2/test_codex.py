@@ -24,6 +24,8 @@ from nunchi.integrations.subprocess_participant_v2 import SubprocessParticipantE
 from nunchi.integrations.codex_room_v2 import CodexRoomV2, CodexRoomV2Error
 from nunchi.mcp_discord.continuation import DiscordHistoryContinuations
 from nunchi.mcp_discord.events import DiscordEventSourceV2, message_event_from_create
+from nunchi.mcp_discord.ratelimit import SendBackstop
+from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.participant import ParticipantTurn
 from nunchi.policy import load_operator_policy
 from tests.v2.contract.schema_helpers import make_wake
@@ -742,7 +744,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         )
 
     @staticmethod
-    def bootstrap(history, *, truncated=False):
+    def bootstrap(history, *, truncated_by=()):
         returned_bytes = sum(
             len(
                 json.dumps(
@@ -771,7 +773,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
                     "max_bytes": 32768,
                     "returned_events": len(history),
                     "returned_bytes": returned_bytes,
-                    "truncated": truncated,
+                    "truncated_by": list(truncated_by),
                 },
             },
         }
@@ -949,12 +951,95 @@ class CodexRoomLifecycleCases(unittest.TestCase):
             history_limit=1,
         )
         self.addCleanup(room.close)
-        self.assertEqual(room.backfill(self.bootstrap(history, truncated=True)), 1)
+        self.assertEqual(
+            room.backfill(self.bootstrap(history, truncated_by=("bytes",))),
+            1,
+        )
         self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
         room.wait_idle(5)
         coverage = captured[0]["coverage"]
         self.assertTrue(coverage["has_more_before"])
         self.assertEqual(coverage["truncated_by"], ["bytes", "events"])
+
+    def test_event_saturated_bootstrap_producer_reaches_participant_coverage(self):
+        messages = [
+            {
+                "id": message_id,
+                "channel_id": "42",
+                "guild_id": "7",
+                "author": {
+                    "id": "1001",
+                    "username": "Zoe",
+                    "bot": False,
+                },
+                "content": content,
+                "timestamp": f"2026-07-20T12:00:0{message_id}Z",
+                "mentions": [],
+                "mention_everyone": False,
+                "embeds": [],
+                "attachments": [],
+            }
+            for message_id, content in (("2", "newest"), ("1", "older"))
+        ]
+
+        class SaturatedRest:
+            def __init__(self):
+                self.calls = []
+
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.calls.append((channel_id, limit, before))
+                return messages[:limit]
+
+        rest = SaturatedRest()
+        producer = ToolExecutor(
+            rest,
+            SendBackstop(5, 10, clock=lambda: 0),
+            allowed_channel_ids=frozenset({"42"}),
+            action_claim=lambda _request_id: None,
+            continuations=DiscordHistoryContinuations(
+                "b" * 32,
+                participant_id="vigil",
+                room_id="42",
+                continuity_scope_id="discord:channel:42",
+            ),
+        )
+        history = producer.bootstrap_history(max_events=1)
+        self.assertEqual(rest.calls, [("42", 2, None)])
+        self.assertEqual(history["coverage"]["truncated_by"], ["events"])
+
+        captured = []
+        room = self.room(
+            FakeTransportClient(),
+            participant=lambda turn: captured.append(turn.packet),
+        )
+        self.addCleanup(room.close)
+        bootstrap = self.bootstrap([])
+        bootstrap["history"] = history
+        self.assertEqual(room.backfill(bootstrap), 1)
+        self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
+        room.wait_idle(5)
+        self.assertTrue(captured[0]["coverage"]["has_more_before"])
+        self.assertEqual(captured[0]["coverage"]["truncated_by"], ["events"])
+
+    def test_remote_and_local_event_truncation_union_without_duplicates(self):
+        history = [
+            discord_params("2", "newest retained"),
+            discord_params("1", "locally omitted"),
+        ]
+        captured = []
+        room = self.room(
+            FakeTransportClient(history=history),
+            participant=lambda turn: captured.append(turn.packet),
+            history_limit=1,
+        )
+        self.addCleanup(room.close)
+        self.assertEqual(
+            room.backfill(self.bootstrap(history, truncated_by=("events",))),
+            1,
+        )
+        self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
+        room.wait_idle(5)
+        self.assertEqual(captured[0]["coverage"]["truncated_by"], ["events"])
 
     def test_backfill_rejects_malformed_or_over_budget_authenticated_history(self):
         cases = (

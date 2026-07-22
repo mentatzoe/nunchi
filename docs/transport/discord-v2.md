@@ -31,6 +31,12 @@ restart and backup/upgrade; deleting it reopens request IDs and is therefore a
 security-sensitive operator action. Capacity exhaustion fails closed and
 requires an explicit migration, never silent eviction.
 
+Startup history fetches one extra event below the configured cap. At Discord's
+100-message API edge it instead performs one bounded probe before the oldest
+returned message. Event-cap and byte-cap truncation therefore remain distinct
+coverage facts for the consumer rather than being presented as complete
+history.
+
 ## Context and actions
 
 Live messages may carry a signed continuation capability. `read_history`

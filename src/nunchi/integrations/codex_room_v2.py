@@ -240,7 +240,7 @@ class CodexRoomV2:
                 "max_bytes",
                 "returned_events",
                 "returned_bytes",
-                "truncated",
+                "truncated_by",
             }
             or isinstance(coverage.get("max_events"), bool)
             or not isinstance(coverage.get("max_events"), int)
@@ -253,7 +253,13 @@ class CodexRoomV2:
             or isinstance(coverage.get("returned_bytes"), bool)
             or not isinstance(coverage.get("returned_bytes"), int)
             or not 0 <= coverage["returned_bytes"] <= coverage["max_bytes"]
-            or not isinstance(coverage.get("truncated"), bool)
+            or not isinstance(coverage.get("truncated_by"), list)
+            or any(
+                item not in {"events", "bytes"}
+                for item in coverage["truncated_by"]
+            )
+            or len(set(coverage["truncated_by"]))
+            != len(coverage["truncated_by"])
             or len(messages) > coverage["max_events"]
         ):
             raise CodexRoomV2Error("Discord history result is invalid")
@@ -281,16 +287,17 @@ class CodexRoomV2:
         if returned_bytes != coverage["returned_bytes"]:
             raise CodexRoomV2Error("Discord history coverage is invalid")
         local_omission = len(validated) > self.history_limit
-        remote_truncation = coverage["truncated"]
+        remote_truncation = coverage["truncated_by"]
         retained_messages = validated[: self.history_limit]
         self.observation.has_restart_gap = subscription["has_restart_gap"]
         truncated_by = []
         if local_omission:
             truncated_by.append("events")
-        if remote_truncation:
-            truncated_by.append("bytes")
+        truncated_by.extend(
+            cause for cause in remote_truncation if cause not in truncated_by
+        )
         self.observation.record_upstream_coverage(
-            has_more_before=local_omission or remote_truncation,
+            has_more_before=local_omission or bool(remote_truncation),
             has_more_after=False,
             has_gaps=False,
             truncated_by=truncated_by,

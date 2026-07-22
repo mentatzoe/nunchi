@@ -330,12 +330,29 @@ class ToolExecutor:
             or not 1 <= max_bytes <= 32768
         ):
             raise ValueError("bootstrap history budget is invalid")
+        fetch_limit = min(max_events + 1, 100)
         messages = self._rest.get_messages(
             self._channel_id,
-            limit=max_events,
+            limit=fetch_limit,
         )
+        truncated_by_events = len(messages) > max_events
+        if truncated_by_events:
+            messages = messages[:max_events]
+        elif len(messages) == max_events and max_events == 100 and messages:
+            # Discord caps one history call at 100. Probe once before the
+            # oldest returned message so an event-saturated bootstrap cannot
+            # be mistaken for complete history.
+            oldest = shape_message(messages[-1])["message_id"]
+            truncated_by_events = bool(
+                self._rest.get_messages(
+                    self._channel_id,
+                    limit=1,
+                    before=oldest,
+                )
+            )
         selected: list[dict] = []
         total_bytes = 0
+        truncated_by_bytes = False
         for raw in messages:
             message = shape_message(raw)
             if message["channel_id"] != self._channel_id:
@@ -349,9 +366,15 @@ class ToolExecutor:
                 ).encode("utf-8")
             )
             if total_bytes + encoded_size > max_bytes:
+                truncated_by_bytes = True
                 break
             selected.append(message)
             total_bytes += encoded_size
+        truncated_by = []
+        if truncated_by_events:
+            truncated_by.append("events")
+        if truncated_by_bytes:
+            truncated_by.append("bytes")
         return {
             "messages": selected,
             "coverage": {
@@ -359,7 +382,7 @@ class ToolExecutor:
                 "max_bytes": max_bytes,
                 "returned_events": len(selected),
                 "returned_bytes": total_bytes,
-                "truncated": len(selected) < len(messages),
+                "truncated_by": truncated_by,
             },
         }
 
