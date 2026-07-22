@@ -37,7 +37,7 @@ Every command below was run on the Attempt-9 implementation candidate
 
 Full finding-by-finding narrative is in `handoff.md` (Attempt 9).
 
-## Attempt-10, Attempt-11, and Attempt-12 amendments
+## Attempt-10 through Attempt-13 amendments
 
 None of these attempts rewrote this index's framing note above (still
 "Attempt 9"); each is a small, targeted delta on top of it, recorded here
@@ -83,6 +83,29 @@ rather than as a full new section. Full narrative for each is in
   governance → OK; scene replay ×2 → 20 rows (19 PASS, 1 declared
   limitation), byte-identical to committed evidence; `git diff --check` →
   clean.
+- **Attempt 13** (candidate `5b661134d9f0b68cdb98ab248361a89723629d41`):
+  closed pc-vigil's two Attempt-12 findings, both verified against the
+  pinned plugin source before fixing. (1) A reply carrying `files` (the
+  pinned tool uploads local paths — an effect the canonical action cannot
+  represent) is denied before execution unless absent or exactly `[]`,
+  fail-closed on any other shape, burning no reservation. (2) Transport
+  `failed` is no longer producible at this hook seam: an error/failure
+  report cannot transport-prove zero effects (the pinned plugin chunks
+  replies and throws after earlier chunks landed; a first-send error may
+  have landed server-side), so undelivered rows record delivery `unknown`
+  with bounded error text and parsed `chunks_sent`/`chunks_total` when the
+  pinned format matches. Self-found in the same seam and fixed: unreserved
+  and cross-room executed sends previously left NO row, so `Stop` attested
+  them as silence — both now record `unattested_effect` (outcome `unknown`,
+  never silence), with exact duplicate reports of the already-resolved
+  reservation ignored as benign. Reflected in the CC-04 row below (its
+  earlier "transport recorded `failed`" wording is superseded — that value
+  no longer exists on this seam). `python3 -m unittest
+  tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` → 160 OK
+  (6 RED-to-GREEN new/updated + 1 regression guard); five-module guard run
+  → 182 OK; full baseline → 1381 OK (skipped=9); governance → OK; scene
+  replay ×2 → 20 rows (19 PASS, 1 declared limitation), byte-identical to
+  committed evidence; `git diff --check` → clean.
 
 ---
 
@@ -234,7 +257,7 @@ the wrapper's stdout can never be read as admission:
 | CC-01 reactive bot hearing | PASS — `reactive-bot-hearing.jsonl` (exact bot author, literal content, actor kind `bot`, one classifier call) | NOT RUN live (see Blocked live scenes) |
 | CC-02 Station scars | PASS — six scar rows in `scene-results.jsonl`: every scar reached the classifier verbatim, one call each, zero deterministic suppressors | Not applicable live (replay corpus) |
 | CC-03 attention routing | PASS — one engine invocation per ordinary opportunity; effective SUPPRESS stops only the wake and retains the event; classifier-DEFER and margin-DEFER valves distinct; trusted bypass zero classifier calls with `classifier_not_invoked` and trusted provenance present; forged in-content bypass rejected; operational error wakes `ERROR_FALLBACK` with no fabricated verdict | NOT RUN live (classifier unconfigured) |
-| CC-04 direct act-or-silence | PASS — message/reaction contributions produce `participant-host`(unknown, attested before any transport effect) then observed `transport`(sent); silence produces `outcome=silent` and no transport stage; failed delivery leaves `participant-host` honestly `unknown` and `transport` recorded `failed`; meta-answer prose recorded verbatim and graded only post-hoc; zero send-time social calls; stages singly attested (Attempt-10: host stage never claims a delivery outcome it has not observed, per the fixed upstream `nunchi.participant` contract); reply/react denied fail-closed during a degraded (operational-error) turn, exactly like privileged actions, so a send can never occur without a real snapshot behind it (Attempt-11) | NOT RUN live (outbound send denied) |
+| CC-04 direct act-or-silence | PASS — message/reaction contributions produce `participant-host`(unknown, attested before any transport effect) then observed `transport`(sent); silence produces `outcome=silent` and no transport stage; an error/failure report leaves `participant-host` honestly `unknown` and `transport` recorded `unknown` with any pinned partial-chunk facts in the detail (Attempt-13: `failed` is not producible at this seam — zero effects are never transport-provable); meta-answer prose recorded verbatim and graded only post-hoc; zero send-time social calls; stages singly attested (Attempt-10: host stage never claims a delivery outcome it has not observed, per the fixed upstream `nunchi.participant` contract); reply/react denied fail-closed during a degraded (operational-error) turn, exactly like privileged actions, so a send can never occur without a real snapshot behind it (Attempt-11); file/media uploads and out-of-packet references denied before execution (Attempts 12–13); unreserved or cross-room executed sends taint the turn as `unknown`, never silence (Attempt-13) | NOT RUN live (outbound send denied) |
 | CC-05 later hearing / restart | PASS — suppressed event hearable next opportunity; burst coalesces to one fresh successor; restart drops the pending anchor, keeps retained context, fabricates no receipts; cold wake DECLARED unsupported | Live restart NOT RUN |
 | CC-06 installed provenance | PASS — `installed-runtime.md`: full component digests, plugin base/patch states, registration state, two installed-hook probes | Installed probes ARE live-host evidence; room-live probe NOT RUN |
 

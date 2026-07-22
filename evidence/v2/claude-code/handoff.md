@@ -1392,3 +1392,97 @@ text. Pre-existing, unchanged by the merge, recorded here for completeness.
 exact candidate (`abb823ed55a6e20addf8c54913f9976641457122`) on
 [mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
 lane does not self-accept and did not integrate.
+
+## Attempt 13 — 2026-07-22 (rework: close pc-vigil's two Attempt-12 findings)
+
+**Delivering lane**: `v2-claude-owner`, same session (model `claude-fable-5`).
+pc-vigil's Attempt-12 exact-head review (PR #15, CHANGES_REQUESTED at
+`31adbfd`) returned two HIGH findings. Both were verified against the pinned
+plugin source (`~/.claude/plugins/cache/claude-plugins-official/discord/0.0.4/server.ts`)
+before fixing — the reply tool's `files` schema/upload path and the chunked
+send loop's partial-failure throw were confirmed exactly as cited.
+
+### Exact candidate
+
+- **Implementation candidate**: `5b661134d9f0b68cdb98ab248361a89723629d41`
+  (one product commit on top of Attempt-12 evidence tip `31adbfd`).
+- **Evidence-only binding**: this commit (adding this Attempt-13 section and
+  the manifest/verification amendments) sits on top; its diff from `5b66113`
+  touches only `evidence/v2/claude-code/`.
+- Repository gate SHA-256 of `nunchi_claude_v2.py` at the implementation
+  candidate:
+  `055766c3829ccd7c78f1d9f17149c35a43176eeebaede7fdb34622495fff2dc9`.
+
+Changed-file inventory (implementation candidate):
+
+```text
+M  docs/integrations/claude-code-v2.md
+M  integrations/claude-code/nunchi_claude_v2.py
+M  tests/v2/test_claude_code.py
+```
+
+### Finding-by-finding disposition
+
+| # | pc-vigil finding | Resolution | Proof |
+|---|---|---|---|
+| 1 | HIGH — the supported `reply` path permits `files` uploads absent from the canonical action and receipts | `handle_pre_tool` denies a reply carrying `files` unless absent or exactly `[]`, fail-closed on any other shape (non-empty list, string, dict, number), before the reservation — the reviewer's "deny until a canonical, authorized, receipted media action exists" option. A denied attempt burns no reservation. | `test_reply_with_files_is_denied_before_execution` (non-empty list denied, malformed string denied, no reservation burned, empty list allowed) |
+| 2 | HIGH — partial multi-message delivery misattested as clean failure | `_ObservedDeliveryRecorder` never writes `failed` anymore: an error/failure report cannot transport-prove zero effects at this seam (the pinned plugin throws after earlier chunks landed; even a first-send error may have landed server-side — the same non-idempotent-POST reasoning as slice 050's nonce finding). Any undelivered row → delivery `unknown`, with bounded error text and parsed `chunks_sent`/`chunks_total` in the transport detail when the pinned format matches. `handle_post_tool` now captures response-embedded errors so both report paths carry the facts. Stale `outcome=sent` docstring and blanket failed-delivery docs wording corrected. | `test_post_tool_failure_records_an_unknown_delivery`, `test_partial_chunk_failure_preserves_the_partial_send_fact`, `test_error_response_delivery_is_recorded_unknown_not_failed` |
+
+### Self-found in the same seam (fixed this attempt, same class as finding 2)
+
+Tracing the post-tool observation seam for finding 2 exposed two adjacent
+executed-effects-understated holes, both fixed here rather than deferred:
+
+- **An unreserved executed in-room send was attested as silence.** The
+  unmatched-reservation path appended no row at all, so `Stop`'s replay
+  found no reservation and no marker and returned `None` — an executed send
+  recorded as a genuinely silent turn. Reachable when PreToolUse is
+  unregistered or bypassed while PostToolUse still reports — exactly the
+  guard-bypass scenario for which `unattested_effect` markers already
+  existed on the unsupported-tool path. Both post handlers now append an
+  `unattested_effect` row for unmatched reports, so `Stop` reports
+  `unknown`, never silence. Only an exact duplicate re-description of the
+  already-resolved reservation (same `tool_use_id`, tool name, input digest
+  — new `_is_duplicate_report`) is ignored as benign, so a cleanly attested
+  turn cannot be flipped to `unknown` by a duplicate report.
+- **A cross-room execution report was silently allowed with no marker.**
+  Same reasoning: the model DID act (just not in the bound room), so the
+  turn's outcome cannot be silence. Both post handlers now record the
+  marker.
+
+### RED-to-GREEN and verification (Attempt 13)
+
+Six new/updated tests fail against the Attempt-12 product file — the files
+reply was allowed through and reserved; error/failure reports produced
+`transport(failed)`; unreserved and cross-room executed sends were attested
+as silence — and pass with the fix, verified by file swap. The
+duplicate-report test passes on both files (it guards the new unmatched
+behavior against over-tainting) and is recorded as a regression guard, not
+a RED-to-GREEN proof.
+
+`python3 -m unittest tests.v2.test_claude_code
+tests.test_claude_code_hook_wrapper` → **160 OK** (5 new, 2 renamed/
+reworked); five-module guard run → **182 OK**; full baseline (isolated env)
+→ **1381 OK (skipped=9)**; governance → OK; scene replay ×2 → 20 rows
+(19 PASS, 1 declared limitation), byte-identical to each other and to the
+committed evidence rows (no scene exercises the failure/bypass paths this
+attempt changed); `git diff --check` → clean.
+
+### Known limitations and rejected claims (Attempt 13)
+
+Unchanged from Attempt 12, plus: **transport-stage `failed` is no longer
+producible at this hook seam at all** — zero-effect proof would require the
+patched plugin itself to attest structured sent-IDs/counts across the hook
+boundary (the reviewer's alternative direction), which is a possible future
+transport-patch extension, honestly deferred rather than half-claimed.
+**Rejected claim**: "denying `files` is a capability regression" — there
+was never a receipted media capability; what existed was an unattested
+upload path. **Rejected claim**: "the unreserved/cross-room markers were in
+the reviewer's findings" — they were not; they are self-found members of
+the same class, reported and fixed here rather than left for a future
+round to rediscover.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`5b661134d9f0b68cdb98ab248361a89723629d41`) on
+[mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
+lane does not self-accept and did not integrate.
