@@ -13,6 +13,7 @@ import copy
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .authorization import (
@@ -21,6 +22,7 @@ from .authorization import (
 )
 from .observation import (
     check_actor_reference_integrity,
+    check_binding_expiry,
     check_id_uniqueness,
     check_timestamp_order,
     check_trigger_membership,
@@ -40,6 +42,10 @@ class ParticipantHostError(ValueError):
 # ceiling as defence in depth while the configured fetch limits bound every
 # individual I-010D request and page.
 MAX_EXPANSION_CALLS_PER_TURN = 8
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _canonical_size(value: Any) -> int:
@@ -288,6 +294,7 @@ class ParticipantTurn:
         policy: EffectiveAttentionPolicy | None = None,
         max_expansion_calls: int = MAX_EXPANSION_CALLS_PER_TURN,
         capabilities: frozenset[str] = frozenset(),
+        fetch_time: Callable[[], str] = _utc_now_iso,
     ) -> None:
         self.packet = copy.deepcopy(packet)
         self._continuation_fetch = continuation_fetch
@@ -301,7 +308,10 @@ class ParticipantTurn:
         self._max_expansion_calls = max_expansion_calls
         self._expansion_calls = 0
         self._fetch_requests: set[tuple[str, str, str | None, str | None]] = set()
-        self._returned_cursors: set[str] = set()
+        self._returned_cursors: dict[str, str] = {}
+        if not callable(fetch_time):
+            raise ParticipantHostError("context expansion clock is invalid")
+        self._fetch_time = fetch_time
         if not isinstance(capabilities, frozenset) or any(
             not _nonempty(capability) for capability in capabilities
         ):
@@ -321,6 +331,65 @@ class ParticipantTurn:
             if isinstance(event, dict) and _nonempty(event.get("id"))
         ]
         self._actors = copy.deepcopy(packet_actors) if isinstance(packet_actors, dict) else {}
+        capability = self.packet.get("continuation")
+        if capability is not None:
+            self._validate_capability(capability)
+
+    def _host_context(self) -> dict[str, str]:
+        room = self.packet.get("room") or {}
+        self_binding = self.packet.get("self") or {}
+        return {
+            "participant_id": self_binding.get("participant_id"),
+            "room_id": room.get("id"),
+            "continuity_scope_id": room.get("continuity_scope_id"),
+            "trigger_event_id": self.packet.get("trigger_event_id"),
+        }
+
+    def _validate_capability(
+        self,
+        capability: dict[str, Any],
+        request: dict[str, Any] | None = None,
+    ) -> None:
+        if request is None:
+            directions = (
+                ("before", "can_fetch_before"),
+                ("after", "can_fetch_after"),
+                ("around", "can_fetch_around_event"),
+            )
+            direction = next(
+                (name for name, flag in directions if capability.get(flag) is True),
+                None,
+            )
+            if direction is None:
+                raise ParticipantHostError("context expansion grants no fetch direction")
+            request = {
+                "request_id": self.packet["request_id"],
+                "handle_id": capability.get("handle_id"),
+                "direction": direction,
+                "max_events": 1,
+                "max_bytes": 1,
+            }
+            if direction == "around":
+                request["anchor_event_id"] = self.packet["trigger_event_id"]
+        binding_request = copy.deepcopy(request)
+        # Cursor provenance is turn-local and opaque.  The shared relational
+        # checker uses fixture cursor syntax, so binding/expiry validation is
+        # deliberately performed on the same request without that token.
+        binding_request.pop("cursor", None)
+        try:
+            fetch_time = self._fetch_time()
+        except Exception as exc:
+            raise ParticipantHostError("context expansion clock failed") from exc
+        errors = check_binding_expiry(
+            {
+                "fetch_time": fetch_time,
+                "issued": [copy.deepcopy(capability)],
+                "request": binding_request,
+                "host_context": self._host_context(),
+            }
+        )
+        if errors:
+            raise ParticipantHostError("context expansion binding or expiry is invalid")
 
     @property
     def expansion_calls(self) -> int:
@@ -363,6 +432,7 @@ class ParticipantTurn:
             or accepted_request["handle_id"] != capability.get("handle_id")
         ):
             raise ParticipantHostError("context expansion binding is invalid")
+        self._validate_capability(capability, accepted_request)
         direction = accepted_request["direction"]
         direction_flag = {
             "before": "can_fetch_before",
@@ -381,6 +451,11 @@ class ParticipantTurn:
             capability.get("max_bytes_per_fetch", 0),
         ):
             raise ParticipantHostError("context expansion exceeds byte budget")
+        incoming_cursor = accepted_request.get("cursor")
+        if incoming_cursor is not None and self._returned_cursors.get(
+            incoming_cursor
+        ) != direction:
+            raise ParticipantHostError("context expansion cursor was not issued for this turn")
         request_key = (
             direction,
             accepted_request.get("anchor_event_id")
@@ -440,7 +515,7 @@ class ParticipantTurn:
                 or next_cursor in self._returned_cursors
             ):
                 raise ParticipantHostError("context expansion cursor did not progress")
-            self._returned_cursors.add(next_cursor)
+            self._returned_cursors[next_cursor] = direction
         for actor_id, actor in page["actors"].items():
             if actor_id in self._actors and self._actors[actor_id] != actor:
                 raise ParticipantHostError("context expansion actor identity changed")
@@ -537,6 +612,7 @@ def run_participant_turn(
     action_sink: Callable[[dict[str, Any]], Any] | None = None,
     correlated_action_sink: Callable[[str, dict[str, Any]], Any] | None = None,
     continuation_fetch: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    fetch_time: Callable[[], str] = _utc_now_iso,
     authorization_coordinator: PrivilegedActionCoordinator | None = None,
 ) -> dict[str, Any]:
     """Invoke one normal participant turn or stop on effective suppression."""
@@ -606,6 +682,7 @@ def run_participant_turn(
         continuation_fetch,
         policy=policy,
         capabilities=frozenset(capabilities),
+        fetch_time=fetch_time,
     )
     authorization_result = None
     action = None

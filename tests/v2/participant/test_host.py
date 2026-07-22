@@ -424,6 +424,59 @@ class RoutingAndOutcomeCases(ParticipantHostCase):
                 self.assertEqual(result["status"], "error")
                 self.assertEqual(result["outcome"], "unknown")
 
+    def test_context_expansion_rejects_foreign_and_expired_capabilities_before_invocation(self):
+        cases = (
+            ("participant_id", "other", None),
+            ("room_id", "99", None),
+            ("continuity_scope_id", "wrong-scope", None),
+            ("trigger_event_id", "alien", None),
+            (None, None, "2000-01-01T00:00:00Z"),
+        )
+        for field, value, expires_at in cases:
+            with self.subTest(field=field, expires_at=expires_at):
+                self._enable_continuation()
+                if field is not None:
+                    self.snapshot["continuation"]["bound_to"][field] = value
+                if expires_at is not None:
+                    self.snapshot["continuation"]["expires_at"] = expires_at
+                with self.assertRaisesRegex(
+                    ParticipantHostError,
+                    "binding or expiry",
+                ):
+                    self.run_turn(
+                        make_decision_ok("WAKE", "WAKE", "none"),
+                        lambda _turn: self.fail("invalid capability must not invoke"),
+                        continuation_fetch=lambda _request: self.fail(
+                            "invalid capability must not fetch"
+                        ),
+                        fetch_time=lambda: "2026-07-22T00:00:00Z",
+                    )
+
+    def test_context_expansion_rejects_cursor_not_returned_in_this_turn(self):
+        self._enable_continuation()
+
+        def participant(turn):
+            turn.fetch_context(
+                {
+                    "request_id": "req-0001",
+                    "handle_id": "cont-7f3a",
+                    "direction": "before",
+                    "max_events": 1,
+                    "max_bytes": 1024,
+                    "cursor": "never-issued",
+                }
+            )
+
+        result = self.run_turn(
+            make_decision_ok("WAKE", "WAKE", "none"),
+            participant,
+            continuation_fetch=lambda _request: self.fail(
+                "unissued cursor must stop before fetch"
+            ),
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["outcome"], "unknown")
+
     def test_context_expansion_has_an_absolute_per_turn_call_ceiling(self):
         self._enable_continuation()
         def fetch(request):
