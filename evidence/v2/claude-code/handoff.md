@@ -1251,3 +1251,144 @@ operational-error path `start_degraded_turn` creates.
 exact candidate (`bb79cca17cccaa2965ead3aa8182cb3c2602b991`) on
 [mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
 lane does not self-accept and did not integrate.
+
+## Attempt 12 — 2026-07-22 (self-review vs merged upstream: unattestable-reference denial)
+
+**Delivering lane**: `v2-claude-owner`, same session (model `claude-fable-5`
+for this attempt). Zoe asked for a review of whether this slice is done
+against the latest upstream "and honestly so". Answer: Attempt 11 was
+verified genuinely closed (all claimed numbers reproduced independently;
+RED-to-GREEN re-proven by file swap against the pre-fix candidate; both
+degraded-turn producers — `start_degraded_turn` and `_degraded_turn_marker`
+— confirmed covered by the deny condition), but the review found one more
+real post-merge gap that Attempt 10's "apply the relevant fixes" audit
+missed, so the honest answer was "not yet" and this attempt closes it.
+
+### Exact candidate
+
+- **Implementation candidate**: `abb823ed55a6e20addf8c54913f9976641457122`
+  (one product commit on top of Attempt-11 evidence tip `1bf4c24`).
+- **Evidence-only binding**: this commit (adding this Attempt-12 section and
+  the manifest/verification amendments) sits on top; its diff from `abb823e`
+  touches only `evidence/v2/claude-code/`.
+- Repository gate SHA-256 of `nunchi_claude_v2.py` at the implementation
+  candidate:
+  `57d0c9e7155a231db038bd945544799d4cefcdfdcda927aab2ad788d068b1574`.
+
+Changed-file inventory (implementation candidate):
+
+```text
+M  integrations/claude-code/nunchi_claude_v2.py
+M  tests/v2/test_claude_code.py
+```
+
+### The gap, its reproduction, and the fix
+
+The merged `nunchi.participant` (slice-040 successor, PR #17) binds
+`reply_to_event_id`/`target_event_id` to facts delivered in the participant
+packet (`_validate_action` → `turn.binds_event`) and rejects anything else.
+Claude Code natively can reply/react to ANY message in the channel,
+including ones outside the packet's event budget — the packet typically
+carries a bounded window, and `fetch_messages` (allowed, read-only) can
+surface older messages the model may then want to reference.
+
+Reproduced concretely before fixing (scratch scenario, kept out of the
+suite; the committed regression tests supersede it): a native reply to an
+out-of-packet target **executes**, then at `Stop` the host raises
+"participant reply target is unavailable" before the action sink runs. The
+recorded chain: `participant-host` `outcome="unknown"`, **no transport
+stage at all** — for a delivery this integration directly observed succeed.
+Pre-merge, the identical flow produced `participant-host` + `transport(sent)`.
+It never fabricates silence, but it records unknown-for-a-known-fact,
+silently drops an observed delivery attestation, and never warns the model.
+
+Since the `Stop`-time rejection is inevitable under the upstream contract,
+the fix moves it before the irreversible native send — the same
+attestability-not-social-gate pattern as the cross-room denial and
+Attempt 11's degraded-turn denial. New `_unattestable_reference` helper in
+`handle_pre_tool`'s reply/react branch, after room binding, before the
+reservation:
+
+- reply with no `reply_to` (plain message): always allowed — nothing to bind;
+- reply with a digit-string `reply_to`: allowed iff
+  `discord:message:<id>` is one of this turn's packet event ids, else
+  denied with a message telling the model to target a packet message or
+  send without the reference;
+- reply with a non-digit/non-string `reply_to`: denied for attestation
+  fidelity — `_observed_action` would omit the reference from the replayed
+  action while the native call might still send with one, so the attested
+  action would under-report what happened;
+- react: `message_id` (mirroring `_observed_action`'s `str()` coercion
+  exactly) must be digits and one of the packet event ids.
+
+The helper's rules mirror `_observed_action`'s replay construction exactly,
+so PreToolUse's judgment of "what will be attested" always matches what
+PostToolUse will actually record. A denied attempt creates no reservation,
+so a corrected in-packet retry works end-to-end (covered by test). The
+common cases — replying/reacting to the trigger or any packet message, or
+sending a plain message — are unaffected.
+
+One existing test (`test_second_room_action_in_the_same_turn_is_denied`)
+reacted to out-of-packet `message_id="1"` merely as a placeholder; its
+second call now targets the in-packet trigger so the reservation denial —
+that test's actual subject — is what fires, not the new earlier denial.
+
+### RED-to-GREEN and verification (Attempt 12)
+
+All three new tests
+(`test_out_of_packet_reply_target_is_denied_before_execution`,
+`test_out_of_packet_reaction_target_is_denied_before_execution`,
+`test_non_numeric_reply_reference_is_denied_before_execution`) fail against
+the pre-fix product file — the gate returned allow and the send went
+through — and pass with the fix, verified by file swap. Attempt 11's
+`test_operational_error_wake_denies_reply_and_react_too` was likewise
+re-proven RED against the Attempt-10 product file during this review, not
+taken on faith.
+
+`python3 -m unittest tests.v2.test_claude_code
+tests.test_claude_code_hook_wrapper` → **155 OK** (3 new); five-module guard
+run → **177 OK**; full baseline (isolated env) → **1376 OK (skipped=9)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay ×2 →
+20 rows (19 PASS, 1 declared limitation), byte-identical to each other and
+to the committed evidence rows (PreToolUse denial semantics only; no scene
+references an out-of-packet target); `git diff --check` → clean.
+
+### Upstream-contract audit summary (what "done against latest upstream" was checked to mean)
+
+Every upstream seam this lane consumes was re-checked against the merged
+tree: `evaluate_v2` (receipt-sink-failure routing — closed in Attempt 10),
+`run_participant_turn` (receipt ordering — Attempt 10; action fact-binding
+— this attempt; strict `None`-only receipt acks — already conformant since
+Attempt 8), `build_participant_wake` (decisions come from the real
+`evaluate_v2`, conformant by construction), `DiscordEventSourceV2.native_input`
+(sidecar records already validated to exact native types since Attempt 8;
+new `MessageEvent` fields carry defaults), `ConversationOpportunityScheduler`
+(interface unchanged), `ReloadingPolicyReceiptSink` (new
+`claim_transport_action` is additive and unused here: the exclusive-create
+receipt files already deduplicate the replayed transport stage per
+request_id, and a turn is completed exactly once before `room["turn"]` is
+cleared), privileged-guard seams (derive-only + unconditional deny,
+unchanged). `record_upstream_coverage` (new upstream) is not applicable:
+this lane declares `message: live-only` visibility and performs no remote
+history restoration, so there is no upstream coverage claim to record —
+stated here so its absence reads as a decision, not an omission.
+
+### Known limitations and rejected claims (Attempt 12)
+
+Unchanged from Attempt 11 otherwise. **Rejected claim**: "the slice was
+already done against the latest upstream before this attempt" — it was not;
+this review found the unattestable-reference gap that Attempt 10 missed,
+and closed it. **Rejected claim**: "denying out-of-packet references is a
+send-time social judgment" — it is not; the content of the send is never
+examined, only whether its reference can bind to a delivered fact, exactly
+the check the canonical host performs unconditionally at `Stop`; this
+attempt only moves that mechanical rejection before the irreversible
+effect. **Residual fidelity note**: replayed message actions do not carry
+`mention_actor_ids` (native mention metadata is not reconstructed from
+`tool_input`); the attested action's content still contains the literal
+text. Pre-existing, unchanged by the merge, recorded here for completeness.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`abb823ed55a6e20addf8c54913f9976641457122`) on
+[mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
+lane does not self-accept and did not integrate.

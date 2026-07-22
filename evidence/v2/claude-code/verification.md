@@ -37,11 +37,12 @@ Every command below was run on the Attempt-9 implementation candidate
 
 Full finding-by-finding narrative is in `handoff.md` (Attempt 9).
 
-## Attempt-10 and Attempt-11 amendments
+## Attempt-10, Attempt-11, and Attempt-12 amendments
 
-Neither attempt rewrote this index's framing note above (still "Attempt 9");
-both are small, targeted deltas on top of it, recorded here rather than as
-full new sections. Full narrative for each is in `handoff.md`.
+None of these attempts rewrote this index's framing note above (still
+"Attempt 9"); each is a small, targeted delta on top of it, recorded here
+rather than as a full new section. Full narrative for each is in
+`handoff.md`.
 
 - **Attempt 10** (candidate `1b54cfbe6801fe0196f50d042861ad5fb4293677`):
   merged `codex/v2-integration@8e647469`; the immutable `participant-host`
@@ -65,6 +66,23 @@ full new sections. Full narrative for each is in `handoff.md`.
   Attempt 10 (this attempt changes `PreToolUse` denial semantics only — no
   scene ever executes a reply/react during a degraded turn, so no recorded
   row is affected); `git diff --check` → clean.
+- **Attempt 12** (candidate `abb823ed55a6e20addf8c54913f9976641457122`):
+  self-review against the merged upstream found that the fact-binding the
+  merged `nunchi.participant` performs at `Stop` (`_validate_action` →
+  `turn.binds_event`) makes a native reply/react to an out-of-packet target
+  executable-but-unattestable — reproduced: the send happens, then the host
+  rejects the replay, leaving `participant-host` `unknown` and NO transport
+  stage for an observed delivery. `handle_pre_tool` now denies such
+  references before execution (new `_unattestable_reference`, mirroring
+  `_observed_action`'s replay semantics exactly, including its `str()`
+  coercion for reaction targets); plain messages and in-packet references
+  are unaffected, and a denied attempt burns no reservation. Reflected in
+  the CC-04 row below. `python3 -m unittest tests.v2.test_claude_code
+  tests.test_claude_code_hook_wrapper` → 155 OK (3 new RED-to-GREEN tests);
+  five-module guard run → 177 OK; full baseline → 1376 OK (skipped=9);
+  governance → OK; scene replay ×2 → 20 rows (19 PASS, 1 declared
+  limitation), byte-identical to committed evidence; `git diff --check` →
+  clean.
 
 ---
 
