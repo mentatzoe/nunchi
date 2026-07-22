@@ -19,7 +19,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from ..mcp_discord.ratelimit import SendBackstop
-from ..net import open_no_redirect
+from ..net import (
+    is_bounded_ascii_credential,
+    is_loopback_hostname,
+    open_no_redirect,
+)
 from ..receipts import transport_receipt
 from .native_host_v2 import (
     DurableCursorStoreV2,
@@ -117,9 +121,23 @@ def _urllib_call(
 
 
 def _api_base(value: str, *, allow_insecure_http: bool) -> str:
-    parsed = urllib.parse.urlsplit(value)
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 8192
+        or any(ord(character) <= 32 or ord(character) == 127 for character in value)
+        or not isinstance(allow_insecure_http, bool)
+    ):
+        raise TelegramV2Error("Telegram API base is invalid")
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise TelegramV2Error("Telegram API base is invalid") from exc
     permitted = parsed.scheme == "https" or (
-        allow_insecure_http and parsed.scheme == "http"
+        allow_insecure_http
+        and parsed.scheme == "http"
+        and is_loopback_hostname(parsed.hostname)
     )
     if (
         not permitted
@@ -128,6 +146,7 @@ def _api_base(value: str, *, allow_insecure_http: bool) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or port is not None and not 1 <= port <= 65535
     ):
         raise TelegramV2Error("Telegram API base is invalid")
     return value.rstrip("/")
@@ -142,7 +161,7 @@ class TelegramClientV2:
         allow_insecure_http: bool = False,
         http: HttpCall = _urllib_call,
     ) -> None:
-        if not isinstance(token, str) or not token or "/" in token:
+        if not is_bounded_ascii_credential(token) or "/" in token:
             raise TelegramV2Error("Telegram client binding is invalid")
         self.token = token
         self.api_base = _api_base(
@@ -327,9 +346,13 @@ class TelegramActionSinkV2:
         self._lock = threading.RLock()
 
     def _receipt(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(
+        returned = self.receipt_sink(
             transport_receipt(request_id, delivery, detail=detail)
         )
+        if returned is not None:
+            raise TelegramV2Error(
+                "Telegram action receipt persistence is unknown"
+            )
 
     def _fail(self, request_id: str, detail: str, cause: Exception | None = None) -> None:
         try:
@@ -340,6 +363,15 @@ class TelegramActionSinkV2:
             ) from receipt_error
         raise TelegramV2Error("Telegram action failed") from cause
 
+    def _unknown(self, request_id: str, detail: str, cause: Exception) -> None:
+        try:
+            self._receipt(request_id, "unknown", detail)
+        except Exception as receipt_error:
+            raise TelegramV2Error(
+                "Telegram action and receipt status are unknown"
+            ) from receipt_error
+        raise TelegramV2Error("Telegram action outcome is unknown") from cause
+
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise TelegramV2Error("Telegram action correlation is invalid")
@@ -349,8 +381,6 @@ class TelegramActionSinkV2:
             if len(self._consumed) >= self.max_request_ids:
                 raise TelegramV2Error("Telegram action capacity is exhausted")
             self._consumed.add(request_id)
-        if self.backstop.try_acquire(self.chat_id) > 0:
-            self._fail(request_id, "send-backstop")
         try:
             accepted = copy.deepcopy(action)
             if accepted.get("kind") == "message":
@@ -362,10 +392,10 @@ class TelegramActionSinkV2:
                         "Telegram exact outbound mentions are unavailable"
                     )
                 reply = accepted.get("reply_to_event_id")
-                self.client.send_message(
-                    self.chat_id,
+                operation = (
+                    "message",
                     content,
-                    reply_to_message_id=(
+                    (
                         _telegram_target(reply, self.chat_id)
                         if reply is not None
                         else None
@@ -375,8 +405,8 @@ class TelegramActionSinkV2:
                 reaction = accepted.get("reaction")
                 if not isinstance(reaction, str) or not reaction:
                     raise TelegramV2Error("Telegram reaction is invalid")
-                self.client.set_reaction(
-                    self.chat_id,
+                operation = (
+                    "reaction",
                     _telegram_target(
                         accepted.get("target_event_id"),
                         self.chat_id,
@@ -386,7 +416,32 @@ class TelegramActionSinkV2:
             else:
                 raise TelegramV2Error("Telegram action kind is unsupported")
         except Exception as exc:
-            self._fail(request_id, "telegram-api-failure", exc)
+            self._fail(request_id, "invalid-action", exc)
+        if self.backstop.try_acquire(self.chat_id) > 0:
+            self._fail(request_id, "send-backstop")
+        try:
+            if operation[0] == "message":
+                result = self.client.send_message(
+                    self.chat_id,
+                    operation[1],
+                    reply_to_message_id=operation[2],
+                )
+                if (
+                    isinstance(result, bool)
+                    or not isinstance(result, int)
+                    or result < 1
+                ):
+                    raise TelegramV2Error("Telegram message result is invalid")
+            else:
+                result = self.client.set_reaction(
+                    self.chat_id,
+                    operation[1],
+                    operation[2],
+                )
+                if result is not None:
+                    raise TelegramV2Error("Telegram reaction result is invalid")
+        except Exception as exc:
+            self._unknown(request_id, "telegram-api-outcome-unknown", exc)
         try:
             self._receipt(request_id, "sent")
         except Exception as exc:
@@ -422,7 +477,12 @@ class TelegramChatAdapterV2:
         self.client = client
         identity = copy.deepcopy(self_user if self_user is not None else client.get_me())
         user_id = identity.get("id") if isinstance(identity, dict) else None
-        if isinstance(user_id, bool) or not isinstance(user_id, int):
+        if (
+            isinstance(user_id, bool)
+            or not isinstance(user_id, int)
+            or user_id < 1
+            or identity.get("is_bot") is not True
+        ):
             raise TelegramV2Error("Telegram self identity is invalid")
         self.source = TelegramEventSourceV2(
             allowed_chat_ids=frozenset({arguments.chat_id})

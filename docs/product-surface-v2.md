@@ -43,8 +43,10 @@ python3 -m evals.v2.provenance.runner \
 ```
 
 The repository audit compares `pyproject.toml` to the closed surface table,
-requires a V2 major version, and groups exact importable V1 residue by file and
-symbol. The install probe builds a wheel offline, records its SHA-256 digest,
+requires a V2 major version, and groups exact V1 residue by file and symbol
+across both the importable package and ordinary integration runtime sources.
+Historical docs, tests, and evidence are outside that runtime scan. The install
+probe builds a wheel offline, records its SHA-256 digest,
 creates a fresh virtual environment, installs without dependency or index
 resolution, reads installed distribution metadata in isolated Python mode, and
 runs every required command's `--help` path under a minimal environment. Help

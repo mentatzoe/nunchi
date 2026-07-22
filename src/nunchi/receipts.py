@@ -78,6 +78,12 @@ class ExclusiveJSONFileReceiptSink:
             raise
         self._directory_fd = descriptor
         self._lock = threading.RLock()
+        self._max_transport_claims = 4096
+        self._transport_claim_count = sum(
+            1
+            for name in os.listdir(descriptor)
+            if name.startswith("transport-action-") and name.endswith(".claim")
+        )
 
     @staticmethod
     def _filename(request_id: str, stage: str) -> str:
@@ -154,6 +160,64 @@ class ExclusiveJSONFileReceiptSink:
             except OSError as exc:
                 raise ReceiptSinkPersistenceError("unknown") from exc
 
+    def claim_transport_action(self, request_id: str) -> None:
+        """Durably reserve one request ID before any transport side effect.
+
+        Reservation files are never removed or evicted.  A restart therefore
+        cannot reopen an already-dispatched request.  Capacity exhaustion fails
+        closed instead of forgetting replay identity.
+        """
+        if not isinstance(request_id, str) or not request_id:
+            raise ReceiptSinkPersistenceError("not-persisted")
+        digest = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
+        filename = f"transport-action-{digest}.claim"
+        with self._lock:
+            if self._transport_claim_count >= self._max_transport_claims:
+                raise ReceiptSinkPersistenceError("not-persisted")
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            flags |= getattr(os, "O_CLOEXEC", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            try:
+                descriptor = os.open(
+                    filename,
+                    flags,
+                    0o600,
+                    dir_fd=self._directory_fd,
+                )
+            except FileExistsError as exc:
+                raise ReceiptSinkPersistenceError("not-persisted") from exc
+            except OSError as exc:
+                raise ReceiptSinkPersistenceError("not-persisted") from exc
+            failure: OSError | None = None
+            try:
+                payload = (request_id + "\n").encode("utf-8")
+                view = memoryview(payload)
+                while view:
+                    written = os.write(descriptor, view)
+                    if written <= 0:
+                        raise OSError("transport reservation write made no progress")
+                    view = view[written:]
+                os.fsync(descriptor)
+            except OSError as exc:
+                failure = exc
+            finally:
+                try:
+                    os.close(descriptor)
+                except OSError as exc:
+                    if failure is None:
+                        failure = exc
+            if failure is not None:
+                try:
+                    os.unlink(filename, dir_fd=self._directory_fd)
+                except OSError:
+                    pass
+                raise ReceiptSinkPersistenceError("unknown") from failure
+            try:
+                os.fsync(self._directory_fd)
+            except OSError as exc:
+                raise ReceiptSinkPersistenceError("unknown") from exc
+            self._transport_claim_count += 1
+
     def close(self) -> None:
         with self._lock:
             if self._directory_fd >= 0:
@@ -224,6 +288,23 @@ class ReloadingPolicyReceiptSink:
                     previous.close()
             assert self._sink is not None
             self._sink(record)
+
+    def claim_transport_action(self, request_id: str) -> None:
+        with self._lock:
+            policy = self._policy_loader()
+            if not isinstance(policy, OperatorPolicy):
+                raise ReceiptSinkConstructionError("policy loader returned an invalid policy")
+            sink_policy = policy.receipt_sink
+            binding = (sink_policy.type, sink_policy.directory, sink_policy.source)
+            if binding != self._binding:
+                replacement = ExclusiveJSONFileReceiptSink(sink_policy)
+                previous = self._sink
+                self._sink = replacement
+                self._binding = binding
+                if previous is not None:
+                    previous.close()
+            assert self._sink is not None
+            self._sink.claim_transport_action(request_id)
 
     def close(self) -> None:
         with self._lock:

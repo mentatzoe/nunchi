@@ -153,6 +153,67 @@ class MatrixActionCases(unittest.TestCase):
         self.assertEqual(client.actions, [])
         self.assertEqual(receipts[0]["body"]["delivery"], "failed")
 
+    def test_lost_api_response_records_unknown_not_failed(self):
+        class LostResponseClient(FakeMatrixClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                raise OSError("response lost after dispatch")
+
+        client = LostResponseClient([])
+        receipts = []
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(MatrixV2Error):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+        self.assertEqual(
+            receipts[-1]["body"]["detail"],
+            "matrix-api-outcome-unknown",
+        )
+
+    def test_malformed_success_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeMatrixClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                return ""
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(MatrixV2Error):
+            sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        client = FakeMatrixClient([])
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = MatrixActionSinkV2(
+            room_id=ROOM,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(MatrixV2Error, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][3], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
 
 class MatrixRoomCases(unittest.TestCase):
     def setUp(self):
@@ -267,6 +328,13 @@ class MatrixClientCases(unittest.TestCase):
     def test_https_is_required_unless_operator_explicitly_allows_http(self):
         with self.assertRaises(MatrixV2Error):
             MatrixClientV2("http://matrix.example.test", "secret", room_id=ROOM)
+        with self.assertRaises(MatrixV2Error):
+            MatrixClientV2(
+                "http://matrix.example.test",
+                "secret",
+                room_id=ROOM,
+                allow_insecure_http=True,
+            )
         client = MatrixClientV2(
             "http://127.0.0.1:8008",
             "secret",
@@ -275,6 +343,32 @@ class MatrixClientCases(unittest.TestCase):
             http=lambda *_args: (200, b'{"user_id":"@vigil:example.test"}'),
         )
         self.assertEqual(client.whoami(), SELF)
+
+    def test_malformed_or_ambiguous_homeserver_is_rejected(self):
+        for value, flag in (
+            ("http://127.0.0.1:bad", True),
+            ("http://localhost.example.test:8008", True),
+            ("https://matrix.example.test\n", False),
+            (123, False),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(MatrixV2Error):
+                    MatrixClientV2(
+                        value,
+                        "secret",
+                        room_id=ROOM,
+                        allow_insecure_http=flag,
+                    )
+
+    def test_http_credential_is_bounded_visible_ascii(self):
+        for token in ("secret\nheader", "snowman-☃", "x" * 4097, 123):
+            with self.subTest(token=token):
+                with self.assertRaises(MatrixV2Error):
+                    MatrixClientV2(
+                        "https://matrix.example.test",
+                        token,
+                        room_id=ROOM,
+                    )
 
     def test_duplicate_or_nonfinite_server_json_is_rejected(self):
         for payload in (b'{"user_id":"a","user_id":"b"}', b'{"x":NaN}'):

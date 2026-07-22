@@ -15,6 +15,7 @@ Error messages never include the token or request headers.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import time
@@ -46,7 +47,7 @@ class DiscordRestError(Exception):
         self.status = status
 
 
-def _strict_json(raw: bytes):
+def _strict_json(raw: str | bytes):
     def pairs(items):
         result = {}
         for key, value in items:
@@ -146,8 +147,16 @@ class DiscordRestClient:
         reply_to_message_id: str | None = None,
         allowed_mention_user_ids: tuple[str, ...] | None = None,
         fail_if_reply_missing: bool = False,
+        nonce: str | None = None,
     ) -> dict:
         body: dict = {"content": content}
+        if nonce is not None:
+            if not isinstance(nonce, str) or not nonce or len(nonce) > 512:
+                raise DiscordRestError(None, "Discord message nonce source is invalid")
+            # Discord accepts a string nonce up to 25 characters.  The stable
+            # digest preserves V2 request identity across retries and restarts.
+            body["nonce"] = hashlib.sha256(nonce.encode("utf-8")).hexdigest()[:25]
+            body["enforce_nonce"] = True
         if allowed_mention_user_ids is not None:
             body["allowed_mentions"] = {
                 "parse": [],
@@ -236,6 +245,16 @@ class DiscordRestClient:
                 )
 
             if 500 <= status < 600:
+                if method == "POST" and not (
+                    isinstance(body, dict)
+                    and body.get("enforce_nonce") is True
+                    and isinstance(body.get("nonce"), str)
+                    and body["nonce"]
+                ):
+                    raise DiscordRestError(
+                        status,
+                        f"Discord API {status} left a non-idempotent POST outcome unknown",
+                    )
                 attempts += 1
                 if attempts > self._max_retries:
                     raise DiscordRestError(status, f"Discord API {status} on {route}; retries exhausted")
@@ -264,7 +283,12 @@ class DiscordRestClient:
         try:
             payload = _strict_json(body)
             if isinstance(payload, dict):
-                retry_after = float(payload.get("retry_after", retry_after))
+                retry_value = payload.get("retry_after", retry_after)
+                if isinstance(retry_value, bool) or not isinstance(
+                    retry_value, (int, float)
+                ):
+                    raise ValueError("invalid retry-after value")
+                retry_after = float(retry_value)
                 global_value = payload.get("global", is_global)
                 if type(global_value) is bool:
                     is_global = global_value

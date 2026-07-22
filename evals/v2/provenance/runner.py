@@ -106,12 +106,24 @@ def _version_major(version: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _source_files(root: Path) -> list[Path]:
-    package = root / "src" / "nunchi"
+def _runtime_files(root: Path) -> list[Path]:
+    """Return ordinary product runtime sources, excluding docs/tests/evidence.
+
+    The wheel is only one product surface. Hermes, Claude Code, Codex, and
+    transport packets also execute from ``integrations`` before or during
+    installation, so a source-only scan could falsely report a V1-clean
+    repository while a live hook or dashboard still exposed the old gate.
+    """
+    suffixes = frozenset({".py", ".js", ".json", ".sh", ".yaml", ".yml"})
+    roots = (root / "src" / "nunchi", root / "integrations")
     return sorted(
         path
-        for path in package.rglob("*.py")
-        if "__pycache__" not in path.parts
+        for runtime_root in roots
+        if runtime_root.is_dir()
+        for path in runtime_root.rglob("*")
+        if path.is_file()
+        and path.suffix in suffixes
+        and "__pycache__" not in path.parts
     )
 
 
@@ -121,7 +133,7 @@ def _residue_findings(root: Path, contract: dict[str, Any]) -> list[dict[str, An
         (symbol, re.compile(rf"\b{re.escape(symbol)}\b"))
         for symbol in contract["forbidden_runtime_symbols"]
     ]
-    for path in _source_files(root):
+    for path in _runtime_files(root):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
         except OSError:

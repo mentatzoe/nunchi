@@ -88,13 +88,17 @@ class JSONLinesActionSinkV2:
                 self.stream.flush()
             except Exception as exc:
                 try:
-                    self.receipt_sink(
+                    returned = self.receipt_sink(
                         transport_receipt(
                             request_id,
                             "unknown",
                             detail="generic-output-failure",
                         )
                     )
+                    if returned is not None:
+                        raise GenericAdapterV2Error(
+                            "generic action receipt persistence is unknown"
+                        )
                 except Exception as receipt_exc:
                     raise GenericAdapterV2Error(
                         "generic action and receipt status are unknown"

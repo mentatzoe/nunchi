@@ -36,6 +36,11 @@ _INSTALL_MD = _REPO_ROOT / "docs" / "INSTALL.md"
 _MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
+_V1_CONTRACTS = (
+    _REPO_ROOT / "docs" / "contracts" / "channel-adapter-v1.md",
+    _REPO_ROOT / "docs" / "contracts" / "verdict-suite-data-model-v1.md",
+    _REPO_ROOT / "docs" / "contracts" / "verdict-suite-requirements-v1.md",
+)
 
 def _load_hermes_plugin() -> types.ModuleType:
     spec = importlib.util.spec_from_file_location("nunchi_gate_docs_check", _HERMES_PLUGIN)
@@ -243,6 +248,14 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
         self.assertIn("not an installable product", install_text)
         self.assertIn("does not contain the", mcp_text)
         self.assertNotIn("pip install nunchi[mcp-discord]", mcp_text)
+
+    def test_historical_contracts_do_not_call_v2_unimplemented(self) -> None:
+        for path in _V1_CONTRACTS:
+            with self.subTest(path=path.relative_to(_REPO_ROOT)):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("still-unimplemented V2", text)
+                self.assertNotIn("contract remains current", text.lower())
+                self.assertIn("Historical", text)
 
 
 if __name__ == "__main__":  # pragma: no cover

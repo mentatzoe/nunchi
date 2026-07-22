@@ -17,7 +17,9 @@ nothing through the shared transport.
 The Codex participant has a dedicated owner-only `CODEX_HOME` and empty
 workspace. Its invocation disables shell, web, apps, plugins, skills, MCP, code
 mode, multi-agent, and permission tools; ignores ambient instructions; inherits
-no operator environment; and rejects any observed tool event. It returns only a
+no operator environment; and rejects any observed tool event or unknown JSONL
+shape. The persistent thread advances only after both the completed Codex event
+lifecycle and the strict structured action artifact validate. It returns only a
 message action, reaction action, or `null`.
 
 ## Run

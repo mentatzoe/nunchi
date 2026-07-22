@@ -4,11 +4,15 @@
 
 **Created**: 2026-06-13
 
-**Status**: Implemented (refined by `005`)
+**Status**: Historical V1 contract (refined by `005`); no live V2-candidate
+runtime or entry point implements this contract.
 
-> **Relocated 2026-07-11:** This is the ordinary-path contract for the currently
-> implemented V1 channel adapter. It is not an active SpecKit plan and does not
-> describe the selected, still-unimplemented V2 attention/wake contract.
+> **Relocated 2026-07-11; retired from the source candidate 2026-07-21:** This
+> preserves the published V1 channel-adapter design for release-history and
+> regression research. It is not an active SpecKit plan, an installable
+> compatibility surface, or a description of the implemented V2 candidate.
+> The current `nunchi-channel` command is the closed V2 JSON-lines host in
+> [`../adapters-v2.md`](../adapters-v2.md).
 
 > **Historical reconciliation 2026-06-14:** the adapter's default contract was
 > made transport-neutral — `gate()` returns `verdict` + `silent`, and the CLI

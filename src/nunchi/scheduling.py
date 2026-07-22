@@ -127,6 +127,22 @@ class ConversationOpportunityScheduler:
             del self._rooms[opportunity.key]
             return None
 
+    def abort(self, opportunity: ConversationOpportunity) -> None:
+        """Drop exact active and pending wake work after host cancellation.
+
+        Observed events remain available as context. A later live event may
+        start fresh work, but cancellation never promotes a pending anchor into
+        an orphaned response obligation.
+        """
+
+        if not isinstance(opportunity, ConversationOpportunity):
+            raise SchedulingError("abort requires a scheduler-issued opportunity")
+        with self._lock:
+            state = self._rooms.get(opportunity.key)
+            if state is None or state.active != opportunity:
+                raise SchedulingError("opportunity is not the exact active generation")
+            del self._rooms[opportunity.key]
+
     def snapshot(self) -> tuple[dict[str, object], ...]:
         """Return a non-authoritative operator/debug copy of ephemeral state."""
         with self._lock:

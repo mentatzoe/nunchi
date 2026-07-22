@@ -1,114 +1,145 @@
 #!/usr/bin/env python3
-"""Demo: a NON-cc-connect host adopting the gate via the transport-neutral contract.
+"""Run the portable V2 lifecycle without a platform-specific adapter.
 
-This stands in for a plain message-queue / "Slack-style" loop — no cc-connect, no
-Discord, no platform glue. A worker `helpbot` pulls events off a queue and, for
-each one, asks the gate whether to speak BEFORE composing anything. It acts only
-on the transport-neutral decision the adapter returns:
+The example is offline and deterministic so it is safe in CI. Only the remote
+participant-shaped model call is replaced by a scripted fixture; the ordinary
+V2 policy, observation, attention, scheduling, participant, receipt, and action
+paths still run. Production hosts use the same lifecycle with the configured
+model provider.
 
-    if result.silent:  the host posts nothing
-    else:              the host would compose exactly one turn in result.run_shape
+Run from a checkout:
 
-It never composes reply prose — it just shows the routing a real host would do.
-To prove the contract is platform-agnostic, it also derives this host's OWN
-suppression sentinel via ``result.silent_token("<<HOST_NOOP>>")`` — a made-up
-magic string for a transport that suppresses sends by a final-output marker.
-Nothing here references cc-connect's sentinel.
-
-Run live (real classifier):
-    export NUNCHI_CLASSIFIER_MODEL=google/gemini-3.1-flash-lite
-    export OPENROUTER_API_KEY=...
     PYTHONPATH=src python3 examples/generic_host_demo.py
-
-Run offline (pin every verdict, just to see the routing/plumbing):
-    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
-    PYTHONPATH=src python3 examples/generic_host_demo.py
-
-    # Or inject a different pinned verdict to watch it route a SPEAK:
-    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["dev"]}'
 """
 
-import os
-import sys
+from __future__ import annotations
 
-from nunchi.adapters.channel import gate
+import tempfile
+from pathlib import Path
 
-# This host's own suppression marker. It is OUR convention, not Nunchi's — a
-# transport that drops an outbound message when the worker's final output equals
-# this string. (cc-connect has a different one; the gate is agnostic to both.)
-HOST_NOOP_SENTINEL = "<<HOST_NOOP>>"
+from v2.demo_support import (
+    PARTICIPANT_ACTOR_ID,
+    build_harness,
+    message_delivery,
+)
 
-AGENT = {"id": "helpbot", "role": "participant", "mention_id": "U_HELPBOT"}
 
-# A few canned events off the queue: (label, trigger, recent transcript oldest-first).
-QUEUE = [
-    (
-        "operator asks this worker for substantive help",
-        {"content": "helpbot, can you summarize today's incident timeline?",
-         "author": "dana", "author_kind": "operator", "message_id": "evt-1"},
-        [],
-    ),
-    (
-        "two peers chatting, nobody addressed this worker",
-        {"content": "yeah I'll grab lunch after the deploy", "author": "sam",
-         "author_kind": "peer", "message_id": "evt-2"},
-        [{"content": "deploy's green, merging now", "author": "lee",
-          "author_kind": "peer", "message_id": "evt-1b"}],
-    ),
-    (
-        "trigger just echoes what this worker already said (duplicate)",
-        {"content": "someone should note the cache TTL changed", "author": "lee",
-         "author_kind": "peer", "message_id": "evt-3"},
-        [{"content": "Heads up: cache TTL changed to 60s in this release.",
-          "author": "helpbot", "author_kind": "self", "message_id": "evt-2b"}],
-    ),
-]
+SCRIPTED_DISPOSITIONS = {
+    "reference:event:1": "WAKE",
+    "reference:event:2": "SUPPRESS",
+    "reference:event:3": "DEFER",
+}
+
+
+def scripted_participant_model(projection, _config):
+    """Stand in for one stochastic participant-shaped model call."""
+    disposition = SCRIPTED_DISPOSITIONS[projection["trigger_event_id"]]
+    judgment = {
+        "disposition": disposition,
+        "reasons": [f"offline fixture selected {disposition}"],
+        "evidence_event_ids": [projection["trigger_event_id"]],
+    }
+    if disposition == "WAKE":
+        judgment["attention_advice"] = [
+            {
+                "note": "The participant was addressed directly.",
+                "evidence_event_ids": [projection["trigger_event_id"]],
+            }
+        ]
+    return judgment
+
+
+def participant(turn):
+    """Act directly when useful; a DEFER wake may still end in silence."""
+    if turn.packet["attention"]["source"] == "DEFER":
+        return None
+    return {
+        "kind": "message",
+        "content": "I can take that summary.",
+    }
 
 
 def main() -> int:
-    if not (os.environ.get("NUNCHI_CLASSIFIER_MODEL")
-            or os.environ.get("NUNCHI_CLASSIFIER_TEST_RESULT")):
-        print("Set NUNCHI_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
-              "or NUNCHI_CLASSIFIER_TEST_RESULT to see routing offline.",
-              file=sys.stderr)
-        return 2
-
-    print(f"[host] generic message-queue worker: {AGENT['id']}")
-    print("[host] asking the gate per event; acting only on result.silent / verdict.\n")
-
-    posted = suppressed = 0
-    for label, trigger, history in QUEUE:
-        result = gate(
-            trigger, history,
-            agent_id=AGENT["id"], agent_role=AGENT["role"],
-            agent_mention_id=AGENT["mention_id"],
-            surface={"type": "generic-queue"}, fail_policy="open",
+    with tempfile.TemporaryDirectory() as temporary:
+        harness = build_harness(
+            Path(temporary),
+            classifier=scripted_participant_model,
+            participant=participant,
+        )
+        deliveries = (
+            message_delivery(
+                harness.source,
+                "1",
+                "reference:user:zoe",
+                "Vigil, summarize the incident timeline.",
+                mentioned_actor_ids=[PARTICIPANT_ACTOR_ID],
+            ),
+            message_delivery(
+                harness.source,
+                "2",
+                "reference:user:sol",
+                "Lunch after the deploy?",
+            ),
+            message_delivery(
+                harness.source,
+                "3",
+                "reference:user:sol",
+                "The request may need another look.",
+            ),
         )
 
-        print(f"• {label}")
-        print(f"    trigger : {trigger['content']}")
-        print(f"    verdict : {result.verdict}")
-        if result.silent:
-            suppressed += 1
-            # Transport-neutral branch: just don't post. We ALSO show this host's
-            # own sentinel, to demonstrate the generic suppression-token helper.
-            print("    [host] suppressed (posted nothing)")
-            print(f"    [host] (our suppression marker would be: "
-                  f"{result.silent_token(HOST_NOOP_SENTINEL)!r})")
-        else:
-            posted += 1
-            # Admission only — we route, we do NOT compose the reply here.
-            print(f"    [host] would compose one turn — run_shape: {result.run_shape}")
-            # On a non-PASS verdict the host's sentinel helper yields "" (no suppression).
-            assert result.silent_token(HOST_NOOP_SENTINEL) == ""
-        if result.reasons:
-            print(f"    reason  : {result.reasons[0]}")
-        print()
+        print("ordinary V2 attention")
+        for delivery in deliveries:
+            result = harness.runtime.process_delivery(delivery)[0]
+            decision = result["decision"]
+            disposition = decision["effective_disposition"]
+            invoked = result["participant_invoked"]
+            outcome = result.get("participant", {}).get("outcome", "none")
+            print(
+                f"  {result['anchor_event_id']}: {disposition}; "
+                f"participant_invoked={invoked}; outcome={outcome}"
+            )
 
-    print(f"[host] {suppressed} suppressed, {posted} routed for composition "
-          f"— classifier model: {result.classifier_model}")
+        bypass_calls = []
+        bypass = build_harness(
+            Path(temporary),
+            classifier=lambda projection, config: bypass_calls.append(projection),
+            participant=lambda _turn: None,
+            preattention_enabled=False,
+        )
+        bypass_result = bypass.runtime.process_delivery(
+            message_delivery(
+                bypass.source,
+                "4",
+                "reference:user:zoe",
+                "Trusted pre-attention is disabled for this binding.",
+            )
+        )[0]
+        print(
+            "trusted bypass: "
+            f"status={bypass_result['decision']['status']}; "
+            f"model_calls={len(bypass_calls)}; "
+            f"participant_invoked={bypass_result['participant_invoked']}"
+        )
+
+        rejected = message_delivery(
+            harness.source,
+            "5",
+            "reference:user:zoe",
+            "Room text cannot authorize this delivery.",
+            authorized=False,
+        )
+        rejected_results = harness.runtime.process_delivery(rejected)
+        print(
+            "deterministic transport rejection: "
+            f"disposition={rejected['disposition']}; "
+            f"model_or_participant_results={len(rejected_results)}"
+        )
+        print(
+            f"receipts={len(harness.receipts)}; actions={len(harness.actions)}"
+        )
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

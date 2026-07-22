@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import tempfile
 import threading
 import unittest
@@ -12,6 +13,7 @@ from nunchi.authorization import (
 )
 from nunchi.policy import OperatorPolicySource, load_operator_policy
 from nunchi.runtime import LiveRoomRuntime, LiveRoomRuntimeError
+from nunchi.scheduling import ConversationOpportunityScheduler
 from tests.v2.contract.schema_helpers import make_authorization_request
 from tests.v2.observation.helpers import (
     FIXTURE_ACTORS,
@@ -28,6 +30,22 @@ def wake_judgment(projection, _config):
         "reasons": ["the current room warrants a participant turn"],
         "evidence_event_ids": [projection["trigger_event_id"]],
     }
+
+
+class ChangesAfterCopy(dict):
+    """Mapping whose caller-owned view changes after the defensive copy."""
+
+    def __deepcopy__(self, memo):
+        return copy.deepcopy(dict(self), memo)
+
+    def get(self, key, default=None):
+        if key == "event":
+            return None
+        return super().get(key, default)
+
+
+class HostCancellation(BaseException):
+    pass
 
 
 class RuntimeCase(unittest.TestCase):
@@ -60,6 +78,97 @@ class RuntimeCase(unittest.TestCase):
 
 
 class LiveCoalescingCases(RuntimeCase):
+    def test_attention_receipt_failure_stops_before_participant_and_action(self):
+        persisted = []
+        effects = []
+
+        def sink(receipt):
+            if receipt["stage"] == "attention":
+                raise OSError("durability unavailable")
+            persisted.append(receipt)
+
+        runtime = self.runtime(
+            receipt_sink=sink,
+            participant=lambda _turn: self.fail("receipt failure must not invoke"),
+            action_sink=effects.append,
+        )
+        results = runtime.process_delivery(self.delivery(1))
+        self.assertEqual(results[0]["status"], "error")
+        self.assertEqual(
+            results[0]["error"],
+            "attention-receipt-persistence-unknown",
+        )
+        self.assertEqual([record["stage"] for record in persisted], ["observation"])
+        self.assertEqual(effects, [])
+
+    def test_concurrent_accept_preserves_ingest_order_in_scheduler(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingScheduler(ConversationOpportunityScheduler):
+            def observe(inner_self, **arguments):
+                if arguments["anchor_event_id"] == "e1":
+                    entered.set()
+                    self.assertTrue(release.wait(5))
+                return super().observe(**arguments)
+
+        runtime = self.runtime(scheduler=BlockingScheduler())
+        accepted = []
+        first = threading.Thread(
+            target=lambda: accepted.append(runtime.accept(self.delivery(1))),
+            daemon=True,
+        )
+        second = threading.Thread(
+            target=lambda: accepted.append(runtime.accept(self.delivery(2))),
+            daemon=True,
+        )
+        first.start()
+        self.assertTrue(entered.wait(5))
+        second.start()
+        release.set()
+        first.join(5)
+        second.join(5)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual([event["id"] for event in self.provider._events], ["e1", "e2"])
+        state = runtime.scheduler.snapshot()[0]
+        self.assertEqual(state["active_anchor_event_id"], "e1")
+        self.assertEqual(state["pending_anchor_event_id"], "e2")
+
+    def test_non_none_observation_receipt_ack_stops_before_attention(self):
+        offered = []
+
+        def ambiguous_receipt(receipt):
+            offered.append(receipt)
+            return False
+
+        runtime = self.runtime(receipt_sink=ambiguous_receipt)
+        results = runtime.process_delivery(self.delivery(1))
+        self.assertEqual(results[0]["status"], "error")
+        self.assertEqual(
+            results[0]["error"],
+            "observation-receipt-persistence-unknown",
+        )
+        self.assertEqual([record["stage"] for record in offered], ["observation"])
+        self.assertEqual(self.participant_packets, [])
+
+    def test_single_delivery_schedules_from_the_exact_retained_copy(self):
+        runtime = self.runtime()
+        delivery = ChangesAfterCopy(self.delivery(1))
+        accepted = runtime.accept(delivery)
+        self.assertEqual(accepted.observation_disposition, "observed")
+        self.assertIsNotNone(accepted.opportunity)
+        self.assertEqual(accepted.opportunity.anchor_event_id, "e1")
+
+    def test_batch_schedules_from_the_exact_retained_copy(self):
+        runtime = self.runtime()
+        accepted = runtime.accept_batch(
+            [ChangesAfterCopy(self.delivery(1)), ChangesAfterCopy(self.delivery(2))]
+        )
+        self.assertEqual(accepted.observation_dispositions, ("observed", "observed"))
+        self.assertIsNotNone(accepted.opportunity)
+        self.assertEqual(accepted.opportunity.anchor_event_id, "e2")
+
     def test_backfill_batch_is_context_only_and_creates_no_wake_obligation(self):
         runtime = self.runtime()
         dispositions = runtime.observe_context_batch(
@@ -151,6 +260,29 @@ class LiveCoalescingCases(RuntimeCase):
         self.assertEqual(
             [record["stage"] for record in self.receipts],
             ["observation", "attention", "participant-host"] * 2,
+        )
+
+    def test_host_cancellation_discards_pending_wake_but_retains_context(self):
+        holder = {}
+
+        def cancel_after_pending(_projection, _config):
+            accepted = holder["runtime"].accept(self.delivery(2))
+            self.assertIsNone(accepted.opportunity)
+            raise HostCancellation()
+
+        runtime = self.runtime(classifier_transport=cancel_after_pending)
+        holder["runtime"] = runtime
+        first = runtime.accept(self.delivery(1))
+        with self.assertRaises(HostCancellation):
+            runtime.drain(first.opportunity)
+        self.assertEqual(runtime.scheduler.snapshot(), ())
+
+        successor = runtime.accept(self.delivery(3))
+        self.assertIsNotNone(successor.opportunity)
+        self.assertEqual(successor.opportunity.anchor_event_id, "e3")
+        self.assertEqual(
+            [event["id"] for event in self.provider._events],
+            ["e1", "e2", "e3"],
         )
 
     def test_suppression_stops_without_participant_invocation(self):

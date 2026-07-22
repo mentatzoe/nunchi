@@ -18,10 +18,11 @@ pump, in-flight tracking for drain-on-shutdown); everything that touches the
 mcp SDK lives in :mod:`._binding` and is imported lazily by :func:`main`.
 
 Backpressure: the notification queue is bounded
-(NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE, default 256). When a slow MCP client lets
-it fill, the OLDEST event is dropped with a warning — for an admission-gate
-transport the room's present matters more than its backlog, and memory stays
-bounded. See integrations/mcp-discord/DESIGN.md.
+(NUNCHI_MCP_DISCORD_QUEUE_MAXSIZE, default 256). Overflow fails the transport
+session instead of silently dropping one event and delivering a falsely
+continuous successor. The supervised client reconnects and backfills bounded
+message history as context under its declared restart gap. See
+integrations/mcp-discord/DESIGN.md.
 """
 
 from __future__ import annotations
@@ -35,12 +36,13 @@ import sys
 from typing import Awaitable, Callable
 
 from .config import Config, load_config
-from .events import MessageEvent, ReactionEvent
+from .events import GatewayContinuityEvent, MessageEvent, ReactionEvent
 from .hygiene import install_redaction
 
 logger = logging.getLogger("nunchi.mcp_discord.server")
 
 _PUMP_POLL_SECONDS = 0.25
+_SESSION_SEND_TIMEOUT_SECONDS = 5.0
 
 
 class InFlight:
@@ -61,6 +63,18 @@ class InFlight:
             self._count -= 1
             if self._count == 0:
                 self._idle.set()
+
+    def track_future(self, future: asyncio.Future) -> None:
+        """Track the worker itself, not only the cancellable awaiting task."""
+        self._count += 1
+        self._idle.clear()
+
+        def completed(_future: asyncio.Future) -> None:
+            self._count -= 1
+            if self._count == 0:
+                self._idle.set()
+
+        future.add_done_callback(completed)
 
     @property
     def count(self) -> int:
@@ -114,27 +128,22 @@ class BearerAuthMiddleware:
 
 def enqueue_event(
     queue: asyncio.Queue,
-    event: MessageEvent | ReactionEvent,
+    event: MessageEvent | ReactionEvent | GatewayContinuityEvent,
 ) -> bool:
-    """Bounded enqueue with drop-oldest backpressure.
+    """Bounded enqueue that never fabricates continuity across overflow.
 
-    Returns False when the queue was full and the oldest event was evicted
-    to make room (never blocks, never grows without bound).
+    Returns ``False`` without changing the full queue. The binding treats that
+    result as transport-fatal, so no event after the unobserved delivery is
+    broadcast under the old session (never blocks, never grows without bound).
     """
     try:
         queue.put_nowait(event)
         return True
     except asyncio.QueueFull:
-        try:
-            dropped = queue.get_nowait()
-            logger.warning(
-                "notification queue full (maxsize=%d); dropped oldest message %s "
-                "from channel %s — is the MCP client keeping up?",
-                queue.maxsize, dropped.message_id, dropped.channel_id,
-            )
-        except asyncio.QueueEmpty:  # pragma: no cover — racing consumers only
-            pass
-        queue.put_nowait(event)
+        logger.critical(
+            "notification queue full (maxsize=%d); refusing a post-gap event",
+            queue.maxsize,
+        )
         return False
 
 
@@ -143,12 +152,14 @@ async def pump_notifications(
     send: Callable[[dict], Awaitable[None]],
     *,
     shutdown: asyncio.Event,
-    projector: Callable[[MessageEvent | ReactionEvent], dict],
+    projector: Callable[[MessageEvent | ReactionEvent | GatewayContinuityEvent], dict],
 ) -> None:
     """Drain the queue into *send* (broadcast to MCP sessions) until shutdown.
 
-    A failing send (MCP client gone mid-write) drops that notification and
-    keeps pumping; delivery to admission gates is best-effort by design.
+    ``send`` is the multi-session broadcast boundary and already isolates a
+    failed individual client. An exception here is therefore a global delivery
+    failure: it is re-raised so the binding terminates the transport session
+    rather than delivering later events across an unobservable hole.
     """
     while not shutdown.is_set():
         try:
@@ -159,7 +170,30 @@ async def pump_notifications(
         try:
             await send(params)
         except Exception as exc:  # noqa: BLE001 — transport must outlive one client
-            logger.warning("notification delivery failed (client gone?): %s", exc)
+            logger.critical("notification continuity failed: %s", exc)
+            raise
+
+
+async def broadcast_sessions(
+    sessions: list[object],
+    notification: object,
+    *,
+    discard: Callable[[object], None],
+    send_timeout: float = _SESSION_SEND_TIMEOUT_SECONDS,
+) -> None:
+    """Bound each session write so one stalled client cannot block its peers."""
+
+    async def deliver(session: object) -> None:
+        try:
+            await asyncio.wait_for(
+                session.send_notification(notification),  # type: ignore[attr-defined]
+                timeout=send_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 — transport isolates clients
+            logger.info("dropping MCP session after failed send: %s", exc)
+            discard(session)
+
+    await asyncio.gather(*(deliver(session) for session in sessions))
 
 
 def main(argv: list[str] | None = None) -> int:

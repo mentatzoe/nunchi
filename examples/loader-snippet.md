@@ -1,117 +1,75 @@
-# Loader snippet: shell out to the admission gate before replying
+# Host integration snippet: V2 act or silence
 
-Paste the block below into your agent's loader file (`CLAUDE.md`, `AGENTS.md`,
-`GEMINI.md`, or whatever your runtime loads as standing instruction). It
-implements **Path A** from [`docs/integration.md`](../docs/integration.md): the
-agent calls Nunchi first and obeys the verdict, instead of improvising the
-"should I speak?" decision inline.
+Nunchi V2 belongs in the trusted host, before a participant process is
+invoked. Do **not** paste a self-gating instruction into an agent prompt: room
+text must not choose policy, identity, authorization, or whether pre-attention
+is enabled, and a woken participant must not return a verdict or magic
+suppression sentinel.
 
-It is transport-neutral — nothing below assumes cc-connect, Discord, Slack, or
-any particular platform. The agent posts a normal turn or stays silent; the gate
-decides which.
-
-## Operator setup (one-time, outside the loader)
-
-The host process must have the classifier configured in its environment before
-the agent runs. Set **one** of:
-
-- **Live:** `NUNCHI_CLASSIFIER_MODEL` (e.g. `google/gemini-3.1-flash-lite`)
-  plus an API key (`OPENROUTER_API_KEY` or `NUNCHI_CLASSIFIER_API_KEY`).
-- **Dev / offline (no provider call):** `NUNCHI_CLASSIFIER_TEST_RESULT` set to
-  a pinned decision JSON, e.g.
-  `{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}`.
-
-Install once with `pip install .` (gives you the `nunchi-channel` console
-script), or run from a checkout with `PYTHONPATH=src python3 -m nunchi.adapters`.
-
----
-
-## Paste this into your loader file
-
-```markdown
-## Before any channel output
-
-You do NOT decide on your own whether to speak. Before composing anything that
-would appear in the channel, run the admission gate and obey its verdict.
-
-1. Build a JSON payload from what you're reacting to:
-   - `trigger`: the message that woke you — at least `content`; include
-     `message_id`, `author`, and `author_kind` when you have them.
-   - `history`: the recent transcript (about the last 10 messages), **oldest
-     first**. Tag each line's `author_kind` as one of:
-       - `operator` — a human / the person you serve,
-       - `peer` — another agent or participant,
-       - `self` — a message you yourself wrote earlier
-         (lets the gate suppress duplicating or echoing your own turn).
-   - `agent`: your own identity — `{"id": "<YOUR_AGENT_ID>"}`. If this surface
-     uses @mentions, also add `"mention_id": "<YOUR_MENTION_HANDLE>"` so the gate
-     can tell a mention aimed at someone else apart from one aimed at you.
-   - (optional) `surface`: `{"type": "<YOUR_PLATFORM>"}` for context/logging.
-   - (optional) `pinned_rules`: your channel's governance text, as a string.
-   - (optional) `fail_policy`: `"open"` (default; gate-unavailable -> SPEAK),
-     `"closed"` (gate-unavailable -> PASS), or `"raise"`.
-
-   Example payload:
-
-       {
-         "trigger": {
-           "content": "<THE_MESSAGE_THAT_TRIGGERED_YOU>",
-           "author": "<SENDER>",
-           "author_kind": "operator",
-           "message_id": "<TRIGGER_ID>"
-         },
-         "history": [
-           {"content": "<EARLIER_MESSAGE>", "author": "<SOMEONE>",
-            "author_kind": "peer", "message_id": "<ID_1>"},
-           {"content": "<SOMETHING_YOU_SAID>", "author": "<YOUR_AGENT_ID>",
-            "author_kind": "self", "message_id": "<ID_2>"}
-         ],
-         "agent": {"id": "<YOUR_AGENT_ID>", "mention_id": "<YOUR_MENTION_HANDLE>"},
-         "fail_policy": "open"
-       }
-
-2. Pipe that payload to the gate and read the JSON it prints:
-
-       echo "$PAYLOAD" | nunchi-channel
-       # or, from a checkout without installing:
-       echo "$PAYLOAD" | PYTHONPATH=src python3 -m nunchi.adapters
-
-3. Act on the directive:
-   - If the JSON has `"silent": true` -> **post nothing this turn. Stop.**
-   - Otherwise read `verdict` and `run_shape`, and compose **exactly one** turn
-     in that shape. Do not exceed the run-shape:
-       - `SPEAK` — one normal participant turn.
-       - `ASK`   — one blocking clarifying question, nothing else.
-       - `ACK`   — one short presence signal (an emoji or a single sentence).
-
-The gate decides admission only. It never writes your reply — you compose the
-turn yourself once it admits you.
-```
-
----
-
-## Optional: suppression-by-magic-string transports
-
-Most hosts just branch on `"silent": true` and post nothing. But some transports
-suppress an outbound message when the agent's *final output* is a specific magic
-string. If yours is one of those, add `--silent-token` so the CLI prints **your**
-token (and nothing else) on PASS, instead of JSON:
+Use [`nunchi-channel`](../docs/adapters-v2.md#generic-json-lines-host) when a
+platform-specific adapter is unavailable. The operator starts one long-lived
+process with an owner-only policy and an exact participant/room binding:
 
 ```sh
-echo "$PAYLOAD" | nunchi-channel --silent-token "<YOUR_TRANSPORTS_SENTINEL>"
-# PASS  -> prints exactly: <YOUR_TRANSPORTS_SENTINEL>   (emit it verbatim to stay silent)
-# other -> prints the normal JSON directive             (compose one turn)
+nunchi-channel \
+  --policy /absolute/operator/nunchi-policy.json \
+  --participant-id vigil \
+  --participant-actor-id reference:user:vigil \
+  --participant-name Vigil \
+  --platform reference \
+  --room-id room-1 \
+  --continuity-scope-id reference:room:1 \
+  --continuity restart-safe \
+  --restart-gap false \
+  --participant-workspace /absolute/owner-only/participant-workspace \
+  --participant-command /absolute/path/to/participant --json-stdio
 ```
 
-The token is **your platform's convention, not Nunchi's** — supply your own.
+The host authenticates and authorizes a native delivery first. It then writes
+one closed JSON document per line; text never substitutes for exact actor or
+room identity:
 
-cc-connect is one such transport, provided as a named preset of this same
-mechanism (no special status):
-
-```sh
-echo "$PAYLOAD" | nunchi-channel --format cc-connect
-# equivalent to: --silent-token CC_CONNECT_SILENT_PASS
+```json
+{
+  "delivery_id": "reference:delivery:501",
+  "authorized": true,
+  "routing_room_id": "room-1",
+  "event": {
+    "id": "reference:event:501",
+    "type": "message",
+    "author_id": "reference:user:zoe",
+    "text": "Vigil, summarize the incident timeline.",
+    "mentioned_actor_ids": ["reference:user:vigil"],
+    "mentions_room": false
+  },
+  "actors": {
+    "reference:user:zoe": {"display_name": "Zoe", "kind": "human"},
+    "reference:user:vigil": {"display_name": "Vigil", "kind": "bot"}
+  }
+}
 ```
 
-With a token configured, the loader's step 3 becomes: if the gate prints your
-sentinel, emit it verbatim and stop; otherwise compose one turn per the JSON.
+The process may emit an `action` record followed by a `delivery-result`, or
+only a `delivery-result` when suppression or participant silence produces no
+room action. The host sends an emitted action exactly once and never asks a
+second social question at send time. Invalid, unauthorized, duplicate, and
+self-caused native deliveries do not become response jobs.
+
+The participant receives one `ParticipantWakeV2` JSON document on stdin and
+returns exactly one structured action or JSON `null`:
+
+```json
+{"kind":"message","content":"The incident began at 14:03 UTC."}
+```
+
+That is the entire participant-side loader contract: treat the wake as a
+normal current-room turn, optionally fetch bounded context through a host-only
+continuation interface when one is supplied, then contribute directly or stay
+silent. Do not emit `SUPPRESS`, `WAKE`, `DEFER`, an explanation of whether to
+speak, or a transport sentinel.
+
+See [`generic_host_demo.py`](generic_host_demo.py) for all three model
+dispositions plus trusted bypass and deterministic transport rejection. See
+[`read_the_room_demo.py`](read_the_room_demo.py) for the one-active,
+newest-pending freshness rule that prevents a burst from becoming a FIFO of
+stale replies.

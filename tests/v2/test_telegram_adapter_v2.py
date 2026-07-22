@@ -121,6 +121,93 @@ class TelegramActionCases(unittest.TestCase):
                 self.assertEqual(client.actions, [])
                 self.assertEqual(receipts[0]["body"]["delivery"], "failed")
 
+    def test_lost_api_response_records_unknown_not_failed(self):
+        class LostResponseClient(FakeTelegramClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                raise OSError("response lost after dispatch")
+
+        client = LostResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink("req-unknown", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+        self.assertEqual(
+            receipts[-1]["body"]["detail"],
+            "telegram-api-outcome-unknown",
+        )
+
+    def test_malformed_success_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeTelegramClient):
+            def send_message(self, *args, **kwargs):
+                super().send_message(*args, **kwargs)
+                return True
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink("req-malformed", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_malformed_reaction_response_records_unknown_not_sent(self):
+        class MalformedResponseClient(FakeTelegramClient):
+            def set_reaction(self, *args, **kwargs):
+                super().set_reaction(*args, **kwargs)
+                return False
+
+        client = MalformedResponseClient([])
+        receipts = []
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=receipts.append,
+        )
+        with self.assertRaises(TelegramV2Error):
+            sink(
+                "req-malformed-reaction",
+                {
+                    "kind": "reaction",
+                    "target_event_id": f"telegram:message:{CHAT}:12",
+                    "reaction": "👍",
+                },
+            )
+        self.assertEqual(client.actions[0], ("reaction", CHAT, 12, "👍"))
+        self.assertEqual(receipts[-1]["body"]["delivery"], "unknown")
+
+    def test_non_none_receipt_ack_is_not_treated_as_persisted(self):
+        client = FakeTelegramClient([])
+        receipts = []
+
+        def ambiguous_receipt(receipt):
+            receipts.append(receipt)
+            return False
+
+        sink = TelegramActionSinkV2(
+            chat_id=CHAT,
+            client=client,
+            backstop=SendBackstop(10, 30),
+            receipt_sink=ambiguous_receipt,
+        )
+        with self.assertRaisesRegex(TelegramV2Error, "persistence is unknown"):
+            sink("req-ambiguous", {"kind": "message", "content": "once"})
+        self.assertEqual(client.actions[0][2], "once")
+        self.assertEqual(receipts[-1]["body"]["delivery"], "sent")
+
 
 class TelegramChatCases(unittest.TestCase):
     def setUp(self):
@@ -161,6 +248,20 @@ class TelegramChatCases(unittest.TestCase):
             max_sends=10,
             send_window_seconds=30,
         )
+
+    def test_self_identity_must_be_an_exact_bot_attestation(self):
+        for identity in (
+            {"id": 9001, "is_bot": False},
+            {"id": 9001, "is_bot": "true"},
+            {"id": "9001", "is_bot": True},
+        ):
+            with self.subTest(identity=identity):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramChatAdapterV2(
+                        self.arguments(),
+                        client=FakeTelegramClient([]),
+                        self_user=identity,
+                    )
 
     def test_initial_tail_is_context_only_then_live_batch_uses_newest_update(self):
         client = FakeTelegramClient(
@@ -237,6 +338,12 @@ class TelegramClientCases(unittest.TestCase):
     def test_https_default_and_strict_server_json(self):
         with self.assertRaises(TelegramV2Error):
             TelegramClientV2("123:secret", api_base="http://api.example.test")
+        with self.assertRaises(TelegramV2Error):
+            TelegramClientV2(
+                "123:secret",
+                api_base="http://api.example.test",
+                allow_insecure_http=True,
+            )
         for payload in (
             b'{"ok":true,"result":{},"result":{}}',
             b'{"ok":true,"result":NaN}',
@@ -248,6 +355,36 @@ class TelegramClientCases(unittest.TestCase):
                 )
                 with self.assertRaises(TelegramV2Error):
                     client.get_me()
+
+    def test_plaintext_override_is_exact_loopback_only(self):
+        client = TelegramClientV2(
+            "123:secret",
+            api_base="http://[::1]:8081",
+            allow_insecure_http=True,
+            http=lambda *_args: (
+                200,
+                b'{"ok":true,"result":{"id":9001,"is_bot":true}}',
+            ),
+        )
+        self.assertEqual(client.get_me()["id"], 9001)
+        for value in (
+            "http://localhost.example.test:8081",
+            "http://127.0.0.1:bad",
+            "https://api.telegram.org\t",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramClientV2(
+                        "123:secret",
+                        api_base=value,
+                        allow_insecure_http=True,
+                    )
+
+    def test_url_credential_is_bounded_visible_ascii(self):
+        for token in ("123:secret\npath", "123:snowman-☃", "x" * 4097, 123):
+            with self.subTest(token=token):
+                with self.assertRaises(TelegramV2Error):
+                    TelegramClientV2(token)
 
     def test_api_errors_never_echo_token(self):
         client = TelegramClientV2(

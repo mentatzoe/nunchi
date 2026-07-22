@@ -20,6 +20,7 @@ logs opcodes and event names only (see :mod:`.hygiene`).
 from __future__ import annotations
 
 import sys
+import urllib.parse
 from dataclasses import dataclass
 
 GUILD_MESSAGES = 1 << 9
@@ -29,6 +30,7 @@ INTENTS = GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT
 V2_INTENTS = INTENTS
 
 DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
+_GATEWAY_QUERY = "v=10&encoding=json"
 
 # Gateway opcodes (client-relevant subset)
 OP_DISPATCH = 0
@@ -56,6 +58,60 @@ _CLOSE_HINTS = {
         "Discord Developer Portal (Bot -> Privileged Gateway Intents)"
     ),
 }
+
+
+def _gateway_url(value: object) -> str | None:
+    """Bind credential-bearing gateway connections to Discord TLS origins."""
+
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "wss"
+        or not isinstance(hostname, str)
+        or not hostname.isascii()
+        or not (
+            hostname == "gateway.discord.gg"
+            or hostname.endswith(".discord.gg")
+        )
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.path not in ("", "/")
+        or parsed.fragment
+    ):
+        return None
+    if parsed.query:
+        try:
+            query = urllib.parse.parse_qs(
+                parsed.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError:
+            return None
+        if query != {"v": ["10"], "encoding": ["json"]}:
+            return None
+    authority = hostname if port is None else f"{hostname}:{port}"
+    return f"wss://{authority}/?{_GATEWAY_QUERY}"
+
+
+def _nonempty_ascii(value: object, *, maximum: int = 512) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= maximum
+        and value.isascii()
+        and all(33 <= ord(character) <= 126 for character in value)
+    )
+
+
+def _snowflake(value: object) -> str | None:
+    return value if isinstance(value, str) and value.isdigit() else None
 
 
 def classify_close(code: int | None) -> str:
@@ -94,6 +150,10 @@ class CloseAndReconnect:
     """Close the socket and reconnect; resume if ``resume`` is True."""
 
     resume: bool
+    reason: str | None = None
+    previous_session_id: str | None = None
+    expected_sequence: int | None = None
+    observed_sequence: int | None = None
 
 
 Action = SendPayload | Dispatch | CloseAndReconnect
@@ -102,7 +162,15 @@ Action = SendPayload | Dispatch | CloseAndReconnect
 class GatewayProtocol:
     """Tracks one bot account's gateway session across (re)connections."""
 
-    def __init__(self, token: str, intents: int = INTENTS) -> None:
+    def __init__(
+        self,
+        token: str,
+        intents: int = INTENTS,
+        *,
+        expected_user_id: str | None = None,
+    ) -> None:
+        if expected_user_id is not None and _snowflake(expected_user_id) is None:
+            raise ValueError("expected Discord self actor is invalid")
         self._token = token
         self._intents = intents
         self.session_id: str | None = None
@@ -112,6 +180,7 @@ class GatewayProtocol:
         self.heartbeat_interval_ms: int | None = None
         self.ready = False
         self._awaiting_ack = False
+        self._expected_user_id = expected_user_id
 
     # ------------------------------------------------------------------ #
     # Connection lifecycle
@@ -124,10 +193,7 @@ class GatewayProtocol:
     def connect_url(self) -> str:
         """URL for the next connection (resume URL when resuming)."""
         if self.can_resume and self.resume_gateway_url:
-            url = self.resume_gateway_url
-            if "?" not in url:
-                url = url.rstrip("/") + "/?v=10&encoding=json"
-            return url
+            return self.resume_gateway_url
         return DEFAULT_GATEWAY_URL
 
     def on_connection_open(self) -> None:
@@ -141,6 +207,8 @@ class GatewayProtocol:
         self.session_id = None
         self.resume_gateway_url = None
         self.seq = None
+        self.own_user_id = None
+        self.ready = False
 
     # ------------------------------------------------------------------ #
     # Heartbeat bookkeeping (timing lives in the runner)
@@ -161,10 +229,29 @@ class GatewayProtocol:
     # ------------------------------------------------------------------ #
 
     def handle(self, payload: dict) -> list[Action]:
+        if not isinstance(payload, dict):
+            return []
         op = payload.get("op")
+        if isinstance(op, bool) or not isinstance(op, int):
+            return []
         if op == OP_HELLO:
-            data = payload.get("d") or {}
-            self.heartbeat_interval_ms = int(data.get("heartbeat_interval", 41250))
+            data = payload.get("d")
+            interval = data.get("heartbeat_interval") if isinstance(data, dict) else None
+            if (
+                isinstance(interval, bool)
+                or not isinstance(interval, int)
+                or interval < 1
+            ):
+                previous_session_id = self.session_id
+                self.invalidate_session()
+                return [
+                    CloseAndReconnect(
+                        resume=False,
+                        reason="invalid-gateway-hello",
+                        previous_session_id=previous_session_id,
+                    )
+                ]
+            self.heartbeat_interval_ms = interval
             if self.can_resume:
                 return [SendPayload(self._resume_payload())]
             return [SendPayload(self._identify_payload())]
@@ -176,29 +263,120 @@ class GatewayProtocol:
         if op == OP_RECONNECT:
             return [CloseAndReconnect(resume=True)]
         if op == OP_INVALID_SESSION:
-            resumable = bool(payload.get("d"))
+            resumable = payload.get("d")
+            previous_session_id = self.session_id
+            expected_sequence = self.seq + 1 if self.seq is not None else None
+            if not isinstance(resumable, bool):
+                self.invalidate_session()
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-payload",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
+            if resumable and not self.can_resume:
+                self.invalidate_session()
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-resume-unavailable",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
             if not resumable:
                 self.invalidate_session()
-            return [CloseAndReconnect(resume=resumable)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-nonresumable",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
+            return [CloseAndReconnect(resume=True)]
         if op == OP_DISPATCH:
             return self._handle_dispatch(payload)
         return []
 
     def _handle_dispatch(self, payload: dict) -> list[Action]:
         seq = payload.get("s")
-        if seq is not None:
-            self.seq = seq
         event = payload.get("t")
-        data = payload.get("d") or {}
+        data = payload.get("d")
+        if (
+            isinstance(seq, bool)
+            or not isinstance(seq, int)
+            or seq < 0
+            or not isinstance(event, str)
+            or not event
+            or not isinstance(data, dict)
+            or (self.seq is not None and seq <= self.seq)
+        ):
+            previous_session_id = self.session_id
+            expected_sequence = self.seq + 1 if self.seq is not None else None
+            self.invalidate_session()
+            return [
+                CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-or-replayed-sequence",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                    observed_sequence=seq if isinstance(seq, int) else None,
+                )
+            ]
+        if self.seq is not None and seq != self.seq + 1:
+            previous_session_id = self.session_id
+            expected_sequence = self.seq + 1
+            self.invalidate_session()
+            return [
+                CloseAndReconnect(
+                    resume=False,
+                    reason="gateway-sequence-gap",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                    observed_sequence=seq,
+                )
+            ]
+        self.seq = seq
         if event == "READY":
-            self.session_id = data.get("session_id")
-            self.resume_gateway_url = data.get("resume_gateway_url")
-            user = data.get("user") or {}
-            if user.get("id") is not None:
-                self.own_user_id = str(user["id"])
+            session_id = data.get("session_id")
+            resume_gateway_url = _gateway_url(data.get("resume_gateway_url"))
+            user = data.get("user")
+            own_user_id = (
+                _snowflake(user.get("id")) if isinstance(user, dict) else None
+            )
+            if (
+                not _nonempty_ascii(session_id)
+                or resume_gateway_url is None
+                or own_user_id is None
+                or (
+                    self._expected_user_id is not None
+                    and own_user_id != self._expected_user_id
+                )
+            ):
+                previous_session_id = self.session_id
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-ready-identity-or-resume-origin",
+                    previous_session_id=previous_session_id,
+                )]
+            self.session_id = session_id
+            self.resume_gateway_url = resume_gateway_url
+            self.own_user_id = own_user_id
             self.ready = True
             return []
         if event == "RESUMED":
+            if (
+                not _nonempty_ascii(self.session_id)
+                or self.resume_gateway_url is None
+                or _snowflake(self.own_user_id) is None
+            ):
+                previous_session_id = self.session_id
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-resumed-state",
+                    previous_session_id=previous_session_id,
+                )]
             self.ready = True
             return []
         if event in (
@@ -206,6 +384,18 @@ class GatewayProtocol:
             "MESSAGE_REACTION_ADD",
             "MESSAGE_REACTION_REMOVE",
         ):
+            if not self.ready or _snowflake(self.own_user_id) is None:
+                previous_session_id = self.session_id
+                expected_sequence = self.seq + 1 if self.seq is not None else None
+                self.invalidate_session()
+                self.own_user_id = None
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="dispatch-before-attested-ready",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                    observed_sequence=self.seq,
+                )]
             return [Dispatch(event, data, sequence=self.seq, session_id=self.session_id)]
         return []
 

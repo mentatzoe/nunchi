@@ -28,6 +28,13 @@
   ],
   "forbidden_runtime_fragments": [
     "add_parser(\"admit\"",
-    "add_parser('admit'"
+    "add_parser('admit'",
+    "verdict == \"PASS\"",
+    "verdict == 'PASS'",
+    "verdict === \"PASS\"",
+    "verdict === 'PASS'",
+    "nunchi:PASS",
+    "_SPEAK_VERDICTS =",
+    "_ALL_VERDICTS ="
   ]
 }

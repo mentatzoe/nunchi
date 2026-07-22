@@ -87,6 +87,14 @@ class ConversationOpportunityCases(unittest.TestCase):
         self.assertEqual(self.scheduler.snapshot()[0]["active_generation"], 2)
         self.assertIsNone(self.scheduler.complete(second))
 
+    def test_abort_drops_active_and_pending_without_promotion(self):
+        active = self.observe("e1")
+        self.assertIsNone(self.observe("e2"))
+        self.scheduler.abort(active)
+        self.assertEqual(self.scheduler.snapshot(), ())
+        with self.assertRaises(SchedulingError):
+            self.scheduler.abort(active)
+
     def test_restart_has_no_pending_wake_backlog(self):
         self.observe("e1")
         self.observe("e2")

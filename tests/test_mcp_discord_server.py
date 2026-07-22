@@ -38,6 +38,7 @@ except ImportError:
     MCP_AVAILABLE = False
 
 from nunchi.mcp_discord.config import load_config
+from nunchi.mcp_discord.continuation import DiscordHistoryContinuations
 from nunchi.mcp_discord.events import (
     DiscordEventSourceV2,
     V2_NOTIFICATION_METHOD,
@@ -48,7 +49,13 @@ from nunchi.mcp_discord.gateway import GatewayProtocol
 from nunchi.mcp_discord.hygiene import REDACTED, TokenRedactionFilter
 from nunchi.mcp_discord.ratelimit import RateLimiter, SendBackstop
 from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
-from nunchi.mcp_discord.server import InFlight, enqueue_event, main, pump_notifications
+from nunchi.mcp_discord.server import (
+    InFlight,
+    broadcast_sessions,
+    enqueue_event,
+    main,
+    pump_notifications,
+)
 from nunchi.mcp_discord.tools import TOOL_NAMES, TOOL_SCHEMAS, ToolExecutor, shape_message
 
 TOKEN = "NUNCHI-TEST-TOKEN-4f9a2bconfidential"
@@ -59,7 +66,10 @@ def _config_env(**overrides):
     result = {
         "NUNCHI_DISCORD_TOKEN": TOKEN,
         "NUNCHI_MCP_DISCORD_AUTH_TOKEN": AUTH_TOKEN,
-        "NUNCHI_MCP_DISCORD_CHANNELS": "100,444555666",
+        "NUNCHI_MCP_DISCORD_CHANNELS": "100",
+        "NUNCHI_MCP_DISCORD_PARTICIPANT_ID": "vigil",
+        "NUNCHI_MCP_DISCORD_SELF_ACTOR_ID": "999",
+        "NUNCHI_MCP_DISCORD_STATE_DIR": "/private/tmp/nunchi-mcp-test-state",
     }
     result.update(overrides)
     return result
@@ -135,6 +145,7 @@ class _FakeRest:
         reply_to_message_id=None,
         allowed_mention_user_ids=None,
         fail_if_reply_missing=False,
+        nonce=None,
     ):
         self.sent.append((channel_id, content, reply_to_message_id))
         return _api_message(channel_id=channel_id, content=content)
@@ -326,37 +337,31 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
             "discord:user:777",
         )
 
-    async def test_failing_client_does_not_stop_the_pump(self):
+    async def test_global_send_failure_stops_before_a_post_gap_event(self):
         queue: asyncio.Queue = asyncio.Queue(maxsize=8)
         shutdown = asyncio.Event()
         received: list[dict] = []
-        calls = {"n": 0}
-
-        async def flaky_send(params: dict) -> None:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise ConnectionError("MCP client went away")
+        async def failed_broadcast(params: dict) -> None:
             received.append(params)
-            shutdown.set()
+            raise ConnectionError("global broadcast failed")
 
         for author in ("111", "222"):
             enqueue_event(queue, filter_message_create(_create_data(author), "999"))
         source = DiscordEventSourceV2(
             allowed_channel_ids=frozenset({"444555666"})
         )
-        await asyncio.wait_for(
-            pump_notifications(
-                queue,
-                flaky_send,
-                shutdown=shutdown,
-                projector=source.notification_params,
-            ),
-            timeout=5.0,
-        )
-        self.assertEqual(
-            [p["native_input"]["event"]["author_id"] for p in received],
-            ["discord:user:222"],
-        )
+        with self.assertRaises(ConnectionError):
+            await asyncio.wait_for(
+                pump_notifications(
+                    queue,
+                    failed_broadcast,
+                    shutdown=shutdown,
+                    projector=source.notification_params,
+                ),
+                timeout=5.0,
+            )
+        self.assertEqual(len(received), 1)
+        self.assertEqual(queue.qsize(), 1)
 
     async def test_dm_message_has_null_guild_id(self):
         data = _create_data()
@@ -373,7 +378,7 @@ class TestNotificationDelivery(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBackpressure(unittest.IsolatedAsyncioTestCase):
-    async def test_drop_oldest_when_queue_full(self):
+    async def test_queue_overflow_refuses_post_gap_event_without_eviction(self):
         queue: asyncio.Queue = asyncio.Queue(maxsize=2)
         events = [
             filter_message_create(_create_data(str(i), content=f"msg{i}"), "999")
@@ -386,7 +391,11 @@ class TestBackpressure(unittest.IsolatedAsyncioTestCase):
         self.assertIn("queue full", "\n".join(captured.output))
 
         remaining = [queue.get_nowait().content for _ in range(queue.qsize())]
-        self.assertEqual(remaining, ["msg2", "msg3"], "oldest must be dropped, newest kept")
+        self.assertEqual(
+            remaining,
+            ["msg1", "msg2"],
+            "a post-gap event must not replace retained continuity",
+        )
         self.assertEqual(queue.qsize(), 0)
 
 
@@ -419,6 +428,16 @@ class TestRateLimit(unittest.TestCase):
         self.assertEqual(len(http.calls), 2, "must retry exactly once")
         self.assertIn(0.75, sleeps, "retry-after must be slept out before the retry")
 
+    def test_429_json_retry_after_rejects_coercible_types(self):
+        for value in (True, False, "0.01", None, [], {}):
+            with self.subTest(value=value):
+                retry_after, is_global = DiscordRestClient._parse_retry_after(
+                    {},
+                    json.dumps({"retry_after": value, "global": False}).encode(),
+                )
+                self.assertEqual(retry_after, 1.0)
+                self.assertFalse(is_global)
+
     def test_429_retries_exhausted_raises(self):
         clock = _FakeClock()
         body = json.dumps({"retry_after": 0.1, "global": False}).encode()
@@ -442,6 +461,22 @@ class TestRateLimit(unittest.TestCase):
         self.assertEqual(sleeps, [])
         client.create_message("100", "two")
         self.assertEqual(sleeps, [2.5], "second send must wait out the bucket reset")
+
+    def test_shared_bucket_identity_and_last_slot_are_reserved_atomically(self):
+        clock = _FakeClock()
+        sleeps = []
+        limiter = RateLimiter(clock=clock, sleeper=sleeps.append)
+        headers = {
+            "x-ratelimit-bucket": "shared-1",
+            "x-ratelimit-remaining": "1",
+            "x-ratelimit-reset-after": "3",
+        }
+        limiter.after_response("GET /channels/42/messages", headers)
+        limiter.after_response("POST /channels/42/messages", headers)
+        limiter.before_request("GET /channels/42/messages")
+        self.assertEqual(sleeps, [])
+        limiter.before_request("POST /channels/42/messages")
+        self.assertEqual(sleeps, [3.0])
 
     def test_401_aborts_immediately_no_retry(self):
         clock = _FakeClock()
@@ -505,19 +540,29 @@ class TestToolContract(unittest.TestCase):
     def test_tool_names(self):
         self.assertEqual(
             TOOL_NAMES,
-            {"send_message", "reply_message", "read_history", "add_reaction"},
+            {
+                "subscribe_events",
+                "send_message",
+                "reply_message",
+                "read_history",
+                "add_reaction",
+            },
         )
 
     def test_schemas_have_required_fields(self):
         by_name = {s["name"]: s for s in TOOL_SCHEMAS}
         self.assertEqual(
-            by_name["send_message"]["inputSchema"]["required"], ["channel_id", "content"]
+            by_name["send_message"]["inputSchema"]["required"],
+            ["request_id", "channel_id", "content"],
         )
         self.assertEqual(
             by_name["reply_message"]["inputSchema"]["required"],
-            ["channel_id", "message_id", "content"],
+            ["request_id", "channel_id", "message_id", "content"],
         )
-        self.assertEqual(by_name["read_history"]["inputSchema"]["required"], ["channel_id"])
+        self.assertEqual(
+            by_name["read_history"]["inputSchema"]["required"],
+            ["request_id", "handle_id", "direction", "max_events", "max_bytes"],
+        )
 
     def test_schemas_are_json_serializable(self):
         json.dumps(TOOL_SCHEMAS)
@@ -527,15 +572,51 @@ class TestToolExecutor(unittest.TestCase):
     def _executor(self, max_sends=5):
         rest = _FakeRest()
         backstop = SendBackstop(max_sends, 10.0, clock=_FakeClock())
+        claimed = set()
+
+        def claim(request_id):
+            if request_id in claimed:
+                raise RuntimeError("duplicate")
+            claimed.add(request_id)
+
         return ToolExecutor(
             rest,
             backstop,
             allowed_channel_ids=frozenset({"100"}),
+            action_claim=claim,
+            continuations=DiscordHistoryContinuations(
+                AUTH_TOKEN,
+                participant_id="vigil",
+                room_id="100",
+                continuity_scope_id="discord:channel:100",
+            ),
         ), rest
+
+    @staticmethod
+    def _history_request(trigger="77", **overrides):
+        continuations = DiscordHistoryContinuations(
+            AUTH_TOKEN,
+            participant_id="vigil",
+            room_id="100",
+            continuity_scope_id="discord:channel:100",
+        )
+        capability = continuations.issue(f"discord:message:{trigger}")
+        request = {
+            "request_id": "req-history",
+            "handle_id": capability["handle_id"],
+            "direction": "before",
+            "max_events": 10,
+            "max_bytes": 32768,
+        }
+        request.update(overrides)
+        return request
 
     def test_send_message_happy_path(self):
         executor, rest = self._executor()
-        payload, ok = executor.call("send_message", {"channel_id": "100", "content": "hi"})
+        payload, ok = executor.call(
+            "send_message",
+            {"request_id": "req-send", "channel_id": "100", "content": "hi"},
+        )
         self.assertTrue(ok)
         self.assertEqual(rest.sent, [("100", "hi", None)])
         self.assertEqual(payload["message"]["content"], "hi")
@@ -544,7 +625,13 @@ class TestToolExecutor(unittest.TestCase):
     def test_reply_message_passes_reference(self):
         executor, rest = self._executor()
         payload, ok = executor.call(
-            "reply_message", {"channel_id": "100", "message_id": "55", "content": "re"}
+            "reply_message",
+            {
+                "request_id": "req-reply",
+                "channel_id": "100",
+                "message_id": "55",
+                "content": "re",
+            },
         )
         self.assertTrue(ok)
         self.assertEqual(rest.sent, [("100", "re", "55")])
@@ -552,12 +639,12 @@ class TestToolExecutor(unittest.TestCase):
     def test_read_history_passes_limit_and_before(self):
         executor, rest = self._executor()
         payload, ok = executor.call(
-            "read_history", {"channel_id": "100", "limit": 10, "before": "77"}
+            "read_history", self._history_request()
         )
         self.assertTrue(ok)
-        self.assertEqual(rest.history_calls, [("100", 10, "77")])
-        self.assertEqual(len(payload["messages"]), 2)
-        self.assertIn("author_is_bot", payload["messages"][0])
+        self.assertEqual(rest.history_calls, [("100", 11, "77")])
+        self.assertEqual(len(payload["events"]), 2)
+        self.assertEqual(payload["room_id"], "100")
 
     def test_read_history_normalizes_rich_only_messages(self):
         shaped = shape_message(
@@ -585,10 +672,33 @@ class TestToolExecutor(unittest.TestCase):
         self.assertEqual(shaped["reply_to_author_id"], "999")
         self.assertEqual(shaped["reply_to_content"], "prior message")
 
+    def test_read_history_preserves_exact_room_mention_boolean(self):
+        shaped = shape_message(_api_message(mention_everyone=True))
+        self.assertIs(shaped["mentions_room"], True)
+        with self.assertRaises(ValueError):
+            shape_message(_api_message(mention_everyone="true"))
+
+    def test_read_history_rejects_coercible_native_addressing(self):
+        cases = (
+            {"mentions": [{"id": 999}]},
+            {"message_reference": {"message_id": 41}},
+            {
+                "referenced_message": {
+                    "id": "41",
+                    "content": "prior",
+                    "author": {"id": "999", "username": "Vigil", "bot": "true"},
+                }
+            },
+        )
+        for override in cases:
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                shape_message(_api_message(**override))
+
     def test_non_numeric_channel_id_rejected(self):
         executor, rest = self._executor()
         payload, ok = executor.call(
-            "send_message", {"channel_id": "../evil", "content": "hi"}
+            "send_message",
+            {"request_id": "req-bad", "channel_id": "../evil", "content": "hi"},
         )
         self.assertFalse(ok)
         self.assertIn("snowflake", payload["error"])
@@ -596,13 +706,17 @@ class TestToolExecutor(unittest.TestCase):
 
     def test_empty_content_rejected(self):
         executor, _ = self._executor()
-        payload, ok = executor.call("send_message", {"channel_id": "100", "content": "  "})
+        payload, ok = executor.call(
+            "send_message",
+            {"request_id": "req-empty", "channel_id": "100", "content": "  "},
+        )
         self.assertFalse(ok)
 
     def test_overlong_content_rejected(self):
         executor, _ = self._executor()
         payload, ok = executor.call(
-            "send_message", {"channel_id": "100", "content": "x" * 2001}
+            "send_message",
+            {"request_id": "req-long", "channel_id": "100", "content": "x" * 2001},
         )
         self.assertFalse(ok)
         self.assertIn("2000", payload["error"])
@@ -614,9 +728,15 @@ class TestToolExecutor(unittest.TestCase):
 
     def test_backstop_blocks_send_with_retry_hint(self):
         executor, rest = self._executor(max_sends=1)
-        _, ok = executor.call("send_message", {"channel_id": "100", "content": "one"})
+        _, ok = executor.call(
+            "send_message",
+            {"request_id": "req-one", "channel_id": "100", "content": "one"},
+        )
         self.assertTrue(ok)
-        payload, ok = executor.call("send_message", {"channel_id": "100", "content": "two"})
+        payload, ok = executor.call(
+            "send_message",
+            {"request_id": "req-two", "channel_id": "100", "content": "two"},
+        )
         self.assertFalse(ok)
         self.assertIn("backstop", payload["error"])
         self.assertIn("retry in", payload["error"])
@@ -632,10 +752,45 @@ class TestToolExecutor(unittest.TestCase):
             _FailingRest(),
             backstop,
             allowed_channel_ids=frozenset({"100"}),
+            action_claim=lambda _request_id: None,
+            continuations=DiscordHistoryContinuations(
+                AUTH_TOKEN,
+                participant_id="vigil",
+                room_id="100",
+                continuity_scope_id="discord:channel:100",
+            ),
         )
-        payload, ok = executor.call("send_message", {"channel_id": "100", "content": "hi"})
+        payload, ok = executor.call(
+            "send_message",
+            {"request_id": "req-fail", "channel_id": "100", "content": "hi"},
+        )
         self.assertFalse(ok)
         self.assertIn("403", payload["error"])
+
+    def test_malformed_success_response_is_not_reported_as_a_sent_message(self):
+        class _MalformedRest(_FakeRest):
+            def create_message(self, channel_id, content, **kwargs):
+                self.sent.append((channel_id, content, None))
+                return {"id": "", "channel_id": channel_id, "author": {}}
+
+        executor = ToolExecutor(
+            _MalformedRest(),
+            SendBackstop(5, 10.0, clock=_FakeClock()),
+            allowed_channel_ids=frozenset({"100"}),
+            action_claim=lambda _request_id: None,
+            continuations=DiscordHistoryContinuations(
+                AUTH_TOKEN,
+                participant_id="vigil",
+                room_id="100",
+                continuity_scope_id="discord:channel:100",
+            ),
+        )
+        payload, ok = executor.call(
+            "send_message",
+            {"request_id": "req-malformed", "channel_id": "100", "content": "hi"},
+        )
+        self.assertFalse(ok)
+        self.assertIn("error", payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -791,8 +946,16 @@ class TestTokenHygiene(unittest.TestCase):
                 _FakeRest(),
                 backstop,
                 allowed_channel_ids=frozenset({"100"}),
+                action_claim=lambda _request_id: None,
+                continuations=DiscordHistoryContinuations(
+                    AUTH_TOKEN,
+                    participant_id="vigil",
+                    room_id="100",
+                    continuity_scope_id="discord:channel:100",
+                ),
             ).call(
-                "send_message", {"channel_id": "100", "content": "hi"}
+                "send_message",
+                {"request_id": "req-hygiene", "channel_id": "100", "content": "hi"},
             )
             # Adversarial: a hypothetical future log line that embeds the token
             # must be rewritten by the redaction filter before it hits a stream.
@@ -848,8 +1011,24 @@ class TestMcpBinding(unittest.TestCase):
             _FakeRest(),
             SendBackstop(5, 10.0, clock=_FakeClock()),
             allowed_channel_ids=frozenset({"100"}),
+            action_claim=lambda _request_id: None,
+            continuations=DiscordHistoryContinuations(
+                AUTH_TOKEN,
+                participant_id="vigil",
+                room_id="100",
+                continuity_scope_id="discord:channel:100",
+            ),
         )
-        server = _binding.build_server(executor, _binding.SessionRegistry(), InFlight())
+        server = _binding.build_server(
+            executor,
+            _binding.SessionRegistry(
+                participant_id="vigil",
+                room_id="100",
+                self_actor_id="999",
+                capabilities=TOOL_NAMES,
+            ),
+            InFlight(),
+        )
         self.assertEqual(server.name, "nunchi-mcp-discord")
 
     def test_vendor_notification_dumps_method_and_params(self):
@@ -861,6 +1040,112 @@ class TestMcpBinding(unittest.TestCase):
         dumped = notification.model_dump()
         self.assertEqual(dumped["method"], V2_NOTIFICATION_METHOD)
         self.assertEqual(dumped["params"], {"schema_version": 2})
+
+    def test_registry_restart_boundary_taints_history_continuations(self):
+        from nunchi.mcp_discord import _binding
+
+        continuations = DiscordHistoryContinuations(
+            AUTH_TOKEN,
+            participant_id="vigil",
+            room_id="100",
+            continuity_scope_id="discord:channel:100",
+        )
+        capability = continuations.issue("discord:message:77")
+        registry = _binding.SessionRegistry(
+            participant_id="vigil",
+            room_id="100",
+            self_actor_id="999",
+            capabilities=TOOL_NAMES,
+            on_restart_gap=continuations.mark_restart_gap,
+        )
+        self.assertTrue(registry.add(object())["has_restart_gap"])
+        registry.sessions({"kind": "continuity-boundary", "channel_id": "100"})
+        handle, _before = continuations.verify_request(
+            {
+                "request_id": "req-gap",
+                "handle_id": capability["handle_id"],
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 1024,
+            }
+        )
+        self.assertTrue(continuations.coverage(handle)["has_restart_gap"])
+
+    def test_bounded_event_store_replays_notifications_sent_without_live_stream(self):
+        from nunchi.mcp_discord import _binding
+
+        async def scenario():
+            store = _binding.BoundedEventStore(max_events=3)
+            priming = await store.store_event("_GET_stream", None)
+            first = await store.store_event("_GET_stream", {"message": 1})
+            second = await store.store_event("_GET_stream", {"message": 2})
+            replayed = []
+
+            async def capture(message):
+                replayed.append(message)
+
+            stream = await store.replay_events_after(first, capture)
+            self.assertEqual(stream, "_GET_stream")
+            self.assertEqual([item.message for item in replayed], [{"message": 2}])
+            self.assertNotEqual(priming, second)
+            with self.assertRaises(RuntimeError):
+                await store.store_event("_GET_stream", {"message": 3})
+            failure = await asyncio.wait_for(store.wait_failed(), 0.1)
+            self.assertIn("continuity is lost", str(failure))
+            with self.assertRaisesRegex(RuntimeError, "continuity is lost"):
+                store.raise_if_failed()
+
+        asyncio.run(scenario())
+
+
+class TestMcpBroadcast(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_session_is_bounded_and_does_not_delay_healthy_session(self):
+        class SlowSession:
+            async def send_notification(self, _notification):
+                await asyncio.Event().wait()
+
+        class HealthySession:
+            def __init__(self):
+                self.notifications = []
+
+            async def send_notification(self, notification):
+                self.notifications.append(notification)
+
+        slow = SlowSession()
+        healthy = HealthySession()
+        sessions = [slow, healthy]
+        discarded = []
+        await broadcast_sessions(
+            sessions,
+            {"schema_version": 2},
+            discard=discarded.append,
+            send_timeout=0.01,
+        )
+        self.assertEqual(len(healthy.notifications), 1)
+        self.assertEqual(discarded, [slow])
+
+    async def test_failed_session_does_not_remove_other_sessions(self):
+        class Session:
+            def __init__(self, fail=False):
+                self.fail = fail
+                self.called = False
+
+            async def send_notification(self, _notification):
+                self.called = True
+                if self.fail:
+                    raise OSError("gone")
+
+        failed = Session(fail=True)
+        healthy = Session()
+        discarded = []
+        await broadcast_sessions(
+            [failed, healthy],
+            {"schema_version": 2},
+            discard=discarded.append,
+        )
+        self.assertTrue(failed.called)
+        self.assertTrue(healthy.called)
+        self.assertEqual(discarded, [failed])
 
 
 if __name__ == "__main__":

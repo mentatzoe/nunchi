@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from ..mcp_discord.ratelimit import SendBackstop
-from ..net import open_no_redirect
+from ..net import (
+    is_bounded_ascii_credential,
+    is_loopback_hostname,
+    open_no_redirect,
+)
 from ..receipts import transport_receipt
 from .native_host_v2 import (
     DurableCursorStoreV2,
@@ -116,11 +120,23 @@ def _urllib_call(
 
 
 def _homeserver(value: str, *, allow_insecure_http: bool) -> str:
-    if not isinstance(value, str) or not value:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 8192
+        or any(ord(character) <= 32 or ord(character) == 127 for character in value)
+        or not isinstance(allow_insecure_http, bool)
+    ):
         raise MatrixV2Error("Matrix homeserver is invalid")
-    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise MatrixV2Error("Matrix homeserver is invalid") from exc
     permitted = parsed.scheme == "https" or (
-        allow_insecure_http and parsed.scheme == "http"
+        allow_insecure_http
+        and parsed.scheme == "http"
+        and is_loopback_hostname(parsed.hostname)
     )
     if (
         not permitted
@@ -129,6 +145,7 @@ def _homeserver(value: str, *, allow_insecure_http: bool) -> str:
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
+        or port is not None and not 1 <= port <= 65535
     ):
         raise MatrixV2Error("Matrix homeserver is invalid")
     return value.rstrip("/")
@@ -145,8 +162,7 @@ class MatrixClientV2:
         http: HttpCall = _urllib_call,
     ) -> None:
         if (
-            not isinstance(token, str)
-            or not token
+            not is_bounded_ascii_credential(token)
             or not isinstance(room_id, str)
             or not room_id
         ):
@@ -351,9 +367,13 @@ class MatrixActionSinkV2:
         self._lock = threading.RLock()
 
     def _receipt(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(
+        returned = self.receipt_sink(
             transport_receipt(request_id, delivery, detail=detail)
         )
+        if returned is not None:
+            raise MatrixV2Error(
+                "Matrix action receipt persistence is unknown"
+            )
 
     def _fail(self, request_id: str, detail: str, cause: Exception | None = None) -> None:
         try:
@@ -364,6 +384,15 @@ class MatrixActionSinkV2:
             ) from receipt_error
         raise MatrixV2Error("Matrix action failed") from cause
 
+    def _unknown(self, request_id: str, detail: str, cause: Exception) -> None:
+        try:
+            self._receipt(request_id, "unknown", detail)
+        except Exception as receipt_error:
+            raise MatrixV2Error(
+                "Matrix action and receipt status are unknown"
+            ) from receipt_error
+        raise MatrixV2Error("Matrix action outcome is unknown") from cause
+
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise MatrixV2Error("Matrix action correlation is invalid")
@@ -373,8 +402,6 @@ class MatrixActionSinkV2:
             if len(self._consumed) >= self.max_request_ids:
                 raise MatrixV2Error("Matrix action capacity is exhausted")
             self._consumed.add(request_id)
-        if self.backstop.try_acquire(self.room_id) > 0:
-            self._fail(request_id, "send-backstop")
         try:
             accepted = copy.deepcopy(action)
             transaction = "nunchi-" + hashlib.sha256(
@@ -395,29 +422,51 @@ class MatrixActionSinkV2:
                         for value in accepted.get("mention_actor_ids", [])
                     )
                 )
-                self.client.send_message(
-                    self.room_id,
-                    transaction,
+                operation = (
+                    "message",
                     content,
-                    reply_to_event_id=(
-                        _matrix_event_id(reply) if reply is not None else None
-                    ),
-                    mention_user_ids=mentions,
+                    _matrix_event_id(reply) if reply is not None else None,
+                    mentions,
                 )
             elif accepted.get("kind") == "reaction":
                 reaction = accepted.get("reaction")
                 if not isinstance(reaction, str) or not reaction:
                     raise MatrixV2Error("Matrix reaction is invalid")
-                self.client.send_reaction(
-                    self.room_id,
-                    transaction,
+                operation = (
+                    "reaction",
                     _matrix_event_id(accepted.get("target_event_id")),
                     reaction,
                 )
             else:
                 raise MatrixV2Error("Matrix action kind is unsupported")
         except Exception as exc:
-            self._fail(request_id, "matrix-api-failure", exc)
+            self._fail(request_id, "invalid-action", exc)
+        if self.backstop.try_acquire(self.room_id) > 0:
+            self._fail(request_id, "send-backstop")
+        try:
+            if operation[0] == "message":
+                result = self.client.send_message(
+                    self.room_id,
+                    transaction,
+                    operation[1],
+                    reply_to_event_id=operation[2],
+                    mention_user_ids=operation[3],
+                )
+            else:
+                result = self.client.send_reaction(
+                    self.room_id,
+                    transaction,
+                    operation[1],
+                    operation[2],
+                )
+            if (
+                not isinstance(result, str)
+                or not result.startswith("$")
+                or len(result) > 512
+            ):
+                raise MatrixV2Error("Matrix action result is invalid")
+        except Exception as exc:
+            self._unknown(request_id, "matrix-api-outcome-unknown", exc)
         try:
             self._receipt(request_id, "sent")
         except Exception as exc:

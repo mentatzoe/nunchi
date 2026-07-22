@@ -50,10 +50,27 @@ def _read_input(path: str | None) -> str:
 
 
 def _load_request(raw: str) -> Any:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate object key")
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> Any:
+        raise ValueError("non-finite number")
+
     try:
-        return json.loads(raw)
+        return json.loads(
+            raw,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
     except json.JSONDecodeError as exc:
         raise InputError(f"invalid JSON: {exc.msg}") from exc
+    except ValueError as exc:
+        raise InputError(f"invalid JSON: {exc}") from exc
 
 
 def _write_error(error: NunchiError) -> None:
@@ -116,6 +133,6 @@ def main(argv: Sequence[str] | None = None):
         _write_error(exc)
         return EXIT_RUNTIME
 
-    json.dump(result, sys.stdout, sort_keys=True)
+    json.dump(result, sys.stdout, allow_nan=False, sort_keys=True)
     sys.stdout.write("\n")
     return exit_code

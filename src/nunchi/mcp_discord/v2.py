@@ -24,6 +24,7 @@ class DiscordV2RestLike(Protocol):
         reply_to_message_id: str | None = None,
         allowed_mention_user_ids: tuple[str, ...] | None = None,
         fail_if_reply_missing: bool = False,
+        nonce: str | None = None,
     ) -> dict: ...
 
     def create_reaction(
@@ -39,8 +40,8 @@ class MCPToolClientLike(Protocol):
 
 
 def _snowflake(value: object) -> str | None:
-    text = str(value).strip() if value is not None else ""
-    return text if text.isdigit() else None
+    """Return an exact JSON snowflake string without coercing its type."""
+    return value if isinstance(value, str) and value.isdigit() else None
 
 
 def _event_snowflake(value: object, prefix: str) -> str | None:
@@ -51,6 +52,17 @@ def _event_snowflake(value: object, prefix: str) -> str | None:
 
 def _actor_snowflake(value: object) -> str | None:
     return _event_snowflake(value, "discord:user:")
+
+
+def _created_message(value: object, channel_id: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DiscordV2ActionError("Discord create-message result is invalid")
+    if (
+        _snowflake(value.get("id")) is None
+        or _snowflake(value.get("channel_id")) != channel_id
+    ):
+        raise DiscordV2ActionError("Discord create-message result is invalid")
+    return value
 
 
 class DiscordActionSinkV2:
@@ -68,6 +80,7 @@ class DiscordActionSinkV2:
         rest: DiscordV2RestLike,
         backstop: SendBackstop,
         receipt_sink: Callable[[dict[str, Any]], None],
+        request_claim: Callable[[str], None] | None = None,
         max_request_ids: int = 4096,
     ) -> None:
         resolved_channel = _snowflake(channel_id)
@@ -85,12 +98,24 @@ class DiscordActionSinkV2:
         self.rest = rest
         self.backstop = backstop
         self.receipt_sink = receipt_sink
+        resolved_claim = request_claim or getattr(
+            receipt_sink, "claim_transport_action", None
+        )
+        if not callable(resolved_claim):
+            raise ValueError(
+                "Discord action transport requires durable request reservation"
+            )
+        self.request_claim = resolved_claim
         self.max_request_ids = max_request_ids
-        self._lock = threading.RLock()
-        self._consumed_request_ids: set[str] = set()
 
     def _write(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
+        returned = self.receipt_sink(
+            transport_receipt(request_id, delivery, detail=detail)
+        )
+        if returned is not None:
+            raise DiscordV2ActionError(
+                "Discord action receipt persistence is unknown"
+            )
 
     def _fail(self, request_id: str, detail: str) -> None:
         try:
@@ -99,6 +124,15 @@ class DiscordActionSinkV2:
             raise DiscordV2ActionError("Discord action and receipt status are unknown") from exc
         raise DiscordV2ActionError(f"Discord action failed: {detail}")
 
+    def _unknown(self, request_id: str, detail: str, cause: Exception) -> None:
+        try:
+            self._write(request_id, "unknown", detail)
+        except Exception as receipt_error:
+            raise DiscordV2ActionError(
+                "Discord action and receipt status are unknown"
+            ) from receipt_error
+        raise DiscordV2ActionError(f"Discord action outcome is unknown: {detail}") from cause
+
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise DiscordV2ActionError("Discord action request correlation is invalid")
@@ -106,36 +140,68 @@ class DiscordActionSinkV2:
             accepted = copy.deepcopy(action)
         except Exception as exc:
             raise DiscordV2ActionError("Discord action is invalid") from exc
-        with self._lock:
-            if request_id in self._consumed_request_ids:
-                raise DiscordV2ActionError("Discord action request was already consumed")
-            if len(self._consumed_request_ids) >= self.max_request_ids:
-                raise DiscordV2ActionError("Discord action capacity is exhausted")
-            self._consumed_request_ids.add(request_id)
-
-        kind = accepted.get("kind") if isinstance(accepted, dict) else None
+        try:
+            kind = accepted.get("kind") if isinstance(accepted, dict) else None
+            if kind == "message":
+                operation = ("message", self._message_arguments(accepted))
+            elif kind == "reaction":
+                operation = ("reaction", self._reaction_arguments(accepted))
+            else:
+                raise ValueError("unsupported action")
+        except Exception as exc:
+            self._fail(request_id, "invalid-action")
         wait = self.backstop.try_acquire(self.channel_id)
         if wait > 0:
             self._fail(request_id, "send-backstop")
         try:
-            if kind == "message":
-                self._send_message(accepted)
-            elif kind == "reaction":
-                self._send_reaction(accepted)
+            self.request_claim(request_id)
+        except Exception as exc:
+            raise DiscordV2ActionError(
+                "Discord action request was already consumed or could not be reserved"
+            ) from exc
+        try:
+            if operation[0] == "message":
+                content, reply_to, mention_ids = operation[1]
+                _created_message(
+                    self.rest.create_message(
+                        self.channel_id,
+                        content,
+                        reply_to_message_id=reply_to,
+                        allowed_mention_user_ids=mention_ids,
+                        fail_if_reply_missing=reply_to is not None,
+                        nonce=request_id,
+                    ),
+                    self.channel_id,
+                )
             else:
-                self._fail(request_id, "unsupported-action")
-        except DiscordV2ActionError:
-            raise
-        except (DiscordRestError, OSError, ValueError):
-            self._fail(request_id, "discord-api-failure")
-        except Exception:
-            self._fail(request_id, "transport-failure")
+                target, reaction = operation[1]
+                returned = self.rest.create_reaction(
+                    self.channel_id,
+                    target,
+                    reaction,
+                )
+                if returned is not None:
+                    raise DiscordV2ActionError(
+                        "Discord reaction result is invalid"
+                    )
+        except Exception as exc:
+            self._unknown(request_id, "discord-api-outcome-unknown", exc)
         try:
             self._write(request_id, "sent")
         except Exception as exc:
             raise DiscordV2ActionError("Discord send receipt persistence is unknown") from exc
 
-    def _send_message(self, action: dict[str, Any]) -> None:
+    def _message_arguments(
+        self,
+        action: dict[str, Any],
+    ) -> tuple[str, str | None, tuple[str, ...]]:
+        if (
+            not {"kind", "content"} <= set(action)
+            or set(action) - {
+                "kind", "content", "reply_to_event_id", "mention_actor_ids"
+            }
+        ):
+            raise ValueError("message action does not match the closed contract")
         content = action.get("content")
         if not isinstance(content, str) or not content or len(content) > 2000:
             raise ValueError("invalid content")
@@ -156,15 +222,11 @@ class DiscordActionSinkV2:
             if user_id not in seen:
                 seen.add(user_id)
                 mention_ids.append(user_id)
-        self.rest.create_message(
-            self.channel_id,
-            content,
-            reply_to_message_id=reply_to,
-            allowed_mention_user_ids=tuple(mention_ids),
-            fail_if_reply_missing=reply_to is not None,
-        )
+        return content, reply_to, tuple(mention_ids)
 
-    def _send_reaction(self, action: dict[str, Any]) -> None:
+    def _reaction_arguments(self, action: dict[str, Any]) -> tuple[str, str]:
+        if set(action) != {"kind", "target_event_id", "reaction"}:
+            raise ValueError("reaction action does not match the closed contract")
         target = _event_snowflake(
             action.get("target_event_id"),
             "discord:message:",
@@ -172,7 +234,7 @@ class DiscordActionSinkV2:
         reaction = action.get("reaction")
         if target is None or not isinstance(reaction, str) or not reaction:
             raise ValueError("invalid reaction")
-        self.rest.create_reaction(self.channel_id, target, reaction)
+        return target, reaction
 
 
 class MCPDiscordActionSinkV2:
@@ -184,6 +246,7 @@ class MCPDiscordActionSinkV2:
         channel_id: str,
         client: MCPToolClientLike,
         receipt_sink: Callable[[dict[str, Any]], None],
+        request_claim: Callable[[str], None] | None = None,
         max_request_ids: int = 4096,
     ) -> None:
         resolved = _snowflake(channel_id)
@@ -198,30 +261,44 @@ class MCPDiscordActionSinkV2:
         self.channel_id = resolved
         self.client = client
         self.receipt_sink = receipt_sink
+        resolved_claim = request_claim or getattr(
+            receipt_sink, "claim_transport_action", None
+        )
+        if not callable(resolved_claim):
+            raise ValueError(
+                "Discord MCP action transport requires durable request reservation"
+            )
+        self.request_claim = resolved_claim
         self.max_request_ids = max_request_ids
-        self._lock = threading.RLock()
-        self._consumed_request_ids: set[str] = set()
 
     def _receipt(self, request_id: str, delivery: str, detail: str | None = None) -> None:
-        self.receipt_sink(transport_receipt(request_id, delivery, detail=detail))
+        returned = self.receipt_sink(
+            transport_receipt(request_id, delivery, detail=detail)
+        )
+        if returned is not None:
+            raise DiscordV2ActionError(
+                "Discord MCP action receipt persistence is unknown"
+            )
 
     def __call__(self, request_id: str, action: dict[str, Any]) -> None:
         if not isinstance(request_id, str) or not request_id:
             raise DiscordV2ActionError("Discord MCP action correlation is invalid")
-        with self._lock:
-            if request_id in self._consumed_request_ids:
-                raise DiscordV2ActionError("Discord MCP action request was already consumed")
-            if len(self._consumed_request_ids) >= self.max_request_ids:
-                raise DiscordV2ActionError("Discord MCP action capacity is exhausted")
-            self._consumed_request_ids.add(request_id)
         try:
             accepted = copy.deepcopy(action)
             kind = accepted.get("kind") if isinstance(accepted, dict) else None
             if kind == "message":
+                if (
+                    not {"kind", "content"} <= set(accepted)
+                    or set(accepted) - {
+                        "kind", "content", "reply_to_event_id", "mention_actor_ids"
+                    }
+                ):
+                    raise ValueError("message action does not match the closed contract")
                 content = accepted.get("content")
                 if not isinstance(content, str) or not content or len(content) > 2000:
                     raise ValueError("invalid message")
                 arguments: dict[str, Any] = {
+                    "request_id": request_id,
                     "channel_id": self.channel_id,
                     "content": content,
                 }
@@ -243,8 +320,9 @@ class MCPDiscordActionSinkV2:
                         raise ValueError("invalid reply")
                     tool = "reply_message"
                     arguments["message_id"] = reply_id
-                self.client.call_tool(tool, arguments)
             elif kind == "reaction":
+                if set(accepted) != {"kind", "target_event_id", "reaction"}:
+                    raise ValueError("reaction action does not match the closed contract")
                 target = _event_snowflake(
                     accepted.get("target_event_id"),
                     "discord:message:",
@@ -252,24 +330,66 @@ class MCPDiscordActionSinkV2:
                 reaction = accepted.get("reaction")
                 if target is None or not isinstance(reaction, str) or not reaction:
                     raise ValueError("invalid reaction")
-                self.client.call_tool(
-                    "add_reaction",
-                    {
-                        "channel_id": self.channel_id,
-                        "message_id": target,
-                        "reaction": reaction,
-                    },
-                )
+                tool = "add_reaction"
+                arguments = {
+                    "request_id": request_id,
+                    "channel_id": self.channel_id,
+                    "message_id": target,
+                    "reaction": reaction,
+                }
             else:
                 raise ValueError("unsupported action")
         except Exception as exc:
             try:
-                self._receipt(request_id, "failed", "mcp-discord-action-failure")
+                self._receipt(request_id, "failed", "invalid-action")
             except Exception as receipt_exc:
                 raise DiscordV2ActionError(
                     "Discord MCP action and receipt status are unknown"
                 ) from receipt_exc
             raise DiscordV2ActionError("Discord MCP action failed") from exc
+        try:
+            self.request_claim(request_id)
+        except Exception as exc:
+            raise DiscordV2ActionError(
+                "Discord MCP action request was already consumed or could not be reserved"
+            ) from exc
+        try:
+            response = self.client.call_tool(tool, arguments)
+            if not isinstance(response, dict):
+                raise DiscordV2ActionError("Discord MCP action result is invalid")
+            if tool in ("send_message", "reply_message"):
+                message = response.get("message")
+                if (
+                    not isinstance(message, dict)
+                    or _snowflake(message.get("message_id")) is None
+                    or _snowflake(message.get("channel_id")) != self.channel_id
+                ):
+                    raise DiscordV2ActionError(
+                        "Discord MCP message result is invalid"
+                    )
+                if response.get("request_id") != request_id:
+                    raise DiscordV2ActionError(
+                        "Discord MCP message correlation is invalid"
+                    )
+            elif response != {
+                "request_id": request_id,
+                "channel_id": self.channel_id,
+                "reaction": "sent",
+                "message_id": arguments["message_id"],
+            }:
+                raise DiscordV2ActionError("Discord MCP reaction result is invalid")
+        except Exception as exc:
+            try:
+                self._receipt(
+                    request_id,
+                    "unknown",
+                    "mcp-discord-action-outcome-unknown",
+                )
+            except Exception as receipt_exc:
+                raise DiscordV2ActionError(
+                    "Discord MCP action and receipt status are unknown"
+                ) from receipt_exc
+            raise DiscordV2ActionError("Discord MCP action outcome is unknown") from exc
         try:
             self._receipt(request_id, "sent")
         except Exception as exc:

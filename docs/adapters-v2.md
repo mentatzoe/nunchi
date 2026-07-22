@@ -18,7 +18,16 @@ features.
 
 All surfaces feed `LiveRoomRuntime`: one active attention/participant turn, one
 replaceable newest pending anchor, a fresh current-tail participant view, and no
-send-time social reclassification.
+send-time social reclassification. Host cancellation atomically drops active
+and pending wake work while leaving already observed events as context; a later
+live event starts a new opportunity rather than replaying the cancelled anchor.
+Each action is fully validated before its send backstop and remote dispatch.
+Invalid actions and backstop rejection are receipted `failed`; once a remote
+call begins, any lost/error response is conservatively receipted `unknown`,
+never `failed`, and is not automatically retried as if zero effect were proven.
+Every transport receipt sink must acknowledge persistence with exactly no
+return value. An exception or any non-`None` result leaves persistence unknown;
+the adapter never promotes that ambiguous write into a known terminal fact.
 
 ## Generic JSON-lines host
 
@@ -27,7 +36,8 @@ participant, platform, room, continuity scope and recoverability facts on the
 command line; room input cannot change them. Each stdin line is one closed host
 delivery with `delivery_id`, exact boolean `authorized`, `routing_room_id`,
 canonical `event`, and optional actor facts. Duplicate JSON keys, non-finite
-numbers, unknown fields and non-boolean authorization claims are rejected.
+numbers, unknown fields, non-boolean authorization claims, and a non-object
+actor map are rejected.
 
 ```sh
 nunchi-channel \
@@ -91,7 +101,11 @@ receipt under one closed binding; run another process with another policy for a
 second room. The Matrix access token is read from `NUNCHI_MATRIX_TOKEN` by
 default and is never placed in room, classifier or participant projections.
 HTTPS is mandatory unless the operator explicitly supplies
-`--allow-insecure-http` for a controlled development homeserver.
+`--allow-insecure-http` for an exact `localhost` or loopback-IP development
+homeserver. The override never admits a plaintext DNS or remote address.
+Malformed ports, literal URL whitespace/control characters, embedded
+credentials, queries and fragments fail during configuration, before the
+access token can be sent.
 
 ```sh
 install -d -m 700 /absolute/operator-state
@@ -126,8 +140,11 @@ executor is exposed on this room surface.
 
 `nunchi-telegram` likewise binds one exact chat and policy per process. The bot
 token comes from `NUNCHI_TELEGRAM_TOKEN` by default, the API endpoint requires
-HTTPS unless development mode is explicitly enabled, and the token never
-crosses into participant or classifier input.
+HTTPS unless development mode is explicitly enabled for an exact `localhost`
+or loopback-IP endpoint, and the token never crosses into participant or
+classifier input. The plaintext override cannot target a DNS or remote host;
+malformed ports, literal URL whitespace/control characters, embedded
+credentials, queries and fragments fail before a request.
 
 ```sh
 install -d -m 700 /absolute/operator-state
@@ -162,6 +179,14 @@ reaction deltas remain unavailable without prior-state comparison. Sends have
 a local backstop and request-correlated transport receipts, but Telegram offers
 no idempotency key for `sendMessage`, which remains an explicit transport
 limitation rather than a false guarantee.
+
+Chat, message, update, user, and structured-mention IDs must arrive in the
+Telegram Bot API's exact native integer types; stringified or boolean IDs are
+unroutable. The configured chat uses one canonical nonzero numeric string, and
+`getMe` must attest that the exact self ID is a bot before the adapter starts.
+Native `is_bot` booleans become human/bot facts, an absent field remains
+honestly `unknown`, and any present non-boolean value is rejected rather than
+coerced.
 
 ## Standalone Discord
 

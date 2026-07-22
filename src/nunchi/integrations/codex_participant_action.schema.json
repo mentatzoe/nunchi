@@ -1,37 +1,68 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "NunchiCodexParticipantResultV2",
-  "description": "Integration-private structured result: one ordinary room action or explicit silence. The host, not Codex, executes it.",
+  "description": "Integration-private structured result: one bounded host context request, ordinary room action, or explicit silence. The host validates/fetches context and executes actions; Codex receives no tool authority.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["action"],
+  "required": ["result"],
   "properties": {
-    "action": {
-      "oneOf": [
-        {"type": "null"},
+    "result": {
+      "anyOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "content"],
+          "required": ["action"],
           "properties": {
-            "kind": {"const": "message"},
-            "content": {"type": "string", "minLength": 1, "maxLength": 2000},
-            "reply_to_event_id": {"type": "string", "minLength": 1},
-            "mention_actor_ids": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {"type": "string", "minLength": 1}
+            "action": {
+              "anyOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "content", "reply_to_event_id", "mention_actor_ids"],
+                  "properties": {
+                    "kind": {"type": "string", "const": "message"},
+                    "content": {"type": "string", "minLength": 1, "maxLength": 2000},
+                    "reply_to_event_id": {"type": ["string", "null"], "minLength": 1},
+                    "mention_actor_ids": {
+                      "type": ["array", "null"],
+                      "items": {"type": "string", "minLength": 1}
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "target_event_id", "reaction"],
+                  "properties": {
+                    "kind": {"type": "string", "const": "reaction"},
+                    "target_event_id": {"type": "string", "minLength": 1},
+                    "reaction": {"type": "string", "minLength": 1, "maxLength": 256}
+                  }
+                }
+              ]
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "target_event_id", "reaction"],
+          "required": ["context_fetch"],
           "properties": {
-            "kind": {"const": "reaction"},
-            "target_event_id": {"type": "string", "minLength": 1},
-            "reaction": {"type": "string", "minLength": 1, "maxLength": 256}
+            "context_fetch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["request_id", "handle_id", "direction", "anchor_event_id", "cursor", "max_events", "max_bytes"],
+              "properties": {
+                "request_id": {"type": "string", "minLength": 1},
+                "handle_id": {"type": "string", "minLength": 1},
+                "direction": {"enum": ["before", "after", "around"]},
+                "anchor_event_id": {"type": ["string", "null"], "minLength": 1},
+                "cursor": {"type": ["string", "null"], "minLength": 1},
+                "max_events": {"type": "integer", "minimum": 1},
+                "max_bytes": {"type": "integer", "minimum": 1}
+              }
+            }
           }
         }
       ]
