@@ -991,3 +991,157 @@ self-declare acceptance.
 exact candidate (`2389a9b48b471273e6856ca0430b8a58891091d6`) on
 [mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
 lane does not self-accept and did not integrate.
+
+## Attempt 10 — 2026-07-22 (merge codex/v2-integration@8e647469, close the analogous receipt-sink-failure gap)
+
+**Delivering lane**: `v2-claude-owner`, same session (model `claude-sonnet-5`).
+Between Attempt 9 and this attempt, this same session independently reviewed
+and approved slice 040 (participant-wake, PR #17), slice 050 (Discord-transport,
+PR #18), and their composition onto `codex/v2-integration` (PR #19) — all now
+merged. Zoe relayed Codex's instruction to merge that integration line into
+this branch, apply whatever fixes from that work are relevant to this
+integration, and push a successor.
+
+### Exact candidate
+
+- **Merge commit**: `6ab3bd42…` — `git merge origin/codex/v2-integration`
+  (tip `8e64746970f9910d03b372291c5aa173883e869f`, PR #19's merge commit) into
+  `claude/claude-code-v2-integration-3ac219` at Attempt-9 evidence tip
+  `a4e0d9d`. Clean three-way merge via the `ort` strategy — zero conflicts,
+  confirmed by grep for conflict markers across the tree. `integrations/claude-code/`
+  itself has zero path overlap with anything `codex/v2-integration` touched.
+- **Implementation candidate**: `1b54cfbe6801fe0196f50d042861ad5fb4293677`
+  (two fix commits — `b735c14` then a self-correction `1b54cfb` — on top of
+  the merge commit).
+- **Evidence-only binding**: this commit (adding this Attempt-10 section)
+  sits on top; its diff from `1b54cfb` touches only `evidence/v2/claude-code/`.
+- Repository gate SHA-256 of `nunchi_claude_v2.py` at the implementation
+  candidate: `267dbe193805548b7a07cbb7ef5dd54fb72ff18ba8ee34e700344f087565b34f`.
+
+Attempt-10 changed-file inventory (post-merge, own commits only):
+
+```text
+M  evals/v2/claude_code/run_scenes.py
+M  evidence/v2/claude-code/verification.md
+M  integrations/claude-code/nunchi_claude_v2.py
+M  tests/v2/test_claude_code.py
+```
+
+No `src/` file was touched by this lane; those changes arrived entirely
+through the merge and are owned by their respective reviewed/merged slices.
+
+### What the merge changed for this integration, and what was applied
+
+`nunchi.participant` changed by 497 lines across the reviewed 040 rework
+(PR #17, three rounds — my own approval, then two corrections after Aleph
+caught real gaps I'd missed, detailed in this session's PR review history).
+The externally-visible contract change relevant to this lane: the immutable
+`participant-host` receipt stage now *always* attests `outcome="unknown"`
+before any transport effect and is never rewritten — delivery truth lives
+exclusively in the separate `transport` stage, closing the "immutable host
+receipt can claim `sent` before the action seam has an outcome" class of bug
+Aleph found in the reviewed source. This lane's own `complete_turn()` already
+calls `run_participant_turn` for exactly this purpose, so no code change was
+needed there — only four stale test assertions (`test_claude_code.py`) and
+two stale scene-runner assertions (`run_scenes.py`, missed by the first pass
+and caught by re-running the deterministic scene replay itself) that expected
+the old `"sent"`-on-the-host-receipt behavior, including one
+(`test_post_tool_failure_records_a_failed_delivery`) that had been asserting
+the *buggy* behavior as correct — a failed transport delivery with a host
+receipt still claiming `"sent"`.
+
+Auditing the rest of the merge for the same categories of bug the PR #17/#18/#19
+reviews surfaced (trust-boundary confused-deputy gaps, hardcoded literals
+standing in for computed coverage state, incomplete trigger coverage for a
+gap/taint signal, bounded-resource exhaustion) found one real, analogous gap
+in this lane's own code, unrelated to any merge conflict:
+
+`run_attention()` reimplements (rather than reuses) the attention→participant
+orchestration `LiveRoomRuntime._process_one()` performs upstream, since this
+lane doesn't use `nunchi.runtime` directly. It did not have the upstream
+fix's explicit check for `decision["error"]["code"] == "receipt-sink-failure"`
+before branching on decision status. With this lane's default
+`error_action="WAKE"`, a receipt-sink failure inside `evaluate_v2()` (the
+attention-stage receipt failing to persist) was indistinguishable from an
+ordinary classifier/operational error and fell through to the same
+`ERROR_FALLBACK` wake path as a real WAKE/DEFER decision — returning a real
+`snapshot` for eventual real participant/privileged-tool invocation, exactly
+the bug Aleph found and Codex fixed in `LiveRoomRuntime._process_one()`.
+Fixed: `run_attention()` now checks for `receipt-sink-failure` first, before
+any other status branch, and routes it to `operational-error` (denying
+privileged effects via the existing degraded-turn machinery), matching the
+fixed upstream contract.
+
+RED-to-GREEN verified: `git stash` of just the product file reproduced the
+bug with the new test (`route="wake"`, `KeyError: 'degraded'` — no snapshot
+gate at all) before the fix was restored and the same test passed.
+
+`read_channel_backlog`/`_coalesce_backlog_anchor` were checked against the
+Codex composition's "bootstrap truncation erased from participant coverage"
+finding (PR #19) and found not applicable: that function only coalesces
+toward the newest already-locally-known anchor within an append-only sidecar
+scan window bounded from the *end* of the file — it never makes a
+completeness/coverage claim that a truncated *earlier* window could falsify,
+unlike `bootstrap_history()`'s remote-history-restoration role.
+
+### Self-found, out-of-scope finding (flagged, not fixed this attempt)
+
+While tracing `handle_pre_tool`'s reply/react branch to confirm degraded
+turns can't produce a real send, found that they can: `_reserve_room_action`
+(and its caller) never checks `turn.get("degraded")` or
+`turn.get("snapshot")`, so an ordinary reply/react tool call is not denied at
+`PreToolUse` during a degraded turn — only "privileged" (I-040B) actions are
+unconditionally denied there. Worse, `complete_turn()` unconditionally
+short-circuits for any degraded turn *before* calling `run_participant_turn`,
+so if a reply/react does execute during one, no participant-host and no
+transport receipt are ever written for it — the send happens with zero
+attestation, which the canonical singly-attested receipt-chain invariant this
+whole system is built around does not allow for. Confirmed via `git log`/`git
+show` that this exact code shape predates this attempt (present at Attempt-9
+tip `a4e0d9d`) — it is not a regression from today's merge or fix, and fixing
+it requires a real design decision (deny reply/react outright during degraded
+turns, or receipt whatever happens honestly) that is out of scope for "apply
+the fixes relevant to this merge." Flagged as a standalone follow-up rather
+than silently left for a future reviewer to rediscover.
+
+### Deterministic commands and results (Attempt 10)
+
+`python3 -m unittest tests.v2.test_claude_code tests.test_claude_code_hook_wrapper`
+→ **151 OK** (1 new since Attempt 9's 150 combined); full baseline
+`python3 -m unittest` (isolated `HOME`, `HERMES_HOME`/`PYTHONPATH` unset) →
+**1372 OK (skipped=9)**; `python3 scripts/check_governance.py --check-cli` →
+OK; scene replay (`PYTHONPATH=src:. python3 -m evals.v2.claude_code.run_scenes
+--out-dir <tmp>`, run twice after the scene-runner fix) → 20 rows (19 PASS, 1
+declared limitation) each time, byte-identical to each other and to the
+already-committed `scene-results.jsonl`/`reactive-bot-hearing.jsonl` (this
+attempt touches receipt-outcome semantics only, not attention/scene
+mechanics — the recorded data rows were never affected, only the assertion
+text that checks them); `python3 -m py_compile` and `ast.parse` on the
+product file → clean; `git diff --check` → clean.
+
+### Installed provenance (Attempt 10)
+
+**No host mutation was performed or requested this session** — no
+`settings.json` edit, no transport-patch application, no outbound Discord
+send, no staged-install refresh. The installed host remains at Attempt-7's
+armed two-patch state (`0d1ffaa0…`), unchanged by this attempt; re-arming
+still requires the ladder documented in `installed-runtime.md`.
+
+### Known limitations and rejected claims (Attempt 10)
+
+Unchanged from Attempt 9, plus: the self-found degraded-turn receipt gap
+above is now a known, tracked limitation rather than an undiscovered one —
+**rejected claim**: "the merge was a mechanical no-op for this lane" — it
+surfaced one real, confirmed, previously-live bug in this lane's own
+receipt-sink-failure handling (fixed this attempt) and one real, confirmed,
+pre-existing gap in degraded-turn room-action denial (flagged, not fixed).
+**Rejected claim**: "the receipt-sink-failure fix is upstream's problem, not
+this lane's" — `run_attention()` is this lane's own reimplementation of the
+orchestration `LiveRoomRuntime` provides upstream, so the same class of bug
+had to be independently checked for and independently fixed here; it does
+not inherit fixes made only inside `nunchi.runtime`.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`1b54cfbe6801fe0196f50d042861ad5fb4293677`) on
+[mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
+lane does not self-accept and did not integrate.

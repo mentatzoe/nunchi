@@ -2,8 +2,8 @@
  "schema_version": 1,
  "slice": "070-v2-claude-code",
  "owner_lane": "v2-claude-owner",
- "attempt": 9,
- "recorded_on": "2026-07-21",
+ "attempt": 10,
+ "recorded_on": "2026-07-22",
  "supersedes_attempt_1_candidate": "6476b58ca015e259fa576fd8f9ed569adc0c6913",
  "supersedes_attempt_2_candidate": "199012901278777750671f4fc0731b779e91c2b8",
  "supersedes_attempt_3_candidate": "651313531f19ba82683a8234bcc3c0252e67adfd",
@@ -12,7 +12,8 @@
  "supersedes_attempt_6_candidate": "4ca9d8bbb6fc40c33b9fc54a7dd027922472994e",
  "supersedes_attempt_7_candidate": "7ea499be33c6260f79e10f07fe77110b147929e2",
  "supersedes_attempt_8_candidate": "d594b29c1bca487da38f025b1a46de21c183b8f6",
- "candidate_commit": "2389a9b48b471273e6856ca0430b8a58891091d6 (Attempt-9 implementation candidate); the append-only Attempt-9 handoff section binds it and the later evidence-only commit",
+ "supersedes_attempt_9_candidate": "2389a9b48b471273e6856ca0430b8a58891091d6",
+ "candidate_commit": "1b54cfbe6801fe0196f50d042861ad5fb4293677 (Attempt-10 implementation candidate, on top of merge commit 6ab3bd42 pulling origin/codex/v2-integration@8e647469); the append-only Attempt-10 handoff section binds it and the later evidence-only commit",
  "scene_map": {
   "CC-01": {
    "s_ids": ["S01", "S02", "S11"],
