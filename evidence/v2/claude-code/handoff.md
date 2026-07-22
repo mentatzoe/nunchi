@@ -1145,3 +1145,109 @@ not inherit fixes made only inside `nunchi.runtime`.
 exact candidate (`1b54cfbe6801fe0196f50d042861ad5fb4293677`) on
 [mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
 lane does not self-accept and did not integrate.
+
+---
+
+## Attempt 11 — 2026-07-22 (rework: deny reply/react during degraded turns, closing Attempt-10's self-found gap)
+
+**Delivering lane**: `v2-claude-owner`, same session (model `claude-sonnet-5`).
+Attempt 10 found and flagged, but did not fix, a gap in its own review scope:
+`handle_pre_tool`'s reply/react branch did not check `turn.get("degraded")`,
+so an ordinary reply/react could execute during a degraded (operational-error)
+turn with zero participant-host or transport receipt ever attested for it —
+the send happens, the receipt chain does not. Zoe reviewed the flagged
+finding directly and directed the fix.
+
+### Exact candidate
+
+- **Implementation candidate**: `bb79cca17cccaa2965ead3aa8182cb3c2602b991`
+  (cherry-picked, zero conflicts, from an identical commit authored in a
+  sibling worktree on the same base — Attempt-10 evidence tip `33c50b4` —
+  branch `claude/youthful-cori-976b2d` commit `fe909e4`).
+- Repository gate SHA-256 of `nunchi_claude_v2.py` at the implementation
+  candidate: `b42bee5e3dd4bfa1ef98c41d2a11c756375b5a1ec397395af14d0f1cf0baddfd`.
+- **Evidence-only binding**: this commit (adding this Attempt-11 section)
+  sits on top; its diff from `bb79cca` touches only `evidence/v2/claude-code/`.
+
+Attempt-11 changed-file inventory:
+
+```text
+M  integrations/claude-code/nunchi_claude_v2.py
+M  tests/v2/test_claude_code.py
+```
+
+No `src/`, `schemas/`, or other lane's surface changed.
+
+### Direction decided, and why the alternative was rejected
+
+Attempt 10 named two possible directions: deny reply/react outright during a
+degraded turn (matching how privileged actions are already denied there), or
+write an honest "unknown-provenance" receipt for whatever the reply/react
+call did. The second was evaluated and rejected: `nunchi.observation`'s
+`check_receipt_sequence` enforces a canonical `observation -> attention ->
+participant-host -> transport` prefix per `request_id`, which a degraded turn
+cannot reliably supply — the `snapshot-unavailable` operational-error route
+has no `request_id` at all, and at least one other route
+(`observation-receipt-persistence-unknown`) leaves the `observation`-stage
+persistence itself uncertain. Writing a bare `participant-host`/`transport`
+receipt in either case would itself violate that canonical-order invariant
+this whole system is built around, and fixing it correctly would mean
+extending the core receipt schema in `src/nunchi/observation.py` — an
+upstream contract change outside this integration's lane, not something to
+reach into unilaterally from a Claude Code fix.
+
+Chosen instead: `handle_pre_tool`'s reply/react branch now denies fail-closed
+when `turn.get("degraded")` or `turn["snapshot"]` is not a `dict`, exactly
+mirroring the privileged-action seam two branches down in the same function.
+Nothing sends, so nothing needs an unattested receipt — `complete_turn()`'s
+existing degraded short-circuit (clear the turn, no fabricated stage) is now
+fully honest rather than a discard-after-the-fact. Updated the
+`handle_pre_tool`/`start_degraded_turn` docstrings and the
+`_drive_opportunity` operational-error context message rendered to the model,
+so they accurately state reply/react is denied too, not just privileged
+tools — the prior text told the model it could "take one normal room turn,"
+which is no longer true.
+
+### Test coverage
+
+Added `test_operational_error_wake_denies_reply_and_react_too`
+(`AdversarialRegressionCases`), reusing the exact receipt-sink-failure
+degraded-turn setup from the two sibling tests immediately above it, then
+confirming both `mcp__discord__reply` and `mcp__discord__react` are denied
+at `PreToolUse` and that neither attempt ever created a reservation.
+
+### Deterministic commands and results (Attempt 11)
+
+`python3 -m unittest tests.v2.test_claude_code tests.test_claude_code_hook_wrapper`
+→ **152 OK** (1 new, since Attempt 10's 151); the five-module guard run
+(`test_no_home_writes`, `test_sentinel_forgery`, `test_no_second_judgment`,
+`test_claude_code`, `test_claude_code_hook_wrapper`) → **174 OK**; full
+baseline `python3 -m unittest` → **1373 OK (skipped=9)**;
+`python3 scripts/check_governance.py --check-cli` → OK; scene replay
+(`python3 evals/v2/claude_code/run_scenes.py`, run twice) → 20 rows (19 PASS,
+1 declared limitation) each time, identical to Attempt 10 (this attempt
+changes `PreToolUse` denial semantics only, not attention/scene mechanics —
+no scene ever executes a reply/react during a degraded turn, so no recorded
+row is affected); `git diff --check` against the implementation candidate →
+clean.
+
+### Installed provenance (Attempt 11)
+
+**No host mutation was performed or requested this session** — no
+`settings.json` edit, no transport-patch application, no outbound Discord
+send, no staged-install refresh. The installed host remains at Attempt-7's
+armed two-patch state (`0d1ffaa0…`), unchanged by this attempt.
+
+### Known limitations and rejected claims (Attempt 11)
+
+Unchanged from Attempt 10, minus the degraded-turn receipt gap, which is now
+closed rather than a tracked limitation. **Rejected claim**: "denying
+reply/react during a degraded turn changes ordinary (non-degraded) turn
+behavior" — it does not; the new check only fires when `turn.get("degraded")`
+is true or `turn["snapshot"]` is not a `dict`, both exclusive to the
+operational-error path `start_degraded_turn` creates.
+
+**Handoff target**: Codex, for independent adversarial re-review of this
+exact candidate (`bb79cca17cccaa2965ead3aa8182cb3c2602b991`) on
+[mentatzoe/nunchi#15](https://github.com/mentatzoe/nunchi/pull/15). This
+lane does not self-accept and did not integrate.

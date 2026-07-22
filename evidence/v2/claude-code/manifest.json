@@ -2,7 +2,7 @@
  "schema_version": 1,
  "slice": "070-v2-claude-code",
  "owner_lane": "v2-claude-owner",
- "attempt": 10,
+ "attempt": 11,
  "recorded_on": "2026-07-22",
  "supersedes_attempt_1_candidate": "6476b58ca015e259fa576fd8f9ed569adc0c6913",
  "supersedes_attempt_2_candidate": "199012901278777750671f4fc0731b779e91c2b8",
@@ -13,7 +13,8 @@
  "supersedes_attempt_7_candidate": "7ea499be33c6260f79e10f07fe77110b147929e2",
  "supersedes_attempt_8_candidate": "d594b29c1bca487da38f025b1a46de21c183b8f6",
  "supersedes_attempt_9_candidate": "2389a9b48b471273e6856ca0430b8a58891091d6",
- "candidate_commit": "1b54cfbe6801fe0196f50d042861ad5fb4293677 (Attempt-10 implementation candidate, on top of merge commit 6ab3bd42 pulling origin/codex/v2-integration@8e647469); the append-only Attempt-10 handoff section binds it and the later evidence-only commit",
+ "supersedes_attempt_10_candidate": "1b54cfbe6801fe0196f50d042861ad5fb4293677",
+ "candidate_commit": "bb79cca17cccaa2965ead3aa8182cb3c2602b991 (Attempt-11 implementation candidate, cherry-picked clean on top of Attempt-10 evidence tip 33c50b4); the append-only Attempt-11 handoff section binds it and the later evidence-only commit",
  "scene_map": {
   "CC-01": {
    "s_ids": ["S01", "S02", "S11"],
@@ -64,7 +65,7 @@
     "tests.v2.test_claude_code.AdversarialRegressionCases"
    ],
    "post_hoc_grading_corpus": "evals/v2/claude_code/scenes.jsonl (meta-answer-grading rows)",
-   "result": "PASS — act-or-silence with singly attested receipts; silence valid; no runtime prose filter, send re-gate, social ledger, or cross-owner stage mutation; room-caused privileged execution denied fail-closed (unsupported through the advisory seam); cross-room sends denied before execution; live room send NOT RUN — blockers in verification.md",
+   "result": "PASS — act-or-silence with singly attested receipts; silence valid; no runtime prose filter, send re-gate, social ledger, or cross-owner stage mutation; room-caused privileged execution denied fail-closed (unsupported through the advisory seam); cross-room sends denied before execution; reply/react denied fail-closed during a degraded (operational-error) turn, exactly like privileged actions (Attempt-11); live room send NOT RUN — blockers in verification.md",
    "send_time_social_calls": 0
   },
   "CC-05": {

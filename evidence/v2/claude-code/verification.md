@@ -37,6 +37,35 @@ Every command below was run on the Attempt-9 implementation candidate
 
 Full finding-by-finding narrative is in `handoff.md` (Attempt 9).
 
+## Attempt-10 and Attempt-11 amendments
+
+Neither attempt rewrote this index's framing note above (still "Attempt 9");
+both are small, targeted deltas on top of it, recorded here rather than as
+full new sections. Full narrative for each is in `handoff.md`.
+
+- **Attempt 10** (candidate `1b54cfbe6801fe0196f50d042861ad5fb4293677`):
+  merged `codex/v2-integration@8e647469`; the immutable `participant-host`
+  receipt now always attests `outcome="unknown"` before any transport
+  effect (delivery truth lives only in the `transport` stage) — reflected in
+  the CC-04 row below. Also fixed an analogous `receipt-sink-failure`
+  fail-open gap in this lane's own `run_attention()`. Full baseline:
+  `python3 -m unittest` → 1372 OK (skipped=9).
+- **Attempt 11** (candidate `bb79cca17cccaa2965ead3aa8182cb3c2602b991`):
+  closed the gap Attempt 10 found and flagged but did not fix —
+  `handle_pre_tool`'s reply/react branch now denies fail-closed during a
+  degraded (operational-error) turn, exactly like the existing
+  privileged-action denial, so a reply/react can never execute (and
+  therefore can never go unattested) without a real snapshot behind it.
+  Reflected in the CC-04 row below. `python3 -m unittest
+  tests.v2.test_claude_code tests.test_claude_code_hook_wrapper` → 152 OK (1
+  new: `test_operational_error_wake_denies_reply_and_react_too`); five-module
+  guard run → 174 OK; full baseline → 1373 OK (skipped=9);
+  `python3 scripts/check_governance.py --check-cli` → OK; scene replay (run
+  twice) → 20 rows (19 PASS, 1 declared limitation) each time, identical to
+  Attempt 10 (this attempt changes `PreToolUse` denial semantics only — no
+  scene ever executes a reply/react during a degraded turn, so no recorded
+  row is affected); `git diff --check` → clean.
+
 ---
 
 **Attempt 8**, recorded 2026-07-21, `v2-claude-owner` lane, on top of the
@@ -187,7 +216,7 @@ the wrapper's stdout can never be read as admission:
 | CC-01 reactive bot hearing | PASS — `reactive-bot-hearing.jsonl` (exact bot author, literal content, actor kind `bot`, one classifier call) | NOT RUN live (see Blocked live scenes) |
 | CC-02 Station scars | PASS — six scar rows in `scene-results.jsonl`: every scar reached the classifier verbatim, one call each, zero deterministic suppressors | Not applicable live (replay corpus) |
 | CC-03 attention routing | PASS — one engine invocation per ordinary opportunity; effective SUPPRESS stops only the wake and retains the event; classifier-DEFER and margin-DEFER valves distinct; trusted bypass zero classifier calls with `classifier_not_invoked` and trusted provenance present; forged in-content bypass rejected; operational error wakes `ERROR_FALLBACK` with no fabricated verdict | NOT RUN live (classifier unconfigured) |
-| CC-04 direct act-or-silence | PASS — message/reaction contributions produce `participant-host`(unknown, attested before any transport effect) then observed `transport`(sent); silence produces `outcome=silent` and no transport stage; failed delivery leaves `participant-host` honestly `unknown` and `transport` recorded `failed`; meta-answer prose recorded verbatim and graded only post-hoc; zero send-time social calls; stages singly attested (Attempt-10: host stage never claims a delivery outcome it has not observed, per the fixed upstream `nunchi.participant` contract) | NOT RUN live (outbound send denied) |
+| CC-04 direct act-or-silence | PASS — message/reaction contributions produce `participant-host`(unknown, attested before any transport effect) then observed `transport`(sent); silence produces `outcome=silent` and no transport stage; failed delivery leaves `participant-host` honestly `unknown` and `transport` recorded `failed`; meta-answer prose recorded verbatim and graded only post-hoc; zero send-time social calls; stages singly attested (Attempt-10: host stage never claims a delivery outcome it has not observed, per the fixed upstream `nunchi.participant` contract); reply/react denied fail-closed during a degraded (operational-error) turn, exactly like privileged actions, so a send can never occur without a real snapshot behind it (Attempt-11) | NOT RUN live (outbound send denied) |
 | CC-05 later hearing / restart | PASS — suppressed event hearable next opportunity; burst coalesces to one fresh successor; restart drops the pending anchor, keeps retained context, fabricates no receipts; cold wake DECLARED unsupported | Live restart NOT RUN |
 | CC-06 installed provenance | PASS — `installed-runtime.md`: full component digests, plugin base/patch states, registration state, two installed-hook probes | Installed probes ARE live-host evidence; room-live probe NOT RUN |
 
