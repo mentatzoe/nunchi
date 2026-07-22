@@ -242,8 +242,15 @@ class GatewayProtocol:
                 or not isinstance(interval, int)
                 or interval < 1
             ):
+                previous_session_id = self.session_id
                 self.invalidate_session()
-                return [CloseAndReconnect(resume=False)]
+                return [
+                    CloseAndReconnect(
+                        resume=False,
+                        reason="invalid-gateway-hello",
+                        previous_session_id=previous_session_id,
+                    )
+                ]
             self.heartbeat_interval_ms = interval
             if self.can_resume:
                 return [SendPayload(self._resume_payload())]
@@ -257,15 +264,33 @@ class GatewayProtocol:
             return [CloseAndReconnect(resume=True)]
         if op == OP_INVALID_SESSION:
             resumable = payload.get("d")
+            previous_session_id = self.session_id
+            expected_sequence = self.seq + 1 if self.seq is not None else None
             if not isinstance(resumable, bool):
                 self.invalidate_session()
-                return [CloseAndReconnect(resume=False)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-payload",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
             if resumable and not self.can_resume:
                 self.invalidate_session()
-                return [CloseAndReconnect(resume=False)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-resume-unavailable",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
             if not resumable:
                 self.invalidate_session()
-            return [CloseAndReconnect(resume=resumable)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-session-nonresumable",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                )]
+            return [CloseAndReconnect(resume=True)]
         if op == OP_DISPATCH:
             return self._handle_dispatch(payload)
         return []
@@ -325,9 +350,14 @@ class GatewayProtocol:
                     and own_user_id != self._expected_user_id
                 )
             ):
+                previous_session_id = self.session_id
                 self.invalidate_session()
                 self.own_user_id = None
-                return [CloseAndReconnect(resume=False)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-ready-identity-or-resume-origin",
+                    previous_session_id=previous_session_id,
+                )]
             self.session_id = session_id
             self.resume_gateway_url = resume_gateway_url
             self.own_user_id = own_user_id
@@ -339,9 +369,14 @@ class GatewayProtocol:
                 or self.resume_gateway_url is None
                 or _snowflake(self.own_user_id) is None
             ):
+                previous_session_id = self.session_id
                 self.invalidate_session()
                 self.own_user_id = None
-                return [CloseAndReconnect(resume=False)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="invalid-resumed-state",
+                    previous_session_id=previous_session_id,
+                )]
             self.ready = True
             return []
         if event in (
@@ -350,9 +385,17 @@ class GatewayProtocol:
             "MESSAGE_REACTION_REMOVE",
         ):
             if not self.ready or _snowflake(self.own_user_id) is None:
+                previous_session_id = self.session_id
+                expected_sequence = self.seq + 1 if self.seq is not None else None
                 self.invalidate_session()
                 self.own_user_id = None
-                return [CloseAndReconnect(resume=False)]
+                return [CloseAndReconnect(
+                    resume=False,
+                    reason="dispatch-before-attested-ready",
+                    previous_session_id=previous_session_id,
+                    expected_sequence=expected_sequence,
+                    observed_sequence=self.seq,
+                )]
             return [Dispatch(event, data, sequence=self.seq, session_id=self.session_id)]
         return []
 

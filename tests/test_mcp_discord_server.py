@@ -1058,6 +1058,7 @@ class TestMcpBinding(unittest.TestCase):
             capabilities=TOOL_NAMES,
             on_restart_gap=continuations.mark_restart_gap,
         )
+        self.assertTrue(registry.add(object())["has_restart_gap"])
         registry.sessions({"kind": "continuity-boundary", "channel_id": "100"})
         handle, _before = continuations.verify_request(
             {

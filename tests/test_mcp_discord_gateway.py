@@ -24,7 +24,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from nunchi.mcp_discord import ws as wslib
-from nunchi.mcp_discord.events import filter_message_create
+from nunchi.mcp_discord.events import GatewayContinuityEvent, filter_message_create
 from nunchi.mcp_discord.gateway import (
     INTENTS,
     CloseAndReconnect,
@@ -255,7 +255,10 @@ class TestGatewayResume(unittest.TestCase):
         proto.handle(_ready(session_id="sess-abc", seq=4))
 
         actions = proto.handle({"op": 9, "d": False})
-        self.assertEqual(actions, [CloseAndReconnect(resume=False)])
+        self.assertEqual(len(actions), 1)
+        self.assertFalse(actions[0].resume)
+        self.assertEqual(actions[0].reason, "invalid-session-nonresumable")
+        self.assertEqual(actions[0].previous_session_id, "sess-abc")
         self.assertFalse(proto.can_resume)
 
         proto.on_connection_open()
@@ -295,8 +298,8 @@ class TestGatewayResume(unittest.TestCase):
                 ready = _ready()
                 ready["d"]["resume_gateway_url"] = url
                 self.assertEqual(
-                    proto.handle(ready),
-                    [CloseAndReconnect(resume=False)],
+                    proto.handle(ready)[0].reason,
+                    "invalid-ready-identity-or-resume-origin",
                 )
                 self.assertFalse(proto.can_resume)
                 self.assertEqual(
@@ -309,16 +312,16 @@ class TestGatewayResume(unittest.TestCase):
         self.assertEqual(proto.handle([]), [])
         self.assertEqual(proto.handle({"op": True}), [])
         self.assertEqual(
-            proto.handle({"op": 10, "d": {"heartbeat_interval": "45000"}}),
-            [CloseAndReconnect(resume=False)],
+            proto.handle({"op": 10, "d": {"heartbeat_interval": "45000"}})[0].reason,
+            "invalid-gateway-hello",
         )
         self.assertEqual(
-            proto.handle({"op": 9, "d": "false"}),
-            [CloseAndReconnect(resume=False)],
+            proto.handle({"op": 9, "d": "false"})[0].reason,
+            "invalid-session-payload",
         )
         self.assertEqual(
-            proto.handle(_message_create("777")),
-            [CloseAndReconnect(resume=False)],
+            proto.handle(_message_create("777"))[0].reason,
+            "dispatch-before-attested-ready",
         )
 
         ordered = GatewayProtocol(TOKEN)
@@ -428,6 +431,47 @@ class _ScriptedWS:
 
 
 class TestGatewayRunner(unittest.IsolatedAsyncioTestCase):
+    async def test_identify_close_emits_boundary_before_fresh_session_successor(self):
+        first = _ScriptedWS(
+            [
+                _hello(interval_ms=600000),
+                _ready(session_id="session-one", own_id="999", seq=1),
+                wslib.WSClosed(4009, "session timed out"),
+            ]
+        )
+        second = _ScriptedWS(
+            [
+                _hello(interval_ms=600000),
+                _ready(session_id="session-two", own_id="999", seq=1),
+                _message_create("777", seq=2),
+                wslib.WSClosed(4004, "stop the test"),
+            ]
+        )
+        sockets = [first, second]
+
+        async def fake_connect(_url: str):
+            return sockets.pop(0)
+
+        events = []
+        runner = GatewayRunner(
+            GatewayProtocol(TOKEN),
+            events.append,
+            connect=fake_connect,
+            rng=lambda: 1.0,
+            initial_backoff=0.01,
+        )
+        with self.assertRaises(GatewayFatalError):
+            await runner.run(asyncio.Event())
+
+        self.assertIsInstance(events[0], GatewayContinuityEvent)
+        self.assertEqual(
+            events[0].reason,
+            "gateway-close-4009-requires-identify",
+        )
+        self.assertEqual(events[0].previous_session_id, "session-one")
+        self.assertEqual(events[1].gateway_session_id, "session-two")
+        self.assertEqual(second.sent[0]["op"], 2)
+
     async def test_runner_resumes_after_ambiguous_gateway_json_without_a_gap(self):
         duplicate = json.dumps(_message_create("666", seq=2)).replace(
             '"id": "111222333"',

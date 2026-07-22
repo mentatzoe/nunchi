@@ -74,6 +74,9 @@ sequenceDiagram
    event store replays disconnected streams. Capacity exhaustion sets a
    supervised global health failure and terminates the transport, including
    when the pinned SDK swallows the router task's exception.
+   A new process starts gap-tainted; every non-resumed fresh IDENTIFY emits a
+   continuity boundary before a successor and remains `session-only` until a
+   separately proven bounded recovery can clear it.
 10. The live notification queue is bounded. Overflow terminates the transport
    session before any post-gap event can be delivered; it is not persisted and
    never becomes a FIFO of conversational obligations.

@@ -148,7 +148,10 @@ class SessionRegistry:
         self_actor_id: str,
         capabilities: frozenset[str],
         on_restart_gap=None,
+        initial_restart_gap: bool = True,
     ) -> None:
+        if not isinstance(initial_restart_gap, bool):
+            raise ValueError("initial MCP restart-gap state is invalid")
         self._participant_id = participant_id
         self._room_id = room_id
         self._self_actor_id = self_actor_id
@@ -156,7 +159,7 @@ class SessionRegistry:
         self._sessions: dict[int, SessionBinding] = {}
         self._gateway_session_id: str | None = None
         self._gateway_sequence: int | None = None
-        self._has_restart_gap = False
+        self._has_restart_gap = initial_restart_gap
         self._on_restart_gap = on_restart_gap
 
     def add(self, session: object) -> dict:
@@ -302,6 +305,7 @@ def serve(config: Config) -> int:
         self_actor_id=config.self_actor_id,
         capabilities=frozenset(schema["name"] for schema in TOOL_SCHEMAS),
         on_restart_gap=continuations.mark_restart_gap,
+        initial_restart_gap=continuations.has_restart_gap,
     )
     executor = ToolExecutor(
         rest,

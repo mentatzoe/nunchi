@@ -20,6 +20,12 @@ binding.
    page coverage until a separate bounded recovery can prove closure; bounded
    REST history alone never upgrades it to `restart-safe`.
 
+Every new transport process begins gap-tainted because its replay store is
+process-local. A Discord close or invalid-session response that requires fresh
+IDENTIFY emits a boundary before the next session's event. Until an explicit
+bounded recovery mechanism exists, subscription and history coverage therefore
+remain conservatively `session-only` across process and gateway epochs.
+
 The state directory contains exclusive request-claim files. Preserve it across
 restart and backup/upgrade; deleting it reopens request IDs and is therefore a
 security-sensitive operator action. Capacity exhaustion fails closed and

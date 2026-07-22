@@ -821,6 +821,43 @@ class V2ServerBoundaryCases(unittest.TestCase):
 
 
 class AdversarialTransportClosureCases(unittest.TestCase):
+    def test_process_restart_taints_pre_and_post_restart_history_handles(self):
+        first = DiscordHistoryContinuations(
+            "a" * 32,
+            participant_id="vigil",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+        )
+        old_capability = first.issue("discord:message:111")
+        restarted = DiscordHistoryContinuations(
+            "a" * 32,
+            participant_id="vigil",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+        )
+        new_capability = restarted.issue("discord:message:112")
+        for capability, request_id in (
+            (old_capability, "req-old"),
+            (new_capability, "req-new"),
+        ):
+            handle, _before = restarted.verify_request(
+                {
+                    "request_id": request_id,
+                    "handle_id": capability["handle_id"],
+                    "direction": "before",
+                    "max_events": 1,
+                    "max_bytes": 1024,
+                }
+            )
+            self.assertEqual(
+                restarted.coverage(handle),
+                {
+                    "has_gaps": True,
+                    "continuity": "session-only",
+                    "has_restart_gap": True,
+                },
+            )
+
     def test_gateway_message_keeps_lineage_and_sequence_gap_emits_boundary(self):
         event = message_event_from_create(
             message_payload(),

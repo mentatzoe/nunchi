@@ -64,7 +64,11 @@ class DiscordHistoryContinuations:
         self.max_events = max_events
         self.max_bytes = max_bytes
         self._state_lock = threading.Lock()
-        self._has_restart_gap = False
+        # This store and the gateway replay buffer are process-local. A newly
+        # constructed process cannot prove what happened before its epoch, so
+        # continuity begins conservatively tainted and remains so until a
+        # future explicit bounded recovery mechanism proves closure.
+        self._has_restart_gap = True
 
     def mark_restart_gap(self) -> None:
         """Conservatively retain known gateway discontinuity for this process."""
@@ -74,6 +78,10 @@ class DiscordHistoryContinuations:
     def _restart_gap(self) -> bool:
         with self._state_lock:
             return self._has_restart_gap
+
+    @property
+    def has_restart_gap(self) -> bool:
+        return self._restart_gap()
 
     def _token(self, payload: dict[str, Any]) -> str:
         raw = json.dumps(

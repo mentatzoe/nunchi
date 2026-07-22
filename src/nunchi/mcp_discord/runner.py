@@ -94,6 +94,18 @@ class GatewayRunner:
                     f"gateway closed with code {close_code}: {hint or 'not retryable'}"
                 )
             if strategy == "identify":
+                self._on_event(
+                    GatewayContinuityEvent(
+                        reason=f"gateway-close-{close_code}-requires-identify",
+                        previous_session_id=self._protocol.session_id,
+                        expected_sequence=(
+                            self._protocol.seq + 1
+                            if self._protocol.seq is not None
+                            else None
+                        ),
+                        observed_sequence=None,
+                    )
+                )
                 self._protocol.invalidate_session()
             logger.warning(
                 "gateway connection ended (code=%s); will %s in %.1fs",

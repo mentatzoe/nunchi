@@ -110,7 +110,10 @@ The bounded MCP event store replays a disconnected SSE stream within the live
 process; process restart is reported honestly through the subscription binding
 and history snapshot rather than claimed gap-free. A known gateway restart gap
 also remains set in signed history-handle/page coverage; REST history cannot by
-itself prove that every missed gateway event was recovered. Event-limit
+itself prove that every missed gateway event was recovered. Each new process
+starts conservatively gap-tainted, and invalid-session or close-code paths that
+require fresh IDENTIFY project a boundary before the new session's successor.
+No current path upgrades those epochs to `restart-safe`. Event-limit
 truncation uses a one-extra bounded probe and is reported as `events`, while
 byte truncation is reported independently. Replay-store exhaustion raises a
 supervised global health failure and terminates the transport even though the
