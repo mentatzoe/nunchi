@@ -2,7 +2,7 @@
 
 **Review status**: SUCCESSOR FROZEN FOR INDEPENDENT SOURCE RE-REVIEW
 
-**Effective successor implementation commit**: `fd2278e05b835bcaff0a93bf2fc681ab860c6a15`
+**Effective successor implementation commit**: `b46bc8a0fbba18a3af0fb401aefa431f1e953302`
 
 **Pre-surface comparison commit**: `09e204a`
 
@@ -31,10 +31,13 @@ diff.
 
 ## Successor closure and remaining lifecycle boundary
 
-The successor closes every source defect reported on the original head and now
+The successor closes every source defect reported on the prior heads and now
 includes native fixtures, deterministic replay material, the product guide, DT
 scene results, a clean-installed `mcp==1.28.1` record, and an evidence manifest.
-The exact 31-file source/test/doc/eval surface is pinned below.
+Replay-store exhaustion is supervised as global continuity failure, known
+gateway restart gaps remain in signed history coverage, and event-limit
+truncation is established by a one-extra bounded probe. The exact 31-file
+source/test/doc/eval surface is pinned below.
 
 Live DT-07 mixed-room evidence is truthfully `NOT_RUN` because no authenticated
 Discord credential was available to this review process. Source approval and
@@ -44,7 +47,7 @@ lifecycle gate: this PR does not claim `HANDOFF_READY` or `ACCEPTED`.
 ## Review requirements
 
 1. Verify every listed SHA-256 and Git blob against successor implementation
-   commit `fd2278e05b835bcaff0a93bf2fc681ab860c6a15` and confirm the PR does not move.
+   commit `b46bc8a0fbba18a3af0fb401aefa431f1e953302` and confirm the PR does not move.
 2. Run the focused ordinary and clean-installed SDK commands recorded in
    `evidence/v2/discord-transport/installed-runtime.md` and the deterministic
    replay runner `python3 -m evals.v2.discord_transport.runner`.
