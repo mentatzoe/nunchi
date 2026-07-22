@@ -447,8 +447,8 @@ def cc04_rows() -> list[dict]:
         _require(ctx.stop(transport).output is None, "stop did not complete the turn")
         stages = ctx.stages(request_id)
         _require(
-            stages["participant-host"]["body"]["outcome"] == "sent",
-            "act path host outcome was not sent",
+            stages["participant-host"]["body"]["outcome"] == "unknown",
+            "act path host outcome was not the truthful pre-transport unknown",
         )
         _require(
             stages["transport"]["body"]["delivery"] == "sent",
@@ -512,7 +512,7 @@ def cc04_rows() -> list[dict]:
         ctx.stop(transport)
         stages = ctx.stages(request_id)
         _require(
-            stages["participant-host"]["body"]["outcome"] == "sent",
+            stages["participant-host"]["body"]["outcome"] == "unknown",
             "runtime filtered or relabeled a meta-answer-shaped send",
         )
         rows.append(
