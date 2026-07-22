@@ -1,5 +1,5 @@
 {
-  "candidate_commit": "b46bc8a0fbba18a3af0fb401aefa431f1e953302",
+  "candidate_commit": "c95ea79e952bcf7803b54d24ba84485ba9ff0804",
   "interface": "I-050A DiscordEventSourceV2@1 plus I-010D/I-010E",
   "deterministic": {
     "DT-01": "evidence/v2/discord-transport/scene-results.jsonl",

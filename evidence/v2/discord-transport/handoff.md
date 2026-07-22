@@ -1,6 +1,6 @@
 # Discord V2 source successor handoff
 
-**Candidate implementation:** `b46bc8a0fbba18a3af0fb401aefa431f1e953302`
+**Candidate implementation:** `c95ea79e952bcf7803b54d24ba84485ba9ff0804`
 
 **Status claimed:** exact source/clean-installed-runtime re-review ready. This
 record does not claim slice `HANDOFF_READY` or `ACCEPTED`; DT-07 live mixed-room
@@ -12,13 +12,14 @@ replay; exact gateway lineage and gap boundaries; durable pre-effect request
 claims; enforced message nonce; bound I-010D continuation; actual worker-future
 drain; nested fact cross-binding; shared Discord rate buckets; and closed social-
 control-free action objects; supervised global replay-store exhaustion; known-
-gap history coverage; and honest one-extra event truncation.
+gap history coverage; honest one-extra event truncation; conservative process-
+epoch taint; and explicit fresh-IDENTIFY boundaries.
 
 Verification results:
 
-- focused ordinary environment: `139` passed, `5` SDK-absent skips;
-- complete offline suite: `1273` passed, `9` skipped;
-- clean-installed `mcp==1.28.1` packet suite: `139` passed, `1` mutually
+- focused ordinary environment: `141` passed, `5` SDK-absent skips;
+- complete offline suite: `1275` passed, `9` skipped;
+- clean-installed `mcp==1.28.1` packet suite: `141` passed, `1` mutually
   exclusive missing-SDK skip;
 - deterministic replay: `7/7` scenes passed.
 
