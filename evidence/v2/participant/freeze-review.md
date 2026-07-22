@@ -2,7 +2,7 @@
 
 **Review status**: SUCCESSOR FROZEN FOR INDEPENDENT RE-REVIEW
 
-**Effective successor implementation commit**: `91e97bad7c50de70d3fd41805c206c9a5804a7ef`
+**Effective successor implementation commit**: `aab0673e84479276165b2e04cf60c25a9be203e2`
 
 **Pre-surface comparison commit**: `efa99ac`
 
@@ -34,7 +34,8 @@ host boundary consumed by platform integrations.
 
 The successor closes every source-level objection recorded on the original
 head: full decision/request/policy validation before suppression, bounded and
-turn-scoped continuation, fact-bound action references, explicit turn
+host-bound, expiry-checked, cursor-provenant and turn-scoped continuation,
+fact-bound action references, explicit turn
 capabilities, truthful pre-transport host receipts, fail-closed receipt
 persistence, atomic observation/scheduler order, and attention-receipt failure
 before participant effect. Runtime and scheduling source are now manifest-
@@ -48,10 +49,10 @@ not be inferred from source approval.
 ## Review requirements
 
 1. Verify every listed SHA-256 and Git blob against effective successor
-   implementation commit `91e97bad7c50de70d3fd41805c206c9a5804a7ef` and confirm the PR does not move.
+   implementation commit `aab0673e84479276165b2e04cf60c25a9be203e2` and confirm the PR does not move.
 2. Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v
    tests.v2.participant.test_host tests.v2.participant.test_runtime
-   tests.v2.participant.test_scheduling` (45 tests in the successor packet).
+   tests.v2.participant.test_scheduling` (47 tests in the successor packet).
 3. Adversarially inspect SUPPRESS, WAKE, DEFER, trusted bypass, operational
    error, direct act-or-silence, no send-time social reclassification,
    immutable receipt ownership, cancellation/timeout cleanup, request
