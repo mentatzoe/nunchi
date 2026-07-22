@@ -36,7 +36,10 @@ requires an explicit migration, never silent eviction.
 Live messages may carry a signed continuation capability. `read_history`
 accepts only a request correlated to that handle and exact trigger, room,
 participant, continuity scope, direction, and declared event/byte caps. Cursors
-are opaque and signed. History is context, not a queue of response obligations.
+are opaque and signed. A consumer preserves that capability with the exact
+trigger and exposes expansion only through its participant host; the model
+never receives transport credentials or direct tool authority. History is
+context, not a queue of response obligations.
 
 Every send, reply, and reaction requires an immutable `request_id`. The server
 claims it durably before contacting Discord. Messages use Discord's enforced

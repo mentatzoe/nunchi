@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 import logging
 import os
 import re
@@ -107,10 +109,19 @@ class CodexRoomV2:
             receipt_sink=self.receipt_sink,
             participant=participant_callable,
             correlated_action_sink=action_sink,
+            continuation_fetch=self._fetch_context,
             classifier_transport=classifier_transport,
         )
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nunchi-codex-v2")
         self._futures: set[Future] = set()
+
+    def _fetch_context(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Use only the already-authenticated, exact-room MCP history seam."""
+        try:
+            accepted = copy.deepcopy(request)
+        except Exception as exc:
+            raise CodexRoomV2Error("Discord continuation request is invalid") from exc
+        return self.client.call_tool("read_history", accepted)
 
     @staticmethod
     def _message_event(params: dict[str, Any]) -> MessageEvent | None:
@@ -198,31 +209,94 @@ class CodexRoomV2:
             raise CodexRoomV2Error("Discord subscription result is invalid")
         subscription = bootstrap["subscription"]
         history = bootstrap["history"]
+        capabilities = (
+            subscription.get("capabilities")
+            if isinstance(subscription, dict)
+            else None
+        )
         if (
             not isinstance(subscription, dict)
             or subscription.get("participant_id") != self.participant_id
             or subscription.get("room_id") != self.channel_id
             or subscription.get("self_actor_id") != self.self_user_id
-            or not isinstance(subscription.get("capabilities"), list)
-            or "subscribe_events" not in subscription["capabilities"]
+            or not isinstance(capabilities, list)
+            or any(not isinstance(capability, str) for capability in capabilities)
+            or len(set(capabilities)) != len(capabilities)
+            or not {"subscribe_events", "read_history"} <= set(capabilities)
             or not isinstance(subscription.get("has_restart_gap"), bool)
             or not isinstance(history, dict)
             or set(history) != {"messages", "coverage"}
         ):
             raise CodexRoomV2Error("Discord subscription binding is invalid")
         messages = history.get("messages")
-        if not isinstance(messages, list) or len(messages) > 100:
+        coverage = history.get("coverage")
+        if (
+            not isinstance(messages, list)
+            or len(messages) > 100
+            or not isinstance(coverage, dict)
+            or set(coverage)
+            != {
+                "max_events",
+                "max_bytes",
+                "returned_events",
+                "returned_bytes",
+                "truncated",
+            }
+            or isinstance(coverage.get("max_events"), bool)
+            or not isinstance(coverage.get("max_events"), int)
+            or not 1 <= coverage["max_events"] <= 100
+            or isinstance(coverage.get("max_bytes"), bool)
+            or not isinstance(coverage.get("max_bytes"), int)
+            or not 1 <= coverage["max_bytes"] <= 32768
+            or isinstance(coverage.get("returned_events"), bool)
+            or coverage.get("returned_events") != len(messages)
+            or isinstance(coverage.get("returned_bytes"), bool)
+            or not isinstance(coverage.get("returned_bytes"), int)
+            or not 0 <= coverage["returned_bytes"] <= coverage["max_bytes"]
+            or not isinstance(coverage.get("truncated"), bool)
+            or len(messages) > coverage["max_events"]
+        ):
             raise CodexRoomV2Error("Discord history result is invalid")
-        messages = messages[: self.history_limit]
-        self.observation.has_restart_gap = subscription["has_restart_gap"]
-        retained = 0
-        for params in reversed(messages):
+        validated: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        returned_bytes = 0
+        for params in messages:
             event = self._message_event(params) if isinstance(params, dict) else None
             if event is None:
                 raise CodexRoomV2Error("Discord history message is invalid")
+            try:
+                returned_bytes += len(
+                    json.dumps(
+                        params,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+            except (TypeError, ValueError) as exc:
+                raise CodexRoomV2Error("Discord history result is invalid") from exc
             native = self.source.native_input(event)
             if native.get("disposition") != "candidate-event":
                 raise CodexRoomV2Error("Discord history message binding is invalid")
+            validated.append((params, native))
+        if returned_bytes != coverage["returned_bytes"]:
+            raise CodexRoomV2Error("Discord history coverage is invalid")
+        local_omission = len(validated) > self.history_limit
+        remote_truncation = coverage["truncated"]
+        retained_messages = validated[: self.history_limit]
+        self.observation.has_restart_gap = subscription["has_restart_gap"]
+        truncated_by = []
+        if local_omission:
+            truncated_by.append("events")
+        if remote_truncation:
+            truncated_by.append("bytes")
+        self.observation.record_upstream_coverage(
+            has_more_before=local_omission or remote_truncation,
+            has_more_after=False,
+            has_gaps=False,
+            truncated_by=truncated_by,
+        )
+        retained = 0
+        for _params, native in reversed(retained_messages):
             self.observation.ingest(native)
             retained += 1
         return retained
@@ -288,6 +362,14 @@ class CodexRoomV2:
         native = params.get("native_input")
         if not isinstance(native, dict):
             raise CodexRoomV2Error("Discord V2 notification lacks native input")
+        if "continuation" in params:
+            try:
+                native = copy.deepcopy(native)
+                native["continuation"] = copy.deepcopy(params["continuation"])
+            except Exception as exc:
+                raise CodexRoomV2Error(
+                    "Discord V2 continuation is invalid"
+                ) from exc
         accepted = self.runtime.accept(native)
         if accepted.opportunity is None:
             return accepted.observation_disposition
