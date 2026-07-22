@@ -9,6 +9,7 @@ identity guesses and no conversational freshness heuristic.
 from __future__ import annotations
 
 import copy
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -75,24 +76,30 @@ class LiveRoomRuntime:
         self.recover_current_history = recover_current_history
         self.continuation_fetch = continuation_fetch
         self.authorization_coordinator = authorization_coordinator
+        # Observation order and scheduler order are one authoritative
+        # transition.  The provider and scheduler have their own locks, but a
+        # shared outer lock prevents a later ingest from scheduling before an
+        # earlier ingest reaches the scheduler.
+        self._accept_lock = threading.RLock()
 
     def accept(self, native_event_input: dict[str, Any]) -> AcceptedDelivery:
         """Record one transport-attested delivery and maybe start live work."""
-        accepted_input = copy.deepcopy(native_event_input)
-        disposition = self.observation.ingest(accepted_input)
-        opportunity = None
-        if disposition == OBSERVED:
-            event = accepted_input.get("event")
-            event_id = event.get("id") if isinstance(event, dict) else None
-            if not isinstance(event_id, str) or not event_id:
-                # ``ingest`` already validated this exact defensive copy.
-                raise LiveRoomRuntimeError("accepted event identity is unavailable")
-            opportunity = self.scheduler.observe(
-                participant_id=self.observation.participant_id,
-                platform=self.observation.platform,
-                room_id=self.observation.room_id,
-                anchor_event_id=event_id,
-            )
+        with self._accept_lock:
+            accepted_input = copy.deepcopy(native_event_input)
+            disposition = self.observation.ingest(accepted_input)
+            opportunity = None
+            if disposition == OBSERVED:
+                event = accepted_input.get("event")
+                event_id = event.get("id") if isinstance(event, dict) else None
+                if not isinstance(event_id, str) or not event_id:
+                    # ``ingest`` already validated this exact defensive copy.
+                    raise LiveRoomRuntimeError("accepted event identity is unavailable")
+                opportunity = self.scheduler.observe(
+                    participant_id=self.observation.participant_id,
+                    platform=self.observation.platform,
+                    room_id=self.observation.room_id,
+                    anchor_event_id=event_id,
+                )
         return AcceptedDelivery(disposition, opportunity)
 
     def accept_batch(
@@ -111,28 +118,29 @@ class LiveRoomRuntime:
             raise LiveRoomRuntimeError("runtime batch must be a finite sequence")
         if len(native_event_inputs) > 1000:
             raise LiveRoomRuntimeError("runtime batch exceeds its event limit")
-        dispositions: list[str] = []
-        newest_event_id: str | None = None
-        for native_event_input in native_event_inputs:
-            accepted_input = copy.deepcopy(native_event_input)
-            disposition = self.observation.ingest(accepted_input)
-            dispositions.append(disposition)
-            if disposition == OBSERVED:
-                event = accepted_input.get("event")
-                event_id = event.get("id") if isinstance(event, dict) else None
-                if not isinstance(event_id, str) or not event_id:
-                    raise LiveRoomRuntimeError(
-                        "accepted batch event identity is unavailable"
-                    )
-                newest_event_id = event_id
-        opportunity = None
-        if newest_event_id is not None:
-            opportunity = self.scheduler.observe(
-                participant_id=self.observation.participant_id,
-                platform=self.observation.platform,
-                room_id=self.observation.room_id,
-                anchor_event_id=newest_event_id,
-            )
+        with self._accept_lock:
+            dispositions: list[str] = []
+            newest_event_id: str | None = None
+            for native_event_input in native_event_inputs:
+                accepted_input = copy.deepcopy(native_event_input)
+                disposition = self.observation.ingest(accepted_input)
+                dispositions.append(disposition)
+                if disposition == OBSERVED:
+                    event = accepted_input.get("event")
+                    event_id = event.get("id") if isinstance(event, dict) else None
+                    if not isinstance(event_id, str) or not event_id:
+                        raise LiveRoomRuntimeError(
+                            "accepted batch event identity is unavailable"
+                        )
+                    newest_event_id = event_id
+            opportunity = None
+            if newest_event_id is not None:
+                opportunity = self.scheduler.observe(
+                    participant_id=self.observation.participant_id,
+                    platform=self.observation.platform,
+                    room_id=self.observation.room_id,
+                    anchor_event_id=newest_event_id,
+                )
         return AcceptedBatch(tuple(dispositions), opportunity)
 
     def observe_context_batch(
@@ -144,10 +152,11 @@ class LiveRoomRuntime:
             raise LiveRoomRuntimeError("runtime context batch must be finite")
         if len(native_event_inputs) > 1000:
             raise LiveRoomRuntimeError("runtime context batch exceeds its event limit")
-        return tuple(
-            self.observation.ingest(copy.deepcopy(native_event_input))
-            for native_event_input in native_event_inputs
-        )
+        with self._accept_lock:
+            return tuple(
+                self.observation.ingest(copy.deepcopy(native_event_input))
+                for native_event_input in native_event_inputs
+            )
 
     def _policy(self) -> OperatorPolicy:
         policy = self.policy_loader()
@@ -224,6 +233,19 @@ class LiveRoomRuntime:
             receipt_sink=self.receipt_sink,
             classifier_transport=self.classifier_transport,
         )
+        if (
+            decision.get("status") == "error"
+            and isinstance(decision.get("error"), dict)
+            and decision["error"].get("code") == "receipt-sink-failure"
+        ):
+            return {
+                "status": "error",
+                "error": "attention-receipt-persistence-unknown",
+                "request_id": request["request_id"],
+                "anchor_event_id": opportunity.anchor_event_id,
+                "participant_invoked": False,
+                "decision": copy.deepcopy(decision),
+            }
         if (
             decision.get("status") == "ok"
             and decision.get("effective_disposition") == "SUPPRESS"

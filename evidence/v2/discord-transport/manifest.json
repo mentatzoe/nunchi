@@ -1,0 +1,22 @@
+{
+  "candidate_commit": "c95ea79e952bcf7803b54d24ba84485ba9ff0804",
+  "interface": "I-050A DiscordEventSourceV2@1 plus I-010D/I-010E",
+  "deterministic": {
+    "DT-01": "evidence/v2/discord-transport/scene-results.jsonl",
+    "DT-02": "evidence/v2/discord-transport/scene-results.jsonl",
+    "DT-03": "evidence/v2/discord-transport/scene-results.jsonl",
+    "DT-04": "evidence/v2/discord-transport/scene-results.jsonl",
+    "DT-05": "evidence/v2/discord-transport/scene-results.jsonl"
+  },
+  "installed_runtime": "evidence/v2/discord-transport/installed-runtime.md",
+  "mixed_room": {
+    "status": "NOT_RUN",
+    "record": "evidence/v2/discord-transport/mixed-room.jsonl"
+  },
+  "documentation": [
+    "integrations/mcp-discord/README.md",
+    "integrations/mcp-discord/DESIGN.md",
+    "docs/transport/discord-v2.md"
+  ],
+  "lifecycle_claim": "source re-review only; HANDOFF_READY and ACCEPTED are not claimed"
+}

@@ -12,9 +12,11 @@ Message-shaped results reuse the notification field names
 from __future__ import annotations
 
 import logging
-from typing import Protocol
+import json
+from typing import Callable, Protocol
 
 from .events import message_addressing, message_text
+from .continuation import DiscordHistoryContinuations
 from .ratelimit import SendBackstop
 from .rest import DiscordRestError
 
@@ -23,6 +25,19 @@ logger = logging.getLogger("nunchi.mcp_discord.tools")
 _MAX_CONTENT_LENGTH = 2000  # Discord's message content limit
 
 TOOL_SCHEMAS: list[dict] = [
+    {
+        "name": "subscribe_events",
+        "description": (
+            "Register this authenticated MCP session for the exact process-bound "
+            "participant/room stream and return the backfill/live barrier."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    },
     {
         "name": "send_message",
         "description": (
@@ -33,6 +48,7 @@ TOOL_SCHEMAS: list[dict] = [
             "type": "object",
             "properties": {
                 "channel_id": {"type": "string", "description": "Target channel snowflake ID."},
+                "request_id": {"type": "string", "description": "Immutable V2 action correlation ID."},
                 "content": {
                     "type": "string",
                     "maxLength": _MAX_CONTENT_LENGTH,
@@ -45,7 +61,7 @@ TOOL_SCHEMAS: list[dict] = [
                     "description": "Exact Discord user IDs permitted to ping; all other mentions are inert.",
                 },
             },
-            "required": ["channel_id", "content"],
+            "required": ["request_id", "channel_id", "content"],
             "additionalProperties": False,
         },
     },
@@ -59,6 +75,7 @@ TOOL_SCHEMAS: list[dict] = [
             "type": "object",
             "properties": {
                 "channel_id": {"type": "string", "description": "Channel snowflake ID."},
+                "request_id": {"type": "string", "description": "Immutable V2 action correlation ID."},
                 "message_id": {"type": "string", "description": "Message snowflake ID to reply to."},
                 "content": {
                     "type": "string",
@@ -71,33 +88,34 @@ TOOL_SCHEMAS: list[dict] = [
                     "items": {"type": "string"},
                 },
             },
-            "required": ["channel_id", "message_id", "content"],
+            "required": ["request_id", "channel_id", "message_id", "content"],
             "additionalProperties": False,
         },
     },
     {
         "name": "read_history",
         "description": (
-            "Read recent messages from a Discord channel, newest first. "
-            "Bot-authored messages are included."
+            "Fetch one bounded, participant/room/trigger-bound I-010D page."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "channel_id": {"type": "string", "description": "Channel snowflake ID."},
-                "limit": {
+                "request_id": {"type": "string"},
+                "handle_id": {"type": "string"},
+                "direction": {"const": "before"},
+                "max_events": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 100,
-                    "default": 50,
-                    "description": "How many messages to fetch (1-100).",
                 },
-                "before": {
+                "max_bytes": {"type": "integer", "minimum": 1},
+                "anchor_event_id": {"type": "string"},
+                "cursor": {
                     "type": "string",
-                    "description": "Only messages before this message snowflake ID.",
+                    "description": "Opaque continuation cursor from a prior page.",
                 },
             },
-            "required": ["channel_id"],
+            "required": ["request_id", "handle_id", "direction", "max_events", "max_bytes"],
             "additionalProperties": False,
         },
     },
@@ -109,10 +127,11 @@ TOOL_SCHEMAS: list[dict] = [
             "additionalProperties": False,
             "properties": {
                 "channel_id": {"type": "string"},
+                "request_id": {"type": "string"},
                 "message_id": {"type": "string"},
                 "reaction": {"type": "string", "maxLength": 256}
             },
-            "required": ["channel_id", "message_id", "reaction"]
+            "required": ["request_id", "channel_id", "message_id", "reaction"]
         }
     },
 ]
@@ -133,6 +152,7 @@ class RestLike(Protocol):
         reply_to_message_id: str | None = None,
         allowed_mention_user_ids: tuple[str, ...] | None = None,
         fail_if_reply_missing: bool = False,
+        nonce: str | None = None,
     ) -> dict: ...
 
     def get_messages(
@@ -239,16 +259,25 @@ class ToolExecutor:
         backstop: SendBackstop,
         *,
         allowed_channel_ids: frozenset[str],
+        action_claim: Callable[[str], None] | None = None,
+        continuations: DiscordHistoryContinuations | None = None,
     ) -> None:
         if (
             not isinstance(allowed_channel_ids, frozenset)
-            or not allowed_channel_ids
+            or len(allowed_channel_ids) != 1
             or any(_snowflake(value) != value for value in allowed_channel_ids)
+            or not callable(action_claim)
+            or not isinstance(continuations, DiscordHistoryContinuations)
         ):
-            raise ValueError("Discord tool executor requires exact trusted channels")
+            raise ValueError(
+                "Discord tool executor requires one exact trusted room and durable action claims"
+            )
         self._rest = rest
         self._backstop = backstop
         self._allowed_channel_ids = allowed_channel_ids
+        self._channel_id = next(iter(allowed_channel_ids))
+        self._action_claim = action_claim
+        self._continuations = continuations
 
     def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
         """Returns (payload, ok). Error payloads carry an 'error' string."""
@@ -278,8 +307,64 @@ class ToolExecutor:
         except Exception:
             return ({"error": "Discord transport operation failed"}, False)
 
+    def bootstrap_history(
+        self,
+        *,
+        max_events: int = 100,
+        max_bytes: int = 32768,
+    ) -> dict:
+        """Return bounded startup history after the live session is registered.
+
+        This is deliberately not a standalone room-controlled tool.  The MCP
+        binding invokes it only as part of ``subscribe_events``, after the
+        session has entered the live registry, closing the backfill/live race.
+        Participant-requested expansion remains exclusively I-010D-bound via
+        ``read_history``.
+        """
+        if (
+            isinstance(max_events, bool)
+            or not isinstance(max_events, int)
+            or not 1 <= max_events <= 100
+            or isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or not 1 <= max_bytes <= 32768
+        ):
+            raise ValueError("bootstrap history budget is invalid")
+        messages = self._rest.get_messages(
+            self._channel_id,
+            limit=max_events,
+        )
+        selected: list[dict] = []
+        total_bytes = 0
+        for raw in messages:
+            message = shape_message(raw)
+            if message["channel_id"] != self._channel_id:
+                raise ValueError("Discord history response crossed the bound room")
+            encoded_size = len(
+                json.dumps(
+                    message,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            if total_bytes + encoded_size > max_bytes:
+                break
+            selected.append(message)
+            total_bytes += encoded_size
+        return {
+            "messages": selected,
+            "coverage": {
+                "max_events": max_events,
+                "max_bytes": max_bytes,
+                "returned_events": len(selected),
+                "returned_bytes": total_bytes,
+                "truncated": len(selected) < len(messages),
+            },
+        }
+
     def _send(self, arguments: dict, *, reply: bool) -> tuple[dict, bool]:
-        required = {"channel_id", "content"}
+        required = {"request_id", "channel_id", "content"}
         if reply:
             required.add("message_id")
         if not _closed_arguments(
@@ -293,6 +378,13 @@ class ToolExecutor:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
         if channel_id not in self._allowed_channel_ids:
             return ({"error": "channel_id is outside the trusted allowlist"}, False)
+        request_id = arguments.get("request_id")
+        if (
+            not isinstance(request_id, str)
+            or not request_id
+            or len(request_id) > 512
+        ):
+            return ({"error": "request_id must be a non-empty V2 correlation ID"}, False)
         reply_to: str | None = None
         if reply:
             reply_to = _snowflake(arguments.get("message_id"))
@@ -334,47 +426,141 @@ class ToolExecutor:
                 },
                 False,
             )
+        try:
+            assert self._action_claim is not None
+            self._action_claim(request_id)
+        except Exception:
+            return ({"error": "request_id was already consumed or could not be reserved"}, False)
         created = self._rest.create_message(
             channel_id,
             content,
             reply_to_message_id=reply_to,
             allowed_mention_user_ids=tuple(mention_ids),
             fail_if_reply_missing=reply,
+            nonce=request_id,
         )
-        return ({"message": shape_message(created)}, True)
+        shaped = shape_message(created)
+        if shaped["channel_id"] != channel_id:
+            return ({"error": "Discord response crossed the bound room"}, False)
+        return ({"request_id": request_id, "message": shaped}, True)
 
     def _history(self, arguments: dict) -> tuple[dict, bool]:
-        if not _closed_arguments(
-            arguments,
-            required=frozenset({"channel_id"}),
-            optional=frozenset({"limit", "before"}),
-        ):
-            return ({"error": "history arguments do not match the closed tool contract"}, False)
-        channel_id = _snowflake(arguments.get("channel_id"))
-        if channel_id is None:
-            return ({"error": "channel_id must be a numeric snowflake string"}, False)
-        if channel_id not in self._allowed_channel_ids:
-            return ({"error": "channel_id is outside the trusted allowlist"}, False)
-        limit_raw = arguments.get("limit", 50)
-        if isinstance(limit_raw, bool):
-            return ({"error": "limit must be an integer between 1 and 100"}, False)
-        if not isinstance(limit_raw, int):
-            return ({"error": "limit must be an integer between 1 and 100"}, False)
-        limit = limit_raw
-        if not 1 <= limit <= 100:
-            return ({"error": "limit must be an integer between 1 and 100"}, False)
-        before: str | None = None
-        if arguments.get("before") is not None:
-            before = _snowflake(arguments.get("before"))
-            if before is None:
-                return ({"error": "before must be a numeric snowflake string"}, False)
-        messages = self._rest.get_messages(channel_id, limit=limit, before=before)
-        return ({"messages": [shape_message(m) for m in messages]}, True)
+        try:
+            assert self._continuations is not None
+            handle, before = self._continuations.verify_request(arguments)
+        except Exception:
+            return ({"error": "history continuation request is invalid"}, False)
+        limit = arguments["max_events"]
+        fetch_limit = min(limit + 1, 100)
+        messages = self._rest.get_messages(
+            self._channel_id,
+            limit=fetch_limit,
+            before=before,
+        )
+        truncated_by_events = len(messages) > limit
+        if truncated_by_events:
+            messages = messages[:limit]
+        elif len(messages) == limit and limit == 100 and messages:
+            # Discord caps one history call at 100, so a one-extra probe needs
+            # a second bounded request at that exact edge.
+            oldest = shape_message(messages[-1])["message_id"]
+            truncated_by_events = bool(
+                self._rest.get_messages(self._channel_id, limit=1, before=oldest)
+            )
+        shaped = [shape_message(message) for message in messages]
+        if any(message["channel_id"] != self._channel_id for message in shaped):
+            return ({"error": "Discord history response crossed the bound room"}, False)
+        selected_newest_first: list[dict] = []
+        total_bytes = 0
+        truncated_by_bytes = False
+        for message in shaped:
+            event = self._history_event(message)
+            event_bytes = len(
+                json.dumps(
+                    event,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            if total_bytes + event_bytes > arguments["max_bytes"]:
+                truncated_by_bytes = True
+                break
+            selected_newest_first.append(message)
+            total_bytes += event_bytes
+        if messages and not selected_newest_first:
+            return ({"error": "history byte budget cannot admit one event"}, False)
+        events = [
+            self._history_event(message)
+            for message in reversed(selected_newest_first)
+        ]
+        actors: dict[str, dict] = {}
+        for event, message in zip(events, reversed(selected_newest_first)):
+            actors[event["author_id"]] = {
+                "display_name": message["author_name"],
+                "kind": "bot" if message["author_is_bot"] else "human",
+            }
+            for actor_id in event["mentioned_actor_ids"]:
+                actors.setdefault(actor_id, {})
+        has_more = truncated_by_bytes or truncated_by_events
+        truncated_by = []
+        if truncated_by_events:
+            truncated_by.append("events")
+        if truncated_by_bytes:
+            truncated_by.append("bytes")
+        continuity = self._continuations.coverage(handle)
+        page = {
+            "request_id": arguments["request_id"],
+            "handle_id": arguments["handle_id"],
+            "room_id": self._channel_id,
+            "continuity_scope_id": handle["continuity_scope_id"],
+            "direction": "before",
+            "anchor_event_id": handle["trigger_event_id"],
+            "actors": actors,
+            "events": events,
+            "coverage": {
+                "has_more_before": has_more,
+                "has_more_after": None,
+                "has_gaps": continuity["has_gaps"],
+                "truncated_by": truncated_by,
+                "continuity": continuity["continuity"],
+                "has_restart_gap": continuity["has_restart_gap"],
+                "max_events": arguments["max_events"],
+                "max_bytes": arguments["max_bytes"],
+            },
+        }
+        if has_more and selected_newest_first:
+            page["next_cursor"] = self._continuations.cursor(
+                arguments["handle_id"],
+                selected_newest_first[-1]["message_id"],
+            )
+        return (page, True)
+
+    @staticmethod
+    def _history_event(message: dict) -> dict:
+        event = {
+            "id": f"discord:message:{message['message_id']}",
+            "type": "message",
+            "author_id": f"discord:user:{message['author_id']}",
+            "text": message["content"],
+            "mentioned_actor_ids": [
+                f"discord:user:{user_id}"
+                for user_id in message["mentioned_user_ids"]
+            ],
+            "mentions_room": message["mentions_room"],
+        }
+        if message["timestamp"]:
+            event["timestamp"] = message["timestamp"]
+        if message["reply_to_message_id"]:
+            event["reply_to_event_id"] = (
+                f"discord:message:{message['reply_to_message_id']}"
+            )
+        return event
 
     def _reaction(self, arguments: dict) -> tuple[dict, bool]:
         if not _closed_arguments(
             arguments,
-            required=frozenset({"channel_id", "message_id", "reaction"}),
+            required=frozenset({"request_id", "channel_id", "message_id", "reaction"}),
         ):
             return ({"error": "reaction arguments do not match the closed tool contract"}, False)
         channel_id = _snowflake(arguments.get("channel_id"))
@@ -384,10 +570,26 @@ class ToolExecutor:
             return ({"error": "channel_id and message_id must be numeric snowflake strings"}, False)
         if channel_id not in self._allowed_channel_ids:
             return ({"error": "channel_id is outside the trusted allowlist"}, False)
+        request_id = arguments.get("request_id")
+        if not isinstance(request_id, str) or not request_id or len(request_id) > 512:
+            return ({"error": "request_id must be a non-empty V2 correlation ID"}, False)
         if not isinstance(reaction, str) or not reaction or len(reaction) > 256:
             return ({"error": "reaction must be a non-empty string up to 256 characters"}, False)
         wait = self._backstop.try_acquire(channel_id)
         if wait > 0:
             return ({"error": "send backstop exceeded for channel"}, False)
+        try:
+            assert self._action_claim is not None
+            self._action_claim(request_id)
+        except Exception:
+            return ({"error": "request_id was already consumed or could not be reserved"}, False)
         self._rest.create_reaction(channel_id, message_id, reaction)
-        return ({"reaction": "sent", "message_id": message_id}, True)
+        return (
+            {
+                "request_id": request_id,
+                "channel_id": channel_id,
+                "reaction": "sent",
+                "message_id": message_id,
+            },
+            True,
+        )
