@@ -1,9 +1,9 @@
 # Hermes Integration: Nunchi V2
 
-> **Candidate packet, not current released behavior.** This directory now contains
-> the Slice 060 Hermes V2 candidate. It is not installed by `nunchi-install`, is
-> not accepted, and must not be described as current until the atomic V2 cutover
-> is verified.
+> **Pre-activation draft technical-review object, not current behavior.** This
+> directory contains a Slice 060 implementation draft for Codex review. It is not
+> a canonical candidate or handoff, is not installed by `nunchi-install`, and has
+> no integration authority while Slice 060 remains `PLANNED`.
 
 `nunchi-gate` binds one Nunchi participant to an exact Hermes profile,
 transport-authenticated self actor, and native room scope. It retains bounded
@@ -11,7 +11,7 @@ structured observation, schedules one attention opportunity, and either
 suppresses the wake or redispatches the exact event into one ordinary Hermes
 act-or-silence turn.
 
-The candidate plugin path is V2-only. It was verified against the pinned
+The draft plugin path is V2-only. It was verified against the pinned
 installed Hermes source below but was not installed or armed. Retired V1
 verdict, command, and quiet-room machinery is absent from the executable
 packet; migration history is preserved only in
@@ -21,9 +21,9 @@ packet; migration history is preserved only in
 
 The private host wrappers in this packet were inspected and evaluated against:
 
-- Hermes version: `0.19.0`
-- Hermes source commit: `f657840e06e03b9552cf2d28175a1e4e4af0210b`
-- Nunchi source base: `a03eeb95c7d569895e1171993c7a5748fc250bd8`
+- Installed Hermes version: `0.19.0`
+- Installed Hermes commit: `279be8211d8347cc3500b9a78c6a0f8cb4d92a6a`
+- Candidate base: `8e64746970f9910d03b372291c5aa173883e869f`
 
 The wrappers target:
 
@@ -68,6 +68,11 @@ nunchi:
   # receipt boundary and therefore fails the supported-host precondition.
   streaming: false
 ```
+
+`channels` entries are native Discord channel/thread IDs or Telegram chat IDs.
+A Telegram topic can be selected explicitly with the parent-qualified canonical
+form `telegram:chat:<chat-id>:topic:<topic-id>`. A raw Telegram topic ID is never
+matched independently because topic IDs are only unique within their parent chat.
 
 Hermes' effective profile/platform streaming setting must also be disabled. The
 plugin resolves that host setting independently; the Nunchi field is not treated

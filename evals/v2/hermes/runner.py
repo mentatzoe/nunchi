@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SCENES = Path(__file__).with_name("scenes.jsonl")
 PLUGIN_DIR = ROOT / "integrations" / "hermes" / "nunchi-gate"
 EXPECTED_HERMES_VERSION = "0.19.0"
-EXPECTED_HERMES_COMMIT = "f657840e06e03b9552cf2d28175a1e4e4af0210b"
+EXPECTED_HERMES_COMMIT = "279be8211d8347cc3500b9a78c6a0f8cb4d92a6a"
 
 
 def _load_module(name: str, path: Path):
@@ -605,19 +605,219 @@ def _hm06(metadata, hermes_source: Path):
     middleware = (hermes_source / "hermes_cli" / "middleware.py").read_text()
     manifest = (PLUGIN_DIR / "plugin.yaml").read_text()
     candidate_plugin = (PLUGIN_DIR / "v2_plugin.py").read_text()
-    probe_code = (
-        "import importlib.util,sys; from pathlib import Path; "
-        f"root=Path({str(ROOT)!r}); "
-        "sys.path.insert(0,str(root)); sys.path.insert(0,str(root/'src')); "
-        "path=root/'integrations/hermes/nunchi-gate/v2_plugin.py'; "
-        "spec=importlib.util.spec_from_file_location('nunchi_v2_hm06_probe',path); "
-        "module=importlib.util.module_from_spec(spec); "
-        "sys.modules[spec.name]=module; spec.loader.exec_module(module); "
-        "module.configure(config_loader=lambda event,gateway:{},participant_id='probe'); "
-        "ctx=type('C',(),{'register_hook':lambda self,n,c:None,"
-        "'register_middleware':lambda self,n,c:None})(); module.register(ctx); "
-        "print('installed-register-pass')"
+    probe_code = f"""
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(ROOT)!r})
+sys.path.insert(0, str(root))
+sys.path.insert(0, str(root / "src"))
+path = root / "integrations/hermes/nunchi-gate/v2_plugin.py"
+spec = importlib.util.spec_from_file_location("nunchi_v2_hm06_probe", path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+module.configure(config_loader=lambda event, gateway: {{}}, participant_id="probe")
+manager = type("Manager", (), {{"_hooks": {{}}, "_middleware": {{}}}})()
+ctx = type(
+    "Ctx",
+    (),
+    {{
+        "_manager": manager,
+        "register_hook": lambda self, name, callback: manager._hooks.setdefault(
+            name, []
+        ).append(callback),
+        "register_middleware": lambda self, name, callback: manager._middleware.setdefault(
+            name, []
+        ).append(callback),
+    }},
+)()
+
+from gateway.run import GatewayRunner
+from gateway.platforms.base import BasePlatformAdapter
+from plugins.platforms.discord.adapter import DiscordAdapter, commands
+from plugins.platforms.telegram.adapter import TelegramAdapter
+
+host_classes = (
+    GatewayRunner,
+    BasePlatformAdapter,
+    DiscordAdapter,
+    TelegramAdapter,
+    commands.Bot,
+)
+snapshots = [(host_class, dict(host_class.__dict__)) for host_class in host_classes]
+original_telegram_installer = module.install_telegram_exact_text
+
+def fail_after_telegram_patch(adapter_cls):
+    assert original_telegram_installer(adapter_cls)
+    return False
+
+module.install_telegram_exact_text = fail_after_telegram_patch
+try:
+    module.register(ctx)
+except module.HermesV2BoundaryError:
+    pass
+else:
+    raise AssertionError("late registration failure was accepted")
+finally:
+    module.install_telegram_exact_text = original_telegram_installer
+
+for host_class, before in snapshots:
+    after = dict(host_class.__dict__)
+    assert set(after) == set(before)
+    assert all(after[name] is value for name, value in before.items())
+
+print("installed-registration-rollback-pass")
+
+from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
+
+original_register_hook = PluginContext.register_hook
+original_register_middleware = PluginContext.register_middleware
+
+
+def plugin_manifest(case):
+    return PluginManifest(
+        name=f"nunchi-hm06-{{case}}",
+        version="2.0.0",
+        source="project",
+        path=str(root / "integrations/hermes/nunchi-gate"),
+        key=f"nunchi-hm06-{{case}}",
     )
+
+
+def assert_host_classes_restored(before_snapshots):
+    for host_class, before in before_snapshots:
+        after = dict(host_class.__dict__)
+        assert set(after) == set(before)
+        assert all(after[name] is value for name, value in before.items())
+
+
+def run_installed_failure(case):
+    callback_manager = PluginManager()
+    hook_sentinels = {{
+        "pre_gateway_dispatch": object(),
+        "pre_llm_call": object(),
+    }}
+    middleware_sentinels = {{"tool_execution": object()}}
+    hook_lists = {{
+        name: [sentinel] for name, sentinel in hook_sentinels.items()
+    }}
+    middleware_lists = {{
+        name: [sentinel] for name, sentinel in middleware_sentinels.items()
+    }}
+    callback_manager._hooks.update(hook_lists)
+    callback_manager._middleware.update(middleware_lists)
+    hook_registry = callback_manager._hooks
+    middleware_registry = callback_manager._middleware
+    hook_calls = 0
+
+    def forced_register_hook(self, name, callback):
+        nonlocal hook_calls
+        original_register_hook(self, name, callback)
+        hook_calls += 1
+        if case == "second_hook" and hook_calls == 2:
+            raise RuntimeError("forced second register_hook failure after append")
+
+    def forced_register_middleware(self, kind, callback):
+        original_register_middleware(self, kind, callback)
+        if case == "middleware":
+            raise RuntimeError("forced register_middleware failure after append")
+
+    before_classes = [
+        (host_class, dict(host_class.__dict__)) for host_class in host_classes
+    ]
+    PluginContext.register_hook = forced_register_hook
+    PluginContext.register_middleware = forced_register_middleware
+    try:
+        manifest = plugin_manifest(case)
+        callback_manager._load_plugin(manifest)
+    finally:
+        PluginContext.register_hook = original_register_hook
+        PluginContext.register_middleware = original_register_middleware
+
+    loaded = callback_manager._plugins[manifest.key]
+    assert loaded.enabled is False
+    assert isinstance(loaded.error, str) and "forced" in loaded.error
+    assert callback_manager._hooks is hook_registry
+    assert callback_manager._middleware is middleware_registry
+    assert set(callback_manager._hooks) == set(hook_sentinels)
+    assert set(callback_manager._middleware) == set(middleware_sentinels)
+    for name, sentinel in hook_sentinels.items():
+        assert callback_manager._hooks[name] is hook_lists[name]
+        assert hook_lists[name] == [sentinel]
+    for name, sentinel in middleware_sentinels.items():
+        assert callback_manager._middleware[name] is middleware_lists[name]
+        assert middleware_lists[name] == [sentinel]
+    assert_host_classes_restored(before_classes)
+
+
+run_installed_failure("second_hook")
+run_installed_failure("middleware")
+print("installed-callback-rollback-pass")
+
+success_manager = PluginManager()
+success_manifest = plugin_manifest("success")
+success_manager._load_plugin(success_manifest)
+success = success_manager._plugins[success_manifest.key]
+assert success.enabled is True
+assert success.error is None
+assert set(success_manager._hooks) == {{"pre_gateway_dispatch", "pre_llm_call"}}
+assert all(len(callbacks) == 1 for callbacks in success_manager._hooks.values())
+assert set(success_manager._middleware) == {{"tool_execution"}}
+assert len(success_manager._middleware["tool_execution"]) == 1
+assert set(success.hooks_registered) == {{"pre_gateway_dispatch", "pre_llm_call"}}
+assert success.middleware_registered == ["tool_execution"]
+
+from hermes_cli import middleware
+
+class FailingController:
+    def tool_execution(self, **kwargs):
+        raise OSError("authorization sink unavailable")
+
+module._CONTROLLER = FailingController()
+effects = []
+result = middleware._run_execution_chain(
+    "tool_execution",
+    [module.on_tool_execution],
+    lambda arguments: effects.append(arguments) or "executed",
+    tool_name="write_file",
+    args={{"path": "blocked"}},
+    original_args={{"path": "blocked"}},
+)
+assert effects == []
+assert json.loads(result)["error"] == "nunchi-v2-execution-failed"
+
+class PassThroughController:
+    def tool_execution(self, **kwargs):
+        return kwargs["next_call"](kwargs["arguments"])
+
+module._CONTROLLER = PassThroughController()
+downstream_calls = []
+
+def failing_downstream(arguments):
+    downstream_calls.append(arguments)
+    raise RuntimeError("native executor failure")
+
+try:
+    middleware._run_execution_chain(
+        "tool_execution",
+        [module.on_tool_execution],
+        failing_downstream,
+        tool_name="web_search",
+        args={{"query": "nunchi"}},
+        original_args={{"query": "nunchi"}},
+    )
+except RuntimeError as exc:
+    assert str(exc) == "native executor failure"
+else:
+    raise AssertionError("native executor failure was laundered")
+assert len(downstream_calls) == 1
+print("installed-register-pass")
+print("installed-middleware-fail-closed-pass")
+print("installed-downstream-semantics-pass")
+"""
     probe = subprocess.run(
         [str(hermes_source / "venv/bin/python"), "-c", probe_code],
         cwd=ROOT,
@@ -671,6 +871,10 @@ def _hm06(metadata, hermes_source: Path):
                 "_DeliveryCancellation",
                 "discard_pending=True",
                 "install_telegram_exact_text",
+                "_should_drop_delayed_delivery",
+                "_apply_topic_recovery",
+                "_restore_class_snapshots",
+                "_restore_callback_registries",
                 "_nunchi_v2_raw_content",
                 "_DISCORD_NO_AUTO_THREAD",
                 "attest_participant_turn",
@@ -683,6 +887,22 @@ def _hm06(metadata, hermes_source: Path):
         ),
         "candidate_registers_required_wrappers_against_installed_classes": (
             probe.returncode == 0 and "installed-register-pass" in probe.stdout
+        ),
+        "candidate_rolls_back_late_installed_registration_failure": (
+            probe.returncode == 0
+            and "installed-registration-rollback-pass" in probe.stdout
+        ),
+        "candidate_rolls_back_late_callback_registration_failure": (
+            probe.returncode == 0
+            and "installed-callback-rollback-pass" in probe.stdout
+        ),
+        "installed_middleware_contains_candidate_operational_failure": (
+            probe.returncode == 0
+            and "installed-middleware-fail-closed-pass" in probe.stdout
+        ),
+        "installed_middleware_preserves_native_downstream_failure": (
+            probe.returncode == 0
+            and "installed-downstream-semantics-pass" in probe.stdout
         ),
         "plugin_declares_v2_hook": "- pre_llm_call" in manifest,
         "plugin_declares_action_middleware": "- tool_execution" in manifest,

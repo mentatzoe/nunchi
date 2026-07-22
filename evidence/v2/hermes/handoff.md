@@ -1,46 +1,59 @@
-# Hermes V2 successor handoff candidate — 2026-07-21
+# Hermes V2 pre-activation source-review packet — not a canonical handoff
 
 ## Object identity
 
-- Canonical base: `a03eeb95c7d569895e1171993c7a5748fc250bd8`
-- Branch: `codex/v2-hermes-successor-08`
-- Final candidate commit: assigned by Git after this record and the complete
+- Installed Hermes version: `0.19.0`
+- Installed Hermes commit: `279be8211d8347cc3500b9a78c6a0f8cb4d92a6a`
+- Candidate base: `8e64746970f9910d03b372291c5aa173883e869f`
+- Branch: `v2/hermes`
+- Final draft commit: assigned by Git after this record and the complete
   manifest are frozen; reported externally with the manifest SHA-256.
 
 ## Scope handed off
 
-This is the complete canonical-base-to-successor packet: implementation,
-documentation, tests, evals, generated HM evidence, installed-runtime
-provenance, verification record, deletion tombstones, and a successor-owned
-manifest. The manifest hashes every present candidate path and records every
-removed path as `DELETE`.
+This packet contains the implementation, documentation, tests, evals,
+regenerated HM evidence, installed-runtime provenance, verification record,
+deletion tombstones, and a draft-owned manifest. The manifest hashes every
+changed path except its self-referential manifest file and records every removed
+path as `DELETE`; the review request reports the manifest's own SHA-256
+separately.
 
-The original HIGH findings and follow-up receipt, identity, reload,
-dispatch-activation, tool authorization, native reaction, and V1-residue
-findings have focused adversarial regressions. Fresh lifecycle, eval,
-repository-wide unittest, governance, installed-runtime, and residue checks
-are recorded in `verification.md`.
+The successor adds focused regressions for strict authorization uncertainty,
+redispatch revocation cleanup, pre-transport `unknown` participant receipts,
+native downstream error preservation, globally atomic approval admission and
+audit persistence, semantically bound installed-source provenance, installed
+version and full-status allowlisting, tri-state Telegram scope failure, host
+teardown/topic-recovery ordering plus an execution-time teardown recheck,
+transactional rollback of every class patch and public callback registration,
+zero-argument host executors, and concurrent approval capacity reservation.
 
 ## Runtime disposition
 
 Installed Hermes `0.19.0` at
-`f657840e06e03b9552cf2d28175a1e4e4af0210b` was used as an immutable
+`279be8211d8347cc3500b9a78c6a0f8cb4d92a6a` was used as an immutable
 verification source. The production venv was not modified. The gateway was not
 restarted, the plugin was not armed, and no profile or live room was changed.
 
-The installed roles/DM-scope suite is GREEN (`15 passed in 0.18s`) when the
-test environment unsets only inherited `DISCORD_ALLOWED_CHANNELS` and
-`DISCORD_IGNORED_CHANNELS`. The earlier positive-control failure was environment
-contamination and is not preserved as an upstream limitation.
+The exact isolated installed private-seam run is GREEN (`83 passed`). HM-06
+drives the actual installed `PluginManager._load_plugin`/`PluginContext` path and
+proves late class-wrapper and after-append callback rollback preserves registry
+and pre-existing target-name list identity/content before successful exact
+registration. It also proves
+the draft's fail-closed containment and preservation of native downstream
+executor errors through installed Hermes middleware.
 
 ## Review boundary
 
 Review the entire exact diff from
-`a03eeb95c7d569895e1171993c7a5748fc250bd8` to the externally reported final
-candidate commit, and verify `evidence/v2/hermes/candidate-files.sha256` against
+`8e64746970f9910d03b372291c5aa173883e869f` to the externally reported final
+draft commit, and verify `evidence/v2/hermes/candidate-files.sha256` against
 that object. Any write invalidates the review and requires a new manifest and
-review request.
+review request. Historical rejected tree identities remain evidence only; this
+successor requires fresh technical review on its exact immutable object.
 
-This handoff does not claim lifecycle activation, installed cutover, or
-acceptance. The packet owner requests independent review and must not accept or
-integrate its own packet.
+This packet is not a governed candidate or handoff and does not claim lifecycle
+activation, installed cutover, or acceptance. Slice 060 remains `PLANNED`;
+dependency acceptance and canonical activation/candidate/handoff records remain
+absent. It exists only to request technical draft review from Codex. It must not
+be integrated or promoted until the program/integrator lane reconciles those
+canonical lifecycle gates.

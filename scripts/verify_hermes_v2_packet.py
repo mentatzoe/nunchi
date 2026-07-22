@@ -6,11 +6,14 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE_BASE = "a03eeb95c7d569895e1171993c7a5748fc250bd8"
+CANDIDATE_BASE = "8e64746970f9910d03b372291c5aa173883e869f"
+EXPECTED_HERMES_COMMIT = "279be8211d8347cc3500b9a78c6a0f8cb4d92a6a"
+EXPECTED_HERMES_VERSION = "0.19.0"
 REQUIRED_PATHS = (
     "integrations/hermes/nunchi-gate/__init__.py",
     "integrations/hermes/nunchi-gate/v2_runtime.py",
@@ -218,19 +221,77 @@ def validate(
             if token not in manifest:
                 errors.append(f"manifest-token:{token}")
 
+    for relative in (
+        "docs/integrations/hermes-v2.md",
+        "integrations/hermes/README.md",
+        "evidence/v2/hermes/installed-runtime.md",
+        "evidence/v2/hermes/verification.md",
+        "evidence/v2/hermes/handoff.md",
+    ):
+        path = root / relative
+        if path.is_file():
+            text = path.read_text()
+            documented = set(
+                re.findall(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", text)
+            )
+            allowed = {EXPECTED_HERMES_COMMIT, CANDIDATE_BASE}
+            expected_fields = {
+                "Installed Hermes version": EXPECTED_HERMES_VERSION,
+                "Installed Hermes commit": EXPECTED_HERMES_COMMIT,
+                "Candidate base": CANDIDATE_BASE,
+            }
+            fields_match = all(
+                re.findall(
+                    rf"(?m)^- {re.escape(label)}: `([^`\n]+)`\s*$",
+                    text,
+                )
+                == [expected]
+                for label, expected in expected_fields.items()
+            )
+            if not fields_match or documented - allowed:
+                errors.append(f"hermes-provenance:{relative}")
+
     try:
         commit = _git_output(hermes_source, "rev-parse", "HEAD")
     except (OSError, subprocess.CalledProcessError) as exc:
         errors.append(f"hermes-git:{type(exc).__name__}")
     else:
-        if commit != "f657840e06e03b9552cf2d28175a1e4e4af0210b":
+        if commit != EXPECTED_HERMES_COMMIT:
             errors.append(f"hermes-commit:{commit}")
+
+    try:
+        with (hermes_source / "pyproject.toml").open("rb") as handle:
+            installed_version = tomllib.load(handle)["project"]["version"]
+    except (KeyError, OSError, tomllib.TOMLDecodeError) as exc:
+        errors.append(f"hermes-version:{type(exc).__name__}")
+    else:
+        if installed_version != EXPECTED_HERMES_VERSION:
+            errors.append(f"hermes-version:{installed_version}")
+
+    try:
+        installed_status = _git_output(
+            hermes_source,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        errors.append(f"hermes-status:{type(exc).__name__}")
+    else:
+        status_lines = installed_status.splitlines()
+        if any(not line.startswith("?? ") for line in status_lines):
+            errors.append("hermes-tracked-dirty")
+        for line in status_lines:
+            if line.startswith("?? ") and line[3:] != ".install_method":
+                errors.append(f"hermes-untracked:{line[3:]}")
 
     return errors
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Verify the Hermes V2 candidate packet")
+    parser = argparse.ArgumentParser(
+        description="Verify the Hermes V2 pre-activation draft review packet"
+    )
     parser.add_argument("--hermes-source", type=Path, required=True)
     parser.add_argument("--require-complete", action="store_true")
     args = parser.parse_args(argv)
@@ -245,7 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.require_complete:
         print("Hermes V2 packet: handoff-complete")
     else:
-        print("Hermes V2 candidate packet: internally complete; lifecycle not evaluated")
+        print(
+            "Hermes V2 draft review packet: internally consistent; "
+            "lifecycle not evaluated; not a canonical candidate"
+        )
     print("HM cases: HM-01 HM-02 HM-03 HM-04 HM-05 HM-06")
     return 0
 

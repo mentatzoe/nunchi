@@ -1,0 +1,38 @@
+# Hermes V2 pre-activation draft review manifest
+# base 8e64746970f9910d03b372291c5aa173883e869f
+# This file hashes every changed path except itself; its own SHA-256 is supplied
+# separately with the immutable review request.
+4b22f30b9636d47c8d4d9f46ae70e286115f84d1f2543221984548a21b7e12c5  docs/archive/v1/hermes-nunchi-gate.md
+0d145a046cf23366184af4bc87737f714bd06fef1ee8675611bdcdd66464a674  docs/integrations/hermes-core-patch-test-plan.md
+538b02df1c420fc4d0ecd3a9050fd0491bbd1462495e7a23129b74abe1a0fe0b  docs/integrations/hermes-core-patch.md
+5722a0bd67524487a715b2feb06aebfa1b6684efdb04eb2c7918f1a5e6d30b08  docs/integrations/hermes-v2.md
+f16a8ba2714b2119cf760fd58ee6e629ca892e44878bf97d4f8349d6414099a3  evals/v2/hermes/__init__.py
+83e5d298dda4a41eb0a9785b6ec7ef81937393ac530eb8a569ba6dd983b2da0c  evals/v2/hermes/runner.py
+93a6fa5742b43d3ea73ffce0367e911893c67b192701b9e5c8dc59f9342ac5c0  evals/v2/hermes/scenes.jsonl
+1fd93b13c3318fe5b6b3ea94595b0e86892029e023808c3935e54798a58cc2bc  evidence/v2/hermes/handoff.md
+749d517856932421dd90094fcd69f887e94f9ef3fd944c347ef776a38d7d72c2  evidence/v2/hermes/hermes-scenes.jsonl
+e3340be36cbc919321c949fc8b682b208e400466c00ce49f9be300d5c8f83c69  evidence/v2/hermes/installed-runtime.md
+ae1871aebea0f87e05af50b87a4ceba5498812140c97cca364fd9183921bd729  evidence/v2/hermes/telegram-scenes.jsonl
+52989bf08e0165124d4eb9b5c53f1c87acc108e53ef065878f2fbd5ffbb0b7f1  evidence/v2/hermes/verification.md
+449fb26db24b13960c37268140945101276ab7b1a7141561eeeed0124baedeaa  integrations/hermes/README.md
+4926c22f62e27a23f6bcf39a19608ea0a18340a5b4e5c171c6ea203bfc94a541  integrations/hermes/nunchi-gate/__init__.py
+DELETE  integrations/hermes/nunchi-gate/dashboard/index.js
+DELETE  integrations/hermes/nunchi-gate/dashboard/manifest.json
+DELETE  integrations/hermes/nunchi-gate/dashboard/plugin_api.py
+f499cd27133e1fcbbc5dcb40bd8b1681e09a6f26ab594121c4c44b15ee8be59f  integrations/hermes/nunchi-gate/plugin.yaml
+DELETE  integrations/hermes/nunchi-gate/resolve.py
+DELETE  integrations/hermes/nunchi-gate/state.py
+07be5a2b6a2943979ed5f6fbf3f86a410ba1c25c463cbe8fe7bbc1c9419f15e6  integrations/hermes/nunchi-gate/v2_plugin.py
+6b1faa196b999c1b3d8b28137879875fed78420e0d0587fad6305ea5eae61671  integrations/hermes/nunchi-gate/v2_runtime.py
+7cc53a24c5f36f700e61766ca5683dedd493d8828d81a13d50391644a553b542  scripts/verify_hermes_v2_packet.py
+33751867bc90d1e7620df0570ce454efabe5437980c43bb134481734ffac5ef7  tests/fixtures/v2/hermes/cases.json
+fe5a35ec1f35c759d2f4736dcf7fb7062c07b9fccf8f131e6be0ca8f864684a0  tests/test_dashboard_asset_safety.py
+2ebabb40a185bb4f711d1bef7e9349cd4a311e4321d79999167a3d40b288d3de  tests/test_docs_truthfulness.py
+DELETE  tests/test_hermes_integration.py
+DELETE  tests/test_hermes_nunchi_gate_quiet_chatter.py
+DELETE  tests/test_hermes_state.py
+0241b4cbb6a5153e8db8e858dccab55e131e9bb4143f2f4e37b97fc84a4a67c3  tests/test_sentinel_forgery.py
+DELETE  tests/test_slash_command_authz.py
+9b64914d35b1e5388eb582d6f4ddb6be1b298a61809d74e1749883549ab668fb  tests/v2/test_hermes.py
+3ab4fa817bc5b996632b8f0f9289db3df7ae27054d0deb670ce455c7a32cfc2c  tests/v2/test_hermes_eval.py
+# records 33

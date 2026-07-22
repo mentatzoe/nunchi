@@ -36,9 +36,22 @@ v2_plugin = importlib.util.module_from_spec(PLUGIN_SPEC)
 sys.modules[PLUGIN_SPEC.name] = v2_plugin
 PLUGIN_SPEC.loader.exec_module(v2_plugin)
 
+ENTRY_PATH = ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
+
 
 def _load_fresh_plugin_module(name: str):
     spec = importlib.util.spec_from_file_location(name, PLUGIN_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_fresh_entry_module(name: str):
+    spec = importlib.util.spec_from_file_location(
+        name, ENTRY_PATH, submodule_search_locations=[str(ENTRY_PATH.parent)]
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -223,6 +236,36 @@ class HermesV2IdentityTest(unittest.TestCase):
             event, v2.resolve_binding_key(event, _Gateway(adapter))
         )
         self.assertEqual(native["event"]["text"], "part one\npart two")
+
+    def test_telegram_projection_omits_unavailable_timestamp(self):
+        source = SimpleNamespace(
+            profile="default", platform=_Platform("telegram"),
+            chat_id="-10042", thread_id=None,
+        )
+        raw = SimpleNamespace(
+            message_id=79,
+            from_user=SimpleNamespace(id=1001, is_bot=False),
+            chat=SimpleNamespace(id=-10042),
+            text="no timestamp",
+            caption=None,
+            entities=[],
+            reply_to_message=None,
+            date=None,
+        )
+        event = SimpleNamespace(
+            source=source,
+            raw_message=raw,
+            message_id="79",
+            platform_update_id=902,
+            text=raw.text,
+            internal=False,
+        )
+        adapter = SimpleNamespace(_bot=SimpleNamespace(id=9002))
+        native = v2.project_native_event(
+            event, v2.resolve_binding_key(event, _Gateway(adapter))
+        )
+        self.assertEqual(native["disposition"], "candidate-event")
+        self.assertNotIn("timestamp", native["event"])
 
     def test_discord_projection_rejects_coerced_native_facts(self):
         adapter = SimpleNamespace(
@@ -530,10 +573,15 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
         middleware = {}
 
         class Context:
+            def __init__(self):
+                self._manager = SimpleNamespace(_hooks={}, _middleware={})
+
             def register_hook(self, name, callback):
+                self._manager._hooks.setdefault(name, []).append(callback)
                 hooks[name] = callback
 
             def register_middleware(self, name, callback):
+                self._manager._middleware.setdefault(name, []).append(callback)
                 middleware[name] = callback
 
         discord_module = SimpleNamespace(
@@ -545,6 +593,10 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
             TelegramAdapter=type("TelegramAdapter", (), {})
         )
         with unittest.mock.patch.object(
+            v2_plugin,
+            "_load_host_classes",
+            return_value=(type("Runner", (), {}), type("Base", (), {})),
+        ), unittest.mock.patch.object(
             v2_plugin, "install_host_wrappers", return_value={
                 "participant_turn": True, "transport": True,
             }
@@ -568,14 +620,40 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
         self.assertIs(hooks["pre_llm_call"], v2_plugin.on_pre_llm_call)
 
     def test_register_fails_closed_without_required_host_wrappers(self):
+        hooks = []
+        middleware = []
+
         class Context:
+            def __init__(self):
+                self._manager = SimpleNamespace(_hooks={}, _middleware={})
+
             def register_hook(self, name, callback):
-                pass
+                self._manager._hooks.setdefault(name, []).append(callback)
+                hooks.append((name, callback))
 
             def register_middleware(self, name, callback):
-                pass
+                self._manager._middleware.setdefault(name, []).append(callback)
+                middleware.append((name, callback))
 
+        discord_module = SimpleNamespace(
+            DiscordAdapter=type("DiscordAdapter", (), {}),
+            commands=SimpleNamespace(Bot=type("Bot", (), {})),
+            discord=SimpleNamespace(),
+        )
+        telegram_module = SimpleNamespace(
+            TelegramAdapter=type("TelegramAdapter", (), {})
+        )
         with unittest.mock.patch.object(
+            v2_plugin,
+            "_load_host_classes",
+            return_value=(type("Runner", (), {}), type("Base", (), {})),
+        ), unittest.mock.patch.object(
+            v2_plugin,
+            "_load_platform_module",
+            side_effect=lambda name: (
+                discord_module if "discord" in name else telegram_module
+            ),
+        ), unittest.mock.patch.object(
             v2_plugin, "install_host_wrappers", return_value={
                 "participant_turn": False, "transport": False,
             }
@@ -585,6 +663,174 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
                 "participant and transport wrappers are required",
             ):
                 v2_plugin.register(Context())
+        self.assertEqual(hooks, [])
+        self.assertEqual(middleware, [])
+
+    def test_register_rolls_back_every_host_patch_after_late_failure(self):
+        hooks = []
+        middleware = []
+
+        class Context:
+            def __init__(self):
+                self._manager = SimpleNamespace(_hooks={}, _middleware={})
+
+            def register_hook(self, name, callback):
+                self._manager._hooks.setdefault(name, []).append(callback)
+                hooks.append((name, callback))
+
+            def register_middleware(self, name, callback):
+                self._manager._middleware.setdefault(name, []).append(callback)
+                middleware.append((name, callback))
+
+        runner = type("Runner", (), {"native": object()})
+        base = type("Base", (), {"native": object()})
+        discord_adapter = type("DiscordAdapter", (), {"native": object()})
+        telegram_adapter = type("TelegramAdapter", (), {"native": object()})
+        bot = type("Bot", (), {"native": object()})
+        discord_module = SimpleNamespace(
+            DiscordAdapter=discord_adapter,
+            commands=SimpleNamespace(Bot=bot),
+            discord=SimpleNamespace(),
+        )
+        telegram_module = SimpleNamespace(TelegramAdapter=telegram_adapter)
+
+        def install_host_wrappers(*, runner_cls=None, adapter_cls=None):
+            if runner_cls is None:
+                runner.patched = object()
+                base.patched = object()
+            else:
+                adapter_cls.patched = object()
+            return {"participant_turn": True, "transport": True}
+
+        def mutate_adapter(adapter_cls, **_kwargs):
+            adapter_cls.bridge = object()
+            return True
+
+        def mutate_raw(*, adapter_cls, bot_cls, discord_module):
+            adapter_cls.raw = object()
+            bot_cls.raw = object()
+            return True
+
+        def fail_telegram(adapter_cls):
+            adapter_cls.exact = object()
+            return False
+
+        with unittest.mock.patch.object(
+            v2_plugin,
+            "_load_host_classes",
+            return_value=(runner, base),
+            create=True,
+        ), unittest.mock.patch.object(
+            v2_plugin, "install_host_wrappers", side_effect=install_host_wrappers
+        ), unittest.mock.patch.object(
+            v2_plugin, "install_reaction_bridge", side_effect=mutate_adapter
+        ), unittest.mock.patch.object(
+            v2_plugin, "install_discord_control_guard", side_effect=mutate_adapter
+        ), unittest.mock.patch.object(
+            v2_plugin, "install_discord_raw_observer", side_effect=mutate_raw
+        ), unittest.mock.patch.object(
+            v2_plugin, "install_telegram_exact_text", side_effect=fail_telegram
+        ), unittest.mock.patch.object(
+            v2_plugin,
+            "_load_platform_module",
+            side_effect=lambda name: (
+                discord_module if "discord" in name else telegram_module
+            ),
+        ):
+            with self.assertRaisesRegex(
+                v2_plugin.HermesV2BoundaryError,
+                "Telegram exact-event dispatch is required",
+            ):
+                v2_plugin.register(Context())
+
+        self.assertEqual(hooks, [])
+        self.assertEqual(middleware, [])
+        for host_class in (runner, base, discord_adapter, telegram_adapter, bot):
+            self.assertEqual(set(host_class.__dict__) - {"__module__", "__dict__", "__weakref__", "__doc__"}, {"native"})
+
+    def test_register_rolls_back_public_callbacks_after_late_failure(self):
+        for failure in ("second_hook", "middleware"):
+            with self.subTest(failure=failure):
+                runner = type("Runner", (), {"native": object()})
+                base = type("Base", (), {"native": object()})
+                discord_adapter = type("DiscordAdapter", (), {"native": object()})
+                telegram_adapter = type("TelegramAdapter", (), {"native": object()})
+                bot = type("Bot", (), {"native": object()})
+                discord_module = SimpleNamespace(
+                    DiscordAdapter=discord_adapter,
+                    commands=SimpleNamespace(Bot=bot),
+                    discord=SimpleNamespace(),
+                )
+                telegram_module = SimpleNamespace(TelegramAdapter=telegram_adapter)
+                existing_hook = object()
+                existing_middleware = object()
+                manager = SimpleNamespace(
+                    _hooks={"existing": [existing_hook]},
+                    _middleware={"existing": [existing_middleware]},
+                )
+
+                class Context:
+                    _manager = manager
+
+                    def register_hook(self, name, callback):
+                        if failure == "second_hook" and name == "pre_llm_call":
+                            raise RuntimeError("forced second hook failure")
+                        manager._hooks.setdefault(name, []).append(callback)
+
+                    def register_middleware(self, name, callback):
+                        if failure == "middleware":
+                            raise RuntimeError("forced middleware failure")
+                        manager._middleware.setdefault(name, []).append(callback)
+
+                def install_host_wrappers(*, runner_cls=None, adapter_cls=None):
+                    setattr(runner, "patched", object())
+                    setattr(base, "patched", object())
+                    if adapter_cls is not None:
+                        setattr(adapter_cls, "patched", object())
+                    return {"participant_turn": True, "transport": True}
+
+                with unittest.mock.patch.object(
+                    v2_plugin,
+                    "_load_host_classes",
+                    return_value=(runner, base),
+                ), unittest.mock.patch.object(
+                    v2_plugin,
+                    "install_host_wrappers",
+                    side_effect=install_host_wrappers,
+                ), unittest.mock.patch.object(
+                    v2_plugin, "install_reaction_bridge", return_value=True
+                ), unittest.mock.patch.object(
+                    v2_plugin, "install_discord_control_guard", return_value=True
+                ), unittest.mock.patch.object(
+                    v2_plugin, "install_discord_raw_observer", return_value=True
+                ), unittest.mock.patch.object(
+                    v2_plugin, "install_telegram_exact_text", return_value=True
+                ), unittest.mock.patch.object(
+                    v2_plugin,
+                    "_load_platform_module",
+                    side_effect=lambda name: (
+                        discord_module if "discord" in name else telegram_module
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "forced"):
+                        v2_plugin.register(Context())
+
+                self.assertEqual(manager._hooks, {"existing": [existing_hook]})
+                self.assertEqual(
+                    manager._middleware, {"existing": [existing_middleware]}
+                )
+                for host_class in (
+                    runner,
+                    base,
+                    discord_adapter,
+                    telegram_adapter,
+                    bot,
+                ):
+                    self.assertEqual(
+                        set(host_class.__dict__)
+                        - {"__module__", "__dict__", "__weakref__", "__doc__"},
+                        {"native"},
+                    )
 
     def test_pre_llm_context_is_available_only_for_ticketed_session(self):
         controller = v2_plugin.HermesV2Controller(participant_id="resident")
@@ -646,10 +892,15 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
         middleware = {}
 
         class Context:
+            def __init__(self):
+                self._manager = SimpleNamespace(_hooks={}, _middleware={})
+
             def register_hook(self, name, callback):
+                self._manager._hooks.setdefault(name, []).append(callback)
                 hooks[name] = callback
 
             def register_middleware(self, name, callback):
+                self._manager._middleware.setdefault(name, []).append(callback)
                 middleware[name] = callback
 
             def register_command(self, *args, **kwargs):
@@ -664,6 +915,12 @@ class HermesV2PluginBoundaryTest(unittest.TestCase):
             TelegramAdapter=type("TelegramAdapter", (), {})
         )
         with unittest.mock.patch.object(
+            plugin, "_load_config", return_value={}
+        ), unittest.mock.patch.object(
+            plugin._v2_plugin,
+            "_load_host_classes",
+            return_value=(type("Runner", (), {}), type("Base", (), {})),
+        ), unittest.mock.patch.object(
             plugin._v2_plugin,
             "install_host_wrappers",
             return_value={"participant_turn": True, "transport": True},
@@ -870,6 +1127,10 @@ class HermesV2LifecycleTest(unittest.TestCase):
         )
         self.assertEqual(result, {"ok": {"query": "nunchi"}})
         self.assertEqual(order, ["participant", "executor"])
+        participant = next(
+            row for row in self.receipts if row["stage"] == "participant-host"
+        )
+        self.assertEqual(participant["body"]["outcome"], "unknown")
         controller.complete_transport(session_key, delivery="sent")
 
     def test_reaction_tool_executes_only_after_exact_i040b_allow(self):
@@ -1165,6 +1426,294 @@ class HermesV2LifecycleTest(unittest.TestCase):
                 ),
             )
         self.assertEqual(audits[-1]["decision"], "ALLOW")
+
+    def test_public_tool_middleware_contains_operational_failures(self):
+        self.policy_with_grant(
+            capability="workspace.file.write",
+            resource_kind="workspace-file",
+            resource_id="docs/release.md",
+        )
+        cases = {
+            "sink-factory": (
+                lambda policy_loader: (_ for _ in ()).throw(
+                    OSError("authorization sink unavailable")
+                ),
+                None,
+            ),
+            "audit-persistence": (
+                lambda policy_loader: (
+                    lambda decision: (_ for _ in ()).throw(
+                        OSError("authorization audit unavailable")
+                    )
+                ),
+                None,
+            ),
+            "participant-receipt": (
+                lambda policy_loader: self.receipts.append,
+                "participant-receipt",
+            ),
+        }
+        for index, (name, (authorization_factory, receipt_failure)) in enumerate(
+            cases.items()
+        ):
+            with self.subTest(name=name):
+                def receipt_sink(receipt):
+                    if (
+                        receipt_failure == "participant-receipt"
+                        and receipt["stage"] == "participant-host"
+                    ):
+                        raise OSError("participant receipt unavailable")
+                    self.receipts.append(receipt)
+
+                controller = v2_plugin.HermesV2Controller(
+                    participant_id="resident",
+                    authorization_sink_factory=authorization_factory,
+                )
+                session_key, _evaluation = self.active_tool_turn(
+                    controller,
+                    str(3010 + index),
+                    receipt_sink=receipt_sink,
+                )
+                previous = v2_plugin._CONTROLLER
+                setattr(v2_plugin, "_CONTROLLER", controller)
+                self.addCleanup(setattr, v2_plugin, "_CONTROLLER", previous)
+                effects = []
+
+                def downstream(arguments):
+                    effects.append(arguments)
+                    return "executed"
+
+                # Mirror installed Hermes' fail-open callback fallback: only a
+                # returned terminal value prevents downstream replay.
+                try:
+                    result = v2_plugin.on_tool_execution(
+                        tool_name="write_file",
+                        arguments={
+                            "path": "docs/release.md",
+                            "content": "ready",
+                        },
+                        next_call=downstream,
+                    )
+                except Exception:
+                    result = downstream(
+                        {"path": "docs/release.md", "content": "ready"}
+                    )
+                self.assertEqual(effects, [])
+                denial = json.loads(result)
+                self.assertEqual(denial["error"], "nunchi-v2-execution-failed")
+                self.assertTrue(controller.is_ticketed(session_key))
+
+    def test_public_tool_middleware_propagates_downstream_failures(self):
+        previous = v2_plugin._CONTROLLER
+        setattr(
+            v2_plugin,
+            "_CONTROLLER",
+            v2_plugin.HermesV2Controller(participant_id="resident"),
+        )
+        self.addCleanup(setattr, v2_plugin, "_CONTROLLER", previous)
+
+        def downstream(_arguments):
+            raise RuntimeError("ordinary Hermes tool failure")
+
+        with self.assertRaisesRegex(RuntimeError, "ordinary Hermes tool failure"):
+            v2_plugin.on_tool_execution(
+                tool_name="web_search",
+                arguments={"query": "nunchi"},
+                next_call=downstream,
+            )
+
+    def test_public_tool_middleware_preserves_zero_argument_downstream_contract(self):
+        previous = v2_plugin._CONTROLLER
+        setattr(
+            v2_plugin,
+            "_CONTROLLER",
+            v2_plugin.HermesV2Controller(participant_id="resident"),
+        )
+        self.addCleanup(setattr, v2_plugin, "_CONTROLLER", previous)
+        calls = []
+
+        self.assertEqual(
+            v2_plugin.on_tool_execution(
+                tool_name="web_search",
+                arguments={"query": "nunchi"},
+                next_call=lambda: calls.append(True) or "searched",
+            ),
+            "searched",
+        )
+        self.assertEqual(calls, [True])
+
+    def test_pending_authorization_queue_is_globally_bounded(self):
+        self.policy_with_grant(
+            capability="workspace.file.delete",
+            resource_kind="workspace-file",
+            resource_id="tmp/stale.txt",
+            impact="destructive",
+            execution="approval",
+        )
+        controller = v2_plugin.HermesV2Controller(
+            participant_id="resident",
+            max_pending_authorizations=2,
+            authorization_sink_factory=lambda policy_loader: self.receipts.append,
+        )
+        self.active_tool_turn(controller, "3014")
+        effects = []
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                v2_plugin.HermesV2BoundaryError, "authenticated approval"
+            ):
+                controller.tool_execution(
+                    tool_name="delete_file",
+                    arguments={"path": "tmp/stale.txt"},
+                    next_call=lambda supplied: effects.append(supplied),
+                )
+        with self.assertRaisesRegex(v2_plugin.HermesV2BoundaryError, "capacity"):
+            controller.tool_execution(
+                tool_name="delete_file",
+                arguments={"path": "tmp/stale.txt"},
+                next_call=lambda supplied: effects.append(supplied),
+            )
+        self.assertEqual(len(controller.pending_authorizations()), 2)
+        self.assertEqual(
+            len(
+                [
+                    row
+                    for row in self.receipts
+                    if row.get("decision") == "APPROVAL_REQUIRED"
+                ]
+            ),
+            2,
+        )
+        self.assertEqual(effects, [])
+
+    def test_pending_authorization_capacity_is_reserved_before_concurrent_audit(self):
+        self.policy_with_grant(
+            capability="workspace.file.delete",
+            resource_kind="workspace-file",
+            resource_id="tmp/stale.txt",
+            impact="destructive",
+            execution="approval",
+        )
+        audit_gate = threading.Event()
+        release_audit = threading.Event()
+        audits = []
+
+        def authorization_factory(_policy_loader):
+            audit_gate.set()
+            self.assertTrue(release_audit.wait(timeout=2))
+            return audits.append
+
+        controller = v2_plugin.HermesV2Controller(
+            participant_id="resident",
+            max_pending_authorizations=1,
+            authorization_sink_factory=authorization_factory,
+        )
+        session_key, _evaluation = self.active_tool_turn(controller, "30141")
+        failures = []
+
+        def propose():
+            token = controller.bind_tool_session(session_key)
+            try:
+                controller.tool_execution(
+                    tool_name="delete_file",
+                    arguments={"path": "tmp/stale.txt"},
+                    next_call=lambda supplied: self.fail("effect executed"),
+                )
+            except v2_plugin.HermesV2BoundaryError as exc:
+                failures.append(str(exc))
+            finally:
+                controller.reset_tool_session(token)
+
+        first = threading.Thread(target=propose)
+        first.start()
+        self.assertTrue(audit_gate.wait(timeout=2))
+        second = threading.Thread(target=propose)
+        second.start()
+        second.join(timeout=2)
+        self.assertFalse(second.is_alive())
+        release_audit.set()
+        first.join(timeout=2)
+        self.assertFalse(first.is_alive())
+
+        self.assertEqual(len(controller.pending_authorizations()), 1)
+        self.assertEqual(len(audits), 1)
+        self.assertEqual(controller._pending_authorization_reservations, 0)
+        self.assertEqual(
+            sorted(failures),
+            sorted(
+                [
+                    "pending authorization capacity is exhausted",
+                    "privileged action requires authenticated approval; room prose is not approval",
+                ]
+            ),
+        )
+
+    def test_pending_authorization_receipt_tracks_effect_or_final_message(self):
+        self.policy_with_grant(
+            capability="workspace.file.delete",
+            resource_kind="workspace-file",
+            resource_id="tmp/stale.txt",
+            impact="destructive",
+            execution="approval",
+        )
+        audits = []
+        controller = v2_plugin.HermesV2Controller(
+            participant_id="resident",
+            authorization_sink_factory=lambda policy_loader: audits.append,
+        )
+        session_key, _evaluation = self.active_tool_turn(controller, "3015")
+        with self.assertRaisesRegex(
+            v2_plugin.HermesV2BoundaryError, "authenticated approval"
+        ):
+            controller.tool_execution(
+                tool_name="delete_file",
+                arguments={"path": "tmp/stale.txt"},
+                next_call=lambda supplied: "deleted",
+            )
+        self.assertFalse(
+            any(row["stage"] == "participant-host" for row in self.receipts)
+        )
+        action = controller.complete_participant_turn(
+            session_key, "I need operator approval."
+        )
+        self.assertEqual(action["kind"], "message")
+        participant = next(
+            row for row in self.receipts if row["stage"] == "participant-host"
+        )
+        self.assertEqual(participant["body"]["outcome"], "unknown")
+
+        approved_receipts = []
+        approved_effects = []
+        controller = v2_plugin.HermesV2Controller(
+            participant_id="resident",
+            authorization_sink_factory=lambda policy_loader: audits.append,
+        )
+        self.active_tool_turn(
+            controller, "3016", receipt_sink=approved_receipts.append
+        )
+        with self.assertRaisesRegex(
+            v2_plugin.HermesV2BoundaryError, "authenticated approval"
+        ):
+            controller.tool_execution(
+                tool_name="delete_file",
+                arguments={"path": "tmp/stale.txt"},
+                next_call=lambda supplied: approved_effects.append(supplied) or "deleted",
+            )
+        pending = controller.pending_authorizations()
+        challenge = pending[0]["authorization"]["approval_challenge"]
+        controller.complete_authenticated_approval(
+            {
+                "challenge_id": challenge["challenge_id"],
+                "attestation_id": "operator-attestation-delayed",
+                "approver_actor_id": "discord:user:admin",
+                "approved_at": audits[-1]["evaluated_at"],
+                "channel": "authenticated-transport",
+            }
+        )
+        self.assertEqual(approved_effects, [{"path": "tmp/stale.txt"}])
+        approved_participant = next(
+            row for row in approved_receipts if row["stage"] == "participant-host"
+        )
+        self.assertEqual(approved_participant["body"]["outcome"], "unknown")
 
     def test_approval_required_never_executes_from_room_prose(self):
         self.policy_with_grant(
@@ -1536,14 +2085,18 @@ class HermesV2LifecycleTest(unittest.TestCase):
         gateway = _Gateway(
             SimpleNamespace(_client=SimpleNamespace(user=SimpleNamespace(id=9001)))
         )
-        suppress = lambda projection, classifier: {
-            "disposition": "SUPPRESS",
-            "reasons": ["no contribution is useful"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-            "legacy_verdict_confidences": {
-                "PASS": 0.99, "ACK": 0.0, "ASK": 0.0, "SPEAK": 0.01,
-            },
-        }
+        def suppress(projection, classifier):
+            return {
+                "disposition": "SUPPRESS",
+                "reasons": ["no contribution is useful"],
+                "evidence_event_ids": [projection["trigger_event_id"]],
+                "legacy_verdict_confidences": {
+                    "PASS": 0.99,
+                    "ACK": 0.0,
+                    "ASK": 0.0,
+                    "SPEAK": 0.01,
+                },
+            }
         first = controller.accept_delivery(
             event=self.hermes_event("201"),
             gateway=gateway,
@@ -2128,6 +2681,76 @@ class HermesV2LifecycleTest(unittest.TestCase):
                     controller.is_ticketed("agent:default:discord:42")
                 )
 
+    def test_gateway_admission_contains_receipt_sink_construction_failure(self):
+        adapter = SimpleNamespace(
+            _client=SimpleNamespace(user=SimpleNamespace(id=9001))
+        )
+        gateway = SimpleNamespace(
+            _adapter_for_source=lambda source: adapter,
+            _session_key_for_source=lambda source: "agent:default:discord:42",
+            _is_user_authorized=lambda source: True,
+        )
+        config = {
+            "enabled": True,
+            "api_version": 2,
+            "participant_id": "resident",
+            "policy_path": str(self.policy_path),
+            "platforms": ["discord"],
+            "channels": ["42"],
+            "streaming": False,
+            "_host_streaming_disabled": True,
+            "_host_effect_runtime_supported": True,
+        }
+        v2_plugin.configure(
+            config_loader=lambda supplied_event, supplied_gateway: config,
+            participant_id="resident",
+            receipt_sink_factory=lambda policy_loader: (_ for _ in ()).throw(
+                OSError("receipt sink unavailable")
+            ),
+            schedule_redispatch=lambda supplied_event, supplied_gateway: None,
+        )
+        result = v2_plugin.on_pre_gateway_dispatch(
+            event=self.hermes_event("4105"), gateway=gateway
+        )
+        self.assertEqual(
+            result, {"action": "skip", "reason": "nunchi:v2-receipt-error"}
+        )
+        self.assertEqual(len(v2_plugin._CONTROLLER.registry), 0)
+
+    def test_entry_config_read_failures_propagate_to_fail_closed_hook(self):
+        entry = _load_fresh_entry_module("nunchi_gate_entry_config_failure")
+        with unittest.mock.patch.object(
+            entry.importlib,
+            "import_module",
+            side_effect=OSError("Hermes config unavailable"),
+        ):
+            with self.assertRaisesRegex(OSError, "config unavailable"):
+                entry._load_config()
+
+        captured = {}
+        with (
+            unittest.mock.patch.object(entry, "_nunchi_config", return_value={}),
+            unittest.mock.patch.object(entry._v2_plugin, "register", return_value=None),
+            unittest.mock.patch.object(
+                entry._v2_plugin,
+                "configure",
+                side_effect=lambda **kwargs: captured.update(kwargs),
+            ),
+        ):
+            entry.register(SimpleNamespace())
+        profile_config = captured["config_loader"]
+        event = self.hermes_event("4106")
+        gateway = SimpleNamespace(
+            _resolve_profile_home_for_source=lambda source: "/tmp/profile"
+        )
+        with unittest.mock.patch.object(
+            entry.importlib,
+            "import_module",
+            side_effect=OSError("profile runtime unavailable"),
+        ):
+            with self.assertRaisesRegex(OSError, "profile runtime unavailable"):
+                profile_config(event, gateway)
+
     def test_unauthorized_dispatch_is_not_retained_or_receipted(self):
         event = self.hermes_event("41")
         adapter = SimpleNamespace(
@@ -2160,11 +2783,86 @@ class HermesV2LifecycleTest(unittest.TestCase):
             receipt_sink_factory=lambda policy_loader: self.receipts.append,
             schedule_redispatch=lambda supplied_event, supplied_gateway: None,
         )
-        self.assertIsNone(
-            v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway)
+        self.assertEqual(
+            v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway),
+            {"action": "skip", "reason": "nunchi:v2-authorization-error"},
         )
         self.assertEqual(self.receipts, [])
         self.assertEqual(len(v2_plugin._CONTROLLER.registry), 0)
+
+    def test_authorization_exception_fails_closed_before_host_retry(self):
+        event = self.hermes_event("4110")
+        gateway = SimpleNamespace(
+            _session_key_for_source=lambda source: "agent:default:discord:42",
+            _is_user_authorized=lambda source: (_ for _ in ()).throw(
+                OSError("authorization unavailable")
+            ),
+        )
+        v2_plugin.configure(
+            config_loader=lambda supplied_event, supplied_gateway: self.fail(
+                "authorization uncertainty reached configuration"
+            ),
+            participant_id="resident",
+        )
+        self.assertEqual(
+            v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway),
+            {"action": "skip", "reason": "nunchi:v2-authorization-error"},
+        )
+        self.assertEqual(len(v2_plugin._CONTROLLER.registry), 0)
+
+    def test_redispatch_authorization_revocation_aborts_reserved_delivery(self):
+        event = self.hermes_event("4111")
+        authorization = {"allowed": True}
+        adapter = SimpleNamespace(
+            _client=SimpleNamespace(user=SimpleNamespace(id=9001))
+        )
+        gateway = SimpleNamespace(
+            _adapter_for_source=lambda source: adapter,
+            _session_key_for_source=lambda source: "agent:default:discord:42",
+            _is_user_authorized=lambda source: authorization["allowed"],
+        )
+        config = {
+            "enabled": True,
+            "api_version": 2,
+            "participant_id": "resident",
+            "policy_path": str(self.policy_path),
+            "platforms": ["discord"],
+            "channels": ["42"],
+            "streaming": False,
+            "_host_streaming_disabled": True,
+            "_host_effect_runtime_supported": True,
+        }
+        v2_plugin.configure(
+            config_loader=lambda supplied_event, supplied_gateway: config,
+            participant_id="resident",
+            classifier_transport=lambda projection, classifier: {
+                "disposition": "WAKE",
+                "reasons": ["the participant may contribute"],
+                "evidence_event_ids": [projection["trigger_event_id"]],
+            },
+            receipt_sink_factory=lambda policy_loader: self.receipts.append,
+            schedule_redispatch=lambda supplied_event, supplied_gateway: None,
+        )
+        session_key = "agent:default:discord:42"
+        event_id = "discord:message:4111"
+        self.assertEqual(
+            v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway),
+            {"action": "skip", "reason": "nunchi:v2-attention"},
+        )
+        controller = v2_plugin._CONTROLLER
+        binding = next(iter(controller.registry_for("resident")._bindings.values()))
+        self.assertTrue(controller.tickets.has_dispatch(event_id, session_key))
+        self.assertTrue(binding.scheduler.snapshot())
+        self.assertTrue(controller._host_deliveries)
+
+        authorization["allowed"] = False
+        self.assertEqual(
+            v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway),
+            {"action": "skip", "reason": "nunchi:v2-authorization-revoked"},
+        )
+        self.assertFalse(controller.tickets.has_dispatch(event_id, session_key))
+        self.assertEqual(binding.scheduler.snapshot(), ())
+        self.assertEqual(controller._host_deliveries, {})
 
     def test_receipt_sink_is_reused_and_closed_on_reconfigure(self):
         adapter = SimpleNamespace(
@@ -2615,11 +3313,12 @@ class HermesV2LifecycleTest(unittest.TestCase):
                 return None
 
         gateway = Gateway()
-        classify = lambda projection, classifier: {
-            "disposition": "WAKE",
-            "reasons": ["the participant may contribute"],
-            "evidence_event_ids": [projection["trigger_event_id"]],
-        }
+        def classify(projection, classifier):
+            return {
+                "disposition": "WAKE",
+                "reasons": ["the participant may contribute"],
+                "evidence_event_ids": [projection["trigger_event_id"]],
+            }
         common = {
             "gateway": gateway,
             "session_key": session_key,
@@ -2683,6 +3382,90 @@ class HermesV2LifecycleTest(unittest.TestCase):
                 for receipt in self.receipts
             )
         )
+
+    def test_nonwake_cancellation_after_completion_is_idempotent(self):
+        for index, mode in enumerate(("suppressed", "no-wake")):
+            with self.subTest(mode=mode):
+                controller = v2_plugin.HermesV2Controller(participant_id="resident")
+                gateway = _Gateway(
+                    SimpleNamespace(
+                        _client=SimpleNamespace(user=SimpleNamespace(id=9001))
+                    )
+                )
+                policy = load_operator_policy(self.policy_path)
+                if mode == "no-wake":
+                    object.__setattr__(policy.attention, "error_action", "NO_WAKE")
+
+                    def no_wake_classifier(projection, classifier):
+                        raise OSError("classifier unavailable")
+
+                    classify = no_wake_classifier
+                else:
+                    def suppress_classifier(projection, classifier):
+                        return {
+                            "disposition": "SUPPRESS",
+                            "reasons": ["no contribution is useful"],
+                            "evidence_event_ids": [projection["trigger_event_id"]],
+                            "legacy_verdict_confidences": {
+                                "PASS": 0.99,
+                                "ACK": 0.0,
+                                "ASK": 0.0,
+                                "SPEAK": 0.01,
+                            },
+                        }
+
+                    classify = suppress_classifier
+
+                accepted = controller.accept_delivery(
+                    event=self.hermes_event(str(29840 + index)),
+                    gateway=gateway,
+                    session_key="agent:default:discord:42",
+                    participant_id="resident",
+                    policy_loader=lambda current=policy: current,
+                    receipt_sink=self.receipts.append,
+                    classifier_transport=classify,
+                )
+                cancellation = v2_plugin._DeliveryCancellation()
+                completed = threading.Event()
+                release = threading.Event()
+                self.addCleanup(release.set)
+                original_drop = controller._drop_host_delivery
+
+                def blocked_drop(binding, event_id):
+                    completed.set()
+                    if not release.wait(timeout=2):
+                        raise RuntimeError("completion release barrier timed out")
+                    return original_drop(binding, event_id)
+
+                controller._drop_host_delivery = blocked_drop
+                results = []
+                failures = []
+
+                def evaluate():
+                    try:
+                        results.append(
+                            controller.evaluate_delivery(
+                                accepted, cancellation=cancellation
+                            )
+                        )
+                    except BaseException as exc:
+                        failures.append(exc)
+
+                worker = threading.Thread(target=evaluate)
+                worker.start()
+                self.assertTrue(completed.wait(timeout=1))
+                try:
+                    controller.cancel_delivery(
+                        accepted, cancellation, discard_pending=True
+                    )
+                finally:
+                    release.set()
+                    worker.join(timeout=2)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(failures, [])
+                self.assertEqual([result.status for result in results], [mode])
+                self.assertEqual(accepted.binding.scheduler.snapshot(), ())
+                self.assertEqual(controller._host_deliveries, {})
 
     def test_cancelled_attention_executor_cannot_stage_or_redispatch_late(self):
         classifier_started = threading.Event()
@@ -3463,6 +4246,12 @@ class HermesV2LifecycleTest(unittest.TestCase):
             def __init__(self):
                 self._background_tasks = set()
 
+            def _should_drop_delayed_delivery(self):
+                return False
+
+            def _apply_topic_recovery(self, event):
+                return None
+
             def _enqueue_text_event(self, event):
                 native.append(event)
 
@@ -3482,6 +4271,124 @@ class HermesV2LifecycleTest(unittest.TestCase):
 
         asyncio.run(exercise())
         self.assertEqual(scope_modules, ["b"])
+        self.assertEqual(native, [])
+        self.assertEqual(exact, [event])
+
+    def test_telegram_exact_text_preserves_host_teardown_fence(self):
+        native = []
+        exact = []
+        recovered = []
+
+        class Adapter:
+            def __init__(self):
+                self._background_tasks = set()
+
+            def _enqueue_text_event(self, event):
+                native.append(event)
+
+            def _should_drop_delayed_delivery(self):
+                return True
+
+            def _apply_topic_recovery(self, event):
+                recovered.append(event)
+
+            async def handle_message(self, event):
+                exact.append(event)
+
+        self.assertTrue(v2_plugin.install_telegram_exact_text(Adapter))
+        event = object()
+
+        async def exercise():
+            adapter = Adapter()
+            with unittest.mock.patch.object(
+                v2_plugin, "_gateway_for_adapter", return_value=object()
+            ), unittest.mock.patch.object(
+                v2_plugin, "_event_in_scope", return_value=True
+            ):
+                adapter._enqueue_text_event(event)
+                await asyncio.gather(*tuple(adapter._background_tasks))
+
+        asyncio.run(exercise())
+        self.assertEqual(native, [])
+        self.assertEqual(exact, [])
+        self.assertEqual(recovered, [])
+
+    def test_telegram_exact_text_rechecks_teardown_before_scheduled_dispatch(self):
+        exact = []
+        teardown = {"active": False}
+
+        class Adapter:
+            def __init__(self):
+                self._background_tasks = set()
+
+            def _enqueue_text_event(self, event):
+                raise AssertionError("in-scope event must not enter native batching")
+
+            def _should_drop_delayed_delivery(self):
+                return teardown["active"]
+
+            def _apply_topic_recovery(self, event):
+                return None
+
+            async def handle_message(self, event):
+                exact.append(event)
+
+        self.assertTrue(v2_plugin.install_telegram_exact_text(Adapter))
+        event = object()
+
+        async def exercise():
+            adapter = Adapter()
+            with unittest.mock.patch.object(
+                v2_plugin, "_gateway_for_adapter", return_value=object()
+            ), unittest.mock.patch.object(
+                v2_plugin, "_event_in_scope", return_value=True
+            ):
+                adapter._enqueue_text_event(event)
+                teardown["active"] = True
+                await asyncio.gather(*tuple(adapter._background_tasks))
+
+        asyncio.run(exercise())
+        self.assertEqual(exact, [])
+
+    def test_telegram_topic_recovery_precedes_exact_scope_decision(self):
+        native = []
+        exact = []
+        source = SimpleNamespace(thread_id=None)
+        event = SimpleNamespace(source=source)
+
+        class Adapter:
+            def __init__(self):
+                self._background_tasks = set()
+
+            def _enqueue_text_event(self, supplied_event):
+                native.append(supplied_event)
+
+            def _should_drop_delayed_delivery(self):
+                return False
+
+            def _apply_topic_recovery(self, supplied_event):
+                supplied_event.source.thread_id = 7
+
+            async def handle_message(self, supplied_event):
+                exact.append(supplied_event)
+
+        self.assertTrue(v2_plugin.install_telegram_exact_text(Adapter))
+
+        async def exercise():
+            adapter = Adapter()
+            with unittest.mock.patch.object(
+                v2_plugin, "_gateway_for_adapter", return_value=object()
+            ), unittest.mock.patch.object(
+                v2_plugin,
+                "_event_in_scope",
+                side_effect=lambda supplied_event, gateway: (
+                    supplied_event.source.thread_id == 7
+                ),
+            ):
+                adapter._enqueue_text_event(event)
+                await asyncio.gather(*tuple(adapter._background_tasks))
+
+        asyncio.run(exercise())
         self.assertEqual(native, [])
         self.assertEqual(exact, [event])
 
@@ -3640,6 +4547,34 @@ class HermesV2LifecycleTest(unittest.TestCase):
             [row["stage"] for row in self.receipts],
             ["observation", "attention"],
         )
+
+    def test_telegram_topic_scope_requires_parent_qualified_identifier(self):
+        event = SimpleNamespace(
+            source=SimpleNamespace(
+                platform=_Platform("telegram"),
+                chat_id="-10042",
+                parent_chat_id=None,
+                thread_id="7",
+            )
+        )
+        config = {
+            "enabled": True,
+            "api_version": 2,
+            "participant_id": "resident",
+            "policy_path": str(self.policy_path),
+            "platforms": ["telegram"],
+            "channels": ["7"],
+            "streaming": False,
+            "_host_streaming_disabled": True,
+            "_host_effect_runtime_supported": True,
+        }
+        self.assertFalse(v2_plugin._config_in_scope(config, event))
+        configured_chat = dict(config, channels=["-10042"])
+        self.assertTrue(v2_plugin._config_in_scope(configured_chat, event))
+        configured_topic = dict(
+            config, channels=["telegram:chat:-10042:topic:7"]
+        )
+        self.assertTrue(v2_plugin._config_in_scope(configured_topic, event))
 
     def test_host_runtime_scope_requires_effect_middleware_and_streaming_rails(self):
         event = self.hermes_event("300")
@@ -3908,6 +4843,12 @@ class HermesV2LifecycleTest(unittest.TestCase):
             def _enqueue_text_event(self, supplied_event):
                 self.batched.append(supplied_event)
 
+            def _should_drop_delayed_delivery(self):
+                return False
+
+            def _apply_topic_recovery(self, supplied_event):
+                return None
+
             async def handle_message(self, supplied_event):
                 self.exact.append(supplied_event)
                 return True
@@ -3922,6 +4863,51 @@ class HermesV2LifecycleTest(unittest.TestCase):
         asyncio.run(exercise())
         self.assertEqual(adapter.batched, [])
         self.assertEqual(adapter.exact, [event])
+
+    def test_telegram_config_error_never_falls_back_to_lossy_batching(self):
+        source = SimpleNamespace(
+            profile="default",
+            platform=_Platform("telegram"),
+            chat_id=42,
+            parent_chat_id=None,
+            thread_id=None,
+        )
+        event = SimpleNamespace(source=source, message_id="5002", text="exact")
+        gateway = SimpleNamespace(
+            handle=lambda supplied_event: None,
+            _session_key_for_source=lambda supplied_source: "agent:default:telegram:42",
+        )
+
+        class Adapter:
+            def __init__(self):
+                self._message_handler = gateway.handle
+                self.batched = []
+
+            def _enqueue_text_event(self, supplied_event):
+                self.batched.append(supplied_event)
+
+            def _should_drop_delayed_delivery(self):
+                return False
+
+            def _apply_topic_recovery(self, supplied_event):
+                return None
+
+            async def handle_message(self, supplied_event):
+                return True
+
+        v2_plugin.configure(
+            config_loader=lambda supplied_event, supplied_gateway: (_ for _ in ()).throw(
+                OSError("configuration unavailable")
+            ),
+            participant_id="resident",
+        )
+        self.assertTrue(v2_plugin.install_telegram_exact_text(Adapter))
+        adapter = Adapter()
+        with self.assertRaisesRegex(
+            v2_plugin.HermesV2BoundaryError, "configuration scope is unavailable"
+        ):
+            adapter._enqueue_text_event(event)
+        self.assertEqual(adapter.batched, [])
 
     def test_ticketed_participant_rechecks_host_configuration(self):
         controller = v2_plugin.HermesV2Controller(participant_id="resident")

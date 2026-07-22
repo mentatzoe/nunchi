@@ -2,10 +2,20 @@
 
 ## Status
 
-This document describes the Slice 060 candidate implementation in
+This document describes the pre-activation Slice 060 draft implementation in
 `integrations/hermes/nunchi-gate/`. It is implementation/handoff documentation,
 not a claim that V2 is current, installed, accepted, released, or live-verified.
 V1 remains current until the program's atomic cutover is post-merge verified.
+
+## Pinned review provenance
+
+- Installed Hermes version: `0.19.0`
+- Installed Hermes commit: `279be8211d8347cc3500b9a78c6a0f8cb4d92a6a`
+- Candidate base: `8e64746970f9910d03b372291c5aa173883e869f`
+
+This is not a canonical Slice 060 candidate or handoff. The slice remains
+`PLANNED`; the draft exists only to obtain technical review before any governed
+activation decision.
 
 ## Components
 
@@ -22,19 +32,32 @@ It does not copy schemas or implement an alternative verdict system.
 ## Trust boundaries
 
 - Native adapter identity, not display text, binds self.
-- Hermes authorization is required before human input enters observation,
-  classification, receipts, or ticket state.
+- Hermes authorization must return literal `True` before human input enters
+  observation, classification, receipts, or ticket state. Exceptions and
+  truthy non-booleans fail closed; revocation during native redispatch aborts
+  the reserved ticket, scheduler generation, and host-delivery state.
 - Each scoped Telegram text update bypasses Hermes' lossy concatenation batch
   and enters as its own native `MessageEvent`, preserving that update's ID and
-  entity set. The pinned Discord raw-dispatch seam snapshots literal mentions
+  entity set. The wrapper checks Hermes' teardown fence both before scheduling
+  and again inside the scheduled coroutine immediately before dispatch. The
+  pinned Discord raw-dispatch seam snapshots literal mentions
   before Hermes mutates content, retains eligible self/peer-directed context,
   and completes that retention before ordinary dispatch continues.
 - Classifier advice is untrusted annotation and is rendered separately from room facts.
 - Wake tickets are host-owned, request-correlated, one-use, and restart-ephemeral.
 - Continuation/wake secrets do not enter classifier input or room output.
-- Each receipt stage is appended by its owning seam; participant-host precedes
-  platform I/O and transport closes only after the full adapter output process.
-- Ticketed tool effects without exact canonical authorization return a terminal denial without invoking Hermes `next_call`.
+- Each receipt stage is appended by its owning seam; participant-host records
+  immutable `unknown` before platform I/O, and transport alone later closes the
+  full adapter output process as sent or failed.
+- Ticketed tool effects without exact canonical authorization return a terminal
+  denial without invoking Hermes `next_call`. Nunchi boundary failures are
+  contained before downstream execution, while native executor failures retain
+  Hermes' original exception semantics and are never replayed or laundered.
+- Global pending-approval capacity is reserved before an approval-required
+  audit is persisted, so rejected admission cannot leave a phantom challenge.
+- Plugin registration snapshots both host classes and the installed plugin
+  manager's hook/middleware registries. A failure at any later wrapper, hook,
+  or middleware step restores both sets before the registration error escapes.
 - Hermes processing typing/reactions/voice acknowledgements are suppressed
   before they can escape the participant rail. An explicit scoped Discord
   self-mention continues in its parent channel without entering Hermes'
@@ -42,7 +65,7 @@ It does not copy schemas or implement an alternative verdict system.
   clarify/approval prompts are terminal output and are wrapped.
 - Gateway proxy mode and `codex_app_server` are outside V2 scope because they
   bypass ordinary Hermes tool middleware. Before the participant executes,
-  the candidate re-attests the configured participant, policy source and
+  the draft re-attests the configured participant, policy source and
   semantic fingerprint, authenticated self/room binding, normalized session,
   effective per-session runtime, streaming rail, and effect rail.
 
@@ -90,7 +113,7 @@ sequenceDiagram
 | HM-03 later hearing/restart semantics | Deterministic |
 | HM-04 shared Discord | Deterministic synthetic only; no live claim |
 | HM-05 Telegram | Deterministic synthetic only; no live claim |
-| HM-06 installed provenance | Installed-source inspection plus candidate registration against installed Hermes classes at `0.19.0` / `f657840…`; no deployed-plugin/provider claim |
+| HM-06 installed provenance | Installed-source inspection plus draft registration and rollback through actual installed `PluginManager._load_plugin`/`PluginContext` at `0.19.0` / `279be8211d8347cc3500b9a78c6a0f8cb4d92a6a`; no deployed-plugin/provider claim |
 
 The committed JSONL rows carry `evidence_grade` on every scene. Missing live
 capability is an explicit limitation, not silently upgraded to proof.

@@ -38,12 +38,11 @@ _v2_plugin = _load_v2_plugin()
 
 
 def _load_config() -> dict[str, Any]:
-    try:
-        module = importlib.import_module("hermes_cli.config")
-        loaded = module.load_config()
-    except Exception:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    module = importlib.import_module("hermes_cli.config")
+    loaded = module.load_config()
+    if not isinstance(loaded, dict):
+        raise RuntimeError("Hermes configuration is invalid")
+    return loaded
 
 
 def _nunchi_config() -> dict[str, Any]:
@@ -119,13 +118,10 @@ def register(ctx: Any) -> None:
         resolve_home = getattr(gateway, "_resolve_profile_home_for_source", None)
         profile_home = resolve_home(source) if callable(resolve_home) else None
         if profile_home:
-            try:
-                run_module = importlib.import_module("gateway.run")
-                profile_scope = getattr(run_module, "_profile_runtime_scope")
-                with profile_scope(profile_home):
-                    return resolved_profile_config(source, gateway)
-            except Exception:
-                return {}
+            run_module = importlib.import_module("gateway.run")
+            profile_scope = getattr(run_module, "_profile_runtime_scope")
+            with profile_scope(profile_home):
+                return resolved_profile_config(source, gateway)
         return resolved_profile_config(source, gateway)
 
     def schedule_redispatch(event: Any, gateway: Any) -> None:

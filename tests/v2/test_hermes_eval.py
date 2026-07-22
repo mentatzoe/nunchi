@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from evals.v2.hermes.runner import run_all, write_results
-from scripts.verify_hermes_v2_packet import validate
+from scripts.verify_hermes_v2_packet import EXPECTED_HERMES_COMMIT, validate
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -77,6 +77,69 @@ class HermesV2EvaluationTest(unittest.TestCase):
                 "missing-lifecycle:evidence/v2/hermes/slice-handoff.md",
             ],
         )
+
+    def test_verifier_rejects_stale_documented_installed_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = root / "docs/integrations/hermes-v2.md"
+            document.parent.mkdir(parents=True)
+            document.write_text(
+                "Installed Hermes classes at `0.19.0` / "
+                f"`{EXPECTED_HERMES_COMMIT}`; stale mirror "
+                "`f657840e06e03b9552cf2d28175a1e4e4af0210b`.\n"
+            )
+            self.assertIn(
+                "hermes-provenance:docs/integrations/hermes-v2.md",
+                validate(hermes_source=HERMES_SOURCE, root=root),
+            )
+
+    def test_verifier_rejects_role_swapped_documented_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = root / "docs/integrations/hermes-v2.md"
+            document.parent.mkdir(parents=True)
+            document.write_text(
+                "- Installed Hermes version: `0.19.0`\n"
+                "- Installed Hermes commit: "
+                "`8e64746970f9910d03b372291c5aa173883e869f`\n"
+                f"- Candidate base: `{EXPECTED_HERMES_COMMIT}`\n"
+            )
+            self.assertIn(
+                "hermes-provenance:docs/integrations/hermes-v2.md",
+                validate(hermes_source=HERMES_SOURCE, root=root),
+            )
+
+    def test_verifier_rejects_installed_version_mismatch_and_tracked_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "candidate"
+            root.mkdir()
+            source = Path(directory) / "hermes"
+            source.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=source,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=source, check=True
+            )
+            (source / "pyproject.toml").write_text(
+                '[project]\nname = "hermes-agent"\nversion = "0.18.0"\n'
+            )
+            tracked = source / "tracked.py"
+            tracked.write_text("clean = True\n")
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "fixture"], cwd=source, check=True
+            )
+            tracked.write_text("clean = False\n")
+            (source / "sitecustomize.py").write_text("DRIFT = True\n")
+
+            errors = validate(hermes_source=source, root=root)
+            self.assertIn("hermes-version:0.18.0", errors)
+            self.assertIn("hermes-tracked-dirty", errors)
+            self.assertIn("hermes-untracked:sitecustomize.py", errors)
 
     def test_scene_verifier_rejects_false_duplicate_and_incompatible_rows(self):
         rows = run_all(hermes_source=HERMES_SOURCE)

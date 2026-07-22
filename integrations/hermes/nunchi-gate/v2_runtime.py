@@ -9,7 +9,6 @@ with production-shaped fakes.
 
 from __future__ import annotations
 import copy
-import hashlib
 import json
 import re
 import threading
@@ -24,7 +23,7 @@ from nunchi.scheduling import ConversationOpportunityScheduler
 
 
 HERMES_V2_VERSION = "0.19.0"
-HERMES_V2_COMMIT = "f657840e06e03b9552cf2d28175a1e4e4af0210b"
+HERMES_V2_COMMIT = "279be8211d8347cc3500b9a78c6a0f8cb4d92a6a"
 
 
 class HermesV2BoundaryError(ValueError):
@@ -181,7 +180,6 @@ def _discord_native_event(event: Any, key: BindingKey) -> dict[str, Any]:
     raw = _field(event, "raw_message")
     if raw is None:
         raise HermesV2BoundaryError("Discord native message is unavailable")
-    source = _field(event, "source")
     message_id = _field(raw, "id", _field(event, "message_id"))
     author = _field(raw, "author")
     author_id = _identifier("Discord author", _field(author, "id"))
@@ -327,8 +325,9 @@ def _telegram_update(event: Any) -> dict[str, Any]:
         "chat": {"id": chat_id},
         "text": text,
         "entities": entities,
-        "date": date,
     }
+    if date is not None:
+        message["date"] = date
     if reply_id is not None:
         message["reply_to_message"] = {
             "message_id": _native_identifier("Telegram reply", reply_id)

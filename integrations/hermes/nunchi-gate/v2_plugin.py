@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import copy
+import functools
 import hashlib
 import importlib.util
 import inspect
@@ -21,7 +22,7 @@ import sys
 import threading
 import uuid
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -49,15 +50,17 @@ HermesV2BoundaryError = _v2.HermesV2BoundaryError
 
 _NON_PRIVILEGED_TOOLS = frozenset({"web_search", "web_extract"})
 
-from nunchi.authorization import (
+# Installed plugins are loaded by file path; resolve the sibling runtime before
+# importing candidate-package services from the checkout injected by the loader.
+from nunchi.authorization import (  # noqa: E402
     PrivilegedActionCoordinator,
     PrivilegedActionGuard,
     canonical_action_digest,
 )
-from nunchi.core import evaluate_v2
-from nunchi.participant import build_participant_wake
-from nunchi.policy import OperatorPolicy, OperatorPolicySource
-from nunchi.receipts import (
+from nunchi.core import evaluate_v2  # noqa: E402
+from nunchi.participant import build_participant_wake  # noqa: E402
+from nunchi.policy import OperatorPolicy, OperatorPolicySource  # noqa: E402
+from nunchi.receipts import (  # noqa: E402
     ReloadingPolicyAuthorizationSink,
     ReloadingPolicyReceiptSink,
     transport_receipt,
@@ -112,6 +115,7 @@ class _DeliveryCancellation:
     def __init__(self) -> None:
         self.lock = threading.RLock()
         self.cancelled = False
+        self.completed = False
 
 
 def _operator_policy_fingerprint(policy: OperatorPolicy) -> str:
@@ -128,13 +132,21 @@ class HermesV2Controller:
         *,
         participant_id: str,
         max_participants: int = 64,
+        max_pending_authorizations: int = 128,
         authorization_sink_factory: Callable[[Callable[[], OperatorPolicy]], Any] = ReloadingPolicyAuthorizationSink,
     ) -> None:
         if not isinstance(max_participants, int) or max_participants < 1:
             raise HermesV2BoundaryError("participant registry limit is invalid")
         if not callable(authorization_sink_factory):
             raise HermesV2BoundaryError("authorization sink factory is invalid")
+        if (
+            isinstance(max_pending_authorizations, bool)
+            or not isinstance(max_pending_authorizations, int)
+            or not 1 <= max_pending_authorizations <= 10000
+        ):
+            raise HermesV2BoundaryError("pending authorization limit is invalid")
         self.max_participants = max_participants
+        self.max_pending_authorizations = max_pending_authorizations
         self._default_participant = str(participant_id)
         self.registry = _v2.BindingRegistry(participant_id=participant_id)
         self._registries = {participant_id: self.registry}
@@ -155,6 +167,7 @@ class HermesV2Controller:
         self._authorization_sink_factory = authorization_sink_factory
         self._participant_receipts: dict[str, OpportunityEvaluation] = {}
         self._pending_authorizations: dict[str, tuple[Any, Any]] = {}
+        self._pending_authorization_reservations = 0
 
     def registry_for(self, participant_id: str):
         participant = str(participant_id).strip()
@@ -305,6 +318,7 @@ class HermesV2Controller:
                 receipt_sink=accepted.host.receipt_sink,
                 classifier_transport=accepted.host.classifier_transport,
                 policy_identity=accepted.host.policy_identity,
+                complete_scheduler=cancellation is None,
             )
         except BaseException:
             if cancellation is None:
@@ -329,6 +343,15 @@ class HermesV2Controller:
                         session_key=accepted.host.session_key,
                     )
         else:
+            if cancellation is not None:
+                with cancellation.lock:
+                    if cancellation.cancelled:
+                        return DeliveryResult("cancelled", evaluation)
+                    promoted = accepted.binding.scheduler.complete(
+                        accepted.opportunity
+                    )
+                    cancellation.completed = True
+                evaluation = replace(evaluation, promoted=promoted)
             self._drop_host_delivery(
                 accepted.binding, accepted.opportunity.anchor_event_id
             )
@@ -358,6 +381,28 @@ class HermesV2Controller:
             if promoted is not None:
                 self._promote(accepted.binding, promoted)
 
+    def cancel_delivery(
+        self,
+        accepted: AcceptedHostDelivery,
+        cancellation: _DeliveryCancellation,
+        *,
+        discard_pending: bool = False,
+    ) -> None:
+        """Cancel once without racing an already completed non-wake generation."""
+        with cancellation.lock:
+            if cancellation.cancelled:
+                return
+            cancellation.cancelled = True
+            if cancellation.completed:
+                return
+            session_key = accepted.host.session_key
+            if self.is_ticketed(session_key):
+                self.abort_participant_turn(
+                    session_key, discard_pending=discard_pending
+                )
+            else:
+                self.fail_delivery(accepted, discard_pending=discard_pending)
+
     def evaluate_opportunity(
         self,
         *,
@@ -367,6 +412,7 @@ class HermesV2Controller:
         receipt_sink: Callable[[dict[str, Any]], None],
         classifier_transport: Callable[[dict[str, Any], Any], Any] | None = None,
         policy_identity: str | None = None,
+        complete_scheduler: bool = True,
     ) -> OpportunityEvaluation:
         """Evaluate one scheduler-issued opportunity exactly once."""
         if opportunity is None:
@@ -406,7 +452,11 @@ class HermesV2Controller:
             decision.get("status") == "ok"
             and decision.get("effective_disposition") == "SUPPRESS"
         ):
-            promoted = binding.scheduler.complete(opportunity)
+            promoted = (
+                binding.scheduler.complete(opportunity)
+                if complete_scheduler
+                else None
+            )
             return OpportunityEvaluation(
                 "suppressed", binding, opportunity, copy.deepcopy(request),
                 copy.deepcopy(decision), None, None, receipt_sink,
@@ -448,7 +498,11 @@ class HermesV2Controller:
                 ),
                 stage="participant-host",
             )
-            promoted = binding.scheduler.complete(opportunity)
+            promoted = (
+                binding.scheduler.complete(opportunity)
+                if complete_scheduler
+                else None
+            )
             return OpportunityEvaluation(
                 "no-wake", binding, opportunity, copy.deepcopy(request),
                 copy.deepcopy(decision), copy.deepcopy(participant_snapshot),
@@ -555,7 +609,7 @@ class HermesV2Controller:
         self, session_key: str, evaluation: OpportunityEvaluation
     ) -> None:
         self._persist_participant_receipt_once(
-            session_key, evaluation, outcome="sent"
+            session_key, evaluation, outcome="unknown"
         )
         self.set_transport_session(session_key)
 
@@ -569,7 +623,7 @@ class HermesV2Controller:
             outcome = "silent"
         elif isinstance(response, str):
             action = {"kind": "message", "content": response}
-            outcome = "sent"
+            outcome = "unknown"
         elif isinstance(response, dict) and response.get("kind") == "message":
             if (
                 set(response) - {"kind", "content", "reply_to_event_id", "mention_actor_ids"}
@@ -578,7 +632,7 @@ class HermesV2Controller:
             ):
                 raise HermesV2BoundaryError("Hermes participant message is invalid")
             action = copy.deepcopy(response)
-            outcome = "sent"
+            outcome = "unknown"
         elif isinstance(response, dict) and response.get("kind") == "reaction":
             if set(response) != {"kind", "target_event_id", "reaction"} or not all(
                 isinstance(response.get(field), str) and response[field]
@@ -586,7 +640,7 @@ class HermesV2Controller:
             ):
                 raise HermesV2BoundaryError("Hermes participant reaction is invalid")
             action = copy.deepcopy(response)
-            outcome = "sent"
+            outcome = "unknown"
         else:
             raise HermesV2BoundaryError("Hermes participant outcome is unsupported")
         already_persisted = False
@@ -1140,7 +1194,23 @@ class HermesV2Controller:
             "operation": operation,
         }
 
+    def _prune_pending_authorizations(self) -> None:
+        with self._lock:
+            snapshot = tuple(self._pending_authorizations.items())
+        stale_sinks = []
+        for challenge_id, pending in snapshot:
+            coordinator, sink = pending
+            if coordinator.pending_for_operator():
+                continue
+            with self._lock:
+                if self._pending_authorizations.get(challenge_id) is pending:
+                    self._pending_authorizations.pop(challenge_id, None)
+                    stale_sinks.append(sink)
+        for sink in stale_sinks:
+            self._close_authorization_sink(sink)
+
     def pending_authorizations(self) -> tuple[dict[str, Any], ...]:
+        self._prune_pending_authorizations()
         with self._lock:
             pending = tuple(self._pending_authorizations.values())
         return tuple(
@@ -1203,55 +1273,77 @@ class HermesV2Controller:
         action = self._privileged_action(
             evaluation, tool_name=tool_name, arguments=arguments
         )
-        authorization_sink = self._authorization_sink_factory(
-            evaluation.policy_loader
-        )
-        result_box: dict[str, Any] = {}
-
-        def execute(_operation: Any) -> None:
-            result_box["value"] = self._invoke_tool(next_call, arguments)
-
-        capability = action["authorization_request"]["capability"]
-        coordinator = PrivilegedActionCoordinator(
-            PrivilegedActionGuard(evaluation.policy_loader),
-            executors={capability: execute},
-            audit_sink=authorization_sink,
-        )
-        try:
-            coordinated = coordinator.propose(
-                action,
-                evaluation.participant_snapshot,
-                before_execute=lambda: self._prepare_tool_effect(
-                    session_key, evaluation
-                ),
-            )
-        except BaseException as failure:
-            self.record_output_attempt(error=failure)
-            self._close_authorization_sink(authorization_sink)
-            raise
-
-        execution = coordinated["execution"]
-        if execution == "executed":
-            self.record_output_attempt(result=result_box.get("value"))
-            self._close_authorization_sink(authorization_sink)
-            return result_box.get("value")
-
-        self._persist_participant_receipt_once(
-            session_key, evaluation, outcome="silent"
-        )
-        if execution == "pending":
-            challenge = coordinated["authorization"]["approval_challenge"]
-            with self._lock:
-                self._pending_authorizations[challenge["challenge_id"]] = (
-                    coordinator,
-                    authorization_sink,
+        self._prune_pending_authorizations()
+        with self._lock:
+            if (
+                len(self._pending_authorizations)
+                + self._pending_authorization_reservations
+                >= self.max_pending_authorizations
+            ):
+                raise HermesV2BoundaryError(
+                    "pending authorization capacity is exhausted"
                 )
-            raise HermesV2BoundaryError(
-                "privileged action requires authenticated approval; room prose is not approval"
+            self._pending_authorization_reservations += 1
+        capacity_reserved = True
+        authorization_sink = None
+        retain_authorization_sink = False
+        try:
+            authorization_sink = self._authorization_sink_factory(
+                evaluation.policy_loader
             )
+            result_box: dict[str, Any] = {}
 
-        self._close_authorization_sink(authorization_sink)
-        raise HermesV2BoundaryError("privileged action was denied")
+            def execute(_operation: Any) -> None:
+                # Direct proposals already call this via before_execute. Delayed
+                # approvals do not, so the stored executor must enforce the same
+                # immutable pre-effect receipt immediately before dispatch.
+                self._prepare_tool_effect(session_key, evaluation)
+                result_box["value"] = self._invoke_tool(next_call, arguments)
+
+            capability = action["authorization_request"]["capability"]
+            coordinator = PrivilegedActionCoordinator(
+                PrivilegedActionGuard(evaluation.policy_loader),
+                executors={capability: execute},
+                audit_sink=authorization_sink,
+            )
+            try:
+                coordinated = coordinator.propose(
+                    action,
+                    evaluation.participant_snapshot,
+                    before_execute=lambda: self._prepare_tool_effect(
+                        session_key, evaluation
+                    ),
+                )
+            except BaseException as failure:
+                self.record_output_attempt(error=failure)
+                raise
+
+            execution = coordinated["execution"]
+            if execution == "executed":
+                self.record_output_attempt(result=result_box.get("value"))
+                return result_box.get("value")
+
+            if execution == "pending":
+                challenge = coordinated["authorization"]["approval_challenge"]
+                with self._lock:
+                    self._pending_authorizations[challenge["challenge_id"]] = (
+                        coordinator,
+                        authorization_sink,
+                    )
+                    self._pending_authorization_reservations -= 1
+                    capacity_reserved = False
+                    retain_authorization_sink = True
+                raise HermesV2BoundaryError(
+                    "privileged action requires authenticated approval; room prose is not approval"
+                )
+
+            raise HermesV2BoundaryError("privileged action was denied")
+        finally:
+            if capacity_reserved:
+                with self._lock:
+                    self._pending_authorization_reservations -= 1
+            if authorization_sink is not None and not retain_authorization_sink:
+                self._close_authorization_sink(authorization_sink)
 
 
 _CONTROLLER = HermesV2Controller(
@@ -1348,15 +1440,19 @@ def _config_in_scope(config: dict[str, Any], event: Any) -> bool:
     if "*" not in platforms and platform not in platforms:
         return False
     channels = _values(config.get("channels"))
-    channel_ids = {
-        str(value)
-        for value in (
-            getattr(source, "chat_id", None),
-            getattr(source, "parent_chat_id", None),
-            getattr(source, "thread_id", None),
-        )
-        if value is not None and str(value)
-    }
+    chat_id = getattr(source, "chat_id", None)
+    parent_chat_id = getattr(source, "parent_chat_id", None)
+    thread_id = getattr(source, "thread_id", None)
+    if platform == "telegram":
+        channel_ids = {str(chat_id)} if chat_id is not None and str(chat_id) else set()
+        if chat_id is not None and thread_id is not None:
+            channel_ids.add(f"telegram:chat:{chat_id}:topic:{thread_id}")
+    else:
+        channel_ids = {
+            str(value)
+            for value in (chat_id, parent_chat_id, thread_id)
+            if value is not None and str(value)
+        }
     return "*" in channels or bool(channels & channel_ids)
 
 
@@ -1375,14 +1471,14 @@ def _gateway_for_adapter(adapter: Any) -> Any:
     return None
 
 
-def _event_in_scope(event: Any, gateway: Any) -> bool:
+def _event_in_scope(event: Any, gateway: Any) -> bool | None:
     if _CONFIG_LOADER is None or gateway is None:
-        return False
+        return None
     try:
         config = _CONFIG_LOADER(event, gateway)
+        return isinstance(config, dict) and _config_in_scope(config, event)
     except Exception:
-        return False
-    return isinstance(config, dict) and _config_in_scope(config, event)
+        return None
 
 
 def _session_key_from_context(explicit: str | None = None) -> str | None:
@@ -1965,16 +2061,40 @@ def install_telegram_exact_text(adapter_cls: Any) -> bool:
     typed_original: Any = original
 
     def wrapped_enqueue(self, event):
+        should_drop = getattr(self, "_should_drop_delayed_delivery", None)
+        if not callable(should_drop):
+            raise HermesV2BoundaryError(
+                "Telegram delayed-delivery fence is unavailable"
+            )
+        if should_drop():
+            return None
+        apply_topic_recovery = getattr(self, "_apply_topic_recovery", None)
+        if not callable(apply_topic_recovery):
+            raise HermesV2BoundaryError(
+                "Telegram topic-recovery seam is unavailable"
+            )
+        apply_topic_recovery(event)
         gateway = _gateway_for_adapter(self)
-        if not _event_in_scope(event, gateway):
+        scope = _event_in_scope(event, gateway)
+        if scope is None:
+            raise HermesV2BoundaryError(
+                "Hermes V2 configuration scope is unavailable"
+            )
+        if scope is False:
             return typed_original(self, event)
         handle_message = getattr(self, "handle_message", None)
         if not callable(handle_message):
             raise HermesV2BoundaryError(
                 "Telegram exact-event dispatch seam is unavailable"
             )
-        pending: Any = handle_message(event)
-        task = asyncio.create_task(pending)
+        typed_handle_message: Any = handle_message
+
+        async def dispatch_exact_event() -> Any:
+            if should_drop():
+                return None
+            return await typed_handle_message(event)
+
+        task = asyncio.create_task(dispatch_exact_event())
         background = getattr(self, "_background_tasks", None)
         if isinstance(background, set):
             background.add(task)
@@ -2238,7 +2358,7 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
                 )
                 guard_only = (
                     entry_evaluation is None
-                    and _event_in_scope(event, gateway)
+                    and _event_in_scope(event, gateway) is True
                     and not control_output
                 )
                 token = _CONTROLLER.begin_output_collection(
@@ -2400,26 +2520,52 @@ def on_pre_gateway_dispatch(event: Any, gateway: Any = None, **_: Any):
     authorize = getattr(gateway, "_is_user_authorized", None)
     if not callable(authorize):
         return {"action": "skip", "reason": "nunchi:v2-host-incompatible"}
-    try:
-        authorized = authorize(source)
-    except Exception:
-        return None
-    if authorized is not True:
-        # Preserve Hermes' own pairing/unauthorized behavior without retaining
-        # untrusted text in Nunchi observation state.
-        return None
     session_resolver = getattr(gateway, "_session_key_for_source", None)
     if not callable(session_resolver):
         return {"action": "skip", "reason": "nunchi:v2-host-incompatible"}
     session_key = str(session_resolver(source) or "")
     if not session_key:
         return {"action": "skip", "reason": "nunchi:v2-host-incompatible"}
+    reserved_dispatch = bool(
+        event_id and _CONTROLLER.tickets.has_dispatch(event_id, session_key)
+    )
+
+    def abort_reserved_dispatch() -> None:
+        if not reserved_dispatch:
+            return
+        try:
+            _CONTROLLER.abort_participant_turn(
+                session_key, discard_pending=True
+            )
+        except Exception:
+            logger.exception(
+                "Hermes V2 reserved dispatch cleanup failed closed"
+            )
+
+    try:
+        authorized = authorize(source)
+    except Exception:
+        abort_reserved_dispatch()
+        return {"action": "skip", "reason": "nunchi:v2-authorization-error"}
+    if authorized is False:
+        # Preserve Hermes' own pairing/unauthorized behavior without retaining
+        # untrusted text in Nunchi observation state. A reserved Nunchi
+        # redispatch is different: it must be withdrawn before host dispatch.
+        if reserved_dispatch:
+            abort_reserved_dispatch()
+            return {
+                "action": "skip",
+                "reason": "nunchi:v2-authorization-revoked",
+            }
+        return None
+    if authorized is not True:
+        abort_reserved_dispatch()
+        return {"action": "skip", "reason": "nunchi:v2-authorization-error"}
     # A second, host-owned redispatch consumes one ticket bound to both the
     # native event and this exact Hermes profile/session.
-    if (
-        event_id
-        and _CONTROLLER.tickets.consume_dispatch(event_id, session_key) is not None
-    ):
+    if reserved_dispatch:
+        if _CONTROLLER.tickets.consume_dispatch(event_id, session_key) is None:
+            return {"action": "skip", "reason": "nunchi:v2-ticket-expired"}
         return None
     try:
         config = _CONFIG_LOADER(event, gateway)
@@ -2433,11 +2579,14 @@ def on_pre_gateway_dispatch(event: Any, gateway: Any = None, **_: Any):
         return {"action": "skip", "reason": "nunchi:v2-policy-unavailable"}
     policy_source = OperatorPolicySource(policy_path)
     policy_loader = policy_source.load
-    receipt_sink = _receipt_sink_for(
-        profile=str(getattr(source, "profile", "") or ""),
-        policy_path=policy_path,
-        policy_loader=policy_loader,
-    )
+    try:
+        receipt_sink = _receipt_sink_for(
+            profile=str(getattr(source, "profile", "") or ""),
+            policy_path=policy_path,
+            policy_loader=policy_loader,
+        )
+    except Exception:
+        return {"action": "skip", "reason": "nunchi:v2-receipt-error"}
     try:
         running_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -2515,18 +2664,9 @@ def on_pre_gateway_dispatch(event: Any, gateway: Any = None, **_: Any):
         background = getattr(adapter, "_background_tasks", None)
 
         def cancel_evaluation() -> None:
-            with delivery_cancellation.lock:
-                if delivery_cancellation.cancelled:
-                    return
-                delivery_cancellation.cancelled = True
-                if _CONTROLLER.is_ticketed(session_key):
-                    _CONTROLLER.abort_participant_turn(
-                        session_key, discard_pending=True
-                    )
-                else:
-                    _CONTROLLER.fail_delivery(
-                        accepted, discard_pending=True
-                    )
+            _CONTROLLER.cancel_delivery(
+                accepted, delivery_cancellation, discard_pending=True
+            )
 
         async def track_worker_lifetime() -> None:
             cancellation_requested = False
@@ -2675,11 +2815,19 @@ def on_tool_execution(
     **_: Any,
 ):
     payload = args if isinstance(args, dict) else arguments if isinstance(arguments, dict) else {}
+    downstream_started = False
+
+    @functools.wraps(next_call)
+    def tracked_next_call(*call_args, **call_kwargs):
+        nonlocal downstream_started
+        downstream_started = True
+        return next_call(*call_args, **call_kwargs)
+
     try:
         return _CONTROLLER.tool_execution(
             tool_name=tool_name,
             arguments=payload,
-            next_call=next_call,
+            next_call=tracked_next_call,
         )
     except HermesV2BoundaryError as exc:
         # Hermes execution middleware is fail-open when callbacks raise before
@@ -2691,26 +2839,117 @@ def on_tool_execution(
             },
             sort_keys=True,
         )
+    except Exception as exc:
+        if downstream_started:
+            raise
+        # Installed Hermes retries downstream execution when middleware raises
+        # before next_call. Every operational failure is therefore a terminal
+        # fail-closed result at this public callback boundary.
+        logger.exception("Hermes V2 tool execution failed closed")
+        return json.dumps(
+            {
+                "error": "nunchi-v2-execution-failed",
+                "detail": str(exc),
+            },
+            sort_keys=True,
+        )
 
 
 def _load_platform_module(module_name: str) -> Any:
     return __import__(module_name, fromlist=["*"])
 
 
+def _load_host_classes() -> tuple[type, type]:
+    gateway_module = _load_platform_module("gateway.run")
+    base_module = _load_platform_module("gateway.platforms.base")
+    return gateway_module.GatewayRunner, base_module.BasePlatformAdapter
+
+
+def _restore_class_snapshots(snapshots: list[tuple[type, dict[str, Any]]]) -> None:
+    failures = []
+    for host_class, before in reversed(snapshots):
+        current = dict(host_class.__dict__)
+        for name in current.keys() - before.keys():
+            try:
+                delattr(host_class, name)
+            except Exception as exc:
+                failures.append((host_class.__name__, name, exc))
+        for name, value in before.items():
+            if host_class.__dict__.get(name) is value:
+                continue
+            try:
+                setattr(host_class, name, value)
+            except Exception as exc:
+                failures.append((host_class.__name__, name, exc))
+    if failures:
+        detail = ", ".join(f"{owner}.{name}" for owner, name, _ in failures)
+        raise HermesV2BoundaryError(
+            f"Hermes V2 host-wrapper rollback failed for {detail}"
+        ) from failures[0][2]
+
+
+CallbackRegistrySnapshot = tuple[
+    dict[str, list[Any]],
+    dict[str, tuple[list[Any], tuple[Any, ...]]],
+]
+
+
+def _snapshot_callback_registry(registry: Any) -> CallbackRegistrySnapshot:
+    if not isinstance(registry, dict):
+        raise HermesV2BoundaryError("Hermes callback registry is unavailable")
+    snapshot: dict[str, tuple[list[Any], tuple[Any, ...]]] = {}
+    for name, callbacks in registry.items():
+        if not isinstance(name, str) or not isinstance(callbacks, list):
+            raise HermesV2BoundaryError(
+                "Hermes callback registry shape is unsupported"
+            )
+        snapshot[name] = (callbacks, tuple(callbacks))
+    return registry, snapshot
+
+
+def _snapshot_callback_registries(
+    ctx: Any,
+) -> tuple[CallbackRegistrySnapshot, CallbackRegistrySnapshot]:
+    manager = getattr(ctx, "_manager", None)
+    if manager is None:
+        raise HermesV2BoundaryError("Hermes plugin manager is unavailable")
+    return (
+        _snapshot_callback_registry(getattr(manager, "_hooks", None)),
+        _snapshot_callback_registry(getattr(manager, "_middleware", None)),
+    )
+
+
+def _restore_callback_registry(snapshot: CallbackRegistrySnapshot) -> None:
+    registry, before = snapshot
+    for name in tuple(registry):
+        if name not in before:
+            del registry[name]
+    for name, (original_list, callbacks) in before.items():
+        original_list[:] = callbacks
+        registry[name] = original_list
+
+
+def _restore_callback_registries(
+    snapshots: tuple[CallbackRegistrySnapshot, CallbackRegistrySnapshot],
+) -> None:
+    for snapshot in snapshots:
+        _restore_callback_registry(snapshot)
+
+
 def register(ctx: Any) -> None:
-    ctx.register_hook("pre_gateway_dispatch", on_pre_gateway_dispatch)
-    ctx.register_hook("pre_llm_call", on_pre_llm_call)
+    register_hook = getattr(ctx, "register_hook", None)
     register_middleware = getattr(ctx, "register_middleware", None)
-    if not callable(register_middleware):
+    if not callable(register_hook) or not callable(register_middleware):
         raise HermesV2BoundaryError(
-            "Hermes 0.19.0 tool_execution middleware is required"
+            "Hermes 0.19.0 hooks and tool_execution middleware are required"
         )
-    register_middleware("tool_execution", on_tool_execution)
-    base_wrappers = install_host_wrappers()
-    if not all(base_wrappers.values()):
+    try:
+        runner_cls, base_adapter_cls = _load_host_classes()
+    except Exception as exc:
         raise HermesV2BoundaryError(
-            "Hermes 0.19.0 participant and transport wrappers are required"
-        )
+            "Hermes 0.19.0 host classes are unavailable"
+        ) from exc
+    platform_modules = []
     for module_name, class_name in (
         ("plugins.platforms.discord.adapter", "DiscordAdapter"),
         ("plugins.platforms.telegram.adapter", "TelegramAdapter"),
@@ -2722,36 +2961,89 @@ def register(ctx: Any) -> None:
             raise HermesV2BoundaryError(
                 f"Hermes 0.19.0 {class_name} is unavailable"
             ) from exc
-        platform_wrappers = install_host_wrappers(
-            runner_cls=type("_NunchiNoRunner", (), {}),
-            adapter_cls=platform_adapter_cls,
-        )
-        if not platform_wrappers["transport"]:
-            raise HermesV2BoundaryError(
-                f"Hermes 0.19.0 {class_name} output wrappers are required"
-            )
-        platform = "discord" if class_name == "DiscordAdapter" else "telegram"
-        if not install_reaction_bridge(platform_adapter_cls, platform=platform):
-            raise HermesV2BoundaryError(
-                f"Hermes 0.19.0 {class_name} reaction bridge is required"
-            )
+        platform_modules.append((module, class_name, platform_adapter_cls))
+
+    try:
+        callback_snapshots = _snapshot_callback_registries(ctx)
+    except Exception as exc:
+        raise HermesV2BoundaryError(
+            "Hermes 0.19.0 callback rollback surface is unavailable"
+        ) from exc
+
+    host_classes = [runner_cls, base_adapter_cls]
+    for module, class_name, platform_adapter_cls in platform_modules:
+        host_classes.append(platform_adapter_cls)
         if class_name == "DiscordAdapter":
-            if not install_discord_control_guard(platform_adapter_cls):
-                raise HermesV2BoundaryError(
-                    "Hermes 0.19.0 Discord control guard is required"
-                )
-            if not install_discord_raw_observer(
-                adapter_cls=platform_adapter_cls,
-                bot_cls=module.commands.Bot,
-                discord_module=module.discord,
-            ):
-                raise HermesV2BoundaryError(
-                    "Hermes 0.19.0 Discord raw observer is required"
-                )
-        elif not install_telegram_exact_text(platform_adapter_cls):
+            host_classes.append(module.commands.Bot)
+    snapshots = []
+    seen_classes = set()
+    for host_class in host_classes:
+        if id(host_class) in seen_classes:
+            continue
+        seen_classes.add(id(host_class))
+        snapshots.append((host_class, dict(host_class.__dict__)))
+
+    try:
+        base_wrappers = install_host_wrappers(
+            runner_cls=runner_cls,
+            adapter_cls=base_adapter_cls,
+        )
+        if not all(base_wrappers.values()):
             raise HermesV2BoundaryError(
-                "Hermes 0.19.0 Telegram exact-event dispatch is required"
+                "Hermes 0.19.0 participant and transport wrappers are required"
             )
+        for module, class_name, platform_adapter_cls in platform_modules:
+            platform_wrappers = install_host_wrappers(
+                runner_cls=type("_NunchiNoRunner", (), {}),
+                adapter_cls=platform_adapter_cls,
+            )
+            if not platform_wrappers["transport"]:
+                raise HermesV2BoundaryError(
+                    f"Hermes 0.19.0 {class_name} output wrappers are required"
+                )
+            platform = (
+                "discord" if class_name == "DiscordAdapter" else "telegram"
+            )
+            if not install_reaction_bridge(platform_adapter_cls, platform=platform):
+                raise HermesV2BoundaryError(
+                    f"Hermes 0.19.0 {class_name} reaction bridge is required"
+                )
+            if class_name == "DiscordAdapter":
+                if not install_discord_control_guard(platform_adapter_cls):
+                    raise HermesV2BoundaryError(
+                        "Hermes 0.19.0 Discord control guard is required"
+                    )
+                if not install_discord_raw_observer(
+                    adapter_cls=platform_adapter_cls,
+                    bot_cls=module.commands.Bot,
+                    discord_module=module.discord,
+                ):
+                    raise HermesV2BoundaryError(
+                        "Hermes 0.19.0 Discord raw observer is required"
+                    )
+            elif not install_telegram_exact_text(platform_adapter_cls):
+                raise HermesV2BoundaryError(
+                    "Hermes 0.19.0 Telegram exact-event dispatch is required"
+                )
+        register_hook("pre_gateway_dispatch", on_pre_gateway_dispatch)
+        register_hook("pre_llm_call", on_pre_llm_call)
+        register_middleware("tool_execution", on_tool_execution)
+    except BaseException:
+        rollback_error: BaseException | None = None
+        try:
+            _restore_callback_registries(callback_snapshots)
+        except BaseException as exc:
+            rollback_error = exc
+        try:
+            _restore_class_snapshots(snapshots)
+        except BaseException as exc:
+            if rollback_error is None:
+                rollback_error = exc
+        if rollback_error is not None:
+            raise HermesV2BoundaryError(
+                "Hermes V2 registration rollback was incomplete"
+            ) from rollback_error
+        raise
 
 
 __all__ = [

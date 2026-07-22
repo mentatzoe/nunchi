@@ -1,60 +1,78 @@
-# Hermes V2 successor verification — 2026-07-21
+# Hermes V2 pre-activation draft verification — 2026-07-22
 
-## Candidate identity and scope
+## Draft identity and scope
 
-- Canonical base: `a03eeb95c7d569895e1171993c7a5748fc250bd8`
-- Successor branch: `codex/v2-hermes-successor-08`
-- Final candidate commit: assigned by Git after this record is frozen; the exact
-  commit is reported with the manifest digest in the external review request.
+- Candidate base: `8e64746970f9910d03b372291c5aa173883e869f`
+- Branch: `v2/hermes`
+- Final draft commit: assigned by Git after this record and the complete
+  manifest are frozen; reported externally with the manifest SHA-256.
 - Installed Hermes source: `/Users/zmll/.hermes/hermes-agent`
-- Installed Hermes commit: `f657840e06e03b9552cf2d28175a1e4e4af0210b`
+- Installed Hermes commit: `279be8211d8347cc3500b9a78c6a0f8cb4d92a6a`
 - Installed Hermes version: `0.19.0`
 
-The candidate is an independent complete successor from the canonical base.
-The rejected 23-entry manifest is historical REWORK evidence only and is not a
-parent or reconstruction dependency.
+The branch incorporates the exact current `origin/codex/v2-integration` tip and
+its merged 040/050 state. This is a technical draft-review object, not a
+canonical Slice 060 candidate or handoff. It does not claim installation,
+activation, transport delivery, or lifecycle authority.
 
-## Remediation coverage
+## Independent-review remediation
 
-The successor closes the original HIGH classes and follow-up lifecycle gaps:
+A predecessor staged candidate failed independent review. Its disposition is
+not reused. This successor adds focused regression coverage and implementation
+repairs for every reported blocker:
 
-1. Plaintext and native Discord control output serialize against admission and
-   close owned participant tickets before direct output.
-2. Raw Discord retention and pre-gateway dispatch require canonical literal
-   `True` authorization before lookup, scheduling, retention, or receipts.
-3. Pre-participant and executor cancellation close exact-generation staged
-   state without masking `CancelledError`.
-4. Deferred cleanup cannot finish or abort a promoted generation.
-5. Reserved wake context stays invisible until the exact native dispatch is
-   consumed.
-6. Observation, participant-host, and transport receipt persistence accepts
-   only exact `None` acknowledgements.
-7. `NO_WAKE` closes the participant-host stage canonically without invocation.
-8. Discord and Telegram wrappers rebind to current module globals after reload.
-9. Non-privileged and privileged tools execute only after participant-host
-   receipt persistence; privileged effects use the shared I-040B guard and
-   coordinator with canonical room scope.
-10. Discord and Telegram adapters expose the pinned native reaction protocol;
-    Telegram topic/message correlation preserves exact chat and native message
-    identity, and its optional factory is statically resolved before closure.
-11. The retired executable Hermes V1 command, verdict, state, resolver, and
-    dashboard surface and its obsolete tests are removed; history is archived.
+1. Gateway authorization exceptions and truthy non-booleans now fail closed.
+   Literal `False` preserves ordinary Hermes denial only before Nunchi owns a
+   dispatch; redispatch revocation aborts its reserved ticket, scheduler
+   generation, host-delivery record, and deferred work before returning skip.
+2. Participant-host receipts record immutable `unknown` before adapter-native
+   transport. They no longer claim `sent` before the transport owner knows it.
+3. Public tool middleware contains Nunchi failures only before downstream
+   execution. Native executor failures retain Hermes' original error semantics
+   after exactly one invocation; zero-argument and payload-taking executors both
+   preserve their host signatures.
+4. Global pending-approval capacity is reserved atomically before coordinator
+   proposal/audit persistence. Capacity rejection cannot leave a phantom
+   `APPROVAL_REQUIRED` record, including under a forced two-thread interleaving.
+5. Installed-source provenance binds version, host commit, and candidate base to
+   exact named fields, rejects role swaps and contradictory commit identities,
+   verifies package version, and rejects tracked drift or any untracked path
+   other than the acknowledged `.install_method` marker.
+6. Telegram configuration/scope lookup is tri-state. The exact-event wrapper
+   honors installed teardown/drop fencing and applies installed topic recovery
+   before deciding scope, then rechecks the teardown fence inside its scheduled
+   coroutine immediately before dispatch. Recovered in-scope events cannot enter
+   lossy text batching or outlive a teardown that wins the next event-loop turn.
+7. Every required host class is snapshotted before mutation. Any later wrapper
+   or registration failure restores the complete class patch set and the exact
+   installed plugin-manager hook/middleware lists before the error escapes.
+   Public hooks and middleware register only after all wrappers.
+
+The author reports observing focused cases RED before the corresponding
+implementation changes and GREEN afterward; the frozen packet preserves only
+the final regression tests, not independently auditable RED-run receipts. The
+concurrency test durably forces an in-flight capacity reservation before the
+second proposal.
 
 ## Fresh command results
 
-- Receipt/identity/reload group: `Ran 14 tests` — `OK`.
-- Tool/authorization group: `Ran 5 tests` — `OK`.
-- Focused reaction regressions: `Ran 2 tests in 0.003s` — `OK`.
-- Complete Hermes lifecycle module: `Ran 87 tests in 0.976s` — `OK`.
-- Hermes implementation plus eval: `Ran 94 tests in 2.479s` — `OK`.
-- Repository-wide unittest discovery: `Ran 1014 tests in 47.547s` —
-  `OK (skipped=7)`.
-- Telegram reaction-factory Pyright diagnostic: cleared by binding one
-  definitely-callable `resolved_factory` before the nested reaction method.
+- Complete Hermes implementation plus evaluation: `Ran 119 tests in 3.589s` —
+  `OK`.
+- Repository-wide controlled unittest discovery under Python 3.11, temporary
+  `HOME`, empty `HERMES_HOME`, and `PYTHONDONTWRITEBYTECODE=1`:
+  `Ran 1139 tests in 39.786s` — `OK (skipped=9)`.
+- HM-01 through HM-06 regenerated from the pinned installed source: all `PASS`.
+- Installed private-seam pytest selection: `83 passed in 10.81s`.
+- Draft-owned Ruff selection: `All checks passed!`.
 - Governance boundary and CLI:
   `governance boundary + CLI: OK (SpecKit 0.12.11)`.
-- Hermes executable V1-residue audit: `OK`.
-- `git diff --check` against the canonical base: `OK`.
+- `git diff --check`: `OK`.
+- Installed fixture identity recheck: expected commit and version, clean tracked
+  status.
+
+The draft packet verifier is run only after the manifest is regenerated;
+its exact result and the final manifest digest are reported with the immutable
+review request rather than predeclared in this self-hashed record.
 
 ## HM-01 through HM-06
 
@@ -64,37 +82,29 @@ All six installed-source scenes returned `PASS`:
 - HM-02 disposition routing
 - HM-03 later-hearing restart
 - HM-04 shared Discord
-- HM-05 Telegram capability
-- HM-06 installed provenance
+- HM-05 Telegram capability, including absent-timestamp projection
+- HM-06 installed provenance, registration and late-failure rollback against
+  actual installed `PluginManager._load_plugin`/`PluginContext`, with registry
+  and pre-existing target-name callback-list identity/content preservation;
+  fail-closed containment; and
+  native downstream-error preservation through installed middleware
 
-Regenerated HM evidence SHA-256:
-`7914643bfed7fea164a501eec312a389cefcc7b9c0b2e9e9319de8f19b084761`.
+The committed JSONL rows carry the evidence grade for each scene. HM-04 and
+HM-05 remain deterministic synthetic evidence, not live transport claims.
 
 ## Installed Hermes seams
 
-All installed-source tests used the production interpreter only as an
-executable, disposable pytest site `/tmp/nunchi-hermes-py311-pytest.Vroaus/site`,
-`PYTHONDONTWRITEBYTECODE=1`, and `-p no:cacheprovider`. No package was installed
-and no production source/configuration was changed.
+The installed checkout was inspected and tested without copying candidate code
+into it, modifying its production virtual environment, changing a profile, or
+restarting a gateway. Its tracked source remained clean; full status validation
+confirmed `.install_method` as the only untracked path. See
+`installed-runtime.md` for the exact test scope and method.
 
-- `tests/e2e/test_platform_commands.py`: `50 passed, 4 skipped in 6.03s`.
-- `tests/gateway/test_session_race_guard.py` plus
-  `tests/gateway/test_discord_slash_auth.py`: `60 passed in 5.91s`.
-- `tests/gateway/test_pending_drain_race.py` plus
-  `tests/gateway/test_pending_drain_no_recursion.py`: `8 passed in 4.97s`.
-- `tests/gateway/test_discord_roles_dm_scope.py`, with only
-  `DISCORD_ALLOWED_CHANNELS` and `DISCORD_IGNORED_CHANNELS` unset:
-  `15 passed in 0.18s`. The earlier positive-control failure was inherited
-  channel-scope environment contamination, not an installed-Hermes limitation.
+## Lifecycle boundary
 
-The installed checkout remained clean at
-`f657840e06e03b9552cf2d28175a1e4e4af0210b`.
-
-## Disposition and limitations
-
-This is a source/evidence review candidate, not an installed-runtime cutover.
-No plugin was armed, gateway restarted, profile mutated, or live-delivery claim
-made. Canonical lifecycle activation/candidate/handoff records remain absent,
-so the packet verifier runs in candidate-internal mode rather than
-`--require-complete`. External integration review must accept or reject the
-exact final commit; this packet owner does not self-accept it.
+Slice 060 remains `PLANNED`. Accepted 060-owned upstream dependency records and
+canonical activation/candidate/handoff records are absent; under the governing
+contract, this implementation has no integration authority. No task checkbox
+or lifecycle state is changed by this packet. Review is requested only as draft
+technical feedback from Codex. Program/integrator reconciliation and canonical
+activation remain mandatory before this work can become a governed candidate.
