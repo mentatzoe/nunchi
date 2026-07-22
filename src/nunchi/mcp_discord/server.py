@@ -36,7 +36,7 @@ import sys
 from typing import Awaitable, Callable
 
 from .config import Config, load_config
-from .events import MessageEvent, ReactionEvent
+from .events import GatewayContinuityEvent, MessageEvent, ReactionEvent
 from .hygiene import install_redaction
 
 logger = logging.getLogger("nunchi.mcp_discord.server")
@@ -63,6 +63,18 @@ class InFlight:
             self._count -= 1
             if self._count == 0:
                 self._idle.set()
+
+    def track_future(self, future: asyncio.Future) -> None:
+        """Track the worker itself, not only the cancellable awaiting task."""
+        self._count += 1
+        self._idle.clear()
+
+        def completed(_future: asyncio.Future) -> None:
+            self._count -= 1
+            if self._count == 0:
+                self._idle.set()
+
+        future.add_done_callback(completed)
 
     @property
     def count(self) -> int:
@@ -116,7 +128,7 @@ class BearerAuthMiddleware:
 
 def enqueue_event(
     queue: asyncio.Queue,
-    event: MessageEvent | ReactionEvent,
+    event: MessageEvent | ReactionEvent | GatewayContinuityEvent,
 ) -> bool:
     """Bounded enqueue that never fabricates continuity across overflow.
 
@@ -140,7 +152,7 @@ async def pump_notifications(
     send: Callable[[dict], Awaitable[None]],
     *,
     shutdown: asyncio.Event,
-    projector: Callable[[MessageEvent | ReactionEvent], dict],
+    projector: Callable[[MessageEvent | ReactionEvent | GatewayContinuityEvent], dict],
 ) -> None:
     """Drain the queue into *send* (broadcast to MCP sessions) until shutdown.
 

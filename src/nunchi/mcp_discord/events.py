@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger("nunchi.mcp_discord.events")
 
@@ -131,6 +131,15 @@ def message_addressing(data: dict) -> dict[str, Any]:
     reply_to_message_id = reference.get("message_id")
     if reply_to_message_id is None and referenced is not None:
         reply_to_message_id = referenced.get("id")
+    if (
+        referenced is not None
+        and reference.get("message_id") is not None
+        and referenced.get("id") is not None
+        and reference.get("message_id") != referenced.get("id")
+    ):
+        # Preserve a constructibility failure; never attach one message's
+        # author/content to another message's reference identity.
+        reply_to_message_id = ""
 
     reply_author_id = (
         referenced_author.get("id")
@@ -178,6 +187,9 @@ class MessageEvent:
     reply_to_content: str | None
     mentions_room: bool = False
     thread_root_message_id: str | None = None
+    gateway_session_id: str | None = None
+    gateway_sequence: int | None = None
+    gateway_self_user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -194,9 +206,16 @@ class ReactionEvent:
     operation: str
     gateway_session_id: str
     gateway_sequence: int
+    gateway_self_user_id: str | None = None
 
 
-def message_event_from_create(data: dict) -> MessageEvent:
+def message_event_from_create(
+    data: dict,
+    *,
+    gateway_session_id: str | None = None,
+    gateway_sequence: int | None = None,
+    gateway_self_user_id: str | None = None,
+) -> MessageEvent:
     """Normalize a MESSAGE_CREATE dispatch payload."""
     author = data.get("author")
     if not isinstance(author, dict):
@@ -230,6 +249,9 @@ def message_event_from_create(data: dict) -> MessageEvent:
             if data.get("thread_root_message_id") is not None
             else None
         ),
+        gateway_session_id=gateway_session_id,
+        gateway_sequence=gateway_sequence,
+        gateway_self_user_id=gateway_self_user_id,
     )
 
 
@@ -239,6 +261,7 @@ def reaction_event_from_dispatch(
     operation: str,
     gateway_session_id: str | None,
     gateway_sequence: int | None,
+    gateway_self_user_id: str | None = None,
 ) -> ReactionEvent | None:
     """Normalize a Discord reaction dispatch or return unavailable honestly."""
     if operation not in ("add", "remove"):
@@ -259,6 +282,8 @@ def reaction_event_from_dispatch(
     user = member.get("user") if isinstance(member, dict) else None
     if not isinstance(user, dict):
         user = {}
+    if user.get("id") is not None and user.get("id") != data.get("user_id"):
+        return None
     author_name = user.get("username")
     return ReactionEvent(
         guild_id=(data["guild_id"] if data.get("guild_id") is not None else None),
@@ -271,6 +296,7 @@ def reaction_event_from_dispatch(
         operation=operation,
         gateway_session_id=gateway_session_id,
         gateway_sequence=gateway_sequence,
+        gateway_self_user_id=gateway_self_user_id,
     )
 
 
@@ -292,6 +318,9 @@ def filter_message_create(
     own_user_id: str | None,
     *,
     retain_self: bool = False,
+    gateway_session_id: str | None = None,
+    gateway_sequence: int | None = None,
+    gateway_self_user_id: str | None = None,
 ) -> MessageEvent | None:
     """Drop ONLY self-authored messages; warn loudly on stripped content.
 
@@ -301,7 +330,12 @@ def filter_message_create(
     when the emptiness looks like a missing MESSAGE_CONTENT intent a WARNING
     is logged with the remediation step.
     """
-    event = message_event_from_create(data)
+    event = message_event_from_create(
+        data,
+        gateway_session_id=gateway_session_id,
+        gateway_sequence=gateway_sequence,
+        gateway_self_user_id=gateway_self_user_id,
+    )
     if (
         not retain_self
         and own_user_id is not None
@@ -319,6 +353,16 @@ def filter_message_create(
             event.channel_id,
         )
     return event
+
+
+@dataclass(frozen=True)
+class GatewayContinuityEvent:
+    """Explicit boundary emitted before any post-gap successor."""
+
+    reason: str
+    previous_session_id: str | None
+    expected_sequence: int | None
+    observed_sequence: int | None
 
 
 def _snowflake(value: object) -> str | None:
@@ -346,6 +390,7 @@ class DiscordEventSourceV2:
         *,
         allowed_channel_ids: frozenset[str],
         blocked_actor_ids: frozenset[str] = frozenset(),
+        continuation_issuer: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         if not isinstance(allowed_channel_ids, frozenset) or not allowed_channel_ids:
             raise ValueError("Discord V2 requires a non-empty trusted channel allowlist")
@@ -357,6 +402,9 @@ class DiscordEventSourceV2:
             raise ValueError("Discord blocked actors must be exact snowflake strings")
         self.allowed_channel_ids = allowed_channel_ids
         self.blocked_actor_ids = blocked_actor_ids
+        if continuation_issuer is not None and not callable(continuation_issuer):
+            raise ValueError("Discord continuation issuer is invalid")
+        self._continuation_issuer = continuation_issuer
 
     @staticmethod
     def _unroutable(delivery_id: str, reason: str) -> dict:
@@ -544,12 +592,39 @@ class DiscordEventSourceV2:
             "actors": {_discord_actor_id(author_id): actor},
         }
 
-    def notification_params(self, event: MessageEvent | ReactionEvent) -> dict[str, Any]:
+    def notification_params(
+        self,
+        event: MessageEvent | ReactionEvent | GatewayContinuityEvent,
+    ) -> dict[str, Any]:
         """Versioned credential-free reactive notification for V2 consumers."""
-        return {
+        if isinstance(event, GatewayContinuityEvent):
+            return {
+                "schema_version": 2,
+                "platform": "discord",
+                "kind": "continuity-boundary",
+                "reason": event.reason,
+                "previous_gateway_session_id": event.previous_session_id,
+                "expected_gateway_sequence": event.expected_sequence,
+                "observed_gateway_sequence": event.observed_sequence,
+                "continuity": "known-gap",
+                "has_restart_gap": True,
+            }
+        params = {
             "schema_version": 2,
             "platform": "discord",
             "guild_id": event.guild_id,
             "channel_id": event.channel_id,
+            "gateway_session_id": event.gateway_session_id,
+            "gateway_sequence": event.gateway_sequence,
+            "gateway_self_user_id": event.gateway_self_user_id,
             "native_input": self.native_input(event),
         }
+        if (
+            isinstance(event, MessageEvent)
+            and self._continuation_issuer is not None
+            and params["native_input"].get("disposition") == "candidate-event"
+        ):
+            params["continuation"] = self._continuation_issuer(
+                params["native_input"]["event"]["id"]
+            )
+        return params

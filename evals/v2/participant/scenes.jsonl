@@ -1,0 +1,8 @@
+{"scene_id":"PT-01-suppress","decision":"SUPPRESS","expected_invoked":false,"expected_effects":0,"claim":"complete decision validation precedes suppression"}
+{"scene_id":"PT-02-wake-silence","decision":"WAKE","participant_action":null,"expected_outcome":"silent","claim":"a woken participant may directly stay silent"}
+{"scene_id":"PT-03-defer-action","decision":"DEFER","participant_action":"message","expected_host_receipt_outcome":"unknown","claim":"transport owns later delivery truth"}
+{"scene_id":"PT-04-bypass","decision":"PREATTENTION_BYPASS","expected_classifier_calls":0,"claim":"trusted bypass does not fabricate a model result"}
+{"scene_id":"PT-05-error-no-wake","decision":"ERROR","operator_error_action":"NO_WAKE","expected_invoked":false,"claim":"operator error policy is deterministic and receipted"}
+{"scene_id":"PT-06-stale-decision","decision_request":"different-request","expected_effects":0,"claim":"a foreign decision cannot suppress or wake this request"}
+{"scene_id":"PT-07-expansion-expiry","foreign_binding":true,"expired_handle":true,"unknown_cursor":true,"retain_turn":true,"expected_fetch":"rejected-before-provider","expected_post_turn_fetch":"rejected","claim":"continuation authority is host-bound, clock-checked, cursor-provenant, and turn-scoped"}
+{"scene_id":"PT-08-concurrent-order","observed":["e1","e2"],"expected_active":"e1","expected_pending":"e2","claim":"ingest and scheduling order cannot invert"}

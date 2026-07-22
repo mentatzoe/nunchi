@@ -35,8 +35,9 @@ class RateLimiter:
         self._clock = clock
         self._sleep = sleeper
         self._lock = threading.Lock()
-        # route -> (remaining, reset_at monotonic)
+        # Discord bucket identity -> (remaining, reset_at monotonic).
         self._buckets: dict[str, tuple[int, float]] = {}
+        self._route_buckets: dict[str, str] = {}
         self._global_until = 0.0
 
     def before_request(self, route: str) -> None:
@@ -44,13 +45,28 @@ class RateLimiter:
         with self._lock:
             now = self._clock()
             delay = max(0.0, self._global_until - now)
-            bucket = self._buckets.get(route)
+            bucket_key = self._route_buckets.get(route, f"route:{route}")
+            bucket = self._buckets.get(bucket_key)
+            clear_bucket: tuple[int, float] | None = None
             if bucket is not None:
                 remaining, reset_at = bucket
-                if remaining <= 0 and reset_at > now:
+                if reset_at <= now:
+                    self._buckets.pop(bucket_key, None)
+                elif remaining <= 0:
                     delay = max(delay, reset_at - now)
+                    clear_bucket = bucket
+                elif delay == 0:
+                    # Reserve capacity while holding the lock so two worker
+                    # threads cannot both consume the last remaining slot.
+                    self._buckets[bucket_key] = (remaining - 1, reset_at)
+            clear_global = self._global_until > now and delay > 0
         if delay > 0:
             self._sleep(delay)
+            with self._lock:
+                if clear_bucket is not None and self._buckets.get(bucket_key) == clear_bucket:
+                    self._buckets.pop(bucket_key, None)
+                if clear_global:
+                    self._global_until = 0.0
 
     def after_response(self, route: str, headers: Mapping[str, str]) -> None:
         """Record bucket state from response headers (lower-cased keys)."""
@@ -73,7 +89,13 @@ class RateLimiter:
         except (TypeError, ValueError, OverflowError):
             return
         with self._lock:
-            self._buckets[route] = parsed
+            bucket_id = headers.get("x-ratelimit-bucket")
+            if isinstance(bucket_id, str) and bucket_id and len(bucket_id) <= 512:
+                bucket_key = f"discord:{bucket_id}"
+                self._route_buckets[route] = bucket_key
+            else:
+                bucket_key = self._route_buckets.get(route, f"route:{route}")
+            self._buckets[bucket_key] = parsed
 
     def note_retry_after(self, route: str, seconds: float, *, is_global: bool) -> None:
         """Record a 429's retry-after so the next attempt waits."""
@@ -84,7 +106,8 @@ class RateLimiter:
             if is_global:
                 self._global_until = max(self._global_until, until)
             else:
-                self._buckets[route] = (0, until)
+                bucket_key = self._route_buckets.get(route, f"route:{route}")
+                self._buckets[bucket_key] = (0, until)
 
 
 class SendBackstop:

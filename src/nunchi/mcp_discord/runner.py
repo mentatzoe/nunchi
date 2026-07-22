@@ -19,6 +19,7 @@ import random
 from typing import Awaitable, Callable
 
 from .events import (
+    GatewayContinuityEvent,
     MessageEvent,
     ReactionEvent,
     filter_message_create,
@@ -93,6 +94,18 @@ class GatewayRunner:
                     f"gateway closed with code {close_code}: {hint or 'not retryable'}"
                 )
             if strategy == "identify":
+                self._on_event(
+                    GatewayContinuityEvent(
+                        reason=f"gateway-close-{close_code}-requires-identify",
+                        previous_session_id=self._protocol.session_id,
+                        expected_sequence=(
+                            self._protocol.seq + 1
+                            if self._protocol.seq is not None
+                            else None
+                        ),
+                        observed_sequence=None,
+                    )
+                )
                 self._protocol.invalidate_session()
             logger.warning(
                 "gateway connection ended (code=%s); will %s in %.1fs",
@@ -130,6 +143,9 @@ class GatewayRunner:
                                 action.data,
                                 self._protocol.own_user_id,
                                 retain_self=True,
+                                gateway_session_id=action.session_id,
+                                gateway_sequence=action.sequence,
+                                gateway_self_user_id=self._protocol.own_user_id,
                             )
                             if event is not None:
                                 self._on_event(event)
@@ -146,10 +162,20 @@ class GatewayRunner:
                                 ),
                                 gateway_session_id=action.session_id,
                                 gateway_sequence=action.sequence,
+                                gateway_self_user_id=self._protocol.own_user_id,
                             )
                             if event is not None:
                                 self._on_event(event)
                     elif isinstance(action, CloseAndReconnect):
+                        if action.reason is not None:
+                            self._on_event(
+                                GatewayContinuityEvent(
+                                    reason=action.reason,
+                                    previous_session_id=action.previous_session_id,
+                                    expected_sequence=action.expected_sequence,
+                                    observed_sequence=action.observed_sequence,
+                                )
+                            )
                         logger.info(
                             "gateway asked us to reconnect (resume=%s)", action.resume
                         )

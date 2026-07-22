@@ -7,7 +7,7 @@ flowchart LR
   D["Discord Gateway<br/>message and reaction dispatch"] --> G["Gateway protocol<br/>exact session and sequence"]
   G --> N["DiscordEventSourceV2<br/>allowlist and canonical facts"]
   N --> Q["Bounded newest-preserving<br/>notification queue"]
-  Q --> A["Bearer-authenticated<br/>streamable HTTP MCP"]
+  Q --> A["Bound participant/room session<br/>replayable streamable HTTP MCP"]
   A --> C["V2 consumers<br/>observation and participants"]
   C -->|"allowlisted tool call"| T["Tool executor<br/>closed arguments and backstop"]
   T --> R["Discord REST"]
@@ -34,11 +34,14 @@ sequenceDiagram
   Gateway->>Source: exact native event
   Source->>MCP: versioned candidate or unroutable input
   MCP->>MCP: verify Bearer credential
-  MCP-->>Consumer: V2 notification
+  Consumer->>MCP: open SSE then subscribe_events
+  MCP-->>Consumer: exact binding plus bounded snapshot
+  MCP-->>Consumer: V2 notification plus gateway lineage
   Consumer->>Consumer: observe, coalesce, judge once, act or stay silent
   opt concrete room action
-    Consumer->>MCP: allowlisted closed tool call
-    MCP->>REST: exact effect with mention and reply controls
+    Consumer->>MCP: request-correlated closed tool call
+    MCP->>MCP: durable exclusive request claim
+    MCP->>REST: exact effect with nonce, mention and reply controls
     REST-->>MCP: API result
     MCP-->>Consumer: factual tool result
   end
@@ -46,8 +49,9 @@ sequenceDiagram
 
 ## Deterministic security rules
 
-1. `NUNCHI_MCP_DISCORD_CHANNELS` is mandatory and non-empty. Every notification
-   and tool path checks it; text cannot redirect a call.
+1. Each process/credential binds exactly one channel, participant and READY-
+   attested bot user. Every subscription, notification, tool and response checks
+   that binding; text cannot redirect a call.
 2. `NUNCHI_MCP_DISCORD_AUTH_TOKEN` is mandatory, at least 32 printable ASCII
    characters, and must differ from the Discord bot token.
 3. The plaintext server binds only to loopback; remote access must terminate
@@ -63,12 +67,20 @@ sequenceDiagram
 7. A Ready-event resume URL is accepted only over `wss` on a Discord-owned
    `discord.gg` gateway host, then normalized to the fixed version and JSON
    encoding before the credential-bearing Resume payload can use it.
-8. Sends use a closed allowed-mentions object, exact reply targets, Discord rate
-   limits and a local per-channel backstop.
-9. The live notification queue is bounded. Overflow terminates the transport
+8. Sends use a closed action object, durable pre-effect request claims, enforced
+   message nonces, exact reply targets, shared Discord bucket limits and a local
+   per-channel backstop.
+9. SSE registration precedes bounded history restoration. The process-local
+   event store replays disconnected streams. Capacity exhaustion sets a
+   supervised global health failure and terminates the transport, including
+   when the pinned SDK swallows the router task's exception.
+   A new process starts gap-tainted; every non-resumed fresh IDENTIFY emits a
+   continuity boundary before a successor and remains `session-only` until a
+   separately proven bounded recovery can clear it.
+10. The live notification queue is bounded. Overflow terminates the transport
    session before any post-gap event can be delivered; it is not persisted and
    never becomes a FIFO of conversational obligations.
-10. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
+11. No V1 mode, verdict, gate hook or send-time social judgment is reachable.
 
 ## Failure semantics
 
@@ -81,9 +93,10 @@ sequenceDiagram
 | Non-Discord resume URL or malformed gateway identity/sequence | Refuse the resume target, discard resumable state, and reconnect for fresh identification. |
 | Invalid session or fatal token/intent close | Re-identify when permitted; fatal errors terminate for supervisor visibility. |
 | Queue full | Refuse the new event and terminate the transport session; the client reconnects and restores bounded message history as context under its declared restart gap. |
-| MCP client disconnect or stalled notification write | Bound and cancel that session's write, remove only that session; other sessions and gateway continue concurrently. |
+| MCP client disconnect or stalled notification write | Replay from the event-store cursor when possible; evict only a client whose bounded write fails. |
 | Global notification broadcast failure | Terminate the transport rather than delivering later events across an invisible gap. |
-| Discord 429/5xx | Bounded rate-limit/retry policy; tool returns generic failure when exhausted. |
+| MCP replay-store exhaustion/router death | Signal global continuity failure and terminate the transport; never degrade to zero-session success. |
+| Discord 429/5xx | Shared bucket/429 limits are honored. Ambiguous POST is retried only with enforced nonce; otherwise outcome is unknown. |
 | Discord 401/403 | Immediate non-retryable generic tool failure. |
 | SIGTERM/SIGINT | Stop notifications, drain bounded in-flight tools, close gateway, exit. |
 

@@ -346,6 +346,7 @@ class MCPTransportClientV2:
             if len(names) != len(tool_names):
                 raise MCPTransportV2Error("MCP tool inventory is invalid")
             if not {
+                "subscribe_events",
                 "send_message",
                 "reply_message",
                 "add_reaction",
@@ -412,10 +413,17 @@ class MCPTransportClientV2:
     def stream_events(
         self,
         notification_method: str = V2_NOTIFICATION_METHOD,
+        *,
+        on_subscribed: Callable[[dict[str, Any]], None] | None = None,
     ) -> Iterator[dict[str, Any]]:
         if notification_method != V2_NOTIFICATION_METHOD:
             raise MCPTransportV2Error("MCP notification method is invalid")
+        if on_subscribed is not None and not callable(on_subscribed):
+            raise MCPTransportV2Error("MCP subscription callback is invalid")
         with self.open_stream() as stream:
+            bootstrap = self.call_tool("subscribe_events", {})
+            if on_subscribed is not None:
+                on_subscribed(bootstrap)
             def decoded_lines():
                 for raw in stream:
                     try:

@@ -6,8 +6,11 @@ from NUNCHI_DISCORD_TOKEN only and must never surface anywhere else (see
 
 Required env vars:
     NUNCHI_DISCORD_TOKEN                           Discord bot token
-    NUNCHI_MCP_DISCORD_CHANNELS                 Comma-separated trusted channel IDs
+    NUNCHI_MCP_DISCORD_CHANNELS                 Exactly one trusted channel ID
     NUNCHI_MCP_DISCORD_AUTH_TOKEN               Separate bearer credential for MCP clients
+    NUNCHI_MCP_DISCORD_PARTICIPANT_ID           Exact bound participant identity
+    NUNCHI_MCP_DISCORD_SELF_ACTOR_ID            Expected Discord bot user snowflake
+    NUNCHI_MCP_DISCORD_STATE_DIR                Owner-only durable replay-state directory
 
 Optional env vars:
     NUNCHI_MCP_DISCORD_BLOCKED_ACTORS           Comma-separated blocked user IDs
@@ -47,6 +50,15 @@ class Config:
     drain_timeout_seconds: float = _DEFAULT_DRAIN_TIMEOUT_SECONDS
     channels: frozenset[str] = frozenset()
     blocked_actors: frozenset[str] = frozenset()
+    participant_id: str = ""
+    self_actor_id: str = ""
+    state_directory: str = ""
+
+    @property
+    def channel_id(self) -> str:
+        if len(self.channels) != 1:
+            raise RuntimeError("Discord transport room binding is invalid")
+        return next(iter(self.channels))
 
 
 def _require(environ: Mapping[str, str], name: str) -> str:
@@ -111,8 +123,22 @@ def load_config(environ: Mapping[str, str]) -> Config:
     discord_token = _require(environ, "NUNCHI_DISCORD_TOKEN")
     channels = _snowflake_csv(environ, "NUNCHI_MCP_DISCORD_CHANNELS")
     blocked = _snowflake_csv(environ, "NUNCHI_MCP_DISCORD_BLOCKED_ACTORS")
-    if not channels:
-        raise RuntimeError("NUNCHI_MCP_DISCORD_CHANNELS is required.")
+    if len(channels) != 1:
+        raise RuntimeError(
+            "NUNCHI_MCP_DISCORD_CHANNELS must bind this process and bearer credential "
+            "to exactly one room."
+        )
+    participant_id = _require(environ, "NUNCHI_MCP_DISCORD_PARTICIPANT_ID")
+    if (
+        len(participant_id) > 256
+        or not participant_id.isascii()
+        or any(ord(character) < 33 or ord(character) > 126 for character in participant_id)
+    ):
+        raise RuntimeError("NUNCHI_MCP_DISCORD_PARTICIPANT_ID is invalid.")
+    self_actor_id = _require(environ, "NUNCHI_MCP_DISCORD_SELF_ACTOR_ID")
+    if not self_actor_id.isdigit():
+        raise RuntimeError("NUNCHI_MCP_DISCORD_SELF_ACTOR_ID must be a Discord snowflake.")
+    state_directory = _require(environ, "NUNCHI_MCP_DISCORD_STATE_DIR")
     config = Config(
         token=discord_token,
         auth_token=_auth_token(environ, discord_token),
@@ -130,6 +156,9 @@ def load_config(environ: Mapping[str, str]) -> Config:
         ),
         channels=channels,
         blocked_actors=blocked,
+        participant_id=participant_id,
+        self_actor_id=self_actor_id,
+        state_directory=state_directory,
     )
     if (
         config.host not in ("127.0.0.1", "::1", "localhost")

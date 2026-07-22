@@ -896,6 +896,11 @@ class ObservationProvider:
         self._actors: dict[str, dict] = {self.actor_id: {}}
         self._seen_delivery_ids: set[str] = set()
         self._evicted = False
+        self._event_continuations: dict[str, dict[str, Any]] = {}
+        self._upstream_has_more_before = False
+        self._upstream_has_more_after = False
+        self._upstream_has_gaps = False
+        self._upstream_truncated_by: set[str] = set()
         self._unroutable_count = 0
         self._last_parseable_timestamp: datetime | None = None
         self._max_pending_receipts = max_pending_receipts
@@ -947,6 +952,30 @@ class ObservationProvider:
             self._request_id_filter[position // 8] |= 1 << (position % 8)
 
     # -- ingestion (FR-003, FR-004, FR-010) ----------------------------
+
+    @_with_state_lock
+    def record_upstream_coverage(
+        self,
+        *,
+        has_more_before: bool,
+        has_more_after: bool,
+        has_gaps: bool,
+        truncated_by: list[str],
+    ) -> None:
+        """Monotonically retain transport-attested omissions outside the buffer."""
+        if (
+            not isinstance(has_more_before, bool)
+            or not isinstance(has_more_after, bool)
+            or not isinstance(has_gaps, bool)
+            or not isinstance(truncated_by, list)
+            or any(item not in TRUNCATION_CAUSES for item in truncated_by)
+            or len(set(truncated_by)) != len(truncated_by)
+        ):
+            raise ObservationInputError("upstream coverage is invalid")
+        self._upstream_has_more_before |= has_more_before
+        self._upstream_has_more_after |= has_more_after
+        self._upstream_has_gaps |= has_gaps
+        self._upstream_truncated_by.update(truncated_by)
 
     @_with_state_lock
     def ingest(self, native_event_input: dict) -> str:
@@ -1004,6 +1033,20 @@ class ObservationProvider:
                 "('authorized': True); it is never derived from payload content"
             )
 
+        allowed_candidate_fields = {
+            "delivery_id",
+            "disposition",
+            "authorized",
+            "event",
+            "actors",
+            "continuation",
+        }
+        unexpected = sorted(set(native_event_input) - allowed_candidate_fields)
+        if unexpected:
+            raise ObservationInputError(
+                f"candidate-event carries unexpected fields: {unexpected}"
+            )
+
         if delivery_id in self._seen_delivery_ids:
             return DUPLICATE_RETAINED
 
@@ -1023,6 +1066,24 @@ class ObservationProvider:
                 f"event id {event_id!r} collides with an already-observed event "
                 "(cross-item ID uniqueness)"
             )
+        continuation = native_event_input.get("continuation")
+        if continuation is not None:
+            continuation_errors = _Errors()
+            _check_continuation_capability(
+                continuation_errors,
+                "continuation",
+                continuation,
+            )
+            expected_binding = {
+                "participant_id": self.participant_id,
+                "room_id": self.room_id,
+                "continuity_scope_id": self.continuity_scope_id,
+                "trigger_event_id": event_id,
+            }
+            if continuation_errors or continuation.get("bound_to") != expected_binding:
+                raise ObservationInputError(
+                    "candidate-event continuation binding is invalid"
+                )
         current_timestamp = _parse_timestamp(
             event.get("timestamp") if isinstance(event, dict) else None
         )
@@ -1066,12 +1127,15 @@ class ObservationProvider:
             evicted_delivery_id = self._event_delivery_ids.pop(evicted_id)
             self._seen_delivery_ids.discard(evicted_delivery_id)
             self._event_generations.pop(evicted_id, None)
+            self._event_continuations.pop(evicted_id, None)
 
         self._next_event_generation += 1
         self._event_generations[event_id] = self._next_event_generation
         self._event_delivery_ids[event_id] = delivery_id
         self._seen_delivery_ids.add(delivery_id)
         self._events.append(event)
+        if continuation is not None:
+            self._event_continuations[event_id] = deepcopy(continuation)
         if current_timestamp is not None:
             self._last_parseable_timestamp = current_timestamp
         self._reindex()
@@ -1252,10 +1316,10 @@ class ObservationProvider:
         }
 
         coverage: dict[str, Any] = {
-            "has_more_before": has_more_before,
-            "has_more_after": has_more_after,
-            "has_gaps": has_gaps,
-            "truncated_by": sorted(truncated_by),
+            "has_more_before": has_more_before or self._upstream_has_more_before,
+            "has_more_after": has_more_after or self._upstream_has_more_after,
+            "has_gaps": has_gaps or self._upstream_has_gaps,
+            "truncated_by": sorted(truncated_by | self._upstream_truncated_by),
             "continuity": self.continuity,
             "has_restart_gap": self.has_restart_gap,
             "max_events": max_events,
@@ -1288,6 +1352,9 @@ class ObservationProvider:
             "trigger_event_id": trigger_event_id,
             "coverage": coverage,
         }
+        continuation = self._event_continuations.get(trigger_event_id)
+        if continuation is not None:
+            document["continuation"] = deepcopy(continuation)
         errors = validate_attention_request(document)
         if errors:
             raise ObservationInputError(f"assembled snapshot failed self-validation: {errors}")
@@ -1416,10 +1483,10 @@ class ObservationProvider:
         }
         actors_used.add(self.actor_id)
         coverage: dict[str, Any] = {
-            "has_more_before": omitted_before,
-            "has_more_after": omitted_after,
-            "has_gaps": has_gaps,
-            "truncated_by": sorted(truncated_by),
+            "has_more_before": omitted_before or self._upstream_has_more_before,
+            "has_more_after": omitted_after or self._upstream_has_more_after,
+            "has_gaps": has_gaps or self._upstream_has_gaps,
+            "truncated_by": sorted(truncated_by | self._upstream_truncated_by),
             "continuity": self.continuity,
             "has_restart_gap": self.has_restart_gap,
             "max_events": max_events,
@@ -1440,6 +1507,9 @@ class ObservationProvider:
             "trigger_event_id": trigger_event_id,
             "coverage": coverage,
         }
+        continuation = self._event_continuations.get(trigger_event_id)
+        if continuation is not None:
+            document["continuation"] = deepcopy(continuation)
         errors = validate_attention_request(document)
         if errors:
             raise ObservationInputError(

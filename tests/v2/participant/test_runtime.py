@@ -13,6 +13,7 @@ from nunchi.authorization import (
 )
 from nunchi.policy import OperatorPolicySource, load_operator_policy
 from nunchi.runtime import LiveRoomRuntime, LiveRoomRuntimeError
+from nunchi.scheduling import ConversationOpportunityScheduler
 from tests.v2.contract.schema_helpers import make_authorization_request
 from tests.v2.observation.helpers import (
     FIXTURE_ACTORS,
@@ -77,6 +78,63 @@ class RuntimeCase(unittest.TestCase):
 
 
 class LiveCoalescingCases(RuntimeCase):
+    def test_attention_receipt_failure_stops_before_participant_and_action(self):
+        persisted = []
+        effects = []
+
+        def sink(receipt):
+            if receipt["stage"] == "attention":
+                raise OSError("durability unavailable")
+            persisted.append(receipt)
+
+        runtime = self.runtime(
+            receipt_sink=sink,
+            participant=lambda _turn: self.fail("receipt failure must not invoke"),
+            action_sink=effects.append,
+        )
+        results = runtime.process_delivery(self.delivery(1))
+        self.assertEqual(results[0]["status"], "error")
+        self.assertEqual(
+            results[0]["error"],
+            "attention-receipt-persistence-unknown",
+        )
+        self.assertEqual([record["stage"] for record in persisted], ["observation"])
+        self.assertEqual(effects, [])
+
+    def test_concurrent_accept_preserves_ingest_order_in_scheduler(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingScheduler(ConversationOpportunityScheduler):
+            def observe(inner_self, **arguments):
+                if arguments["anchor_event_id"] == "e1":
+                    entered.set()
+                    self.assertTrue(release.wait(5))
+                return super().observe(**arguments)
+
+        runtime = self.runtime(scheduler=BlockingScheduler())
+        accepted = []
+        first = threading.Thread(
+            target=lambda: accepted.append(runtime.accept(self.delivery(1))),
+            daemon=True,
+        )
+        second = threading.Thread(
+            target=lambda: accepted.append(runtime.accept(self.delivery(2))),
+            daemon=True,
+        )
+        first.start()
+        self.assertTrue(entered.wait(5))
+        second.start()
+        release.set()
+        first.join(5)
+        second.join(5)
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual([event["id"] for event in self.provider._events], ["e1", "e2"])
+        state = runtime.scheduler.snapshot()[0]
+        self.assertEqual(state["active_anchor_event_id"], "e1")
+        self.assertEqual(state["pending_anchor_event_id"], "e2")
+
     def test_non_none_observation_receipt_ack_stops_before_attention(self):
         offered = []
 

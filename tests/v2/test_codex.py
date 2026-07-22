@@ -22,8 +22,12 @@ from nunchi.integrations.codex_session_v2 import (
 )
 from nunchi.integrations.subprocess_participant_v2 import SubprocessParticipantError
 from nunchi.integrations.codex_room_v2 import CodexRoomV2, CodexRoomV2Error
-from nunchi.mcp_discord.events import message_event_from_create
+from nunchi.mcp_discord.continuation import DiscordHistoryContinuations
+from nunchi.mcp_discord.events import DiscordEventSourceV2, message_event_from_create
+from nunchi.mcp_discord.ratelimit import SendBackstop
+from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.participant import ParticipantTurn
+from nunchi.policy import load_operator_policy
 from tests.v2.contract.schema_helpers import make_wake
 from tests.v2.security.helpers import clone_policy, write_policy
 
@@ -88,7 +92,9 @@ class CodexParticipantCases(unittest.TestCase):
                     "reply_to_event_id": action.get("reply_to_event_id"),
                     "mention_actor_ids": action.get("mention_actor_ids"),
                 }
-            Path(command[output_index]).write_text(json.dumps({"action": structured}))
+            Path(command[output_index]).write_text(
+                json.dumps({"result": {"action": structured}})
+            )
             return (
                 returncode,
                 self.event_stream(thread_id),
@@ -208,6 +214,107 @@ class CodexParticipantCases(unittest.TestCase):
         self.assertEqual(command[:3], ("/usr/bin/true", "exec", "resume"))
         self.assertIn(THREAD_ONE, command)
 
+    def test_context_fetch_round_trip_is_host_served_and_bounded(self):
+        packet = make_wake("WAKE")
+        capability = {
+            "handle_id": "cont-codex-round-trip",
+            "bound_to": {
+                "participant_id": packet["self"]["participant_id"],
+                "room_id": packet["room"]["id"],
+                "continuity_scope_id": packet["room"]["continuity_scope_id"],
+                "trigger_event_id": packet["trigger_event_id"],
+            },
+            "can_fetch_before": True,
+            "can_fetch_after": False,
+            "can_fetch_around_event": False,
+            "max_events_per_fetch": 2,
+            "max_bytes_per_fetch": 2048,
+        }
+        packet["continuation"] = capability
+        request = {
+            "request_id": packet["request_id"],
+            "handle_id": capability["handle_id"],
+            "direction": "before",
+            "max_events": 2,
+            "max_bytes": 2048,
+        }
+        page = {
+            "request_id": packet["request_id"],
+            "handle_id": capability["handle_id"],
+            "room_id": packet["room"]["id"],
+            "continuity_scope_id": packet["room"]["continuity_scope_id"],
+            "direction": "before",
+            "anchor_event_id": packet["trigger_event_id"],
+            "actors": {"discord:1001": {"display_name": "Zoe", "kind": "human"}},
+            "events": [
+                {
+                    "id": "e0",
+                    "type": "message",
+                    "author_id": "discord:1001",
+                    "timestamp": "2026-07-17T00:59:00Z",
+                    "text": "earlier context",
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                }
+            ],
+            "coverage": {
+                "has_more_before": False,
+                "has_more_after": None,
+                "has_gaps": False,
+                "truncated_by": [],
+                "continuity": "restart-safe",
+                "has_restart_gap": False,
+                "max_events": 2,
+                "max_bytes": 2048,
+            },
+        }
+        policy_path = write_policy(self.temporary.name, clone_policy())
+        policy = load_operator_policy(policy_path).attention
+        fetches = []
+        turn = ParticipantTurn(
+            packet,
+            lambda value: fetches.append(value) or page,
+            policy=policy,
+            capabilities=frozenset({"context-expansion"}),
+        )
+        results = iter(
+            (
+                {
+                    "result": {
+                        "context_fetch": {
+                            **request,
+                            "anchor_event_id": None,
+                            "cursor": None,
+                        }
+                    }
+                },
+                {"result": {"action": None}},
+            )
+        )
+
+        def run(command, **_kwargs):
+            self.commands.append((command, _kwargs))
+            output_index = command.index("--output-last-message") + 1
+            Path(command[output_index]).write_text(json.dumps(next(results)))
+            return 0, self.event_stream(), b""
+
+        with mock.patch(
+            "nunchi.integrations.codex_participant_v2.run_bounded_process",
+            side_effect=run,
+        ):
+            self.assertIsNone(self.participant()(turn))
+        self.assertEqual(fetches, [request])
+        self.assertEqual(len(self.commands), 2)
+        self.assertNotIn("resume", self.commands[0][0])
+        self.assertEqual(self.commands[1][0][:3], ("/usr/bin/true", "exec", "resume"))
+        follow_up = json.loads(self.commands[1][0][-1])
+        self.assertEqual(
+            follow_up["schema"],
+            "nunchi-codex-participant-context-page-v2",
+        )
+        self.assertEqual(follow_up["untrusted_context_page"], page)
+        self.assertEqual(load_codex_session(self.session_path)["thread_id"], THREAD_ONE)
+
     def test_reaction_output_normalizes_to_portable_action(self):
         action = {
             "kind": "reaction",
@@ -240,7 +347,7 @@ class CodexParticipantCases(unittest.TestCase):
                 def invalid(command, **_kwargs):
                     output_index = command.index("--output-last-message") + 1
                     Path(command[output_index]).write_text(
-                        json.dumps({"action": action})
+                        json.dumps({"result": {"action": action}})
                     )
                     return 0, self.event_stream(), b""
 
@@ -289,8 +396,8 @@ class CodexParticipantCases(unittest.TestCase):
 
     def test_final_output_is_strict_bounded_and_no_follow(self):
         invalid_outputs = (
-            b'{"action":null,"action":{}}',
-            b'{"action":NaN}',
+            b'{"result":{"action":null,"action":{}}}',
+            b'{"result":{"action":NaN}}',
         )
         for payload in invalid_outputs:
             with self.subTest(payload=payload):
@@ -339,7 +446,13 @@ class CodexParticipantCases(unittest.TestCase):
         def attempted_tool(command, **kwargs):
             output_index = command.index("--output-last-message") + 1
             Path(command[output_index]).write_text(
-                json.dumps({"action": {"kind": "message", "content": "done"}})
+                json.dumps(
+                    {
+                        "result": {
+                            "action": {"kind": "message", "content": "done"}
+                        }
+                    }
+                )
             )
             return (
                 0,
@@ -384,7 +497,9 @@ class CodexParticipantCases(unittest.TestCase):
             with self.subTest(output=output):
                 def invalid_stream(command, **kwargs):
                     output_index = command.index("--output-last-message") + 1
-                    Path(command[output_index]).write_text(json.dumps({"action": None}))
+                    Path(command[output_index]).write_text(
+                        json.dumps({"result": {"action": None}})
+                    )
                     return 0, output.encode(), b""
 
                 with mock.patch(
@@ -443,7 +558,9 @@ class CodexParticipantCases(unittest.TestCase):
             with self.subTest(stream=stream):
                 def invalid(command, **_kwargs):
                     output_index = command.index("--output-last-message") + 1
-                    Path(command[output_index]).write_text(json.dumps({"action": None}))
+                    Path(command[output_index]).write_text(
+                        json.dumps({"result": {"action": None}})
+                    )
                     return 0, stream.encode(), b""
 
                 with mock.patch(
@@ -456,12 +573,20 @@ class CodexParticipantCases(unittest.TestCase):
 
     def test_structured_output_schema_uses_supported_required_union(self):
         schema = json.loads(CodexParticipantV2._schema_path().read_text())
-        action = schema["properties"]["action"]
+        self.assertNotIn("oneOf", schema)
+        result = schema["properties"]["result"]
+        self.assertIn("anyOf", result)
+        action = result["anyOf"][0]["properties"]["action"]
         self.assertIn("anyOf", action)
         self.assertNotIn("oneOf", action)
         message = action["anyOf"][1]
         self.assertEqual(set(message["properties"]), set(message["required"]))
         self.assertFalse(message["additionalProperties"])
+        context_fetch = result["anyOf"][1]["properties"]["context_fetch"]
+        self.assertEqual(
+            set(context_fetch["properties"]),
+            set(context_fetch["required"]),
+        )
 
     def test_timeout_and_thread_mismatch_fail_closed(self):
         with mock.patch(
@@ -514,22 +639,47 @@ class CodexParticipantCases(unittest.TestCase):
 
 
 class FakeTransportClient:
-    def __init__(self, history=None):
+    def __init__(self, history=None, history_page=None):
         self.history = history or []
+        self.history_page = history_page
         self.calls = []
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
         if name == "read_history":
+            if callable(self.history_page):
+                return self.history_page(arguments)
+            if self.history_page is not None:
+                return self.history_page
             return {"messages": self.history}
         if name == "add_reaction":
-            return {"reaction": "sent", "message_id": arguments["message_id"]}
+            return {
+                "request_id": arguments["request_id"],
+                "reaction": "sent",
+                "channel_id": arguments["channel_id"],
+                "message_id": arguments["message_id"],
+            }
         return {
+            "request_id": arguments["request_id"],
             "message": {
                 "message_id": "999",
                 "channel_id": arguments["channel_id"],
             }
         }
+
+
+class MemoryReceiptSink:
+    def __init__(self):
+        self.records = []
+        self.claims = set()
+
+    def __call__(self, record):
+        self.records.append(record)
+
+    def claim_transport_action(self, request_id):
+        if request_id in self.claims:
+            raise ValueError("duplicate request")
+        self.claims.add(request_id)
 
 
 def discord_params(message_id, content, *, author_id="1001", timestamp="2026-07-20T12:00:00Z"):
@@ -564,7 +714,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         document = clone_policy()
         document["recoverability"]["continuity_scope_id"] = "discord:channel:42"
         self.policy_path = write_policy(self.temporary.name, document)
-        self.receipts = []
+        self.receipts = MemoryReceiptSink()
         self.turns = []
         self.classifier_calls = []
 
@@ -576,7 +726,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
             "evidence_event_ids": [projection["trigger_event_id"]],
         }
 
-    def room(self, client, *, participant=None, classifier=None):
+    def room(self, client, *, participant=None, classifier=None, history_limit=100):
         return CodexRoomV2(
             policy_path=self.policy_path,
             channel_id="42",
@@ -589,8 +739,44 @@ class CodexRoomLifecycleCases(unittest.TestCase):
             participant_workspace=self.workspace,
             classifier_transport=classifier or self.classifier,
             participant=participant or self.participant,
-            receipt_sink=self.receipts.append,
+            receipt_sink=self.receipts,
+            history_limit=history_limit,
         )
+
+    @staticmethod
+    def bootstrap(history, *, truncated_by=()):
+        returned_bytes = sum(
+            len(
+                json.dumps(
+                    message,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            for message in history
+        )
+        return {
+            "subscription": {
+                "participant_id": "vigil",
+                "room_id": "42",
+                "self_actor_id": "9001",
+                "capabilities": ["read_history", "subscribe_events"],
+                "gateway_session_id": "gateway-1",
+                "gateway_sequence": 10,
+                "has_restart_gap": False,
+            },
+            "history": {
+                "messages": history,
+                "coverage": {
+                    "max_events": 100,
+                    "max_bytes": 32768,
+                    "returned_events": len(history),
+                    "returned_bytes": returned_bytes,
+                    "truncated_by": list(truncated_by),
+                },
+            },
+        }
 
     def participant(self, turn):
         self.turns.append(turn.packet)
@@ -617,7 +803,10 @@ class CodexRoomLifecycleCases(unittest.TestCase):
                 "mentions": [],
                 "embeds": [],
                 "attachments": [],
-            }
+            },
+            gateway_session_id="gateway-1",
+            gateway_sequence=int(message_id),
+            gateway_self_user_id="9001",
         )
         return room.source.notification_params(event)
 
@@ -630,7 +819,7 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         )
         room = self.room(client)
         self.addCleanup(room.close)
-        self.assertEqual(room.backfill(), 2)
+        self.assertEqual(room.backfill(self.bootstrap(client.history)), 2)
         self.assertEqual(self.classifier_calls, [])
         self.assertEqual(self.turns, [])
 
@@ -647,9 +836,210 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         self.assertEqual(client.calls[-1][1]["channel_id"], "42")
         self.assertEqual(client.calls[-1][1]["message_id"], "3")
         self.assertEqual(
-            [record["stage"] for record in self.receipts],
+            [record["stage"] for record in self.receipts.records],
             ["observation", "attention", "participant-host", "transport"],
         )
+
+    def test_server_continuation_reaches_participant_and_authenticated_history(self):
+        pages = []
+
+        def history_page(request):
+            page = {
+                "request_id": request["request_id"],
+                "handle_id": request["handle_id"],
+                "room_id": "42",
+                "continuity_scope_id": "discord:channel:42",
+                "direction": "before",
+                "anchor_event_id": "discord:message:3",
+                "actors": {
+                    "discord:user:1002": {
+                        "display_name": "Earlier Human",
+                        "kind": "human",
+                    }
+                },
+                "events": [
+                    {
+                        "id": "discord:message:2",
+                        "type": "message",
+                        "author_id": "discord:user:1002",
+                        "timestamp": "2026-07-20T12:00:02Z",
+                        "text": "Earlier bounded context",
+                        "mentioned_actor_ids": [],
+                        "mentions_room": False,
+                    }
+                ],
+                "coverage": {
+                    "has_more_before": False,
+                    "has_more_after": None,
+                    "has_gaps": True,
+                    "truncated_by": [],
+                    "continuity": "session-only",
+                    "has_restart_gap": True,
+                    "max_events": request["max_events"],
+                    "max_bytes": request["max_bytes"],
+                },
+            }
+            pages.append(page)
+            return page
+
+        client = FakeTransportClient(history_page=history_page)
+
+        def participant(turn):
+            self.assertIn("context-expansion", turn.capabilities)
+            capability = turn.packet["continuation"]
+            page = turn.fetch_context(
+                {
+                    "request_id": turn.packet["request_id"],
+                    "handle_id": capability["handle_id"],
+                    "direction": "before",
+                    "max_events": 2,
+                    "max_bytes": 2048,
+                }
+            )
+            self.assertEqual(page["events"][0]["id"], "discord:message:2")
+            return None
+
+        room = self.room(client, participant=participant)
+        self.addCleanup(room.close)
+        continuations = DiscordHistoryContinuations(
+            "s" * 64,
+            participant_id="vigil",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+        )
+        source = DiscordEventSourceV2(
+            allowed_channel_ids=frozenset({"42"}),
+            continuation_issuer=continuations.issue,
+        )
+        event = message_event_from_create(
+            {
+                "id": "3",
+                "channel_id": "42",
+                "guild_id": "7",
+                "author": {"id": "1001", "username": "Zoe", "bot": False},
+                "content": "Can you inspect earlier context?",
+                "timestamp": "2026-07-20T12:00:03Z",
+                "mentions": [],
+                "embeds": [],
+                "attachments": [],
+            },
+            gateway_session_id="gateway-1",
+            gateway_sequence=3,
+            gateway_self_user_id="9001",
+        )
+        notification = source.notification_params(event)
+        self.assertIn("continuation", notification)
+        self.assertEqual(room.accept_notification(notification), "scheduled")
+        result = room.wait_idle(5)[0][0]
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(client.calls[0][0], "read_history")
+        self.assertNotIn(
+            notification["continuation"]["handle_id"],
+            repr(self.classifier_calls[-1]),
+        )
+
+    def test_remote_and_local_bootstrap_truncation_remain_visible(self):
+        history = [
+            discord_params("2", "newest retained"),
+            discord_params("1", "locally omitted"),
+        ]
+        captured = []
+        room = self.room(
+            FakeTransportClient(history=history),
+            participant=lambda turn: captured.append(turn.packet),
+            history_limit=1,
+        )
+        self.addCleanup(room.close)
+        self.assertEqual(
+            room.backfill(self.bootstrap(history, truncated_by=("bytes",))),
+            1,
+        )
+        self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
+        room.wait_idle(5)
+        coverage = captured[0]["coverage"]
+        self.assertTrue(coverage["has_more_before"])
+        self.assertEqual(coverage["truncated_by"], ["bytes", "events"])
+
+    def test_event_saturated_bootstrap_producer_reaches_participant_coverage(self):
+        messages = [
+            {
+                "id": message_id,
+                "channel_id": "42",
+                "guild_id": "7",
+                "author": {
+                    "id": "1001",
+                    "username": "Zoe",
+                    "bot": False,
+                },
+                "content": content,
+                "timestamp": f"2026-07-20T12:00:0{message_id}Z",
+                "mentions": [],
+                "mention_everyone": False,
+                "embeds": [],
+                "attachments": [],
+            }
+            for message_id, content in (("2", "newest"), ("1", "older"))
+        ]
+
+        class SaturatedRest:
+            def __init__(self):
+                self.calls = []
+
+            def get_messages(self, channel_id, *, limit=50, before=None):
+                self.calls.append((channel_id, limit, before))
+                return messages[:limit]
+
+        rest = SaturatedRest()
+        producer = ToolExecutor(
+            rest,
+            SendBackstop(5, 10, clock=lambda: 0),
+            allowed_channel_ids=frozenset({"42"}),
+            action_claim=lambda _request_id: None,
+            continuations=DiscordHistoryContinuations(
+                "b" * 32,
+                participant_id="vigil",
+                room_id="42",
+                continuity_scope_id="discord:channel:42",
+            ),
+        )
+        history = producer.bootstrap_history(max_events=1)
+        self.assertEqual(rest.calls, [("42", 2, None)])
+        self.assertEqual(history["coverage"]["truncated_by"], ["events"])
+
+        captured = []
+        room = self.room(
+            FakeTransportClient(),
+            participant=lambda turn: captured.append(turn.packet),
+        )
+        self.addCleanup(room.close)
+        bootstrap = self.bootstrap([])
+        bootstrap["history"] = history
+        self.assertEqual(room.backfill(bootstrap), 1)
+        self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
+        room.wait_idle(5)
+        self.assertTrue(captured[0]["coverage"]["has_more_before"])
+        self.assertEqual(captured[0]["coverage"]["truncated_by"], ["events"])
+
+    def test_remote_and_local_event_truncation_union_without_duplicates(self):
+        history = [
+            discord_params("2", "newest retained"),
+            discord_params("1", "locally omitted"),
+        ]
+        captured = []
+        room = self.room(
+            FakeTransportClient(history=history),
+            participant=lambda turn: captured.append(turn.packet),
+            history_limit=1,
+        )
+        self.addCleanup(room.close)
+        self.assertEqual(
+            room.backfill(self.bootstrap(history, truncated_by=("events",))),
+            1,
+        )
+        self.assertEqual(room.accept_notification(self.notification(room)), "scheduled")
+        room.wait_idle(5)
+        self.assertEqual(captured[0]["coverage"]["truncated_by"], ["events"])
 
     def test_backfill_rejects_malformed_or_over_budget_authenticated_history(self):
         cases = (
@@ -663,7 +1053,13 @@ class CodexRoomLifecycleCases(unittest.TestCase):
                 room = self.room(FakeTransportClient(history=history))
                 self.addCleanup(room.close)
                 with self.assertRaises(CodexRoomV2Error):
-                    room.backfill()
+                    room.backfill(self.bootstrap(history))
+        bad_coverage = self.bootstrap([])
+        bad_coverage["history"]["coverage"]["returned_events"] = 1
+        room = self.room(FakeTransportClient())
+        self.addCleanup(room.close)
+        with self.assertRaises(CodexRoomV2Error):
+            room.backfill(bad_coverage)
 
     def test_self_and_wrong_room_cannot_wake_codex(self):
         client = FakeTransportClient()
@@ -720,10 +1116,10 @@ class CodexRoomLifecycleCases(unittest.TestCase):
         self.assertEqual(len(self.turns), 1)
         self.assertEqual(self.turns[0]["attention"], {"source": "PREATTENTION_BYPASS"})
         self.assertEqual(
-            [record["stage"] for record in self.receipts],
+            [record["stage"] for record in self.receipts.records],
             ["observation", "attention", "participant-host"],
         )
-        self.assertTrue(self.receipts[1]["body"]["classifier_not_invoked"])
+        self.assertTrue(self.receipts.records[1]["body"]["classifier_not_invoked"])
 
 if __name__ == "__main__":
     unittest.main()
