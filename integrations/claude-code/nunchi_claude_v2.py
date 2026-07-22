@@ -1307,7 +1307,10 @@ class ClaudeRoomV2:
         can be attested — but the wake IS caused by a transport-attested room
         event (``anchor_event_id``). Recording the turn keeps ``PreToolUse``
         from mistaking the resulting tools for operator-originated work: with
-        no verifiable causal snapshot, privileged effects are denied fail-closed.
+        no verifiable causal snapshot, every room-affecting action (reply,
+        react, and privileged effects alike) is denied fail-closed, not just
+        privileged ones — a send here could never get a real participant-host
+        or transport receipt at ``Stop``.
         """
         room["turn"] = {
             "session_id": session_id,
@@ -1757,12 +1760,15 @@ def _drive_opportunity(
                 return _block_stop(context, *diagnostics)
             return _allow_with_context(context, *diagnostics)
         if route == "operational-error":
-            # Receipts or snapshots failed operationally. Widen toward the
-            # participant so the room is not silently dropped, but record a
-            # confined room-causal turn: the wake is caused by this exact
+            # Receipts or snapshots failed operationally. The session still
+            # runs (the room is not silently dropped), but a confined
+            # room-causal turn is recorded: the wake is caused by this exact
             # transport-attested anchor, yet no verifiable snapshot exists, so
-            # PreToolUse denies privileged effects. No social outcome is
-            # fabricated. The successor (if any) still runs from a fresh cycle.
+            # PreToolUse denies every room-affecting action for it — reply,
+            # react, and privileged effects alike (see handle_pre_tool) — not
+            # just privileged ones. No social outcome is fabricated, and none
+            # can go unattested. The successor (if any) still runs from a
+            # fresh cycle.
             binding.start_degraded_turn(
                 room, session_id, opportunity.anchor_event_id, str(attention.get("detail"))
             )
@@ -1773,9 +1779,11 @@ def _drive_opportunity(
             diagnostics.append(f"operational error: {attention.get('detail')}")
             context = (
                 "[nunchi-v2] attention was operationally unavailable for this "
-                "room event; take one normal room turn (contribute or stay "
-                "silent). Privileged tool actions are denied for this turn "
-                "because its causal context could not be established."
+                "room event; its causal context could not be established, so "
+                "no room-affecting action is available this turn. Reply, "
+                "react, and privileged tool actions are all denied "
+                "fail-closed. End the turn normally without acting in the "
+                "room."
             )
             if stop:
                 return _block_stop(context, *diagnostics)
@@ -1964,8 +1972,15 @@ def handle_pre_tool(
 ) -> HookDecision:
     """Mechanical send-safety and privileged-action denial before execution.
 
-    Four enforcement duties, all before the tool runs:
+    Five enforcement duties, all before the tool runs:
 
+    * A degraded turn (no verifiable causal snapshot — see
+      :func:`ClaudeRoomV2.start_degraded_turn`) denies reply/react outright,
+      exactly like the privileged-action seam below: ``Stop``'s
+      ``complete_turn`` has no real snapshot to replay a participant-host
+      stage against for this turn, so a send here could execute with zero
+      participant-host or transport receipt ever attested. Fail-closed here
+      too, rather than let an unattested send happen.
     * Room-action send tools (reply/react) must target the bound room. A
       cross-room target is denied here — ``PostToolUse`` is too late.
     * An in-room reply/react reserves this turn's one atomic room-action slot
@@ -2010,6 +2025,18 @@ def handle_pre_tool(
             is_reply = tools["reply_tool_re"].fullmatch(tool_name) is not None
             is_react = tools["react_tool_re"].fullmatch(tool_name) is not None
             if is_reply or is_react:
+                if turn.get("degraded") or not isinstance(turn.get("snapshot"), dict):
+                    # No verifiable causal snapshot exists for this turn (an
+                    # operational-error wake — see start_degraded_turn), so
+                    # Stop's complete_turn can never replay a real
+                    # participant-host stage for whatever this call sends.
+                    # Deny fail-closed, exactly like the privileged-action
+                    # seam below, rather than let an unattested send happen.
+                    return _deny_tool(
+                        "nunchi-v2: this turn's causal context could not be "
+                        "established (degraded); reply/react is denied "
+                        "fail-closed for this turn."
+                    )
                 # Send safety, not a social gate: a room-caused turn may only
                 # act in its own bound room.
                 target = str(tool_input.get("chat_id") or "")

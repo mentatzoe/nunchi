@@ -1258,6 +1258,54 @@ class AdversarialRegressionCases(_GateCase):
         self.assertIsNotNone(gate.output)
         self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_operational_error_wake_denies_reply_and_react_too(self) -> None:
+        # The same degraded turn as the two cases above must also deny
+        # ordinary reply/react, not just privileged tools: with no verifiable
+        # snapshot, Stop's complete_turn can never replay a real
+        # participant-host stage for whatever a send here would do, so an
+        # executed-but-unattested send is not an acceptable outcome. Confirmed
+        # pre-existing (found while fixing the sibling receipt-sink-failure
+        # gap above): before this fix, this exact call was allowed through
+        # and reserved, with zero receipt ever written for it at Stop.
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        receipts_dir = self.tmp / "receipts"
+        import shutil
+
+        shutil.rmtree(receipts_dir)
+        receipts_dir.write_text("not a directory", encoding="utf-8")
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="7000000000000000002")
+        self.assertIsNotNone(decision.output)
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertIsInstance(turn, dict)
+        self.assertTrue(turn["degraded"])
+
+        reply_gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "hi"},
+        )
+        self.assertIsNotNone(reply_gate.output)
+        self.assertEqual(
+            reply_gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        react_gate = self.pre_tool(
+            tool_name="mcp__discord__react",
+            tool_input={"chat_id": CHANNEL_ID, "message_id": "1", "reaction": "👍"},
+        )
+        self.assertIsNotNone(react_gate.output)
+        self.assertEqual(
+            react_gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        # Neither denied attempt ever created a reservation for this turn.
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertIsNone(turn.get("reservation"))
+
     # -- F2: no double execution / audit-failure execution ------------------
 
     def test_identical_privileged_action_replay_never_executes_twice(self) -> None:
