@@ -316,6 +316,8 @@ def _telegram_update(event: Any) -> dict[str, Any]:
     timestamp = getattr(date, "timestamp", None)
     if callable(timestamp):
         date = timestamp()
+        if type(date) is float and date.is_integer():
+            date = int(date)
     message = {
         "message_id": message_id,
         "from": {

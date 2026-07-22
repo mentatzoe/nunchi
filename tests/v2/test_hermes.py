@@ -2051,6 +2051,83 @@ class HermesV2LifecycleTest(unittest.TestCase):
         third = v2_plugin.on_pre_gateway_dispatch(event=event, gateway=gateway)
         self.assertEqual(third, {"action": "skip", "reason": "nunchi:v2-observed"})
 
+    def test_public_dispatch_hook_fail_closes_all_evaluation_exceptions_once(self):
+        adapter = SimpleNamespace(
+            _client=SimpleNamespace(user=SimpleNamespace(id=9001))
+        )
+        gateway = SimpleNamespace(
+            _adapter_for_source=lambda source: adapter,
+            _session_key_for_source=lambda source: "agent:default:discord:42",
+            _is_user_authorized=lambda source: True,
+        )
+        base_config = {
+            "enabled": True,
+            "api_version": 2,
+            "participant_id": "resident",
+            "policy_path": str(self.policy_path),
+            "platforms": ["discord"],
+            "channels": ["42"],
+            "streaming": False,
+            "_host_streaming_disabled": True,
+            "_host_effect_runtime_supported": True,
+        }
+        classifier_policy_dir = Path(self.temporary.name) / "classifier-policy"
+        classifier_policy_dir.mkdir()
+        classifier_policy = json.loads(self.policy_path.read_text(encoding="utf-8"))
+        classifier_policy["attention"]["error_action"] = "NO_WAKE"
+        classifier_policy_path = write_policy(
+            str(classifier_policy_dir), classifier_policy
+        )
+
+        def failing_classifier(projection, classifier):
+            raise OSError("classifier unavailable")
+
+        def failing_receipt(_receipt):
+            raise OSError("receipt unavailable")
+
+        cases = (
+            (
+                "policy",
+                {**base_config, "policy_path": str(self.policy_path) + ".missing"},
+                None,
+                self.receipts.append,
+            ),
+            (
+                "classifier",
+                {**base_config, "policy_path": str(classifier_policy_path)},
+                failing_classifier,
+                self.receipts.append,
+            ),
+            (
+                "observation-receipt",
+                base_config,
+                None,
+                failing_receipt,
+            ),
+        )
+        for index, (name, config, classifier, sink) in enumerate(cases):
+            with self.subTest(name=name):
+                v2_plugin.configure(
+                    config_loader=lambda supplied_event, supplied_gateway, row=config: row,
+                    participant_id="resident",
+                    classifier_transport=classifier,
+                    receipt_sink_factory=lambda policy_loader, target=sink: target,
+                    schedule_redispatch=lambda supplied_event, supplied_gateway: None,
+                )
+                result = v2_plugin.on_pre_gateway_dispatch(
+                    event=self.hermes_event(str(4100 + index)), gateway=gateway
+                )
+                self.assertEqual(
+                    result, {"action": "skip", "reason": "nunchi:v2-attention"}
+                )
+                controller = v2_plugin._CONTROLLER
+                binding = next(iter(controller.registry_for("resident")._bindings.values()))
+                self.assertEqual(binding.scheduler.snapshot(), ())
+                self.assertEqual(controller._host_deliveries, {})
+                self.assertFalse(
+                    controller.is_ticketed("agent:default:discord:42")
+                )
+
     def test_unauthorized_dispatch_is_not_retained_or_receipted(self):
         event = self.hermes_event("41")
         adapter = SimpleNamespace(
@@ -2745,6 +2822,79 @@ class HermesV2LifecycleTest(unittest.TestCase):
         controller.stage_turn(evaluation=evaluation, session_key=session_key)
         self.activate_turn(controller, "2986", session_key)
         self.assertTrue(controller.is_ticketed(session_key))
+
+    def test_idle_plaintext_control_boundary_follows_spawned_processing_owner(self):
+        controller = v2_plugin.HermesV2Controller(participant_id="resident")
+        previous = v2_plugin._CONTROLLER
+        setattr(v2_plugin, "_CONTROLLER", controller)
+        self.addCleanup(setattr, v2_plugin, "_CONTROLLER", previous)
+        platform_calls = []
+
+        class Gateway:
+            def _session_key_for_source(self, source):
+                return "agent:default:discord:42"
+
+            async def handle(self, event):
+                return "status-ok"
+
+        gateway = Gateway()
+
+        class Adapter:
+            def __init__(self):
+                self._message_handler = gateway.handle
+                self._background_tasks = set()
+                self._session_tasks = {}
+
+            async def handle_message(self, event):
+                key = "agent:default:discord:42"
+                task = asyncio.create_task(
+                    self._process_message_background(event, key)
+                )
+                self._session_tasks[key] = task
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+
+            async def _process_message_background(self, event, session_key):
+                await asyncio.sleep(0)
+                response = await self._message_handler(event)
+                if response:
+                    await self.send(event.source.chat_id, response)
+
+            async def send(self, chat_id, content):
+                platform_calls.append((chat_id, content))
+                return True
+
+        config = {
+            "enabled": True,
+            "api_version": 2,
+            "participant_id": "resident",
+            "policy_path": str(self.policy_path),
+            "platforms": ["discord"],
+            "channels": ["42"],
+            "streaming": False,
+            "_host_streaming_disabled": True,
+            "_host_effect_runtime_supported": True,
+        }
+        v2_plugin._CONFIG_LOADER = lambda event, supplied_gateway: config
+        self.assertTrue(
+            v2_plugin.install_host_wrappers(
+                runner_cls=type("RunnerWithoutTurn", (), {}), adapter_cls=Adapter
+            )["transport"]
+        )
+        adapter = Adapter()
+        event = self.hermes_event("2987")
+        event.text = "/status"
+        event.get_command = lambda: "status"
+
+        async def run_idle_control():
+            await adapter.handle_message(event)
+            owner = adapter._session_tasks["agent:default:discord:42"]
+            await owner
+
+        asyncio.run(run_idle_control())
+
+        self.assertEqual(platform_calls, [("42", "status-ok")])
+        self.assertEqual(controller._control_output_boundaries, {})
 
     def test_active_ticket_is_closed_before_plaintext_command_output(self):
         controller = v2_plugin.HermesV2Controller(participant_id="resident")

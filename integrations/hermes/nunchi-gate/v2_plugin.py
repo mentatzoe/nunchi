@@ -307,7 +307,12 @@ class HermesV2Controller:
                 policy_identity=accepted.host.policy_identity,
             )
         except BaseException:
-            self.fail_delivery(accepted)
+            if cancellation is None:
+                self.fail_delivery(accepted)
+            else:
+                with cancellation.lock:
+                    if not cancellation.cancelled:
+                        self.fail_delivery(accepted)
             raise
         if evaluation.status == "wake":
             if cancellation is None:
@@ -831,6 +836,10 @@ class HermesV2Controller:
                 self._control_output_boundaries.pop(session_key, None)
             else:
                 self._control_output_boundaries[session_key] = count - 1
+
+    def control_output_active(self, session_key: str) -> bool:
+        with self._lock:
+            return self._control_output_boundaries.get(session_key, 0) > 0
 
     def set_transport_session(self, session_key: str) -> None:
         if not self.is_ticketed(session_key):
@@ -2090,13 +2099,35 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
 
             async def wrapped_handle_message(self, event, *args, **kwargs):
                 boundary = await _begin_control_output(self, event)
+                owner_before = (
+                    getattr(self, "_session_tasks", {}).get(boundary)
+                    if boundary is not None
+                    else None
+                )
                 try:
-                    return await typed_handle_original(
+                    result = await typed_handle_original(
                         self, event, *args, **kwargs
                     )
-                finally:
+                except BaseException:
                     if boundary is not None:
                         _CONTROLLER.finish_control_output(boundary)
+                    raise
+                if boundary is None:
+                    return result
+                owner = getattr(self, "_session_tasks", {}).get(boundary)
+                if owner is None or owner is owner_before or owner.done():
+                    _CONTROLLER.finish_control_output(boundary)
+                    return result
+
+                def finish_spawned_control(_done):
+                    _CONTROLLER.finish_control_output(boundary)
+
+                try:
+                    owner.add_done_callback(finish_spawned_control)
+                except BaseException:
+                    _CONTROLLER.finish_control_output(boundary)
+                    raise
+                return result
 
             setattr(adapter_cls, "handle_message", wrapped_handle_message)
 
@@ -2201,9 +2232,14 @@ def install_host_wrappers(*, runner_cls: Any = None, adapter_cls: Any = None) ->
                 key = str(session_key)
                 gateway = _gateway_for_adapter(self)
                 entry_evaluation = _CONTROLLER.evaluation_for_session(key)
+                control_output = (
+                    _control_command_name(event) is not None
+                    and _CONTROLLER.control_output_active(key)
+                )
                 guard_only = (
                     entry_evaluation is None
                     and _event_in_scope(event, gateway)
+                    and not control_output
                 )
                 token = _CONTROLLER.begin_output_collection(
                     key, guard_only=guard_only
@@ -2453,13 +2489,9 @@ def on_pre_gateway_dispatch(event: Any, gateway: Any = None, **_: Any):
                 cancellation=delivery_cancellation,
             )
         except Exception:
-            with delivery_cancellation.lock:
-                if delivery_cancellation.cancelled:
-                    return
-                if _CONTROLLER.is_ticketed(session_key):
-                    _CONTROLLER.abort_participant_turn(session_key)
-                else:
-                    _CONTROLLER.fail_delivery(accepted)
+            # evaluate_delivery owns scheduler/ticket finalization. Repeating it
+            # here can complete the same exact generation twice and escape into
+            # Hermes' fail-open plugin hook boundary.
             return
         if result.status == "wake" and callable(accepted.host.redispatch):
             with delivery_cancellation.lock:
