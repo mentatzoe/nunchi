@@ -949,6 +949,92 @@ class ParticipantTurnCases(_GateCase):
         self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
         self.assertEqual(stages["transport"]["body"]["delivery"], "sent")
 
+    def test_out_of_packet_reply_target_is_denied_before_execution(self) -> None:
+        # Post-merge, the canonical host binds reply references to this
+        # turn's delivered packet facts and rejects anything else at Stop —
+        # AFTER a native send would already have happened, leaving an
+        # observed delivery with no transport stage and a participant-host
+        # outcome of "unknown". The inevitable rejection must land BEFORE
+        # the irreversible native send instead.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="4912000000000000001")
+        self.assertIsNotNone(decision.output)
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "text": "answering an older question above",
+                "reply_to": "1111111111111111111",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(
+            gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.assertIn(
+            "not one of this turn's packet messages",
+            gate.output["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+        # The denied attempt never burned the turn's one action slot: a
+        # corrected, attestable retry still works end-to-end.
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            self.assertIsNone(store.read_room()["turn"].get("reservation"))
+        request_id = wake_request_id(decision.output)
+        self.post_tool(
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "text": "answering an older question above",
+                "reply_to": "4912000000000000001",
+            }
+        )
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["transport"]["body"]["delivery"], "sent")
+
+    def test_out_of_packet_reaction_target_is_denied_before_execution(self) -> None:
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="4912000000000000002")
+        self.assertIsNotNone(decision.output)
+        gate = self.pre_tool(
+            tool_name="mcp__discord__react",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "message_id": "2222222222222222222",
+                "emoji": "👀",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(
+            gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.assertIn(
+            "not one of this turn's packet messages",
+            gate.output["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_non_numeric_reply_reference_is_denied_before_execution(self) -> None:
+        # A non-numeric reply_to would be OMITTED from the replayed action
+        # (see _observed_action) while the native plugin call might still
+        # send with a reference — the attested action would under-report
+        # what actually happened. Deny for attestation fidelity.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="4912000000000000003")
+        self.assertIsNotNone(decision.output)
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "text": "hello",
+                "reply_to": "not-a-snowflake",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(
+            gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+
     def test_failed_native_delivery_is_recorded_honestly(self) -> None:
         transport = CountingTransport(wake_judgment)
         decision = self.deliver(transport, message_id="4900000000000000004")
@@ -1771,7 +1857,14 @@ class ReservationAndPostToolFailureCases(_GateCase):
         self.assertIsNone(first.output)
         second = self.pre_tool(
             tool_name="mcp__discord__react",
-            tool_input={"chat_id": CHANNEL_ID, "message_id": "1", "emoji": "👀"},
+            # In-packet target (the trigger), so the reservation denial —
+            # this test's actual subject — is what fires, not the earlier
+            # out-of-packet attestability denial.
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "message_id": "8300000000000000002",
+                "emoji": "👀",
+            },
         )
         self.assertIsNotNone(second.output)
         self.assertEqual(

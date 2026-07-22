@@ -1906,6 +1906,68 @@ def _tool_input_digest(tool_input: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _unattestable_reference(
+    turn: dict[str, Any],
+    *,
+    is_reply: bool,
+    tool_input: dict[str, Any],
+) -> str | None:
+    """Return a denial reason iff this call's message reference cannot be
+    attested at ``Stop``, or ``None`` when the replay will bind cleanly.
+
+    The canonical participant host (``nunchi.participant._validate_action``)
+    binds ``reply_to_event_id``/``target_event_id`` to facts actually
+    delivered in this turn's packet and rejects anything else. A native send
+    whose reference is outside the packet therefore executes but can never be
+    attested — the host raises at ``Stop``, the transport stage is never
+    written, and an observed delivery ends recorded ``unknown``. That
+    inevitable rejection belongs BEFORE the irreversible native send. The
+    rules here mirror :func:`_observed_action`'s replay construction exactly,
+    so PreToolUse's judgment of "what will be attested" always matches what
+    PostToolUse will actually record.
+    """
+    snapshot = turn.get("snapshot")
+    events = snapshot.get("events") if isinstance(snapshot, dict) else None
+    packet_ids = {
+        event.get("id")
+        for event in (events if isinstance(events, list) else [])
+        if isinstance(event, dict)
+    }
+    if is_reply:
+        reference = tool_input.get("reply_to")
+        if reference is None:
+            return None  # plain message: no reference to bind; always attestable
+        if not isinstance(reference, str) or not reference.isdigit():
+            return (
+                "reply_to must be the exact numeric id of one of this turn's "
+                "packet messages (or omitted for a plain message); a "
+                "non-numeric reference cannot be attested at Stop"
+            )
+        if f"discord:message:{reference}" not in packet_ids:
+            return (
+                f"reply_to {reference} is not one of this turn's packet "
+                "messages; a reply to it could never be attested at Stop. "
+                "Reply to one of the messages shown in this turn's context, "
+                "or send without reply_to"
+            )
+        return None
+    # Mirror _observed_action exactly: it coerces via str(...) for reactions.
+    message_id = str(tool_input.get("message_id") or "")
+    if not message_id.isdigit():
+        return (
+            "message_id must be the exact numeric id of one of this turn's "
+            "packet messages; a non-numeric reaction target cannot be "
+            "attested at Stop"
+        )
+    if f"discord:message:{message_id}" not in packet_ids:
+        return (
+            f"reaction target {message_id} is not one of this turn's packet "
+            "messages; a reaction to it could never be attested at Stop. "
+            "React to one of the messages shown in this turn's context"
+        )
+    return None
+
+
 def _reserve_room_action(
     turn: dict[str, Any],
     tool_use_id: str,
@@ -2045,6 +2107,16 @@ def handle_pre_tool(
                         "nunchi-v2 send safety: this room-caused turn may act only in "
                         f"the bound room {config.channel_id}; tool targets {target or '<none>'}."
                     )
+                # Attestability, not a social gate: the canonical host binds
+                # reply/reaction references to this turn's delivered packet
+                # facts and will reject anything else at Stop — after the
+                # native send already happened. Deny the inevitable rejection
+                # here instead, before the irreversible effect.
+                unattestable = _unattestable_reference(
+                    turn, is_reply=is_reply, tool_input=tool_input
+                )
+                if unattestable is not None:
+                    return _deny_tool(f"nunchi-v2 attestability: {unattestable}.")
                 tool_use_id = str(payload.get("tool_use_id") or "")
                 denial = _reserve_room_action(turn, tool_use_id, tool_name, tool_input)
                 if denial is not None:
