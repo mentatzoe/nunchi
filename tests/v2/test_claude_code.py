@@ -18,6 +18,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.v2.claude_code_helpers import (
     CHANNEL_ID,
@@ -912,7 +913,10 @@ class ParticipantTurnCases(_GateCase):
         stages = receipts_for(self.tmp, request_id)
         host = stages["participant-host"]
         self.assertIs(host["body"]["invoked"], True)
-        self.assertEqual(host["body"]["outcome"], "sent")
+        # The immutable participant-host stage attests invocation/selection
+        # only; it is written before the transport effect is known and never
+        # rewritten. Delivery truth lives exclusively in the transport stage.
+        self.assertEqual(host["body"]["outcome"], "unknown")
         transport_stage = stages["transport"]
         self.assertEqual(transport_stage["body"]["delivery"], "sent")
         detail = json.loads(transport_stage["body"]["detail"])
@@ -942,7 +946,7 @@ class ParticipantTurnCases(_GateCase):
         )
         self.assertIsNone(self.stop(transport).output)
         stages = receipts_for(self.tmp, request_id)
-        self.assertEqual(stages["participant-host"]["body"]["outcome"], "sent")
+        self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
         self.assertEqual(stages["transport"]["body"]["delivery"], "sent")
 
     def test_failed_native_delivery_is_recorded_honestly(self) -> None:
@@ -980,7 +984,7 @@ class ParticipantTurnCases(_GateCase):
         self.assertIsNone(self.stop(transport).output)
         records = read_receipts(self.tmp)
         host = [r for r in records if r["stage"] == "participant-host"]
-        self.assertEqual(host[0]["body"]["outcome"], "sent")
+        self.assertEqual(host[0]["body"]["outcome"], "unknown")
 
     def test_wake_instruction_is_room_directed_not_admission_shaped(self) -> None:
         transport = CountingTransport(wake_judgment)
@@ -1210,6 +1214,46 @@ class AdversarialRegressionCases(_GateCase):
             turn = store.read_room()["turn"]
         self.assertIsInstance(turn, dict)
         self.assertTrue(turn["degraded"])
+        gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_attention_receipt_sink_failure_denies_privileged_effects_too(self) -> None:
+        # The observation-stage receipt above persists fine; this forces the
+        # *attention*-stage receipt (written inside evaluate_v2 itself) to
+        # fail instead. With the default error_action=WAKE, run_attention
+        # must still stop at operational-error rather than falling through
+        # to the ordinary ERROR_FALLBACK wake path with a real snapshot —
+        # a receipt-sink failure is infrastructure failure, not a classifier
+        # error eligible for the normal error-policy fallback.
+        self._configure_privileged([self._shell_grant(f"discord:user:{HUMAN_ID}")])
+        real_evaluate_v2 = self.module.evaluate_v2
+
+        def failing_evaluate_v2(*args: object, **kwargs: object) -> dict:
+            result = real_evaluate_v2(*args, **kwargs)
+            if result.get("status") == "ok":
+                return {
+                    "status": "error",
+                    "error": {
+                        "code": "receipt-sink-failure",
+                        "detail": "attention receipt persistence is unknown",
+                    },
+                    "request_id": result.get("request_id"),
+                }
+            return result
+
+        transport = CountingTransport(wake_judgment)
+        with mock.patch.object(self.module, "evaluate_v2", failing_evaluate_v2):
+            decision = self.deliver(transport, message_id="7000000000000000006")
+        self.assertIsNotNone(decision.output)
+        self.assertIn("hookSpecificOutput", decision.output)
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            turn = store.read_room()["turn"]
+        self.assertIsInstance(turn, dict)
+        self.assertTrue(turn["degraded"])
+        self.assertIsNone(turn["snapshot"])
         gate = self.pre_tool(tool_name="Bash", tool_input={"command": "ls -la"})
         self.assertIsNotNone(gate.output)
         self.assertEqual(gate.output["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -1663,7 +1707,10 @@ class ReservationAndPostToolFailureCases(_GateCase):
         self.assertIsNone(result.output)
         self.assertIsNone(self.stop(transport).output)
         stages = receipts_for(self.tmp, request_id)
-        self.assertEqual(stages["participant-host"]["body"]["outcome"], "sent")
+        # The immutable host stage was written before the transport outcome
+        # was known and is never rewritten — it stays "unknown" even though
+        # the transport stage below honestly records the eventual failure.
+        self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
         self.assertEqual(stages["transport"]["body"]["delivery"], "failed")
 
     def test_second_room_action_in_the_same_turn_is_denied(self) -> None:

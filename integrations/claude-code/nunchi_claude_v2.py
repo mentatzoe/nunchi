@@ -1154,6 +1154,22 @@ class ClaudeRoomV2:
             classifier_transport=self.classifier_transport,
         )
         if (
+            decision.get("status") == "error"
+            and isinstance(decision.get("error"), dict)
+            and decision["error"].get("code") == "receipt-sink-failure"
+        ):
+            # A failure to persist the attention receipt is infrastructure
+            # failure, not an ordinary classifier/operational error — it must
+            # stop before participant invocation regardless of the operator's
+            # configured error_action, or an unpersisted attention stage could
+            # still be followed by a real participant effect.
+            return {
+                "route": "operational-error",
+                "request_id": request.get("request_id"),
+                "detail": "attention-receipt-persistence-unknown",
+                "decision": decision,
+            }
+        if (
             decision.get("status") == "ok"
             and decision.get("effective_disposition") == "SUPPRESS"
         ):
