@@ -1035,14 +1035,19 @@ class ParticipantTurnCases(_GateCase):
             gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
         )
 
-    def test_failed_native_delivery_is_recorded_honestly(self) -> None:
+    def test_error_response_delivery_is_recorded_unknown_not_failed(self) -> None:
+        # An error-bearing tool response cannot transport-prove zero effects
+        # (the pinned plugin chunks replies and can partially deliver, and
+        # even a first-send error response may have landed server-side).
+        # "failed" is never claimable at this seam — the honest record is
+        # "unknown".
         transport = CountingTransport(wake_judgment)
         decision = self.deliver(transport, message_id="4900000000000000004")
         request_id = wake_request_id(decision.output)
         self.post_tool(tool_response={"isError": True})
         self.assertIsNone(self.stop(transport).output)
         stages = receipts_for(self.tmp, request_id)
-        self.assertEqual(stages["transport"]["body"]["delivery"], "failed")
+        self.assertEqual(stages["transport"]["body"]["delivery"], "unknown")
 
     def test_no_send_time_social_gate_and_no_prose_filter(self) -> None:
         transport = CountingTransport(wake_judgment)
@@ -1833,7 +1838,7 @@ class SidecarExactTypeCases(_GateCase):
 
 
 class ReservationAndPostToolFailureCases(_GateCase):
-    def test_post_tool_failure_records_a_failed_delivery(self) -> None:
+    def test_post_tool_failure_records_an_unknown_delivery(self) -> None:
         transport = CountingTransport(wake_judgment)
         decision = self.deliver(transport, message_id="8300000000000000001")
         request_id = wake_request_id(decision.output)
@@ -1842,10 +1847,125 @@ class ReservationAndPostToolFailureCases(_GateCase):
         self.assertIsNone(self.stop(transport).output)
         stages = receipts_for(self.tmp, request_id)
         # The immutable host stage was written before the transport outcome
-        # was known and is never rewritten — it stays "unknown" even though
-        # the transport stage below honestly records the eventual failure.
+        # was known and is never rewritten. The transport stage records
+        # "unknown", never "failed": a generic failure report cannot
+        # transport-prove the attempt had zero effects.
         self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
-        self.assertEqual(stages["transport"]["body"]["delivery"], "failed")
+        self.assertEqual(stages["transport"]["body"]["delivery"], "unknown")
+        detail = json.loads(stages["transport"]["body"]["detail"])
+        self.assertEqual(detail["undelivered_actions"], 1)
+        self.assertIn("discord API 500", detail["error"])
+
+    def test_partial_chunk_failure_preserves_the_partial_send_fact(self) -> None:
+        # The pinned plugin chunks one reply into sequential sends and, on a
+        # mid-sequence error, throws AFTER earlier chunks already landed in
+        # the room. The transport detail must preserve that partial fact,
+        # never reduce it to a clean failure.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8300000000000000005")
+        request_id = wake_request_id(decision.output)
+        result = self.post_tool_failure(
+            error="reply failed after 1 of 3 chunk(s) sent: HTTP 500"
+        )
+        self.assertIsNone(result.output)
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["transport"]["body"]["delivery"], "unknown")
+        detail = json.loads(stages["transport"]["body"]["detail"])
+        self.assertEqual(detail["chunks_sent"], 1)
+        self.assertEqual(detail["chunks_total"], 3)
+        self.assertIn("reply failed after 1 of 3", detail["error"])
+
+    def test_reply_with_files_is_denied_before_execution(self) -> None:
+        # The pinned reply tool uploads `files` (absolute local paths) — an
+        # external effect the canonical participant action cannot represent
+        # and no receipt would attest. Denied before execution.
+        transport = CountingTransport(wake_judgment)
+        self.assert_woken(self.deliver(transport, message_id="8300000000000000006"))
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "text": "report attached",
+                "files": ["/tmp/secret-report.txt"],
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(
+            gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.assertIn(
+            "file/media output",
+            gate.output["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+        # A malformed files value (string instead of list) is denied too —
+        # fail-closed, not coerced.
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={
+                "chat_id": CHANNEL_ID,
+                "text": "report attached",
+                "files": "/tmp/secret-report.txt",
+            },
+        )
+        self.assertIsNotNone(gate.output)
+        self.assertEqual(
+            gate.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        # Neither denied attempt burned the turn's one reservation slot.
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            self.assertIsNone(store.read_room()["turn"].get("reservation"))
+        # An explicitly empty files list uploads nothing: allowed.
+        gate = self.pre_tool(
+            tool_name="mcp__discord__reply",
+            tool_input={"chat_id": CHANNEL_ID, "text": "text only", "files": []},
+        )
+        self.assertIsNone(gate.output)
+
+    def test_unreserved_executed_send_is_never_attested_as_silence(self) -> None:
+        # An in-room send that executed with NO open matching reservation
+        # (PreToolUse unregistered or bypassed) must taint the turn's
+        # outcome. Before this fix the report was ignored entirely and Stop
+        # attested the turn as silence — an executed send recorded as if
+        # nothing happened.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8300000000000000007")
+        request_id = wake_request_id(decision.output)
+        self.post_tool(reserve=False)
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
+        self.assertNotIn("transport", stages)
+
+    def test_duplicate_report_of_attested_action_stays_attested(self) -> None:
+        # An exact re-description of the already-resolved reservation is
+        # benign duplicate noise, not bypass evidence: the turn's clean
+        # attestation must not flip to unknown.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8300000000000000008")
+        request_id = wake_request_id(decision.output)
+        self.post_tool(tool_use_id="toolu-dup-1")
+        self.post_tool(tool_use_id="toolu-dup-1", reserve=False)
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["transport"]["body"]["delivery"], "sent")
+
+    def test_cross_room_executed_send_is_never_attested_as_silence(self) -> None:
+        # PreToolUse denies cross-room sends; one that executed anyway is
+        # bypass evidence — the model DID act, so the turn cannot be silence.
+        transport = CountingTransport(wake_judgment)
+        decision = self.deliver(transport, message_id="8300000000000000009")
+        request_id = wake_request_id(decision.output)
+        self.post_tool(
+            tool_input={"chat_id": "9999999999999999999", "text": "elsewhere"},
+            reserve=False,
+        )
+        self.assertIsNone(self.stop(transport).output)
+        stages = receipts_for(self.tmp, request_id)
+        self.assertEqual(stages["participant-host"]["body"]["outcome"], "unknown")
+        self.assertNotIn("transport", stages)
 
     def test_second_room_action_in_the_same_turn_is_denied(self) -> None:
         transport = CountingTransport(wake_judgment)

@@ -60,7 +60,14 @@ sequenceDiagram
   model output. Room-participation tools (reply, react) are never re-gated on
   content — but an in-room reply/react reserves this turn's one atomic
   room-action slot, bound to the exact `tool_use_id`, tool name, and input
-  digest; a second attempt in the same turn is denied. `fetch_messages`
+  digest; a second attempt in the same turn is denied. Two attestability
+  denials (mechanical, never content-based) also apply before execution: a
+  reply carrying non-empty `files` is denied — the pinned plugin uploads
+  local files alongside the text, an external effect the canonical
+  participant action cannot represent and no receipt would attest — and a
+  reply/react whose reference target is not one of this turn's packet facts
+  is denied, because the canonical host would reject its replay at `Stop`
+  after the send already happened. `fetch_messages`
   (read-only room history) is allowed once room-scoped; every other tool the
   Discord plugin exposes (`edit_message`, `download_attachment`, and
   anything the plugin adds later) has no reservation/receipt shape this
@@ -68,11 +75,22 @@ sequenceDiagram
   never silently treated as operator work. The guard fails closed on
   internal errors while configured.
 - **PostToolUse** — records the exact executed room actions so the transport
-  stage attests what actually happened, including failed deliveries, and
-  resolves the matching reservation by its exact `tool_use_id`.
+  stage attests what actually happened, and resolves the matching reservation
+  by its exact `tool_use_id`. A response that itself reports an error is
+  recorded with transport delivery `unknown`, never `failed`: this seam can
+  never transport-prove zero effects. An executed in-room send with no open
+  matching reservation, or a cross-room execution, is recorded as an
+  unattested effect (so `Stop` reports `unknown`, never silence); only an
+  exact duplicate re-description of the already-attested reservation is
+  ignored as benign.
 - **PostToolUseFailure** — resolves the matching reservation when the reserved
-  tool call itself failed, recording the attempt as a failed delivery rather
-  than leaving it unattested.
+  tool call itself failed. The attempt's transport stage records delivery
+  `unknown`, never `failed`: the pinned plugin chunks one reply into
+  sequential sends and can throw after earlier chunks already landed
+  (`reply failed after N of M chunk(s) sent`), and even a first-send error
+  response does not prove the in-flight request had no server-side effect.
+  When the pinned partial-chunk format is present, the parsed
+  `chunks_sent`/`chunks_total` facts are preserved in the transport detail.
 
 Every stage record is immutable, request-correlated, and singly attested:
 observation by the observation provider, attention by the engine, the

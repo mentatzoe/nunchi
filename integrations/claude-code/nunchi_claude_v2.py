@@ -1399,6 +1399,14 @@ class ClaudeRoomV2:
         return result
 
 
+# The pinned Discord plugin (0.0.4) chunks one reply into sequential sends
+# and, on a mid-sequence error, throws AFTER earlier chunks already landed:
+# "reply failed after N of M chunk(s) sent: <cause>". Parsing this exact
+# pinned format preserves the partial-delivery fact in the transport detail.
+_CHUNK_FAILURE_RE = re.compile(r"failed after (\d+) of (\d+) chunk\(s\) sent")
+_MAX_DETAIL_ERROR_CHARS = 200
+
+
 class _ObservedDeliveryRecorder:
     """Transport-stage recorder for already-executed native deliveries."""
 
@@ -1412,20 +1420,33 @@ class _ObservedDeliveryRecorder:
             for row in self.observed
             if isinstance(row.get("action"), dict) and row.get("matched_reservation")
         ]
-        failed = [row for row in delivered if not row.get("delivered", False)]
-        delivery = "failed" if (not delivered or failed) else "sent"
-        detail = json.dumps(
-            {
-                "surface": "claude-code-native-tool",
-                "observed_actions": len(delivered),
-                "failed_actions": len(failed),
-                "tool_names": sorted(
-                    {str(row.get("tool_name") or "") for row in delivered}
-                ),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+        undelivered = [row for row in delivered if not row.get("delivered", False)]
+        # A tool failure/error report can never transport-prove zero effects
+        # at this hook seam: the pinned plugin chunks one reply into
+        # sequential sends and throws after earlier chunks already landed,
+        # and even a first-send error response does not prove the in-flight
+        # request had no server-side effect. "failed" (zero effects) is
+        # therefore never claimable here — an unclean report is "unknown",
+        # with whatever partial-delivery facts the pinned error format
+        # carries preserved in the detail.
+        delivery = "unknown" if (not delivered or undelivered) else "sent"
+        detail_body: dict[str, Any] = {
+            "surface": "claude-code-native-tool",
+            "observed_actions": len(delivered),
+            "undelivered_actions": len(undelivered),
+            "tool_names": sorted(
+                {str(row.get("tool_name") or "") for row in delivered}
+            ),
+        }
+        if undelivered:
+            error_text = str(undelivered[0].get("error") or "")
+            if error_text:
+                detail_body["error"] = error_text[:_MAX_DETAIL_ERROR_CHARS]
+                chunk_match = _CHUNK_FAILURE_RE.search(error_text)
+                if chunk_match is not None:
+                    detail_body["chunks_sent"] = int(chunk_match.group(1))
+                    detail_body["chunks_total"] = int(chunk_match.group(2))
+        detail = json.dumps(detail_body, ensure_ascii=False, sort_keys=True)
         # Forward the underlying sink's exact acknowledgement rather than
         # assuming success just because it did not raise: the caller's
         # contract (``src/nunchi/participant.py``) treats this callable's
@@ -2003,6 +2024,31 @@ def _reserve_room_action(
     return None
 
 
+def _is_duplicate_report(
+    turn: dict[str, Any],
+    tool_use_id: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> bool:
+    """True iff this report exactly re-describes the already-resolved
+    reservation (same ``tool_use_id``, tool name, and input digest).
+
+    A duplicate report of an action the turn already attested is benign
+    noise; anything else that executed without an open matching reservation
+    is evidence of a bypassed or misconfigured guard and must taint the
+    turn's outcome instead of being ignored.
+    """
+    reservation = turn.get("reservation")
+    return (
+        isinstance(reservation, dict)
+        and reservation.get("resolved", False) is True
+        and bool(tool_use_id)
+        and reservation.get("tool_use_id") == tool_use_id
+        and reservation.get("tool_name") == tool_name
+        and reservation.get("input_digest") == _tool_input_digest(tool_input)
+    )
+
+
 def _resolve_reservation(
     turn: dict[str, Any],
     tool_use_id: str,
@@ -2106,6 +2152,20 @@ def handle_pre_tool(
                     return _deny_tool(
                         "nunchi-v2 send safety: this room-caused turn may act only in "
                         f"the bound room {config.channel_id}; tool targets {target or '<none>'}."
+                    )
+                # Attestability, not a social gate: the pinned plugin's reply
+                # tool uploads `files` (absolute local paths) alongside the
+                # text — an external effect the canonical participant action
+                # cannot represent and no receipt would attest. Until a
+                # canonical, authorized, receipted media action exists, a
+                # room-caused turn may not upload files at all.
+                files = tool_input.get("files")
+                if files is not None and files != []:
+                    return _deny_tool(
+                        "nunchi-v2 attestability: file/media output is not a "
+                        "canonical room action this integration can attest; "
+                        "send a text-only reply (omit files, or pass an empty "
+                        "list)."
                     )
                 # Attestability, not a social gate: the canonical host binds
                 # reply/reaction references to this turn's delivered packet
@@ -2261,20 +2321,46 @@ def handle_post_tool(
                 )
                 return _allow(f"post-tool: unsupported native effect {tool_name} observed")
             if str(tool_input.get("chat_id") or "") != config.channel_id:
-                return _allow()
+                # PreToolUse denies cross-room sends for a room-caused turn;
+                # observing one execute anyway is bypass evidence. The model
+                # DID act, just not in this room — the turn's outcome can no
+                # longer be trusted as silence.
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
+                return _allow(
+                    f"post-tool: cross-room native effect {tool_name} observed"
+                )
             matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
             if not matched:
-                # No open reservation binds this exact tool_use_id/input: do
-                # not attest an action the turn never reserved. This can only
-                # happen from a misconfiguration (PreToolUse not registered)
-                # or a mismatched/duplicate report — either way, silently
-                # trusting it would let an unbound send masquerade as the
-                # turn's attested action.
+                # No open reservation binds this exact tool_use_id/input. An
+                # exact re-description of the already-resolved reservation is
+                # benign duplicate noise; anything else means an in-room send
+                # executed without ever being reserved (PreToolUse not
+                # registered, or bypassed) — that executed effect must taint
+                # the turn's outcome, or Stop would attest it as silence.
                 room["turn"] = turn
+                if _is_duplicate_report(turn, tool_use_id, tool_name, tool_input):
+                    store.write_room(room)
+                    return _allow(
+                        f"post-tool: duplicate report of the already-attested "
+                        f"reservation tool_use_id={tool_use_id!r}; ignored"
+                    )
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
                 store.write_room(room)
                 return _allow(
                     f"post-tool: no open reservation matches tool_use_id={tool_use_id!r}; "
-                    "action not attested"
+                    "unreserved executed send recorded as an unattested effect"
                 )
             action = _observed_action(is_reply, tool_input)
             response = payload.get("tool_response")
@@ -2282,15 +2368,20 @@ def handle_post_tool(
                 isinstance(response, dict)
                 and (response.get("isError") or response.get("error"))
             )
-            store.append_turn_action(
-                {
-                    "action": action,
-                    "matched_reservation": True,
-                    "delivered": delivered,
-                    "tool_name": tool_name,
-                    "recorded_at": time.time(),
-                }
-            )
+            row: dict[str, Any] = {
+                "action": action,
+                "matched_reservation": True,
+                "delivered": delivered,
+                "tool_name": tool_name,
+                "recorded_at": time.time(),
+            }
+            if not delivered and isinstance(response, dict):
+                # Preserve the reported error so the transport detail can
+                # carry it (including any pinned partial-chunk fact).
+                row["error"] = str(
+                    response.get("error") or "tool response reported an error"
+                )
+            store.append_turn_action(row)
             room["turn"] = turn
             store.write_room(room)
         return _allow()
@@ -2307,9 +2398,12 @@ def handle_post_tool_failure(
     ``PostToolUseFailure`` fires instead of ``PostToolUse`` when the tool call
     itself failed; it carries the same ``tool_use_id`` the corresponding
     ``PreToolUse`` reserved. Closing the reservation here — not just on
-    success — is what lets ``Stop`` distinguish "the send failed" (attested,
-    ``outcome=sent``, transport stage ``failed``) from "nothing ever closed
-    the reservation" (honestly ``unknown``, never silence).
+    success — is what lets ``Stop`` distinguish "the attempt was reported and
+    closed" (attested: host stage ``unknown`` as always pre-transport,
+    transport stage ``unknown`` — a failure report can never transport-prove
+    zero effects on this chunking transport, so ``failed`` is not claimable
+    here) from "nothing ever closed the reservation" (also ``unknown``, but
+    via the open-reservation path — never silence either way).
     """
     if not ClaudeGateConfig.is_configured(environ):
         return _allow()
@@ -2345,14 +2439,40 @@ def handle_post_tool_failure(
                     f"post-tool-failure: unsupported native effect {tool_name} observed"
                 )
             if str(tool_input.get("chat_id") or "") != config.channel_id:
-                return _allow()
+                # A cross-room attempt that reached execution (and then
+                # failed) still proves the guard was bypassed, and a failure
+                # report cannot prove the attempt had zero effects.
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
+                return _allow(
+                    f"post-tool-failure: cross-room native attempt {tool_name} observed"
+                )
             matched = _resolve_reservation(turn, tool_use_id, tool_name, tool_input)
             if not matched:
                 room["turn"] = turn
+                if _is_duplicate_report(turn, tool_use_id, tool_name, tool_input):
+                    store.write_room(room)
+                    return _allow(
+                        f"post-tool-failure: duplicate report of the already-"
+                        f"attested reservation tool_use_id={tool_use_id!r}; ignored"
+                    )
+                store.append_turn_action(
+                    {
+                        "unattested_effect": True,
+                        "tool_name": tool_name,
+                        "recorded_at": time.time(),
+                    }
+                )
                 store.write_room(room)
                 return _allow(
                     f"post-tool-failure: no open reservation matches "
-                    f"tool_use_id={tool_use_id!r}; action not attested"
+                    f"tool_use_id={tool_use_id!r}; unreserved attempt recorded "
+                    "as an unattested effect"
                 )
             action = _observed_action(is_reply, tool_input)
             store.append_turn_action(
