@@ -70,3 +70,40 @@ under site-packages.
 `git diff --check` and JSON parsing of the structured-output schema also
 passed. No live Discord ladder, installed participant-runtime acceptance,
 slice `HANDOFF_READY`/`ACCEPTED`, main merge, or cutover is asserted here.
+
+## Event-cap truncation successor
+
+Aleph re-reviewed exact head
+`2270c714f1d4ad9d1f73071d4cd57e11a964c18b` in review `4752659661` and found
+that an event-saturated bootstrap could still claim complete coverage: the
+producer asked Discord for exactly its event cap, leaving no evidence that an
+older suffix existed. Repair commit
+`bb01e85e5a7fa8232a0b2c1da272d8ec53d384f3` closes that producer-to-consumer
+boundary.
+
+The bootstrap now requests one extra event below Discord's 100-message edge
+and performs one bounded `before=oldest` probe at that edge. Its closed coverage
+reports distinct `events` and `bytes` truncation causes. `CodexRoomV2` validates
+those causes, unions them with local omissions without duplicates, and carries
+them into participant coverage.
+
+The new regression begins with a two-message authoritative REST dataset and a
+one-event bootstrap cap, observes the producer request `limit=2`, then passes
+the result through `CodexRoomV2.backfill()` and a live participant turn. The
+participant receives `has_more_before=true` and `truncated_by=["events"]`. A
+separate test proves the bounded second probe at Discord's 100-message edge.
+
+Verification at the repair commit:
+
+```text
+Focused composition/participant/Discord suite: 95 tests — OK
+Clean installed wheel from an external test tree: 95 tests — OK
+Complete deterministic suite: 1291 tests — OK (skipped=9)
+Discord replay: 7/7 — PASS
+Governance boundary + CLI: OK (SpecKit 0.12.11)
+git diff --check: OK
+```
+
+This appended result has the same scope limits as the earlier record: it does
+not claim DT-07, installed-runtime acceptance, a slice lifecycle transition,
+main merge, or cutover.
