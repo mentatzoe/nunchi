@@ -25,7 +25,8 @@ and establishes `READY` before `ACTIVE`)
 reusable reference scenes that every in-tree surface can bind and prove in its
 own integration slice.
 
-**Authority source**: Zoe-selected Aleph Vault design at `bdd1ebb`, contract-clarified in PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 

@@ -1903,6 +1903,17 @@ class GovernanceBoundaryTests(unittest.TestCase):
 **Candidate commit**: `{base}`
 """,
             )
+            self._write_lifecycle_record(
+                root,
+                check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                    "acceptance"
+                ],
+                f"""# Upstream acceptance
+**Slice**: `010-v2-contract`
+**Status**: ACCEPTED
+**Candidate commit**: `{base}`
+""",
+            )
 
             def activation_with(dependency_commit: str, reference: str) -> str:
                 self._write_lifecycle_record(
@@ -2102,13 +2113,47 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
             self.assertFalse(check_governance._planning_baseline_accepted(root))
 
-    def test_dependent_slice_cannot_start_before_upstream_handoff(self):
+    def test_dependent_slice_cannot_start_before_upstream_acceptance(self):
         states = {name: "PLANNED" for name in check_governance.EXPECTED_SLICES}
         states["020-v2-observation"] = "READY"
         errors = check_governance._slice_dependency_state_errors(states)
         self.assertTrue(any("010-v2-contract" in error for error in errors))
         states["010-v2-contract"] = "HANDOFF_READY"
+        errors = check_governance._slice_dependency_state_errors(states)
+        self.assertTrue(
+            any(
+                "requires dependency 010-v2-contract to be ACCEPTED" in error
+                for error in errors
+            )
+        )
+        states["010-v2-contract"] = "ACCEPTED"
         self.assertEqual(check_governance._slice_dependency_state_errors(states), [])
+
+    def test_completion_vocabulary_includes_freshness_and_authorization(self):
+        self.assertEqual(
+            set(check_governance.SCENE_ID.findall("S16 S17 S18 S19")),
+            {"S16", "S17", "S18"},
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-010F"],
+            "010-v2-contract",
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-040B"],
+            "040-v2-participant-wake",
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-040C"],
+            "040-v2-participant-wake",
+        )
+        self.assertIn(
+            "I-010F",
+            check_governance.COMPLETION_PLAN_TERMS["020-v2-observation"],
+        )
+        self.assertIn(
+            "I-010F",
+            check_governance.COMPLETION_PLAN_TERMS["030-v2-core-attention"],
+        )
 
     def test_final_slice_requires_accepted_dependencies(self):
         states = {name: "ACCEPTED" for name in check_governance.EXPECTED_SLICES}

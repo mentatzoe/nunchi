@@ -23,7 +23,8 @@ and establishes `READY` before `ACTIVE`)
 
 **Input**: Define the atomic V2 request, decision, wake, continuation, and receipt contracts before any dependent implementation begins.
 
-**Authority source**: Zoe-selected Aleph Vault design at `bdd1ebb`, contract-clarified in PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 

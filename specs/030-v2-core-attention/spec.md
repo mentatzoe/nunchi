@@ -23,7 +23,8 @@ and establishes `READY` before `ACTIVE`)
 
 **Input**: Replace the V1 move classifier with one participant-shaped pre-attention judgment, governed suppression, dual DEFER valves, separate operational error, and contract-equivalent callable core and CLI.
 
-**Authority source**: Zoe-selected Aleph Vault design at `bdd1ebb`, contract-clarified in PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 

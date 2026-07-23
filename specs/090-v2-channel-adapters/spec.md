@@ -23,7 +23,8 @@ establishes `READY` before `ACTIVE`)
 
 **Input**: Plan atomic V2 parity for the generic, Discord, Matrix, and Telegram standalone adapters without implementation now.
 
-**Authority source**: Aleph Vault selected design `bdd1ebb`, contract-clarified at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 

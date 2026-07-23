@@ -1,26 +1,23 @@
 <!--
 Sync Impact Report
-Version change: 2.1.0 -> 2.3.0
-Minor-bump rationale: replaces session-specific numbered-goal governance with
-an externally legible program-authority contract and per-slice lifecycle, then
-defines durable assignment, dependency-acceptance, and append-only rework rules.
+Version change: 2.3.0 -> 2.4.0
+Minor-bump rationale: makes the selected design self-contained inside the
+repository and closes the executable lifecycle gap that allowed downstream
+implementation to start from a merely handed-off upstream candidate.
 Modified principles:
-- Selected V2 Product Boundary (current truth changes only at CUTOVER_VERIFIED)
-- Atomic Contract and Cross-Surface Parity (authorized program owns migration)
-- Single-Owner Slices and Deliberate Integration (slice state and activation)
-Added sections:
-- Program and Slice Lifecycle Gates
-- Assignment and append-only rejection/rework contracts
-Removed sections:
-- Goal and Workflow Gates
+- Authority and Repository Boundaries (repository-owned selected design)
+- Program and Slice Lifecycle Gates (terminal upstream acceptance)
 Dependent artifacts:
 - ✅ Spec/plan/tasks/checklist templates (slice lifecycle metadata and gates)
 - ✅ nunchi-plan and speckit workflows (implementation authority + readiness)
 - ✅ AGENTS.md, CLAUDE.md, README.md, and execution-spine guidance
-- ✅ umbrella program and slices 010-110 (external lifecycle terminology)
-- ✅ governance checker and tests (authority/slice-state enforcement)
-- ✅ governance evidence (new amendment record; historical record unchanged)
-Follow-up TODOs: none
+- ✅ umbrella program and slice authority declarations
+- ✅ governance checker and tests (terminal dependency enforcement)
+- ✅ completion goal and inherited-state baseline
+Follow-up TODOs:
+- Deliver and accept I-010F through the slice-010 amendment path, then re-plan
+  slice 040 to define I-040B, I-040C, S17, and S18 before activation; refresh
+  downstream packets only after their dependencies accept.
 -->
 
 # Nunchi Constitution
@@ -210,8 +207,11 @@ without recreating the previous detached patchwork.
 
 Authority is ordered as follows:
 
-1. Zoe-selected Aleph Vault decisions and technical design, selected in PR 67
-   at `bdd1ebb` and contract-clarified in PR 68 at `c834e8c`.
+1. The repository-owned selected design at
+   `docs/architecture/v2-selected-design.md` and portable contract reference at
+   `docs/contracts/nunchi-v2.md`. They preserve the Zoe-selected decisions from
+   Aleph Vault PR 67 (`bdd1ebb`) and PR 68 (`c834e8c`); those external commits
+   are provenance, not a contributor or runtime dependency.
 2. This constitution, which translates those decisions into repository
    invariants.
 3. `AGENTS.md` and `CLAUDE.md`, which provide runtime-specific execution
@@ -222,7 +222,7 @@ Authority is ordered as follows:
 Ordinary-path source, schemas, tests, evaluations, evidence, and documentation
 are authoritative for what is currently implemented and proven. A planning
 artifact MUST NOT claim capability that those artifacts do not establish. When
-the Vault design and current implementation differ, both MUST be stated:
+the selected design and current implementation differ, both MUST be stated:
 selected target versus current behavior.
 
 The canonical ordinary-path homes are:
@@ -275,8 +275,9 @@ PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
 - `PLANNED`: its control-plane artifacts agree; implementation remains dormant.
 - `READY`: the one complete program authority record is valid and enumerates
   exactly slices `010` through `110`, one accountable occupant is assigned
-  from a durable source, every declared upstream handoff needed by this consumer
-  is accepted at an exact full commit with a durable
+  from a durable source, every declared upstream slice needed by this consumer
+  is terminally `ACCEPTED` at an exact full commit and its packet is accepted
+  by that consumer with a durable
   per-consumer acceptance reference, and analysis has zero CRITICAL/HIGH
   findings. Slice `110` additionally requires every slice `010` through `100`
   to be `ACCEPTED`. After those facts are accepted, the owner writes immutable
@@ -511,4 +512,4 @@ integration, release, and any live-readiness claim. Any unexplained violation
 blocks the affected work. Program and slice milestone acceptance requires the
 repository governance check and full existing test baseline to pass.
 
-**Version**: 2.3.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-11
+**Version**: 2.4.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-23

@@ -8,16 +8,18 @@ lives in the disposable SpecKit control plane.
 
 The source-of-truth order is:
 
-1. Zoe-selected Aleph Vault Nunchi decisions and technical design, selected in
-   PR 67 at `bdd1ebb` and contract-clarified in PR 68 at `c834e8c`.
+1. Repository-owned `docs/architecture/v2-selected-design.md` and
+   `docs/contracts/nunchi-v2.md`, preserving the Zoe-selected Aleph Vault
+   decisions from PR 67 (`bdd1ebb`) and PR 68 (`c834e8c`).
 2. `.specify/memory/constitution.md`.
 3. `AGENTS.md` and `CLAUDE.md`.
 4. `specs/001-nunchi-v2-program/` and its independently owned slices.
 5. Ordinary-path implementation, tests, evaluations, evidence, and product
    documentation for what is currently built and proven.
 
-The Vault design owns the selected target. The repository's ordinary artifacts
-own current implementation truth. SpecKit owns execution planning only.
+The repository-owned design owns the selected target; the historical Vault
+commits establish provenance only. The repository's ordinary artifacts own
+current implementation truth. SpecKit owns execution planning only.
 
 ## Program authority and slice lifecycle
 
@@ -54,10 +56,10 @@ PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
 
 `READY` means the complete program authorization record is valid, the slice's
 named participant occupies the owner lane from a durable assignment source,
-all declared upstream handoffs are accepted at exact commits with matching
-per-consumer acceptance references, analysis is clean, its isolated worktree
-is fixed, and its `slice-activation.md` records those exact facts. Slice `110`
-is stricter: every upstream slice `010`–`100` must already be `ACCEPTED`.
+all declared upstream slices are terminally `ACCEPTED` at exact commits and
+their packets have matching per-consumer acceptance references, analysis is
+clean, its isolated worktree is fixed, and its `slice-activation.md` records
+those exact facts.
 There is no central status registry: state is derived from the slice declaration
 and its activation, candidate, handoff, and acceptance evidence. None of this
 state enters conversation, classifier, runtime permission, receipt, or social
@@ -65,9 +67,10 @@ memory.
 
 At slice level, `v2-integrator` accepts the exact commit and handoff packet for
 slices `010`–`100`; Zoe accepts the exact slice-`110` candidate. Separately,
-each dependent owner must accept each required upstream handoff before its own
-slice may become `READY`. That dependency-specific acceptance neither replaces
-nor implies terminal slice acceptance.
+each dependent owner must accept each required upstream packet before its own
+slice may become `READY`. Both facts are required: terminal upstream acceptance
+does not fabricate consumer acceptance, and consumer acceptance cannot make a
+nonterminal upstream candidate ready for dependency use.
 
 Create the following record only after Zoe externally grants implementation
 authority for the complete V2 program:

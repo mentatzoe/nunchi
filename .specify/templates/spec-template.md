@@ -8,7 +8,8 @@
 
 **Input**: User description: "$ARGUMENTS"
 
-**Authority source**: [Aleph Vault selected design/decision link]
+**Authority source**: `docs/architecture/v2-selected-design.md` and
+`docs/contracts/nunchi-v2.md` [plus historical decision provenance when relevant]
 
 **Umbrella program**: [program directory]
 
@@ -46,6 +47,10 @@ the task graph is unchanged; activation is retained and attempt streams append]
 
 **Dependency commits / acceptance references**: [ordered `slice=full-sha` and
 `slice=repo-relative-evidence-reference` mappings; `none` when dependency-free]
+
+Every dependency MUST already be terminally `ACCEPTED`; the consumer-owned
+reference separately accepts that exact packet and does not substitute for the
+upstream lifecycle decision.
 
 **Feeds**: [dependent slice ids or final integration]
 

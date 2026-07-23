@@ -11,8 +11,9 @@ they do not implement V2 product behavior or make a slice ready.
 **Product-delivery prerequisites (`T004` onward)**: a valid external
 complete implementation-authority record enumerating exactly slices `010`
 through `110`; one assigned
-participant with a durable assignment source; per-recipient acceptance of every
-required upstream handoff; zero CRITICAL/HIGH slice-analysis findings; an
+participant with a durable assignment source; terminal acceptance of every
+upstream slice plus per-recipient acceptance of its exact packet; zero
+CRITICAL/HIGH slice-analysis findings; an
 isolated worktree; and immutable ordinary-path slice-activation evidence that
 establishes `READY` before the assigned participant moves the slice to `ACTIVE`
 

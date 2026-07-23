@@ -6,8 +6,10 @@ order or product design.
 
 ## Grounding sequence
 
-1. Read the selected Aleph Vault Nunchi technical design and decisions (PR 67
-   at `bdd1ebb`, contract-clarified by PR 68 at `c834e8c`).
+1. Read `docs/architecture/v2-selected-design.md` and
+   `docs/contracts/nunchi-v2.md`. These repository-owned references preserve
+   the Zoe-selected Aleph Vault decisions from PR 67 (`bdd1ebb`) and PR 68
+   (`c834e8c`); a Vault checkout is not required.
 2. Read `.specify/memory/constitution.md`.
 3. Read `AGENTS.md` and this file.
 4. Read `specs/001-nunchi-v2-program/` and only the slice assigned to your owner

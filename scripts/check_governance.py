@@ -15,8 +15,11 @@ from pathlib import Path
 
 PINNED_SPECKIT_VERSION = "0.12.11"
 PINNED_SPECKIT_COMMIT = "e802a7dd52a6eceba9403cbbf40e60dced043238"
-PINNED_CONSTITUTION_VERSION = "2.3.0"
+PINNED_CONSTITUTION_VERSION = "2.4.0"
 PINNED_VAULT_COMMIT = "c834e8c"
+SELECTED_DESIGN_PATH = "docs/architecture/v2-selected-design.md"
+SELECTED_CONTRACT_PATH = "docs/contracts/nunchi-v2.md"
+COMPLETION_GOAL_PATH = "docs/v2-completion-goal.md"
 IMPLEMENTATION_AUTHORIZATION_PATH = Path(
     "evidence/governance/v2-implementation-authorization.md"
 )
@@ -310,9 +313,12 @@ CANONICAL_INTERFACES = {
     "I-010C": "010-v2-contract",
     "I-010D": "010-v2-contract",
     "I-010E": "010-v2-contract",
+    "I-010F": "010-v2-contract",
     "I-020A": "020-v2-observation",
     "I-030A": "030-v2-core-attention",
     "I-040A": "040-v2-participant-wake",
+    "I-040B": "040-v2-participant-wake",
+    "I-040C": "040-v2-participant-wake",
     "I-050A": "050-v2-discord-transport",
 }
 
@@ -340,7 +346,19 @@ PLANNING_PLACEHOLDER = re.compile(
 )
 TASK_LINE = re.compile(r"^- \[ \] T(\d{3})(?: \[P\])?(?: \[US\d+\])? .+$")
 INTERFACE_ID = re.compile(r"\bI-\d{3}[A-Z]\b")
-SCENE_ID = re.compile(r"\bS(?:0[1-9]|1[0-6])\b")
+SCENE_ID = re.compile(r"\bS(?:0[1-9]|1[0-8])\b")
+COMPLETION_PLAN_TERMS = {
+    "020-v2-observation": ("I-010F", "S17", "S18"),
+    "030-v2-core-attention": ("I-010F",),
+    "040-v2-participant-wake": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "050-v2-discord-transport": ("I-010F", "S17", "S18"),
+    "060-v2-hermes": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "070-v2-claude-code": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "080-v2-codex": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "090-v2-channel-adapters": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "100-v2-security-provenance": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "110-v2-parity-cutover": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+}
 
 EXPECTED_DOCUMENTATION_PATHS = {
     "010-v2-contract": {
@@ -763,6 +781,8 @@ def check_governance_documents(root: Path) -> list[str]:
         ".specify/memory/constitution.md": (
             f"**Version**: {PINNED_CONSTITUTION_VERSION}",
             PINNED_VAULT_COMMIT,
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "SpecKit Is Control-Plane Only (NON-NEGOTIABLE)",
             "Trusted preattention-disabled configuration MUST bypass model judgment",
             "Receipt records MUST be immutable and request-correlated",
@@ -815,6 +835,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "The `README.md` row is mandatory",
             "Generic directory rows are invalid",
             "Dependency acceptance mapping",
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/spec-template.md": (
             "**SpecKit binding**:",
@@ -825,6 +846,9 @@ def check_governance_documents(root: Path) -> list[str]:
             "Every implementation MUST review `README.md`",
             "Generic directories or wildcards",
             "Delegated by: Zoe",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/tasks-template.md": (
             "activation records document prerequisites but never grant authority",
@@ -837,6 +861,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "documentation-freshness gate passes",
             "every exact row in `plan.md` §Documentation Impact and Freshness",
             "Candidate and handoff files are append-only attempt streams",
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/checklist-template.md": (
             "python3 scripts/run_slice_workflow.py run <nunchi-plan|speckit>",
@@ -851,6 +876,8 @@ def check_governance_documents(root: Path) -> list[str]:
             "SpecKit-managed paths are control plane only",
             "Trusted preattention bypass wakes directly",
             PINNED_VAULT_COMMIT,
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "## Documentation freshness",
             "Use exactly one disposition per reviewed surface",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
@@ -860,6 +887,8 @@ def check_governance_documents(root: Path) -> list[str]:
         "CLAUDE.md": (
             "continuation authority out of classifier input",
             "immutable singly",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "documentation-freshness gate",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
             "scripts/run_slice_workflow.py run speckit",
@@ -869,6 +898,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "post-convergence documentation-freshness gate",
             "evidence-backed `NO_IMPACT`",
             "directory wildcard does not satisfy the gate",
+            COMPLETION_GOAL_PATH,
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
             "scripts/run_slice_workflow.py run speckit",
             "scripts/run_slice_workflow.py resume <run-id>",
@@ -876,6 +906,8 @@ def check_governance_documents(root: Path) -> list[str]:
         "docs/governance/execution-spine.md": (
             "## Documentation freshness",
             "The workflow's `documentation-freshness` gate",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "## Participant action contract",
             "### Transition evidence schema",
             "Dependency commits",
@@ -884,6 +916,15 @@ def check_governance_documents(root: Path) -> list[str]:
             "scripts/run_slice_workflow.py run speckit",
             "scripts/run_slice_workflow.py resume <run-id>",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
+        ),
+        COMPLETION_GOAL_PATH: (
+            "# Nunchi V2 completion goal",
+            "## End conditions",
+            "Live conversation, not queued work",
+            "Deterministic authority boundaries",
+            "Dependencies are terminal before downstream work starts",
+            "One frozen candidate closes review",
+            "Cutover is atomic and truth remains exact",
         ),
         "evidence/governance/slice-lifecycle-amendment-2026-07-11.md": (
             "# Slice-centric execution-spine amendment",
@@ -1376,6 +1417,30 @@ def _lifecycle_records(text: str) -> tuple[str, ...]:
     )
 
 
+def _accepted_amended_interfaces(
+    root: Path, upstream: str, *, at_commit: str | None = None
+) -> set[str]:
+    relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["amendments"])
+    if at_commit is not None:
+        text = _git_file_text(root, at_commit, relative)
+    else:
+        path = root / relative
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = None
+    if text is None:
+        return set()
+    interfaces: set[str] = set()
+    for record in _lifecycle_records(text):
+        if _clean_metadata(record, "Status") != "ACCEPTED":
+            continue
+        match = INTERFACE_ID.search(_clean_metadata(record, "Amended interface"))
+        if match:
+            interfaces.add(match.group(0))
+    return interfaces
+
+
 def _effective_dependency_commit(
     root: Path,
     upstream: str,
@@ -1492,7 +1557,8 @@ def _effective_dependency_commit(
             )
         if interface_match and prior_match:
             interface_key = interface_match.group(0)
-            expected_prior = interface_versions.get(interface_key, 1)
+            initial_version = 0 if interface_key == "I-010F" else 1
+            expected_prior = interface_versions.get(interface_key, initial_version)
             if int(prior_match.group(1)) != expected_prior:
                 errors.append(
                     f"{prefix}: Prior interface version for {interface_key} must "
@@ -2251,8 +2317,7 @@ def _slice_lifecycle_evidence_errors(
                 )
                 continue
             upstream = by_id[dependency_id]
-            stage = "acceptance" if dirname == "110-v2-parity-cutover" else "handoff"
-            packet_reference = EXPECTED_LIFECYCLE_PATHS[upstream][stage]
+            packet_reference = EXPECTED_LIFECYCLE_PATHS[upstream]["handoff"]
             expected_reference_fields = {
                 "Consumer slice": dirname,
                 "Upstream slice": upstream,
@@ -2292,7 +2357,7 @@ def _slice_lifecycle_evidence_errors(
 
         for dependency_id, commit in commit_map.items():
             upstream = by_id[dependency_id]
-            stage = "acceptance" if dirname == "110-v2-parity-cutover" else "handoff"
+            stage = "acceptance"
             upstream_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream][stage])
             upstream_path = root / upstream_relative
             if not _repo_path_is_safe(root, upstream_relative, require_file=True):
@@ -2768,23 +2833,13 @@ def _slice_dependency_state_errors(slice_states: dict[str, str]) -> list[str]:
     for dirname, state in slice_states.items():
         if state not in started_states:
             continue
-        accepted_dependency_states = (
-            {"ACCEPTED"}
-            if dirname == "110-v2-parity-cutover"
-            else {"HANDOFF_READY", "ACCEPTED"}
-        )
         for dependency_id in EXPECTED_SLICES[dirname]["dependencies"]:
             dependency = by_id[dependency_id]
             dependency_state = slice_states.get(dependency, "")
-            if dependency_state not in accepted_dependency_states:
-                requirement = (
-                    "ACCEPTED"
-                    if dirname == "110-v2-parity-cutover"
-                    else "HANDOFF_READY or ACCEPTED"
-                )
+            if dependency_state != "ACCEPTED":
                 errors.append(
                     f"{dirname}: {state} requires dependency {dependency} to be "
-                    f"{requirement}; observed {dependency_state!r}"
+                    f"ACCEPTED; observed {dependency_state!r}"
                 )
     return errors
 
@@ -3362,6 +3417,29 @@ def check_program(root: Path) -> list[str]:
             )
         slice_state = next(iter(observed_states), "")
         slice_states[dirname] = slice_state
+        completion_gate = slice_state in {
+            "READY",
+            "ACTIVE",
+            "CONVERGED",
+            "HANDOFF_READY",
+            "ACCEPTED",
+        }
+        if completion_gate:
+            for term in COMPLETION_PLAN_TERMS.get(dirname, ()):
+                if term not in plan_text:
+                    errors.append(
+                        f"{feature.relative_to(root)}/plan.md: {slice_state} under "
+                        f"the V2 completion goal requires {term}"
+                    )
+            if (
+                "I-010F" in COMPLETION_PLAN_TERMS.get(dirname, ())
+                and "I-010F"
+                not in _accepted_amended_interfaces(root, "010-v2-contract")
+            ):
+                errors.append(
+                    f"{feature.relative_to(root)}: {slice_state} requires an accepted "
+                    "I-010F amendment in the slice-010 amendment ledger"
+                )
         distinct_assignments = set(assigned_values.values())
         if len(distinct_assignments) != 1:
             errors.append(
@@ -3429,8 +3507,14 @@ def check_program(root: Path) -> list[str]:
         if PINNED_VAULT_COMMIT not in spec_text:
             errors.append(
                 f"{feature.relative_to(root)}/spec.md: authority source must cite "
-                f"Aleph Vault merge {PINNED_VAULT_COMMIT}"
+                f"selected-design provenance {PINNED_VAULT_COMMIT}"
             )
+        for authority_path in (SELECTED_DESIGN_PATH, SELECTED_CONTRACT_PATH):
+            if authority_path not in spec_text:
+                errors.append(
+                    f"{feature.relative_to(root)}/spec.md: authority source must cite "
+                    f"repository-owned {authority_path}"
+                )
 
         for section in REQUIRED_SPEC_SECTIONS:
             if section not in spec_text:
@@ -3555,6 +3639,14 @@ def check_program(root: Path) -> list[str]:
         produced = _markdown_subsection(plan_text, "Produces")
         for interface, interface_owner in CANONICAL_INTERFACES.items():
             if interface_owner == dirname and interface not in produced:
+                if (
+                    interface == "I-010F"
+                    and interface
+                    not in _accepted_amended_interfaces(root, "010-v2-contract")
+                ):
+                    continue
+                if interface in {"I-010F", "I-040B", "I-040C"} and not completion_gate:
+                    continue
                 errors.append(
                     f"{feature.relative_to(root)}/plan.md: owner does not produce {interface}"
                 )
@@ -3562,12 +3654,16 @@ def check_program(root: Path) -> list[str]:
         scenes = set(SCENE_ID.findall(plan_text))
         if not scenes:
             errors.append(
-                f"{feature.relative_to(root)}/plan.md: no shared S01-S16 scene mapping"
+                f"{feature.relative_to(root)}/plan.md: no shared S01-S18 scene mapping"
             )
         if dirname == "110-v2-parity-cutover":
-            if scenes != required_scenes:
+            expected_final_scenes = required_scenes | (
+                {"S17", "S18"} if completion_gate else set()
+            )
+            if scenes != expected_final_scenes:
                 errors.append(
-                    f"{feature.relative_to(root)}/plan.md: final parity must map exactly S01-S16"
+                    f"{feature.relative_to(root)}/plan.md: final parity must map "
+                    f"exactly {sorted(expected_final_scenes)}"
                 )
         else:
             all_nonfinal_scenes.update(scenes)
@@ -3587,9 +3683,9 @@ def check_program(root: Path) -> list[str]:
         errors.append(
             f"specs/: non-canonical interface IDs present {sorted(unknown_interfaces)}"
         )
-    if all_nonfinal_scenes != required_scenes:
+    if not required_scenes.issubset(all_nonfinal_scenes):
         errors.append(
-            "specs/: implementing slices must collectively map S01-S16; "
+            "specs/: implementing slices must collectively map base scenes S01-S16; "
             f"missing {sorted(required_scenes - all_nonfinal_scenes)}"
         )
     cycle = _graph_cycle(graph)

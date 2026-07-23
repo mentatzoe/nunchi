@@ -22,13 +22,15 @@ implementation authority not granted
 Nunchi technical design without implementing V2 product behavior while building
 the planning baseline.
 
-**Authority source**: Aleph Vault selected design PR 67 (`bdd1ebb`) and contract-clarification PR 68 (`c834e8c`)
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault PR 67 (`bdd1ebb`) and PR 68
+(`c834e8c`) remain decision provenance
 
 **Umbrella program**: this directory
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Depends on**: selected Vault design and Nunchi Constitution 2.3.0
+**Depends on**: repository-owned selected design and Nunchi Constitution 2.4.0
 
 **Feeds**: independently activated slices `010` through `110`
 
@@ -55,8 +57,8 @@ the planning baseline.
 
 ## Interface Summary
 
-- **Consumes**: selected Aleph Vault V2 technical design; current ordinary-path
-  V1 implementation and evidence; Constitution 2.3.0.
+- **Consumes**: repository-owned selected V2 design; current ordinary-path V1
+  implementation and evidence; Constitution 2.4.0.
 - **Produces**: an acyclic slice graph, stable owner lanes, a shared interface
   registry, acceptance-scene catalog, integration order, and evidence contract.
 - **Integration handoff**: `v2-program-owner` coordinates slice order and
@@ -306,9 +308,10 @@ and final parity gate.
   readiness before activation and implementation.
 - **SC-008**: Both Codex and Claude integration manifests and the installed CLI
   report SpecKit `0.12.11`.
-- **SC-009**: The pre-existing baseline remains 968 tests—960 passing and 8
-  skipped; governance tests add coverage without removing or weakening an
-  existing test.
+- **SC-009**: Every previously accepted deterministic behavior remains covered;
+  no candidate may delete, skip, or weaken accepted coverage merely to become
+  green. Exact test and skip counts belong to candidate evidence, not this
+  long-lived specification.
 - **SC-010**: Every common acceptance scene maps to at least one implementing
   slice and to final parity slice `110`.
 - **SC-011**: There are zero unresolved placeholders, ownership gaps, dependency
@@ -332,10 +335,10 @@ and final parity gate.
   attempt streams, never a duplicated umbrella status table.
 - **SC-016**: Every `010`–`100` packet has an explicit integrator acceptance
   record before its source slice is `ACCEPTED`, every `110` packet has Zoe's
-  explicit acceptance, and every dependent activation cites its own
-  per-recipient acceptance of each required upstream handoff through ordered
-  full-SHA and matching consumer-owned evidence mappings; slice `110` starts
-  only after every upstream slice is `ACCEPTED`.
+  explicit acceptance, and every dependent activation requires each upstream
+  slice to be terminally `ACCEPTED` while also citing its own per-recipient
+  acceptance of each exact packet through ordered full-SHA and matching
+  consumer-owned evidence mappings.
 - **SC-017**: Every declared lifecycle transition cites the exact standard
   milestone record for that slice, and program `CUTOVER_VERIFIED` cites both
   the program owner's record of Zoe's cutover decision and the complete
