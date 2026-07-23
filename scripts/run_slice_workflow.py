@@ -842,6 +842,33 @@ def resume_bound_run(root: Path, run_id: str) -> int:
     return return_code
 
 
+def repair_bound_run(root: Path, run_id: str) -> int:
+    """Re-pin the binding to the engine's own recorded state transition.
+
+    An interrupted invocation (killed step session, wrapper death) can leave
+    state.json legitimately advanced by the SpecKit engine while the binding
+    still pins the pre-invocation state, which makes every later resume fail
+    with a drift error. This deliberate operator command accepts exactly that
+    transition: every other pin (workflow, inputs, task graph, state identity)
+    is still enforced by the refresh validation.
+    """
+
+    binding = _load_json_file(
+        _run_directory(root, run_id) / BINDING_NAME, "Nunchi workflow binding"
+    )
+    refreshed = _refresh_state_binding_after_resume(root, run_id, binding)
+    print(
+        f"Repaired binding for {run_id}: status {refreshed['state_status']}",
+        file=sys.stderr,
+    )
+    if refreshed["state_status"] in RESUMABLE_STATUSES:
+        print(
+            f"Resume only with: python3 scripts/run_slice_workflow.py resume {run_id}",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -861,6 +888,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     resume_parser.add_argument("run_id")
 
+    repair_parser = subparsers.add_parser(
+        "repair",
+        help="re-pin the binding after an interrupted invocation advanced state",
+    )
+    repair_parser.add_argument("run_id")
+
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent.parent
     try:
@@ -872,6 +905,8 @@ def main(argv: list[str] | None = None) -> int:
                 integration=args.integration,
             )
             return return_code
+        if args.action == "repair":
+            return repair_bound_run(root, args.run_id)
         return resume_bound_run(root, args.run_id)
     except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

@@ -20,7 +20,12 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
+      # Governance validates the commissioned starting commit and therefore
+      # requires repository history; the default one-commit checkout makes a
+      # valid implementation grant appear missing.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}

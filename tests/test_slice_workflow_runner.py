@@ -409,6 +409,43 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "status changed outside"):
             runner.validate_resume(self.root, run_id)
 
+    def test_repair_accepts_engine_recorded_state_after_interrupted_invocation(
+        self,
+    ) -> None:
+        run_id = self._create_finalized_run()
+        state_path = runner._run_directory(self.root, run_id) / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["status"] = "failed"
+        self._write_json(state_path, state)
+
+        with self.assertRaisesRegex(ValueError, "status changed outside"):
+            runner.validate_resume(self.root, run_id)
+
+        self.assertEqual(runner.repair_bound_run(self.root, run_id), 0)
+        binding = runner.validate_resume(self.root, run_id)
+        self.assertEqual(binding["state_status"], "failed")
+
+    def test_repair_still_rejects_changed_state_identity(self) -> None:
+        run_id = self._create_finalized_run()
+        state_path = runner._run_directory(self.root, run_id) / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["created_at"] = "2026-07-11T13:00:00+00:00"
+        self._write_json(state_path, state)
+
+        with self.assertRaisesRegex(ValueError, "identity changed"):
+            runner.repair_bound_run(self.root, run_id)
+
+    def test_repair_does_not_make_completed_runs_resumable(self) -> None:
+        run_id = self._create_finalized_run()
+        state_path = runner._run_directory(self.root, run_id) / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["status"] = "completed"
+        self._write_json(state_path, state)
+
+        self.assertEqual(runner.repair_bound_run(self.root, run_id), 0)
+        with self.assertRaisesRegex(ValueError, "cannot resume"):
+            runner.validate_resume(self.root, run_id)
+
     def test_resume_rejects_changed_task_graph(self) -> None:
         run_id = self._create_finalized_run()
         tasks = self.root / SLICE / "tasks.md"
