@@ -7,8 +7,10 @@ conversation.
 
 Read these before substantive work, in this order:
 
-1. Zoe-selected Aleph Vault Nunchi decisions and technical design, selected in
-   PR 67 (`bdd1ebb`) and contract-clarified in PR 68 (`c834e8c`).
+1. Repository-owned `docs/architecture/v2-selected-design.md` and
+   `docs/contracts/nunchi-v2.md`, preserving the Zoe-selected decisions from
+   Aleph Vault PR 67 (`bdd1ebb`) and PR 68 (`c834e8c`). The external commits
+   are provenance; no contributor needs a Vault checkout.
 2. `.specify/memory/constitution.md`.
 3. This file and `CLAUDE.md` for runtime-specific execution guidance.
 4. `specs/001-nunchi-v2-program/` and the one owned slice being worked.
@@ -47,11 +49,12 @@ PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
 - `PLANNED` means its control-plane artifacts agree and implementation is
   dormant.
 - `READY` requires the complete program implementation-authority record, one
-  assigned participant in the accountable owner lane, accepted upstream
-  handoffs recorded as ordered full commits plus matching per-consumer
-  acceptance references, zero CRITICAL/HIGH analysis findings, an isolated
-  worktree, and ordinary-path activation evidence. Slice `110` requires every
-  upstream slice `010`–`100` to be `ACCEPTED`.
+  assigned participant in the accountable owner lane, terminally `ACCEPTED`
+  upstream slices recorded as ordered current effective full commits plus
+  matching terminal or amendment packets and per-consumer acceptance
+  references, zero CRITICAL/HIGH analysis findings, an isolated worktree, and
+  ordinary-path activation evidence. Slice `110` requires every upstream slice
+  `010`–`100` to be `ACCEPTED`.
 - `ACTIVE` is implementation by that owner within the bound slice.
 - `CONVERGED` means implementation, tests/evaluations, evidence, task state,
   and limitations agree.
@@ -72,6 +75,29 @@ The same new-run rule applies when convergence appends tasks: retain the
 original activation, remain `ACTIVE`, and re-enter through authority and
 readiness checks. Fixes requested by a paused post-convergence gate may resume
 that run only while its task graph is unchanged.
+
+An already `ACCEPTED` slice may issue a bounded versioned successor through the
+same delivery workflow's accepted-amendment mode. The slice remains
+`ACCEPTED`; its activation, terminal candidate, terminal handoff, terminal
+acceptance, and prior amendment records remain immutable. The stable owner lane
+must have one valid current occupant from a durable Zoe/delegate assignment.
+Before implementation, one append-only amendment record fixes the amendment
+ID, interface and versions, current effective predecessor commit and packet,
+ordinary-path scope, task manifest, evidence, documentation dispositions, and
+limitations. The candidate must descend from that predecessor. The integrator
+records `ACCEPTED` or `REJECTED` in the same amendment record; rejection leaves
+the prior effective binding in force and requires a fresh bound run.
+Acceptance alone appends one entry to `slice-amendments.md`, changing the
+effective commit and packet for consumers without rewriting terminal slice
+history. Historical A1/A2 records retain their accepted schema; A3 and later
+must satisfy the complete amendment schema.
+
+If an accepted upstream successor appears after a dependent activates, the
+dependent's historical activation and acceptance evidence is preserved, but
+its candidate is blocked from further use until the dependent owner appends a
+compatibility re-attestation tied to the exact effective successor commit and
+packet. Incompatible candidates are replaced; sunk cost never authorizes
+continued downstream work.
 There is no central mutable slice-state registry. State is derived from the
 slice declaration, immutable activation/acceptance records, and append-only
 candidate/handoff evidence. These are repository-governance facts only:
@@ -87,7 +113,10 @@ receipt field, participant roster, social ledger, or memory service.
   slice environment in the workflow process, pins the slice input, integration
   manifest and installed skill bytes, workflow digest, and initial task graph,
   and leaves `.specify/feature.json`
-  unchanged.
+  unchanged. The wrapper may record exactly one task-graph transition when a
+  resume crosses the workflow's unique successful `speckit.tasks` step; before
+  that boundary, after it, and on every later resume the current task graph is
+  immutable.
 - Planning-only existing-slice workflow: `nunchi-plan`. It never creates or
   replaces a feature.
 - Existing-slice delivery workflow: `speckit`. Its implementation-authority

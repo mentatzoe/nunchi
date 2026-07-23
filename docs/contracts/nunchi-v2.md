@@ -10,14 +10,14 @@ program slices. V1 remains the current product until the atomic V2 merge is
 verified on `main`; nothing in this document claims the V2 lifecycle is the
 running product today.
 
-**Field-level authority**: the selected Aleph Vault design at `c834e8c`
-(`projects/shared/nunchi/technical-design.md`) is the field-level naming and
-shape authority for all five interfaces (FR-014); the program-canonical
-interface names and versions (`I-010A`, `I-010C`, `I-010D` at `@1`;
-`I-010B`, `I-010E` at `@2`) are this slice's own vocabulary layered over
-that same field inventory. A document the selected
-design declares valid that either validator rejects is a contract defect,
-never resolved by narrowing the corpus.
+**Field-level authority**: this repository-owned reference and
+`docs/architecture/v2-selected-design.md` preserve the field inventory selected
+from Aleph Vault at `c834e8c`; the external path is provenance, not a
+contributor dependency. The program-canonical interface names and versions
+(`I-010A`, `I-010C`, `I-010D` at `@1`; `I-010B`, `I-010E` at `@2`) are this
+slice's vocabulary layered over that inventory. A document the selected design
+declares valid that either validator rejects is a contract defect, never
+resolved by narrowing the corpus.
 
 **Machine-readable contracts** (JSON Schema Draft 2020-12):
 
@@ -28,6 +28,17 @@ never resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+
+### Planned completion amendment
+
+The selected product also requires `I-010F
+PrivilegedActionAuthorizationV2@1`. It is not part of the accepted contract
+packet above: no machine-readable schema, corpus, or accepted amendment exists
+for it on this baseline. The `v2-contract-owner` must deliver that seam through
+the versioned amendment path, and `v2-integrator` must accept the exact
+successor before any consumer may cite or implement `I-010F`. Target semantics
+remain in the selected architecture and umbrella plan; they are not current
+contract truth.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`

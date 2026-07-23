@@ -45,6 +45,9 @@ an unchanged task graph; retain activation and append attempt history]
 **Dependency acceptance mapping**: `[ordered slice=full-sha plus matching
 slice=repo-relative-evidence-reference entries; none when dependency-free]`
 
+Each mapped upstream slice must be terminally `ACCEPTED`; the matching
+consumer-owned record separately accepts the exact packet.
+
 ## Summary
 
 [Extract from the existing slice specification: primary requirement + technical approach from research]

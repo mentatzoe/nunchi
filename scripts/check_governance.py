@@ -15,8 +15,11 @@ from pathlib import Path
 
 PINNED_SPECKIT_VERSION = "0.12.11"
 PINNED_SPECKIT_COMMIT = "e802a7dd52a6eceba9403cbbf40e60dced043238"
-PINNED_CONSTITUTION_VERSION = "2.3.0"
+PINNED_CONSTITUTION_VERSION = "2.5.0"
 PINNED_VAULT_COMMIT = "c834e8c"
+SELECTED_DESIGN_PATH = "docs/architecture/v2-selected-design.md"
+SELECTED_CONTRACT_PATH = "docs/contracts/nunchi-v2.md"
+COMPLETION_GOAL_PATH = "docs/v2-completion-goal.md"
 IMPLEMENTATION_AUTHORIZATION_PATH = Path(
     "evidence/governance/v2-implementation-authorization.md"
 )
@@ -310,9 +313,12 @@ CANONICAL_INTERFACES = {
     "I-010C": "010-v2-contract",
     "I-010D": "010-v2-contract",
     "I-010E": "010-v2-contract",
+    "I-010F": "010-v2-contract",
     "I-020A": "020-v2-observation",
     "I-030A": "030-v2-core-attention",
     "I-040A": "040-v2-participant-wake",
+    "I-040B": "040-v2-participant-wake",
+    "I-040C": "040-v2-participant-wake",
     "I-050A": "050-v2-discord-transport",
 }
 
@@ -340,7 +346,28 @@ PLANNING_PLACEHOLDER = re.compile(
 )
 TASK_LINE = re.compile(r"^- \[ \] T(\d{3})(?: \[P\])?(?: \[US\d+\])? .+$")
 INTERFACE_ID = re.compile(r"\bI-\d{3}[A-Z]\b")
-SCENE_ID = re.compile(r"\bS(?:0[1-9]|1[0-6])\b")
+SCENE_ID = re.compile(r"\bS(?:0[1-9]|1[0-8])\b")
+COMPLETION_PLAN_TERMS = {
+    "020-v2-observation": ("S17", "S18"),
+    "040-v2-participant-wake": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "050-v2-discord-transport": ("I-010F", "S17", "S18"),
+    "060-v2-hermes": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "070-v2-claude-code": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "080-v2-codex": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "090-v2-channel-adapters": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "100-v2-security-provenance": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+    "110-v2-parity-cutover": ("I-010F", "I-040B", "I-040C", "S17", "S18"),
+}
+I010F_STABILITY_DEPENDENTS = frozenset(EXPECTED_SLICES) - {
+    "010-v2-contract"
+}
+STARTED_SLICE_STATES = frozenset(
+    {"READY", "ACTIVE", "CONVERGED", "HANDOFF_READY", "ACCEPTED"}
+)
+AMENDMENT_PHASES = frozenset(
+    {"READY", "ACTIVE", "CONVERGED", "HANDOFF_READY", "ACCEPTED", "REJECTED"}
+)
+FUTURE_AMENDMENT_RECORD = re.compile(r"amendment-A([3-9]\d*)-[a-z0-9-]+\.md")
 
 EXPECTED_DOCUMENTATION_PATHS = {
     "010-v2-contract": {
@@ -690,7 +717,15 @@ def check_control_plane(root: Path) -> list[str]:
                     errors.append(
                         f"{rel}: checklist artifacts must be Markdown planning files"
                     )
-                elif rel not in allowed_spec_paths:
+                elif rel not in allowed_spec_paths and not (
+                    len(rel.parts) == 4
+                    and rel.parts[0] == "specs"
+                    and rel.parts[1] in EXPECTED_SLICES
+                    and rel.parts[2] == "checklists"
+                    and re.fullmatch(
+                        r"amendment-A[3-9]\d*-requirements\.md", rel.name
+                    )
+                ):
                     errors.append(
                         f"{rel}: checklist is outside the exact slice/program planning allowlist"
                     )
@@ -763,6 +798,8 @@ def check_governance_documents(root: Path) -> list[str]:
         ".specify/memory/constitution.md": (
             f"**Version**: {PINNED_CONSTITUTION_VERSION}",
             PINNED_VAULT_COMMIT,
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "SpecKit Is Control-Plane Only (NON-NEGOTIABLE)",
             "Trusted preattention-disabled configuration MUST bypass model judgment",
             "Receipt records MUST be immutable and request-correlated",
@@ -782,27 +819,71 @@ def check_governance_documents(root: Path) -> list[str]:
         ),
         ".agents/skills/speckit-plan/SKILL.md": (
             "Nunchi Existing-Slice Override (NON-NEGOTIABLE)",
+            "Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
             "MUST update its existing `plan.md` only",
             "MUST NOT create or replace a feature",
             "**Output**: the existing `plan.md` only",
         ),
         ".claude/skills/speckit-plan/SKILL.md": (
             "Nunchi Existing-Slice Override (NON-NEGOTIABLE)",
+            "Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
             "MUST update its existing `plan.md` only",
             "MUST NOT create or replace a feature",
             "**Output**: the existing `plan.md` only",
         ),
         ".agents/skills/speckit-converge/SKILL.md": (
-            "## Nunchi Active-Correction Contract",
+            "## Nunchi Delivery-Mode Contract",
             "keep the slice `ACTIVE`",
+            "In accepted-amendment mode",
             "run speckit specs/<same-exact-slice>",
             "handoff rejection or a second activation",
         ),
         ".claude/skills/speckit-converge/SKILL.md": (
-            "## Nunchi Active-Correction Contract",
+            "## Nunchi Delivery-Mode Contract",
             "keep the slice `ACTIVE`",
+            "In accepted-amendment mode",
             "run speckit specs/<same-exact-slice>",
             "handoff rejection or a second activation",
+        ),
+        ".agents/skills/speckit-clarify/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "Preserve the accepted spec",
+            "Do not toggle, rewrite, or re-adjudicate",
+        ),
+        ".claude/skills/speckit-clarify/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "Preserve the accepted spec",
+            "Do not toggle, rewrite, or re-adjudicate",
+        ),
+        ".agents/skills/speckit-checklist/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "amendment-<ID>-requirements.md",
+            "never delete, rename, replace, or toggle prior checklist",
+        ),
+        ".claude/skills/speckit-checklist/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "amendment-<ID>-requirements.md",
+            "never delete, rename, replace, or toggle prior checklist",
+        ),
+        ".agents/skills/speckit-tasks/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "preserve every existing byte",
+            "Post-Acceptance Amendment <ID>",
+        ),
+        ".claude/skills/speckit-tasks/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "preserve every existing byte",
+            "Post-Acceptance Amendment <ID>",
+        ),
+        ".agents/skills/speckit-implement/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "unchecked tasks in the labelled amendment phase",
+            "prior effective",
+        ),
+        ".claude/skills/speckit-implement/SKILL.md": (
+            "Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)",
+            "unchecked tasks in the labelled amendment phase",
+            "prior effective",
         ),
         ".specify/templates/plan-template.md": (
             "**SpecKit binding**:",
@@ -815,6 +896,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "The `README.md` row is mandatory",
             "Generic directory rows are invalid",
             "Dependency acceptance mapping",
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/spec-template.md": (
             "**SpecKit binding**:",
@@ -825,6 +907,9 @@ def check_governance_documents(root: Path) -> list[str]:
             "Every implementation MUST review `README.md`",
             "Generic directories or wildcards",
             "Delegated by: Zoe",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/tasks-template.md": (
             "activation records document prerequisites but never grant authority",
@@ -837,6 +922,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "documentation-freshness gate passes",
             "every exact row in `plan.md` §Documentation Impact and Freshness",
             "Candidate and handoff files are append-only attempt streams",
+            "terminally `ACCEPTED`",
         ),
         ".specify/templates/checklist-template.md": (
             "python3 scripts/run_slice_workflow.py run <nunchi-plan|speckit>",
@@ -851,6 +937,8 @@ def check_governance_documents(root: Path) -> list[str]:
             "SpecKit-managed paths are control plane only",
             "Trusted preattention bypass wakes directly",
             PINNED_VAULT_COMMIT,
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "## Documentation freshness",
             "Use exactly one disposition per reviewed surface",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
@@ -860,6 +948,8 @@ def check_governance_documents(root: Path) -> list[str]:
         "CLAUDE.md": (
             "continuation authority out of classifier input",
             "immutable singly",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "documentation-freshness gate",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
             "scripts/run_slice_workflow.py run speckit",
@@ -869,6 +959,7 @@ def check_governance_documents(root: Path) -> list[str]:
             "post-convergence documentation-freshness gate",
             "evidence-backed `NO_IMPACT`",
             "directory wildcard does not satisfy the gate",
+            COMPLETION_GOAL_PATH,
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
             "scripts/run_slice_workflow.py run speckit",
             "scripts/run_slice_workflow.py resume <run-id>",
@@ -876,6 +967,8 @@ def check_governance_documents(root: Path) -> list[str]:
         "docs/governance/execution-spine.md": (
             "## Documentation freshness",
             "The workflow's `documentation-freshness` gate",
+            SELECTED_DESIGN_PATH,
+            SELECTED_CONTRACT_PATH,
             "## Participant action contract",
             "### Transition evidence schema",
             "Dependency commits",
@@ -884,6 +977,15 @@ def check_governance_documents(root: Path) -> list[str]:
             "scripts/run_slice_workflow.py run speckit",
             "scripts/run_slice_workflow.py resume <run-id>",
             str(IMPLEMENTATION_AUTHORIZATION_PATH),
+        ),
+        COMPLETION_GOAL_PATH: (
+            "# Nunchi V2 completion goal",
+            "## End conditions",
+            "Live conversation, not queued work",
+            "Deterministic authority boundaries",
+            "Dependencies are terminal before downstream work starts",
+            "One frozen candidate closes review",
+            "Cutover is atomic and truth remains exact",
         ),
         "evidence/governance/slice-lifecycle-amendment-2026-07-11.md": (
             "# Slice-centric execution-spine amendment",
@@ -1175,10 +1277,14 @@ def check_workflow_surface(root: Path) -> list[str]:
                         "already ACTIVE",
                         "latest handoff attempt is REJECTED",
                         "Convergence-appended tasks or a failed implementation",
+                        "post-acceptance amendment",
+                        "terminal activation/candidate/handoff/acceptance records are unchanged",
+                        "stable owner lane has exactly one valid current occupant",
                     ),
                     "activate-slice": (
                         "retain the original activation record",
                         "already ACTIVE",
+                        "declarations remain ACCEPTED",
                     ),
                     "documentation-freshness": (
                         "exact candidate",
@@ -1187,12 +1293,15 @@ def check_workflow_surface(root: Path) -> list[str]:
                     "record-convergence": (
                         "converge appended no tasks",
                         "start a new bound speckit run",
+                        "fixed amendment record",
                     ),
                     "slice-handoff": (
                         "The delivery workflow ends here",
                         "v2-integrator",
                         "REJECTED record",
                         "v2-program-owner",
+                        "slice-amendments.md",
+                        "prior effective commit unchanged",
                     ),
                 }
             )
@@ -1299,6 +1408,18 @@ def check_workflow_surface(root: Path) -> list[str]:
             "already ACTIVE",
             "speckit workflow must provide executable rework re-entry",
         ),
+        (
+            "post-acceptance amendment",
+            "speckit workflow must provide the accepted-amendment path",
+        ),
+        (
+            "terminal activation/candidate/handoff/acceptance records are unchanged",
+            "speckit workflow must preserve terminal lifecycle evidence during amendments",
+        ),
+        (
+            "slice-amendments.md",
+            "speckit workflow must update effective dependencies only through the amendment ledger",
+        ),
     ):
         if token.lower() not in full.lower():
             errors.append(message)
@@ -1309,12 +1430,20 @@ def check_workflow_surface(root: Path) -> list[str]:
 
     registry = _json(root / ".specify" / "workflows" / "workflow-registry.json", errors)
     registered = registry.get("workflows", {})
-    expected_versions = {"speckit": "2.5.0", "nunchi-plan": "1.4.0"}
+    expected_versions = {"speckit": "2.6.0", "nunchi-plan": "1.4.0"}
     for name, version in expected_versions.items():
         observed = registered.get(name, {}) if isinstance(registered, dict) else {}
         if observed.get("version") != version:
             errors.append(
                 f".specify/workflows/workflow-registry.json: {name} must be version {version}"
+            )
+        embedded_version = re.search(
+            r'(?m)^  version: "([^"]+)"$', contents.get(name, "")
+        )
+        if embedded_version is None or embedded_version.group(1) != version:
+            errors.append(
+                f".specify/workflows/{name}/workflow.yml: embedded version "
+                f"must be {version}"
             )
     return errors
 
@@ -1367,7 +1496,16 @@ def _singleton_metadata_errors(
 def _lifecycle_records(text: str) -> tuple[str, ...]:
     """Split an append-only lifecycle file into its individually attested records."""
 
-    starts = [match.start() for match in re.finditer(r"(?m)^\*\*Slice\*\*:", text)]
+    return _metadata_records(text, "Slice")
+
+
+def _metadata_records(text: str, label: str) -> tuple[str, ...]:
+    """Split append-only evidence at each exact attestation label."""
+
+    starts = [
+        match.start()
+        for match in re.finditer(rf"(?m)^\*\*{re.escape(label)}\*\*:", text)
+    ]
     if not starts:
         return ()
     return tuple(
@@ -1376,12 +1514,36 @@ def _lifecycle_records(text: str) -> tuple[str, ...]:
     )
 
 
-def _effective_dependency_commit(
+def _accepted_amended_interfaces(
+    root: Path, upstream: str, *, at_commit: str | None = None
+) -> set[str]:
+    relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["amendments"])
+    if at_commit is not None:
+        text = _git_file_text(root, at_commit, relative)
+    else:
+        path = root / relative
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = None
+    if text is None:
+        return set()
+    interfaces: set[str] = set()
+    for record in _lifecycle_records(text):
+        if _clean_metadata(record, "Status") != "ACCEPTED":
+            continue
+        match = INTERFACE_ID.search(_clean_metadata(record, "Amended interface"))
+        if match:
+            interfaces.add(match.group(0))
+    return interfaces
+
+
+def _effective_dependency_binding(
     root: Path,
     upstream: str,
     terminal_commit: str,
-) -> tuple[str, list[str]]:
-    """Resolve the exact commit a dependent slice must bind to for *upstream*.
+) -> tuple[str, str, list[str]]:
+    """Resolve the exact commit and packet a dependent must bind to.
 
     A post-acceptance amendment (see the constitution's amendment procedure)
     never appends to `slice-candidate.md`/`slice-handoff.md`/`slice-acceptance.md`
@@ -1390,27 +1552,28 @@ def _effective_dependency_commit(
     accepted amendment appends one record to a separate canonical
     `slice-amendments.md` ledger. This validates that ledger's chain integrity
     independently (never by parsing narrative `amendment-A*.md` prose) and
-    returns the commit downstream slices must now depend on.
+    returns the commit and amendment packet downstream slices must now accept.
     """
 
     errors: list[str] = []
+    effective_packet = EXPECTED_LIFECYCLE_PATHS[upstream]["handoff"]
     amendments_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["amendments"])
     raw_path = root / amendments_relative
     if not raw_path.exists() and not raw_path.is_symlink():
-        return terminal_commit, errors
+        return terminal_commit, effective_packet, errors
     if not _repo_path_is_safe(root, amendments_relative, require_file=True):
-        return terminal_commit, [
+        return terminal_commit, effective_packet, [
             f"{amendments_relative}: amendment ledger path is unsafe"
         ]
     try:
         text = raw_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        return terminal_commit, [
+        return terminal_commit, effective_packet, [
             f"{amendments_relative}: amendment ledger is unreadable ({exc})"
         ]
     records = _lifecycle_records(text)
     if not records:
-        return terminal_commit, [
+        return terminal_commit, effective_packet, [
             f"{amendments_relative}: amendment ledger exists but has no attested "
             "record"
         ]
@@ -1472,11 +1635,18 @@ def _effective_dependency_commit(
                 f"{prefix}: Amendment decision commit must descend from the "
                 "Amendment candidate commit"
             )
-        interface_match = re.search(
-            r"I-\d{3}[A-Z]", _clean_metadata(record, "Amended interface")
-        )
+        interface_value = _clean_metadata(record, "Amended interface")
+        interface_match = re.fullmatch(r"I-\d{3}[A-Z]", interface_value)
         if not interface_match:
             errors.append(f"{prefix}: missing concrete Amended interface")
+        elif (
+            interface_value not in CANONICAL_INTERFACES
+            or CANONICAL_INTERFACES[interface_value] != upstream
+        ):
+            errors.append(
+                f"{prefix}: Amended interface {interface_value!r} is not owned by "
+                f"{upstream}"
+            )
         prior_version = _clean_metadata(record, "Prior interface version")
         new_version = _clean_metadata(record, "New interface version")
         prior_match = re.fullmatch(r"@(\d+)", prior_version)
@@ -1492,7 +1662,8 @@ def _effective_dependency_commit(
             )
         if interface_match and prior_match:
             interface_key = interface_match.group(0)
-            expected_prior = interface_versions.get(interface_key, 1)
+            initial_version = 0 if interface_key == "I-010F" else 1
+            expected_prior = interface_versions.get(interface_key, initial_version)
             if int(prior_match.group(1)) != expected_prior:
                 errors.append(
                     f"{prefix}: Prior interface version for {interface_key} must "
@@ -1511,7 +1682,16 @@ def _effective_dependency_commit(
             errors.append(f"{prefix}: Decision reference must name an existing file")
         amendment_record_value = _clean_metadata(record, "Amendment record")
         amendment_record_path = Path(amendment_record_value)
-        if not _repo_path_is_safe(root, amendment_record_path, require_file=True):
+        if amendment_record_value:
+            effective_packet = amendment_record_value
+        expected_amendment_directory = amendments_relative.parent
+        if (
+            amendment_record_path.parent != expected_amendment_directory
+            or not amendment_record_path.name.startswith(
+                f"amendment-{amendment_id}-"
+            )
+            or not _repo_path_is_safe(root, amendment_record_path, require_file=True)
+        ):
             errors.append(f"{prefix}: Amendment record must name an existing file")
         elif commits_exist and decision:
             amendment_record_text = _git_file_text(
@@ -1574,7 +1754,366 @@ def _effective_dependency_commit(
             f"summary must be {effective_commit!r}; observed "
             f"{summary_matches[-1].group(1)!r}"
         )
+    return effective_commit, effective_packet, errors
+
+
+def _effective_dependency_commit(
+    root: Path,
+    upstream: str,
+    terminal_commit: str,
+) -> tuple[str, list[str]]:
+    """Compatibility wrapper returning only the effective accepted commit."""
+
+    effective_commit, _packet, errors = _effective_dependency_binding(
+        root, upstream, terminal_commit
+    )
     return effective_commit, errors
+
+
+def _validated_accepted_amended_interfaces(root: Path, upstream: str) -> set[str]:
+    """Return accepted interfaces only when the whole amendment chain is valid."""
+
+    acceptance_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream]["acceptance"])
+    if not _repo_path_is_safe(root, acceptance_relative, require_file=True):
+        return set()
+    try:
+        records = _lifecycle_records(
+            (root / acceptance_relative).read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError):
+        return set()
+    if not records:
+        return set()
+    terminal_commit = _clean_metadata(records[-1], "Candidate commit")
+    _effective, _packet, errors = _effective_dependency_binding(
+        root, upstream, terminal_commit
+    )
+    if errors:
+        return set()
+    return _accepted_amended_interfaces(root, upstream)
+
+
+def _exact_scope_paths(value: str) -> tuple[Path, ...] | None:
+    entries = tuple(part.strip().strip("`") for part in value.split(","))
+    if not entries or any(not entry for entry in entries):
+        return None
+    paths = tuple(Path(entry) for entry in entries)
+    if len(set(paths)) != len(paths):
+        return None
+    for entry, path in zip(entries, paths):
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or any(character in entry for character in "*?[]")
+            or not path.parts
+        ):
+            return None
+    return paths
+
+
+def _future_amendment_records(
+    root: Path, dirname: str
+) -> tuple[tuple[int, Path, str], ...]:
+    """Load A3+ records; A1/A2 retain their accepted historical schemas."""
+
+    evidence_directory = Path(EXPECTED_LIFECYCLE_PATHS[dirname]["activation"]).parent
+    directory = root / evidence_directory
+    records: list[tuple[int, Path, str]] = []
+    if not directory.is_dir():
+        return ()
+    for path in sorted(directory.glob("amendment-A*-*.md")):
+        match = FUTURE_AMENDMENT_RECORD.fullmatch(path.name)
+        if match is None:
+            continue
+        relative = path.relative_to(root)
+        if not _repo_path_is_safe(root, relative, require_file=True):
+            records.append((int(match.group(1)), relative, ""))
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        records.append((int(match.group(1)), relative, text))
+    return tuple(records)
+
+
+def _accepted_amendment_attempt_errors(
+    root: Path,
+    dirname: str,
+    expected: dict[str, object],
+    tasks_text: str,
+    terminal_commit: str,
+) -> tuple[list[str], bool]:
+    """Validate every A3+ record and identify one lawful open amendment.
+
+    The slice itself stays ACCEPTED. An open amendment is the only condition
+    under which newly appended task checkboxes may remain unchecked.
+    """
+
+    errors: list[str] = []
+    records = _future_amendment_records(root, dirname)
+    if not records:
+        return errors, False
+    numbers = [number for number, _path, _text in records]
+    if len(numbers) != len(set(numbers)):
+        errors.append(f"{dirname}: each A3+ amendment ID must have exactly one record")
+
+    effective_commit, effective_packet, binding_errors = (
+        _effective_dependency_binding(root, dirname, terminal_commit)
+    )
+    errors.extend(binding_errors)
+    ledger_path = root / EXPECTED_LIFECYCLE_PATHS[dirname]["amendments"]
+    ledger_records = (
+        _lifecycle_records(ledger_path.read_text(encoding="utf-8"))
+        if ledger_path.is_file()
+        else ()
+    )
+    accepted_ids = {
+        _clean_metadata(record, "Amendment ID") for record in ledger_records
+    }
+    predecessor_by_id: dict[str, tuple[str, str]] = {}
+    preceding_packet = EXPECTED_LIFECYCLE_PATHS[dirname]["handoff"]
+    for ledger_record in ledger_records:
+        ledger_id = _clean_metadata(ledger_record, "Amendment ID")
+        predecessor_by_id[ledger_id] = (
+            _clean_metadata(ledger_record, "Prior effective commit"),
+            preceding_packet,
+        )
+        preceding_packet = _clean_metadata(ledger_record, "Amendment record")
+
+    open_records = 0
+    for number, relative, text in records:
+        prefix = str(relative)
+        errors.extend(_git_path_history_errors(root, relative, append_only=True))
+        if not text:
+            errors.append(f"{relative}: amendment record is unsafe or unreadable")
+            continue
+
+        fixed_labels = (
+            "Slice",
+            "Amendment ID",
+            "Amended interface",
+            "Prior interface version",
+            "New interface version",
+            "Prior effective commit",
+            "Prior effective packet",
+            "Starting commit",
+            "Owner lane",
+            "Assigned participant / source",
+            "Fixed scope paths",
+            "Analysis result",
+            "Branch",
+            "Worktree",
+        )
+        errors.extend(_singleton_metadata_errors(text, fixed_labels, relative))
+        amendment_id = f"A{number}"
+        expected_predecessor, expected_predecessor_packet = predecessor_by_id.get(
+            amendment_id, (effective_commit, effective_packet)
+        )
+        exact_fields = {
+            "Slice": dirname,
+            "Amendment ID": amendment_id,
+            "Prior effective commit": expected_predecessor,
+            "Prior effective packet": expected_predecessor_packet,
+            "Owner lane": str(expected["owner"]),
+            "Analysis result": "PASS — zero CRITICAL/HIGH findings",
+        }
+        for label, expected_value in exact_fields.items():
+            observed = _clean_metadata(text, label)
+            if observed != expected_value:
+                errors.append(
+                    f"{prefix}: {label} must be {expected_value!r}; "
+                    f"observed {observed!r}"
+                )
+
+        interface = _clean_metadata(text, "Amended interface")
+        if (
+            interface not in CANONICAL_INTERFACES
+            or CANONICAL_INTERFACES.get(interface) != dirname
+        ):
+            errors.append(
+                f"{prefix}: Amended interface must be owned by {dirname}"
+            )
+        prior_version = _clean_metadata(text, "Prior interface version")
+        new_version = _clean_metadata(text, "New interface version")
+        prior_match = re.fullmatch(r"@(\d+)", prior_version)
+        new_match = re.fullmatch(r"@(\d+)", new_version)
+        if (
+            not prior_match
+            or not new_match
+            or int(new_match.group(1)) != int(prior_match.group(1)) + 1
+        ):
+            errors.append(
+                f"{prefix}: New interface version must be one above the prior version"
+            )
+
+        assigned = _clean_metadata(text, "Assigned participant / source")
+        errors.extend(_assignment_errors(root, assigned, str(expected["owner"]), relative))
+
+        starting_commit = _clean_metadata(text, "Starting commit")
+        if not re.fullmatch(r"[0-9a-f]{40}", starting_commit) or not _git_commit_exists(
+            root, starting_commit
+        ):
+            errors.append(f"{prefix}: Starting commit must be an existing full Git SHA")
+        elif not _git_is_ancestor(root, expected_predecessor, starting_commit):
+            errors.append(
+                f"{prefix}: Starting commit must descend from Prior effective commit"
+            )
+
+        scope = _exact_scope_paths(_clean_metadata(text, "Fixed scope paths"))
+        if scope is None:
+            errors.append(f"{prefix}: Fixed scope paths must be an exact unique path list")
+            scope_set: set[str] = set()
+        else:
+            scope_set = {path.as_posix() for path in scope}
+            required_scope = {
+                relative.as_posix(),
+                f"specs/{dirname}/spec.md",
+                f"specs/{dirname}/plan.md",
+                f"specs/{dirname}/tasks.md",
+            }
+            missing_scope = required_scope - scope_set
+            if missing_scope:
+                errors.append(
+                    f"{prefix}: Fixed scope paths omit {sorted(missing_scope)}"
+                )
+            for path in scope:
+                if not _repo_path_is_safe(root, path):
+                    errors.append(f"{prefix}: unsafe Fixed scope path {path}")
+
+        start_tasks_text = (
+            _git_file_text(root, starting_commit, Path("specs") / dirname / "tasks.md")
+            if re.fullmatch(r"[0-9a-f]{40}", starting_commit)
+            else None
+        )
+        appended_entries: tuple[tuple[str, str], ...] = ()
+        if start_tasks_text is None:
+            errors.append(f"{prefix}: Starting commit must contain the bound tasks.md")
+        elif not tasks_text.replace("\r\n", "\n").startswith(start_tasks_text):
+            errors.append(
+                f"{prefix}: accepted task history must remain a byte-for-byte prefix"
+            )
+        else:
+            try:
+                starting_entries = _validated_task_entries(start_tasks_text)
+                current_entries = _validated_task_entries(tasks_text)
+            except ValueError as exc:
+                errors.append(f"{prefix}: invalid amendment task graph ({exc})")
+            else:
+                if current_entries[: len(starting_entries)] != starting_entries:
+                    errors.append(
+                        f"{prefix}: amendment tasks must append after accepted history"
+                    )
+                appended_entries = current_entries[len(starting_entries) :]
+                if not appended_entries:
+                    errors.append(f"{prefix}: amendment must append at least one task")
+
+        expected_task_ids, expected_task_hash = _task_manifest(appended_entries)
+        declared_task_ids = _clean_metadata(text, "Amendment task IDs", last=True)
+        declared_task_hash = _clean_metadata(
+            text, "Amendment tasks SHA256", last=True
+        )
+        if declared_task_ids != expected_task_ids:
+            errors.append(
+                f"{prefix}: Amendment task IDs must be {expected_task_ids!r}"
+            )
+        if declared_task_hash != expected_task_hash:
+            errors.append(
+                f"{prefix}: Amendment tasks SHA256 must be {expected_task_hash!r}"
+            )
+
+        phase = _clean_metadata(text, "Amendment phase", last=True)
+        if phase not in AMENDMENT_PHASES:
+            errors.append(
+                f"{prefix}: Amendment phase must be one of {sorted(AMENDMENT_PHASES)}"
+            )
+        decision = _clean_metadata(text, "Decision", last=True)
+        ledger_accepted = amendment_id in accepted_ids
+        if decision == "ACCEPTED" and not ledger_accepted:
+            errors.append(
+                f"{prefix}: accepted amendment must be appended to slice-amendments.md"
+            )
+        if ledger_accepted and decision != "ACCEPTED":
+            errors.append(
+                f"{prefix}: slice-amendments.md entry requires an ACCEPTED decision"
+            )
+        if decision == "REJECTED" and ledger_accepted:
+            errors.append(f"{prefix}: rejected amendment may not change the ledger")
+        if decision not in {"", "ACCEPTED", "REJECTED"}:
+            errors.append(f"{prefix}: Decision must be ACCEPTED or REJECTED when present")
+
+        candidate = _clean_metadata(text, "Amendment candidate commit", last=True)
+        if candidate:
+            if not re.fullmatch(r"[0-9a-f]{40}", candidate) or not _git_commit_exists(
+                root, candidate
+            ):
+                errors.append(
+                    f"{prefix}: Amendment candidate commit must be an existing full SHA"
+                )
+            elif re.fullmatch(r"[0-9a-f]{40}", starting_commit):
+                if not _git_is_ancestor(root, starting_commit, candidate):
+                    errors.append(
+                        f"{prefix}: candidate must descend from Starting commit"
+                    )
+                changed_paths = _git_changed_paths(root, starting_commit, candidate)
+                if changed_paths is None:
+                    errors.append(f"{prefix}: candidate scope diff is unreadable")
+                elif scope is not None:
+                    outside = sorted(set(changed_paths) - scope_set)
+                    if outside:
+                        errors.append(
+                            f"{prefix}: candidate changed paths outside fixed scope "
+                            f"{outside}"
+                        )
+            committed_tasks = _git_file_text(
+                root, candidate, Path("specs") / dirname / "tasks.md"
+            )
+            if committed_tasks is None:
+                errors.append(f"{prefix}: candidate lacks the bound tasks.md")
+            else:
+                try:
+                    committed_entries = _validated_task_entries(committed_tasks)
+                except ValueError as exc:
+                    errors.append(f"{prefix}: candidate task graph is invalid ({exc})")
+                else:
+                    candidate_amendment_entries = committed_entries[
+                        len(committed_entries) - len(appended_entries) :
+                    ] if appended_entries else ()
+                    completed = set(_checked_task_ids(committed_tasks))
+                    amendment_ids = {task_id for task_id, _line in candidate_amendment_entries}
+                    if candidate_amendment_entries != appended_entries:
+                        errors.append(
+                            f"{prefix}: candidate amendment task manifest changed"
+                        )
+                    elif not amendment_ids.issubset(completed):
+                        errors.append(
+                            f"{prefix}: candidate requires every amendment task checked"
+                        )
+
+        if decision not in {"ACCEPTED", "REJECTED"}:
+            open_records += 1
+            if phase not in {"READY", "ACTIVE", "CONVERGED", "HANDOFF_READY"}:
+                errors.append(f"{prefix}: open amendment has invalid current phase")
+
+    if open_records > 1:
+        errors.append(f"{dirname}: only one post-acceptance amendment may be open")
+    return errors, open_records == 1 and not errors
+
+
+def _i010f_stability_errors(
+    slice_states: dict[str, str], accepted_amended_interfaces: set[str]
+) -> list[str]:
+    """Block every downstream lane until the known contract amendment lands."""
+
+    if "I-010F" in accepted_amended_interfaces:
+        return []
+    return [
+        f"{dirname}: {state} requires accepted I-010F amendment A3 before "
+        "downstream work"
+        for dirname, state in sorted(slice_states.items())
+        if dirname in I010F_STABILITY_DEPENDENTS
+        and state in STARTED_SLICE_STATES
+    ]
 
 
 def _slice_ids(value: str | None) -> tuple[str, ...]:
@@ -1913,6 +2452,22 @@ def _git_changed_paths(root: Path, older: str, newer: str) -> tuple[str, ...] | 
     return tuple(line for line in completed.stdout.splitlines() if line)
 
 
+def _git_path_creation_commit(root: Path, relative: Path) -> str | None:
+    completed = _git(
+        root,
+        "log",
+        "--diff-filter=A",
+        "--format=%H",
+        "--reverse",
+        "--",
+        relative.as_posix(),
+    )
+    if completed is None or completed.returncode != 0:
+        return None
+    commits = [line for line in completed.stdout.splitlines() if line]
+    return commits[0] if commits and re.fullmatch(r"[0-9a-f]{40}", commits[0]) else None
+
+
 def _git_path_history_errors(
     root: Path, relative: Path, *, append_only: bool
 ) -> list[str]:
@@ -2144,14 +2699,27 @@ def _slice_lifecycle_evidence_errors(
     if slice_state == "ACCEPTED" and not acceptance_present:
         errors.append(f"{dirname}: ACCEPTED requires {paths['acceptance']}")
 
+    amendment_open = False
+    if slice_state == "ACCEPTED" and acceptance_present:
+        acceptance_records = _lifecycle_records(texts["acceptance"])
+        terminal_commit = (
+            _clean_metadata(acceptance_records[-1], "Candidate commit")
+            if acceptance_records
+            else ""
+        )
+        amendment_errors, amendment_open = _accepted_amendment_attempt_errors(
+            root, dirname, expected, tasks_text, terminal_commit
+        )
+        errors.extend(amendment_errors)
+
     if slice_state in {"CONVERGED", "HANDOFF_READY", "ACCEPTED"}:
         unchecked = [
             line for line in tasks_text.splitlines() if line.startswith("- [ ] T")
         ]
-        if unchecked:
+        if unchecked and not (slice_state == "ACCEPTED" and amendment_open):
             errors.append(
                 f"{dirname}/tasks.md: {slice_state} requires every planned task to "
-                "be complete"
+                "be complete unless one valid A3+ amendment owns the appended tasks"
             )
 
     activation = texts.get("activation")
@@ -2227,6 +2795,45 @@ def _slice_lifecycle_evidence_errors(
                 f"{relative}: Dependency acceptance references {reference_error}"
             )
         by_id = {name[:3]: name for name in EXPECTED_SLICES}
+        dependency_bindings: dict[str, tuple[str, str]] = {}
+        dependency_terminal_commits: dict[str, str] = {}
+        dependency_ledger_records: dict[str, tuple[str, ...]] = {}
+        for dependency_id, commit in commit_map.items():
+            upstream = by_id[dependency_id]
+            upstream_relative = Path(
+                EXPECTED_LIFECYCLE_PATHS[upstream]["acceptance"]
+            )
+            upstream_path = root / upstream_relative
+            if not _repo_path_is_safe(root, upstream_relative, require_file=True):
+                continue
+            try:
+                upstream_records = _lifecycle_records(
+                    upstream_path.read_text(encoding="utf-8")
+                )
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not upstream_records:
+                continue
+            terminal_commit = _clean_metadata(
+                upstream_records[-1], "Candidate commit"
+            )
+            dependency_terminal_commits[dependency_id] = terminal_commit
+            amendments_path = root / EXPECTED_LIFECYCLE_PATHS[upstream][
+                "amendments"
+            ]
+            dependency_ledger_records[dependency_id] = (
+                _lifecycle_records(amendments_path.read_text(encoding="utf-8"))
+                if amendments_path.is_file()
+                else ()
+            )
+            effective_commit, packet_reference, amendment_errors = (
+                _effective_dependency_binding(root, upstream, terminal_commit)
+            )
+            errors.extend(amendment_errors)
+            dependency_bindings[dependency_id] = (
+                effective_commit,
+                packet_reference,
+            )
         for dependency_id, reference in reference_map.items():
             reference_path = Path(reference)
             consumer_evidence_directory = relative.parent
@@ -2250,19 +2857,36 @@ def _slice_lifecycle_evidence_errors(
                     f"{reference_path}: dependency acceptance evidence is unreadable"
                 )
                 continue
+            errors.extend(
+                _git_path_history_errors(root, reference_path, append_only=True)
+            )
+            reference_records = _metadata_records(reference_text, "Consumer slice")
+            if not reference_records:
+                errors.append(
+                    f"{reference_path}: dependency acceptance evidence has no "
+                    "attested record"
+                )
+                continue
+            latest_reference = reference_records[-1]
             upstream = by_id[dependency_id]
-            stage = "acceptance" if dirname == "110-v2-parity-cutover" else "handoff"
-            packet_reference = EXPECTED_LIFECYCLE_PATHS[upstream][stage]
+            activation_commit = commit_map.get(dependency_id, "")
+            effective_commit, packet_reference = dependency_bindings.get(
+                dependency_id,
+                (
+                    activation_commit,
+                    EXPECTED_LIFECYCLE_PATHS[upstream]["handoff"],
+                ),
+            )
             expected_reference_fields = {
                 "Consumer slice": dirname,
                 "Upstream slice": upstream,
-                "Candidate commit": commit_map.get(dependency_id, ""),
+                "Candidate commit": effective_commit,
                 "Accepted by": assigned_participant.split(" — ", 1)[0],
                 "Packet reference": packet_reference,
             }
             errors.extend(
                 _singleton_metadata_errors(
-                    reference_text,
+                    latest_reference,
                     (
                         "Consumer slice",
                         "Upstream slice",
@@ -2276,7 +2900,7 @@ def _slice_lifecycle_evidence_errors(
                 )
             )
             for label, expected_value in expected_reference_fields.items():
-                observed = _clean_metadata(reference_text, label)
+                observed = _clean_metadata(latest_reference, label)
                 if observed != expected_value:
                     errors.append(
                         f"{reference_path}: {label} must be {expected_value!r}; "
@@ -2284,40 +2908,89 @@ def _slice_lifecycle_evidence_errors(
                     )
             if not re.fullmatch(
                 r"\d{4}-\d{2}-\d{2}",
-                _clean_metadata(reference_text, "Accepted on"),
+                _clean_metadata(latest_reference, "Accepted on"),
             ):
                 errors.append(f"{reference_path}: Accepted on must be an ISO date")
-            if len(_clean_metadata(reference_text, "Decision reference")) < 10:
+            if len(_clean_metadata(latest_reference, "Decision reference")) < 10:
                 errors.append(f"{reference_path}: missing durable Decision reference")
 
-        for dependency_id, commit in commit_map.items():
-            upstream = by_id[dependency_id]
-            stage = "acceptance" if dirname == "110-v2-parity-cutover" else "handoff"
-            upstream_relative = Path(EXPECTED_LIFECYCLE_PATHS[upstream][stage])
-            upstream_path = root / upstream_relative
-            if not _repo_path_is_safe(root, upstream_relative, require_file=True):
-                continue
-            try:
-                upstream_records = _lifecycle_records(
-                    upstream_path.read_text(encoding="utf-8")
-                )
-            except (OSError, UnicodeDecodeError):
-                continue
-            if upstream_records:
-                terminal_commit = _clean_metadata(
-                    upstream_records[-1], "Candidate commit"
-                )
-                effective_commit, amendment_errors = _effective_dependency_commit(
-                    root, upstream, terminal_commit
-                )
-                errors.extend(amendment_errors)
-                if commit != effective_commit:
+            if activation_commit != effective_commit:
+                activation_created = _git_path_creation_commit(root, relative)
+                if activation_created is None:
                     errors.append(
-                        f"{relative}: dependency {dependency_id} commit must match "
-                        f"the effective accepted candidate for "
-                        f"{upstream_path.relative_to(root)} (including any accepted "
-                        "amendments recorded in its slice-amendments.md ledger)"
+                        f"{relative}: stale dependency {dependency_id} cannot be "
+                        "re-attested before immutable activation is committed"
                     )
+                else:
+                    effective_at_activation = dependency_terminal_commits.get(
+                        dependency_id, ""
+                    )
+                    for ledger_record in dependency_ledger_records.get(
+                        dependency_id, ()
+                    ):
+                        decision_commit = _clean_metadata(
+                            ledger_record, "Amendment decision commit"
+                        )
+                        if (
+                            re.fullmatch(r"[0-9a-f]{40}", decision_commit)
+                            and _git_is_ancestor(
+                                root, decision_commit, activation_created
+                            )
+                        ):
+                            effective_at_activation = _clean_metadata(
+                                ledger_record, "Amendment candidate commit"
+                            )
+                    if activation_commit != effective_at_activation:
+                        errors.append(
+                            f"{relative}: dependency {dependency_id} was already "
+                            "stale when activation was created; re-attestation "
+                            "cannot repair an invalid initial binding"
+                        )
+                if len(reference_records) < 2:
+                    errors.append(
+                        f"{reference_path}: changed effective dependency requires "
+                        "an appended compatibility re-attestation"
+                    )
+                else:
+                    previous_commit = _clean_metadata(
+                        reference_records[-2], "Candidate commit"
+                    )
+                    compatibility_fields = {
+                        "Prior accepted commit": previous_commit,
+                        "Compatibility result": "PASS",
+                    }
+                    for label, expected_value in compatibility_fields.items():
+                        observed = _clean_metadata(latest_reference, label)
+                        if observed != expected_value:
+                            errors.append(
+                                f"{reference_path}: {label} must be "
+                                f"{expected_value!r}; observed {observed!r}"
+                            )
+                    affected_candidate = _clean_metadata(
+                        latest_reference, "Affected candidate commit"
+                    )
+                    if not re.fullmatch(
+                        r"[0-9a-f]{40}", affected_candidate
+                    ) or not _git_commit_exists(root, affected_candidate):
+                        errors.append(
+                            f"{reference_path}: Affected candidate commit must "
+                            "be an existing full Git SHA"
+                        )
+                    compatibility_evidence = Path(
+                        _clean_metadata(latest_reference, "Compatibility evidence")
+                    )
+                    if (
+                        not compatibility_evidence.as_posix().startswith(
+                            "evidence/v2/"
+                        )
+                        or not _repo_path_is_safe(
+                            root, compatibility_evidence, require_file=True
+                        )
+                    ):
+                        errors.append(
+                            f"{reference_path}: Compatibility evidence must name "
+                            "an existing evidence/v2 file"
+                        )
         analysis = _clean_metadata(activation, "Analysis result")
         if analysis != "PASS — zero CRITICAL/HIGH findings":
             errors.append(
@@ -2768,23 +3441,13 @@ def _slice_dependency_state_errors(slice_states: dict[str, str]) -> list[str]:
     for dirname, state in slice_states.items():
         if state not in started_states:
             continue
-        accepted_dependency_states = (
-            {"ACCEPTED"}
-            if dirname == "110-v2-parity-cutover"
-            else {"HANDOFF_READY", "ACCEPTED"}
-        )
         for dependency_id in EXPECTED_SLICES[dirname]["dependencies"]:
             dependency = by_id[dependency_id]
             dependency_state = slice_states.get(dependency, "")
-            if dependency_state not in accepted_dependency_states:
-                requirement = (
-                    "ACCEPTED"
-                    if dirname == "110-v2-parity-cutover"
-                    else "HANDOFF_READY or ACCEPTED"
-                )
+            if dependency_state != "ACCEPTED":
                 errors.append(
                     f"{dirname}: {state} requires dependency {dependency} to be "
-                    f"{requirement}; observed {dependency_state!r}"
+                    f"ACCEPTED; observed {dependency_state!r}"
                 )
     return errors
 
@@ -3217,6 +3880,9 @@ def check_program(root: Path) -> list[str]:
     all_interface_ids: set[str] = set()
     all_nonfinal_scenes: set[str] = set()
     required_scenes = {f"S{number:02d}" for number in range(1, 17)}
+    accepted_contract_amendments = _validated_accepted_amended_interfaces(
+        root, "010-v2-contract"
+    )
 
     for dirname, expected in EXPECTED_SLICES.items():
         feature = specs / dirname
@@ -3362,6 +4028,20 @@ def check_program(root: Path) -> list[str]:
             )
         slice_state = next(iter(observed_states), "")
         slice_states[dirname] = slice_state
+        completion_gate = slice_state in {
+            "READY",
+            "ACTIVE",
+            "CONVERGED",
+            "HANDOFF_READY",
+            "ACCEPTED",
+        }
+        if completion_gate:
+            for term in COMPLETION_PLAN_TERMS.get(dirname, ()):
+                if term not in plan_text:
+                    errors.append(
+                        f"{feature.relative_to(root)}/plan.md: {slice_state} under "
+                        f"the V2 completion goal requires {term}"
+                    )
         distinct_assignments = set(assigned_values.values())
         if len(distinct_assignments) != 1:
             errors.append(
@@ -3429,8 +4109,14 @@ def check_program(root: Path) -> list[str]:
         if PINNED_VAULT_COMMIT not in spec_text:
             errors.append(
                 f"{feature.relative_to(root)}/spec.md: authority source must cite "
-                f"Aleph Vault merge {PINNED_VAULT_COMMIT}"
+                f"selected-design provenance {PINNED_VAULT_COMMIT}"
             )
+        for authority_path in (SELECTED_DESIGN_PATH, SELECTED_CONTRACT_PATH):
+            if authority_path not in spec_text:
+                errors.append(
+                    f"{feature.relative_to(root)}/spec.md: authority source must cite "
+                    f"repository-owned {authority_path}"
+                )
 
         for section in REQUIRED_SPEC_SECTIONS:
             if section not in spec_text:
@@ -3555,6 +4241,13 @@ def check_program(root: Path) -> list[str]:
         produced = _markdown_subsection(plan_text, "Produces")
         for interface, interface_owner in CANONICAL_INTERFACES.items():
             if interface_owner == dirname and interface not in produced:
+                if (
+                    interface == "I-010F"
+                    and interface not in accepted_contract_amendments
+                ):
+                    continue
+                if interface in {"I-010F", "I-040B", "I-040C"} and not completion_gate:
+                    continue
                 errors.append(
                     f"{feature.relative_to(root)}/plan.md: owner does not produce {interface}"
                 )
@@ -3562,12 +4255,16 @@ def check_program(root: Path) -> list[str]:
         scenes = set(SCENE_ID.findall(plan_text))
         if not scenes:
             errors.append(
-                f"{feature.relative_to(root)}/plan.md: no shared S01-S16 scene mapping"
+                f"{feature.relative_to(root)}/plan.md: no shared S01-S18 scene mapping"
             )
         if dirname == "110-v2-parity-cutover":
-            if scenes != required_scenes:
+            expected_final_scenes = required_scenes | (
+                {"S17", "S18"} if completion_gate else set()
+            )
+            if scenes != expected_final_scenes:
                 errors.append(
-                    f"{feature.relative_to(root)}/plan.md: final parity must map exactly S01-S16"
+                    f"{feature.relative_to(root)}/plan.md: final parity must map "
+                    f"exactly {sorted(expected_final_scenes)}"
                 )
         else:
             all_nonfinal_scenes.update(scenes)
@@ -3587,11 +4284,14 @@ def check_program(root: Path) -> list[str]:
         errors.append(
             f"specs/: non-canonical interface IDs present {sorted(unknown_interfaces)}"
         )
-    if all_nonfinal_scenes != required_scenes:
+    if not required_scenes.issubset(all_nonfinal_scenes):
         errors.append(
-            "specs/: implementing slices must collectively map S01-S16; "
+            "specs/: implementing slices must collectively map base scenes S01-S16; "
             f"missing {sorted(required_scenes - all_nonfinal_scenes)}"
         )
+    errors.extend(
+        _i010f_stability_errors(slice_states, accepted_contract_amendments)
+    )
     cycle = _graph_cycle(graph)
     if cycle:
         errors.append(f"specs/: dependency cycle {' -> '.join(cycle)}")

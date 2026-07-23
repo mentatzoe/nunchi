@@ -36,8 +36,8 @@ prove installed-runtime and behavioral parity across adapters and harnesses,
 run staged mixed-room scenes, commit the evidence bundle, and make product and
 release documentation truthful without doing promotion."
 
-**Authority source**: Aleph Vault PR 67 selected design at `bdd1ebb`,
-contract-clarified by PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 

@@ -89,6 +89,20 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Parallel execution examples per story
    - Implementation strategy section (MVP first, incremental delivery)
 
+### Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)
+
+When the bound workflow identifies a post-acceptance amendment, do not execute
+the ordinary generation/replacement instruction above. The existing
+`tasks.md` is accepted history: preserve every existing byte, task ID,
+checkbox, phase, and header. Append exactly one new
+`Post-Acceptance Amendment <ID>` phase containing only the fixed amendment
+tasks, starting after the highest existing task ID. Those tasks MUST cover the
+current occupant assignment, fixed predecessor and packet, interface/version
+delta, tests before implementation, ordinary-path scope, evidence,
+documentation freshness, exact amendment record/packet, immutable terminal
+history proof, and integrator handoff. The slice remains `ACCEPTED`; no task may
+reactivate it or rewrite terminal lifecycle evidence.
+
 ## Mandatory Post-Execution Hooks
 
 **You MUST complete this section before reporting completion to the user.**

@@ -8,9 +8,10 @@ description: "Task list template for one existing Nunchi slice"
 **Input**: Existing slice design documents from `specs/[exact-slice]/`
 
 **Prerequisites**: plan.md and spec.md (required), research.md when present,
-zero CRITICAL/HIGH analysis findings, satisfied upstream slice dependencies,
-one valid `evidence/governance/v2-implementation-authorization.md` enumerating
-exactly slices `010` through `110`, an assigned participant, and accepted
+zero CRITICAL/HIGH analysis findings, terminally `ACCEPTED` upstream slices
+plus consumer acceptance of their exact packets, one valid
+`evidence/governance/v2-implementation-authorization.md` enumerating exactly
+slices `010` through `110`, an assigned participant, and accepted
 slice-activation evidence before any product task begins
 
 **Accountable owner lane**: [exactly one lane]

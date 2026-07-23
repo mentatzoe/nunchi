@@ -438,7 +438,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 json.dumps(
                     {
                         "workflows": {
-                            "speckit": {"version": "2.5.0"},
+                            "speckit": {"version": "2.6.0"},
                             "nunchi-plan": {"version": "1.4.0"},
                         }
                     }
@@ -475,6 +475,47 @@ class GovernanceBoundaryTests(unittest.TestCase):
         self.assertTrue(
             any("inline workflow step is forbidden" in error for error in errors)
         )
+
+    def test_delivery_workflow_has_bounded_accepted_amendment_path(self):
+        text = (
+            ROOT / ".specify" / "workflows" / "speckit" / "workflow.yml"
+        ).read_text(encoding="utf-8")
+        for token in (
+            'version: "2.6.0"',
+            "post-acceptance amendment",
+            "stable owner lane has exactly one valid current occupant",
+            "terminal activation/candidate/handoff/acceptance records are unchanged",
+            "declarations remain ACCEPTED",
+            "fixed amendment record",
+            "slice-amendments.md",
+            "prior effective commit unchanged",
+        ):
+            self.assertIn(token, text)
+
+    def test_workflow_registry_version_must_match_embedded_workflow_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("speckit", "nunchi-plan"):
+                source = ROOT / ".specify" / "workflows" / name / "workflow.yml"
+                target = root / ".specify" / "workflows" / name / "workflow.yml"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            registry = root / ".specify" / "workflows" / "workflow-registry.json"
+            registry.write_text(
+                (ROOT / ".specify" / "workflows" / "workflow-registry.json").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            delivery = root / ".specify/workflows/speckit/workflow.yml"
+            delivery.write_text(
+                delivery.read_text(encoding="utf-8").replace(
+                    '  version: "2.6.0"', '  version: "2.5.0"', 1
+                ),
+                encoding="utf-8",
+            )
+            errors = check_governance.check_workflow_surface(root)
+        self.assertTrue(any("embedded version must be 2.6.0" in error for error in errors))
 
     def test_workflow_rejects_non_aborting_gates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -565,8 +606,8 @@ class GovernanceBoundaryTests(unittest.TestCase):
                         1,
                     )
                     text = text.replace(
-                        '      args: &unsafe "Resolve only material ambiguity; preserve the selected Vault design."',
-                        '      args: &unsafe "Resolve only material ambiguity; preserve the selected Vault design."\n'
+                        '      args: &unsafe "Resolve only material ambiguity; preserve the repository-owned selected design and current accepted lifecycle evidence."',
+                        '      args: &unsafe "Resolve only material ambiguity; preserve the repository-owned selected design and current accepted lifecycle evidence."\n'
                         "      args: *unsafe",
                         1,
                     )
@@ -1301,9 +1342,22 @@ class GovernanceBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             sha = self._init_git_repo(root)
+            binding, packet, binding_errors = (
+                check_governance._effective_dependency_binding(
+                    root, "010-v2-contract", sha
+                )
+            )
             effective, errors = check_governance._effective_dependency_commit(
                 root, "010-v2-contract", sha
             )
+            self.assertEqual(binding, sha)
+            self.assertEqual(
+                packet,
+                check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                    "handoff"
+                ],
+            )
+            self.assertEqual(binding_errors, [])
             self.assertEqual(effective, sha)
             self.assertEqual(errors, [])
 
@@ -1393,8 +1447,18 @@ class GovernanceBoundaryTests(unittest.TestCase):
             effective, errors = check_governance._effective_dependency_commit(
                 root, "010-v2-contract", base
             )
+            binding, packet, binding_errors = (
+                check_governance._effective_dependency_binding(
+                    root, "010-v2-contract", base
+                )
+            )
             self.assertEqual(errors, [])
             self.assertEqual(effective, a2_candidate)
+            self.assertEqual(binding_errors, [])
+            self.assertEqual(binding, a2_candidate)
+            self.assertEqual(
+                packet, "evidence/v2/contract/amendment-A2-test.md"
+            )
 
     def test_effective_dependency_commit_rejects_stale_summary_line(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1503,6 +1567,44 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 )
             )
 
+    def test_effective_dependency_commit_rejects_foreign_interface_amendment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            candidate = self._next_git_commit(root, "candidate")
+            decision = self._accept_amendment_commit(
+                root, "evidence/v2/contract/amendment-A1-test.md", candidate
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["amendments"]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-020A
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-19
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+""",
+            )
+            _effective, errors = check_governance._effective_dependency_commit(
+                root, "010-v2-contract", base
+            )
+            self.assertTrue(
+                any("is not owned by 010-v2-contract" in error for error in errors)
+            )
+
     def test_effective_dependency_commit_rejects_forged_decision_authority(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1537,11 +1639,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 root, "010-v2-contract", base
             )
             self.assertTrue(
-                any(
-                    "Amendment record at the decision commit must have Decision"
-                    in error
-                    for error in errors
-                )
+                any("Amendment record must name an existing file" in error for error in errors)
             )
 
     def test_effective_dependency_commit_fails_closed_on_malformed_ledger(self):
@@ -1903,8 +2001,23 @@ class GovernanceBoundaryTests(unittest.TestCase):
 **Candidate commit**: `{base}`
 """,
             )
+            self._write_lifecycle_record(
+                root,
+                check_governance.EXPECTED_LIFECYCLE_PATHS["010-v2-contract"][
+                    "acceptance"
+                ],
+                f"""# Upstream acceptance
+**Slice**: `010-v2-contract`
+**Status**: ACCEPTED
+**Candidate commit**: `{base}`
+""",
+            )
 
-            def activation_with(dependency_commit: str, reference: str) -> str:
+            def activation_with(
+                dependency_commit: str,
+                reference: str,
+                packet_reference: str,
+            ) -> str:
                 self._write_lifecycle_record(
                     root,
                     reference,
@@ -1914,7 +2027,7 @@ class GovernanceBoundaryTests(unittest.TestCase):
 **Candidate commit**: `{dependency_commit}`
 **Accepted by**: Codex
 **Accepted on**: 2026-07-19
-**Packet reference**: `evidence/v2/contract/slice-handoff.md`
+**Packet reference**: `{packet_reference}`
 **Decision reference**: durable dependency acceptance 44
 """,
                 )
@@ -1939,27 +2052,187 @@ class GovernanceBoundaryTests(unittest.TestCase):
 """
 
             reference = "evidence/v2/attention/dependency-010-acceptance.md"
+            amendment_packet = "evidence/v2/contract/amendment-A1-test.md"
 
             # Binding to the pre-amendment terminal commit must now fail: it
             # would falsely consume the superseded interface version.
             self._write_lifecycle_record(
-                root, paths["activation"], activation_with(base, reference)
+                root,
+                paths["activation"],
+                activation_with(base, reference, amendment_packet),
             )
             stale_errors = check_governance._slice_lifecycle_evidence_errors(
                 root, dirname, expected, "READY", assigned, tasks
             )
             self.assertTrue(
-                any("dependency 010 commit must match" in error for error in stale_errors)
+                any(
+                    "stale dependency 010" in error
+                    or "Candidate commit must be" in error
+                    for error in stale_errors
+                )
             )
 
             # Binding to the exact accepted amendment candidate must pass.
             self._write_lifecycle_record(
-                root, paths["activation"], activation_with(amended, reference)
+                root,
+                paths["activation"],
+                activation_with(amended, reference, amendment_packet),
             )
             fresh_errors = check_governance._slice_lifecycle_evidence_errors(
                 root, dirname, expected, "READY", assigned, tasks
             )
             self.assertEqual(fresh_errors, [])
+
+            # A consumer cannot cite the terminal packet for an amended commit.
+            self._write_lifecycle_record(
+                root,
+                paths["activation"],
+                activation_with(
+                    amended,
+                    reference,
+                    "evidence/v2/contract/slice-handoff.md",
+                ),
+            )
+            wrong_packet_errors = (
+                check_governance._slice_lifecycle_evidence_errors(
+                    root, dirname, expected, "READY", assigned, tasks
+                )
+            )
+            self.assertTrue(
+                any(
+                    "Packet reference must be "
+                    "'evidence/v2/contract/amendment-A1-test.md'"
+                    in error
+                    for error in wrong_packet_errors
+                )
+            )
+
+    def test_post_activation_successor_uses_append_only_compatibility_reattestation(
+        self,
+    ):
+        dirname = "020-v2-observation"
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        paths = check_governance.EXPECTED_LIFECYCLE_PATHS[dirname]
+        assigned = "Bob — durable assignment decision 45"
+        tasks = "- [ ] T001 Work\n"
+        task_ids, task_hash = self._task_fields(tasks)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            tasks_path = root / "specs" / dirname / "tasks.md"
+            tasks_path.parent.mkdir(parents=True, exist_ok=True)
+            tasks_path.write_text(tasks, encoding="utf-8")
+            terminal = self._commit_all(root, "terminal contract and consumer tasks")
+
+            upstream_handoff = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["handoff"]
+            upstream_acceptance = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["acceptance"]
+            self._write_lifecycle_record(
+                root,
+                upstream_handoff,
+                f"""# Handoff
+**Slice**: `010-v2-contract`
+**Status**: HANDOFF_READY
+**Candidate commit**: `{terminal}`
+""",
+            )
+            self._write_lifecycle_record(
+                root,
+                upstream_acceptance,
+                f"""# Acceptance
+**Slice**: `010-v2-contract`
+**Status**: ACCEPTED
+**Candidate commit**: `{terminal}`
+""",
+            )
+            reference = "evidence/v2/observation/dependency-010-acceptance.md"
+            initial_reference = f"""# Accepted dependency 010
+**Consumer slice**: `{dirname}`
+**Upstream slice**: `010-v2-contract`
+**Candidate commit**: `{terminal}`
+**Accepted by**: Bob
+**Accepted on**: 2026-07-22
+**Packet reference**: `{upstream_handoff}`
+**Decision reference**: durable dependency acceptance 45
+"""
+            self._write_lifecycle_record(root, reference, initial_reference)
+            activation = f"""# Activation
+**Slice**: `{dirname}`
+**Status**: READY
+**Assigned participant / source**: {assigned}
+**Authority record**: `{check_governance.IMPLEMENTATION_AUTHORIZATION_PATH}`
+**Accepted dependencies**: 010
+**Dependency commits**: 010={terminal}
+**Dependency acceptance references**: 010={reference}
+**Analysis result**: PASS — zero CRITICAL/HIGH findings
+**Branch**: `{expected["branch"]}`
+**Worktree**: `{expected["worktree"]}`
+**Starting commit**: `{terminal}`
+**Interfaces**: I-010A and I-020A
+**Acceptance scenes**: S01-S16 as planned
+**Evidence targets**: evidence/v2/observation/results.json
+**Documentation scope**: README.md and docs/observation.md
+**Initial task IDs**: {task_ids}
+**Initial tasks SHA256**: {task_hash}
+"""
+            self._write_lifecycle_record(root, paths["activation"], activation)
+            activation_commit = self._commit_all(root, "activate consumer")
+
+            amended = self._next_git_commit(root, "amended contract")
+            decision = self._accept_amendment_commit(
+                root, "evidence/v2/contract/amendment-A1-test.md", amended
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["amendments"]
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                f"""## Amendment A1
+**Slice**: `010-v2-contract`
+**Amendment ID**: A1
+**Status**: ACCEPTED
+**Amended interface**: I-010B
+**Prior interface version**: @1
+**New interface version**: @2
+**Prior effective commit**: `{terminal}`
+**Amendment candidate commit**: `{amended}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-23
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A1-test.md`
+""",
+            )
+            compatibility_evidence = (
+                root / "evidence/v2/observation/dependency-010-compatibility.md"
+            )
+            compatibility_evidence.write_text("PASS\n", encoding="utf-8")
+            (root / reference).write_text(
+                initial_reference
+                + f"""
+## Successor re-attestation
+**Consumer slice**: `{dirname}`
+**Upstream slice**: `010-v2-contract`
+**Candidate commit**: `{amended}`
+**Accepted by**: Bob
+**Accepted on**: 2026-07-23
+**Packet reference**: `evidence/v2/contract/amendment-A1-test.md`
+**Decision reference**: durable compatibility decision 45
+**Prior accepted commit**: `{terminal}`
+**Compatibility result**: PASS
+**Affected candidate commit**: `{activation_commit}`
+**Compatibility evidence**: `evidence/v2/observation/dependency-010-compatibility.md`
+""",
+                encoding="utf-8",
+            )
+            errors = check_governance._slice_lifecycle_evidence_errors(
+                root, dirname, expected, "READY", assigned, tasks
+            )
+            self.assertEqual(errors, [])
 
     def test_program_state_is_derived_from_slice_and_cutover_evidence(self):
         planned = {name: "PLANNED" for name in check_governance.EXPECTED_SLICES}
@@ -2102,13 +2375,212 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
             self.assertFalse(check_governance._planning_baseline_accepted(root))
 
-    def test_dependent_slice_cannot_start_before_upstream_handoff(self):
+    def test_dependent_slice_cannot_start_before_upstream_acceptance(self):
         states = {name: "PLANNED" for name in check_governance.EXPECTED_SLICES}
         states["020-v2-observation"] = "READY"
         errors = check_governance._slice_dependency_state_errors(states)
         self.assertTrue(any("010-v2-contract" in error for error in errors))
         states["010-v2-contract"] = "HANDOFF_READY"
+        errors = check_governance._slice_dependency_state_errors(states)
+        self.assertTrue(
+            any(
+                "requires dependency 010-v2-contract to be ACCEPTED" in error
+                for error in errors
+            )
+        )
+        states["010-v2-contract"] = "ACCEPTED"
         self.assertEqual(check_governance._slice_dependency_state_errors(states), [])
+
+    def test_completion_vocabulary_includes_freshness_and_authorization(self):
+        self.assertEqual(
+            set(check_governance.SCENE_ID.findall("S16 S17 S18 S19")),
+            {"S16", "S17", "S18"},
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-010F"],
+            "010-v2-contract",
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-040B"],
+            "040-v2-participant-wake",
+        )
+        self.assertEqual(
+            check_governance.CANONICAL_INTERFACES["I-040C"],
+            "040-v2-participant-wake",
+        )
+        self.assertNotIn(
+            "I-010F",
+            check_governance.COMPLETION_PLAN_TERMS["020-v2-observation"],
+        )
+        self.assertNotIn(
+            "030-v2-core-attention",
+            check_governance.COMPLETION_PLAN_TERMS,
+        )
+
+    def test_i010f_stability_gate_blocks_started_downstream_slices(self):
+        states = {name: "PLANNED" for name in check_governance.EXPECTED_SLICES}
+        self.assertEqual(
+            check_governance._i010f_stability_errors(states, set()), []
+        )
+
+        states["020-v2-observation"] = "READY"
+        states["030-v2-core-attention"] = "ACTIVE"
+        errors = check_governance._i010f_stability_errors(states, set())
+        self.assertTrue(any("020-v2-observation: READY" in error for error in errors))
+        self.assertTrue(any("030-v2-core-attention: ACTIVE" in error for error in errors))
+        self.assertEqual(
+            check_governance._i010f_stability_errors(states, {"I-010F"}),
+            [],
+        )
+
+    def test_validated_amendment_interfaces_require_a_valid_accepted_a3(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = self._init_git_repo(root)
+            acceptance = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["acceptance"]
+            self._write_lifecycle_record(
+                root,
+                acceptance,
+                f"""# Terminal acceptance
+**Slice**: `010-v2-contract`
+**Status**: ACCEPTED
+**Candidate commit**: `{base}`
+""",
+            )
+            candidate = self._next_git_commit(root, "a3")
+            decision = self._accept_amendment_commit(
+                root,
+                "evidence/v2/contract/amendment-A3-test.md",
+                candidate,
+            )
+            ledger = check_governance.EXPECTED_LIFECYCLE_PATHS[
+                "010-v2-contract"
+            ]["amendments"]
+            valid = f"""## Amendment A3
+
+**Slice**: `010-v2-contract`
+**Amendment ID**: A3
+**Status**: ACCEPTED
+**Amended interface**: I-010F
+**Prior interface version**: @0
+**New interface version**: @1
+**Prior effective commit**: `{base}`
+**Amendment candidate commit**: `{candidate}`
+**Amendment decision commit**: `{decision}`
+**Accepted by**: v2-integrator
+**Accepted on**: 2026-07-23
+**Decision reference**: `seed.txt`
+**Amendment record**: `evidence/v2/contract/amendment-A3-test.md`
+"""
+            self._write_lifecycle_record(root, ledger, valid)
+            self.assertEqual(
+                check_governance._validated_accepted_amended_interfaces(
+                    root, "010-v2-contract"
+                ),
+                {"I-010F"},
+            )
+
+            self._write_lifecycle_record(
+                root,
+                ledger,
+                valid.replace("**Status**: ACCEPTED", "**Status**: REJECTED"),
+            )
+            self.assertEqual(
+                check_governance._validated_accepted_amended_interfaces(
+                    root, "010-v2-contract"
+                ),
+                set(),
+            )
+
+    def test_open_a3_must_bind_owner_scope_and_appended_task_manifest(self):
+        dirname = "010-v2-contract"
+        expected = check_governance.EXPECTED_SLICES[dirname]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            terminal = self._init_git_repo(root)
+            tasks_path = root / "specs" / dirname / "tasks.md"
+            tasks_path.parent.mkdir(parents=True, exist_ok=True)
+            accepted_tasks = "- [X] T001 Accepted work\n"
+            tasks_path.write_text(accepted_tasks, encoding="utf-8")
+            assignment = (
+                root
+                / "evidence/governance/assignments/alice-v2-contract-owner.md"
+            )
+            assignment.parent.mkdir(parents=True, exist_ok=True)
+            assignment.write_text(
+                """# Assignment
+**Assignee**: Alice
+**Lane**: v2-contract-owner
+**Assigned by**: Zoe
+**Assigned on**: 2026-07-23
+**Authority reference**: durable Zoe assignment for A3
+""",
+                encoding="utf-8",
+            )
+            starting = self._commit_all(root, "prepare amendment")
+            amendment_task = "- [ ] T002 Implement I-010F\n"
+            tasks_path.write_text(
+                accepted_tasks + amendment_task,
+                encoding="utf-8",
+            )
+            amendment_entries = check_governance._task_entries(amendment_task)
+            task_ids, task_hash = check_governance._task_manifest(
+                amendment_entries
+            )
+            record_relative = Path(
+                "evidence/v2/contract/"
+                "amendment-A3-privileged-action-authorization.md"
+            )
+            record = root / record_relative
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(
+                f"""# A3
+**Slice**: `{dirname}`
+**Amendment ID**: A3
+**Amended interface**: I-010F
+**Prior interface version**: @0
+**New interface version**: @1
+**Prior effective commit**: `{terminal}`
+**Prior effective packet**: `evidence/v2/contract/slice-handoff.md`
+**Starting commit**: `{starting}`
+**Owner lane**: v2-contract-owner
+**Assigned participant / source**: Alice — evidence/governance/assignments/alice-v2-contract-owner.md
+**Fixed scope paths**: `specs/010-v2-contract/spec.md`, `specs/010-v2-contract/plan.md`, `specs/010-v2-contract/tasks.md`, `evidence/v2/contract/amendment-A3-privileged-action-authorization.md`
+**Amendment task IDs**: {task_ids}
+**Amendment tasks SHA256**: {task_hash}
+**Analysis result**: PASS — zero CRITICAL/HIGH findings
+**Branch**: v2/contract-a3
+**Worktree**: .worktrees/v2-contract-a3/
+**Amendment phase**: READY
+""",
+                encoding="utf-8",
+            )
+            errors, open_amendment = (
+                check_governance._accepted_amendment_attempt_errors(
+                    root, dirname, expected, tasks_path.read_text(), terminal
+                )
+            )
+            self.assertEqual(errors, [])
+            self.assertTrue(open_amendment)
+
+            record.write_text(
+                record.read_text(encoding="utf-8").replace(
+                    "**Amended interface**: I-010F",
+                    "**Amended interface**: I-020A",
+                ),
+                encoding="utf-8",
+            )
+            errors, open_amendment = (
+                check_governance._accepted_amendment_attempt_errors(
+                    root, dirname, expected, tasks_path.read_text(), terminal
+                )
+            )
+            self.assertFalse(open_amendment)
+            self.assertTrue(
+                any("Amended interface must be owned" in error for error in errors)
+            )
 
     def test_final_slice_requires_accepted_dependencies(self):
         states = {name: "ACCEPTED" for name in check_governance.EXPECTED_SLICES}

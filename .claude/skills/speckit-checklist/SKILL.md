@@ -78,6 +78,17 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Execution Steps
 
+### Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)
+
+When the bound workflow identifies a post-acceptance amendment, preserve every
+existing checklist byte and ignore the generic filename selection and cleanup
+advice below. Use exactly
+`FEATURE_DIR/checklists/amendment-<ID>-requirements.md`, where `<ID>` is the
+fixed amendment ID from its record. Create it once or append new globally
+unique items to it; never delete, rename, replace, or toggle prior checklist
+history. Every item must test the amendment delta, fixed scope, compatibility,
+or evidence requirements and must cite the amendment section or record.
+
 1. **Setup**: Run `.specify/scripts/bash/check-prerequisites.sh --json` from repo root and parse JSON for FEATURE_DIR and AVAILABLE_DOCS list.
    - All file paths must be absolute.
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").

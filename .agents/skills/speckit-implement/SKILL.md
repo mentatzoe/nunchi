@@ -54,6 +54,20 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
+### Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)
+
+When the bound workflow identifies a post-acceptance amendment, the slice stays
+`ACCEPTED`. Before any write, verify the stable owner lane has one valid current
+occupant, the effective predecessor commit and packet match the canonical
+amendment ledger, and the amendment plan/tasks fix one bounded scope. Execute
+only unchecked tasks in the labelled amendment phase. Do not run generic
+project setup or modify ignore/configuration files unless an amendment task
+names that exact path. Never change existing checked tasks, terminal
+declarations, activation, candidate, handoff, acceptance, prior amendment
+records, or unrelated product paths. Mark only completed amendment tasks
+`[X]`; failure leaves the slice `ACCEPTED` and the prior effective dependency
+unchanged.
+
 1. Run `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
 2. **Check checklists status** (if FEATURE_DIR/checklists/ exists):

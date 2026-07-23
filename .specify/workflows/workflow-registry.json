@@ -3,11 +3,11 @@
   "workflows": {
     "speckit": {
       "name": "Nunchi Existing-Slice Delivery Cycle",
-      "version": "2.5.0",
-      "description": "Initial delivery, active correction, or rejected-candidate rework for one existing authorized slice, ending in an owner handoff",
+      "version": "2.6.0",
+      "description": "Initial delivery, active correction, rejected-candidate rework, or bounded post-acceptance amendment for one existing authorized slice, ending in an owner handoff",
       "source": "project-customized",
       "installed_at": "2026-07-11T09:56:03.818565+00:00",
-      "updated_at": "2026-07-11T19:30:00+00:00"
+      "updated_at": "2026-07-23T00:00:00+00:00"
     },
     "nunchi-plan": {
       "name": "Nunchi Existing-Slice Planning Cycle",

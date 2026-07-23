@@ -33,7 +33,8 @@ EXPECTED_INTEGRATION_SKILLS = {
 }
 RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 BINDING_NAME = "nunchi-binding.json"
-BINDING_SCHEMA_VERSION = 2
+BINDING_SCHEMA_VERSION = 3
+TASKS_STEP_ID = "tasks"
 RESUMABLE_STATUSES = {"failed", "paused"}
 RUN_STATUSES = {
     "aborted",
@@ -49,6 +50,7 @@ BINDING_KEYS = {
     "inputs_file_sha256",
     "integration",
     "integration_manifest_sha256",
+    "initial_tasks_file_sha256",
     "persisted_workflow_sha256",
     "requested_inputs_sha256",
     "resolved_inputs_sha256",
@@ -59,6 +61,10 @@ BINDING_KEYS = {
     "state_sha256",
     "state_status",
     "tasks_file_sha256",
+    "tasks_transition_from_state_sha256",
+    "tasks_transition_step_id",
+    "tasks_transition_to_state_sha256",
+    "tasks_transitioned_at",
     "workflow",
     "workflow_sha256",
     "workflow_version",
@@ -417,12 +423,48 @@ def _validate_binding_shape(
         raise ValueError("run lacks a complete finalized binding")
     if not finalized and any(populated):
         raise ValueError("new run binding was already partially finalized")
+    initial_tasks_digest = binding.get("initial_tasks_file_sha256")
     tasks_digest = binding.get("tasks_file_sha256")
-    if (
-        not isinstance(tasks_digest, str)
-        or re.fullmatch(r"[0-9a-f]{64}", tasks_digest) is None
+    for label, digest in (
+        ("initial bound slice task", initial_tasks_digest),
+        ("bound slice task", tasks_digest),
     ):
-        raise ValueError("bound slice task digest is malformed")
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise ValueError(f"{label} digest is malformed")
+
+    transition_fields = (
+        "tasks_transitioned_at",
+        "tasks_transition_step_id",
+        "tasks_transition_from_state_sha256",
+        "tasks_transition_to_state_sha256",
+    )
+    transition_values = [binding.get(field) for field in transition_fields]
+    if any(value is not None for value in transition_values):
+        if not all(value is not None for value in transition_values):
+            raise ValueError("task graph transition evidence is incomplete")
+        _parse_utc_timestamp(
+            binding.get("tasks_transitioned_at"),
+            "task graph transition timestamp",
+        )
+        if binding.get("tasks_transition_step_id") != TASKS_STEP_ID:
+            raise ValueError("task graph transition was not recorded at the tasks step")
+        for field in (
+            "tasks_transition_from_state_sha256",
+            "tasks_transition_to_state_sha256",
+        ):
+            digest = binding.get(field)
+            if (
+                not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise ValueError("task graph transition state digest is malformed")
+        if tasks_digest == initial_tasks_digest:
+            raise ValueError("task graph transition did not change the task digest")
+    elif tasks_digest != initial_tasks_digest:
+        raise ValueError("task graph digest changed without transition evidence")
     return workflow_path, workflow_version
 
 
@@ -491,6 +533,131 @@ def _validate_state_shape(
     _parse_utc_timestamp(state.get("updated_at"), "SpecKit state updated_at")
 
 
+def _workflow_step_ids(path: Path) -> list[str]:
+    """Return the canonical sequential step IDs used for boundary proofs."""
+
+    values = re.findall(r"(?m)^  - id:[ \t]*(.+?)[ \t]*$", path.read_text("utf-8"))
+    step_ids = [_yaml_scalar(value, label="step id") for value in values]
+    if len(step_ids) != len(set(step_ids)):
+        raise ValueError("workflow step IDs must be unique")
+    return step_ids
+
+
+def _tasks_step_index(root: Path, workflow: str) -> int:
+    step_ids = _workflow_step_ids(_workflow_path(root, workflow))
+    if step_ids.count(TASKS_STEP_ID) != 1:
+        raise ValueError("bound workflow must contain exactly one tasks step")
+    return step_ids.index(TASKS_STEP_ID)
+
+
+def _completed_tasks_step_result(state: dict[str, object]) -> dict[str, object]:
+    """Require the engine's exact successful ``speckit.tasks`` dispatch record."""
+
+    step_results = state.get("step_results")
+    if not isinstance(step_results, dict):
+        raise ValueError("SpecKit run state has invalid step_results")
+    result = step_results.get(TASKS_STEP_ID)
+    if not isinstance(result, dict):
+        raise ValueError("task graph transition lacks a recorded tasks step")
+    output = result.get("output")
+    if (
+        result.get("type") != "command"
+        or result.get("status") != "completed"
+        or not isinstance(output, dict)
+        or output.get("command") != "speckit.tasks"
+        or output.get("dispatched") is not True
+        or output.get("exit_code") != 0
+    ):
+        raise ValueError("task graph transition lacks a successful speckit.tasks step")
+    return result
+
+
+def _validate_recorded_task_transition(
+    root: Path,
+    binding: dict[str, object],
+    state: dict[str, object],
+) -> None:
+    """Validate durable transition evidence retained by every later state."""
+
+    if binding.get("tasks_transitioned_at") is None:
+        return
+    _completed_tasks_step_result(state)
+    workflow = binding.get("workflow")
+    if not isinstance(workflow, str):
+        raise ValueError("binding workflow is malformed")
+    tasks_index = _tasks_step_index(root, workflow)
+    step_index = state.get("current_step_index")
+    if not isinstance(step_index, int) or step_index < tasks_index:
+        raise ValueError("recorded task transition predates the tasks step")
+
+
+def _record_task_transition(
+    root: Path,
+    binding: dict[str, object],
+    prior_state: dict[str, object] | None,
+    state: dict[str, object],
+    tasks_digest: str,
+    state_sha256: str,
+) -> None:
+    """Consume the one task-digest transition only as ``tasks`` is crossed."""
+
+    if prior_state is None:
+        raise ValueError(
+            "task graph changed without a wrapper-observed tasks transition"
+        )
+    if binding.get("tasks_transitioned_at") is not None:
+        raise ValueError("task graph changed after its one allowed transition")
+
+    workflow = binding.get("workflow")
+    run_id = binding.get("run_id")
+    if not isinstance(workflow, str) or not isinstance(run_id, str):
+        raise ValueError("binding workflow identity is malformed")
+    _validate_state_shape(prior_state, run_id=run_id, workflow=workflow)
+    if prior_state.get("status") not in RESUMABLE_STATUSES:
+        raise ValueError("task graph transition did not begin from a resumable state")
+    if prior_state.get("created_at") != binding.get("state_created_at"):
+        raise ValueError("task graph transition changed the run state identity")
+
+    prior_results = prior_state.get("step_results")
+    current_results = state.get("step_results")
+    assert isinstance(prior_results, dict)
+    assert isinstance(current_results, dict)
+    if TASKS_STEP_ID in prior_results:
+        raise ValueError("tasks step was already recorded before the task graph changed")
+    _completed_tasks_step_result(state)
+
+    tasks_index = _tasks_step_index(root, workflow)
+    prior_index = prior_state.get("current_step_index")
+    current_index = state.get("current_step_index")
+    if (
+        not isinstance(prior_index, int)
+        or not isinstance(current_index, int)
+        or prior_index >= tasks_index
+        or current_index < tasks_index
+    ):
+        raise ValueError("task graph change did not cross the tasks boundary")
+
+    prior_current_step = prior_state.get("current_step_id")
+    for step_id, result in prior_results.items():
+        if step_id != prior_current_step and current_results.get(step_id) != result:
+            raise ValueError(
+                "SpecKit rewrote completed step evidence while crossing tasks"
+            )
+
+    initial_digest = binding.get("initial_tasks_file_sha256")
+    if tasks_digest == initial_digest:
+        raise ValueError("task graph transition did not change the task digest")
+    binding.update(
+        {
+            "tasks_file_sha256": tasks_digest,
+            "tasks_transitioned_at": datetime.now(timezone.utc).isoformat(),
+            "tasks_transition_step_id": TASKS_STEP_ID,
+            "tasks_transition_from_state_sha256": binding["state_sha256"],
+            "tasks_transition_to_state_sha256": state_sha256,
+        }
+    )
+
+
 def _validate_bound_run(
     root: Path,
     run_id: str,
@@ -529,6 +696,7 @@ def _validate_bound_run(
     state = _load_json_file(state_path, "SpecKit run state")
     workflow = str(binding["workflow"])
     _validate_state_shape(state, run_id=run_id, workflow=workflow)
+    _validate_recorded_task_transition(root, binding, state)
     if state.get("created_at") != binding.get("state_created_at"):
         raise ValueError("SpecKit run state identity changed after the run was bound")
     if state.get("status") != binding.get("state_status"):
@@ -564,6 +732,9 @@ def prepare_run(
     run_directory = _run_directory(root, selected_run_id)
     if run_directory.exists():
         raise ValueError(f"workflow run already exists: {selected_run_id}")
+    initial_tasks_digest = _sha256(
+        _tasks_path(root, {"slice_directory": slice_directory})
+    )
     payload: dict[str, object] = {
         "schema_version": BINDING_SCHEMA_VERSION,
         "run_id": selected_run_id,
@@ -584,9 +755,12 @@ def prepare_run(
         "state_created_at": None,
         "state_sha256": None,
         "state_status": None,
-        "tasks_file_sha256": _sha256(
-            _tasks_path(root, {"slice_directory": slice_directory})
-        ),
+        "initial_tasks_file_sha256": initial_tasks_digest,
+        "tasks_file_sha256": initial_tasks_digest,
+        "tasks_transitioned_at": None,
+        "tasks_transition_step_id": None,
+        "tasks_transition_from_state_sha256": None,
+        "tasks_transition_to_state_sha256": None,
     }
     _atomic_json(run_directory / BINDING_NAME, payload)
     return selected_run_id, payload
@@ -659,6 +833,8 @@ def _refresh_state_binding_after_resume(
     root: Path,
     run_id: str,
     prior_binding: dict[str, object],
+    *,
+    prior_state: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Accept only the state transition made by the just-finished resume."""
 
@@ -689,19 +865,23 @@ def _refresh_state_binding_after_resume(
         raise ValueError("persisted workflow changed during resume")
     _validate_inputs(run_directory, current_binding)
 
-    if _sha256(_tasks_path(root, current_binding)) != current_binding[
-        "tasks_file_sha256"
-    ]:
-        raise ValueError(
-            "bound slice task graph changed during the run; start a new bound run"
-        )
-
     state_path = run_directory / "state.json"
     state = _load_json_file(state_path, "SpecKit run state")
     workflow = str(current_binding["workflow"])
     _validate_state_shape(state, run_id=run_id, workflow=workflow)
     if state.get("created_at") != current_binding.get("state_created_at"):
         raise ValueError("SpecKit run state identity changed during resume")
+
+    tasks_digest = _sha256(_tasks_path(root, current_binding))
+    if tasks_digest != current_binding["tasks_file_sha256"]:
+        _record_task_transition(
+            root,
+            current_binding,
+            prior_state,
+            state,
+            tasks_digest,
+            _sha256(state_path),
+        )
 
     current_binding["state_sha256"] = _sha256(state_path)
     current_binding["state_status"] = state["status"]
@@ -821,6 +1001,10 @@ def resume_bound_run(root: Path, run_id: str) -> int:
 
     verify_speckit_installation(root)
     binding = validate_resume(root, run_id)
+    prior_state = _load_json_file(
+        _run_directory(root, run_id) / "state.json",
+        "SpecKit run state",
+    )
     environment = os.environ.copy()
     environment["SPECIFY_FEATURE_DIRECTORY"] = str(binding["slice_directory"])
     environment["SPECKIT_WORKFLOW_RUN_ID"] = run_id
@@ -829,7 +1013,12 @@ def resume_bound_run(root: Path, run_id: str) -> int:
         ["specify", "workflow", "resume", run_id, "--json"],
         environment,
     )
-    refreshed = _refresh_state_binding_after_resume(root, run_id, binding)
+    refreshed = _refresh_state_binding_after_resume(
+        root,
+        run_id,
+        binding,
+        prior_state=prior_state,
+    )
     print(
         f"Bound run {run_id} finished with status {refreshed['state_status']}",
         file=sys.stderr,

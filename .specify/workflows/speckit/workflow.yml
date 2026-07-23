@@ -2,9 +2,9 @@ schema_version: "1.0"
 workflow:
   id: "speckit"
   name: "Nunchi Existing-Slice Delivery Cycle"
-  version: "2.5.0"
+  version: "2.6.0"
   author: "Nunchi"
-  description: "Initial delivery, active correction, or rejected-candidate rework for one existing authorized slice, ending in an owner handoff"
+  description: "Initial delivery, active correction, rejected-candidate rework, or a bounded post-acceptance amendment for one existing authorized slice, ending in an owner handoff"
 
 requires:
   speckit_version: "==0.12.11"
@@ -32,7 +32,7 @@ steps:
 
   - id: review-spec
     type: gate
-    message: "Review the bound slice's scope, owner lane, assigned participant/source, dependencies, interfaces, lifecycle state, control-plane-only compliance, and README/docs dispositions. Assignment must be participant identity — evidence/governance/assignments/<record>.md. That durable record names Assignee, Lane, Assigned by, Assigned on, and Authority reference; a non-Zoe assigner also records Delegated by: Zoe and Delegation reference. Assignment grants no implementation authority and need not exist for unrelated slices."
+    message: "Review the bound slice's scope, owner lane, assigned participant/source, dependencies, interfaces, lifecycle state, control-plane-only compliance, and README/docs dispositions against the repository-owned selected design. Identify exactly one mode: first delivery, ACTIVE correction/rework, or a bounded amendment to an already ACCEPTED slice. Assignment must be participant identity — evidence/governance/assignments/<record>.md. That durable record names Assignee, Lane, Assigned by, Assigned on, and Authority reference; a non-Zoe assigner also records Delegated by: Zoe and Delegation reference. Assignment grants no implementation authority and need not exist for unrelated slices."
     options: [approve, reject]
     on_reject: abort
 
@@ -40,7 +40,7 @@ steps:
     command: speckit.clarify
     integration: "{{ inputs.integration }}"
     input:
-      args: "Resolve only material ambiguity; preserve the selected Vault design."
+      args: "Resolve only material ambiguity; preserve the repository-owned selected design and current accepted lifecycle evidence."
 
   - id: plan
     command: speckit.plan
@@ -64,7 +64,7 @@ steps:
     command: speckit.tasks
     integration: "{{ inputs.integration }}"
     input:
-      args: "Generate dependency-ordered tasks with ordinary repository paths, exact README/docs disposition and validation tasks, and explicit handoff inputs. For an ACTIVE correction or recorded rejection, preserve completed history and append only tasks traceable to the correction source."
+      args: "Generate dependency-ordered tasks with ordinary repository paths, exact README/docs disposition and validation tasks, and explicit handoff inputs. For an ACTIVE correction or recorded rejection, preserve completed history and append only tasks traceable to the correction source. For an ACCEPTED amendment, preserve terminal lifecycle history and append only amendment-traceable tasks."
 
   - id: analyze
     command: speckit.analyze
@@ -86,13 +86,13 @@ steps:
 
   - id: slice-readiness
     type: gate
-    message: "SLICE READINESS OR CONTINUATION RE-ENTRY: for first delivery, approve only when the bound slice is READY: one named participant occupies its owner lane from a valid durable Zoe/delegate assignment record; ordered Dependency commits use dependency=full-SHA and matching Dependency acceptance references use dependency=repo-relative-evidence for every per-consumer acceptance; slice 110 sees every upstream slice ACCEPTED; analysis has zero CRITICAL/HIGH findings; the isolated branch/worktree is fixed; and slice-activation evidence records all of those facts plus interfaces, scenes, evidence targets, documentation dispositions, Initial task IDs, and Initial tasks SHA256. For active correction, approve only when the same bound slice is already ACTIVE with its original activation and owner binding valid, no acceptance record, and authority/dependencies still passing. If a completed handoff was rejected, additionally require the latest handoff attempt is REJECTED. Convergence-appended tasks or a failed implementation remain ACTIVE and start a new bound run; post-convergence review corrections resume their paused bound run."
+    message: "SLICE READINESS, CONTINUATION RE-ENTRY, OR ACCEPTED-AMENDMENT READINESS: for first delivery, approve only when the bound slice is READY: one named participant occupies its owner lane from a valid durable Zoe/delegate assignment record; ordered Dependency commits use dependency=full-SHA and matching Dependency acceptance references use dependency=repo-relative-evidence for every per-consumer acceptance; every upstream slice is terminally ACCEPTED; analysis has zero CRITICAL/HIGH findings; the isolated branch/worktree is fixed; and slice-activation evidence records all of those facts plus interfaces, scenes, evidence targets, documentation dispositions, Initial task IDs, and Initial tasks SHA256. For active correction, approve only when the same bound slice is already ACTIVE with its original activation and owner binding valid, no acceptance record, and authority/dependencies still passing. If a completed handoff was rejected, additionally require the latest handoff attempt is REJECTED. Convergence-appended tasks or a failed implementation remain ACTIVE and start a new bound run; post-convergence review corrections resume their paused bound run. For a post-acceptance amendment, approve only when the slice remains ACCEPTED, its stable owner lane has exactly one valid current occupant from a durable assignment, its terminal activation/candidate/handoff/acceptance records are unchanged, the canonical amendment ledger is valid, the current effective dependency commit is fixed, the amendment ID, interface, prior/new versions, rationale, exact ordinary paths, and evidence obligations are fixed, and analysis has zero CRITICAL/HIGH findings."
     options: [approve, reject]
     on_reject: abort
 
   - id: activate-slice
     type: gate
-    message: "SLICE ACTIVATION OR CONTINUATION: on first delivery and before any implementation checkbox is completed, the assigned participant atomically updates only the bound spec, plan, and tasks from READY to ACTIVE. On active correction or rejection rework, verify those declarations are already ACTIVE and retain the original activation record; never fabricate a second activation. Changing labels never grants authority. The participant hands a first-activation transition fact to the assigned v2-program-owner, who alone updates the umbrella declaration to DELIVERY for the first active implementation slice or INTEGRATION when slice 110 first enters ACTIVE."
+    message: "SLICE ACTIVATION, CONTINUATION, OR ACCEPTED AMENDMENT: on first delivery and before any implementation checkbox is completed, the assigned participant atomically updates only the bound spec, plan, and tasks from READY to ACTIVE. On active correction or rejection rework, verify those declarations are already ACTIVE and retain the original activation record; never fabricate a second activation. In amendment mode, verify the declarations remain ACCEPTED, retain the original activation record and all terminal evidence byte-for-byte, and make no program-state transition. Changing labels never grants authority. The participant hands only a first-activation transition fact to the assigned v2-program-owner, who alone updates the umbrella declaration to DELIVERY for the first active implementation slice or INTEGRATION when slice 110 first enters ACTIVE."
     options: [approve, reject]
     on_reject: abort
 
@@ -100,17 +100,17 @@ steps:
     command: speckit.implement
     integration: "{{ inputs.integration }}"
     input:
-      args: "Implement, correct, or rework only the bound existing slice and owner lane, in its isolated worktree, using ordinary product paths. On continuation, address only unchecked tasks traceable to the failed run, convergence finding, or latest rejection without rewriting prior evidence. Execute the planned README/docs dispositions and validation as implementation work."
+      args: "Implement, correct, rework, or amend only the bound existing slice and owner lane, in its isolated worktree, using ordinary product paths. On continuation, address only unchecked tasks traceable to the failed run, convergence finding, or latest rejection without rewriting prior evidence. In amendment mode, change only amendment-scoped ordinary paths and tasks from the fixed current effective predecessor; never rewrite terminal slice evidence. Execute the planned README/docs dispositions and validation as implementation work."
 
   - id: converge
     command: speckit.converge
     integration: "{{ inputs.integration }}"
     input:
-      args: "Reconcile implementation, tasks, tests, evidence, README/docs dispositions, and limitations without broadening scope or claiming incomplete work. If new tasks are appended, keep the slice ACTIVE and report that the owner must start a new bound speckit run for the same slice; do not advance to CONVERGED."
+      args: "Reconcile implementation, tasks, tests, evidence, README/docs dispositions, and limitations without broadening scope or claiming incomplete work. If new tasks are appended, keep an ordinary delivery slice ACTIVE and report that the owner must start a new bound speckit run for the same slice; do not advance to CONVERGED. In amendment mode, keep the slice ACCEPTED and require the exact candidate to descend from the fixed current effective predecessor."
 
   - id: record-convergence
     type: gate
-    message: "SLICE CONVERGENCE: approve only when converge appended no tasks, every planned task is complete, and implementation, tests/evaluations, interfaces, exact existing evidence files, and limitations agree; the assigned participant appends a CONVERGED candidate attempt with an existing Git commit, Tasks complete: YES, exact Completed task IDs, and Tasks SHA256, then updates only the bound declarations from ACTIVE to CONVERGED. If converge appended tasks, reject to pause this gate, leave the slice ACTIVE, and start a new bound speckit run for the same slice so implement processes them."
+    message: "SLICE OR AMENDMENT CONVERGENCE: approve only when converge appended no tasks, every planned task is complete, and implementation, tests/evaluations, interfaces, exact existing evidence files, and limitations agree. For ordinary delivery, the assigned participant appends a CONVERGED candidate attempt with an existing Git commit, Tasks complete: YES, exact Completed task IDs, and Tasks SHA256, then updates only the bound declarations from ACTIVE to CONVERGED. For an ACCEPTED amendment, record the exact candidate, predecessor, amendment ID/interface/versions, completed task IDs/hash, passing commands, evidence, documentation dispositions, and limitations in the fixed amendment record; do not append slice-candidate.md or change ACCEPTED declarations. If converge appends tasks, reject to pause this gate and start a new bound speckit run in the same mode so implement processes them."
     options: [approve, reject]
     on_reject: retry
 
@@ -122,12 +122,12 @@ steps:
 
   - id: prepare-handoff
     type: gate
-    message: "HANDOFF READINESS: after documentation freshness passes, the assigned participant appends a HANDOFF_READY record naming exact existing packet files and updates only the bound declarations from CONVERGED to HANDOFF_READY."
+    message: "HANDOFF READINESS: after documentation freshness passes, ordinary delivery appends a HANDOFF_READY record naming exact existing packet files and updates only the bound declarations from CONVERGED to HANDOFF_READY. An ACCEPTED amendment instead records HANDOFF_READY and exact packet files in its fixed amendment record; it does not append slice-handoff.md or change ACCEPTED declarations."
     options: [approve, reject]
     on_reject: retry
 
   - id: slice-handoff
     type: gate
-    message: "SLICE HANDOFF: the assigned participant delivers the exact HANDOFF_READY commit, commands, evidence paths, interface versions, provenance, documentation dispositions/validation, limitations, and packet to the designated acceptance owner. The delivery workflow ends here. Separately, the assigned v2-integrator accepts or rejects slices 010-100 and writes that evidence. Zoe accepts or rejects slice 110; the assigned v2-integrator durably copies their decision into that slice's acceptance or rejection evidence, and the assigned v2-program-owner copies an acceptance only into the program cutover record. On acceptance, the assigned slice participant then updates only the bound declarations to ACCEPTED. On rejection, the recorder appends a REJECTED record to slice-handoff.md, then the assigned slice participant returns declarations to ACTIVE; rework appends new candidate and handoff attempts without deleting history. Each dependent separately records its upstream acceptance before READY. Only slice 110 performs integration or cutover."
+    message: "SLICE OR AMENDMENT HANDOFF: the assigned participant delivers the exact HANDOFF_READY commit, commands, evidence paths, interface versions, provenance, documentation dispositions/validation, limitations, and packet to the designated acceptance owner. The delivery workflow ends here. For ordinary delivery, the assigned v2-integrator separately accepts or rejects slices 010-100 and writes that evidence. Zoe accepts or rejects slice 110; the assigned v2-integrator durably copies their decision into that slice's acceptance or rejection evidence, and the assigned v2-program-owner copies an acceptance only into the program cutover record. On ordinary acceptance, the assigned slice participant updates only the bound declarations to ACCEPTED. On ordinary rejection, the recorder appends a REJECTED record to slice-handoff.md and the assigned participant returns declarations to ACTIVE. For an ACCEPTED amendment, the v2-integrator instead appends the exact ACCEPTED or REJECTED decision to the amendment record; ACCEPTED then appends one canonical slice-amendments.md ledger record and changes only the effective dependency commit, while REJECTED leaves the prior effective commit unchanged and requires a fresh bound run. Amendment mode never rewrites slice-activation.md, slice-candidate.md, slice-handoff.md, slice-acceptance.md, or ACCEPTED declarations. Each dependent separately accepts the effective upstream commit and exact terminal or amendment packet before READY. Only slice 110 performs integration or cutover."
     options: [approve, reject]
     on_reject: retry

@@ -13,8 +13,9 @@ Nunchi is between contracts. Keep these states separate:
 |---|---|---|
 | [PyPI `0.2.0`](https://pypi.org/project/nunchi/0.2.0/) | Historical release from 2026-07-02; core library plus `nunchi` and `nunchi-channel` | Older V1 `PASS / ACK / ASK / SPEAK`, including the subsequently removed deterministic fast path |
 | This repository checkout | V1 runtime plus substantial unreleased adapter and harness work | Still V1; surfaces do not yet share one parity-proven lifecycle |
-| Selected V2 target | Design, governance, interfaces, slices, and acceptance program are ready | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
-| V2 program lifecycle | 2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED` | At that snapshot all slices were `PLANNED` and dormant; V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED` |
+| Selected V2 target | Repository-owned design and completion goal; the authorization contract amendment and dependency-ordered implementation remain | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
+| Current V2 delivery baseline | [Audited 2026-07-23](evidence/v2/completion-baseline-2026-07-23.md): slice `010` is accepted through amendments A1/A2; the required `I-010F` A3 amendment is not accepted; slices `020`–`110` are `PLANNED` | No downstream V2 implementation is active or accepted; V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED` |
+| Historical V2 program reset | 2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED` | At that snapshot all slices were `PLANNED` and dormant; it is provenance, not current status |
 
 The checkout still reports package version `0.2.0`, so the version string alone
 does not establish which source or integration artifacts are installed. Record
@@ -84,9 +85,9 @@ streams.
 | Wave | Independently owned slice | Accountable owner lane | Outcome |
 |---:|---|---|---|
 | 0 | `010-v2-contract` | `v2-contract-owner` | Canonical V2 request, decision, wake, continuation, and receipt contracts |
-| 1 | `020-v2-observation` | `v2-observation-owner` | Truthful bounded observation and continuation |
+| 1 | `020-v2-observation` | `v2-observation-owner` | Truthful bounded observation, continuation, and factual current snapshot/high-water facts; no turn scheduler |
 | 1 | `030-v2-core-attention` | `v2-core-owner` | Participant-shaped pre-attention and uncertainty widening |
-| 2 | `040-v2-participant-wake` | `v2-wake-owner` | Normal participant act-or-silence turn |
+| 2 | `040-v2-participant-wake` | `v2-wake-owner` | Normal participant act-or-silence turn, coalesced opportunity scheduling, and privileged-action enforcement |
 | 2 | `050-v2-discord-transport` | `v2-transport-owner` | Shared Discord-native continuity and transport receipts |
 | 3 | `060-v2-hermes` | `v2-hermes-owner` | Hermes migration and installed-runtime evidence |
 | 3 | `070-v2-claude-code` | `v2-claude-owner` | Claude Code migration and installed-runtime evidence |
@@ -133,6 +134,18 @@ flowchart LR
     Cutover -->|"Yes"| RecordCutover --> Merge --> Pending --> Verify --> Current
 ```
 
+An already `ACCEPTED` slice may issue a bounded versioned successor without
+rewriting that terminal history. The current occupant of the same stable owner
+lane starts the `speckit` workflow in accepted-amendment mode from the exact
+effective predecessor. The slice stays `ACCEPTED`; its activation, terminal
+candidate, handoff, acceptance, and earlier amendments remain immutable. One
+append-only amendment record carries the fixed scope, candidate, packet, and
+integrator decision. Acceptance alone appends the canonical amendment ledger
+and changes the effective commit and packet that future consumers must accept.
+Rejection leaves the prior effective binding in force. From amendment A3
+onward the complete record schema is mandatory; historical A1/A2 records retain
+their accepted schema.
+
 Before running either workflow, the participant uses
 `python3 scripts/run_slice_workflow.py run <workflow> specs/<exact-slice>`.
 The runner allowlists and preflights the existing slice, sets the exact binding
@@ -143,8 +156,11 @@ and canonical workflow digest for its run ID, and leaves
 `.specify/feature.json` unchanged. Resume uses
 `python3 scripts/run_slice_workflow.py resume <run-id>` and rejects changed
 slice inputs, stale workflows, divergent persisted workflow copies, or a changed
-integration manifest, installed skill, runtime integration, or task graph. Resume is for a paused run whose task graph
-is unchanged.
+integration manifest, installed skill, or runtime integration. The wrapper
+permits exactly one task-graph transition only while a resume crosses the
+workflow's unique successful `speckit.tasks` step; it records the initial and
+current task digests plus the before/after run-state digests. Task changes
+before that boundary, after it, or on any later resume fail closed.
 If convergence adds tasks, or a completed handoff is rejected, the slice stays
 or returns `ACTIVE` and its owner starts a new bound `run speckit`; a completed
 run is never resumed. The external
@@ -153,10 +169,16 @@ implementation grant must be documented at
 all eleven slices, `010` through `110`; a partial record is invalid for every
 slice, and the record does not grant authority or make the slice ready.
 Dependencies, one accountable owner, analysis, an isolated worktree, and
-activation evidence are checked separately. Each dependent owner accepts every
-required upstream handoff before its own slice becomes `READY`. At slice level,
-`v2-integrator` accepts slices `010`–`100`, while Zoe accepts the exact
-slice-`110` candidate.
+activation evidence are checked separately. Before a dependent becomes
+`READY`, every upstream slice must be terminally `ACCEPTED` and the dependent
+owner must separately accept its exact current effective commit and terminal or
+amendment packet. If an accepted upstream successor appears after activation,
+the dependent's immutable historical records stay intact, but its candidate is
+blocked from further use until the consumer appends an exact-commit-and-packet
+compatibility re-attestation; an incompatible candidate is replaced. Each
+dependent owner accepts every required upstream handoff, but that consumer
+decision cannot substitute for terminal upstream acceptance. At slice level, `v2-integrator` accepts
+slices `010`–`100`, while Zoe accepts the exact slice-`110` candidate.
 
 Zoe, or an assigner durably delegated by Zoe, assigns the program owner and
 each slice participant. A declaration uses `<participant identity>` —
@@ -178,8 +200,8 @@ pending. A docs/evidence-only follow-up records exact-main verification and
 final documentation validation; only then is `CUTOVER_VERIFIED` established.
 Release and promotion remain separate.
 
-The umbrella program defines all eleven owners and dependencies, nine canonical
-interfaces, sixteen acceptance scenes, ordinary-path evidence requirements,
+The umbrella program defines all eleven owners and dependencies, twelve
+canonical interfaces, eighteen acceptance scenes, ordinary-path evidence requirements,
 and the final integration ladder. Its ordinary-path views are the
 [architecture guide](docs/architecture/v2-selected-design.md) and
 [execution-spine guide](docs/governance/execution-spine.md). Files under
@@ -270,6 +292,7 @@ below.
 
 | Topic | Source |
 |---|---|
+| V2 outcome, end conditions, and completion decision | [V2 completion goal](docs/v2-completion-goal.md) |
 | Selected V2 flow, interfaces, owners, and diagrams | [V2 selected design](docs/architecture/v2-selected-design.md) |
 | V2 execution model, SpecKit, workflows, and reinitialization | [V2 execution spine](docs/governance/execution-spine.md) |
 | Current V1 public contract and versioning | [V1 stability contract](docs/STABILITY.md) |
@@ -282,10 +305,13 @@ below.
 
 ## Development and governance
 
-Authority flows from the Zoe-selected Aleph Vault design—PR 67 at `bdd1ebb`,
-clarified by PR 68 at `c834e8c`—to the constitution, runtime agent guidance,
-the umbrella program and owned slice, then ordinary-path implementation and
-proof for current behavior.
+Authority starts with the repository-owned
+`docs/architecture/v2-selected-design.md` and `docs/contracts/nunchi-v2.md`.
+They preserve the Zoe-selected Aleph Vault decisions from PR 67 at `bdd1ebb`
+and PR 68 at `c834e8c`; those commits are provenance, not a required external
+checkout. The constitution, runtime guidance, umbrella program and owned slice
+then govern execution, while ordinary-path implementation and proof establish
+current behavior.
 
 SpecKit is pinned to exactly `0.12.11`. Its managed paths are disposable
 control plane and may never own product source, schemas, tests, evaluation
@@ -313,7 +339,8 @@ python3 scripts/run_slice_workflow.py run nunchi-plan \
 # Or, after program authorization and slice readiness:
 python3 scripts/run_slice_workflow.py run speckit \
   specs/030-v2-core-attention
-# Resume only a paused run whose task graph is unchanged:
+# Resume only a bound paused run; task changes are limited to its one
+# wrapper-attested speckit.tasks boundary:
 python3 scripts/run_slice_workflow.py resume <run-id>
 
 python3 scripts/check_governance.py --check-cli

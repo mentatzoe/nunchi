@@ -61,6 +61,19 @@ Goal: Detect and reduce ambiguity or missing decision points in the active featu
 
 Note: This clarification workflow is expected to run (and be completed) BEFORE invoking `/speckit-plan`. If the user explicitly states they are skipping clarification (e.g., exploratory spike), you may proceed, but must warn that downstream rework risk increases.
 
+### Nunchi Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)
+
+When the bound workflow identifies a post-acceptance amendment, the slice
+remains `ACCEPTED`. Ask only questions that can change the already fixed
+amendment scope or its validation, and abort if an answer would broaden that
+scope. Preserve the accepted spec and every historical clarification
+byte-for-byte. Record accepted answers only in one labelled
+`Accepted Amendment <ID> Clarifications` section appended to the spec; express
+any superseding requirement as an amendment delta there rather than replacing
+historical text. Do not toggle, rewrite, or re-adjudicate any existing
+requirements-checklist item. Amendment checklist work belongs in the fixed
+amendment-specific checklist described by `speckit-checklist`.
+
 Execution steps:
 
 1. Run `.specify/scripts/bash/check-prerequisites.sh --json --paths-only` from repo root **once** (combined `--json --paths-only` mode / `-Json -PathsOnly`). Parse minimal JSON payload fields:

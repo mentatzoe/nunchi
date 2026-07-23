@@ -176,8 +176,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before any write (symlinked `hooks/` escaping `--prefix` was reproducible);
   symlinks that stay inside the root remain legitimate operator topology.
 
-### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
-
 ### Removed — fastpath mention-elsewhere short-circuit (the precursor, in detail)
 
 - **A foreign `<@id>` mention no longer produces a deterministic PASS.** The
