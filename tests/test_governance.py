@@ -312,6 +312,21 @@ class GovernanceBoundaryTests(unittest.TestCase):
             errors = check_governance.check_runtime_dependencies(root)
         self.assertTrue(any("link target does not exist" in error for error in errors))
 
+    def test_malformed_documentation_is_rejected_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            assignment = (
+                root
+                / "evidence"
+                / "governance"
+                / "assignments"
+                / "malformed.md"
+            )
+            assignment.parent.mkdir(parents=True)
+            assignment.write_bytes(b"\xff")
+            errors = check_governance.check_runtime_dependencies(root)
+        self.assertTrue(any("documentation is unreadable" in error for error in errors))
+
     def test_installed_speckit_commit_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             tool_dir = Path(tmp)
@@ -2559,11 +2574,38 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
             errors, open_amendment = (
                 check_governance._accepted_amendment_attempt_errors(
-                    root, dirname, expected, tasks_path.read_text(), terminal
+                    root,
+                    dirname,
+                    expected,
+                    tasks_path.read_text(),
+                    terminal,
+                    "Alice — evidence/governance/assignments/"
+                    "alice-v2-contract-owner.md",
                 )
             )
             self.assertEqual(errors, [])
             self.assertTrue(open_amendment)
+
+            replacement = self._write_assignment(
+                root, "Bob", "v2-contract-owner", "bob-v2-contract-owner"
+            )
+            errors, open_amendment = (
+                check_governance._accepted_amendment_attempt_errors(
+                    root,
+                    dirname,
+                    expected,
+                    tasks_path.read_text(),
+                    terminal,
+                    replacement,
+                )
+            )
+            self.assertFalse(open_amendment)
+            self.assertTrue(
+                any(
+                    "must be the current slice assignment" in error
+                    for error in errors
+                )
+            )
 
             record.write_text(
                 record.read_text(encoding="utf-8").replace(
@@ -2574,7 +2616,13 @@ class GovernanceBoundaryTests(unittest.TestCase):
             )
             errors, open_amendment = (
                 check_governance._accepted_amendment_attempt_errors(
-                    root, dirname, expected, tasks_path.read_text(), terminal
+                    root,
+                    dirname,
+                    expected,
+                    tasks_path.read_text(),
+                    terminal,
+                    "Alice — evidence/governance/assignments/"
+                    "alice-v2-contract-owner.md",
                 )
             )
             self.assertFalse(open_amendment)
@@ -2692,6 +2740,11 @@ class GovernanceBoundaryTests(unittest.TestCase):
             shutil.copytree(
                 assignments, root / "evidence" / "governance" / "assignments"
             )
+        ownership = source_root / check_governance.OWNERSHIP_SUPERSESSION_PATH
+        if ownership.is_file():
+            target = root / check_governance.OWNERSHIP_SUPERSESSION_PATH
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ownership, target)
         self._write_valid_implementation_authorization(root)
 
         for dirname in check_governance.EXPECTED_SLICES:
@@ -2720,8 +2773,9 @@ class GovernanceBoundaryTests(unittest.TestCase):
                     staged.unlink()
 
         dirname = "010-v2-contract"
-        assigned = self._write_assignment(
-            root, "Alice", "v2-contract-owner", "contract-owner"
+        assigned = check_governance._clean_metadata(
+            (root / "specs" / dirname / "spec.md").read_text(encoding="utf-8"),
+            "Assigned participant / source",
         )
         for artifact in ("spec.md", "plan.md", "tasks.md"):
             path = root / "specs" / dirname / artifact
@@ -2861,6 +2915,12 @@ class GovernanceBoundaryTests(unittest.TestCase):
                             assignments,
                             source / "evidence" / "governance" / "assignments",
                         )
+                    ownership = ROOT / check_governance.OWNERSHIP_SUPERSESSION_PATH
+                    ownership_target = (
+                        source / check_governance.OWNERSHIP_SUPERSESSION_PATH
+                    )
+                    ownership_target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ownership, ownership_target)
                     for dirname in check_governance.EXPECTED_SLICES:
                         for artifact in ("spec.md", "plan.md", "tasks.md"):
                             path = source / "specs" / dirname / artifact
@@ -2979,6 +3039,204 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 root, declaration, "v2-contract-owner", "slice 010"
             )
         self.assertTrue(any("Delegated by" in error for error in errors))
+
+    def test_current_assignment_may_supersede_immutable_lifecycle_assignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_git_repo(root)
+            historical = self._write_assignment(
+                root, "Alice", "v2-contract-owner", "alice-contract-owner"
+            )
+            activation_relative = Path(
+                "evidence/v2/contract/slice-activation.md"
+            )
+            activation = root / activation_relative
+            activation.parent.mkdir(parents=True, exist_ok=True)
+            activation.write_text("# Historical activation\n", encoding="utf-8")
+            self._commit_all(root, "historical activation")
+
+            current = self._write_assignment(
+                root, "Codex", "v2-contract-owner", "codex-contract-owner"
+            )
+            current_record = root / current.split(" — ", 1)[1]
+            historical_reference = historical.split(" — ", 1)[1]
+            current_record.write_text(
+                current_record.read_text(encoding="utf-8")
+                + f"**Supersedes assignment**: {historical_reference}\n",
+                encoding="utf-8",
+            )
+            self._commit_all(root, "current assignment")
+
+            self.assertEqual(
+                check_governance._assignment_supersession_errors(
+                    root,
+                    current,
+                    historical,
+                    "v2-contract-owner",
+                    activation_relative,
+                ),
+                [],
+            )
+
+            future_relative = Path("evidence/v2/observation/slice-activation.md")
+            future = root / future_relative
+            future.parent.mkdir(parents=True, exist_ok=True)
+            future.write_text("# Future activation\n", encoding="utf-8")
+            self._commit_all(root, "future activation")
+            future_errors = check_governance._assignment_supersession_errors(
+                root,
+                current,
+                historical,
+                "v2-contract-owner",
+                future_relative,
+            )
+            self.assertTrue(
+                any(
+                    "committed before the current assignment" in error
+                    for error in future_errors
+                )
+            )
+
+            current_record.write_text(
+                current_record.read_text(encoding="utf-8").replace(
+                    historical_reference,
+                    "evidence/governance/assignments/unrelated.md",
+                ),
+                encoding="utf-8",
+            )
+            errors = check_governance._assignment_supersession_errors(
+                root,
+                current,
+                historical,
+                "v2-contract-owner",
+                activation_relative,
+            )
+            unassigned_errors = check_governance._assignment_supersession_errors(
+                root,
+                "UNASSIGNED — awaiting assignment",
+                historical,
+                "v2-contract-owner",
+                activation_relative,
+            )
+        self.assertTrue(
+            any("must supersede immutable lifecycle" in error for error in errors)
+        )
+        self.assertTrue(
+            any("requires two named durable" in error for error in unassigned_errors)
+        )
+
+    def test_exact_zoe_ownership_mapping_rejects_fabricated_current_owner(self):
+        self.assertEqual(
+            check_governance.check_ownership_supersession(ROOT),
+            [],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shutil.copytree(ROOT / "specs", root / "specs")
+            governance = root / "evidence" / "governance"
+            governance.mkdir(parents=True)
+            shutil.copytree(
+                ROOT / "evidence" / "governance" / "assignments",
+                governance / "assignments",
+            )
+            shutil.copy2(
+                ROOT / check_governance.OWNERSHIP_SUPERSESSION_PATH,
+                root / check_governance.OWNERSHIP_SUPERSESSION_PATH,
+            )
+            authority = root / check_governance.OWNERSHIP_SUPERSESSION_PATH
+            authority.write_bytes(
+                authority.read_bytes().replace(b"\n", b"\r\n")
+            )
+            self.assertEqual(
+                check_governance.check_ownership_supersession(root),
+                [],
+            )
+
+            observation_assignment = (
+                governance
+                / "assignments"
+                / "codex-v2-observation-owner-2026-07-23.md"
+            )
+            original_assignment = observation_assignment.read_text(encoding="utf-8")
+            expected_predecessor = (
+                check_governance.OWNERSHIP_EXPECTED_PREDECESSORS["020"]
+            )
+            observation_assignment.write_text(
+                original_assignment.replace(
+                    expected_predecessor,
+                    "evidence/governance/assignments/unrelated.md",
+                ),
+                encoding="utf-8",
+            )
+            lineage_errors = check_governance.check_ownership_supersession(root)
+            self.assertTrue(
+                any(
+                    "Supersedes assignment must be" in error
+                    for error in lineage_errors
+                )
+            )
+            observation_assignment.write_text(
+                original_assignment, encoding="utf-8"
+            )
+            observation_assignment.write_text(
+                original_assignment.replace(
+                    "**Authority reference**: evidence/governance/"
+                    "v2-end-to-end-ownership-supersession-2026-07-23.md "
+                    "— Codex task 019f8ff1-46c7-7c60-b427-47bf82e06d7c",
+                    "**Authority reference**: fabricated durable authority",
+                ),
+                encoding="utf-8",
+            )
+            authority_errors = check_governance.check_ownership_supersession(root)
+            self.assertTrue(
+                any(
+                    "exact Zoe assignment digest" in error
+                    for error in authority_errors
+                )
+            )
+            observation_assignment.write_text(
+                original_assignment, encoding="utf-8"
+            )
+            observation_assignment.write_bytes(
+                original_assignment.encode("utf-8") + b"\xff"
+            )
+            malformed_errors = (
+                check_governance.check_ownership_supersession(root)
+            )
+            self.assertTrue(
+                any(
+                    "assignment record is unreadable" in error
+                    for error in malformed_errors
+                )
+            )
+            observation_assignment.write_text(
+                original_assignment, encoding="utf-8"
+            )
+
+            forged = self._write_assignment(
+                root, "Mallory", "v2-observation-owner", "mallory-observation-owner"
+            )
+            expected = (
+                "Codex — evidence/governance/assignments/"
+                "codex-v2-observation-owner-2026-07-23.md"
+            )
+            for artifact in ("spec.md", "plan.md", "tasks.md"):
+                path = root / "specs" / "020-v2-observation" / artifact
+                path.write_text(
+                    path.read_text(encoding="utf-8").replace(expected, forged),
+                    encoding="utf-8",
+                )
+            errors = check_governance.check_ownership_supersession(root)
+            program_errors = check_governance.check_program(root)
+        self.assertTrue(
+            any("Zoe ownership decision requires" in error for error in errors)
+        )
+        self.assertTrue(
+            any(
+                "Zoe ownership decision requires" in error
+                for error in program_errors
+            )
+        )
 
     def test_implementation_authorization_rejects_incomplete_slice_scope(self):
         with tempfile.TemporaryDirectory() as tmp:

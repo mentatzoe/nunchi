@@ -8,7 +8,7 @@
 
 **Accountable owner lane**: `v2-integrator`
 
-**Assigned participant / source**: codex-session-2 — evidence/governance/assignments/codex-session-2-v2-integrator-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-integrator-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/110-v2-parity-cutover`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
 

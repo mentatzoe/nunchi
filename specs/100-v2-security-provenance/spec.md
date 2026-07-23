@@ -32,7 +32,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenanc
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-security-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 
