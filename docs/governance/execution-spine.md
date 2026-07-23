@@ -36,6 +36,14 @@ records, and append-only candidate/handoff attempt streams. No participant-
 local execution state or centrally maintained documentation table establishes
 live state.
 
+The current audited baseline is
+`evidence/v2/completion-baseline-2026-07-23.md`: slice `010` is terminally
+accepted through amendments A1/A2, its effective dependency commit is
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`, and the selected completion target
+still lacks accepted `I-010F`. Slices `020`–`110` are `PLANNED`; the runnable
+product remains V1. No historical downstream branch or packet changes those
+facts.
+
 Program progress is:
 
 ```text
@@ -56,10 +64,10 @@ PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
 
 `READY` means the complete program authorization record is valid, the slice's
 named participant occupies the owner lane from a durable assignment source,
-all declared upstream slices are terminally `ACCEPTED` at exact commits and
-their packets have matching per-consumer acceptance references, analysis is
-clean, its isolated worktree is fixed, and its `slice-activation.md` records
-those exact facts.
+all declared upstream slices are terminally `ACCEPTED` at exact current
+effective commits and their terminal or amendment packets have matching
+per-consumer acceptance references, analysis is clean, its isolated worktree is
+fixed, and its `slice-activation.md` records those exact facts.
 There is no central status registry: state is derived from the slice declaration
 and its activation, candidate, handoff, and acceptance evidence. None of this
 state enters conversation, classifier, runtime permission, receipt, or social
@@ -174,6 +182,8 @@ attestations, not rows in an aggregate registry.
 | `slice-candidate.md` | `CONVERGED` | Append one attempt with `Slice`, `Status: CONVERGED`, a full `Candidate commit` descending from the activation commit and containing the bound tasks/evidence, exact commit-local `Completed task IDs`, matching normalized `Tasks SHA256`, `Tasks complete: YES`, `Verification commands / results` beginning `PASS —`, `Interface versions`, exact existing commit-local `Evidence paths`, and `Known limitations` |
 | `slice-handoff.md` | `HANDOFF_READY` or retry | Append a handoff attempt with `Slice`, `Status: HANDOFF_READY`, matching `Candidate commit`, `Acceptance owner`, `Documentation freshness: PASS`, and exact existing `Packet paths`; rejection appends `Slice`, `Status: REJECTED`, rejected `Candidate commit`, `Rejected by`, ISO `Rejected on`, durable `Decision reference`, and `Recorded by: v2-integrator` |
 | `slice-acceptance.md` | `ACCEPTED` | `Slice`, `Status: ACCEPTED`, matching `Candidate commit`, `Accepted by`, ISO `Accepted on`, durable `Decision reference`, and `Recorded by: v2-integrator` |
+| `amendment-<id>-<scope>.md` | bounded successor attempt while the slice stays `ACCEPTED` | One append-only record fixing stable owner lane, current participant/assignment, amendment ID, interface and versions, current effective predecessor commit and packet, ordinary-path scope, task manifest, evidence and docs obligations; later sections add exact candidate, verification, limitations, `HANDOFF_READY` packet, and integrator `ACCEPTED` or `REJECTED` decision |
+| `slice-amendments.md` | accepted effective dependency chain | Append exactly one summary per accepted amendment, chaining prior effective commit to accepted successor commit and naming the accepted amendment packet; rejection never changes this ledger |
 | `parity/cutover-acceptance.md` | `CUTOVER_ACCEPTED` | `Program: 001-nunchi-v2-program`, `Status: CUTOVER_ACCEPTED`, `Accepted by: Zoe`, `Recorded by: v2-program-owner`, matching `Candidate commit`, ISO `Accepted on`, and durable `Decision reference` |
 | `parity/post-merge-verification.md` | `CUTOVER_VERIFIED` | `Program: 001-nunchi-v2-program`, `Status: CUTOVER_VERIFIED`, full `Accepted candidate commit`, full `Merged candidate commit`, `Main ref: refs/heads/main`, full verified `Main commit`, ISO `Verified on`, `Verification commands / results` beginning `PASS —`, exact `Evidence paths`, `Documentation freshness: PASS`, and a later full `Documentation commit`; accepted → merged → verified-main → docs/evidence-only follow-up must be one ancestry chain contained in `main` |
 
@@ -210,6 +220,43 @@ slice`, `Upstream slice`, matching `Candidate commit`, `Accepted by`, ISO
 reference`. This proves the consumer's decision without inventing a shared
 acceptance registry.
 
+If an accepted upstream amendment changes that effective binding after a
+dependent activated, the dependent's activation and earlier decisions remain
+immutable historical facts. The dependent candidate is nevertheless blocked
+from further use until its owner appends a compatibility re-attestation naming
+the exact new effective commit and packet, affected candidate, verification
+commands/results, and `PASS` or `INCOMPATIBLE`. `PASS` establishes only the new
+consumer binding; it does not rewrite activation or upstream acceptance.
+`INCOMPATIBLE` requires a replacement dependent candidate.
+
+### Bounded post-acceptance amendment
+
+An accepted slice does not move backward to `READY` or `ACTIVE` to publish a
+versioned successor. The current occupant of its stable owner lane starts a new
+bound `speckit` run in accepted-amendment mode. The slice declaration remains
+`ACCEPTED`, and its `slice-activation.md`, terminal `slice-candidate.md`,
+terminal `slice-handoff.md`, `slice-acceptance.md`, and earlier amendments stay
+byte-for-byte unchanged.
+
+Before implementation, the amendment record fixes its complete scope. From A3
+onward it must contain the full schema shown above; A1/A2 retain the schema
+under which they were accepted and are not rewritten retroactively. The
+candidate must descend from the exact current effective predecessor. Workflow
+convergence and documentation gates write candidate and packet sections only
+to that amendment record. After the workflow ends at amendment
+`HANDOFF_READY`, `v2-integrator` separately appends `ACCEPTED` or `REJECTED`.
+Rejection preserves the prior effective commit and packet and requires a fresh
+bound amendment run. Acceptance alone permits one append to
+`slice-amendments.md`; future consumers must accept that exact successor and
+amendment packet.
+
+The next required use is
+`evidence/v2/contract/amendment-A3-privileged-action-authorization.md` for
+`I-010F PrivilegedActionAuthorizationV2@1`, based on effective predecessor
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301` and its A2 packet. Until A3 is
+accepted and recorded in the ledger, no slice `020` or later may begin V2
+implementation.
+
 Slice `110` additionally has a program tail after its bound-slice delivery
 workflow reaches `HANDOFF_READY`. Zoe evaluates the exact candidate. Her durable
 decision is copied into `evidence/v2/parity/slice-acceptance.md` by the assigned
@@ -232,8 +279,9 @@ promotion.
 |---|---|
 | Plan | Existing bound slice; a durable participant assignment may be recorded before implementation authority, which is not required for planning through analysis. |
 | Implement | The complete program authority record is valid; participant assignment, clean analysis, ordered upstream commit/acceptance-reference mappings, branch/worktree, and activation evidence make the bound slice `READY`. Slice `110` additionally requires every upstream slice to be `ACCEPTED`. |
+| Amend accepted slice | Stable owner lane with one valid current occupant; complete fixed amendment record; exact effective predecessor commit and packet; clean analysis; terminal history unchanged. The slice remains `ACCEPTED`. |
 | Hand off | Slice is converged; planned tests/evaluations/evidence pass; documentation freshness passes; exact commit/interface/provenance/limitations packet exists. |
-| Accept dependency | Each dependent owner accepts its own required upstream commit and packet before the dependent slice becomes `READY`; this is distinct from terminal slice acceptance. |
+| Accept dependency | Each dependent owner accepts its own required effective upstream commit and terminal or amendment packet before the dependent slice becomes `READY`; this is distinct from terminal slice acceptance. A later successor requires append-only compatibility re-attestation before an affected candidate is used again. |
 | Accept or reject slice | After the delivery workflow ends at `HANDOFF_READY`, `v2-integrator` accepts or rejects slices `010`–`100`; Zoe accepts or rejects the exact slice-`110` candidate. Rejection appends evidence, returns the same owner to `ACTIVE`, and requires a new bound delivery run. |
 | Integrate | Only `v2-integrator` in slice `110` assembles the cross-surface candidate from its accepted upstream handoffs. |
 | Complete program tail | After slice `110` is `HANDOFF_READY`, the integrator records Zoe's exact-candidate decision for the slice and, on acceptance, the program owner records only the program cutover copy. One atomic merge remains verification-pending; exact-main verification plus final docs validation in a docs/evidence-only follow-up establish `CUTOVER_VERIFIED`. Release remains separate. |
@@ -246,7 +294,10 @@ promotion.
 | Complete program implementation-authority record | Assigned `v2-program-owner`, copying Zoe's external all-eleven-slice decision | Synchronizes only the global authority fact; does not assign, activate, or implement a slice. |
 | Umbrella program-state declaration | Assigned `v2-program-owner` | Derived from accepted planning baseline, slice transitions, and cutover evidence; the program owner never writes another participant's slice evidence. |
 | Slice declarations, activation, candidate attempts, and handoff attempts | Participant assigned to that exact slice's owner lane | Writes only the bound slice; candidate and handoff streams are append-only. |
-| Per-consumer dependency acceptance | Participant assigned to the dependent slice | Records the exact upstream commit and packet it accepted under the consumer's evidence directory. |
+| Per-consumer dependency acceptance | Participant assigned to the dependent slice | Records the exact effective upstream commit and terminal or amendment packet it accepted under the consumer's evidence directory. |
+| Accepted-slice amendment attempt | Current participant assigned to the accepted slice's stable owner lane | Appends only the fixed amendment record and changes only its bounded ordinary-path scope; terminal lifecycle evidence stays immutable. |
+| Amendment decision and effective ledger append | `v2-integrator` | Appends `ACCEPTED` or `REJECTED` to the amendment record; only acceptance appends one chained entry to `slice-amendments.md`. |
+| Post-activation compatibility re-attestation | Participant assigned to the dependent slice | Appends exact successor commit/packet, affected candidate, verification, and pass/incompatible result; never rewrites activation. |
 | Slice acceptance or rejection for `010`–`100` | `v2-integrator` | Acceptance writes `slice-acceptance.md`; rejection appends to that slice's handoff stream and returns the same owner to `ACTIVE`. |
 | Slice-`110` decision | Zoe, durably copied into slice acceptance/rejection evidence by the assigned `v2-integrator` | Establishes slice `ACCEPTED` or returns it to `ACTIVE`; the recorder does not own Zoe's decision. |
 | Program cutover decision | Assigned `v2-program-owner`, copying the accepted Zoe decision into `cutover-acceptance.md` | Establishes program `CUTOVER_ACCEPTED`; the program owner writes no slice evidence and this does not establish verification or release. |
@@ -336,6 +387,9 @@ specify workflow info speckit
 existing slice, then runs review, clarification, planning, plan review,
 requirements checklist, task generation, analysis, and a planning-exit gate.
 It does not run `speckit.specify`, create or replace a feature, or implement.
+`Nunchi Existing-Slice Delivery Cycle` version `2.6.0` supports first
+delivery, active correction/rework, and the bounded accepted-amendment branch
+described above. Every mode stays within one bound slice and owner lane.
 
 Both workflows operate on an existing slice. Never rely on the tracked
 `.specify/feature.json`, which points to the umbrella planning program. Use the
@@ -368,7 +422,7 @@ directory, resolves the concrete integration, and sets the binding in the
 workflow process without modifying `.specify/feature.json`. It verifies CLI
 provenance and records a run ID, slice, integration-manifest digest, canonical
 and persisted workflow digests, and initial task-graph digest. Resume a paused
-unchanged-task run only with:
+bound run only with:
 
 ```sh
 python3 scripts/run_slice_workflow.py resume <run-id>
@@ -376,11 +430,16 @@ python3 scripts/run_slice_workflow.py resume <run-id>
 
 Resume rejects a changed slice input, integration, CLI provenance, canonical
 workflow, persisted workflow copy, integration manifest or installed skill,
-task graph, or SpecKit run state. Resume applies only to
-a paused run whose task graph is unchanged. Convergence-added tasks or a
+or SpecKit run state. The wrapper permits exactly one task-graph transition
+only when a resume crosses the workflow's unique successful `speckit.tasks`
+step. It records the initial and current task digests, transition timestamp,
+step, and before/after state digests; mutation before that boundary, after it,
+during repair, or on a later resume fails closed. Convergence-added tasks or a
 rejected completed handoff require a new bound delivery run for the same
 `ACTIVE` slice; the original activation remains valid and authority/readiness
-are rechecked. The workflow does not run `speckit.specify` or create a
+are rechecked. An accepted-amendment run likewise restarts after rejection or
+new convergence tasks while preserving terminal history and the prior
+effective binding. The workflow does not run `speckit.specify` or create a
 replacement feature; it verifies implementation authority, then slice-specific
 readiness, before implementation. It ends in a slice handoff. Only slice `110`
 may integrate accepted slice commits, and its program tail is outside every
@@ -390,7 +449,8 @@ The delivery workflow makes every owner-controlled declaration transition explic
 
 ```text
 bind existing slice -> review/plan/analyze -> implementation authorization ->
-slice readiness -> activate slice -> implement -> converge -> record
+slice readiness or accepted-amendment readiness -> activate or retain ACCEPTED
+-> implement -> converge -> record
 CONVERGED -> documentation freshness -> prepare HANDOFF_READY -> hand off slice
 ```
 
@@ -408,6 +468,9 @@ Candidate and handoff evidence respectively establish `CONVERGED` and
 the integrator's exact-candidate acceptance then establishes `ACCEPTED`. For
 slice `110`, Zoe's acceptance and the remaining program-tail evidence follow
 the separate sequence described above.
+In accepted-amendment mode those same gates record amendment convergence and
+handoff without changing slice lifecycle declarations. The integrator's
+separate decision changes only the effective amendment ledger on acceptance.
 
 ## Documentation freshness
 

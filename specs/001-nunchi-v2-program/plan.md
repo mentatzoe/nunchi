@@ -1,6 +1,6 @@
 # Implementation Plan: Nunchi V2 End-to-End Parity
 
-**Branch**: `chore/v2-execution-spine` | **Date**: 2026-07-11 | **Spec**: `spec.md`
+**Branch**: `integration/v2` | **Date**: 2026-07-11 | **Spec**: `spec.md`
 
 **Input**: The repository-owned selected design at
 `docs/architecture/v2-selected-design.md` and contract reference at
@@ -25,16 +25,23 @@ candidate/handoff attempts
 
 **Implementation authorization**: `evidence/governance/v2-implementation-authorization.md`
 
+**Current delivery baseline**:
+`evidence/v2/completion-baseline-2026-07-23.md` — slice `010` accepted through
+A1/A2 at effective commit
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`; required `I-010F` A3 pending;
+slices `020`–`110` `PLANNED`; V1 current
+
 **Upstream dependencies**: repository-owned selected design (Vault provenance
-`c834e8c`); Constitution 2.4.0; the
+`c834e8c`); Constitution 2.5.0; the
 ordinary-path V1 inventory and evidence baseline
 
 ## Summary
 
 Deliver one coherent V2 product. The program fixes portable interface ownership
-in slice `010`, separates truthful current observation (`020`) from model
-pre-attention (`030`), and joins them with the fresh conversation scheduler,
-normal participant turn, and deterministic privileged-action guard (`040`). Transport,
+in slice `010`, separates truthful factual current observation and high-water
+facts (`020`) from model pre-attention (`030`), and joins them with the fresh
+conversation scheduler, normal participant turn, and deterministic
+privileged-action guard (`040`). Transport,
 harness, and adapter surfaces then implement the shared behavior without local
 FIFO queues or permission conventions. Security/provenance (`100`) audits the
 exact assembled implementation, and parity/cutover (`110`) freezes, reviews,
@@ -102,8 +109,8 @@ and every handoff.*
 |---|---|---|
 | I. Selected V2 boundary | The program plans pre-attention and direct participant turns without reply composition or floor allocation. | PASS |
 | II. Human-shaped judgment | Only `I-030A` may issue social suppression; deterministic transport work is limited to exact non-events. | PASS |
-| III. Truthful identity/observation | `020` owns exact self binding, native relations, bounded coverage, honest continuation, and one-active/one-pending freshness without a response queue. | PASS |
-| IV. Different owners | `030` decides attention; `040` invokes a normal participant turn and separately enforces privileged action authorization; no send reclassification is planned. | PASS |
+| III. Truthful identity/observation | `020` owns exact self binding, native relations, bounded coverage, honest continuation, and factual current snapshot/high-water facts; it owns no turn scheduler or response queue. | PASS |
+| IV. Different owners | `030` decides attention; `040` owns coalesced opportunity scheduling, invokes a normal participant turn, and separately enforces privileged action authorization; no send reclassification is planned. | PASS |
 | V. Atomic parity | `110` is the sole cutover sink and rejects mixed V1/V2 consumers or translation bridges. | PASS |
 | VI. Evidence before claims | Every slice binds shared scenes to deterministic, replay, live, and provenance evidence as appropriate. | PASS |
 | VII. Control-plane only | This tree contains planning Markdown only; all future product artifacts target ordinary repository paths. | PASS |
@@ -132,6 +139,11 @@ Wave 5:                              110 parity/cutover
 ```
 
 The drawing is explanatory; the table below is normative.
+
+Wave 0 is not complete for this delivery target until accepted slice `010`
+amendment A3 adds `I-010F` to the effective dependency packet. No `020` or `030`
+implementation starts before that exact A3 commit and packet are accepted by
+the consumer.
 
 | Slice | Accountable owner | Hard dependencies | Feeds |
 |---|---|---|---|
@@ -172,7 +184,7 @@ by slice `040`.
 | `I-010D` | `ContextContinuationV2@1` | `010` | `020`, `040`, `050`–`110`; host-only handle/binding plus request/page forms; classifier sees coverage/capability booleans only | `schemas/v2/context-continuation.schema.json` |
 | `I-010E` | `AttentionReceiptV2@2` | `010` | `020`–`110`; immutable request-correlated observation, attention, participant-host, and transport stage union; each owner appends only its own off-surface record | `schemas/v2/attention-receipt.schema.json` |
 | `I-010F` | `PrivilegedActionAuthorizationV2@1` | `010` | `040`, `060`–`110`; exact action ID/digest, capability, origin event, bounded scope, derived requester, `ALLOW`/`DENY`/`APPROVAL_REQUIRED`, reason, policy provenance, and host-only digest-bound approval challenge; no bearer grant reaches the participant | `schemas/v2/privileged-action-authorization.schema.json` |
-| `I-020A` | `ObservationProviderV2@1` | `020` | `040`–`110`; native events to bounded `I-010A` plus continuation, with one active attention opportunity and one replaceable newest pending anchor per participant/room | `src/nunchi/observation.py` |
+| `I-020A` | `ObservationProviderV2@1` | `020` | `040`–`110`; native events to bounded `I-010A` plus continuation and factual current snapshot/high-water facts; no active-turn or pending-work scheduler | `src/nunchi/observation.py` |
 | `I-030A` | `AttentionEngineV2@1` | `030` | `040`, `060`–`110`; callable core + CLI implementing `I-010A/B/E`, zero-call trusted bypass, classifier-safe projection, and the dual-valve transition | `src/nunchi/core.py`, `src/nunchi/cli.py` |
 | `I-040A` | `ParticipantTurnHostV2@1` | `040` | `060`–`110`; refresh before invocation, wake, expansion, direct act-or-silence, no send reclassification | `src/nunchi/participant.py` |
 | `I-040B` | `PrivilegedActionGuardV2@1` | `040` | `060`–`110`; resolve origin event to transport-attested actor, recheck trusted capability policy at execution, emit one-use `I-010F` decision, and execute only an exact allowed action | `src/nunchi/authorization.py` |
@@ -188,8 +200,9 @@ handoff rather than forking or silently mutating an inherited accepted packet.
 
 ## Integration Strategy
 
-**Integration order**: contract schemas/tests (`010`) land first; observation
-and core attention land after consuming that exact version; participant wake and
+**Integration order**: accepted amendment A3 adds `I-010F` to slice `010`'s
+effective contract packet first; observation and core attention land only after
+independently accepting that exact commit and packet; participant wake and
 shared Discord transport land next; harness/adapter lanes consume those
 handoffs; security/provenance audits exact candidate commits; `v2-integrator`
 assembles all accepted commits, runs parity, replaces truthful docs, and performs
@@ -275,8 +288,11 @@ must contain all in-tree consumers on one contract before acceptance.
   successors where inherited interfaces cannot express freshness or action
   authorization. Never retain a hidden V1 or locally divergent path merely to
   preserve a packet's status.
-- Stabilize `I-010F` and the shared policy/authorization vocabulary before
-  participant-host and surface integration. `020` owns bounded current
+- Deliver and accept `I-010F` through
+  `evidence/v2/contract/amendment-A3-privileged-action-authorization.md`, based
+  on exact effective predecessor
+  `26a6b531fa146ba1f1f5fcd1c4d191041b141301`, before any `020` or later
+  implementation. `020` owns bounded current
   observations and high-water facts; `040` owns `I-040C` coalesced scheduling,
   refresh-at-invocation, and the action guard; transports own authenticated
   identity/provenance; each platform packet maps its native config and tool
@@ -303,6 +319,23 @@ activation. Only paused post-convergence fixes with an unchanged task graph
 resume their run. Later candidate/handoff attempts append. Integration checks
 reject rewritten history, a resumed completed run, acceptance of a superseded
 attempt, or downstream activation citing an unaccepted retry.
+
+**Accepted amendments**: an `ACCEPTED` slice uses workflow version `2.6.0` in
+accepted-amendment mode. It remains `ACCEPTED`; terminal activation, candidate,
+handoff, acceptance, and earlier amendment records stay immutable. One
+append-only amendment record fixes the stable owner lane, valid current
+participant/assignment, ID/interface/versions, exact effective predecessor
+commit and packet, ordinary scope, task manifest, evidence, documentation,
+limitations, candidate, and packet. The integrator appends the decision there.
+Rejection preserves the prior binding and starts a new run. Acceptance alone
+appends one chained record to `slice-amendments.md`. A1/A2 retain their
+historical accepted schema; this complete schema governs A3 onward.
+
+If an accepted successor changes a dependency after consumer activation, the
+consumer preserves its immutable historical records but cannot use the affected
+candidate until its owner appends a compatibility re-attestation tied to the
+exact successor commit and packet. A failing re-attestation replaces the
+candidate rather than carrying it forward.
 
 ## Common Acceptance Scenes and Evidence
 
@@ -401,6 +434,7 @@ docs/                          # truthful product/integration/security/evaluatio
 | Evidence | `evidence/v2/` | each slice for its run records; final index in `110` |
 | Product and integration docs | `docs/` | implementing slice drafts; final truthful state in `110` |
 | Security and authorization docs | `docs/security/` and `SECURITY.md` | implementation boundaries in `040`/surfaces; blocking assurance in `100`; final wording in `110` |
+| Package identity, install, upgrade, restart, and rollback | `pyproject.toml`, packaging metadata, `docs/INSTALL.md`, `docs/operators/v2.md`, and exact installed-runtime evidence | assembled and proven in `110`; security/provenance audit in `100` |
 
 ## Program Documentation Freshness
 
@@ -433,7 +467,11 @@ Nunchi's guarantees from participant or third-party tool risks. At minimum the
 cutover candidate updates `docs/architecture/v2-selected-design.md`,
 `docs/security/v2.md`, `docs/operators/v2.md`, `docs/INSTALL.md`, each affected
 installed-surface guide, and `README.md`; unsupported privileged-tool paths are
-named as limitations rather than implied safe. These are the repository's
+named as limitations rather than implied safe. The same committed set must
+document and prove clean install, V1-to-V2 upgrade, restart continuity,
+rollback, package/version identity, and removal of all hidden V1 paths without
+depending on Vault access, conversation history, private session state, or
+contributor-local files. These are the repository's
 coherent ordinary-path surfaces: new parallel threat-model or operational-safety
 documents are created only when they contain a genuinely separate maintained
 contract, not to satisfy a stale filename in this plan.
@@ -449,6 +487,8 @@ use exactly these names and mutation contracts:
 | `slice-candidate.md` | `CONVERGED` | append-only stream whose latest attempt names the exact implementation candidate, its exact task IDs and normalized `Tasks SHA256`, `Tasks complete: YES`, and agreement among implementation, tests/evaluations, evidence, limitations, task state, and docs disposition; an exact-candidate review task may be open in the reviewed commit only when the later record-introduction commit preserves the same task IDs and shows every ID literally resolved |
 | `slice-handoff.md` | `HANDOFF_READY`, or return to `ACTIVE` after rejection | append-only stream of exact candidate packets, named recipients, reviewer, reproduction commands, documentation-freshness result, and attributable `REJECTED` decisions |
 | `slice-acceptance.md` | `ACCEPTED` | one immutable record of the exact accepted commit/packet and named slice-level acceptance owner |
+| `amendment-<id>-<scope>.md` | bounded successor attempt while the slice remains `ACCEPTED` | one append-only record with fixed effective predecessor/scope/task manifest and later exact candidate, proof, docs, packet, and integrator decision; full schema mandatory from A3 onward |
+| `slice-amendments.md` | effective dependency chain | append-only accepted-amendment summaries chaining exact predecessor to successor commit and exact amendment packet |
 
 The assigned participant for a slice writes that slice's declarations and
 immutable activation record, then appends candidate and handoff attempts after
@@ -463,8 +503,12 @@ appends a new candidate and handoff attempt—no earlier entry is deleted or
 rewritten. Each dependent recipient
 separately writes its own upstream-acceptance file under the consumer evidence
 directory. That file includes the upstream ID in its name and attests consumer,
-upstream, matching commit, accepting participant/date, exact packet record, and
-durable decision. Slice `110` additionally requires every upstream slice to be
+upstream, matching effective commit, accepting participant/date, exact terminal
+or amendment packet record, and durable decision. If that binding changes after
+activation, the same consumer evidence stream appends a compatibility
+re-attestation with the successor commit/packet, affected candidate,
+verification, and `PASS` or `INCOMPATIBLE`; activation is never rewritten.
+Slice `110` additionally requires every upstream slice to be
 `ACCEPTED`. The assigned
 `v2-program-owner` coordinates and verifies those records but writes only the
 umbrella declarations and program-state transitions. The sole cross-slice
@@ -499,7 +543,9 @@ Every slice owner hands off one packet containing:
 7. effective configuration and migration/residue notes;
 8. documentation dispositions, exact reviewed paths, validation results,
    reviewer, and accepted shared-doc deltas; and
-9. known limitations, residual risks, and any rejected claim.
+9. clean-install, upgrade, restart, rollback, and retired-V1-path results where
+   the slice owns them; and
+10. known limitations, residual risks, and any rejected claim.
 
 An incomplete packet is not accepted. Reviewers challenge the packet but do not
 silently take ownership. For slices `010`–`100`, `v2-integrator` records
@@ -511,6 +557,10 @@ declared downstream recipient records its own acceptance separately, and the
 source slice's `ACCEPTED` state does not imply those recipient records exist.
 Each dependent's activation evidence uses ordered full-SHA and matching
 consumer-owned acceptance-reference mappings for all required upstream packets.
+An upstream successor blocks use of an affected dependent candidate until its
+append-only compatibility re-attestation passes against the exact new effective
+commit and packet; incompatibility requires replacement and never rewrites
+historical acceptance.
 For slice `110`, `v2-integrator` prepares the packet
 and moves it through `CONVERGED` and `HANDOFF_READY`; only Zoe may decide on the
 exact atomic candidate, and the assigned integrator records that decision and

@@ -33,6 +33,12 @@ partial authorization record is invalid for every slice. V1 remains the current
 product until the atomic V2 merge is verified on `main` and program state is
 `CUTOVER_VERIFIED`.
 
+The audited 2026-07-23 completion baseline is
+`evidence/v2/completion-baseline-2026-07-23.md`: slice `010` is accepted
+through amendments A1/A2, the required `I-010F` A3 amendment is not accepted,
+and slices `020`–`110` are `PLANNED`. Do not start a dependent from an
+unaccepted packet or infer implementation from historical branches.
+
 For V2 planning, preserve the explicit no-model preattention bypass, keep
 continuation authority out of classifier input, and treat observation,
 attention, participant-host, and transport receipts as immutable singly
@@ -60,14 +66,20 @@ Both `nunchi-plan` and `speckit` operate on one existing slice. Invoke either
 only through `scripts/run_slice_workflow.py`. It allowlists and preflights the
 slice, sets `SPECIFY_FEATURE_DIRECTORY` inside the workflow process, pins the
 slice input, integration manifest and installed skill bytes, workflow digest,
-and initial task graph, and does not
-modify `.specify/feature.json`.
+and initial task graph, and does not modify `.specify/feature.json`. The wrapper
+permits exactly one task-graph transition while a resume crosses the unique
+successful `speckit.tasks` step, records both digests and the state transition,
+and rejects task changes before that boundary, after it, or on a later resume.
 `nunchi-plan` plans that bound slice through analysis and never creates or
 replaces a feature. The customized `speckit` workflow continues with separate
 implementation-authority and slice-readiness gates, implementation,
 convergence, a documentation-freshness gate, and owner handoff. Only slice
 `110` performs integration, and its atomic candidate still requires Zoe's
 explicit `CUTOVER_ACCEPTED` decision before cutover.
+The installed delivery workflow is version `2.6.0`. Its bounded
+accepted-amendment branch lets the current occupant of the same stable owner
+lane issue a versioned successor without moving an accepted slice backward or
+rewriting terminal history.
 
 Run the selected workflow with the exact bound directory, for example:
 
@@ -138,6 +150,25 @@ remain `ACTIVE`, and likewise start a new bound run. A paused post-convergence
 gate may resume its run only for fixes that leave the task graph unchanged.
 Append the later candidate/handoff attempts and never delete or rewrite an
 earlier attempt.
+
+For an already `ACCEPTED` slice, use accepted-amendment mode rather than
+pretending the slice is `READY` or `ACTIVE` again. One fixed append-only
+`amendment-<id>-<scope>.md` record names the stable owner lane, current
+participant and durable assignment, interface versions, exact effective
+predecessor commit and packet, bounded ordinary-path scope, task manifest,
+evidence, and docs obligations. The candidate must descend from that
+predecessor. Keep the declaration `ACCEPTED` and preserve
+`slice-activation.md`, `slice-candidate.md`, `slice-handoff.md`, and
+`slice-acceptance.md` byte-for-byte. The integrator's rejection leaves the
+prior effective binding unchanged and requires a new bound run; acceptance
+alone appends `slice-amendments.md`. A1/A2 retain their accepted historical
+schema; the complete schema is mandatory from A3 onward.
+
+Consumers always bind the latest effective upstream commit and terminal or
+amendment packet. If that binding changes after activation, preserve historical
+evidence but stop using the dependent candidate until its owner appends an
+exact-commit-and-packet compatibility re-attestation. Replace incompatible
+work; do not continue it because effort was already spent.
 
 After slice `110` reaches `HANDOFF_READY`, the slice workflow is complete and
 the program tail begins. Zoe's durable decision for the exact candidate is

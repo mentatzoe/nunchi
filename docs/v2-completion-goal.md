@@ -60,10 +60,12 @@ Nunchi V2 is complete only when all of the following are true:
    dependency.
 8. **Dependencies are terminal before downstream work starts.** A downstream
    slice may begin implementation only after every declared upstream slice is
-   accepted at an exact commit and its packet is accepted by that consumer.
-   Any successor that changes an upstream contract invalidates affected
-   downstream acceptance until compatibility is re-proved; incompatible work
-   is replaced rather than preserved for sunk-cost reasons.
+   accepted at an exact effective commit and its terminal or amendment packet
+   is accepted by that consumer. A later upstream successor does not erase
+   immutable historical acceptance, but every affected candidate is blocked
+   from further use until an append-only compatibility re-attestation proves it
+   against the exact successor commit and packet. An incompatible candidate is
+   replaced rather than preserved for sunk-cost reasons.
 9. **One frozen candidate closes review.** The complete candidate is
    byte-frozen and receives independent cross-family review. A blocking finding
    produces a new exact successor, and that successor is reviewed again.

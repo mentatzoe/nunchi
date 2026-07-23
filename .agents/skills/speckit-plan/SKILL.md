@@ -120,6 +120,18 @@ You MUST NOT create or replace a feature, create `research.md`, or generate
 `data-model.md`, `contracts/`, `quickstart.md`, product schemas, runnable docs,
 tests, evals, evidence, or source under `.specify/` or `specs/`.
 
+### Accepted-Amendment Mode (HIGHER-PRECEDENCE OVERRIDE)
+
+When the bound workflow identifies a post-acceptance amendment, the slice MUST
+remain `ACCEPTED`. Preserve its terminal declaration, activation, candidate,
+handoff, acceptance, and prior amendment evidence. Update only the existing
+`plan.md`, and only to add or refine a clearly labelled amendment section
+covering the fixed amendment ID, stable owner lane, valid current occupant
+assignment, effective predecessor commit and packet, one interface/version
+delta, exact ordinary paths, verification, evidence, documentation
+dispositions, limitations, and downstream compatibility obligations. Do not
+re-plan the accepted slice as a new delivery or broaden the amendment.
+
 ### Phase 0: Outline & Research in plan.md
 
 1. **Extract unknowns from Technical Context** above:

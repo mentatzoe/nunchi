@@ -1,6 +1,6 @@
 # Program Specification: Nunchi V2 End-to-End Parity
 
-**Feature Branch**: `chore/v2-execution-spine`
+**Feature Branch**: `integration/v2`
 
 **Created**: 2026-07-11
 
@@ -16,6 +16,12 @@ implementation authority not granted
 
 **Implementation authorization**: `evidence/governance/v2-implementation-authorization.md` (recorded 2026-07-16)
 
+**Current delivery baseline**:
+`evidence/v2/completion-baseline-2026-07-23.md` — slice `010` accepted through
+A1/A2 at effective dependency commit
+`26a6b531fa146ba1f1f5fcd1c4d191041b141301`; `I-010F` A3 not accepted; slices
+`020`–`110` `PLANNED`; V1 current
+
 **Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
 
 **Input**: Establish one implementation-ready V2 program from the selected
@@ -30,7 +36,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault PR 67 (`bdd1ebb`) and PR 68
 
 **Accountable owner lane**: `v2-program-owner`
 
-**Depends on**: repository-owned selected design and Nunchi Constitution 2.4.0
+**Depends on**: repository-owned selected design and Nunchi Constitution 2.5.0
 
 **Feeds**: independently activated slices `010` through `110`
 
@@ -58,7 +64,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault PR 67 (`bdd1ebb`) and PR 68
 ## Interface Summary
 
 - **Consumes**: repository-owned selected V2 design; current ordinary-path V1
-  implementation and evidence; Constitution 2.4.0.
+  implementation and evidence; Constitution 2.5.0.
 - **Produces**: an acyclic slice graph, stable owner lanes, a shared interface
   registry, acceptance-scene catalog, integration order, and evidence contract.
 - **Integration handoff**: `v2-program-owner` coordinates slice order and
@@ -108,8 +114,10 @@ lanes own the same interface or shared integration file.
 
 **Acceptance Scenarios**:
 
-1. **Given** slice `010` is complete, **When** Wave 1 begins, **Then** `020` and
-   `030` may proceed in parallel under different owners.
+1. **Given** slice `010`'s A3 amendment for `I-010F` is accepted at an exact
+   effective commit and packet, **When** `020` and `030` independently accept
+   that same binding, **Then** Wave 1 may proceed in parallel under different
+   owners.
 2. **Given** any foundation slice is incomplete, **When** a dependent harness
    lane requests activation, **Then** the program blocks that activation.
 
@@ -162,7 +170,9 @@ and final parity gate.
 - A runtime occupies two owner lanes: the program requires explicit handoff or
   separate work contexts; ownership never becomes shared implicitly.
 - An upstream interface changes after dependent work begins: dependents pause,
-  pin the prior version, or accept an explicit versioned handoff.
+  preserve immutable historical records, and block the affected candidate until
+  an append-only compatibility re-attestation passes against the exact successor
+  commit and packet; incompatible candidates are replaced.
 - A platform cannot supply a native relation: normalization records the missing
   capability and parity compares only equivalent available facts.
 - A slice is code-green but misses a required scene or evidence record: the
@@ -243,13 +253,19 @@ and final parity gate.
   slices `010`–`100` and by Zoe for slice `110`; it MUST NOT imply another
   downstream recipient accepted unless that recipient's exact acceptance is
   recorded. Every dependent MUST record its own acceptance of every required
-  upstream commit and packet before becoming `READY`. Its activation MUST use
-  canonical ordered dependency IDs, `Dependency commits` as `slice=full-sha`,
-  and matching `Dependency acceptance references` as
+  current effective upstream commit and terminal or amendment packet before
+  becoming `READY`. Its activation MUST use canonical ordered dependency IDs,
+  `Dependency commits` as `slice=full-sha`, and matching `Dependency acceptance
+  references` as
   `slice=consumer-owned-evidence-file`. Each reference file MUST name the
   consumer slice, upstream slice, matching commit, accepting participant, ISO
-  date, exact upstream packet record, and durable decision. Slice `110` MUST
-  require every slice `010`–`100` to be terminally `ACCEPTED`.
+  date, exact effective upstream packet record, and durable decision. A later
+  upstream successor MUST preserve historical activation and acceptance bytes
+  while blocking the affected dependent candidate until an append-only
+  compatibility re-attestation names the exact successor commit and packet,
+  affected candidate, verification, and `PASS` or `INCOMPATIBLE`; an
+  incompatible candidate MUST be replaced. Slice `110` MUST require every slice
+  `010`–`100` to be terminally `ACCEPTED`.
 - **FR-028**: Every slice MUST substantiate lifecycle transitions with immutable
   ordinary-path `slice-activation.md` and `slice-acceptance.md` records plus
   append-only `slice-candidate.md` and `slice-handoff.md` attempt streams beside
@@ -272,6 +288,43 @@ and final parity gate.
   `Recorded by: v2-integrator`; program cutover acceptance uses
   `Recorded by: v2-program-owner`. These records MUST NOT become a central
   mutable registry.
+- **FR-029**: An `ACCEPTED` slice MAY publish a bounded versioned successor only
+  through accepted-amendment mode. It MUST remain `ACCEPTED`; terminal
+  activation, candidate, handoff, acceptance, and prior amendment history MUST
+  remain immutable. One append-only amendment record MUST fix the stable owner
+  lane, valid current participant/assignment, amendment ID/interface/versions,
+  exact effective predecessor commit and packet, ordinary-path scope, task
+  manifest, evidence, documentation dispositions, limitations, candidate,
+  handoff packet, and integrator decision. Rejection MUST preserve the prior
+  effective binding and require a new run. Acceptance alone MAY append one
+  chained entry to `slice-amendments.md`. Historical A1/A2 retain their accepted
+  schema; the full schema is mandatory from A3 onward.
+- **FR-030**: Before slice `020`, `030`, or any downstream implementation begins,
+  slice `010` MUST accept
+  `evidence/v2/contract/amendment-A3-privileged-action-authorization.md`
+  carrying `I-010F PrivilegedActionAuthorizationV2@1`, based on effective
+  predecessor `26a6b531fa146ba1f1f5fcd1c4d191041b141301`; every consumer MUST
+  accept the exact resulting effective commit and amendment packet.
+- **FR-031**: Slice `020` MUST own truthful factual current observation,
+  continuation, snapshot coverage, and high-water facts only. It MUST NOT own
+  turn scheduling. Slice `040` MUST own
+  `I-040C ConversationOpportunitySchedulerV2@1`, including at most one active
+  opportunity and one replaceable newest pending anchor per participant/room,
+  fresh post-turn snapshot assembly, and zero restart/backfill wake backlog.
+- **FR-032**: Slice `040` MUST deliver both
+  `I-040B PrivilegedActionGuardV2@1` against accepted `I-010F` and `I-040C`.
+  Slices `040`–`110` MUST verify live-conversation freshness scene `S17`; slices
+  `010`, `020`, and `040`–`110` MUST verify provenance-bound privileged-action
+  scene `S18` at their owned boundary.
+- **FR-033**: Final completion MUST prove a documented clean install, V1-to-V2
+  upgrade, restart continuity, rollback, and one unambiguous V2 package/version
+  identity with no retained V1 consumer, shim, hook, configuration, or runtime
+  path.
+- **FR-034**: The exact final candidate MUST be self-contained for a new
+  contributor without Aleph Vault, conversation history, private session state,
+  or uncommitted runtime facts; it MUST be byte-frozen for independent
+  cross-family review, and every blocker MUST produce an exact successor that is
+  independently re-reviewed.
 
 ### Key Entities
 
@@ -347,6 +400,25 @@ and final parity gate.
   attempt, appends one attributable `REJECTED` decision, derives the source
   slice as `ACTIVE`, requires a new bound run rather than resuming the completed
   run, and permits a later attempt only by appending new entries.
+- **SC-019**: Before any `020`–`110` implementation starts, the slice-010
+  amendment ledger resolves A3 to one accepted effective commit and exact
+  `amendment-A3-privileged-action-authorization.md` packet, and each activated
+  consumer cites that same binding.
+- **SC-020**: Contract and deterministic integration tests prove `I-010F`,
+  `I-040B`, and `I-040C`; delayed and intervening-resolution evidence proves
+  `S17`, and adversarial identity, capability, digest, approval, replay,
+  revocation, restart, and capacity evidence proves `S18`.
+- **SC-021**: A clean environment completes install, upgrade, restart, rollback,
+  and mixed-agent room instructions from committed docs alone; installed package,
+  config, process, and source provenance all identify one V2 candidate, with
+  zero hidden V1 path.
+- **SC-022**: Removing Aleph Vault access, conversation transcripts, private
+  session state, ignored files, and contributor-local configuration does not
+  prevent a new contributor from understanding, building, testing, operating,
+  reviewing, or continuing the candidate.
+- **SC-023**: One manifest freezes every release-candidate byte. Independent
+  cross-family reviewers review that exact manifest; after any blocking fix,
+  they review the exact successor manifest before cutover.
 
 ## Assumptions
 

@@ -1,18 +1,17 @@
 <!--
 Sync Impact Report
-Version change: 2.3.0 -> 2.4.0
-Minor-bump rationale: makes the selected design self-contained inside the
-repository and closes the executable lifecycle gap that allowed downstream
-implementation to start from a merely handed-off upstream candidate.
+Version change: 2.4.0 -> 2.5.0
+Minor-bump rationale: adds a bounded, executable post-acceptance amendment path
+that preserves terminal history, validates the current owner-lane occupant,
+and prevents downstream work from starting against a superseded dependency.
 Modified principles:
-- Authority and Repository Boundaries (repository-owned selected design)
-- Program and Slice Lifecycle Gates (terminal upstream acceptance)
+- Program and Slice Lifecycle Gates (accepted amendments and effective packets)
 Dependent artifacts:
 - ✅ Spec/plan/tasks/checklist templates (slice lifecycle metadata and gates)
-- ✅ nunchi-plan and speckit workflows (implementation authority + readiness)
+- ✅ nunchi-plan and speckit workflows and installed skills (amendment mode)
 - ✅ AGENTS.md, CLAUDE.md, README.md, and execution-spine guidance
 - ✅ umbrella program and slice authority declarations
-- ✅ governance checker and tests (terminal dependency enforcement)
+- ✅ governance checker and tests (terminal dependency and amendment enforcement)
 - ✅ completion goal and inherited-state baseline
 Follow-up TODOs:
 - Deliver and accept I-010F through the slice-010 amendment path, then re-plan
@@ -309,6 +308,45 @@ PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
   fixes requested by a paused post-convergence gate with an unchanged task graph
   MAY resume that run. Review never transfers ownership silently.
 
+An `ACCEPTED` slice never moves backward merely because its owner must issue a
+versioned successor. A bounded post-acceptance amendment uses the existing
+`speckit` delivery workflow in amendment mode and obeys all of these rules:
+
+- the stable owner lane remains accountable, while exactly one valid current
+  occupant is named from a durable Zoe/delegate assignment in the amendment
+  record; the historical activation occupant remains unchanged;
+- the declared lifecycle state remains `ACCEPTED`, and its activation, terminal candidate,
+  terminal handoff, terminal acceptance, and prior amendment records are
+  immutable. Clearly labelled amendment sections MAY be appended to the
+  existing spec, plan, and tasks; completed task history remains byte-for-byte
+  unchanged;
+- the amendment fixes one ID, interface, prior and new versions, current
+  effective predecessor commit and packet, rationale, ordinary-path scope,
+  task manifest, evidence, documentation dispositions, and limitations before
+  implementation;
+- the candidate MUST descend from the current effective predecessor, and its
+  record and packet live in one append-only amendment file rather than the
+  terminal candidate or handoff streams;
+- the designated acceptance owner records `ACCEPTED` or `REJECTED` in that
+  amendment file. Rejection leaves the prior effective commit and packet
+  unchanged and requires a fresh bound run; and
+- only acceptance permits one append to the canonical
+  `slice-amendments.md` ledger. That append changes the effective dependency
+  commit and packet for new consumers without changing historical slice
+  acceptance. Every affected consumer MUST stop using its prior candidate until
+  compatibility with the exact successor is independently re-proved; an
+  incompatible candidate is replaced.
+
+If an accepted amendment lands after a consumer was activated, the immutable
+activation continues to record the dependency that was true at activation
+time. The consumer MUST append a compatibility re-attestation to its existing
+dependency-acceptance file before using that candidate again. The new record
+names the prior and exact new effective commits, exact amendment packet,
+affected candidate commit, concrete compatibility evidence, and `PASS` or
+`REPLACE`; only `PASS` permits continued use. A consumer activated after the
+amendment MUST bind the effective successor directly and cannot use a
+re-attestation to excuse a stale initial binding.
+
 No central mutable slice-status registry is permitted. Current state MUST be
 derived from the slice's declared control-plane state, immutable activation
 and acceptance records, and append-only candidate and handoff attempt streams.
@@ -349,7 +387,28 @@ Lifecycle evidence uses one file per transition, never a mutable aggregate:
   `Recorded by: v2-integrator`; and
 - `slice-acceptance.md` names the slice, `ACCEPTED` status, candidate commit,
   accepting owner, ISO acceptance date, durable decision reference, and
-  `Recorded by: v2-integrator`.
+  `Recorded by: v2-integrator`; and
+- `amendment-<id>-<scope>.md` is one append-only amendment record containing
+  the stable owner lane, valid current occupant and assignment reference,
+  amendment ID/interface/versions, predecessor commit and packet, fixed scope
+  and task manifest, candidate, verification, evidence, documentation
+  dispositions, limitations, `HANDOFF_READY` packet, and the integrator's
+  `ACCEPTED` or `REJECTED` decision. An accepted decision is then summarized
+  once in append-only `slice-amendments.md`, whose chain determines the exact
+  effective commit and packet downstream consumers must accept.
+
+The complete amendment-record schema above is mandatory beginning with A3.
+A1 and A2 predate Constitution 2.5.0 and retain their already accepted
+historical schemas; they MUST NOT be rewritten to imitate the new procedure.
+An A3-or-later record begins with exactly one initialization section containing
+`Slice`, `Amendment ID`, `Amended interface`, `Prior interface version`,
+`New interface version`, `Prior effective commit`, `Prior effective packet`,
+`Starting commit`, `Owner lane`, `Assigned participant / source`,
+`Fixed scope paths`, `Amendment task IDs`, `Amendment tasks SHA256`,
+`Analysis result`, `Branch`, and `Worktree`. Later phase, candidate, handoff,
+and decision facts are appended to that same file. The candidate diff from the
+recorded starting commit MUST be contained by `Fixed scope paths`; the starting
+commit and candidate MUST both descend from the prior effective commit.
 
 Activation and acceptance records MUST be immutable. Candidate and handoff
 files MUST be append-only attempt streams, agree with the bound slice
@@ -384,7 +443,8 @@ explicit Zoe decision record; and `CUTOVER_VERIFIED` additionally requires the
 complete post-merge record for the exact main commit and final documentation
 validation. A program declaration that does not match those facts is invalid.
 
-Every implementation slice MUST pass this control-plane sequence:
+Every first delivery or active correction MUST pass this control-plane
+sequence:
 
 ```text
 bind existing slice -> review specification -> clarify -> plan -> review plan ->
@@ -407,6 +467,15 @@ evidence; Zoe remains `Accepted by`/`Rejected by`. The assigned program owner
 copies an accepted Zoe decision only into the program-level cutover record.
 Neither recorder becomes the decision owner, and the program owner never writes
 another participant's slice evidence.
+
+An accepted amendment uses the same sequence but the readiness, activation,
+convergence, documentation, and handoff gates take their amendment branches.
+Those branches require a valid current occupant of the stable owner lane, keep
+the slice declaration `ACCEPTED`, leave terminal lifecycle evidence unchanged,
+write only the fixed amendment record and ordinary amendment scope, and end
+before the integrator's separate decision. `speckit-plan`, `speckit-tasks`,
+`speckit-implement`, and `speckit-converge` MUST preserve completed history and
+operate only on the amendment-scoped plan and task delta.
 
 Before any slice implementation checkbox is completed, the program owner MUST
 record Zoe's external grant at
@@ -433,9 +502,10 @@ repository homes during authorized slice implementation. Plans MUST name
 those target paths without embedding the product artifacts.
 
 Before implementation, analysis MUST report zero CRITICAL or HIGH findings,
-the accountable owner MUST be active, dependencies MUST be satisfied or
-explicitly staged, and the slice's acceptance scenes and evidence locations
-MUST be concrete. Before integration, the slice owner MUST hand off a commit,
+the accountable owner lane MUST have one valid assigned occupant, every
+declared dependency MUST be terminally accepted at its exact effective commit
+and packet and separately accepted by the consumer, and the slice's acceptance
+scenes and evidence locations MUST be concrete. Before integration, the slice owner MUST hand off a commit,
 verification commands, evidence references, and known limitations to the final
 integrator. That handoff MUST include the reviewed documentation disposition and
 validation results.
@@ -512,4 +582,4 @@ integration, release, and any live-readiness claim. Any unexplained violation
 blocks the affected work. Program and slice milestone acceptance requires the
 repository governance check and full existing test baseline to pass.
 
-**Version**: 2.4.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-23
+**Version**: 2.5.0 | **Ratified**: 2026-05-22 | **Last Amended**: 2026-07-23

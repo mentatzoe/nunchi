@@ -73,12 +73,13 @@ of remaining work as a new, traceable task** at the bottom of `tasks.md` so that
 This is **not** a diff tool and does **not** track changes. It assesses the present state
 of the code relative to the feature's artifacts — no git, no branch comparison, no history.
 
-## Nunchi Active-Correction Contract
+## Nunchi Delivery-Mode Contract
 
 For Nunchi, the bound slice already exists and the delivery workflow owns the
-execution cycle. If this command appends any tasks, keep the slice `ACTIVE`,
-report the exact appended task IDs, and stop before candidate evidence or a
-`CONVERGED` declaration is written. Tell the operator to start a new bound run:
+execution cycle. In ordinary delivery/correction mode, if this command appends
+any tasks, keep the slice `ACTIVE`, report the exact appended task IDs, and stop
+before candidate evidence or a `CONVERGED` declaration is written. Tell the
+operator to start a new bound run:
 
 ```sh
 python3 scripts/run_slice_workflow.py run speckit specs/<same-exact-slice>
@@ -88,6 +89,15 @@ That run rechecks authority, owner, dependencies, and the original activation,
 then `speckit.implement` completes the appended tasks. Do not fabricate a
 handoff rejection or a second activation. If no task is appended, the current
 run may proceed to the convergence record gate.
+
+In accepted-amendment mode, keep the slice `ACCEPTED` and preserve terminal
+declarations, activation, candidate, handoff, acceptance, prior amendment
+records, and every existing task byte. Findings are bounded to the fixed
+amendment scope. Append any tasks only inside a new amendment convergence phase
+after the existing task graph, then require a fresh bound amendment run. If no
+task is appended, the current run may proceed to the amendment record gate.
+Never append ordinary slice candidate/handoff evidence or change the current
+effective dependency before the integrator accepts the exact amendment.
 
 ## Operating Constraints
 

@@ -4,14 +4,14 @@
   "installed_at": "2026-07-11T09:56:03.939731+00:00",
   "files": {
     ".claude/skills/speckit-analyze/SKILL.md": "fecd4bf113c3dda58c75d387473c0106fc2dfea97a27bb7c65af94f3f916c188",
-    ".claude/skills/speckit-clarify/SKILL.md": "c1c2098756ca407530cca11c5b608f517d769962215ddafa013951b81e3e19c5",
+    ".claude/skills/speckit-clarify/SKILL.md": "007a1933fba3a63ffecd49ab97246bed321c94a1208b15e0da89259058517567",
     ".claude/skills/speckit-constitution/SKILL.md": "ee3972318415a05559c6bf281dcbd2e8deda944e595d64ab5474abeacf558697",
-    ".claude/skills/speckit-implement/SKILL.md": "c36b1326054c66ca23e17b00d6c12b1d2af8f7eee69656cefd38459210552cfe",
-    ".claude/skills/speckit-converge/SKILL.md": "d35470c4425054f401a92caafa9115898f02f6eb63294370eb32f58d68e3e86c",
-    ".claude/skills/speckit-plan/SKILL.md": "241ee518d2f1ad81692d6ba65deb69e46ed9e72a5de6eef00008085fedadbad3",
-    ".claude/skills/speckit-checklist/SKILL.md": "946c6bc808891436972a11a423f89f0fbd272a79809bb8fd1d29f481ebe02613",
+    ".claude/skills/speckit-implement/SKILL.md": "865264b9493bc9f66bdab4f2e3a2ba253c8f76c80c301c84112de4298c8bff59",
+    ".claude/skills/speckit-converge/SKILL.md": "a9b426b4980504750f81178ad4c25746ad7697f987b7e20cb5d0feaf0a65d61a",
+    ".claude/skills/speckit-plan/SKILL.md": "d698f1f3ffdee96b3e7916c83c7200c07dfb9a86578708ffe5f794a006b2171d",
+    ".claude/skills/speckit-checklist/SKILL.md": "165d43a07b106a8fc9f69d2606b8c34fb7aac5fd54c0cacda09428094f57f65f",
     ".claude/skills/speckit-specify/SKILL.md": "63599eda0c392c0a051137adb43db9ef2a8d52fc68a5f5ef43ad19c55c9eca55",
-    ".claude/skills/speckit-tasks/SKILL.md": "f2e56011107c53edf9a3b7cad987ce8fef73d50cb8a6aa26baa4628950d743f7",
+    ".claude/skills/speckit-tasks/SKILL.md": "60de83dc4fd8c180714fbffccfdc8c432f63d9862a5915ca69880e8e12940813",
     ".claude/skills/speckit-taskstoissues/SKILL.md": "dfe23aaca349cd76e98505dafa9aae1ef4616a0c35a5c79122b9bd881e16b62f"
   }
 }

@@ -98,7 +98,22 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
             "inputs:\n"
             "  slice_directory:\n"
             "    type: string\n"
-            "steps: []\n"
+            "steps:\n"
+            "  - id: bind-existing-slice\n"
+            "    type: gate\n"
+            "  - id: review-spec\n"
+            "    type: gate\n"
+            "  - id: review-plan\n"
+            "    type: gate\n"
+            "  - id: checklist\n"
+            "    type: command\n"
+            "  - id: tasks\n"
+            "    type: command\n"
+            "    command: speckit.tasks\n"
+            "  - id: analyze\n"
+            "    type: command\n"
+            "  - id: review-analysis\n"
+            "    type: gate\n"
             f"{suffix}",
             encoding="utf-8",
         )
@@ -113,6 +128,9 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
         run_id: str,
         *,
         status: str = "paused",
+        current_step_index: int = 1,
+        current_step_id: str | None = "review-spec",
+        step_results: dict[str, object] | None = None,
     ) -> None:
         run_directory = runner._run_directory(self.root, run_id)
         (run_directory / "workflow.yml").write_bytes(self._workflow_path().read_bytes())
@@ -131,24 +149,56 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
                 "run_id": run_id,
                 "workflow_id": WORKFLOW,
                 "status": status,
-                "current_step_index": 1,
-                "current_step_id": "review-spec",
-                "step_results": {},
+                "current_step_index": current_step_index,
+                "current_step_id": current_step_id,
+                "step_results": step_results or {},
                 "created_at": TIMESTAMP,
                 "updated_at": TIMESTAMP,
             },
         )
 
-    def _create_finalized_run(self, *, run_id: str = "bound-run") -> str:
+    def _create_finalized_run(
+        self,
+        *,
+        run_id: str = "bound-run",
+        current_step_index: int = 1,
+        current_step_id: str | None = "review-spec",
+    ) -> str:
         runner.prepare_run(
             self.root,
             WORKFLOW,
             SLICE,
             run_id=run_id,
         )
-        self._materialize_specify_run(run_id)
+        self._materialize_specify_run(
+            run_id,
+            current_step_index=current_step_index,
+            current_step_id=current_step_id,
+        )
         runner.finalize_run_binding(self.root, run_id)
         return run_id
+
+    @staticmethod
+    def _completed_tasks_result() -> dict[str, object]:
+        return {
+            "type": "command",
+            "integration": "codex",
+            "model": None,
+            "options": {},
+            "input": {"args": "Generate tasks"},
+            "output": {
+                "command": "speckit.tasks",
+                "integration": "codex",
+                "model": None,
+                "options": {},
+                "input": {"args": "Generate tasks"},
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "dispatched": True,
+            },
+            "status": "completed",
+        }
 
     def test_start_and_resume_are_exactly_bound_and_self_validating(self) -> None:
         observed_commands: list[list[str]] = []
@@ -207,6 +257,11 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
         self.assertRegex(str(binding["requested_inputs_sha256"]), r"^[0-9a-f]{64}$")
         self.assertRegex(str(binding["resolved_inputs_sha256"]), r"^[0-9a-f]{64}$")
         self.assertRegex(str(binding["tasks_file_sha256"]), r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            binding["tasks_file_sha256"],
+            binding["initial_tasks_file_sha256"],
+        )
+        self.assertIsNone(binding["tasks_transitioned_at"])
 
         def resume_invocation(
             root: Path,
@@ -492,7 +547,7 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
             return 0
 
         with mock.patch.object(runner, "_invoke", side_effect=mutating_invocation):
-            with self.assertRaisesRegex(ValueError, "changed during the run"):
+            with self.assertRaisesRegex(ValueError, "recorded tasks step"):
                 runner.resume_bound_run(self.root, run_id)
 
         current_binding = json.loads(binding_path.read_text(encoding="utf-8"))
@@ -500,6 +555,144 @@ class SliceWorkflowRunnerTests(unittest.TestCase):
             current_binding["tasks_file_sha256"],
             original_binding["tasks_file_sha256"],
         )
+
+    def test_resume_records_one_task_digest_transition_at_tasks_boundary(
+        self,
+    ) -> None:
+        run_id = self._create_finalized_run(
+            run_id="task-boundary-transition",
+            current_step_index=2,
+            current_step_id="review-plan",
+        )
+        binding_path = runner._run_directory(self.root, run_id) / runner.BINDING_NAME
+        original = json.loads(binding_path.read_text(encoding="utf-8"))
+
+        def tasks_invocation(
+            _root: Path,
+            _command: list[str],
+            _environment: dict[str, str],
+        ) -> int:
+            tasks = self.root / SLICE / "tasks.md"
+            tasks.write_text(
+                tasks.read_text(encoding="utf-8") + "- [ ] T002 Amendment work\n",
+                encoding="utf-8",
+            )
+            state_path = runner._run_directory(self.root, run_id) / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["current_step_index"] = 6
+            state["current_step_id"] = "review-analysis"
+            state["step_results"]["tasks"] = self._completed_tasks_result()
+            state["updated_at"] = "2026-07-11T12:01:00+00:00"
+            self._write_json(state_path, state)
+            return 0
+
+        with mock.patch.object(runner, "_invoke", side_effect=tasks_invocation):
+            self.assertEqual(runner.resume_bound_run(self.root, run_id), 0)
+
+        transitioned = runner.validate_resume(self.root, run_id)
+        self.assertEqual(
+            transitioned["initial_tasks_file_sha256"],
+            original["tasks_file_sha256"],
+        )
+        self.assertNotEqual(
+            transitioned["tasks_file_sha256"],
+            transitioned["initial_tasks_file_sha256"],
+        )
+        self.assertEqual(transitioned["tasks_transition_step_id"], "tasks")
+        self.assertRegex(
+            str(transitioned["tasks_transition_from_state_sha256"]),
+            r"^[0-9a-f]{64}$",
+        )
+        self.assertRegex(
+            str(transitioned["tasks_transition_to_state_sha256"]),
+            r"^[0-9a-f]{64}$",
+        )
+
+    def test_resume_rejects_second_task_digest_transition(self) -> None:
+        run_id = self._create_finalized_run(
+            run_id="single-task-transition",
+            current_step_index=2,
+            current_step_id="review-plan",
+        )
+
+        invocation_count = 0
+
+        def mutating_invocation(
+            _root: Path,
+            _command: list[str],
+            _environment: dict[str, str],
+        ) -> int:
+            nonlocal invocation_count
+            invocation_count += 1
+            tasks = self.root / SLICE / "tasks.md"
+            tasks.write_text(
+                tasks.read_text(encoding="utf-8")
+                + f"- [ ] T00{invocation_count + 1} Mutation\n",
+                encoding="utf-8",
+            )
+            state_path = runner._run_directory(self.root, run_id) / "state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["current_step_index"] = 6
+            state["current_step_id"] = "review-analysis"
+            state["step_results"]["tasks"] = self._completed_tasks_result()
+            state["updated_at"] = (
+                f"2026-07-11T12:0{invocation_count}:00+00:00"
+            )
+            self._write_json(state_path, state)
+            return 0
+
+        with mock.patch.object(runner, "_invoke", side_effect=mutating_invocation):
+            self.assertEqual(runner.resume_bound_run(self.root, run_id), 0)
+            with self.assertRaisesRegex(ValueError, "one allowed transition"):
+                runner.resume_bound_run(self.root, run_id)
+
+    def test_resume_rejects_late_first_mutation_after_tasks_was_recorded(
+        self,
+    ) -> None:
+        runner.prepare_run(
+            self.root,
+            WORKFLOW,
+            SLICE,
+            run_id="late-task-mutation",
+        )
+        self._materialize_specify_run(
+            "late-task-mutation",
+            current_step_index=6,
+            current_step_id="review-analysis",
+            step_results={"tasks": self._completed_tasks_result()},
+        )
+        runner.finalize_run_binding(self.root, "late-task-mutation")
+
+        def late_mutation(
+            _root: Path,
+            _command: list[str],
+            _environment: dict[str, str],
+        ) -> int:
+            tasks = self.root / SLICE / "tasks.md"
+            tasks.write_text(
+                tasks.read_text(encoding="utf-8") + "- [ ] T002 Too late\n",
+                encoding="utf-8",
+            )
+            return 0
+
+        with mock.patch.object(runner, "_invoke", side_effect=late_mutation):
+            with self.assertRaisesRegex(ValueError, "already recorded"):
+                runner.resume_bound_run(self.root, "late-task-mutation")
+
+    def test_repair_cannot_consume_task_digest_transition(self) -> None:
+        run_id = self._create_finalized_run(run_id="repair-task-transition")
+        tasks = self.root / SLICE / "tasks.md"
+        tasks.write_text(
+            tasks.read_text(encoding="utf-8") + "- [ ] T002 Unbound work\n",
+            encoding="utf-8",
+        )
+        state_path = runner._run_directory(self.root, run_id) / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["status"] = "failed"
+        self._write_json(state_path, state)
+
+        with self.assertRaisesRegex(ValueError, "wrapper-observed"):
+            runner.repair_bound_run(self.root, run_id)
 
     def test_resume_rejects_changed_integration_implementation(self) -> None:
         run_id = self._create_finalized_run(run_id="changed-integration")
