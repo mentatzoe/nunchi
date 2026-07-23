@@ -30,7 +30,7 @@ and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenanc
 
 **Accountable owner lane**: `v2-transport-owner`
 
-**Assigned participant / source**: devops — evidence/governance/assignments/devops-v2-transport-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-transport-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/050-v2-discord-transport`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
 

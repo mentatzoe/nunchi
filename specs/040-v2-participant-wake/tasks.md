@@ -8,7 +8,7 @@
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned participant / source**: architect — evidence/governance/assignments/architect-v2-wake-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-wake-owner-2026-07-23.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/040-v2-participant-wake`
 

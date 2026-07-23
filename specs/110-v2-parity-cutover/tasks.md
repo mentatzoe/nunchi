@@ -8,7 +8,7 @@ description: "Slice delivery task list for V2 parity and atomic cutover (dormant
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned participant / source**: codex-session-2 — evidence/governance/assignments/codex-session-2-v2-integrator-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-integrator-2026-07-23.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
 

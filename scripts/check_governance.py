@@ -27,6 +27,70 @@ IMPLEMENTATION_AUTHORIZATION_BOUNDARY = (
     "This record documents externally granted implementation authority; it does "
     "not grant it and does not authorize cutover, release, or promotion."
 )
+OWNERSHIP_SUPERSESSION_PATH = Path(
+    "evidence/governance/v2-end-to-end-ownership-supersession-2026-07-23.md"
+)
+OWNERSHIP_SUPERSESSION_SHA256 = (
+    "78d5ad9caff49f044a8e9ec6928214e0a0347667d4edb49584f3f1d233dd9333"
+)
+OWNERSHIP_CURRENT_SLICES = ("010", "020", "030", "040", "050", "100", "110")
+OWNERSHIP_RETAINED_SLICES = ("060", "070", "080", "090")
+OWNERSHIP_EXPECTED_IDENTITIES = {
+    "010": "Codex",
+    "020": "Codex",
+    "030": "Codex",
+    "040": "Codex",
+    "050": "Codex",
+    "060": "sr-dev",
+    "070": "Station",
+    "080": "Vigil",
+    "090": "mid-dev",
+    "100": "Codex",
+    "110": "Codex",
+}
+OWNERSHIP_EXPECTED_PREDECESSORS = {
+    "010": (
+        "evidence/governance/assignments/"
+        "cc-session-1-v2-contract-owner-2026-07-16.md"
+    ),
+    "020": (
+        "evidence/governance/assignments/"
+        "aleph-v2-observation-owner-2026-07-16.md"
+    ),
+    "030": (
+        "evidence/governance/assignments/"
+        "codex-session-1-v2-core-owner-2026-07-16.md"
+    ),
+    "040": (
+        "evidence/governance/assignments/"
+        "architect-v2-wake-owner-2026-07-16.md"
+    ),
+    "050": (
+        "evidence/governance/assignments/"
+        "devops-v2-transport-owner-2026-07-16.md"
+    ),
+    "100": (
+        "evidence/governance/assignments/"
+        "cc-session-blind-v2-security-owner-2026-07-16.md"
+    ),
+    "110": (
+        "evidence/governance/assignments/"
+        "codex-session-2-v2-integrator-2026-07-16.md"
+    ),
+}
+OWNERSHIP_ASSIGNMENT_SHA256 = {
+    "010": "9d922bc6d2050e019d3d33c4248069705344694341568938fc6fb60791f5ddfb",
+    "020": "7184e51f2aeef9b195bcc56ca8b40690f1e26611d2041c43c38711ff998e0acf",
+    "030": "27cc13fc5a8ab5430e5ac6ef7f28f7ca3b0780246547a1502b82fe30368bfbbb",
+    "040": "f619d322973861e13b576627002a805b7be5fd4e45702fee3b7be120e4109b3f",
+    "050": "00131d59d9cd97df47d0e58d3f6c0fa545a860182ead4e3b9285f39001d0bf98",
+    "060": "27e1f525d7dc7e302b21529b81f83ca381405c68bc8e44dea2097c229734dbc7",
+    "070": "b38d6a4dbf3656c8c7739d40f6754c6d0008ec748de09cac899c057d94576483",
+    "080": "50af428157db2084583f127493b9cc0c99f69f122fd104458bc24d9bfdc9b023",
+    "090": "00edd6c1b0a1492984e2b1d98af690e905edaf432360ac9a1887eb39936023d7",
+    "100": "18ed50f5cfbdef91c9c55a75a4641b2abcf6e37e232013dedcd44958c53e1229",
+    "110": "9ed1340c8d829f163406a29b9d7c62bef76d7b46eac4683bdfc2e1e4835f2d37",
+}
 HISTORICAL_EVIDENCE_HASHES = {
     Path(
         "evidence/governance/v2-execution-spine-2026-07-11.md"
@@ -1843,6 +1907,7 @@ def _accepted_amendment_attempt_errors(
     expected: dict[str, object],
     tasks_text: str,
     terminal_commit: str,
+    assigned_participant: str,
 ) -> tuple[list[str], bool]:
     """Validate every A3+ record and identify one lawful open amendment.
 
@@ -1948,6 +2013,11 @@ def _accepted_amendment_attempt_errors(
             )
 
         assigned = _clean_metadata(text, "Assigned participant / source")
+        if assigned != assigned_participant:
+            errors.append(
+                f"{prefix}: Assigned participant / source must be the current "
+                f"slice assignment {assigned_participant!r}; observed {assigned!r}"
+            )
         errors.extend(_assignment_errors(root, assigned, str(expected["owner"]), relative))
 
         starting_commit = _clean_metadata(text, "Starting commit")
@@ -2623,6 +2693,236 @@ def _assignment_errors(
     return errors
 
 
+def _assignment_supersession_errors(
+    root: Path,
+    current_declaration: str,
+    historical_declaration: str,
+    expected_lane: str,
+    context: str | Path,
+) -> list[str]:
+    """Permit a current owner to supersede immutable lifecycle provenance."""
+
+    if current_declaration == historical_declaration:
+        return []
+
+    if current_declaration.startswith("UNASSIGNED") or historical_declaration.startswith(
+        "UNASSIGNED"
+    ):
+        return [
+            f"{context}: assignment supersession requires two named durable "
+            "assignment records"
+        ]
+
+    errors = [
+        *_assignment_errors(
+            root, current_declaration, expected_lane, f"{context} current assignment"
+        ),
+        *_assignment_errors(
+            root,
+            historical_declaration,
+            expected_lane,
+            f"{context} historical assignment",
+        ),
+    ]
+    if errors:
+        return errors
+
+    current_reference = Path(
+        current_declaration.split(" — ", 1)[1].strip().strip("`")
+    )
+    historical_reference = Path(
+        historical_declaration.split(" — ", 1)[1].strip().strip("`")
+    )
+    current_text = (root / current_reference).read_text(encoding="utf-8")
+    errors.extend(
+        _singleton_metadata_errors(
+            current_text, ("Supersedes assignment",), current_reference
+        )
+    )
+    observed = _clean_metadata(current_text, "Supersedes assignment")
+    expected = historical_reference.as_posix()
+    if observed != expected:
+        errors.append(
+            f"{context}: current assignment must supersede immutable lifecycle "
+            f"assignment {expected!r}; observed {observed!r}"
+        )
+
+    lifecycle_relative = context if isinstance(context, Path) else Path(str(context))
+    lifecycle_created = _git_path_creation_commit(root, lifecycle_relative)
+    assignment_created = _git_path_creation_commit(root, current_reference)
+    if (
+        lifecycle_created is None
+        or assignment_created is None
+        or lifecycle_created == assignment_created
+        or not _git_is_ancestor(root, lifecycle_created, assignment_created)
+    ):
+        errors.append(
+            f"{context}: superseded assignment is valid only for immutable lifecycle "
+            "evidence committed before the current assignment"
+        )
+    return errors
+
+
+def check_ownership_supersession(root: Path) -> list[str]:
+    """Enforce Zoe's pinned one-time owner mapping in current declarations."""
+
+    relative = OWNERSHIP_SUPERSESSION_PATH
+    if not _repo_path_is_safe(root, relative, require_file=True):
+        return [f"{relative}: ownership supersession record is missing or unsafe"]
+    try:
+        raw = (root / relative).read_bytes()
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{relative}: ownership supersession record is unreadable ({exc})"]
+
+    errors = _git_path_history_errors(root, relative, append_only=False)
+    observed_digest = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
+    if observed_digest != OWNERSHIP_SUPERSESSION_SHA256:
+        errors.append(
+            f"{relative}: exact Zoe ownership decision digest must be "
+            f"{OWNERSHIP_SUPERSESSION_SHA256}; observed {observed_digest}"
+        )
+
+    labels = (
+        "Decision owner",
+        "Decision date",
+        "Recorded by",
+        "Source task",
+        "Authority reference",
+        "Current Codex slices",
+        "Retained platform slices",
+        "Program owner",
+        "Current assignment records",
+        "Retained assignment records",
+    )
+    errors.extend(_singleton_metadata_errors(text, labels, relative))
+    exact_fields = {
+        "Decision owner": "Zoe",
+        "Decision date": "2026-07-23",
+        "Recorded by": "Codex",
+        "Source task": "019f8ff1-46c7-7c60-b427-47bf82e06d7c",
+        "Program owner": "Zoe",
+    }
+    for label, expected in exact_fields.items():
+        observed = _clean_metadata(text, label)
+        if observed != expected:
+            errors.append(
+                f"{relative}: {label} must be {expected!r}; observed {observed!r}"
+            )
+
+    declared_current = _slice_ids(_clean_metadata(text, "Current Codex slices"))
+    if declared_current != OWNERSHIP_CURRENT_SLICES:
+        errors.append(
+            f"{relative}: Current Codex slices must be "
+            f"{OWNERSHIP_CURRENT_SLICES}; observed {declared_current}"
+        )
+    declared_retained = _slice_ids(
+        _clean_metadata(text, "Retained platform slices")
+    )
+    if declared_retained != OWNERSHIP_RETAINED_SLICES:
+        errors.append(
+            f"{relative}: Retained platform slices must be "
+            f"{OWNERSHIP_RETAINED_SLICES}; observed {declared_retained}"
+        )
+
+    assignment_records: dict[str, str] = {}
+    for label, slice_ids in (
+        ("Current assignment records", OWNERSHIP_CURRENT_SLICES),
+        ("Retained assignment records", OWNERSHIP_RETAINED_SLICES),
+    ):
+        parsed, mapping_error = _mapping_metadata(
+            _clean_metadata(text, label), slice_ids
+        )
+        if mapping_error:
+            errors.append(f"{relative}: {label} {mapping_error}")
+        else:
+            assignment_records.update(parsed)
+
+    by_id = {dirname[:3]: dirname for dirname in EXPECTED_SLICES}
+    for slice_id in (*OWNERSHIP_CURRENT_SLICES, *OWNERSHIP_RETAINED_SLICES):
+        dirname = by_id[slice_id]
+        assignment_reference = assignment_records.get(slice_id)
+        if assignment_reference is None:
+            continue
+        identity = OWNERSHIP_EXPECTED_IDENTITIES[slice_id]
+        declaration = f"{identity} — {assignment_reference}"
+        assignment_relative = Path(assignment_reference)
+        assignment_text: str | None = None
+        if _repo_path_is_safe(root, assignment_relative, require_file=True):
+            try:
+                assignment_raw = (root / assignment_relative).read_bytes()
+            except OSError as exc:
+                errors.append(
+                    f"{assignment_relative}: exact Zoe assignment record is "
+                    f"unreadable ({exc})"
+                )
+            else:
+                assignment_digest = hashlib.sha256(
+                    assignment_raw.replace(b"\r\n", b"\n")
+                ).hexdigest()
+                expected_digest = OWNERSHIP_ASSIGNMENT_SHA256[slice_id]
+                if assignment_digest != expected_digest:
+                    errors.append(
+                        f"{assignment_relative}: exact Zoe assignment digest must be "
+                        f"{expected_digest}; observed {assignment_digest}"
+                    )
+                try:
+                    assignment_text = assignment_raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    errors.append(
+                        f"{assignment_relative}: exact Zoe assignment record is "
+                        f"unreadable ({exc})"
+                    )
+        errors.extend(
+            _assignment_errors(
+                root,
+                declaration,
+                str(EXPECTED_SLICES[dirname]["owner"]),
+                relative,
+            )
+        )
+        if (
+            slice_id in OWNERSHIP_EXPECTED_PREDECESSORS
+            and assignment_text is not None
+        ):
+            errors.extend(
+                _singleton_metadata_errors(
+                    assignment_text,
+                    ("Supersedes assignment",),
+                    assignment_relative,
+                )
+            )
+            predecessor = _clean_metadata(
+                assignment_text, "Supersedes assignment"
+            )
+            expected_predecessor = OWNERSHIP_EXPECTED_PREDECESSORS[slice_id]
+            if predecessor != expected_predecessor:
+                errors.append(
+                    f"{assignment_relative}: Supersedes assignment must be "
+                    f"{expected_predecessor!r}; observed {predecessor!r}"
+                )
+        for artifact in ("spec.md", "plan.md", "tasks.md"):
+            artifact_relative = Path("specs") / dirname / artifact
+            if not _repo_path_is_safe(
+                root, artifact_relative, require_file=True
+            ):
+                errors.append(
+                    f"{artifact_relative}: current ownership declaration is "
+                    "missing or unsafe"
+                )
+                continue
+            artifact_text = (root / artifact_relative).read_text(encoding="utf-8")
+            observed = _clean_metadata(
+                artifact_text, "Assigned participant / source"
+            )
+            if observed != declaration:
+                errors.append(
+                    f"{artifact_relative}: Zoe ownership decision requires "
+                    f"{declaration!r}; observed {observed!r}"
+                )
+    return errors
+
+
 def _slice_lifecycle_evidence_errors(
     root: Path,
     dirname: str,
@@ -2708,7 +3008,12 @@ def _slice_lifecycle_evidence_errors(
             else ""
         )
         amendment_errors, amendment_open = _accepted_amendment_attempt_errors(
-            root, dirname, expected, tasks_text, terminal_commit
+            root,
+            dirname,
+            expected,
+            tasks_text,
+            terminal_commit,
+            assigned_participant,
         )
         errors.extend(amendment_errors)
 
@@ -2750,7 +3055,6 @@ def _slice_lifecycle_evidence_errors(
         exact_fields = {
             "Slice": dirname,
             "Status": "READY",
-            "Assigned participant / source": assigned_participant,
             "Authority record": str(IMPLEMENTATION_AUTHORIZATION_PATH),
             "Branch": str(expected["branch"]),
             "Worktree": str(expected["worktree"]),
@@ -2761,6 +3065,18 @@ def _slice_lifecycle_evidence_errors(
                 errors.append(
                     f"{relative}: {label} must be {value!r}; observed {observed!r}"
                 )
+        activation_assignment = _clean_metadata(
+            activation, "Assigned participant / source"
+        )
+        errors.extend(
+            _assignment_supersession_errors(
+                root,
+                assigned_participant,
+                activation_assignment,
+                str(expected["owner"]),
+                relative,
+            )
+        )
         dependencies_value = _clean_metadata(activation, "Accepted dependencies")
         expected_dependencies = expected["dependencies"]
         expected_dependencies_value = (
@@ -4275,6 +4591,7 @@ def check_program(root: Path) -> list[str]:
                     f"{feature.relative_to(root)}/plan.md: missing ordinary target {token!r}"
                 )
 
+    errors.extend(check_ownership_supersession(root))
     integrator_assignment = slice_assignments.get("110-v2-parity-cutover", "")
     errors.extend(_terminal_integrator_assignment_errors(root, integrator_assignment))
 
@@ -4749,7 +5066,13 @@ def check_runtime_dependencies(root: Path) -> list[str]:
     for path in sorted(documentation):
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(
+                f"{path.relative_to(root)}: documentation is unreadable ({exc})"
+            )
+            continue
         for target in MARKDOWN_LINK.findall(text):
             normalized_target = target.strip().strip("<>")
             target_without_anchor = normalized_target.split("#", 1)[0]

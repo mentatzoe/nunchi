@@ -10,7 +10,7 @@ description: "Slice delivery task plan for the V2 Discord transport (dormant unt
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned participant / source**: devops — evidence/governance/assignments/devops-v2-transport-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-transport-owner-2026-07-23.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
 
