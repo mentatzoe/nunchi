@@ -42,7 +42,8 @@ Trusted configuration owns:
 - participant profile and delegated attention model;
 - attention suppression/recovery/margin/error policy;
 - bounded retention, snapshot, age, continuation-page, continuation-handle,
-  and expiry limits;
+  and expiry limits; every byte bound includes the referenced actor IDs and
+  metadata as well as events;
 - participant model or fixed Codex model/session settings;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
@@ -89,6 +90,17 @@ The Codex consumer independently rechecks those facts, JSON-RPC request
 correlation, and the single MCP text result. Empty, stale, cross-bot,
 wrong-content, wrong-reply, mismatched, or malformed acknowledgements are
 recorded as unknown rather than sent.
+
+`participant_timeout_seconds` is the host's total opportunity deadline despite
+the compatibility name: observation packet construction, delegated attention,
+the participant turn, expansion, privileged authorization, and native
+transport acknowledgement all consume the same budget. A stage timeout may be
+narrower, but no provider or network wait may extend the total deadline; a
+late native result is recorded as `unknown` and cannot revive the opportunity.
+Before any native effect, the shared host persists a participant-host
+`unknown` handoff receipt. The separately owned transport stage alone may
+later attest `sent`; if receipt persistence consumes the remaining deadline,
+the host makes zero native calls and records a failed transport stage.
 
 ## Restart and recovery
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -452,6 +453,29 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("silent", stream[-1]["body"]["outcome"])
         self.assertEqual([], transport.calls)
 
+    def test_contribution_delivery_is_attested_only_by_transport(self):
+        pipeline, _, transport, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "one direct contribution",
+            }
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in stream],
+        )
+        self.assertEqual("unknown", stream[2]["body"]["outcome"])
+        self.assertEqual("sent", stream[3]["body"]["delivery"])
+        self.assertEqual(1, len(transport.calls))
+
     def test_cancellation_before_dispatch_prevents_stale_output(self):
         entered = threading.Event()
         release = threading.Event()
@@ -511,6 +535,118 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
         stream = receipts.records(outcome.opportunities[0].request_id)
         self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_host_total_deadline_bounds_native_transport_wait(self):
+        class SlowTransport(RecordingTransport):
+            def dispatch(self, *, action, wake):
+                self.calls.append((deepcopy(action), deepcopy(wake)))
+                time.sleep(0.15)
+                return TransportResult("sent", "late-native")
+
+        transport = SlowTransport()
+        pipeline, _, _, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "hello",
+            },
+            policy=AttentionPolicy(preattention_enabled=False),
+            participant_timeout_seconds=0.05,
+            transport=transport,
+        )
+        started = time.monotonic()
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        elapsed = time.monotonic() - started
+        result = outcome.opportunities[0].transport
+        self.assertIsNotNone(result)
+        self.assertEqual("unknown", result.delivery)
+        self.assertLess(elapsed, 0.13)
+        self.assertFalse(pipeline.scheduler.active)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual("unknown", stream[-1]["body"]["delivery"])
+        time.sleep(0.16)
+        self.assertFalse(pipeline.scheduler.active)
+
+    def test_receipt_persistence_crossing_deadline_never_claims_sent_or_dispatches(self):
+        class DelayedHostReceiptJournal(ReceiptJournal):
+            def append(self, record, *, writer):
+                if record.get("stage") == "participant-host":
+                    time.sleep(0.07)
+                return super().append(record, writer=writer)
+
+        pipeline, _, transport, _ = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "must not escape after the deadline",
+            },
+            policy=AttentionPolicy(preattention_enabled=False),
+            participant_timeout_seconds=0.03,
+        )
+        receipts = DelayedHostReceiptJournal()
+        pipeline.observation.receipts = receipts
+        pipeline.attention.receipts = receipts
+        pipeline.host.receipts = receipts
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual([], transport.calls)
+        self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in stream],
+        )
+        self.assertEqual("unknown", stream[2]["body"]["outcome"])
+        self.assertEqual("failed", stream[3]["body"]["delivery"])
+
+    def test_host_total_deadline_spans_attention_participant_and_transport(self):
+        class PhasedModel(FixtureModel):
+            def judge(self, **kwargs):
+                time.sleep(0.04)
+                return super().judge(**kwargs)
+
+        class PhasedTransport(RecordingTransport):
+            def dispatch(self, *, action, wake):
+                self.calls.append((deepcopy(action), deepcopy(wake)))
+                time.sleep(0.04)
+                return TransportResult("sent", "late-native")
+
+        def participant(**_):
+            time.sleep(0.04)
+            return {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "hello",
+            }
+
+        pipeline, _, _, _ = foundation(
+            model=PhasedModel(),
+            participant=participant,
+            policy=AttentionPolicy(timeout_seconds=0.1),
+            participant_timeout_seconds=0.1,
+            transport=PhasedTransport(),
+        )
+        started = time.monotonic()
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        elapsed = time.monotonic() - started
+        result = outcome.opportunities[0].transport
+        self.assertIsNotNone(result)
+        self.assertNotEqual("sent", result.delivery)
+        self.assertLess(elapsed, 0.18)
+        self.assertFalse(pipeline.scheduler.active)
 
     def test_async_live_ingress_is_active_plus_newest_not_fifo(self):
         entered = threading.Event()
@@ -701,6 +837,53 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
 
+    def test_host_deadline_during_policy_load_never_publishes_stale_approval(self):
+        approval_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        loaded = threading.Event()
+
+        class DelayedApprovalPolicy:
+            def load(inner):
+                time.sleep(0.08)
+                loaded.set()
+                return PolicySnapshot(
+                    "policy",
+                    "delayed-approval",
+                    (approval_rule,),
+                    ("operator:zoe",),
+                )
+
+        coordinator = self.coordinator(policy=DelayedApprovalPolicy())
+        self.pipeline.host.privileged = coordinator
+        self.pipeline.host.host_timeout_seconds = 0.03
+        self.pipeline.host.participant_timeout_seconds = 0.03
+        self.pipeline.host.participant = lambda **_: {
+            "kind": "privileged",
+            "origin_event_id": "e2",
+            "capability": "workspace.file.write",
+            "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+            "operation": {"path": "README.md", "content": "bounded"},
+        }
+
+        outcome = self.pipeline.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertIn(
+            outcome.opportunities[0].transport.delivery,
+            ("failed", "unknown"),
+        )
+        self.assertTrue(loaded.wait(1))
+        self.assertEqual((), coordinator.pending_for_operator())
+        self.assertEqual([], self.native_calls)
+
     def test_corrupt_authorization_journal_and_executor_error_detail_fail_safe(self):
         corrupt = Path(self.temp.name) / "corrupt-authorization.jsonl"
         corrupt.write_text('{"kind":"invented"}\n')
@@ -774,6 +957,98 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
 
+    def test_effect_commit_delay_cannot_outlive_rule_expiry(self):
+        class DelayedEffectCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                if record.get("kind") == "effect_commit":
+                    time.sleep(0.2)
+                return super().append(record)
+
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=0.12)
+        ).isoformat().replace("+00:00", "Z")
+        expiring_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "expires_at": expires_at,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "expiring",
+                (expiring_rule,),
+                ("operator:zoe",),
+            )
+        )
+        journal = DelayedEffectCommitJournal(
+            Path(self.temp.name) / "delayed-effect-commit.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+        self.assertEqual(
+            ["authorization_contract", "authorization_contract", "effect_commit"],
+            [record["kind"] for record in journal.records()],
+        )
+
+    def test_revocation_during_effect_commit_makes_zero_calls(self):
+        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        revoked_rule = CapabilityRule(**{**vars(self.rule), "revoked": True})
+        revoked = PolicySnapshot(
+            "policy",
+            "r1",
+            (revoked_rule,),
+            ("operator:zoe",),
+        )
+        policy = StaticPolicySource(allowed)
+
+        class RevokingEffectCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_commit":
+                    policy.replace(revoked)
+                return result
+
+        journal = RevokingEffectCommitJournal(
+            Path(self.temp.name) / "revoking-effect-commit.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
     def test_high_impact_requires_authenticated_approval_and_wrong_actor_fails(self):
         high_rule = CapabilityRule(**{
             **vars(self.rule),
@@ -828,6 +1103,73 @@ class AuthorizationTests(unittest.TestCase):
             if record["kind"] == "authorization_contract"
         ]
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
+
+    def test_revocation_during_approved_effect_commit_makes_zero_calls(self):
+        approval_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        revoked_rule = CapabilityRule(
+            **{
+                **vars(approval_rule),
+                "revoked": True,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "approval-revocation",
+                (approval_rule,),
+                ("operator:zoe",),
+            )
+        )
+
+        class RevokingApprovedCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_commit":
+                    policy.replace(
+                        PolicySnapshot(
+                            "policy",
+                            "approval-revocation",
+                            (revoked_rule,),
+                            ("operator:zoe",),
+                        )
+                    )
+                return result
+
+        journal = RevokingApprovedCommitJournal(
+            Path(self.temp.name) / "approved-revocation.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+        result = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge_id,
+            authenticated_approver_id="operator:zoe",
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
 
     def test_restart_discards_pending_approval(self):
         high_rule = CapabilityRule(**{
@@ -943,6 +1285,71 @@ class AuthorizationTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_revocation_during_unknown_retry_commit_makes_no_second_call(self):
+        idempotent_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "target_idempotency": True,
+            }
+        )
+        revoked_rule = CapabilityRule(
+            **{
+                **vars(idempotent_rule),
+                "revoked": True,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "retry-revocation",
+                (idempotent_rule,),
+                ("operator:zoe",),
+            )
+        )
+
+        class RevokingRetryCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_retry_commit":
+                    policy.replace(
+                        PolicySnapshot(
+                            "policy",
+                            "retry-revocation",
+                            (revoked_rule,),
+                            ("operator:zoe",),
+                        )
+                    )
+                return result
+
+        journal = RevokingRetryCommitJournal(
+            Path(self.temp.name) / "retry-revocation.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("unknown", "acknowledgement lost")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("unknown", first.delivery)
+        self.assertEqual("failed", second.delivery)
+        self.assertEqual(1, len(self.native_calls))
 
     def test_operation_digest_is_order_stable_and_rejects_nonfinite(self):
         self.assertEqual(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import threading
+import time
 from typing import Any
 
 from .attention import AttentionEngine
@@ -113,6 +114,7 @@ class NunchiV2Pipeline:
         while token is not None:
             if not self.scheduler.is_current(token):
                 break
+            deadline = time.monotonic() + self.host.host_timeout_seconds
             try:
                 request = self.observation.build_snapshot(token.anchor_event_id)
             except SnapshotUnavailable as exc:
@@ -133,12 +135,14 @@ class NunchiV2Pipeline:
             decision = self.attention.judge(
                 request,
                 cancel=token.cancel_event,
+                deadline=deadline,
             )
             transport = self.host.run(
                 request=request,
                 decision=decision,
                 token=token,
                 error_wake=self.attention.policy.error_action == "WAKE",
+                deadline=deadline,
             )
             effective = (
                 decision.get("effective_disposition")

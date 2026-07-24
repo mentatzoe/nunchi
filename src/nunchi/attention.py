@@ -407,9 +407,17 @@ class AttentionEngine:
         projection: Mapping[str, Any],
         *,
         cancel: threading.Event | None,
+        deadline: float | None,
     ) -> Mapping[str, Any]:
         if self.model is None:
             raise AttentionError("participant attention model is not configured")
+        started = time.monotonic()
+        stage_deadline = started + float(self.policy.timeout_seconds)
+        if deadline is not None:
+            stage_deadline = min(stage_deadline, deadline)
+        provider_timeout = stage_deadline - started
+        if provider_timeout <= 0:
+            raise AttentionError("participant attention deadline expired")
         result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
 
         def invoke() -> None:
@@ -417,7 +425,7 @@ class AttentionEngine:
                 result = self.model.judge(
                     profile=self.profile,
                     projection=projection,
-                    timeout_seconds=float(self.policy.timeout_seconds),
+                    timeout_seconds=provider_timeout,
                 )
             except BaseException as exc:  # contained at the provider boundary
                 result_queue.put((False, exc))
@@ -428,11 +436,10 @@ class AttentionEngine:
             self.call_count += 1
         worker = threading.Thread(target=invoke, name="nunchi-attention-call", daemon=True)
         worker.start()
-        deadline = time.monotonic() + float(self.policy.timeout_seconds)
         while True:
             if cancel is not None and cancel.is_set():
                 raise AttentionError("attention work was cancelled")
-            remaining = deadline - time.monotonic()
+            remaining = stage_deadline - time.monotonic()
             if remaining <= 0:
                 raise AttentionError("participant attention deadline expired")
             try:
@@ -450,6 +457,7 @@ class AttentionEngine:
         request: Mapping[str, Any],
         *,
         cancel: threading.Event | None = None,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         checked = validate_attention_request(request)
         if (
@@ -493,7 +501,11 @@ class AttentionEngine:
         projection = classifier_projection(checked)
         event_ids = {event["id"] for event in checked["events"]}
         try:
-            raw = self._call_model(projection, cancel=cancel)
+            raw = self._call_model(
+                projection,
+                cancel=cancel,
+                deadline=deadline,
+            )
             judgment = _validate_model_judgment(raw, event_ids=event_ids)
         except AttentionError as exc:
             code = (

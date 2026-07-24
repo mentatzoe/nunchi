@@ -178,6 +178,31 @@ def _actor_refs(event: Mapping[str, Any]) -> set[str]:
     return result
 
 
+def _context_actors(
+    events: list[Mapping[str, Any]],
+    actors: Mapping[str, Mapping[str, Any]],
+    *,
+    include: set[str] | None = None,
+) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
+    referenced = set(include or ())
+    for event in events:
+        referenced.update(_actor_refs(event))
+    selected = {
+        actor_id: actors[actor_id]
+        for actor_id in referenced
+        if actor_id in actors
+    }
+    return selected, referenced - set(selected)
+
+
+def _context_byte_count(
+    events: list[Mapping[str, Any]],
+    actors: Mapping[str, Mapping[str, Any]],
+) -> int:
+    """Count the complete variable factual context, including actor metadata."""
+    return len(_canonical_bytes({"actors": actors, "events": events}))
+
+
 class ObservationProvider:
     """One participant/room observation provider.
 
@@ -388,6 +413,7 @@ class ObservationProvider:
             raise PersistenceError(
                 f"observation store {self._path} is not trustworthy: {exc}"
             ) from exc
+        self._persist_snapshot()
 
     def _persist_snapshot(self) -> None:
         """Atomically retain only the configured bounded observation horizon."""
@@ -395,24 +421,7 @@ class ObservationProvider:
             return
         lines: list[bytes] = []
         for event in self._events:
-            referenced = _actor_refs(event)
-            actors = {
-                actor_id: self._actors[actor_id]
-                for actor_id in referenced
-                if actor_id in self._actors
-            }
-            if set(actors) != referenced:
-                raise PersistenceError("retained observation actor metadata is incomplete")
-            lines.append(
-                _canonical_bytes(
-                    {
-                        "delivery_id": self._delivery_by_event[event["id"]],
-                        "event": event,
-                        "actors": actors,
-                    }
-                )
-                + b"\n"
-            )
+            lines.append(_canonical_bytes(self._retained_entry(event)) + b"\n")
         payload = b"".join(lines)
         temporary = self._path.with_name(self._path.name + ".tmp")
         fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
@@ -606,7 +615,10 @@ class ObservationProvider:
             removed = self._events.popleft()
             self._delivery_by_event.pop(removed["id"], None)
             self._retention_evicted_before = True
-        while self._events and len(_canonical_bytes(list(self._events))) > self.limits.retention_bytes:
+        while (
+            self._events
+            and self._retained_persistence_bytes() > self.limits.retention_bytes
+        ):
             removed = self._events.popleft()
             self._delivery_by_event.pop(removed["id"], None)
             self._retention_evicted_before = True
@@ -618,6 +630,22 @@ class ObservationProvider:
             for actor_id, actor in self._actors.items()
             if actor_id in referenced
         }
+
+    def _retained_entry(self, event: Mapping[str, Any]) -> dict[str, Any]:
+        actors, missing = _context_actors([event], self._actors)
+        if missing:
+            raise PersistenceError("retained observation actor metadata is incomplete")
+        return {
+            "delivery_id": self._delivery_by_event[event["id"]],
+            "event": event,
+            "actors": actors,
+        }
+
+    def _retained_persistence_bytes(self) -> int:
+        return sum(
+            len(_canonical_bytes(self._retained_entry(event))) + 1
+            for event in self._events
+        )
 
     def observe(
         self,
@@ -759,7 +787,17 @@ class ObservationProvider:
 
         while selected:
             ordered = [events[index] for index in sorted(selected)]
-            if len(_canonical_bytes(ordered)) <= self.limits.snapshot_bytes:
+            actors, missing = _context_actors(
+                ordered,
+                self._actors,
+                include={self.binding.actor_id},
+            )
+            if missing:
+                raise SnapshotUnavailable("retained event actor metadata is incomplete")
+            if (
+                _context_byte_count(ordered, actors)
+                <= self.limits.snapshot_bytes
+            ):
                 break
             removable = sorted(selected - required)
             if not removable:
@@ -788,16 +826,14 @@ class ObservationProvider:
             retained_more_after = last < len(all_events) - 1
             if retained_more_before or self._retention_evicted_before:
                 truncated.add("events")
-            referenced = {self.binding.actor_id}
-            for event in events:
-                referenced.update(_actor_refs(event))
-            actors = {
-                actor_id: deepcopy(self._actors[actor_id])
-                for actor_id in referenced
-                if actor_id in self._actors
-            }
-            if referenced - set(actors):
+            raw_actors, missing = _context_actors(
+                events,
+                self._actors,
+                include={self.binding.actor_id},
+            )
+            if missing:
                 raise SnapshotUnavailable("retained event actor metadata is incomplete")
+            actors = deepcopy(raw_actors)
             coverage: dict[str, Any] = {
                 "max_events": self.limits.snapshot_events,
                 "max_bytes": self.limits.snapshot_bytes,
@@ -841,7 +877,7 @@ class ObservationProvider:
                 "trigger_event_id": trigger_event_id,
                 "continuity_scope_id": self.binding.continuity_scope_id,
                 "event_count": len(events),
-                "byte_count": len(_canonical_bytes(events)),
+                "byte_count": _context_byte_count(events, actors),
                 "coverage": deepcopy(coverage),
                 "included_event_ids": [event["id"] for event in events],
             }
@@ -1016,21 +1052,30 @@ class ObservationProvider:
                     if state.events[index]["id"] not in state.delivered_event_ids
                 ]
             selected_indices: list[int] = []
-            used_bytes = 2
             truncated_by: set[str] = set()
             for index in candidate_indices:
-                event = state.events[index]
-                event_bytes = len(_canonical_bytes(event)) + (
-                    1 if selected_indices else 0
-                )
                 if len(selected_indices) >= request["max_events"]:
                     truncated_by.add("events")
                     break
-                if used_bytes + event_bytes > request["max_bytes"]:
+                proposed_indices = sorted([*selected_indices, index])
+                proposed_events = [
+                    state.events[candidate] for candidate in proposed_indices
+                ]
+                proposed_actors, missing = _context_actors(
+                    proposed_events,
+                    state.actors,
+                )
+                if missing:
+                    raise ValidationError(
+                        "continuation actor metadata is incomplete"
+                    )
+                if (
+                    _context_byte_count(proposed_events, proposed_actors)
+                    > request["max_bytes"]
+                ):
                     truncated_by.add("bytes")
                     break
                 selected_indices.append(index)
-                used_bytes += event_bytes
             exhausted = len(selected_indices) == len(candidate_indices)
             selected = [
                 deepcopy(state.events[index])
@@ -1045,9 +1090,9 @@ class ObservationProvider:
                     anchor,
                     tuple(candidate_indices[len(selected_indices) :]),
                 )
-            referenced = set()
-            for event in selected:
-                referenced.update(_actor_refs(event))
+            page_actors, missing = _context_actors(selected, state.actors)
+            if missing:
+                raise ValidationError("continuation actor metadata is incomplete")
             page: dict[str, Any] = {
                 "request_id": request["request_id"],
                 "handle_id": state.handle_id,
@@ -1055,11 +1100,7 @@ class ObservationProvider:
                 "continuity_scope_id": self.binding.continuity_scope_id,
                 "direction": direction,
                 "anchor_event_id": anchor,
-                "actors": {
-                    actor_id: deepcopy(state.actors[actor_id])
-                    for actor_id in referenced
-                    if actor_id in state.actors
-                },
+                "actors": deepcopy(page_actors),
                 "events": selected,
                 "coverage": {
                     "has_more_before": not exhausted if direction == "before" else None,

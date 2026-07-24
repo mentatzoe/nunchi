@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
+import json
 import math
 from numbers import Real
 from typing import Any
@@ -171,6 +172,20 @@ def _actor_map(value: Any, path: str = "actors") -> Mapping[str, Any]:
     return actors
 
 
+def _context_byte_count(
+    events: list[Any],
+    actors: Mapping[str, Any],
+) -> int:
+    return len(
+        json.dumps(
+            {"actors": actors, "events": events},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    )
+
+
 def validate_canonical_event(value: Any, *, path: str = "event") -> dict[str, Any]:
     event = _mapping(value, path)
     event_type = event.get("type")
@@ -301,7 +316,20 @@ def _observation_fields(doc: Mapping[str, Any], *, require_schema: bool) -> None
     _nes(doc["trigger_event_id"], "trigger_event_id")
     if doc["trigger_event_id"] not in ids:
         _fail("trigger_event_id", "must name an included event")
-    _coverage(doc["coverage"])
+    coverage = _coverage(doc["coverage"])
+    if (
+        "max_events" in coverage
+        and len(doc["events"]) > coverage["max_events"]
+    ):
+        _fail("events", "exceeds coverage.max_events")
+    if (
+        "max_bytes" in coverage
+        and _context_byte_count(doc["events"], actors) > coverage["max_bytes"]
+    ):
+        _fail(
+            "actors/events",
+            "canonical context exceeds coverage.max_bytes",
+        )
     if "continuation" in doc:
         continuation = _closed(
             doc["continuation"],

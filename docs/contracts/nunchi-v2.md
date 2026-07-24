@@ -145,6 +145,10 @@ A truthful attention request represents:
   `max_age_seconds` budgets (each a positive integer, S15), and optional
   per-event-type `event_visibility`. `session-only` continuity and unknown
   visibility are never upgraded by inference.
+- **Relational byte closure** — when `coverage.max_bytes` is present, the
+  canonical `actors` plus `events` context must fit that budget; actor IDs and
+  actor metadata are not free side channels. The stdlib runtime enforces this
+  relation for both attention requests and participant wakes.
 - **Optional continuation capability** — the wire document MAY carry the
   full `continuation` object (`handle_id`, exact `bound_to`
   `{participant_id, room_id, continuity_scope_id, trigger_event_id}`,
@@ -280,9 +284,9 @@ stage-shaped `body` carrying the selected telemetry (FR-014):
 
 | Stage | Owning writer | Body |
 |---|---|---|
-| `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count`, `coverage`, `included_event_ids` |
+| `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count` (canonical actor-map plus event bytes), `coverage`, `included_event_ids` |
 | `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`, required `policy_provenance`) or operational error (`error: {code, detail}`, both required, plus `wake_action`/`policy_provenance` present together exactly when an explicit operator override to the shared `WAKE` default applied) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
-| `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count`, `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
+| `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count` (canonical actor-map plus event bytes), `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
 
 **`@2` amendment A1** (`evidence/v2/attention/dependency-010-post-acceptance-blocker.md`,
@@ -315,6 +319,16 @@ the stream at `attention`) and from non-invocation; the observed outcome is
 `sent`/`silent`/`unknown`, never a handled/owed social state. A bypass
 attention record marks `classifier_not_invoked: true` and carries its
 trusted `cause`/`policy_provenance`.
+
+The participant-host outcome does not substitute for the transport result.
+`silent` means the delegated participant returned no action. `sent` is valid
+only when the host can attest an irreversible handoff to the separately owned
+transport boundary. `unknown` means an action exists but that handoff is not
+yet truthfully established. The shared runtime persists `unknown` before any
+native effect and lets the following transport record exclusively settle
+`sent`/`failed`/`unknown`/`unavailable`; a deadline crossed during host-receipt
+persistence therefore makes zero native calls and never leaves a false
+participant-host `sent`.
 
 ## Validation model (FR-012)
 

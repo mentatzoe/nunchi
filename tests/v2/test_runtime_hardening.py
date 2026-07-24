@@ -34,8 +34,10 @@ from nunchi.observation import (
     ObservationLimits,
     ObservationProvider,
     ParticipantBinding,
+    SnapshotUnavailable,
 )
 from nunchi.receipts import PersistenceError
+from nunchi.v2_contracts import validate_attention_request
 from tests.v2.test_shared_foundation import foundation, message
 
 
@@ -77,6 +79,92 @@ class BoundedPersistenceTests(unittest.TestCase):
                 "evicted context must not fabricate fetch authority",
             )
             self.assertFalse(restored.scheduler.active)
+
+    def test_actor_metadata_counts_toward_snapshot_and_continuation_bytes(self):
+        pipeline, _, _, receipts = foundation(
+            limits=ObservationLimits(
+                retention_events=10,
+                retention_bytes=1_000_000,
+                snapshot_events=1,
+                snapshot_bytes=512,
+                continuation_events=1,
+                continuation_bytes=512,
+            )
+        )
+        pipeline.observation.observe(
+            delivery_id="d-large",
+            event=message("e-large", author_id="human:large"),
+            actors={
+                "human:large": {
+                    "display_name": "x" * 100_000,
+                    "kind": "human",
+                }
+            },
+        )
+        pipeline.observation.observe(
+            delivery_id="d-small",
+            event=message("e-small"),
+            actors={"human:zoe": {"display_name": "Zoe", "kind": "human"}},
+        )
+        request = pipeline.observation.build_snapshot("e-small")
+        expected_bytes = len(
+            json.dumps(
+                {"actors": request["actors"], "events": request["events"]},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode()
+        )
+        self.assertLessEqual(expected_bytes, 512)
+        self.assertEqual(
+            expected_bytes,
+            receipts.records(request["request_id"])[0]["body"]["byte_count"],
+        )
+        continuation = request["continuation"]
+        page = pipeline.observation.fetch_context(
+            {
+                "request_id": request["request_id"],
+                "handle_id": continuation["handle_id"],
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 512,
+            },
+            host_context=continuation["bound_to"],
+        )
+        self.assertEqual([], page["events"])
+        self.assertEqual({}, page["actors"])
+        self.assertIn("bytes", page["coverage"]["truncated_by"])
+        with self.assertRaises(SnapshotUnavailable):
+            pipeline.observation.build_snapshot("e-large")
+        dishonest = deepcopy(request)
+        dishonest["actors"]["human:zoe"]["display_name"] = "x" * 100_000
+        with self.assertRaises(ValidationError):
+            validate_attention_request(dishonest)
+
+    def test_retention_bytes_include_persisted_actor_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+            pipeline, _, _, _ = foundation(
+                persistence_path=path,
+                limits=ObservationLimits(
+                    retention_events=10,
+                    retention_bytes=512,
+                    snapshot_events=1,
+                    snapshot_bytes=512,
+                ),
+            )
+            pipeline.observation.observe(
+                delivery_id="d-large",
+                event=message("e-large", author_id="human:large"),
+                actors={
+                    "human:large": {
+                        "display_name": "x" * 100_000,
+                        "kind": "human",
+                    }
+                },
+            )
+            self.assertLessEqual(path.stat().st_size, 512)
+            self.assertEqual((), pipeline.observation.retained_events())
 
     def test_evicted_event_replay_remains_no_wake_across_restart(self):
         with tempfile.TemporaryDirectory() as directory:

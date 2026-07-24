@@ -105,14 +105,28 @@ Continuation state is therefore bounded as well as expiring. Coverage may
 truthfully report evicted older facts without offering an unfulfillable
 continuation. Restart discards all continuation authority.
 
+Retention, snapshot, continuation-page, observation-receipt, and participant
+packet byte counts cover the canonical `actors` plus `events` context. Actor
+IDs and display metadata cannot escape an event budget; if the required
+trigger closure and its actor closure do not fit, snapshot construction fails
+explicitly without a model call.
+
 ## Scheduling and recovery
 
 Native live ingress retains and offers each event before returning to the
 platform callback. One worker runs the active opportunity while later anchors
 replace a single pending slot; after the active turn, only the newest retained
-anchor becomes work. A host-wide deadline invalidates even a participant that
-ignores cancellation. Gap, cancellation, restart, and corrupt persistence
-cancel active and pending authority rather than promoting retained events.
+anchor becomes work. One host-wide deadline begins before attention and spans
+provider waiting, the participant, expansion, authorization, and native
+transport acknowledgement. It invalidates even a participant or transport
+that ignores cancellation; a late transport result remains `unknown` and
+cannot revive work. Before an effect, the host persists a participant-host
+`unknown` handoff; the transport stage alone settles actual delivery. A receipt
+write that consumes the deadline therefore makes zero native calls.
+Cancellation and expiry are rechecked after every blocking authorization
+boundary, and canceled or expired challenges are absent from the operator
+surface. Gap, cancellation, restart, and corrupt persistence cancel active and
+pending authority rather than promoting retained events.
 
 An unknown privileged effect remains consumed. If the target provides
 idempotency, a fresh policy check may retry the same logical operation only

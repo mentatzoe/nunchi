@@ -325,9 +325,12 @@ executor only in bounded, expiring process memory. It exposes an inspectable
 copy to the trusted operator surface, never to the room participant. Restart
 discards every pending approval: a proposal is not a durable conversational
 obligation and is never replayed. The full authorization decision and the
-participant-host receipt are persisted before a direct effect; an approval
-completion persists its new decision before the approved effect. Unknown
-persistence means zero execution.
+participant-host `unknown` handoff receipt are persisted before a direct
+effect; an approval completion persists its new decision before the approved
+effect. The transport stage alone attests `sent`, `failed`, `unknown`, or
+`unavailable`. Cancellation and expiry are rechecked after blocking policy and
+persistence boundaries, so a late authorization result cannot publish a stale
+approval or execute an effect. Unknown persistence means zero execution.
 
 ```mermaid
 sequenceDiagram
@@ -348,6 +351,7 @@ sequenceDiagram
     Transport->>Host: Canonical event with exact actor and event IDs
     Host->>Agent: Current factual room turn
     Agent->>Host: Exact operation + capability + origin event ID
+    Host->>Audit: Persist participant-host unknown handoff
     Host->>Coordinator: Validated privileged proposal
     Coordinator->>Guard: Action ID, digest, capability, origin, and scope
     Guard->>Guard: Resolve origin from trusted observation; derive requester
@@ -356,7 +360,6 @@ sequenceDiagram
         Policy-->>Guard: ALLOW
         Guard-->>Coordinator: One-use digest-bound allow
         Coordinator->>Audit: Persist full allow decision
-        Coordinator->>Host: Persist participant-host sent receipt
         Coordinator->>Tool: Execute exact operation once
     else Explicit approval required by default
         Policy-->>Guard: APPROVAL_REQUIRED

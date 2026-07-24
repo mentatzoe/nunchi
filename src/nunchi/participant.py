@@ -190,10 +190,13 @@ class PrivilegedCoordinator(Protocol):
         """Authorize and optionally dispatch one exact privileged proposal."""
 
 
-def _packet_bytes(events: list[Mapping[str, Any]]) -> int:
+def _packet_bytes(
+    events: list[Mapping[str, Any]],
+    actors: Mapping[str, Any],
+) -> int:
     return len(
         json.dumps(
-            events,
+            {"actors": actors, "events": events},
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -266,7 +269,7 @@ class ParticipantTurnHost:
             or not math.isfinite(float(participant_timeout_seconds))
             or participant_timeout_seconds <= 0
         ):
-            raise ValueError("participant timeout must be positive and finite")
+            raise ValueError("host timeout must be positive and finite")
         self.observation = observation
         self.participant = participant
         self.transport = transport
@@ -274,6 +277,7 @@ class ParticipantTurnHost:
         self.receipts = receipts or observation.receipts
         self.privileged = privileged
         self.participant_timeout_seconds = float(participant_timeout_seconds)
+        self.host_timeout_seconds = self.participant_timeout_seconds
         self.invocation_count = 0
 
     def _make_wake(
@@ -341,7 +345,13 @@ class ParticipantTurnHost:
         decision: Mapping[str, Any],
         token: OpportunityToken,
         error_wake: bool = True,
+        deadline: float | None = None,
     ) -> TransportResult | None:
+        effective_deadline = (
+            time.monotonic() + self.host_timeout_seconds
+            if deadline is None
+            else deadline
+        )
         checked_decision = validate_attention_decision(decision, request=request)
         if (
             checked_decision["status"] == "error"
@@ -350,9 +360,15 @@ class ParticipantTurnHost:
             return None
         if not self.scheduler.is_current(token):
             return None
+        if time.monotonic() >= effective_deadline:
+            self.scheduler.cancel()
+            return TransportResult("failed", "host total deadline exceeded")
         wake = self._make_wake(request, checked_decision)
         if wake is None:
             return None
+        if time.monotonic() >= effective_deadline:
+            self.scheduler.cancel()
+            return TransportResult("failed", "host total deadline exceeded")
         host_continuation = request.get("continuation")
         expansion_calls = 0
         expansion_cursors: dict[tuple[str, str], str] = {}
@@ -368,6 +384,9 @@ class ParticipantTurnHost:
             nonlocal expansion_calls
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
                 raise ParticipantError("context expansion cancelled")
+            if time.monotonic() >= effective_deadline:
+                self.scheduler.cancel()
+                raise ParticipantError("context expansion deadline exceeded")
             if not host_continuation:
                 raise ParticipantError("context expansion is unavailable")
             if expansion_calls >= _MAX_CONTEXT_EXPANSIONS:
@@ -432,12 +451,11 @@ class ParticipantTurnHost:
             daemon=True,
         )
         worker.start()
-        deadline = time.monotonic() + self.participant_timeout_seconds
         invocation_result: tuple[str, Any] | None = None
         while invocation_result is None:
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
                 return None
-            remaining = deadline - time.monotonic()
+            remaining = effective_deadline - time.monotonic()
             if remaining <= 0:
                 if self.scheduler.is_current(token):
                     self._append_host_receipt(
@@ -448,12 +466,21 @@ class ParticipantTurnHost:
                     self.scheduler.cancel()
                 else:
                     token.cancel_event.set()
-                return TransportResult("failed", "participant deadline exceeded")
+                return TransportResult("failed", "host total deadline exceeded")
             try:
                 invocation_result = result_queue.get(timeout=min(0.05, remaining))
             except queue.Empty:
                 continue
         status, raw_action = invocation_result
+        if time.monotonic() >= effective_deadline:
+            if self.scheduler.is_current(token):
+                self._append_host_receipt(
+                    wake,
+                    expansion_calls=expansion_calls,
+                    outcome="unknown",
+                )
+                self.scheduler.cancel()
+            return TransportResult("failed", "host total deadline exceeded")
         if status == "error":
             if self.scheduler.is_current(token):
                 self._append_host_receipt(
@@ -503,23 +530,99 @@ class ParticipantTurnHost:
 
         def dispatch() -> TransportResult:
             # This append and the native call share the scheduler's commit
-            # lock.  Cancellation ordered first yields neither a sent host
-            # stage nor an outbound call; persistence failure also prevents
-            # dispatch.
+            # lock.  Cancellation ordered first yields neither a host stage nor
+            # an outbound call; persistence failure also prevents dispatch.
+            # The host cannot truthfully claim ``sent`` before the separately
+            # owned transport stage has observed the native result.  Persist
+            # ``unknown`` as the action handoff state, then let transport alone
+            # attest sent/failed/unknown/unavailable.
+            if time.monotonic() >= effective_deadline:
+                self._append_host_receipt(
+                    wake,
+                    expansion_calls=expansion_calls,
+                    outcome="unknown",
+                )
+                self.scheduler.cancel()
+                return TransportResult(
+                    "failed",
+                    "host total deadline exceeded before dispatch",
+                )
             self._append_host_receipt(
                 wake,
                 expansion_calls=expansion_calls,
-                outcome="sent",
+                outcome="unknown",
             )
-            if action["kind"] == "privileged":
-                if self.privileged is None:
-                    return TransportResult("unavailable", "privileged actions are disabled")
-                return self.privileged.execute_proposal(
-                    proposal=action,
-                    wake=wake,
-                    cancel=token.cancel_event,
+            if (
+                token.cancel_event.is_set()
+                or time.monotonic() >= effective_deadline
+            ):
+                self.scheduler.cancel()
+                return TransportResult(
+                    "failed",
+                    "host total deadline exceeded before native dispatch",
                 )
-            return self.transport.dispatch(action=action, wake=wake)
+            dispatch_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+            def invoke_dispatch() -> None:
+                try:
+                    if (
+                        token.cancel_event.is_set()
+                        or time.monotonic() >= effective_deadline
+                    ):
+                        dispatch_queue.put_nowait(
+                            (
+                                "deadline",
+                                TransportResult(
+                                    "failed",
+                                    "host total deadline exceeded before native dispatch",
+                                ),
+                            )
+                        )
+                        return
+                    if action["kind"] == "privileged":
+                        if self.privileged is None:
+                            result = TransportResult(
+                                "unavailable",
+                                "privileged actions are disabled",
+                            )
+                        else:
+                            result = self.privileged.execute_proposal(
+                                proposal=action,
+                                wake=wake,
+                                cancel=token.cancel_event,
+                            )
+                    else:
+                        result = self.transport.dispatch(action=action, wake=wake)
+                except BaseException as exc:
+                    dispatch_queue.put_nowait(("error", exc))
+                else:
+                    dispatch_queue.put_nowait(("ok", result))
+
+            threading.Thread(
+                target=invoke_dispatch,
+                name=f"nunchi-transport-{token.generation}",
+                daemon=True,
+            ).start()
+            while True:
+                remaining = effective_deadline - time.monotonic()
+                if remaining <= 0:
+                    self.scheduler.cancel()
+                    return TransportResult(
+                        "unknown",
+                        "host total deadline exceeded during dispatch",
+                    )
+                try:
+                    status, value = dispatch_queue.get(
+                        timeout=min(0.05, remaining)
+                    )
+                except queue.Empty:
+                    continue
+                if status == "deadline":
+                    self.scheduler.cancel()
+                    return value
+                if status == "error":
+                    raise value
+                return value
 
         try:
             committed, result = self.scheduler.commit_dispatch(token, dispatch)
@@ -560,7 +663,7 @@ class ParticipantTurnHost:
                 "body": {
                     "wake_source": wake["attention"]["source"],
                     "packet_event_count": len(events),
-                    "packet_byte_count": _packet_bytes(events),
+                    "packet_byte_count": _packet_bytes(events, wake["actors"]),
                     "delivered_event_ids": [event["id"] for event in events],
                     "expansion_calls": expansion_calls,
                     "invoked": True,

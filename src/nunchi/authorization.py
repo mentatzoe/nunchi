@@ -593,10 +593,13 @@ class AuthorizationCoordinator:
         policy: PolicySnapshot,
         now: datetime,
         retry_unknown: bool = False,
+        committed_recheck: bool = False,
     ) -> tuple[str, str, CapabilityRule | None]:
         fingerprint = self._effect_fingerprint(binding)
-        if self.journal.consumed(fingerprint) and not (
-            retry_unknown and self.journal.unknown(fingerprint)
+        if (
+            self.journal.consumed(fingerprint)
+            and not committed_recheck
+            and not (retry_unknown and self.journal.unknown(fingerprint))
         ):
             return "DENY", "replay", None
         rule = self._matching_rule(policy, binding)
@@ -673,6 +676,8 @@ class AuthorizationCoordinator:
             return TransportResult("failed", "privileged work cancelled before commit")
         # Exact execution-time policy and origin recheck.
         current_policy = self.policy_source.load()
+        if cancel.is_set():
+            return TransportResult("failed", "privileged work cancelled during policy recheck")
         moment = _now()
         outcome, reason, current_rule = self._evaluate(
             binding=binding,
@@ -695,6 +700,8 @@ class AuthorizationCoordinator:
         idempotency_key = (
             f"nunchi:{fingerprint}" if rule.target_idempotency else None
         )
+        if cancel.is_set():
+            return TransportResult("failed", "privileged work cancelled before effect commit")
         # Persisting consumption is the one-use gate immediately before native
         # dispatch.  An uncertain write makes zero calls.
         self.journal.append(
@@ -708,6 +715,33 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(moment),
             }
         )
+        if cancel.is_set():
+            return TransportResult("failed", "privileged work cancelled before native effect")
+        # Persistence can itself consume the remaining grant lifetime or
+        # overlap a policy revocation. Reload every deterministic authority
+        # fact after that blocking boundary and immediately before the effect.
+        current_policy = self.policy_source.load()
+        moment = _now()
+        outcome, reason, current_rule = self._evaluate(
+            binding=binding,
+            policy=current_policy,
+            now=moment,
+            committed_recheck=True,
+        )
+        if (
+            cancel.is_set()
+            or outcome != "ALLOW"
+            or reason != "policy-allow"
+            or current_rule != rule
+            or current_policy.provenance != decision["policy_provenance"]
+            or moment >= _parse_time(decision["expires_at"])
+            or self.observation.resolve_event(binding["origin_event_id"]) is None
+            or canonical_operation_digest(operation) != binding["action_digest"]
+        ):
+            return TransportResult(
+                "failed",
+                "authorization changed before native effect",
+            )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
         except BaseException:
@@ -747,6 +781,8 @@ class AuthorizationCoordinator:
         if not self.journal.consumed(fingerprint) or not self.journal.unknown(fingerprint):
             return TransportResult("failed", "unknown-effect retry has no unknown predecessor")
         policy = self.policy_source.load()
+        if cancel.is_set():
+            return TransportResult("failed", "unknown-effect retry was cancelled during policy recheck")
         now = _now()
         outcome, reason, current_rule = self._evaluate(
             binding=binding,
@@ -776,6 +812,8 @@ class AuthorizationCoordinator:
         if self.journal.idempotency_key(fingerprint) != expected_key:
             return TransportResult("failed", "unknown-effect target idempotency binding changed")
         retry_id = f"effect-retry:{uuid4()}"
+        if cancel.is_set():
+            return TransportResult("failed", "unknown-effect retry was cancelled before commit")
         self.journal.append(
             {
                 "kind": "effect_retry_commit",
@@ -789,6 +827,39 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
+        if cancel.is_set():
+            return TransportResult("failed", "unknown-effect retry was cancelled before native effect")
+        policy = self.policy_source.load()
+        now = _now()
+        outcome, reason, current_rule = self._evaluate(
+            binding=binding,
+            policy=policy,
+            now=now,
+            retry_unknown=True,
+        )
+        authority_matches = (
+            (authenticated_approval and outcome in {"ALLOW", "APPROVAL_REQUIRED"})
+            or (
+                not authenticated_approval
+                and outcome == "ALLOW"
+                and reason == "policy-allow"
+                and rule.target_idempotency
+            )
+        )
+        if (
+            cancel.is_set()
+            or not authority_matches
+            or current_rule != rule
+            or policy.provenance != decision["policy_provenance"]
+            or now >= _parse_time(decision["expires_at"])
+            or self.observation.resolve_event(binding["origin_event_id"]) is None
+            or canonical_operation_digest(operation) != binding["action_digest"]
+            or self.journal.idempotency_key(fingerprint) != expected_key
+        ):
+            return TransportResult(
+                "failed",
+                "unknown-effect retry authority changed before native effect",
+            )
         try:
             result = self.executors[binding["capability"]](operation, expected_key)
         except BaseException:
@@ -822,11 +893,17 @@ class AuthorizationCoordinator:
         cancel: threading.Event,
     ) -> TransportResult:
         """Authorize one proposal; never accepts room text as authority."""
+        if cancel.is_set():
+            return TransportResult("failed", "privileged proposal was already cancelled")
         with self._lock:
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was already cancelled")
             try:
                 binding, operation = self._build_binding(proposal, wake)
             except (AuthorizationError, ValidationError) as exc:
                 return TransportResult("failed", str(exc))
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was cancelled before audit")
             requested_at = _now()
             request_id = f"authorization:{uuid4()}"
             request = {
@@ -837,10 +914,14 @@ class AuthorizationCoordinator:
                 "requested_at": _iso(requested_at),
             }
             self._persist_contract(request)
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was cancelled during audit")
             try:
                 policy = self.policy_source.load()
             except BaseException:
                 return TransportResult("failed", "trusted authorization policy is unavailable")
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was cancelled during policy load")
             evaluated_at = _strictly_after(requested_at)
             fingerprint = self._effect_fingerprint(binding)
             unknown_retry = self.journal.unknown(fingerprint)
@@ -860,6 +941,8 @@ class AuthorizationCoordinator:
                 # fresh authenticated operator accepts the duplicate risk.
                 outcome = "APPROVAL_REQUIRED"
                 reason = "approval-required"
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was cancelled during evaluation")
             if outcome == "APPROVAL_REQUIRED":
                 challenge_id = f"approval:{secrets.token_urlsafe(24)}"
                 decision = self._decision(
@@ -885,8 +968,14 @@ class AuthorizationCoordinator:
                     ),
                     "host_only": True,
                 }
+                if cancel.is_set():
+                    return TransportResult("failed", "privileged proposal was cancelled before challenge")
                 self._persist_contract(decision)
+                if cancel.is_set():
+                    return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._persist_contract(challenge)
+                if cancel.is_set():
+                    return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._pending[challenge_id] = _PendingApproval(
                     request=request,
                     decision=decision,
@@ -896,6 +985,9 @@ class AuthorizationCoordinator:
                     cancel=cancel,
                     unknown_retry=unknown_retry,
                 )
+                if cancel.is_set():
+                    self._pending.pop(challenge_id, None)
+                    return TransportResult("failed", "privileged proposal was cancelled before challenge publication")
                 return TransportResult("unavailable", "authenticated operator approval required")
             decision = self._decision(
                 request_id=request_id,
@@ -907,6 +999,8 @@ class AuthorizationCoordinator:
                 authorization_path="direct-policy",
             )
             self._persist_contract(decision)
+            if cancel.is_set():
+                return TransportResult("failed", "privileged proposal was cancelled during decision audit")
             if outcome != "ALLOW" or rule is None:
                 return TransportResult("failed", f"privileged action denied: {reason}")
             if unknown_retry:
@@ -929,6 +1023,13 @@ class AuthorizationCoordinator:
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
         """Return the exact host-only proposal an operator must inspect."""
         with self._lock:
+            now = _now()
+            for challenge_id, item in tuple(self._pending.items()):
+                if (
+                    item.cancel.is_set()
+                    or now >= _parse_time(item.challenge["expires_at"])
+                ):
+                    self._pending.pop(challenge_id, None)
             return tuple(
                 {
                     "challenge": deepcopy(item.challenge),
@@ -962,6 +1063,12 @@ class AuthorizationCoordinator:
             ):
                 return TransportResult("failed", "approval is cancelled, expired, or unauthorized")
             policy = self.policy_source.load()
+            now = _strictly_after(now)
+            if (
+                pending.cancel.is_set()
+                or now >= _parse_time(challenge["expires_at"])
+            ):
+                return TransportResult("failed", "approval was cancelled or expired during policy recheck")
             binding = pending.request["binding"]
             outcome, reason, rule = self._evaluate(
                 binding=binding,
@@ -986,6 +1093,8 @@ class AuthorizationCoordinator:
                 return TransportResult("failed", "policy changed before approval completion")
             if policy.provenance != challenge["policy_provenance"]:
                 return TransportResult("failed", "policy revision changed before approval completion")
+            if pending.cancel.is_set():
+                return TransportResult("failed", "approval was cancelled before completion audit")
             completion_id = f"approval-completion:{uuid4()}"
             recheck_at = _strictly_after(now)
             completion = {
@@ -1025,7 +1134,11 @@ class AuthorizationCoordinator:
             # correlated ALLOW cannot extend it.
             allow["expires_at"] = completion["recheck"]["expires_at"]
             self._persist_contract(completion)
+            if pending.cancel.is_set():
+                return TransportResult("failed", "approval was cancelled during completion audit")
             self._persist_contract(allow)
+            if pending.cancel.is_set():
+                return TransportResult("failed", "approval was cancelled during completion audit")
             if pending.unknown_retry:
                 return self._retry_unknown_effect(
                     binding=binding,
@@ -1057,6 +1170,8 @@ class AuthorizationCoordinator:
         if cancel.is_set():
             return TransportResult("failed", "approved work was cancelled before commit")
         policy = self.policy_source.load()
+        if cancel.is_set():
+            return TransportResult("failed", "approved work was cancelled during policy recheck")
         now = _now()
         outcome, reason, current_rule = self._evaluate(
             binding=binding,
@@ -1077,6 +1192,8 @@ class AuthorizationCoordinator:
         if self.journal.consumed(fingerprint):
             return TransportResult("failed", "approved action replay rejected")
         idempotency_key = f"nunchi:{fingerprint}" if rule.target_idempotency else None
+        if cancel.is_set():
+            return TransportResult("failed", "approved work was cancelled before effect commit")
         self.journal.append(
             {
                 "kind": "effect_commit",
@@ -1088,6 +1205,30 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
+        if cancel.is_set():
+            return TransportResult("failed", "approved work was cancelled before native effect")
+        policy = self.policy_source.load()
+        now = _now()
+        outcome, reason, current_rule = self._evaluate(
+            binding=binding,
+            policy=policy,
+            now=now,
+            committed_recheck=True,
+        )
+        if (
+            cancel.is_set()
+            or outcome != "APPROVAL_REQUIRED"
+            or reason != "approval-required"
+            or current_rule != rule
+            or policy.provenance != decision["policy_provenance"]
+            or now >= _parse_time(decision["expires_at"])
+            or self.observation.resolve_event(binding["origin_event_id"]) is None
+            or canonical_operation_digest(operation) != binding["action_digest"]
+        ):
+            return TransportResult(
+                "failed",
+                "approved authority changed before native effect",
+            )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
         except BaseException:
