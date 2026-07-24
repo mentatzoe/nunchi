@@ -118,3 +118,61 @@ output-HMAC file and saved flag-state file were deleted. The temporary V2
 processes shut down cleanly, and both pre-existing Vigil launch agents were
 restored and observed running. No Hermes or Claude Code process was installed,
 armed, changed, or exercised.
+
+## Repaired successor after fresh review
+
+A fresh non-author review later rejected exact evidence candidate
+`4dc13f72c153699424fadc3ecf46717549d77969` for one blocker. After an
+authorized Discord effect was attempted, a lost, malformed, or 5xx
+acknowledgement could be surfaced as a definitive failure even though the
+effect might exist. A malformed nested author value could also escape as an
+unhandled exception. These findings do not change the successful native
+message attestations above, but they prevented `4dc13f7` from being the final
+candidate.
+
+Implementation successor
+`c5f5e6c0c7e2fd6af1bf888ca9a86a7a8f4d7e63` closes that boundary:
+
+- lost, malformed, exceptional, and 5xx post-effect acknowledgements produce
+  an explicit `delivery.status: unknown`;
+- explicit Discord 4xx rejections remain definitive failures;
+- mutating 5xx requests are not retried, avoiding duplicate effects without
+  target idempotency;
+- malformed nested message fields are shaped safely and cannot fabricate a
+  target-attested send; and
+- Codex preserves the transport's `unknown` result instead of reclassifying it
+  as `failed`.
+
+The exact successor was built twice from clean archives with fixed source
+time. Both builds produced byte-identical
+`nunchi-2.0.0-py3-none-any.whl` artifacts with SHA-256
+`f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`.
+A new Python 3.14 environment installed that wheel with `mcp==1.28.1` and
+`jsonschema==4.26.0`; imports resolved from its `site-packages`.
+
+The repaired source and installed wheel each passed:
+
+- 319 full tests, with only the four optional source-interpreter JSON-Schema
+  oracle skips and zero installed skips;
+- all 218 pinned dual-validator contract tests with zero skips;
+- all eight lifecycle scenarios;
+- 101 focused shared-foundation, transport, cancellation, authorization,
+  replay, isolation, bounded-context, coalescing, and recovery tests; and
+- five direct regressions covering lost or malformed message
+  acknowledgement, lost reaction acknowledgement, single-attempt mutating
+  5xx, retained GET retry, and Codex propagation of `unknown`.
+
+The installed CLI, installer, conformance, generic channel, Discord, Matrix,
+Telegram, Codex, and MCP entry points were probed. Installer `init` and
+`verify` created and checked private V2-only state, and removed V1 command
+`nunchi admit` was rejected.
+
+The real-room matrix remains attributable to exact installed implementation
+predecessor `ca4404b` and wheel
+`36975d5f1e863e41db0b9a70d3057ae0b05c87276eec38c0ed52ce15da1b0d82`.
+The successor changes only failure closure after an effect attempt; successful
+room behavior above was not rerun. Instead, the changed path was exercised
+from the exact successor's clean installed wheel using controlled
+lost/malformed/5xx acknowledgements. This differential boundary is explicit
+for the final reviewer to accept or reject; it is not represented as an exact
+successor live-room run.
