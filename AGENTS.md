@@ -32,8 +32,17 @@ Code and reproducible behavior determine implementation truth.
 - Implement product code, tests, evaluations, installation, and documentation
   in ordinary repository paths. Use normal commits and pull requests.
 - Plans, labels, packets, reviews, documents, and evidence do not substitute
-  for working behavior. If implementation is blocked, report the concrete
-  missing outcome and stop; do not manufacture progress with governance work.
+  for working behavior. Do not manufacture progress with governance work.
+- A stale assignment, previous session owner, missing process artifact, pending
+  review, or unfinished delegated task is not by itself a blocker. Resolve,
+  reassign, replace, review, or integrate it as part of delivery. If one path
+  is externally blocked, continue other unblocked product work. Stop only when
+  no safe in-scope work remains because of a concrete external dependency;
+  state that dependency and the remaining work plainly.
+- Do not narrow supported behavior, redefine completion, or exclude a required
+  surface without Zoe's explicit product decision. Ask Zoe only when a choice
+  materially changes product behavior, supported surfaces, security
+  boundaries, or requires an irreversible external action.
 - “Unaccepted implementation” means unfinished. Say `missing`, `implemented
   but unverified`, `verified`, or `integrated` in status reports.
 - Source review, installed-runtime verification, live evaluation, integration,
