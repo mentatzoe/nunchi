@@ -11,6 +11,7 @@ Message-shaped results reuse the notification field names
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Protocol
 
@@ -166,21 +167,23 @@ class RestLike(Protocol):
     def remove_reaction(self, channel_id: str, message_id: str, reaction: str) -> None: ...
 
 
-def shape_message(msg: dict) -> dict:
+def shape_message(msg: object) -> dict:
     """Normalize an API message object to the notification field names."""
-    author = msg.get("author") or {}
-    guild_id = msg.get("guild_id")
+    data = dict(msg) if isinstance(msg, Mapping) else {}
+    raw_author = data.get("author")
+    author = raw_author if isinstance(raw_author, Mapping) else {}
+    guild_id = data.get("guild_id")
     shaped = {
         "guild_id": str(guild_id) if guild_id is not None else None,
-        "channel_id": str(msg.get("channel_id", "")),
-        "message_id": str(msg.get("id", "")),
+        "channel_id": str(data.get("channel_id", "")),
+        "message_id": str(data.get("id", "")),
         "author_id": str(author.get("id", "")),
         "author_name": str(author.get("username", "")),
         "author_is_bot": bool(author.get("bot", False)),
-        "content": message_text(msg),
-        "timestamp": msg.get("timestamp"),
+        "content": message_text(data),
+        "timestamp": data.get("timestamp"),
     }
-    shaped.update(message_addressing(msg))
+    shaped.update(message_addressing(data))
     return shaped
 
 
@@ -188,6 +191,52 @@ def _snowflake(value: object) -> str | None:
     """Coerce to a snowflake string; None if invalid (guards URL paths)."""
     text = str(value).strip() if value is not None else ""
     return text if text.isdigit() else None
+
+
+def _unknown_delivery(detail: str) -> tuple[dict, bool]:
+    """Return a successful tool envelope whose native outcome is uncertain."""
+    return (
+        {
+            "delivery": {
+                "status": "unknown",
+                "detail": detail,
+            }
+        },
+        True,
+    )
+
+
+def _effect_failure_is_definitive(exc: DiscordRestError) -> bool:
+    """Whether Discord explicitly rejected an effect without accepting it."""
+    return isinstance(exc.status, int) and 400 <= exc.status < 500
+
+
+def _message_acknowledgement_is_shapable(data: Mapping) -> bool:
+    """Whether fields used for target attestation have trustworthy types."""
+    author = data.get("author")
+    if not isinstance(author, Mapping):
+        return False
+    if not isinstance(data.get("content"), str):
+        return False
+    mentions = data.get("mentions", [])
+    if not isinstance(mentions, list) or not all(
+        isinstance(item, Mapping) for item in mentions
+    ):
+        return False
+    reference = data.get("message_reference")
+    if reference is not None and not isinstance(reference, Mapping):
+        return False
+    referenced = data.get("referenced_message")
+    if referenced is not None and not isinstance(referenced, Mapping):
+        return False
+    if isinstance(referenced, Mapping):
+        referenced_author = referenced.get("author")
+        if referenced_author is not None and not isinstance(
+            referenced_author,
+            Mapping,
+        ):
+            return False
+    return True
 
 
 class ToolExecutor:
@@ -286,10 +335,21 @@ class ToolExecutor:
         wait = self._backstop.try_acquire(channel_id)
         if wait > 0:
             return ({"error": f"send backstop exceeded; retry in {wait:.1f}s"}, False)
-        if remove:
-            self._rest.remove_reaction(channel_id, message_id, reaction)
-        else:
-            self._rest.add_reaction(channel_id, message_id, reaction)
+        try:
+            if remove:
+                self._rest.remove_reaction(channel_id, message_id, reaction)
+            else:
+                self._rest.add_reaction(channel_id, message_id, reaction)
+        except DiscordRestError as exc:
+            if _effect_failure_is_definitive(exc):
+                raise
+            return _unknown_delivery(
+                "Discord reaction acknowledgement was lost or untrustworthy"
+            )
+        except Exception:
+            return _unknown_delivery(
+                "Discord reaction acknowledgement was lost or untrustworthy"
+            )
         return (
             {
                 "reaction": {
@@ -341,45 +401,49 @@ class ToolExecutor:
                 },
                 False,
             )
-        created = self._rest.create_message(channel_id, content, reply_to_message_id=reply_to)
-        created_id = (
-            _snowflake(created.get("id")) if isinstance(created, dict) else None
-        )
-        created_channel = (
-            _snowflake(created.get("channel_id"))
-            if isinstance(created, dict)
-            else None
-        )
-        author = created.get("author") if isinstance(created, dict) else None
-        author_id = (
-            _snowflake(author.get("id")) if isinstance(author, dict) else None
-        )
-        shaped = shape_message(created) if isinstance(created, dict) else None
-        acknowledged_reply = (
-            shaped.get("reply_to_message_id")
-            if isinstance(shaped, dict)
-            else None
-        )
+        try:
+            created = self._rest.create_message(
+                channel_id,
+                content,
+                reply_to_message_id=reply_to,
+            )
+        except DiscordRestError as exc:
+            if _effect_failure_is_definitive(exc):
+                raise
+            return _unknown_delivery(
+                "Discord create-message acknowledgement was lost or untrustworthy"
+            )
+        except Exception:
+            return _unknown_delivery(
+                "Discord create-message acknowledgement was lost or untrustworthy"
+            )
+        try:
+            created_data = dict(created) if isinstance(created, Mapping) else {}
+            if not _message_acknowledgement_is_shapable(created_data):
+                return _unknown_delivery(
+                    "Discord create-message acknowledgement was malformed"
+                )
+            created_id = _snowflake(created_data.get("id"))
+            created_channel = _snowflake(created_data.get("channel_id"))
+            author = created_data["author"]
+            author_id = _snowflake(author.get("id"))
+            shaped = shape_message(created_data)
+            acknowledged_reply = shaped.get("reply_to_message_id")
+        except Exception:
+            return _unknown_delivery(
+                "Discord create-message acknowledgement was malformed"
+            )
         if (
             created_id is None
             or created_channel != channel_id
             or author_id != expected_author_id
             or author.get("bot") is not True
-            or not isinstance(shaped, dict)
             or shaped.get("content") != content
             or acknowledged_reply != reply_to
         ):
-            return (
-                {
-                    "delivery": {
-                        "status": "unknown",
-                        "detail": (
-                            "Discord create-message acknowledgement lacked "
-                            "target-attested message identity"
-                        ),
-                    }
-                },
-                True,
+            return _unknown_delivery(
+                "Discord create-message acknowledgement lacked "
+                "target-attested message identity"
             )
         return ({"message": shaped}, True)
 

@@ -33,6 +33,7 @@ from nunchi.integrations.mcp_client import StreamableMCPClient
 from nunchi.mcp_discord.authorization import ToolAuthorizer, make_tool_authorization
 from nunchi.mcp_discord.events import v2_notification_from_dispatch
 from nunchi.mcp_discord.ratelimit import SendBackstop
+from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
 from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.observation import ParticipantBinding
 from nunchi.participant import TransportResult
@@ -417,25 +418,177 @@ class ToolAuthorizationTests(unittest.TestCase):
 
     def test_tool_executor_does_not_confirm_malformed_create_response(self):
         class Rest:
+            response = {}
+
             def create_message(self, *_args, **_kwargs):
-                return {}
+                return deepcopy(self.response)
+
+        rest = Rest()
+        executor = ToolExecutor(
+            rest,
+            SendBackstop(5, 10),
+            authorizer=self.authorizer,
+        )
+        arguments = {"channel_id": "42", "content": "hello"}
+        for sequence, response in enumerate(
+            (
+                {},
+                {
+                    "id": "101",
+                    "channel_id": "42",
+                    "author": "malformed-author",
+                    "content": "hello",
+                },
+                {
+                    "id": "101",
+                    "channel_id": "42",
+                    "author": {"id": "9", "username": "Vigil", "bot": True},
+                    "content": "hello",
+                    "mentions": "malformed-mentions",
+                },
+            ),
+            1,
+        ):
+            with self.subTest(response=response):
+                rest.response = response
+                payload, ok = executor.call(
+                    "send_message",
+                    {
+                        **arguments,
+                        "_nunchi_authorization": self.authorization(
+                            arguments,
+                            request_id=f"malformed-create-{sequence}",
+                        ),
+                    },
+                    expected_self_actor_id="discord:actor:9",
+                )
+                self.assertTrue(ok)
+                self.assertEqual("unknown", payload["delivery"]["status"])
+
+    def test_tool_executor_preserves_uncertain_post_effect_outcomes(self):
+        arguments = {"channel_id": "42", "content": "hello"}
+
+        for sequence, failure in enumerate(
+            (
+                DiscordRestError(None, "network acknowledgement lost"),
+                DiscordRestError(201, "malformed successful response"),
+                DiscordRestError(503, "server acknowledgement uncertain"),
+                RuntimeError("unexpected post-dispatch failure"),
+            ),
+            1,
+        ):
+            class Rest:
+                def create_message(self, *_args, **_kwargs):
+                    raise failure
+
+            with self.subTest(failure=failure):
+                executor = ToolExecutor(
+                    Rest(),
+                    SendBackstop(5, 10),
+                    authorizer=self.authorizer,
+                )
+                payload, ok = executor.call(
+                    "send_message",
+                    {
+                        **arguments,
+                        "_nunchi_authorization": self.authorization(
+                            arguments,
+                            request_id=f"uncertain-create-{sequence}",
+                        ),
+                    },
+                    expected_self_actor_id="discord:actor:9",
+                )
+                self.assertTrue(ok)
+                self.assertEqual("unknown", payload["delivery"]["status"])
+
+        class DeniedRest:
+            def create_message(self, *_args, **_kwargs):
+                raise DiscordRestError(403, "Discord rejected the effect")
+
+        denied = ToolExecutor(
+            DeniedRest(),
+            SendBackstop(5, 10),
+            authorizer=self.authorizer,
+        )
+        payload, ok = denied.call(
+            "send_message",
+            {
+                **arguments,
+                "_nunchi_authorization": self.authorization(
+                    arguments,
+                    request_id="definitive-create-denial",
+                ),
+            },
+            expected_self_actor_id="discord:actor:9",
+        )
+        self.assertFalse(ok)
+        self.assertIn("rejected", payload["error"])
+
+    def test_tool_executor_preserves_uncertain_reaction_outcome(self):
+        class Rest:
+            def add_reaction(self, *_args, **_kwargs):
+                raise DiscordRestError(None, "network acknowledgement lost")
 
         executor = ToolExecutor(
             Rest(),
             SendBackstop(5, 10),
             authorizer=self.authorizer,
         )
-        arguments = {"channel_id": "42", "content": "hello"}
+        arguments = {
+            "channel_id": "42",
+            "message_id": "101",
+            "reaction": "✅",
+        }
         payload, ok = executor.call(
-            "send_message",
+            "add_reaction",
             {
                 **arguments,
-                "_nunchi_authorization": self.authorization(arguments),
+                "_nunchi_authorization": self.authorization(
+                    arguments,
+                    tool="add_reaction",
+                    request_id="uncertain-reaction",
+                ),
             },
             expected_self_actor_id="discord:actor:9",
         )
         self.assertTrue(ok)
         self.assertEqual("unknown", payload["delivery"]["status"])
+
+    def test_discord_rest_does_not_retry_uncertain_mutating_5xx(self):
+        calls = []
+
+        def http(method, url, headers, body):
+            calls.append((method, url, headers, body))
+            return (503, {}, b"")
+
+        client = DiscordRestClient(
+            "test-token",
+            http=http,
+            sleeper=lambda _seconds: None,
+        )
+        with self.assertRaises(DiscordRestError) as caught:
+            client.create_message("42", "hello")
+        self.assertEqual(503, caught.exception.status)
+        self.assertEqual(1, len(calls))
+
+    def test_discord_rest_may_retry_read_only_5xx(self):
+        calls = []
+        responses = [
+            (503, {}, b""),
+            (200, {}, b"[]"),
+        ]
+
+        def http(method, url, headers, body):
+            calls.append((method, url, headers, body))
+            return responses.pop(0)
+
+        client = DiscordRestClient(
+            "test-token",
+            http=http,
+            sleeper=lambda _seconds: None,
+        )
+        self.assertEqual([], client.get_messages("42"))
+        self.assertEqual(2, len(calls))
 
     def test_tool_executor_requires_exact_message_effect_and_self(self):
         class Rest:
@@ -857,6 +1010,50 @@ class CodexSurfaceTests(unittest.TestCase):
         class Client:
             def call_tool(self, _name, _arguments):
                 return {"isError": False, "content": []}
+
+        transport = MCPDiscordTransport(
+            Client(),
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
+        result = transport.dispatch(
+            action={
+                "kind": "message",
+                "origin_event_id": "discord:message:1",
+                "text": "hello",
+            },
+            wake={
+                "request_id": "request-1",
+                "self": {"participant_id": "vigil"},
+                "room": {"id": "42"},
+            },
+        )
+        self.assertEqual("unknown", result.delivery)
+
+    def test_codex_mcp_transport_preserves_post_effect_unknown(self):
+        class Client:
+            def call_tool(self, _name, _arguments):
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "delivery": {
+                                        "status": "unknown",
+                                        "detail": (
+                                            "Discord create-message "
+                                            "acknowledgement was lost"
+                                        ),
+                                    }
+                                }
+                            ),
+                        }
+                    ],
+                }
 
         transport = MCPDiscordTransport(
             Client(),
