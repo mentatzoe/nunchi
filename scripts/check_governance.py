@@ -28,23 +28,35 @@ IMPLEMENTATION_AUTHORIZATION_BOUNDARY = (
     "not grant it and does not authorize cutover, release, or promotion."
 )
 OWNERSHIP_SUPERSESSION_PATH = Path(
-    "evidence/governance/v2-end-to-end-ownership-supersession-2026-07-23.md"
+    "evidence/governance/v2-all-codex-ownership-supersession-2026-07-24.md"
 )
 OWNERSHIP_SUPERSESSION_SHA256 = (
-    "78d5ad9caff49f044a8e9ec6928214e0a0347667d4edb49584f3f1d233dd9333"
+    "a14c322499f9597634e85405d7c3e1538be198c8a9c932567d399c6d804903eb"
 )
-OWNERSHIP_CURRENT_SLICES = ("010", "020", "030", "040", "050", "100", "110")
-OWNERSHIP_RETAINED_SLICES = ("060", "070", "080", "090")
+OWNERSHIP_CURRENT_SLICES = (
+    "010",
+    "020",
+    "030",
+    "040",
+    "050",
+    "060",
+    "070",
+    "080",
+    "090",
+    "100",
+    "110",
+)
+OWNERSHIP_RETAINED_SLICES: tuple[str, ...] = ()
 OWNERSHIP_EXPECTED_IDENTITIES = {
     "010": "Codex",
     "020": "Codex",
     "030": "Codex",
     "040": "Codex",
     "050": "Codex",
-    "060": "sr-dev",
-    "070": "Station",
-    "080": "Vigil",
-    "090": "mid-dev",
+    "060": "Codex",
+    "070": "Codex",
+    "080": "Codex",
+    "090": "Codex",
     "100": "Codex",
     "110": "Codex",
 }
@@ -69,6 +81,22 @@ OWNERSHIP_EXPECTED_PREDECESSORS = {
         "evidence/governance/assignments/"
         "devops-v2-transport-owner-2026-07-16.md"
     ),
+    "060": (
+        "evidence/governance/assignments/"
+        "sr-dev-v2-hermes-owner-2026-07-16.md"
+    ),
+    "070": (
+        "evidence/governance/assignments/"
+        "station-v2-claude-owner-2026-07-16.md"
+    ),
+    "080": (
+        "evidence/governance/assignments/"
+        "vigil-v2-codex-owner-2026-07-16.md"
+    ),
+    "090": (
+        "evidence/governance/assignments/"
+        "mid-dev-v2-adapters-owner-2026-07-16.md"
+    ),
     "100": (
         "evidence/governance/assignments/"
         "cc-session-blind-v2-security-owner-2026-07-16.md"
@@ -84,14 +112,26 @@ OWNERSHIP_ASSIGNMENT_SHA256 = {
     "030": "27cc13fc5a8ab5430e5ac6ef7f28f7ca3b0780246547a1502b82fe30368bfbbb",
     "040": "f619d322973861e13b576627002a805b7be5fd4e45702fee3b7be120e4109b3f",
     "050": "00131d59d9cd97df47d0e58d3f6c0fa545a860182ead4e3b9285f39001d0bf98",
-    "060": "27e1f525d7dc7e302b21529b81f83ca381405c68bc8e44dea2097c229734dbc7",
-    "070": "b38d6a4dbf3656c8c7739d40f6754c6d0008ec748de09cac899c057d94576483",
-    "080": "50af428157db2084583f127493b9cc0c99f69f122fd104458bc24d9bfdc9b023",
-    "090": "00edd6c1b0a1492984e2b1d98af690e905edaf432360ac9a1887eb39936023d7",
+    "060": "005c1f573de64c866a49fe4cc441421a499edb3618fddd437a50c1e44828b834",
+    "070": "26a140615ba57bef7a9bf9e810b6ab3a5a6cd9c8f809ce599b48251334853869",
+    "080": "371ba244b5576c8baf74f245bf695653b7448a90693cfc8666312f806ec092d3",
+    "090": "5f2107ead9b8e0607494be07c6c7a4dc5949522bcfd3222c05e887bd36da0b07",
     "100": "18ed50f5cfbdef91c9c55a75a4641b2abcf6e37e232013dedcd44958c53e1229",
     "110": "9ed1340c8d829f163406a29b9d7c62bef76d7b46eac4683bdfc2e1e4835f2d37",
 }
+OWNERSHIP_PROGRAM_ASSIGNMENT_PATH = Path(
+    "evidence/governance/assignments/codex-v2-program-owner-2026-07-24.md"
+)
+OWNERSHIP_PROGRAM_ASSIGNMENT_SHA256 = (
+    "aa7b29712f2cf833a1a1252b88c832cdcb5d0db4cfd838b5685eb0614643445e"
+)
+OWNERSHIP_PROGRAM_PREDECESSOR = (
+    "evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md"
+)
 HISTORICAL_EVIDENCE_HASHES = {
+    Path(
+        "evidence/governance/v2-end-to-end-ownership-supersession-2026-07-23.md"
+    ): "78d5ad9caff49f044a8e9ec6928214e0a0347667d4edb49584f3f1d233dd9333",
     Path(
         "evidence/governance/v2-execution-spine-2026-07-11.md"
     ): "c1a81b9e0f5b762e1870c45627a3338be2666626d1db15292456f71a16b8cb3e",
@@ -2764,7 +2804,7 @@ def _assignment_supersession_errors(
 
 
 def check_ownership_supersession(root: Path) -> list[str]:
-    """Enforce Zoe's pinned one-time owner mapping in current declarations."""
+    """Enforce Zoe's pinned session-agnostic all-Codex owner mapping."""
 
     relative = OWNERSHIP_SUPERSESSION_PATH
     if not _repo_path_is_safe(root, relative, require_file=True):
@@ -2789,19 +2829,26 @@ def check_ownership_supersession(root: Path) -> list[str]:
         "Recorded by",
         "Source task",
         "Authority reference",
+        "Supersedes decision",
         "Current Codex slices",
         "Retained platform slices",
         "Program owner",
+        "Program assignment record",
         "Current assignment records",
         "Retained assignment records",
     )
     errors.extend(_singleton_metadata_errors(text, labels, relative))
     exact_fields = {
         "Decision owner": "Zoe",
-        "Decision date": "2026-07-23",
+        "Decision date": "2026-07-24",
         "Recorded by": "Codex",
-        "Source task": "019f8ff1-46c7-7c60-b427-47bf82e06d7c",
-        "Program owner": "Zoe",
+        "Source task": "019f7f13-3e41-7022-b53f-85e4ce3b23a1",
+        "Supersedes decision": (
+            "evidence/governance/"
+            "v2-end-to-end-ownership-supersession-2026-07-23.md"
+        ),
+        "Program owner": "Codex",
+        "Program assignment record": OWNERSHIP_PROGRAM_ASSIGNMENT_PATH.as_posix(),
     }
     for label, expected in exact_fields.items():
         observed = _clean_metadata(text, label)
@@ -2920,6 +2967,85 @@ def check_ownership_supersession(root: Path) -> list[str]:
                     f"{artifact_relative}: Zoe ownership decision requires "
                     f"{declaration!r}; observed {observed!r}"
                 )
+
+    program_declaration = (
+        f"Codex — {OWNERSHIP_PROGRAM_ASSIGNMENT_PATH.as_posix()}"
+    )
+    program_assignment_text: str | None = None
+    if _repo_path_is_safe(
+        root, OWNERSHIP_PROGRAM_ASSIGNMENT_PATH, require_file=True
+    ):
+        try:
+            program_assignment_raw = (
+                root / OWNERSHIP_PROGRAM_ASSIGNMENT_PATH
+            ).read_bytes()
+        except OSError as exc:
+            errors.append(
+                f"{OWNERSHIP_PROGRAM_ASSIGNMENT_PATH}: exact Zoe program "
+                f"assignment is unreadable ({exc})"
+            )
+        else:
+            observed_digest = hashlib.sha256(
+                program_assignment_raw.replace(b"\r\n", b"\n")
+            ).hexdigest()
+            if observed_digest != OWNERSHIP_PROGRAM_ASSIGNMENT_SHA256:
+                errors.append(
+                    f"{OWNERSHIP_PROGRAM_ASSIGNMENT_PATH}: exact Zoe program "
+                    "assignment digest must be "
+                    f"{OWNERSHIP_PROGRAM_ASSIGNMENT_SHA256}; observed "
+                    f"{observed_digest}"
+                )
+            try:
+                program_assignment_text = program_assignment_raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                errors.append(
+                    f"{OWNERSHIP_PROGRAM_ASSIGNMENT_PATH}: exact Zoe program "
+                    f"assignment is unreadable ({exc})"
+                )
+    errors.extend(
+        _assignment_errors(
+            root,
+            program_declaration,
+            "v2-program-owner",
+            relative,
+        )
+    )
+    if program_assignment_text is not None:
+        errors.extend(
+            _singleton_metadata_errors(
+                program_assignment_text,
+                ("Supersedes assignment",),
+                OWNERSHIP_PROGRAM_ASSIGNMENT_PATH,
+            )
+        )
+        observed_predecessor = _clean_metadata(
+            program_assignment_text, "Supersedes assignment"
+        )
+        if observed_predecessor != OWNERSHIP_PROGRAM_PREDECESSOR:
+            errors.append(
+                f"{OWNERSHIP_PROGRAM_ASSIGNMENT_PATH}: Supersedes assignment "
+                f"must be {OWNERSHIP_PROGRAM_PREDECESSOR!r}; observed "
+                f"{observed_predecessor!r}"
+            )
+
+    for artifact in ("spec.md", "plan.md", "tasks.md"):
+        artifact_relative = Path("specs/001-nunchi-v2-program") / artifact
+        if not _repo_path_is_safe(root, artifact_relative, require_file=True):
+            errors.append(
+                f"{artifact_relative}: current program ownership declaration "
+                "is missing or unsafe"
+            )
+            continue
+        artifact_text = (root / artifact_relative).read_text(encoding="utf-8")
+        observed = _clean_metadata(
+            artifact_text,
+            "Assigned program participant / source (declaration)",
+        )
+        if observed != program_declaration:
+            errors.append(
+                f"{artifact_relative}: Zoe ownership decision requires "
+                f"{program_declaration!r}; observed {observed!r}"
+            )
     return errors
 
 

@@ -22,7 +22,7 @@ A1/A2 at effective dependency commit
 `26a6b531fa146ba1f1f5fcd1c4d191041b141301`; `I-010F` A3 not accepted; slices
 `020`–`110` `PLANNED`; V1 current
 
-**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
+**Assigned program participant / source (declaration)**: Codex — evidence/governance/assignments/codex-v2-program-owner-2026-07-24.md
 
 **Input**: Establish one implementation-ready V2 program from the selected
 Nunchi technical design without implementing V2 product behavior while building

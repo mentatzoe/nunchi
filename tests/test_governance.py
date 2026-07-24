@@ -2793,8 +2793,9 @@ class GovernanceBoundaryTests(unittest.TestCase):
             path.write_text(text, encoding="utf-8")
 
         umbrella = root / "specs" / "001-nunchi-v2-program"
-        program_assignment = self._write_assignment(
-            root, "Pat", "v2-program-owner", "program-owner"
+        program_assignment = check_governance._clean_metadata(
+            (umbrella / "spec.md").read_text(encoding="utf-8"),
+            "Assigned program participant / source (declaration)",
         )
         for artifact in ("spec.md", "plan.md", "tasks.md"):
             path = umbrella / artifact
@@ -3237,6 +3238,61 @@ class GovernanceBoundaryTests(unittest.TestCase):
                 for error in program_errors
             )
         )
+
+    def test_every_current_v2_owner_is_session_agnostic_codex(self):
+        expected_slice_ids = tuple(
+            dirname[:3] for dirname in check_governance.EXPECTED_SLICES
+        )
+        self.assertEqual(
+            check_governance.OWNERSHIP_CURRENT_SLICES,
+            expected_slice_ids,
+        )
+        self.assertEqual(check_governance.OWNERSHIP_RETAINED_SLICES, ())
+        self.assertEqual(
+            set(check_governance.OWNERSHIP_EXPECTED_IDENTITIES.values()),
+            {"Codex"},
+        )
+
+        authority = (
+            ROOT / check_governance.OWNERSHIP_SUPERSESSION_PATH
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "`Codex` is a stable, session-agnostic participant identity",
+            authority,
+        )
+        self.assertIn(
+            "Codex session turnover does not require\nreassignment",
+            authority,
+        )
+
+        for dirname in check_governance.EXPECTED_SLICES:
+            for artifact in ("spec.md", "plan.md", "tasks.md"):
+                text = (
+                    ROOT / "specs" / dirname / artifact
+                ).read_text(encoding="utf-8")
+                declaration = check_governance._clean_metadata(
+                    text, "Assigned participant / source"
+                )
+                self.assertTrue(
+                    declaration.startswith("Codex — "),
+                    f"{dirname}/{artifact}: {declaration}",
+                )
+
+        expected_program = (
+            f"Codex — "
+            f"{check_governance.OWNERSHIP_PROGRAM_ASSIGNMENT_PATH.as_posix()}"
+        )
+        for artifact in ("spec.md", "plan.md", "tasks.md"):
+            text = (
+                ROOT / "specs/001-nunchi-v2-program" / artifact
+            ).read_text(encoding="utf-8")
+            self.assertEqual(
+                check_governance._clean_metadata(
+                    text,
+                    "Assigned program participant / source (declaration)",
+                ),
+                expected_program,
+            )
 
     def test_implementation_authorization_rejects_incomplete_slice_scope(self):
         with tempfile.TemporaryDirectory() as tmp:
