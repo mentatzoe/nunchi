@@ -1,9 +1,7 @@
-# Nunchi V2 Contracts (I-010A, I-010C, I-010D at `@1`; I-010B, I-010E at `@2`)
+# Nunchi V2 Contracts
 
-**Owner**: `v2-contract-owner` (slice `010`). Only this owner edits
-`schemas/v2/**`; a dependent slice requests changes through an explicit
-return handoff followed by re-analysis, never by editing a shared schema
-directly.
+**Owner**: Codex owns the shared portable contracts. Consumers use these
+schemas rather than maintaining private variants.
 
 **Status**: these five contracts are the shared seam consumed by the V2
 program slices. V1 remains the current product until the atomic V2 merge is
@@ -28,17 +26,15 @@ resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
-### Planned completion amendment
+### Privileged-action boundary
 
-The selected product also requires `I-010F
-PrivilegedActionAuthorizationV2@1`. It is not part of the accepted contract
-packet above: no machine-readable schema, corpus, or accepted amendment exists
-for it on this baseline. The `v2-contract-owner` must deliver that seam through
-the versioned amendment path, and `v2-integrator` must accept the exact
-successor before any consumer may cite or implement `I-010F`. Target semantics
-remain in the selected architecture and umbrella plan; they are not current
-contract truth.
+`I-010F PrivilegedActionAuthorizationV2@1` has a machine-readable schema,
+deterministic flow validator, and adversarial corpus. It is a contract, not an
+executable authorization system. The participant host must still implement the
+guard, trusted policy loading, authenticated approval, durable one-use
+consumption, and effect dispatch.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`
@@ -50,7 +46,7 @@ rejects. V1 envelopes, reply-bearing fields, inferred-roster claims, and
 `handled`/`open`/`owed`/permission ledger state reject everywhere; there is
 no V1 translation bridge (FR-011).
 
-## The lifecycle at a glance
+## Attention contract flow
 
 ```text
 observation  ->  AttentionRequestV2   (host assembles factual events)
@@ -62,6 +58,60 @@ observation  ->  AttentionRequestV2   (host assembles factual events)
 
 These are lifecycle boundaries, not social state: no contract carries a
 composed reply, an admission meta-answer, or a social permission ledger.
+
+## I-010F PrivilegedActionAuthorizationV2@1
+
+This contract is a closed host-facing union, always carrying a `schema_version:
+1`, a non-secret `request_id`, and one exact `binding`:
+
+- **`request`** records a unique action ID, participant, exact origin event,
+  namespaced capability, bounded platform/room/continuity/participant/resource
+  scope, transport-derived requester, and a digest of the operation. The raw
+  operation remains host-only.
+- **`decision`** records `ALLOW`, `DENY`, or `APPROVAL_REQUIRED`, the reason,
+  trusted operator-policy provenance, evaluation/expiry/revocation/persistence
+  facts, and either direct-policy or authenticated-approval provenance.
+- **`approval_challenge`** is an expiring, exact-bound, host-only reference
+  naming the allowed approvers. It carries no reusable approval secret.
+- **`approval_completion`** names the exact authenticated approver and a fresh
+  policy/revocation/expiry/persistence recheck. It must follow its originating
+  approval-required decision and retain the challenge's policy provenance. A
+  later authenticated-approval decision must name that exact completion, match
+  its outcome and policy/expiry/revocation/persistence facts, and occur after
+  that recheck.
+
+`binding.action_digest` is a closed object: `algorithm` is exactly `sha256`,
+`value` is exactly 64 lowercase hexadecimal characters, and
+`canonicalization_profile` is exactly `nunchi.operation-json.v1`. A different
+canonicalization algorithm requires a versioned contract change; an unknown
+profile cannot authorize an operation.
+
+The deterministic flow validator rejects a changed action, digest, origin,
+requester, capability, scope, challenge, approver, policy provenance, expiry,
+revocation, or persistence fact; stale revocation results; a decision reason
+that contradicts its outcome; a completion that predates its
+approval-required decision; and recheck policy drift. It also rejects multiple
+initial policy decisions, duplicate decision IDs, multiple completions of one
+challenge, and multiple decisions from one completion. An approval prompt is
+valid only when approval is the sole missing authority: policy and revocation
+must otherwise be current and the decision durable. Room text, reactions,
+quotes, aliases, model assertions, copied decisions, and unknown fields cannot
+become authorization facts because the union is closed.
+
+This is deliberately not a bearer-capability format. Schema and corpus success
+does not attest a native event, authenticate an approver, load a policy, retain
+state across restart, or execute anything. `I-040B` must resolve the retained
+canonical event, recheck all facts immediately before execution, persist the
+new decision, and consume one allow at one effect-commit point. Unknown
+persistence, restart, expiry, revocation, replay, capacity exhaustion, or any
+binding mismatch means no effect.
+
+Focused checks:
+
+```sh
+python3 -m unittest tests.v2.contract.test_privileged_action_authorization
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+```
 
 ## I-010A AttentionRequestV2@1
 
@@ -468,16 +518,17 @@ A participant-silence receipt record (the S07 stream ends at this stage):
 
 ## Versioning and change control
 
-`@1` is the first V2 execution version. A breaking edit requires an
-explicit owner handoff and dependent re-analysis and lands as `@2`; the
-optional `legacy_verdict_confidences` field, its exact four-key shape, and
-its conditional margin-active-suppression requirement are permanent for
-`@1` (FR-007) — margin retirement flips only the reported `margin_status`,
-never the schema. The slice 010 handoff packet names the exact contract
-commit and corpus revision; each downstream runtime owner must pass its own
-stdlib adapter over the identical corpus revision before its own handoff.
+`@1` is the first V2 execution version. A breaking edit requires a version
+bump and re-verification of every consumer. The optional
+`legacy_verdict_confidences` field, its exact four-key shape, and its
+conditional margin-active-suppression requirement are permanent for `@1`
+(FR-007) — margin retirement flips only the reported `margin_status`, never
+the schema. Each runtime must pass its adapter against the same contract corpus
+before integration.
 Evidence for the contract runs lives at
 `evidence/v2/contract/attention-request.jsonl`,
 `evidence/v2/contract/attention-decision.jsonl`,
-`evidence/v2/contract/downstream.jsonl`, and the scene manifest
+`evidence/v2/contract/downstream.jsonl`,
+`evidence/v2/contract/privileged-action-authorization.jsonl`, and the scene
+manifest
 `evidence/v2/contract/README.md`.

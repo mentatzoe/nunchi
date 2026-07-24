@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added the portable privileged-action authorization schema, deterministic flow
+  validator, adversarial corpus, and security boundary documentation. This does
+  not implement or enable the host-side action guard.
 - Retired the executable SpecKit workflow, generated task/checklist control
   plane, and slice lifecycle as implementation authority. Detailed product
   specifications and technical plans remain reference material; V2 now uses

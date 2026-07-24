@@ -28,7 +28,7 @@ skips cannot mask the other's missing cases:
 
 * ``baseline-oracle-absence`` — under the repository baseline
   (``python3 -m unittest``) the oracle is absent; every oracle-side check
-  for the five oracle-visible classes is skipped with an explicit count.
+  for the six oracle-visible classes is skipped with an explicit count.
   The stdlib adapter still runs the full corpus and must pass.
 * ``oracle-class-skip`` — under the pinned dual-validator command the
   oracle explicitly skips the two behavioral classes, by class, with an
@@ -93,6 +93,7 @@ SCHEMA_FILES = {
     "participant-wake": "participant-wake.schema.json",
     "context-continuation": "context-continuation.schema.json",
     "attention-receipt": "attention-receipt.schema.json",
+    "privileged-action-authorization": "privileged-action-authorization.schema.json",
 }
 
 INTERFACE_VERSIONS = {
@@ -101,6 +102,11 @@ INTERFACE_VERSIONS = {
     "participant-wake": ("I-010C", "ParticipantWakeV2", 1),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
     "attention-receipt": ("I-010E", "AttentionReceiptV2", 1),
+    "privileged-action-authorization": (
+        "I-010F",
+        "PrivilegedActionAuthorizationV2",
+        1,
+    ),
 }
 
 # FR-012 partition classes. The vocabulary is owned by the slice spec;
@@ -120,7 +126,12 @@ ALL_CLASSES = (SCHEMA_EXPRESSIBLE,) + ORACLE_VALID_CLASSES + ORACLE_SKIP_CLASSES
 BASELINE_ORACLE_ABSENCE = "baseline-oracle-absence"
 ORACLE_CLASS_SKIP = "oracle-class-skip"
 
-CORPUS_NAMES = ("attention-request", "attention-decision", "downstream")
+CORPUS_NAMES = (
+    "attention-request",
+    "attention-decision",
+    "downstream",
+    "privileged-action-authorization",
+)
 
 NON_FINITE_SENTINELS = {
     "NaN": float("nan"),
@@ -148,6 +159,45 @@ RECEIPT_WRITERS = (
 )
 # Staged-receipt writer map: each stage is appended only by its named owner.
 RECEIPT_WRITER_MAP = dict(zip(RECEIPT_STAGES, RECEIPT_WRITERS))
+
+AUTHORIZATION_KINDS = (
+    "request",
+    "decision",
+    "approval_challenge",
+    "approval_completion",
+)
+AUTHORIZATION_OUTCOMES = ("ALLOW", "DENY", "APPROVAL_REQUIRED")
+AUTHORIZATION_REASONS = (
+    "policy-allow",
+    "policy-deny",
+    "approval-required",
+    "binding-mismatch",
+    "expired",
+    "revoked",
+    "persistence-unknown",
+    "replay",
+    "unauthorized",
+)
+AUTHORIZATION_PATHS = ("direct-policy", "authenticated-approval")
+REVOCATION_STATUSES = ("clear", "revoked", "unknown")
+PERSISTENCE_STATUSES = ("durable", "unknown")
+AUTHORIZATION_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+AUTHORIZATION_CANONICALIZATION_PROFILE = "nunchi.operation-json.v1"
+AUTHORIZATION_REASONS_BY_OUTCOME = {
+    "ALLOW": frozenset({"policy-allow"}),
+    "APPROVAL_REQUIRED": frozenset({"approval-required"}),
+    "DENY": frozenset(
+        {
+            "policy-deny",
+            "binding-mismatch",
+            "expired",
+            "revoked",
+            "persistence-unknown",
+            "replay",
+            "unauthorized",
+        }
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1455,12 +1505,252 @@ def validate_attention_receipt(doc: Any) -> list[str]:
     return list(errors)
 
 
+def _check_action_digest(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("algorithm", "value", "canonicalization_profile")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    if "algorithm" in value:
+        _check_enum(errors, f"{path}.algorithm", value["algorithm"], ("sha256",))
+    if "value" in value:
+        digest = value["value"]
+        if not isinstance(digest, str) or not AUTHORIZATION_DIGEST_RE.fullmatch(digest):
+            errors.add(
+                f"{path}.value",
+                "must be a 64-character lowercase hexadecimal SHA-256 digest",
+            )
+    if "canonicalization_profile" in value:
+        if value["canonicalization_profile"] != AUTHORIZATION_CANONICALIZATION_PROFILE:
+            errors.add(
+                f"{path}.canonicalization_profile",
+                f"must be exactly {AUTHORIZATION_CANONICALIZATION_PROFILE!r}",
+            )
+
+
+def _check_authorization_scope(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("platform", "room_id", "continuity_scope_id", "participant_id", "resource")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    for name in fields[:-1]:
+        if name in value:
+            _check_nes(errors, f"{path}.{name}", value[name])
+    resource = value.get("resource")
+    if "resource" in value and _check_closed_object(
+        errors, f"{path}.resource", resource, ("kind", "id"), ("kind", "id")
+    ):
+        _check_nes(errors, f"{path}.resource.kind", resource.get("kind"))
+        _check_nes(errors, f"{path}.resource.id", resource.get("id"))
+
+
+def _check_derived_requester(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("actor_id", "origin_event_id", "source")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    _check_nes(errors, f"{path}.actor_id", value.get("actor_id"))
+    _check_nes(errors, f"{path}.origin_event_id", value.get("origin_event_id"))
+    if "source" in value:
+        _check_enum(
+            errors,
+            f"{path}.source",
+            value["source"],
+            ("transport-attested-origin-event",),
+        )
+
+
+def _check_authorization_binding(errors: _Errors, path: str, value: Any) -> None:
+    fields = (
+        "action_id",
+        "participant_id",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "action_digest",
+        "derived_requester",
+    )
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    for name in ("action_id", "participant_id", "origin_event_id"):
+        _check_nes(errors, f"{path}.{name}", value.get(name))
+    capability = value.get("capability")
+    if not isinstance(capability, str) or not re.fullmatch(
+        r"[a-z][a-z0-9_.-]*\.[a-z0-9_.-]+", capability
+    ):
+        errors.add(
+            f"{path}.capability",
+            "must be a non-empty namespaced capability containing a dot",
+        )
+    if "scope" in value:
+        _check_authorization_scope(errors, f"{path}.scope", value["scope"])
+    if "action_digest" in value:
+        _check_action_digest(errors, f"{path}.action_digest", value["action_digest"])
+    if "derived_requester" in value:
+        _check_derived_requester(errors, f"{path}.derived_requester", value["derived_requester"])
+
+
+def _check_policy_provenance(errors: _Errors, path: str, value: Any) -> None:
+    fields = ("source", "policy_id", "revision")
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    if "source" in value:
+        _check_enum(errors, f"{path}.source", value["source"], ("trusted-operator-policy",))
+    _check_nes(errors, f"{path}.policy_id", value.get("policy_id"))
+    _check_nes(errors, f"{path}.revision", value.get("revision"))
+
+
+def _check_authorization_recheck(errors: _Errors, path: str, value: Any) -> None:
+    fields = (
+        "outcome",
+        "policy_provenance",
+        "evaluated_at",
+        "expires_at",
+        "revocation_checked_at",
+        "revocation_status",
+        "persistence_status",
+    )
+    if not _check_closed_object(errors, path, value, fields, fields):
+        return
+    if "outcome" in value:
+        _check_enum(errors, f"{path}.outcome", value["outcome"], ("ALLOW", "DENY"))
+    if "policy_provenance" in value:
+        _check_policy_provenance(errors, f"{path}.policy_provenance", value["policy_provenance"])
+    for name in ("evaluated_at", "expires_at", "revocation_checked_at"):
+        _check_nes(errors, f"{path}.{name}", value.get(name))
+    if "revocation_status" in value:
+        _check_enum(errors, f"{path}.revocation_status", value["revocation_status"], REVOCATION_STATUSES)
+    if "persistence_status" in value:
+        _check_enum(errors, f"{path}.persistence_status", value["persistence_status"], PERSISTENCE_STATUSES)
+
+
+def validate_privileged_action_authorization(doc: Any) -> list[str]:
+    """Mirror of ``I-010F PrivilegedActionAuthorizationV2@1``.
+
+    This validates one closed contract document. Cross-document correlation,
+    expiry, revocation, authenticated approval, and replay rules deliberately
+    live in ``validate_privileged_action_authorization_flow`` because a JSON
+    Schema document cannot establish them from one record alone.
+    """
+    errors = _Errors()
+    if not isinstance(doc, dict):
+        errors.add("authorization", "must be an object")
+        return list(errors)
+    kind = doc.get("kind")
+    if not isinstance(kind, str) or kind not in AUTHORIZATION_KINDS:
+        errors.add("authorization.kind", f"must be one of {AUTHORIZATION_KINDS}")
+        return list(errors)
+
+    common = ("schema_version", "kind", "request_id", "binding")
+    if kind == "request":
+        fields = common + ("requested_at",)
+        if not _check_closed_object(errors, "authorization", doc, fields, fields):
+            return list(errors)
+        if not _is_integer(doc.get("schema_version")) or doc.get("schema_version") != 1:
+            errors.add("schema_version", "must be the number 1")
+        _check_nes(errors, "request_id", doc.get("request_id"))
+        _check_authorization_binding(errors, "binding", doc.get("binding"))
+        _check_nes(errors, "requested_at", doc.get("requested_at"))
+    elif kind == "decision":
+        fields = common + (
+            "decision_id",
+            "outcome",
+            "reason",
+            "policy_provenance",
+            "evaluated_at",
+            "expires_at",
+            "revocation_checked_at",
+            "revocation_status",
+            "persistence_status",
+            "authorization_path",
+            "approval_challenge_id",
+            "approval_completion_id",
+        )
+        required = fields[:-2]
+        if not _check_closed_object(errors, "authorization", doc, required, fields):
+            return list(errors)
+        if not _is_integer(doc.get("schema_version")) or doc.get("schema_version") != 1:
+            errors.add("schema_version", "must be the number 1")
+        _check_nes(errors, "request_id", doc.get("request_id"))
+        _check_nes(errors, "decision_id", doc.get("decision_id"))
+        _check_authorization_binding(errors, "binding", doc.get("binding"))
+        if "outcome" in doc:
+            _check_enum(errors, "outcome", doc["outcome"], AUTHORIZATION_OUTCOMES)
+        if "reason" in doc:
+            _check_enum(errors, "reason", doc["reason"], AUTHORIZATION_REASONS)
+        if "policy_provenance" in doc:
+            _check_policy_provenance(errors, "policy_provenance", doc["policy_provenance"])
+        for name in ("evaluated_at", "expires_at", "revocation_checked_at"):
+            _check_nes(errors, name, doc.get(name))
+        if "revocation_status" in doc:
+            _check_enum(errors, "revocation_status", doc["revocation_status"], REVOCATION_STATUSES)
+        if "persistence_status" in doc:
+            _check_enum(errors, "persistence_status", doc["persistence_status"], PERSISTENCE_STATUSES)
+        if "authorization_path" in doc:
+            _check_enum(errors, "authorization_path", doc["authorization_path"], AUTHORIZATION_PATHS)
+        for name in ("approval_challenge_id", "approval_completion_id"):
+            if name in doc:
+                _check_nes(errors, name, doc[name])
+    elif kind == "approval_challenge":
+        fields = common + (
+            "approval_challenge_id",
+            "policy_provenance",
+            "approver_ids",
+            "expires_at",
+            "host_only",
+        )
+        if not _check_closed_object(errors, "authorization", doc, fields, fields):
+            return list(errors)
+        if not _is_integer(doc.get("schema_version")) or doc.get("schema_version") != 1:
+            errors.add("schema_version", "must be the number 1")
+        _check_nes(errors, "request_id", doc.get("request_id"))
+        _check_nes(errors, "approval_challenge_id", doc.get("approval_challenge_id"))
+        _check_authorization_binding(errors, "binding", doc.get("binding"))
+        if "policy_provenance" in doc:
+            _check_policy_provenance(errors, "policy_provenance", doc["policy_provenance"])
+        approvers = doc.get("approver_ids")
+        if not isinstance(approvers, list) or not approvers:
+            errors.add("approver_ids", "must be a non-empty array")
+        else:
+            seen: set[str] = set()
+            for index, approver_id in enumerate(approvers):
+                _check_nes(errors, f"approver_ids[{index}]", approver_id)
+                if isinstance(approver_id, str):
+                    if approver_id in seen:
+                        errors.add("approver_ids", "must not repeat an approver ID")
+                    seen.add(approver_id)
+        _check_nes(errors, "expires_at", doc.get("expires_at"))
+        if doc.get("host_only") is not True:
+            errors.add("host_only", "must be true")
+    else:  # approval_completion
+        fields = common + (
+            "approval_completion_id",
+            "approval_challenge_id",
+            "authenticated_approver_id",
+            "completed_at",
+            "recheck",
+            "host_only",
+        )
+        if not _check_closed_object(errors, "authorization", doc, fields, fields):
+            return list(errors)
+        if not _is_integer(doc.get("schema_version")) or doc.get("schema_version") != 1:
+            errors.add("schema_version", "must be the number 1")
+        _check_nes(errors, "request_id", doc.get("request_id"))
+        _check_nes(errors, "approval_completion_id", doc.get("approval_completion_id"))
+        _check_nes(errors, "approval_challenge_id", doc.get("approval_challenge_id"))
+        _check_authorization_binding(errors, "binding", doc.get("binding"))
+        _check_nes(errors, "authenticated_approver_id", doc.get("authenticated_approver_id"))
+        _check_nes(errors, "completed_at", doc.get("completed_at"))
+        if "recheck" in doc:
+            _check_authorization_recheck(errors, "recheck", doc["recheck"])
+        if doc.get("host_only") is not True:
+            errors.add("host_only", "must be true")
+    return list(errors)
+
+
 DOCUMENT_VALIDATORS: dict[str, Callable[[Any], list[str]]] = {
     "attention-request": validate_attention_request,
     "attention-decision": validate_attention_decision,
     "participant-wake": validate_participant_wake,
     "context-continuation": validate_context_continuation,
     "attention-receipt": validate_attention_receipt,
+    "privileged-action-authorization": validate_privileged_action_authorization,
 }
 
 
@@ -1489,6 +1779,489 @@ def _parse_timestamp(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _authorization_timestamp(errors: list[str], path: str, value: Any) -> datetime | None:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        errors.append(f"{path}: must be an ISO-8601 timestamp")
+    elif parsed.tzinfo is None:
+        errors.append(f"{path}: must include a UTC offset")
+        return None
+    return parsed
+
+
+def _authorization_after(
+    errors: list[str], left_path: str, left: datetime | None, right_path: str, right: datetime | None
+) -> bool:
+    if left is None or right is None:
+        return False
+    try:
+        if left <= right:
+            errors.append(f"{left_path}: must be later than {right_path}")
+            return False
+    except TypeError:
+        errors.append(f"{left_path}: is not comparable with {right_path}")
+        return False
+    return True
+
+
+def _authorization_not_after(
+    errors: list[str], left_path: str, left: datetime | None, right_path: str, right: datetime | None
+) -> bool:
+    if left is None or right is None:
+        return False
+    try:
+        if left > right:
+            errors.append(f"{left_path}: must not be later than {right_path}")
+            return False
+    except TypeError:
+        errors.append(f"{left_path}: is not comparable with {right_path}")
+        return False
+    return True
+
+
+def _authorization_same_moment(
+    errors: list[str], left_path: str, left: datetime | None, right_path: str, right: datetime | None
+) -> bool:
+    if left is None or right is None:
+        return False
+    try:
+        if left != right:
+            errors.append(f"{left_path}: must equal {right_path}")
+            return False
+    except TypeError:
+        errors.append(f"{left_path}: is not comparable with {right_path}")
+        return False
+    return True
+
+
+def _authorization_binding_invariant_errors(binding: dict[str, Any], path: str) -> list[str]:
+    """Local invariants that bind duplicated scope/requester facts together."""
+    errors: list[str] = []
+    scope = binding["scope"]
+    requester = binding["derived_requester"]
+    if scope["participant_id"] != binding["participant_id"]:
+        errors.append(
+            f"{path}.scope.participant_id: must equal {path}.participant_id"
+        )
+    if requester["origin_event_id"] != binding["origin_event_id"]:
+        errors.append(
+            f"{path}.derived_requester.origin_event_id: must equal {path}.origin_event_id"
+        )
+    return errors
+
+
+def _authorization_duplicate_id_errors(
+    records: list[dict[str, Any]], kind: str, field: str
+) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, record in enumerate(records):
+        if record["kind"] != kind:
+            continue
+        value = record[field]
+        if value in seen:
+            errors.append(f"records[{index}].{field}: replayed identifier {value!r}")
+        seen.add(value)
+    return errors
+
+
+def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
+    """Validate I-010F's runtime-only correlation and safety rules.
+
+    A flow is an ordered, host-side audit view. It is deliberately not an
+    executor or persistence implementation: slice 040 must still consume an
+    allow once and recheck it immediately before its effect. This contract
+    boundary proves that a supplied flow cannot turn a copied or substituted
+    fact into a different authorization.
+    """
+    errors: list[str] = []
+    if not isinstance(records, list) or not records:
+        return ["records: an authorization flow must contain at least one record"]
+    for index, record in enumerate(records):
+        for message in validate_privileged_action_authorization(record):
+            errors.append(f"records[{index}].{message}")
+    if errors:
+        return errors
+
+    typed_records: list[dict[str, Any]] = records
+    requests = [record for record in typed_records if record["kind"] == "request"]
+    if len(requests) != 1:
+        return [f"records: expected exactly one request, found {len(requests)}"]
+    request = requests[0]
+    request_index = typed_records.index(request)
+    if request_index != 0:
+        errors.append("records: request must be the first record")
+    request_time = _authorization_timestamp(errors, "request.requested_at", request["requested_at"])
+    request_binding = request["binding"]
+
+    for index, record in enumerate(typed_records):
+        binding = record["binding"]
+        errors.extend(_authorization_binding_invariant_errors(binding, f"records[{index}].binding"))
+        if record is not request:
+            if record["request_id"] != request["request_id"]:
+                errors.append(
+                    f"records[{index}].request_id: must match the initiating request"
+                )
+            if not semantic_equal(binding, request_binding):
+                errors.append(
+                    f"records[{index}].binding: substituted action/origin/requester/"
+                    "capability/scope/digest binding is forbidden"
+                )
+
+    errors.extend(_authorization_duplicate_id_errors(typed_records, "decision", "decision_id"))
+    errors.extend(
+        _authorization_duplicate_id_errors(
+            typed_records, "approval_challenge", "approval_challenge_id"
+        )
+    )
+    errors.extend(
+        _authorization_duplicate_id_errors(
+            typed_records, "approval_completion", "approval_completion_id"
+        )
+    )
+
+    challenges: dict[str, tuple[int, dict[str, Any]]] = {}
+    completions: dict[str, tuple[int, dict[str, Any]]] = {}
+    decisions: list[tuple[int, dict[str, Any]]] = []
+    completion_by_challenge: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, record in enumerate(typed_records):
+        if record["kind"] == "approval_challenge":
+            challenges.setdefault(record["approval_challenge_id"], (index, record))
+        elif record["kind"] == "approval_completion":
+            completions.setdefault(record["approval_completion_id"], (index, record))
+            completion_by_challenge.setdefault(record["approval_challenge_id"], []).append((index, record))
+        elif record["kind"] == "decision":
+            decisions.append((index, record))
+
+    challenge_decisions: dict[str, tuple[int, dict[str, Any]]] = {}
+    completion_decision_counts: dict[str, int] = {}
+    direct_decisions = [
+        (index, decision)
+        for index, decision in decisions
+        if decision["authorization_path"] == "direct-policy"
+    ]
+    if len(direct_decisions) > 1:
+        errors.append(
+            "records: one request may have only one initial direct-policy decision"
+        )
+    for index, decision in decisions:
+        evaluated = _authorization_timestamp(errors, f"records[{index}].evaluated_at", decision["evaluated_at"])
+        expires = _authorization_timestamp(errors, f"records[{index}].expires_at", decision["expires_at"])
+        checked = _authorization_timestamp(
+            errors, f"records[{index}].revocation_checked_at", decision["revocation_checked_at"]
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].evaluated_at",
+            evaluated,
+            "request.requested_at",
+            request_time,
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].expires_at",
+            expires,
+            f"records[{index}].evaluated_at",
+            evaluated,
+        )
+        _authorization_not_after(
+            errors,
+            f"records[{index}].revocation_checked_at",
+            checked,
+            f"records[{index}].evaluated_at",
+            evaluated,
+        )
+
+        outcome = decision["outcome"]
+        path = decision["authorization_path"]
+        challenge_id = decision.get("approval_challenge_id")
+        completion_id = decision.get("approval_completion_id")
+        if decision["reason"] not in AUTHORIZATION_REASONS_BY_OUTCOME[outcome]:
+            errors.append(
+                f"records[{index}].reason: {decision['reason']!r} does not match "
+                f"outcome {outcome!r}"
+            )
+        if outcome in ("ALLOW", "APPROVAL_REQUIRED"):
+            if decision["revocation_status"] != "clear":
+                errors.append(
+                    f"records[{index}].revocation_status: {outcome} requires clear"
+                )
+            if decision["persistence_status"] != "durable":
+                errors.append(
+                    f"records[{index}].persistence_status: {outcome} requires durable"
+                )
+            _authorization_same_moment(
+                errors,
+                f"records[{index}].revocation_checked_at",
+                checked,
+                f"records[{index}].evaluated_at",
+                evaluated,
+            )
+        if path == "direct-policy":
+            if completion_id is not None:
+                errors.append(
+                    f"records[{index}].approval_completion_id: direct-policy decision cannot use approval completion"
+                )
+            if outcome == "APPROVAL_REQUIRED":
+                if not isinstance(challenge_id, str):
+                    errors.append(
+                        f"records[{index}].approval_challenge_id: approval-required decision must create a challenge"
+                    )
+                else:
+                    challenge_decisions.setdefault(challenge_id, (index, decision))
+            elif challenge_id is not None:
+                errors.append(
+                    f"records[{index}].approval_challenge_id: only APPROVAL_REQUIRED may name a direct-policy challenge"
+                )
+        else:
+            if outcome not in ("ALLOW", "DENY"):
+                errors.append(
+                    f"records[{index}].outcome: authenticated approval can yield only ALLOW or DENY"
+                )
+            if not isinstance(challenge_id, str) or not isinstance(completion_id, str):
+                errors.append(
+                    f"records[{index}]: authenticated approval requires exact challenge and completion IDs"
+                )
+            elif completion_id in completion_decision_counts:
+                completion_decision_counts[completion_id] += 1
+            else:
+                completion_decision_counts[completion_id] = 1
+
+    for challenge_id, (index, _decision) in challenge_decisions.items():
+        if challenge_id not in challenges:
+            errors.append(
+                f"records[{index}].approval_challenge_id: missing host-only challenge"
+            )
+
+    for challenge_id, (index, challenge) in challenges.items():
+        proposal = challenge_decisions.get(challenge_id)
+        if proposal is None:
+            errors.append(
+                f"records[{index}].approval_challenge_id: no matching APPROVAL_REQUIRED decision"
+            )
+        else:
+            proposal_index, proposal_record = proposal
+            if proposal_index >= index:
+                errors.append(
+                    f"records[{index}]: challenge must follow its approval-required decision"
+                )
+            if not semantic_equal(
+                proposal_record["policy_provenance"], challenge["policy_provenance"]
+            ):
+                errors.append(
+                    f"records[{index}].policy_provenance: must match the approval-required decision"
+                )
+        challenge_expiry = _authorization_timestamp(
+            errors, f"records[{index}].expires_at", challenge["expires_at"]
+        )
+        if proposal is not None:
+            proposal_time = _authorization_timestamp(
+                errors, f"records[{proposal[0]}].evaluated_at", proposal[1]["evaluated_at"]
+            )
+            _authorization_after(
+                errors,
+                f"records[{index}].expires_at",
+                challenge_expiry,
+                f"records[{proposal[0]}].evaluated_at",
+                proposal_time,
+            )
+        linked_completions = completion_by_challenge.get(challenge_id, [])
+        if len(linked_completions) > 1:
+            errors.append(
+                f"approval_challenge_id {challenge_id!r}: challenge replayed by multiple completions"
+            )
+
+    for challenge_id, linked in completion_by_challenge.items():
+        for index, completion in linked:
+            challenge_tuple = challenges.get(challenge_id)
+            if challenge_tuple is None:
+                errors.append(
+                    f"records[{index}].approval_challenge_id: unknown challenge"
+                )
+                continue
+            challenge_index, challenge = challenge_tuple
+            if challenge_index >= index:
+                errors.append(f"records[{index}]: completion must follow its challenge")
+            approver = completion["authenticated_approver_id"]
+            if approver not in challenge["approver_ids"]:
+                errors.append(
+                    f"records[{index}].authenticated_approver_id: is not an exact authorized approver"
+                )
+            completed = _authorization_timestamp(
+                errors, f"records[{index}].completed_at", completion["completed_at"]
+            )
+            expiry = _authorization_timestamp(
+                errors, f"records[{challenge_index}].expires_at", challenge["expires_at"]
+            )
+            # A completion at or after expiry cannot authorize.
+            if completed is not None and expiry is not None:
+                try:
+                    if completed >= expiry:
+                        errors.append(
+                            f"records[{index}].completed_at: approval challenge is expired"
+                        )
+                except TypeError:
+                    errors.append(
+                        f"records[{index}].completed_at: is not comparable with challenge expiry"
+                    )
+            proposal = challenge_decisions.get(challenge_id)
+            if proposal is not None:
+                proposal_index, proposal_record = proposal
+                proposal_time = _authorization_timestamp(
+                    errors,
+                    f"records[{proposal_index}].evaluated_at",
+                    proposal_record["evaluated_at"],
+                )
+                _authorization_after(
+                    errors,
+                    f"records[{index}].completed_at",
+                    completed,
+                    f"records[{proposal_index}].evaluated_at",
+                    proposal_time,
+                )
+            recheck = completion["recheck"]
+            recheck_time = _authorization_timestamp(
+                errors, f"records[{index}].recheck.evaluated_at", recheck["evaluated_at"]
+            )
+            recheck_expiry = _authorization_timestamp(
+                errors, f"records[{index}].recheck.expires_at", recheck["expires_at"]
+            )
+            recheck_checked = _authorization_timestamp(
+                errors,
+                f"records[{index}].recheck.revocation_checked_at",
+                recheck["revocation_checked_at"],
+            )
+            _authorization_after(
+                errors,
+                f"records[{index}].recheck.evaluated_at",
+                recheck_time,
+                f"records[{index}].completed_at",
+                completed,
+            )
+            _authorization_after(
+                errors,
+                f"records[{index}].recheck.expires_at",
+                recheck_expiry,
+                f"records[{index}].recheck.evaluated_at",
+                recheck_time,
+            )
+            _authorization_not_after(
+                errors,
+                f"records[{index}].recheck.revocation_checked_at",
+                recheck_checked,
+                f"records[{index}].recheck.evaluated_at",
+                recheck_time,
+            )
+            if recheck["outcome"] == "ALLOW":
+                if recheck["revocation_status"] != "clear":
+                    errors.append(f"records[{index}].recheck.revocation_status: ALLOW requires clear")
+                if recheck["persistence_status"] != "durable":
+                    errors.append(
+                        f"records[{index}].recheck.persistence_status: ALLOW requires durable"
+                    )
+                _authorization_same_moment(
+                    errors,
+                    f"records[{index}].recheck.revocation_checked_at",
+                    recheck_checked,
+                    f"records[{index}].recheck.evaluated_at",
+                    recheck_time,
+                )
+            if not semantic_equal(recheck["policy_provenance"], challenge["policy_provenance"]):
+                errors.append(
+                    f"records[{index}].recheck.policy_provenance: must equal the approval challenge"
+                )
+
+    for index, decision in decisions:
+        if decision["authorization_path"] != "authenticated-approval":
+            continue
+        challenge_id = decision.get("approval_challenge_id")
+        completion_id = decision.get("approval_completion_id")
+        completion_tuple = completions.get(completion_id)
+        if challenge_id not in challenges:
+            errors.append(f"records[{index}].approval_challenge_id: unknown challenge")
+        if completion_tuple is None:
+            errors.append(f"records[{index}].approval_completion_id: unknown completion")
+            continue
+        completion_index, completion = completion_tuple
+        if completion_index >= index:
+            errors.append(
+                f"records[{index}]: authenticated-approval decision must follow its completion"
+            )
+        if completion["approval_challenge_id"] != challenge_id:
+            errors.append(
+                f"records[{index}]: completion belongs to a different challenge"
+            )
+        if completion_decision_counts.get(completion_id, 0) > 1:
+            errors.append(
+                f"records[{index}].approval_completion_id: completion is reused by multiple decisions"
+            )
+        if decision["outcome"] != completion["recheck"]["outcome"]:
+            errors.append(
+                f"records[{index}].outcome: must equal the authenticated recheck outcome"
+            )
+        recheck = completion["recheck"]
+        if not semantic_equal(decision["policy_provenance"], recheck["policy_provenance"]):
+            errors.append(
+                f"records[{index}].policy_provenance: must equal the authenticated recheck"
+            )
+        if decision["revocation_status"] != recheck["revocation_status"]:
+            errors.append(
+                f"records[{index}].revocation_status: must equal the authenticated recheck"
+            )
+        if decision["persistence_status"] != recheck["persistence_status"]:
+            errors.append(
+                f"records[{index}].persistence_status: must equal the authenticated recheck"
+            )
+        decision_evaluated = _authorization_timestamp(
+            errors, f"records[{index}].evaluated_at", decision["evaluated_at"]
+        )
+        recheck_evaluated = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.evaluated_at",
+            recheck["evaluated_at"],
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].evaluated_at",
+            decision_evaluated,
+            f"records[{completion_index}].recheck.evaluated_at",
+            recheck_evaluated,
+        )
+        decision_checked = _authorization_timestamp(
+            errors,
+            f"records[{index}].revocation_checked_at",
+            decision["revocation_checked_at"],
+        )
+        recheck_checked = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.revocation_checked_at",
+            recheck["revocation_checked_at"],
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].revocation_checked_at",
+            decision_checked,
+            f"records[{completion_index}].recheck.revocation_checked_at",
+            recheck_checked,
+        )
+        decision_expiry = _authorization_timestamp(
+            errors, f"records[{index}].expires_at", decision["expires_at"]
+        )
+        recheck_expiry = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.expires_at",
+            recheck["expires_at"],
+        )
+        _authorization_same_moment(
+            errors,
+            f"records[{index}].expires_at",
+            decision_expiry,
+            f"records[{completion_index}].recheck.expires_at",
+            recheck_expiry,
+        )
+    return errors
 
 
 def check_id_uniqueness(doc: dict[str, Any]) -> list[str]:
@@ -1894,7 +2667,14 @@ def adapter_errors(case: CorpusCase) -> list[str]:
                 check_advice_citations(docs["attention-decision"], docs["attention-request"])
             )
     elif case.partition == "binding-expiry":
-        errors.extend(validate_continuation_fetch(case.fetch))
+        if case.corpus == "privileged-action-authorization":
+            errors.extend(
+                validate_privileged_action_authorization_flow(
+                    [entry["document"] for entry in case.documents]
+                )
+            )
+        else:
+            errors.extend(validate_continuation_fetch(case.fetch))
     elif case.partition == "receipt-sequence":
         errors.extend(validate_receipt_stream(case.stream))
     return errors
@@ -1944,6 +2724,7 @@ EVIDENCE_FILES = {
     "attention-request": "attention-request.jsonl",
     "attention-decision": "attention-decision.jsonl",
     "downstream": "downstream.jsonl",
+    "privileged-action-authorization": "privileged-action-authorization.jsonl",
 }
 
 # The five mandatory aggregate-record fields (plan §Acceptance Scenes and
@@ -2375,6 +3156,137 @@ def make_fetch_payload(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+_BASE_AUTHORIZATION_BINDING = {
+    "action_id": "action-0001",
+    "participant_id": "vigil",
+    "origin_event_id": "discord:event:1001",
+    "capability": "workspace.file.write",
+    "scope": {
+        "platform": "discord",
+        "room_id": "42",
+        "continuity_scope_id": "discord:room:42#2026-07",
+        "participant_id": "vigil",
+        "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+    },
+    "action_digest": {
+        "algorithm": "sha256",
+        "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "canonicalization_profile": "nunchi.operation-json.v1",
+    },
+    "derived_requester": {
+        "actor_id": "discord:1001",
+        "origin_event_id": "discord:event:1001",
+        "source": "transport-attested-origin-event",
+    },
+}
+
+_BASE_POLICY_PROVENANCE = {
+    "source": "trusted-operator-policy",
+    "policy_id": "default-privileged-actions",
+    "revision": "2026-07-24T00:00:00Z",
+}
+
+
+def make_authorization_request(**overrides: Any) -> dict[str, Any]:
+    doc = {
+        "schema_version": 1,
+        "kind": "request",
+        "request_id": "authorization-request-0001",
+        "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
+        "requested_at": "2026-07-24T01:00:00Z",
+    }
+    doc.update(overrides)
+    return doc
+
+
+def make_authorization_decision(
+    outcome: str = "ALLOW", authorization_path: str = "direct-policy", **overrides: Any
+) -> dict[str, Any]:
+    doc = {
+        "schema_version": 1,
+        "kind": "decision",
+        "request_id": "authorization-request-0001",
+        "decision_id": "authorization-decision-0001",
+        "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
+        "outcome": outcome,
+        "reason": "policy-allow" if outcome == "ALLOW" else "policy-deny",
+        "policy_provenance": _deep_copy(_BASE_POLICY_PROVENANCE),
+        "evaluated_at": "2026-07-24T01:01:00Z",
+        "expires_at": "2026-07-24T01:20:00Z",
+        "revocation_checked_at": "2026-07-24T01:01:00Z",
+        "revocation_status": "clear",
+        "persistence_status": "durable",
+        "authorization_path": authorization_path,
+    }
+    if outcome == "APPROVAL_REQUIRED":
+        doc["reason"] = "approval-required"
+        doc["approval_challenge_id"] = "approval-challenge-0001"
+    if authorization_path == "authenticated-approval":
+        doc["approval_challenge_id"] = "approval-challenge-0001"
+        doc["approval_completion_id"] = "approval-completion-0001"
+    doc.update(overrides)
+    return doc
+
+
+def make_approval_challenge(**overrides: Any) -> dict[str, Any]:
+    doc = {
+        "schema_version": 1,
+        "kind": "approval_challenge",
+        "request_id": "authorization-request-0001",
+        "approval_challenge_id": "approval-challenge-0001",
+        "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
+        "policy_provenance": _deep_copy(_BASE_POLICY_PROVENANCE),
+        "approver_ids": ["operator:zoe"],
+        "expires_at": "2026-07-24T01:15:00Z",
+        "host_only": True,
+    }
+    doc.update(overrides)
+    return doc
+
+
+def make_approval_completion(**overrides: Any) -> dict[str, Any]:
+    doc = {
+        "schema_version": 1,
+        "kind": "approval_completion",
+        "request_id": "authorization-request-0001",
+        "approval_completion_id": "approval-completion-0001",
+        "approval_challenge_id": "approval-challenge-0001",
+        "binding": _deep_copy(_BASE_AUTHORIZATION_BINDING),
+        "authenticated_approver_id": "operator:zoe",
+        "completed_at": "2026-07-24T01:05:00Z",
+        "recheck": {
+            "outcome": "ALLOW",
+            "policy_provenance": _deep_copy(_BASE_POLICY_PROVENANCE),
+            "evaluated_at": "2026-07-24T01:06:00Z",
+            "expires_at": "2026-07-24T01:20:00Z",
+            "revocation_checked_at": "2026-07-24T01:06:00Z",
+            "revocation_status": "clear",
+            "persistence_status": "durable",
+        },
+        "host_only": True,
+    }
+    doc.update(overrides)
+    return doc
+
+
+def make_authenticated_approval_flow() -> list[dict[str, Any]]:
+    approval_required = make_authorization_decision("APPROVAL_REQUIRED")
+    approved = make_authorization_decision(
+        "ALLOW",
+        "authenticated-approval",
+        decision_id="authorization-decision-0002",
+        evaluated_at="2026-07-24T01:07:00Z",
+        revocation_checked_at="2026-07-24T01:07:00Z",
+    )
+    return [
+        make_authorization_request(),
+        approval_required,
+        make_approval_challenge(),
+        make_approval_completion(),
+        approved,
+    ]
 
 
 _STAGE_BODIES = {
