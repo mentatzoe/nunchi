@@ -123,6 +123,11 @@ class AuthorizationFlowCases(unittest.TestCase):
         errors = validate_privileged_action_authorization_flow(replay)
         self.assertTrue(any("challenge replayed" in error for error in errors), errors)
 
+    def test_approval_required_without_its_host_only_challenge_rejects(self):
+        flow = [make_authorization_request(), make_authorization_decision("APPROVAL_REQUIRED")]
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(any("missing host-only challenge" in error for error in errors), errors)
+
     def test_completion_cannot_authorize_more_than_one_decision(self):
         flow = make_authenticated_approval_flow()
         second_allow = deepcopy(flow[-1])

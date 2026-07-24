@@ -1969,6 +1969,12 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
             else:
                 completion_decision_counts[completion_id] = 1
 
+    for challenge_id, (index, _decision) in challenge_decisions.items():
+        if challenge_id not in challenges:
+            errors.append(
+                f"records[{index}].approval_challenge_id: missing host-only challenge"
+            )
+
     for challenge_id, (index, challenge) in challenges.items():
         proposal = challenge_decisions.get(challenge_id)
         if proposal is None:

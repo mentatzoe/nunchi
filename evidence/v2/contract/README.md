@@ -15,8 +15,8 @@ separate integrator acceptance.
 **What changed (amendment A3 candidate)**: the new S18 corpus carries the
 closed request/decision/challenge/completion union and rejects malformed digest
 profiles, public operation or room/model authority fields, action/digest/
-requester/capability substitution, wrong approver, challenge and decision
-replay, expiry, policy mismatch, revocation, and unknown persistence. Its
+requester/capability substitution, missing or wrong challenge/approver,
+challenge and decision replay, expiry, policy mismatch, revocation, and unknown persistence. Its
 runtime-only `binding-expiry` cases prove supplied record correlation; they do
 not claim that an event, policy, operator, persistence backend, or effect was
 actually trusted or executed.
@@ -78,7 +78,7 @@ The A3 candidate's isolated, offline dual-validator run was:
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-Result (2026-07-24): **210 tests, OK, 0 skipped** — every oracle-side check
+Result (2026-07-24): **211 tests, OK, 0 skipped** — every oracle-side check
 ran; only the explicit per-class oracle skips applied inside the corpus runner
 (counted below).
 
@@ -105,7 +105,7 @@ uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_
 ```
 
 Result (2026-07-24): attention-request 98 records, attention-decision 134
-records, downstream 184 records, privileged-action-authorization 48 records;
+records, downstream 184 records, privileged-action-authorization 50 records;
 0 mismatched; all records carry the five mandatory fields.
 
 ## Observed per-class partition counts (cases; each case = 2 records)
@@ -118,9 +118,9 @@ records, downstream 184 records, privileged-action-authorization 48 records;
 | `advice-citation` | 0 | 2 | 0 | 0 | 2 |
 | `trigger-membership` | 2 | 0 | 0 | 0 | 2 |
 | `actor-reference-integrity` | 7 | 0 | 2 | 0 | 9 |
-| `binding-expiry` | 0 | 0 | 20 | 12 | 32 |
+| `binding-expiry` | 0 | 0 | 20 | 13 | 33 |
 | `receipt-sequence` | 0 | 0 | 11 | 0 | 11 |
-| **Total cases** | **49** | **67** | **92** | **24** | **232** |
+| **Total cases** | **49** | **67** | **92** | **25** | **233** |
 
 These observed counts match each corpus's authoritative
 `expected-counts.json` exactly (asserted loudly on every load). The
@@ -136,7 +136,7 @@ valid).
 
 | Regime | When | Count |
 |---|---|---|
-| `oracle-class-skip` | Under the pinned command: the oracle skips the two behavioral classes by explicit class | 43 cases (32 `binding-expiry` + 11 `receipt-sequence`; 43 oracle-side records observe `oracle-class-skip`) |
+| `oracle-class-skip` | Under the pinned command: the oracle skips the two behavioral classes by explicit class | 44 cases (33 `binding-expiry` + 11 `receipt-sequence`; 44 oracle-side records observe `oracle-class-skip`) |
 | `baseline-oracle-absence` | Under `python3 -m unittest` (no pinned oracle): every oracle-side check for the six oracle-visible classes is skipped with an explicit count | 189 oracle-side checks (49 attention-request + 67 attention-decision + 61 downstream + 12 privileged-action-authorization), surfaced as 4 counted unittest skips |
 
 ## FR-014 authority-conformance class (CHK099/CHK110/CHK121; 20 cases)
@@ -215,10 +215,10 @@ from those exact schema files (`iter_errors()` count).
 | | `downstream.jsonl` | DWN-BYP-001, DWN-BYP-002, DWN-BYP-101, DWN-BYP-103, DWN-BYP-104, DWN-BYP-301 |
 | `010-V1` Breaking rejection | `attention-request.jsonl` | REQ-V1-101, REQ-V1-102, REQ-V1-103 |
 | | `downstream.jsonl` | DWN-V1-101, DWN-V1-102 |
-| `S18` Provenance-bound privileged action | `privileged-action-authorization.jsonl` | AUTH-S18-001, AUTH-S18-002, AUTH-S18-003, AUTH-S18-004, AUTH-S18-005, AUTH-S18-101, AUTH-S18-102, AUTH-S18-103, AUTH-S18-104, AUTH-S18-105, AUTH-S18-106, AUTH-S18-107, AUTH-S18-201, AUTH-S18-202, AUTH-S18-301, AUTH-S18-302, AUTH-S18-303, AUTH-S18-304, AUTH-S18-305, AUTH-S18-306, AUTH-S18-307, AUTH-S18-308, AUTH-S18-309, AUTH-S18-310 |
+| `S18` Provenance-bound privileged action | `privileged-action-authorization.jsonl` | AUTH-S18-001, AUTH-S18-002, AUTH-S18-003, AUTH-S18-004, AUTH-S18-005, AUTH-S18-101, AUTH-S18-102, AUTH-S18-103, AUTH-S18-104, AUTH-S18-105, AUTH-S18-106, AUTH-S18-107, AUTH-S18-201, AUTH-S18-202, AUTH-S18-301, AUTH-S18-302, AUTH-S18-303, AUTH-S18-304, AUTH-S18-305, AUTH-S18-306, AUTH-S18-307, AUTH-S18-308, AUTH-S18-309, AUTH-S18-310, AUTH-S18-311 |
 
 The `S09` row abbreviates the contiguous run DEC-S09-101 through
 DEC-S09-122 (twenty-two consecutive IDs, all present); every other row
-enumerates its record IDs exhaustively. All 232 case IDs above (210 named
+enumerates its record IDs exhaustively. All 233 case IDs above (211 named
 plus the abbreviated S09 run) are exactly the cases present in the four
 corpora; no evidence record is outside this manifest.
