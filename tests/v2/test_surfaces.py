@@ -548,7 +548,9 @@ class CodexSurfaceTests(unittest.TestCase):
                             "type": "item.completed",
                             "item": {
                                 "type": "agent_message",
-                                "text": '{"kind":"silence"}',
+                                "text": json.dumps(
+                                    {"action_json": '{"kind":"silence"}'}
+                                ),
                             },
                         }
                     ),
@@ -576,6 +578,7 @@ class CodexSurfaceTests(unittest.TestCase):
                     expand=lambda **_: {},
                     cancel=threading.Event(),
                 )
+            schema = json.loads(participant.output_schema_path.read_text())
         self.assertIsNone(result)
         command = popen.call_args.args[0]
         self.assertNotIn("--full-auto", command)
@@ -585,6 +588,12 @@ class CodexSurfaceTests(unittest.TestCase):
         self.assertIn("--strict-config", command)
         self.assertIn("read-only", command)
         self.assertIn("--output-schema", command)
+        self.assertNotIn("oneOf", schema)
+        self.assertEqual(["action_json"], schema["required"])
+        self.assertEqual(
+            {"action_json"},
+            set(schema["properties"]),
+        )
         for feature in ("shell_tool", "unified_exec", "apps", "plugins"):
             self.assertIn(feature, command)
         child_env = popen.call_args.kwargs["env"]
@@ -736,9 +745,13 @@ class CodexSurfaceTests(unittest.TestCase):
                             "type": "agent_message",
                             "text": json.dumps(
                                 {
-                                    "kind": "message",
-                                    "origin_event_id": "discord:message:1",
-                                    "text": "hello",
+                                    "action_json": json.dumps(
+                                        {
+                                            "kind": "message",
+                                            "origin_event_id": "discord:message:1",
+                                            "text": "hello",
+                                        }
+                                    )
                                 }
                             ),
                         },
@@ -749,6 +762,27 @@ class CodexSurfaceTests(unittest.TestCase):
         thread_id, action = _parse_codex_output(output)
         self.assertEqual("019f9432-9300-7dd1-8225-d7f10f921968", thread_id)
         self.assertEqual("message", action["kind"])
+
+    def test_codex_jsonl_parser_rejects_malformed_action_envelope(self):
+        for text in (
+            '{"kind":"silence"}',
+            '{"action_json":"not-json"}',
+            '{"action_json":"[]"}',
+            '{"action_json":"{\\"kind\\":\\"silence\\"}","extra":true}',
+        ):
+            with self.subTest(text=text):
+                _, action = _parse_codex_output(
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "type": "agent_message",
+                                "text": text,
+                            },
+                        }
+                    )
+                )
+                self.assertIsNone(action)
 
     def test_codex_mcp_transport_binds_exact_output(self):
         secret = b"y" * 32
