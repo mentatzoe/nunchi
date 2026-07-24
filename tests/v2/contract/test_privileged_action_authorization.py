@@ -140,6 +140,19 @@ class AuthorizationFlowCases(unittest.TestCase):
             errors,
         )
 
+    def test_approval_recheck_requires_a_fresh_revocation_check(self):
+        flow = make_authenticated_approval_flow()
+        flow[3]["recheck"]["revocation_checked_at"] = "2000-01-01T00:00:00Z"
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any(
+                "recheck.revocation_checked_at: must equal records[3].recheck.evaluated_at"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
+
     def test_approval_recheck_must_keep_the_challenge_policy(self):
         flow = make_authenticated_approval_flow()
         revision = "2026-07-24T02:00:00Z"

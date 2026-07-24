@@ -72,7 +72,7 @@ The verified offline dual-validator command for the active A3 implementation:
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-Result (2026-07-24): **214 tests, OK, 0 skipped** — every oracle-side check
+Result (2026-07-24): **215 tests, OK, 0 skipped** — every oracle-side check
 ran; only the explicit per-class oracle skips applied inside the corpus runner
 (counted below).
 

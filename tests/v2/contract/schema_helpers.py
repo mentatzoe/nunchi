@@ -2123,6 +2123,13 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
                     errors.append(
                         f"records[{index}].recheck.persistence_status: ALLOW requires durable"
                     )
+                _authorization_same_moment(
+                    errors,
+                    f"records[{index}].recheck.revocation_checked_at",
+                    recheck_checked,
+                    f"records[{index}].recheck.evaluated_at",
+                    recheck_time,
+                )
             if not semantic_equal(recheck["policy_provenance"], challenge["policy_provenance"]):
                 errors.append(
                     f"records[{index}].recheck.policy_provenance: must equal the approval challenge"
