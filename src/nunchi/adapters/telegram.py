@@ -61,12 +61,18 @@ class TelegramTransport:
         try:
             result = self._call("sendMessage", payload)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            return TransportResult("failed", f"Telegram HTTP {exc.code}: {detail}")
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-            return TransportResult("unknown", f"Telegram acknowledgement lost: {exc}")
+            return TransportResult("failed", f"Telegram returned HTTP {exc.code}")
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            return TransportResult("unknown", "Telegram acknowledgement was lost")
         message_id = result.get("message_id") if isinstance(result, dict) else None
         return TransportResult("sent", f"telegram:message:{wake['room']['id']}:{message_id}")
+
+    def authenticated_actor_id(self) -> str:
+        payload = self._call("getMe", {})
+        actor_id = payload.get("id") if isinstance(payload, Mapping) else None
+        if not isinstance(actor_id, (str, int)) or str(actor_id) == "":
+            raise ValidationError("Telegram getMe response lacks a stable actor ID")
+        return f"telegram:actor:{actor_id}"
 
     def updates(self, offset: int | None):
         payload = {
@@ -116,6 +122,29 @@ def _save_offset(path: Path, offset: int) -> None:
     finally:
         os.close(fd)
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _save_backfill_complete(path: Path) -> None:
+    temporary = path.with_suffix(".tmp")
+    payload = b'{"backfill_complete":true,"schema_version":2}'
+    fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    try:
+        if os.write(fd, payload) != len(payload):
+            raise OSError("short Telegram backfill marker write")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -143,37 +172,65 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe["configured"] = True
             print(json.dumps(probe, sort_keys=True, separators=(",", ":")))
             return 0
+        if transport.authenticated_actor_id() != runtime.binding.actor_id:
+            raise ValidationError(
+                "authenticated Telegram bot does not match exact self binding"
+            )
         if args.stdin:
             failed = False
             for line in sys.stdin:
                 if not line.strip():
                     continue
                 try:
-                    runtime.process(json.loads(line))
+                    runtime.submit(json.loads(line))
                 except (json.JSONDecodeError, NunchiError, ValueError) as exc:
                     failed = True
                     print(f"telegram delivery error: {exc}", file=sys.stderr)
-            return 1 if failed else 0
+            if not runtime.drain(300):
+                failed = True
+                print("telegram participant deadline exceeded", file=sys.stderr)
+            return 1 if failed or runtime.lane.errors else 0
 
         offset_path = Path(config["state_directory"]) / "telegram-update-offset"
+        backfill_path = Path(config["state_directory"]) / "telegram-backfill-complete.json"
+        if backfill_path.exists():
+            try:
+                marker = json.loads(backfill_path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    "Telegram backfill marker is untrustworthy"
+                ) from exc
+            if marker != {"backfill_complete": True, "schema_version": 2}:
+                raise ValidationError(
+                    "Telegram backfill marker has an invalid closed shape"
+                )
         offset = int(offset_path.read_text()) if offset_path.exists() else None
+        backfilling = not backfill_path.exists()
         while True:
             updates = transport.updates(offset)
             if not isinstance(updates, list):
                 raise ValidationError("Telegram getUpdates result must be an array")
-            first_sync = offset is None
             for update in updates:
                 if not isinstance(update, Mapping) or not isinstance(update.get("update_id"), int):
                     continue
-                runtime.process(update, live=not first_sync)
+                if backfilling:
+                    runtime.process(update, live=False)
+                else:
+                    runtime.submit(update)
                 offset = max(offset or 0, update["update_id"] + 1)
             if offset is not None:
                 _save_offset(offset_path, offset)
+            if backfilling and not updates:
+                _save_backfill_complete(backfill_path)
+                backfilling = False
             if args.once:
-                return 0
-    except (NunchiError, urllib.error.URLError, OSError, ValueError) as exc:
+                return 0 if runtime.drain(300) and not runtime.lane.errors else 1
+    except NunchiError as exc:
         print(f"telegram adapter error: {exc}", file=sys.stderr)
         return 3 if isinstance(exc, ValidationError) else 1
+    except (urllib.error.URLError, OSError, ValueError):
+        print("telegram adapter operational failure", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

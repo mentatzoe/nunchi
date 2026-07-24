@@ -146,6 +146,8 @@ def v2_notification_from_dispatch(
     data: dict,
     *,
     sequence: int | None,
+    delivery_epoch: str,
+    transport_self_actor_id: str,
     room_id: str | None = None,
 ) -> dict:
     """Build the closed shared V2 notification for one gateway dispatch.
@@ -158,6 +160,14 @@ def v2_notification_from_dispatch(
     from nunchi.adapters.v2 import normalize_discord_gateway
     from nunchi.observation import ParticipantBinding
 
+    if (
+        not isinstance(transport_self_actor_id, str)
+        or not transport_self_actor_id.startswith("discord:actor:")
+        or not transport_self_actor_id.removeprefix("discord:actor:").isdigit()
+    ):
+        raise ValueError("Discord transport self actor is unavailable or malformed")
+    if not isinstance(delivery_epoch, str) or not delivery_epoch:
+        raise ValueError("Discord gateway delivery epoch is unavailable")
     native = dict(data)
     if room_id is not None:
         native["room_id"] = room_id
@@ -169,7 +179,12 @@ def v2_notification_from_dispatch(
         continuity_scope_id=f"discord:{room_id or data.get('channel_id') or data.get('guild_id') or 'unknown'}",
     )
     delivery = normalize_discord_gateway(
-        {"t": event_type, "s": sequence, "d": native},
+        {
+            "t": event_type,
+            "s": sequence,
+            "delivery_epoch": delivery_epoch,
+            "d": native,
+        },
         placeholder,
     )
     return {
@@ -179,4 +194,5 @@ def v2_notification_from_dispatch(
         "event": delivery.event,
         "actors": delivery.actors,
         "continuity_gap": False,
+        "transport_self_actor_id": transport_self_actor_id,
     }

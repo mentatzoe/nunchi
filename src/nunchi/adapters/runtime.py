@@ -32,7 +32,7 @@ from ..participant import (
     TransportResult,
 )
 from ..participant_model import OpenAICompatibleParticipant
-from ..pipeline import DeliveryOutcome, NunchiV2Pipeline
+from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from .v2 import NORMALIZERS
 
@@ -165,7 +165,7 @@ class ReferenceAdapterRuntime:
             "limits",
             "state_directory",
         }
-        optional = {"authorization", "transport"}
+        optional = {"authorization", "transport", "participant_timeout_seconds"}
         if set(config) - (required | optional) or required - set(config):
             raise ValidationError("adapter config has a missing or unexpected field")
         if config["schema_version"] != 2:
@@ -279,6 +279,10 @@ class ReferenceAdapterRuntime:
             scheduler=scheduler,
             receipts=receipts,
             privileged=privileged,
+            participant_timeout_seconds=config.get(
+                "participant_timeout_seconds",
+                300.0,
+            ),
         )
         attention = AttentionEngine(
             profile=profile,
@@ -294,6 +298,7 @@ class ReferenceAdapterRuntime:
             host=host,
             scheduler=scheduler,
         )
+        self.lane = AsyncDeliveryLane(self.pipeline)
 
     def process(
         self,
@@ -316,6 +321,32 @@ class ReferenceAdapterRuntime:
             actors=delivery.actors,
             authorized_route=delivery.room_id == self.binding.room_id,
         )
+
+    def submit(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        live: bool = True,
+    ) -> DeliveryOutcome:
+        """Retain native ingress promptly and schedule work off the callback."""
+        delivery = NORMALIZERS[self.surface](payload, self.binding)
+        if not live:
+            observed = self.pipeline.observation.observe(
+                delivery_id=delivery.delivery_id,
+                event=delivery.event,
+                actors=delivery.actors,
+                authorized_route=delivery.room_id == self.binding.room_id,
+            )
+            return DeliveryOutcome(observed, (), False)
+        return self.lane.submit(
+            delivery_id=delivery.delivery_id,
+            event=delivery.event,
+            actors=delivery.actors,
+            authorized_route=delivery.room_id == self.binding.room_id,
+        )
+
+    def drain(self, timeout: float | None = None) -> bool:
+        return self.lane.drain(timeout)
 
     def probe(self) -> dict[str, Any]:
         return {
@@ -344,4 +375,4 @@ class ReferenceAdapterRuntime:
         }
 
     def restart(self) -> None:
-        self.pipeline.restart()
+        self.lane.restart()

@@ -254,10 +254,9 @@ class OpenAICompatibleAttentionModel:
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 payload = json.load(response)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise AttentionError(f"attention provider HTTP {exc.code}: {detail}") from exc
+            raise AttentionError(f"attention provider returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, socket.timeout, OSError, json.JSONDecodeError) as exc:
-            raise AttentionError(f"attention provider failed: {exc}") from exc
+            raise AttentionError("attention provider request failed") from exc
         if not isinstance(payload, dict):
             raise AttentionError("attention provider response was not an object")
         if "choices" in payload:
@@ -504,7 +503,12 @@ class AttentionEngine:
                 if "deadline" in str(exc)
                 else "provider-failure"
             )
-            return self._error(checked, code, str(exc), invoked=True)
+            detail = {
+                "cancelled": "attention work was cancelled",
+                "deadline-exceeded": "participant attention deadline expired",
+                "provider-failure": "participant attention model failed",
+            }[code]
+            return self._error(checked, code, detail, invoked=True)
 
         disposition = judgment["disposition"]
         effective = disposition

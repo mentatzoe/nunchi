@@ -63,8 +63,18 @@ def normalize_discord_gateway(
         raise ValidationError("Discord gateway delivery must be an object")
     event_type = payload.get("t")
     sequence = payload.get("s")
+    delivery_epoch = payload.get("delivery_epoch")
+    occurrence = (
+        f"{delivery_epoch}:{sequence}"
+        if isinstance(delivery_epoch, str)
+        and delivery_epoch
+        and sequence is not None
+        else None
+    )
     data = payload.get("d")
-    delivery_id = f"discord:gateway:{sequence if sequence is not None else 'unknown'}:{event_type or 'unknown'}"
+    delivery_id = (
+        f"discord:gateway:{occurrence or 'unknown'}:{event_type or 'unknown'}"
+    )
     if not isinstance(data, Mapping):
         return NativeDelivery(delivery_id, None, None, {}, "Discord payload has no event data")
     room_id = str(data.get("channel_id") or data.get("room_id") or "")
@@ -142,7 +152,18 @@ def normalize_discord_gateway(
         reaction = emoji.get("id") or emoji.get("name")
         if not reaction:
             return NativeDelivery(delivery_id, room_id, None, {}, "reaction lacks emoji")
-        event_id = f"{event_type}:{user_id}:{message_id}:{emoji.get('id') or emoji.get('name')}"
+        if occurrence is None:
+            return NativeDelivery(
+                delivery_id,
+                room_id,
+                None,
+                {},
+                "reaction lacks a stable delivery epoch and sequence",
+            )
+        event_id = (
+            f"{event_type}:{user_id}:{message_id}:"
+            f"{emoji.get('id') or emoji.get('name')}:{occurrence}"
+        )
         canonical = {
             "id": _event("discord", "reaction", event_id),
             "type": "reaction",
@@ -160,14 +181,19 @@ def normalize_discord_gateway(
     if event_type in ("GUILD_MEMBER_ADD", "GUILD_MEMBER_REMOVE"):
         user = data.get("user")
         guild_id = data.get("guild_id")
-        if not isinstance(user, Mapping) or user.get("id") is None or guild_id is None:
+        if (
+            not isinstance(user, Mapping)
+            or user.get("id") is None
+            or guild_id is None
+            or occurrence is None
+        ):
             return NativeDelivery(delivery_id, None, None, {}, "membership lacks native identity")
         actor_id = _actor("discord", user["id"])
         canonical = {
             "id": _event(
                 "discord",
                 "membership",
-                f"{guild_id}:{user['id']}:{event_type}:{sequence}",
+                f"{guild_id}:{user['id']}:{event_type}:{occurrence}",
             ),
             "type": "membership",
             "scope": {"kind": "space", "id": str(guild_id)},

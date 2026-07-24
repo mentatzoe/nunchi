@@ -16,6 +16,7 @@ from nunchi.attention import (
 )
 from nunchi.authorization import (
     AuthorizationCoordinator,
+    AuthorizationError,
     AuthorizationJournal,
     CapabilityRule,
     PolicySnapshot,
@@ -33,7 +34,7 @@ from nunchi.participant import (
     ParticipantTurnHost,
     TransportResult,
 )
-from nunchi.pipeline import NunchiV2Pipeline
+from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 from nunchi.v2_contracts import classifier_projection, validate_receipt_stream
 from tests.v2.contract.schema_helpers import (
@@ -109,6 +110,7 @@ def foundation(
     persistence_path=None,
     limits=None,
     transport=None,
+    participant_timeout_seconds=300,
 ):
     binding = ParticipantBinding(
         participant_id="vigil",
@@ -147,6 +149,7 @@ def foundation(
         transport=transport,
         scheduler=scheduler,
         receipts=receipts,
+        participant_timeout_seconds=participant_timeout_seconds,
     )
     pipeline = NunchiV2Pipeline(
         observation=observation,
@@ -369,6 +372,51 @@ class AttentionAndHostTests(unittest.TestCase):
         request_id = outcome.opportunities[0].request_id
         self.assertIn("profile-binding-mismatch", receipts.records(request_id)[1]["body"]["error"]["code"])
 
+    def test_attention_and_dispatch_errors_do_not_persist_exception_content(self):
+        secret = "room-context-and-credential-secret"
+        model = FixtureModel(fail=True)
+        pipeline, _, _, receipts = foundation(
+            model=model,
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "safe output",
+            },
+        )
+        model.judge = lambda **_: (_ for _ in ()).throw(RuntimeError(secret))
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        serialized = json.dumps(
+            receipts.records(outcome.opportunities[0].request_id)
+        )
+        self.assertNotIn(secret, serialized)
+
+        class FailingTransport:
+            def dispatch(self, **_):
+                raise RuntimeError(secret)
+
+        second, _, _, second_receipts = foundation(
+            transport=FailingTransport(),
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e2",
+                "text": "safe output",
+            },
+        )
+        second_outcome = second.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        second_stream = second_receipts.records(
+            second_outcome.opportunities[0].request_id
+        )
+        self.assertNotIn(secret, json.dumps(second_stream))
+        self.assertEqual("unknown", second_outcome.opportunities[0].transport.delivery)
+
     def test_participant_silence_makes_no_transport_stage(self):
         pipeline, _, transport, receipts = foundation(participant=lambda **_: None)
         outcome = pipeline.handle_delivery(
@@ -414,6 +462,72 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual(["observation", "attention"], [
             record["stage"] for record in receipts.records(request_id)
         ])
+
+    def test_host_deadline_invalidates_ignoring_participant_without_output(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def participant(**_):
+            entered.set()
+            release.wait(2)
+            return {"kind": "message", "origin_event_id": "e1", "text": "late"}
+
+        pipeline, _, transport, receipts = foundation(
+            participant=participant,
+            participant_timeout_seconds=0.05,
+        )
+        started = time.monotonic()
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        release.set()
+        self.assertTrue(entered.is_set())
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertFalse(pipeline.scheduler.active)
+        self.assertEqual([], transport.calls)
+        self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_async_live_ingress_is_active_plus_newest_not_fifo(self):
+        entered = threading.Event()
+        release = threading.Event()
+        seen = []
+
+        def participant(**kwargs):
+            seen.append(kwargs["wake"]["trigger_event_id"])
+            if len(seen) == 1:
+                entered.set()
+                release.wait(2)
+            return None
+
+        pipeline, _, _, _ = foundation(
+            participant=participant,
+            limits=ObservationLimits(snapshot_events=20),
+        )
+        lane = AsyncDeliveryLane(pipeline)
+        lane.submit(
+            delivery_id="d0",
+            event=message("e0"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertTrue(entered.wait(1))
+        for index in range(1, 8):
+            outcome = lane.submit(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertTrue(outcome.coalesced)
+        release.set()
+        self.assertTrue(lane.drain(2))
+        self.assertEqual(["e0", "e7"], seen)
+        self.assertEqual(
+            [f"e{index}" for index in range(8)],
+            [event["id"] for event in pipeline.observation.retained_events()],
+        )
 
     def test_twenty_events_during_slow_turn_create_one_fresh_opportunity(self):
         release = threading.Event()
@@ -518,6 +632,71 @@ class AuthorizationTests(unittest.TestCase):
             journal=self.journal,
             executors={"workspace.file.write": execute},
         )
+
+    def test_pipeline_cancel_discards_pending_approval(self):
+        approval_rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            direct_allow=False,
+            impact="high",
+        )
+        coordinator = self.coordinator(
+            StaticPolicySource(
+                PolicySnapshot(
+                    "policy",
+                    "approval",
+                    (approval_rule,),
+                    ("operator:zoe",),
+                )
+            )
+        )
+        self.pipeline.host.privileged = coordinator
+        self.pipeline.host.participant = lambda **_: {
+            "kind": "privileged",
+            "origin_event_id": "e2",
+            "capability": "workspace.file.write",
+            "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+            "operation": {"path": "README.md", "content": "bounded"},
+        }
+        outcome = self.pipeline.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+        challenge = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+        self.pipeline.cancel()
+        result = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge,
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_corrupt_authorization_journal_and_executor_error_detail_fail_safe(self):
+        corrupt = Path(self.temp.name) / "corrupt-authorization.jsonl"
+        corrupt.write_text('{"kind":"invented"}\n')
+        with self.assertRaises(AuthorizationError):
+            AuthorizationJournal(corrupt)
+
+        secret = "executor-secret-room-content"
+        coordinator = self.coordinator(
+            result=TransportResult("unknown", secret)
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unknown", result.delivery)
+        self.assertNotIn(secret, json.dumps(self.journal.records()))
 
     def proposal(self):
         return {
@@ -653,7 +832,7 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
 
-    def test_unknown_outcome_is_a_consumed_effect_not_fresh_authority(self):
+    def test_nonidempotent_unknown_requires_fresh_duplicate_risk_approval(self):
         coordinator = self.coordinator(
             result=TransportResult("unknown", "acknowledgement lost")
         )
@@ -668,8 +847,81 @@ class AuthorizationTests(unittest.TestCase):
             cancel=threading.Event(),
         )
         self.assertEqual("unknown", first.delivery)
-        self.assertEqual("failed", second.delivery)
+        self.assertEqual("unavailable", second.delivery)
         self.assertEqual(1, len(self.native_calls))
+        pending = coordinator.pending_for_operator()
+        self.assertEqual(1, len(pending))
+        self.assertTrue(pending[0]["duplicate_effect_risk"])
+        self.assertEqual(self.proposal()["operation"], pending[0]["operation"])
+        self.assertEqual("e1", pending[0]["origin_observation"]["id"])
+        retried = coordinator.complete_authenticated_approval(
+            approval_challenge_id=pending[0]["challenge"]["approval_challenge_id"],
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("unknown", retried.delivery)
+        self.assertEqual(2, len(self.native_calls))
+        retries = [
+            record
+            for record in self.journal.records()
+            if record["kind"] == "effect_retry_commit"
+        ]
+        self.assertEqual(1, len(retries))
+        self.assertTrue(retries[0]["duplicate_effect_risk"])
+
+    def test_idempotent_unknown_reuses_same_key_and_confirmation_closes_replay(self):
+        idempotent_rule = CapabilityRule(
+            **{**vars(self.rule), "target_idempotency": True}
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "idempotent", (idempotent_rule,), ("operator:zoe",))
+        )
+        results = [
+            TransportResult("unknown", "lost"),
+            TransportResult("sent", "confirmed"),
+        ]
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return results.pop(0)
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=self.journal,
+            executors={"workspace.file.write": execute},
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        third = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual(("unknown", "sent", "failed"), (
+            first.delivery,
+            second.delivery,
+            third.delivery,
+        ))
+        self.assertEqual(2, len(self.native_calls))
+        self.assertIsNotNone(self.native_calls[0][1])
+        self.assertEqual(self.native_calls[0][1], self.native_calls[1][1])
+        self.assertFalse(
+            self.journal.unknown(
+                next(
+                    record["effect_fingerprint"]
+                    for record in self.journal.records()
+                    if record["kind"] == "effect_commit"
+                )
+            )
+        )
 
     def test_operation_digest_is_order_stable_and_rejects_nonfinite(self):
         self.assertEqual(

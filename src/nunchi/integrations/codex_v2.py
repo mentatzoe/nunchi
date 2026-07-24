@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
-import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -32,7 +34,7 @@ from ..participant import (
     ParticipantTurnHost,
     TransportResult,
 )
-from ..pipeline import DeliveryOutcome, NunchiV2Pipeline
+from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from ..v2_contracts import validate_canonical_event
 from ..mcp_discord.authorization import make_tool_authorization
@@ -40,6 +42,32 @@ from .mcp_client import StreamableMCPClient
 
 NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 _THREAD_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_DISABLED_CODEX_FEATURES = (
+    "apps",
+    "auth_elicitation",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "code_mode_host",
+    "computer_use",
+    "hooks",
+    "image_generation",
+    "in_app_browser",
+    "multi_agent",
+    "network_proxy",
+    "plugins",
+    "plugin_sharing",
+    "realtime_conversation",
+    "remote_plugin",
+    "request_permissions_tool",
+    "shell_tool",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_call_mcp_elicitation",
+    "tool_suggest",
+    "unified_exec",
+    "workspace_dependencies",
+)
 
 
 def _strip_json_fence(text: str) -> str:
@@ -93,41 +121,165 @@ class CodexParticipant:
         profile: ParticipantProfile,
         config: Mapping[str, Any],
         binding: ParticipantBinding,
+        state_directory: str | Path,
     ) -> None:
-        allowed = {
-            "binary",
-            "args",
-            "working_directory",
-            "timeout_seconds",
-            "session_mode",
-            "session_state_path",
-        }
+        allowed = {"model", "timeout_seconds", "session_mode"}
         if set(config) - allowed:
             raise ValidationError("Codex participant config has unexpected fields")
         self.profile = profile
         self.binding = binding
-        self.binary = str(config.get("binary", "codex"))
-        raw_args = config.get("args", ["--full-auto"])
-        if isinstance(raw_args, str):
-            self.args = tuple(shlex.split(raw_args))
-        elif isinstance(raw_args, list) and all(isinstance(item, str) for item in raw_args):
-            self.args = tuple(raw_args)
-        else:
-            raise ValidationError("Codex args must be a string or array of strings")
-        self.working_directory = Path(config.get("working_directory", ".")).resolve()
+        binary = shutil.which("codex")
+        if binary is None:
+            raise ValidationError("Codex executable is not installed on trusted PATH")
+        self.binary = binary
+        self.model = config.get("model")
+        if self.model is not None and (
+            not isinstance(self.model, str) or not self.model
+        ):
+            raise ValidationError("Codex model must be a non-empty string")
+        state_root = Path(state_directory)
+        self.working_directory = state_root / "participant-workspace"
+        self.working_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.timeout_seconds = float(config.get("timeout_seconds", 300))
-        if self.timeout_seconds <= 0:
-            raise ValidationError("Codex timeout must be positive")
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValidationError("Codex timeout must be positive and finite")
         self.session_mode = str(config.get("session_mode", "persistent"))
         if self.session_mode not in ("persistent", "fresh"):
             raise ValidationError("Codex session_mode must be persistent or fresh")
-        self.session_path = Path(
-            config.get(
-                "session_state_path",
-                self.working_directory / ".nunchi-codex-v2-session.json",
-            )
-        )
+        self.session_path = state_root / "codex-v2-session.json"
+        self.output_schema_path = state_root / "codex-v2-action.schema.json"
+        self._write_output_schema()
+        behavior = {
+            "profile_sha256": self.profile.sha256,
+            "participant_id": self.binding.participant_id,
+            "actor_id": self.binding.actor_id,
+            "room_id": self.binding.room_id,
+            "continuity_scope_id": self.binding.continuity_scope_id,
+            "model": self.model,
+            "disabled_features": list(_DISABLED_CODEX_FEATURES),
+            "sandbox": "read-only",
+        }
+        self.behavior_sha256 = hashlib.sha256(
+            json.dumps(
+                behavior,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         self._lock = threading.Lock()
+
+    def _write_output_schema(self) -> None:
+        common = {
+            "origin_event_id": {"type": "string", "minLength": 1},
+        }
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"kind": {"const": "silence"}},
+                    "required": ["kind"],
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"const": "message"},
+                        **common,
+                        "text": {"type": "string"},
+                    },
+                    "required": ["kind", "origin_event_id", "text"],
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"const": "reply"},
+                        **common,
+                        "target_event_id": {"type": "string", "minLength": 1},
+                        "text": {"type": "string"},
+                    },
+                    "required": [
+                        "kind",
+                        "origin_event_id",
+                        "target_event_id",
+                        "text",
+                    ],
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"const": "reaction"},
+                        **common,
+                        "target_event_id": {"type": "string", "minLength": 1},
+                        "reaction": {"type": "string", "minLength": 1},
+                        "operation": {"enum": ["add", "remove"]},
+                    },
+                    "required": [
+                        "kind",
+                        "origin_event_id",
+                        "target_event_id",
+                        "reaction",
+                        "operation",
+                    ],
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"const": "privileged"},
+                        **common,
+                        "capability": {"type": "string", "minLength": 1},
+                        "resource": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "kind": {"type": "string", "minLength": 1},
+                                "id": {"type": "string", "minLength": 1},
+                            },
+                            "required": ["kind", "id"],
+                        },
+                        "operation": {"type": "object"},
+                    },
+                    "required": [
+                        "kind",
+                        "origin_event_id",
+                        "capability",
+                        "resource",
+                        "operation",
+                    ],
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "kind": {"const": "expand"},
+                        "direction": {"enum": ["before", "after", "around"]},
+                        "anchor_event_id": {"type": "string", "minLength": 1},
+                        "max_events": {"type": "integer", "minimum": 1},
+                        "max_bytes": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["kind", "direction"],
+                },
+            ],
+        }
+        payload = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()
+        temporary = self.output_schema_path.with_suffix(".tmp")
+        fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        try:
+            if os.write(fd, payload) != len(payload):
+                raise OSError("short Codex output-schema write")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, self.output_schema_path)
+        directory_fd = os.open(self.output_schema_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     def _load_session(self) -> str | None:
         if self.session_mode == "fresh" or not self.session_path.exists():
@@ -140,14 +292,22 @@ class CodexParticipant:
             "schema_version",
             "thread_id",
             "participant_id",
+            "actor_id",
+            "room_id",
             "continuity_scope_id",
+            "profile_sha256",
+            "behavior_sha256",
         }
         if not isinstance(state, dict) or set(state) != expected:
             raise RuntimeError("Codex session state has an invalid closed shape")
         if (
             state["schema_version"] != 2
             or state["participant_id"] != self.binding.participant_id
+            or state["actor_id"] != self.binding.actor_id
+            or state["room_id"] != self.binding.room_id
             or state["continuity_scope_id"] != self.binding.continuity_scope_id
+            or state["profile_sha256"] != self.profile.sha256
+            or state["behavior_sha256"] != self.behavior_sha256
             or not isinstance(state["thread_id"], str)
             or not _THREAD_ID.fullmatch(state["thread_id"])
         ):
@@ -162,7 +322,11 @@ class CodexParticipant:
                 "schema_version": 2,
                 "thread_id": thread_id,
                 "participant_id": self.binding.participant_id,
+                "actor_id": self.binding.actor_id,
+                "room_id": self.binding.room_id,
                 "continuity_scope_id": self.binding.continuity_scope_id,
+                "profile_sha256": self.profile.sha256,
+                "behavior_sha256": self.behavior_sha256,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -175,6 +339,11 @@ class CodexParticipant:
         finally:
             os.close(fd)
         os.replace(temporary, self.session_path)
+        directory_fd = os.open(self.session_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     def _prompt(self, wake: Mapping[str, Any]) -> str:
         packet = json.dumps(
@@ -197,7 +366,9 @@ class CodexParticipant:
             "{\"kind\":\"silence\"}. A contribution is "
             "{\"kind\":\"message\",\"origin_event_id\":\"<visible event id>\","
             "\"text\":\"...\"}; reply and reaction use the Nunchi V2 action "
-            "shapes. If coverage shows more context, you may first return "
+            "shapes. A privileged proposal uses the V2 privileged shape and "
+            "never grants its own authority. If coverage shows more context, "
+            "you may first return "
             "{\"kind\":\"expand\",\"direction\":\"before|after|around\","
             "\"anchor_event_id\":\"<visible event id>\",\"max_events\":12,"
             "\"max_bytes\":16384}; the host mediates at most three pages and "
@@ -210,7 +381,23 @@ class CodexParticipant:
     def __call__(self, *, wake, expand, cancel):
         with self._lock:
             active_thread = self._load_session()
-            extra = self.args if "--json" in self.args else (*self.args, "--json")
+            extra = [
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--strict-config",
+                "--config",
+                'sandbox_mode="read-only"',
+                "--output-schema",
+                str(self.output_schema_path),
+                "--json",
+                *(
+                    item
+                    for feature in _DISABLED_CODEX_FEATURES
+                    for item in ("--disable", feature)
+                ),
+            ]
+            if self.model is not None:
+                extra.extend(("--model", self.model))
             prompt = self._prompt(wake)
             for expansion_number in range(4):
                 if active_thread:
@@ -228,6 +415,8 @@ class CodexParticipant:
                         self.binary,
                         "exec",
                         "--skip-git-repo-check",
+                        "--sandbox",
+                        "read-only",
                         *extra,
                         prompt,
                     ]
@@ -235,18 +424,18 @@ class CodexParticipant:
                     command,
                     cwd=self.working_directory,
                     env={
-                        key: value
-                        for key, value in os.environ.items()
-                        if not (
-                            key.startswith("NUNCHI_")
-                            or key.startswith("OPENAI_")
-                            or key.startswith("OPENROUTER_")
-                            or key in {
-                                "DISCORD_BOT_TOKEN",
-                                "MATRIX_ACCESS_TOKEN",
-                                "TELEGRAM_BOT_TOKEN",
-                            }
+                        key: os.environ[key]
+                        for key in (
+                            "CODEX_HOME",
+                            "HOME",
+                            "LANG",
+                            "LC_ALL",
+                            "LOGNAME",
+                            "PATH",
+                            "TMPDIR",
+                            "USER",
                         )
+                        if key in os.environ
                     },
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -349,7 +538,7 @@ class MCPDiscordTransport:
         if not isinstance(result, Mapping):
             return "MCP tool returned an invalid result"
         if result.get("isError") is True:
-            return str(result.get("content") or "MCP tool failed")
+            return "MCP tool failed"
         return None
 
     def dispatch(self, *, action, wake) -> TransportResult:
@@ -385,8 +574,8 @@ class MCPDiscordTransport:
         )
         try:
             result = self.client.call_tool(name, arguments)
-        except BaseException as exc:
-            return TransportResult("unknown", f"Discord MCP acknowledgement lost: {exc}")
+        except BaseException:
+            return TransportResult("unknown", "Discord MCP acknowledgement was lost")
         error = self._tool_error(result)
         if error:
             return TransportResult("failed", error)
@@ -461,6 +650,7 @@ class CodexRoomRuntime:
             profile=profile,
             config=config["codex"],
             binding=self.binding,
+            state_directory=state,
         )
         host = ParticipantTurnHost(
             observation=observation,
@@ -473,6 +663,7 @@ class CodexRoomRuntime:
             ),
             scheduler=scheduler,
             receipts=receipts,
+            participant_timeout_seconds=participant.timeout_seconds + 5,
         )
         attention = AttentionEngine(
             profile=profile,
@@ -486,6 +677,9 @@ class CodexRoomRuntime:
             host=host,
             scheduler=scheduler,
         )
+        self.lane = AsyncDeliveryLane(self.pipeline)
+        self.client = client
+        self.output_secret = self._output_secret(config["transport"])
 
     @staticmethod
     def _output_secret(transport: Mapping[str, Any]) -> bytes:
@@ -507,6 +701,8 @@ class CodexRoomRuntime:
             "event",
             "actors",
             "continuity_gap",
+            "target_participant_id",
+            "transport_self_actor_id",
         }
         if not isinstance(params, Mapping) or set(params) != required:
             raise ValidationError("shared Discord notification has an invalid V2 shape")
@@ -514,20 +710,75 @@ class CodexRoomRuntime:
             raise ValidationError("shared Discord notification is not V2")
         if not isinstance(params["continuity_gap"], bool):
             raise ValidationError("shared Discord continuity_gap must be a boolean")
+        if params["target_participant_id"] != self.binding.participant_id:
+            raise ValidationError("shared Discord notification targets another participant")
+        if params["transport_self_actor_id"] != self.binding.actor_id:
+            raise ValidationError("authenticated Discord self differs from exact binding")
+        if str(params["room_id"]) != self.binding.room_id:
+            raise ValidationError("shared Discord notification targets another room")
         if params["continuity_gap"]:
             if params["event"] is not None or params["actors"] != {}:
                 raise ValidationError("Discord gap notification cannot fabricate event facts")
+            self.lane.cancel()
             observed = self.pipeline.observation.mark_continuity_gap(
                 delivery_id=str(params["delivery_id"]),
                 detail="shared Discord transport declared a bounded queue gap",
             )
             return DeliveryOutcome(observed, (), False)
         event = validate_canonical_event(params["event"]) if params["event"] is not None else None
-        return self.pipeline.handle_delivery(
+        return self.lane.submit(
             delivery_id=params["delivery_id"],
             event=event,
             actors=params["actors"],
-            authorized_route=str(params["room_id"]) == self.binding.room_id,
+            authorized_route=True,
+        )
+
+    def register_transport(self) -> None:
+        arguments = {
+            "participant_id": self.binding.participant_id,
+            "channel_id": self.binding.room_id,
+        }
+        supplied = {
+            **arguments,
+            "_nunchi_authorization": make_tool_authorization(
+                secret=self.output_secret,
+                request_id=f"transport-registration-{time.time_ns()}",
+                participant_id=self.binding.participant_id,
+                room_id=self.binding.room_id,
+                tool="register_participant",
+                arguments=arguments,
+            ),
+        }
+        result = self.client.call_tool("register_participant", supplied)
+        if not isinstance(result, Mapping) or result.get("isError") is True:
+            raise RuntimeError("shared Discord participant registration failed")
+        content = result.get("content")
+        if not isinstance(content, list) or len(content) != 1:
+            raise RuntimeError("shared Discord registration returned an invalid result")
+        item = content[0]
+        text = item.get("text") if isinstance(item, Mapping) else None
+        if not isinstance(text, str):
+            raise RuntimeError("shared Discord registration omitted its attestation")
+        try:
+            attestation = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "shared Discord registration attestation is malformed"
+            ) from exc
+        if attestation != {
+            "registered": True,
+            "participant_id": self.binding.participant_id,
+            "room_id": self.binding.room_id,
+            "transport_self_actor_id": self.binding.actor_id,
+        }:
+            raise RuntimeError("shared Discord registration attestation binding differs")
+
+    def transport_interrupted(self) -> None:
+        """Invalidate active work and record uncertainty before reconnect."""
+        self.lane.cancel()
+        self.pipeline.observation.mark_continuity_gap(
+            delivery_id=f"discord:mcp-stream-gap:{time.time_ns()}",
+            detail="shared Discord notification stream continuity is uncertain",
         )
 
     def probe(self):
@@ -602,13 +853,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         while True:
             try:
                 client.connect()
+                runtime.register_transport()
                 for method, params in client.notifications():
                     if method != NOTIFICATION_METHOD:
                         continue
                     runtime.handle(params)
+                runtime.transport_interrupted()
                 delay = 1.0
-            except (urllib.error.URLError, RuntimeError, OSError) as exc:
-                print(f"Codex shared transport reconnect after error: {exc}", file=sys.stderr)
+            except (urllib.error.URLError, RuntimeError, OSError):
+                runtime.transport_interrupted()
+                print("Codex shared transport reconnect after operational error", file=sys.stderr)
                 time.sleep(delay)
                 delay = min(delay * 2, 30)
     except (NunchiError, ValueError) as exc:

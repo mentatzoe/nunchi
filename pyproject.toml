@@ -39,6 +39,7 @@ classifiers = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
 mcp-discord = ["mcp>=1.9,<2"]
+test = ["jsonschema==4.26.0"]
 
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"

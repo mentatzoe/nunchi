@@ -30,6 +30,25 @@ integrations are not implemented or armed by the shared-foundation candidate.
 
 Room payloads are never trusted configuration.
 
+## Shared Discord consumer contract
+
+A consumer of the shared Discord transport must:
+
+1. authenticate one exact participant/channel MCP session with a one-use HMAC;
+2. verify `target_participant_id`, `room_id`, and the gateway-attested
+   `transport_self_actor_id` against its pinned binding before retaining facts;
+3. accept only the closed notification fields documented in
+   `integrations/mcp-discord/README.md`;
+4. cancel active and pending work before applying a targeted continuity gap;
+5. submit ordinary live events through the asynchronous active/newest lane;
+6. invoke output/history tools only from that authenticated session with a
+   fresh exact-operation authorization.
+
+The server configuration maps participant IDs directly to numeric room arrays.
+There is no participant/room cross product and no unauthenticated broadcast.
+The delivery journal is per route, so one failed consumer cannot be hidden by
+another consumer's success.
+
 ## Attention judgment returned by the delegated model
 
 ```json
@@ -61,8 +80,9 @@ Return `None` for silence, or exactly one:
 {"kind":"privileged","origin_event_id":"discord:message:123","capability":"workspace.file.write","resource":{"kind":"workspace-file","id":"repo:README.md"},"operation":{"path":"README.md","content":"..."}}
 ```
 
-The host rejects invisible origins, malformed actions, stale opportunities,
-and unavailable native capabilities. The participant cannot send directly.
+The host rejects invisible origins or targets, malformed actions, stale
+opportunities, deadline overruns, and unavailable native capabilities. The
+participant cannot send directly.
 
 ## Continuation
 
@@ -70,14 +90,33 @@ The request may contain a bound expiring continuation capability. It remains
 inside the host. The model sees only expansion availability booleans; the
 normal participant receives a mediated function. Returned pages omit handles,
 cursors, scope bindings, and expiry. Repeated requests use host-retained
-cursors. Restart discards all continuation authority.
+cursors, never repeat already delivered events, and stop after three pages per
+turn. Coverage may truthfully report evicted older facts without offering an
+unfulfillable continuation. Restart discards all continuation authority.
+
+## Scheduling and recovery
+
+Native live ingress retains and offers each event before returning to the
+platform callback. One worker runs the active opportunity while later anchors
+replace a single pending slot; after the active turn, only the newest retained
+anchor becomes work. A host-wide deadline invalidates even a participant that
+ignores cancellation. Gap, cancellation, restart, and corrupt persistence
+cancel active and pending authority rather than promoting retained events.
+
+An unknown privileged effect remains consumed. If the target provides
+idempotency, a fresh policy check may retry the same logical operation only
+with the original deterministic idempotency key. Otherwise, a new
+authenticated approval must display the exact operation, origin observation,
+and duplicate-effect risk before one retry. A confirmed retry closes the
+unknown state; ordinary replay remains denied.
 
 ## Runnable conformance
 
 From the exact candidate:
 
 ```sh
-python3 -m unittest discover -s tests/v2/contract -p 'test_*.py'
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' \
+  python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 python3 -m unittest \
   tests.v2.test_shared_foundation \
   tests.v2.test_surfaces \

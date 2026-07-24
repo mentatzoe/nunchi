@@ -53,18 +53,25 @@ class ToolAuthorizer:
         self,
         *,
         secret: bytes,
-        participant_ids: frozenset[str],
-        room_ids: frozenset[str],
+        participant_routes: Mapping[str, frozenset[str]],
         max_age_seconds: int = 60,
         journal_path: str | Path | None = None,
     ) -> None:
         if len(secret) < 32:
             raise ValueError("Discord output authorization secret must be at least 32 bytes")
-        if not participant_ids or not room_ids:
-            raise ValueError("Discord output authorization requires participants and rooms")
+        if (
+            not participant_routes
+            or any(
+                not participant or not rooms
+                for participant, rooms in participant_routes.items()
+            )
+        ):
+            raise ValueError("Discord output authorization requires exact participant routes")
         self._secret = secret
-        self._participants = participant_ids
-        self._rooms = room_ids
+        self._routes = {
+            participant: frozenset(rooms)
+            for participant, rooms in participant_routes.items()
+        }
         self._max_age = max_age_seconds
         self._used: dict[str, int] = {}
         self._journal_path = Path(journal_path) if journal_path is not None else None
@@ -108,6 +115,7 @@ class ToolAuthorizer:
             )
             + "\n"
         ).encode()
+        existed = self._journal_path.exists()
         fd = os.open(
             self._journal_path,
             os.O_APPEND | os.O_CREAT | os.O_WRONLY,
@@ -119,6 +127,12 @@ class ToolAuthorizer:
             os.fsync(fd)
         finally:
             os.close(fd)
+        if not existed:
+            directory_fd = os.open(self._journal_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
 
     def verify(
         self,
@@ -127,6 +141,8 @@ class ToolAuthorizer:
         tool: str,
         arguments: Mapping[str, Any],
         now: int | None = None,
+        expected_participant_id: str | None = None,
+        expected_room_id: str | None = None,
     ) -> tuple[bool, str]:
         required = {
             "request_id",
@@ -147,12 +163,21 @@ class ToolAuthorizer:
             return False, "authorization issued_at must be an integer"
         if authorization["tool"] != tool:
             return False, "authorization tool binding mismatch"
-        if authorization["room_id"] not in self._rooms:
-            return False, "authorization room is outside trusted routes"
-        if authorization["participant_id"] not in self._participants:
-            return False, "authorization participant is outside trusted routes"
+        participant_id = authorization["participant_id"]
+        room_id = authorization["room_id"]
+        if room_id not in self._routes.get(participant_id, frozenset()):
+            return False, "authorization participant/room route is not trusted"
+        if expected_participant_id is not None and participant_id != expected_participant_id:
+            return False, "authorization participant does not match authenticated session"
+        if expected_room_id is not None and room_id != expected_room_id:
+            return False, "authorization room does not match authenticated session"
         if arguments.get("channel_id") != authorization["room_id"]:
             return False, "authorization channel binding mismatch"
+        if (
+            "participant_id" in arguments
+            and arguments["participant_id"] != participant_id
+        ):
+            return False, "authorization participant argument mismatch"
         try:
             digest = hashlib.sha256(_canonical(arguments)).hexdigest()
         except (TypeError, ValueError):

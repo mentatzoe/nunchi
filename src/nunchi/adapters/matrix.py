@@ -86,12 +86,18 @@ class MatrixTransport:
             else:
                 return TransportResult("unavailable", "Matrix action is unsupported")
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            return TransportResult("failed", f"Matrix HTTP {exc.code}: {detail}")
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
-            return TransportResult("unknown", f"Matrix acknowledgement lost: {exc}")
+            return TransportResult("failed", f"Matrix returned HTTP {exc.code}")
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            return TransportResult("unknown", "Matrix acknowledgement was lost")
         event_id = payload.get("event_id") if isinstance(payload, dict) else None
         return TransportResult("sent", str(event_id or "matrix-sent"))
+
+    def authenticated_actor_id(self) -> str:
+        payload = self._request("GET", "/_matrix/client/v3/account/whoami")
+        user_id = payload.get("user_id") if isinstance(payload, Mapping) else None
+        if not isinstance(user_id, str) or not user_id:
+            raise ValidationError("Matrix whoami response lacks a stable user_id")
+        return f"matrix:actor:{user_id}"
 
     def sync(self, since: str | None):
         query = {"timeout": str(self.sync_timeout_ms)}
@@ -136,6 +142,11 @@ def _save_token(path: Path, token: str) -> None:
     finally:
         os.close(fd)
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -163,17 +174,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe["configured"] = True
             print(json.dumps(probe, sort_keys=True, separators=(",", ":")))
             return 0
+        if transport.authenticated_actor_id() != runtime.binding.actor_id:
+            raise ValidationError(
+                "authenticated Matrix account does not match exact self binding"
+            )
         if args.stdin:
             failed = False
             for line in sys.stdin:
                 if not line.strip():
                     continue
                 try:
-                    runtime.process(json.loads(line))
+                    runtime.submit(json.loads(line))
                 except (json.JSONDecodeError, NunchiError, ValueError) as exc:
                     failed = True
                     print(f"matrix delivery error: {exc}", file=sys.stderr)
-            return 1 if failed else 0
+            if not runtime.drain(300):
+                failed = True
+                print("matrix participant deadline exceeded", file=sys.stderr)
+            return 1 if failed or runtime.lane.errors else 0
 
         token_path = Path(config["state_directory"]) / "matrix-sync-token"
         since = token_path.read_text().strip() if token_path.exists() else None
@@ -189,15 +207,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                         continue
                     timeline = room_data.get("timeline", {})
                     events = timeline.get("events", []) if isinstance(timeline, Mapping) else []
-                    for event in events:
-                        runtime.process(
-                            {"room_id": room_id, "event": event},
-                            live=since is not None,
+                    if (
+                        isinstance(timeline, Mapping)
+                        and timeline.get("limited") is True
+                    ):
+                        runtime.lane.cancel()
+                        runtime.pipeline.observation.mark_continuity_gap(
+                            delivery_id=f"matrix:sync-gap:{room_id}:{next_batch}",
+                            detail="Matrix reported a limited timeline",
                         )
+                    for event in events:
+                        payload = {"room_id": room_id, "event": event}
+                        if since is None:
+                            runtime.process(payload, live=False)
+                        else:
+                            runtime.submit(payload)
             _save_token(token_path, next_batch)
             since = next_batch
             if args.once:
-                return 0
+                return 0 if runtime.drain(300) and not runtime.lane.errors else 1
     except (NunchiError, urllib.error.URLError, OSError, ValueError) as exc:
         print(f"matrix adapter error: {exc}", file=sys.stderr)
         return 3 if isinstance(exc, ValidationError) else 1

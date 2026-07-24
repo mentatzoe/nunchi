@@ -82,6 +82,7 @@ class ReceiptJournal:
             proposed = [*self._records[request_id], checked]
             validate_receipt_stream(proposed)
             if self._path is not None:
+                existed = self._path.exists()
                 payload = (
                     json.dumps(checked, sort_keys=True, separators=(",", ":"))
                     + "\n"
@@ -99,6 +100,17 @@ class ReceiptJournal:
                     ) from exc
                 finally:
                     os.close(fd)
+                if not existed:
+                    try:
+                        directory_fd = os.open(self._path.parent, os.O_RDONLY)
+                        try:
+                            os.fsync(directory_fd)
+                        finally:
+                            os.close(directory_fd)
+                    except OSError as exc:
+                        raise PersistenceError(
+                            "receipt journal directory persistence is uncertain"
+                        ) from exc
             self._records[request_id].append(deepcopy(checked))
         return deepcopy(checked)
 

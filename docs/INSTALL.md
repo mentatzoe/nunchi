@@ -42,7 +42,7 @@ Trusted configuration owns:
 - participant profile and delegated attention model;
 - attention suppression/recovery/margin/error policy;
 - bounded retention, snapshot, age, continuation, and expiry limits;
-- participant model or Codex command;
+- participant model or fixed Codex model/session settings;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
 
@@ -54,11 +54,14 @@ Install `nunchi[mcp-discord]`, then set:
 
 ```text
 NUNCHI_DISCORD_TOKEN
-NUNCHI_DISCORD_ALLOWED_CHANNEL_IDS
-NUNCHI_DISCORD_PARTICIPANT_IDS
+NUNCHI_DISCORD_PARTICIPANT_ROUTES
 NUNCHI_DISCORD_OUTPUT_HMAC_KEY
 NUNCHI_DISCORD_STATE_DIRECTORY
 ```
+
+`NUNCHI_DISCORD_PARTICIPANT_ROUTES` is a closed JSON object such as
+`{"codex":["123456789"]}`. It defines exact participant/room pairs, never a
+participant-by-room cross product.
 
 `NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes and shared only
 between the host-owned participant runner and transport. Output/history tool
@@ -66,9 +69,12 @@ calls require a short-lived, exact-operation HMAC. Accepted nonces are fsynced
 before native dispatch and remain replay-blocked across restart.
 
 The transport requests message, reaction, membership, and message-content
-gateway intents. Its bounded queue never replaces an accepted event. If an
-event or MCP client delivery is lost, a durable audit is written and the next
-accepted room delivery is preceded by an explicit continuity-gap notification.
+gateway intents. Each MCP session must authenticate one exact route before it
+can receive notifications or invoke tools. Notifications carry the
+gateway-attested bot actor and exact target participant. The bounded queue
+never replaces an accepted event. If an event or one participant delivery is
+lost, a durable per-route audit is written; after restart, that route receives
+an explicit continuity gap before any later event.
 
 ## Restart and recovery
 

@@ -61,7 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             try:
                 payload = json.loads(line)
-                runtime.process(payload)
+                runtime.submit(payload)
             except (json.JSONDecodeError, NunchiError, ValueError) as exc:
                 failed = True
                 print(
@@ -75,7 +75,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                     file=sys.stderr,
                 )
-        return 1 if failed else 0
+        if not runtime.drain(300):
+            print(
+                json.dumps({"error": "participant-deadline-exceeded"}),
+                file=sys.stderr,
+            )
+            failed = True
+        return 1 if failed or runtime.lane.errors else 0
     except NunchiError as exc:
         print(f"{exc.label}: {exc}", file=sys.stderr)
         return 3 if isinstance(exc, ValidationError) else 1

@@ -6,6 +6,8 @@ from NUNCHI_DISCORD_TOKEN only and must never surface anywhere else (see
 
 Required env vars:
     NUNCHI_DISCORD_TOKEN    Bot token (Discord Developer Portal -> Bot -> Token)
+    NUNCHI_DISCORD_PARTICIPANT_ROUTES
+        Closed JSON object mapping each participant ID to its numeric channels.
 
 Optional env vars:
     NUNCHI_MCP_DISCORD_HOST                     Bind host (default: 127.0.0.1)
@@ -19,6 +21,8 @@ Optional env vars:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import math
 from typing import Mapping
 
 _DEFAULT_HOST = "127.0.0.1"
@@ -42,9 +46,53 @@ class Config:
     drain_timeout_seconds: float = _DEFAULT_DRAIN_TIMEOUT_SECONDS
     allowed_channel_ids: tuple[str, ...] = ()
     participant_ids: tuple[str, ...] = ()
+    participant_routes: tuple[tuple[str, tuple[str, ...]], ...] = ()
     membership_room_ids: tuple[str, ...] = ()
     output_hmac_key: bytes = field(default=b"", repr=False)
     state_directory: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.token, str) or not self.token:
+            raise ValueError("Discord token must be non-empty")
+        if not isinstance(self.host, str) or not self.host:
+            raise ValueError("Discord MCP host must be non-empty")
+        if len(self.output_hmac_key) < 32:
+            raise ValueError("Discord output HMAC key must be at least 32 bytes")
+        if not isinstance(self.state_directory, str) or not self.state_directory:
+            raise ValueError("Discord state directory must be non-empty")
+        if not 1 <= self.port <= 65_535:
+            raise ValueError("Discord MCP port must be within 1..65535")
+        for name in ("queue_maxsize", "backstop_max_sends"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        for name in ("backstop_window_seconds", "drain_timeout_seconds"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be positive and finite")
+        routes = dict(self.participant_routes)
+        if (
+            not routes
+            or len(routes) != len(self.participant_routes)
+            or any(not participant for participant in routes)
+            or any(
+                not rooms or any(not room.isdigit() for room in rooms)
+                for rooms in routes.values()
+            )
+        ):
+            raise ValueError("Discord participant routes must be non-empty and numeric")
+        if tuple(routes) != self.participant_ids:
+            raise ValueError("Discord participant IDs must exactly match route owners")
+        route_rooms = {room for rooms in routes.values() for room in rooms}
+        if route_rooms != set(self.allowed_channel_ids):
+            raise ValueError("Discord allowed channels must exactly match routed channels")
+        if any(room not in route_rooms for room in self.membership_room_ids):
+            raise ValueError("Discord membership rooms must be routed channels")
 
 
 def _require(environ: Mapping[str, str], name: str) -> str:
@@ -76,24 +124,40 @@ def _get_float(environ: Mapping[str, str], name: str, default: float) -> float:
 
 def load_config(environ: Mapping[str, str]) -> Config:
     """Build a :class:`Config` from *environ*; raises RuntimeError on bad input."""
+    try:
+        raw_routes = json.loads(
+            _require(environ, "NUNCHI_DISCORD_PARTICIPANT_ROUTES")
+        )
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"NUNCHI_DISCORD_PARTICIPANT_ROUTES is invalid JSON: {exc.msg}"
+        ) from None
+    if not isinstance(raw_routes, dict) or not raw_routes:
+        raise RuntimeError(
+            "NUNCHI_DISCORD_PARTICIPANT_ROUTES must be a non-empty JSON object"
+        )
+    routes: list[tuple[str, tuple[str, ...]]] = []
+    for participant, raw_rooms in raw_routes.items():
+        if not isinstance(participant, str) or not participant:
+            raise RuntimeError("Discord participant route IDs must be non-empty strings")
+        if not isinstance(raw_rooms, list):
+            raise RuntimeError("each Discord participant route must be an array")
+        rooms = tuple(
+            dict.fromkeys(
+                item.strip()
+                for item in raw_rooms
+                if isinstance(item, str) and item.strip()
+            )
+        )
+        if len(rooms) != len(raw_rooms) or not rooms or any(not item.isdigit() for item in rooms):
+            raise RuntimeError(
+                "each Discord participant route must contain unique numeric channel strings"
+            )
+        routes.append((participant, rooms))
+    participants = tuple(participant for participant, _ in routes)
     allowed = tuple(
-        dict.fromkeys(
-            item.strip()
-            for item in _require(environ, "NUNCHI_DISCORD_ALLOWED_CHANNEL_IDS").split(",")
-            if item.strip()
-        )
+        dict.fromkeys(room for _, rooms in routes for room in rooms)
     )
-    participants = tuple(
-        dict.fromkeys(
-            item.strip()
-            for item in _require(environ, "NUNCHI_DISCORD_PARTICIPANT_IDS").split(",")
-            if item.strip()
-        )
-    )
-    if not allowed or any(not item.isdigit() for item in allowed):
-        raise RuntimeError("NUNCHI_DISCORD_ALLOWED_CHANNEL_IDS must list numeric channel IDs")
-    if not participants:
-        raise RuntimeError("NUNCHI_DISCORD_PARTICIPANT_IDS must list at least one participant")
     membership_raw = environ.get("NUNCHI_DISCORD_MEMBERSHIP_ROOM_IDS", "").strip()
     membership = tuple(
         dict.fromkeys(item.strip() for item in membership_raw.split(",") if item.strip())
@@ -119,6 +183,7 @@ def load_config(environ: Mapping[str, str]) -> Config:
         ),
         allowed_channel_ids=allowed,
         participant_ids=participants,
+        participant_routes=tuple(routes),
         membership_room_ids=membership,
         output_hmac_key=output_key,
         state_directory=_require(environ, "NUNCHI_DISCORD_STATE_DIRECTORY"),

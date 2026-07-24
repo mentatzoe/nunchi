@@ -6,13 +6,70 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
 import sys
+import threading
+import time
 from collections.abc import Mapping, Sequence
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
+
+
+class DurableGatewaySequence:
+    """Fsync a monotonic occurrence ID for callbacks lacking native IDs."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._value = 0
+        self._lock = threading.Lock()
+        if self.path.exists():
+            try:
+                state = json.loads(self.path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    "Discord synthetic sequence state is untrustworthy"
+                ) from exc
+            if (
+                not isinstance(state, dict)
+                or set(state) != {"schema_version", "value"}
+                or state["schema_version"] != 2
+                or isinstance(state["value"], bool)
+                or not isinstance(state["value"], int)
+                or state["value"] < 0
+            ):
+                raise ValidationError(
+                    "Discord synthetic sequence state has an invalid closed shape"
+                )
+            self._value = state["value"]
+
+    def next(self) -> int:
+        with self._lock:
+            value = self._value + 1
+            payload = json.dumps(
+                {"schema_version": 2, "value": value},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            temporary = self.path.with_suffix(".tmp")
+            fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+            try:
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short Discord synthetic-sequence write")
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(temporary, self.path)
+            directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            self._value = value
+            return value
 
 
 class DiscordPyTransport:
@@ -49,8 +106,8 @@ class DiscordPyTransport:
             result = future.result(timeout=30)
         except asyncio.TimeoutError:
             return TransportResult("unknown", "Discord acknowledgement deadline expired")
-        except BaseException as exc:
-            return TransportResult("unknown", f"Discord acknowledgement lost: {exc}")
+        except BaseException:
+            return TransportResult("unknown", "Discord acknowledgement was lost")
         return result
 
 
@@ -120,20 +177,35 @@ def main(argv: Sequence[str] | None = None) -> int:
                 await bot.close()
                 raise RuntimeError("authenticated Discord bot does not match exact self binding")
             if "runtime" not in runtime_holder:
+                runtime_holder["synthetic_sequence"] = DurableGatewaySequence(
+                    Path(config["state_directory"])
+                    / "discord-synthetic-sequence.json"
+                )
                 runtime_holder["runtime"] = ReferenceAdapterRuntime(
                     surface="discord",
                     config=config,
                     transport=DiscordPyTransport(bot, asyncio.get_running_loop()),
                 )
 
+        @bot.event
+        async def on_disconnect():
+            runtime = runtime_holder.get("runtime")
+            if runtime is None:
+                return
+            runtime.lane.cancel()
+            runtime.pipeline.observation.mark_continuity_gap(
+                delivery_id=f"discord:standalone-stream-gap:{time.time_ns()}",
+                detail="standalone Discord gateway continuity is uncertain",
+            )
+
         async def process(payload):
             runtime = runtime_holder.get("runtime")
             if runtime is None:
                 return
             try:
-                await asyncio.to_thread(runtime.process, payload)
-            except BaseException as exc:
-                print(f"discord delivery error: {exc}", file=sys.stderr)
+                await asyncio.to_thread(runtime.submit, payload)
+            except BaseException:
+                print("discord delivery error", file=sys.stderr)
 
         @bot.event
         async def on_message(message):
@@ -182,7 +254,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             await process(
                 {
                     "t": event_type,
-                    "s": None,
+                    "s": runtime_holder["synthetic_sequence"].next(),
+                    "delivery_epoch": "standalone-durable",
                     "d": {
                         "channel_id": str(raw.channel_id),
                         "guild_id": str(raw.guild_id) if raw.guild_id else None,
@@ -208,7 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             await process(
                 {
                     "t": event_type,
-                    "s": None,
+                    "s": runtime_holder["synthetic_sequence"].next(),
+                    "delivery_epoch": "standalone-durable",
                     "d": {
                         "guild_id": str(member.guild.id),
                         "room_id": str(config["binding"]["room_id"]),
@@ -245,6 +319,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
             return 0
         bot.run(token, log_handler=None)
+        runtime = runtime_holder.get("runtime")
+        if runtime is not None:
+            runtime.lane.cancel()
+            runtime.drain(35)
         return 0
     except (NunchiError, ValueError) as exc:
         print(f"discord adapter error: {exc}", file=sys.stderr)

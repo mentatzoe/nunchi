@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
+import os
+from pathlib import Path
+import tempfile
+import threading
 import time
 import unittest
+from unittest import mock
 
 from nunchi.adapters.v2 import (
     normalize_discord_gateway,
@@ -11,8 +17,17 @@ from nunchi.adapters.v2 import (
     normalize_matrix_event,
     normalize_telegram_update,
 )
+from nunchi.adapters.matrix import MatrixTransport
+from nunchi.adapters.telegram import TelegramTransport
+from nunchi.adapters.discord import DurableGatewaySequence
 from nunchi.errors import ValidationError
-from nunchi.integrations.codex_v2 import MCPDiscordTransport, _parse_codex_output
+from nunchi.attention import ParticipantProfile
+from nunchi.integrations.codex_v2 import (
+    CodexParticipant,
+    CodexRoomRuntime,
+    MCPDiscordTransport,
+    _parse_codex_output,
+)
 from nunchi.mcp_discord.authorization import ToolAuthorizer, make_tool_authorization
 from nunchi.mcp_discord.events import v2_notification_from_dispatch
 from nunchi.mcp_discord.ratelimit import SendBackstop
@@ -31,6 +46,35 @@ BINDING = ParticipantBinding(
 
 
 class NormalizerTests(unittest.TestCase):
+    def test_standalone_discord_occurrence_counter_survives_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sequence.json"
+            first = DurableGatewaySequence(path)
+            self.assertEqual(1, first.next())
+            restored = DurableGatewaySequence(path)
+            self.assertEqual(2, restored.next())
+            path.write_text('{"schema_version":2,"value":"bad"}')
+            with self.assertRaises(ValidationError):
+                DurableGatewaySequence(path)
+
+    def test_reference_transports_attest_authenticated_self_identity(self):
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "secret"}, clear=False):
+            matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        matrix._request = lambda *args, **kwargs: {"user_id": "@vigil:example"}
+        self.assertEqual(
+            "matrix:actor:@vigil:example",
+            matrix.authenticated_actor_id(),
+        )
+        with mock.patch.dict(os.environ, {"TELEGRAM_TOKEN": "secret"}, clear=False):
+            telegram = TelegramTransport({"bot_token_env": "TELEGRAM_TOKEN"})
+        telegram._call = lambda *args, **kwargs: {"id": 123}
+        self.assertEqual("telegram:actor:123", telegram.authenticated_actor_id())
+
     def test_discord_preserves_self_and_other_bot_messages(self):
         for actor_id in ("9", "10"):
             delivery = normalize_discord_gateway(
@@ -60,6 +104,7 @@ class NormalizerTests(unittest.TestCase):
             {
                 "t": "MESSAGE_REACTION_ADD",
                 "s": 5,
+                "delivery_epoch": "session-a",
                 "d": {
                     "channel_id": "42",
                     "user_id": "7",
@@ -74,6 +119,7 @@ class NormalizerTests(unittest.TestCase):
             {
                 "t": "GUILD_MEMBER_ADD",
                 "s": 6,
+                "delivery_epoch": "session-a",
                 "d": {
                     "guild_id": "99",
                     "room_id": "42",
@@ -85,6 +131,51 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual("42", membership.room_id)
         self.assertEqual("membership", membership.event["type"])
         self.assertEqual({"kind": "space", "id": "99"}, membership.event["scope"])
+
+    def test_discord_reaction_repetition_uses_gateway_sequence_identity(self):
+        payload = {
+            "channel_id": "42",
+            "user_id": "7",
+            "message_id": "100",
+            "emoji": {"name": "✅", "id": None},
+        }
+        deliveries = [
+            normalize_discord_gateway(
+                {
+                    "t": event_type,
+                    "s": sequence,
+                    "delivery_epoch": "session-a",
+                    "d": payload,
+                },
+                BINDING,
+            )
+            for event_type, sequence in (
+                ("MESSAGE_REACTION_ADD", 10),
+                ("MESSAGE_REACTION_REMOVE", 11),
+                ("MESSAGE_REACTION_ADD", 12),
+            )
+        ]
+        self.assertEqual(3, len({item.event["id"] for item in deliveries}))
+        new_session = normalize_discord_gateway(
+            {
+                "t": "MESSAGE_REACTION_ADD",
+                "s": 10,
+                "delivery_epoch": "session-b",
+                "d": payload,
+            },
+            BINDING,
+        )
+        self.assertNotEqual(deliveries[0].event["id"], new_session.event["id"])
+        missing = normalize_discord_gateway(
+            {
+                "t": "MESSAGE_REACTION_ADD",
+                "s": None,
+                "delivery_epoch": "session-a",
+                "d": payload,
+            },
+            BINDING,
+        )
+        self.assertIsNone(missing.event)
 
     def test_matrix_and_telegram_preserve_equivalent_available_message_facts(self):
         matrix = normalize_matrix_event(
@@ -157,6 +248,8 @@ class NormalizerTests(unittest.TestCase):
                 "mention_everyone": False,
             },
             sequence=8,
+            delivery_epoch="session-a",
+            transport_self_actor_id="discord:actor:9",
         )
         self.assertEqual(
             {
@@ -166,6 +259,7 @@ class NormalizerTests(unittest.TestCase):
                 "event",
                 "actors",
                 "continuity_gap",
+                "transport_self_actor_id",
             },
             set(params),
         )
@@ -178,8 +272,10 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.secret = b"x" * 32
         self.authorizer = ToolAuthorizer(
             secret=self.secret,
-            participant_ids=frozenset({"vigil"}),
-            room_ids=frozenset({"42"}),
+            participant_routes={
+                "vigil": frozenset({"42"}),
+                "reviewer": frozenset({"43"}),
+            },
         )
 
     def authorization(self, arguments, *, now=None):
@@ -231,6 +327,24 @@ class ToolAuthorizationTests(unittest.TestCase):
                 tool="send_message",
                 arguments=arguments,
                 now=1000,
+            )[0]
+        )
+        cross_product_arguments = {"channel_id": "43", "content": "hello"}
+        cross_product = make_tool_authorization(
+            secret=self.secret,
+            request_id="request-cross",
+            participant_id="vigil",
+            room_id="43",
+            tool="send_message",
+            arguments=cross_product_arguments,
+            now=100,
+        )
+        self.assertFalse(
+            self.authorizer.verify(
+                authorization=cross_product,
+                tool="send_message",
+                arguments=cross_product_arguments,
+                now=100,
             )[0]
         )
         wrong_room = deepcopy(self.authorization(arguments, now=100))
@@ -287,6 +401,231 @@ class ToolAuthorizationTests(unittest.TestCase):
 
 
 class CodexSurfaceTests(unittest.TestCase):
+    @staticmethod
+    def _codex_identity():
+        return (
+            ParticipantProfile(
+                profile_id="vigil",
+                participant_id="vigil",
+                actor_id="discord:actor:9",
+                instructions="Contribute carefully.",
+                provenance="trusted:test",
+                sha256="a" * 64,
+            ),
+            ParticipantBinding(
+                participant_id="vigil",
+                actor_id="discord:actor:9",
+                platform="discord",
+                room_id="42",
+                continuity_scope_id="discord:42",
+            ),
+        )
+
+    def test_codex_participant_rejects_arbitrary_process_configuration(self):
+        profile, binding = self._codex_identity()
+        with tempfile.TemporaryDirectory() as directory:
+            for config in (
+                {"binary": "/tmp/attacker"},
+                {"args": ["--full-auto"]},
+                {"working_directory": "/"},
+                {"timeout_seconds": float("inf")},
+            ):
+                with self.subTest(config=config), self.assertRaises(ValidationError):
+                    CodexParticipant(
+                        profile=profile,
+                        config=config,
+                        binding=binding,
+                        state_directory=directory,
+                    )
+
+    def test_codex_process_is_fixed_read_only_tool_less_and_env_bounded(self):
+        profile, binding = self._codex_identity()
+
+        class Process:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def communicate(self):
+                return (
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "type": "agent_message",
+                                "text": '{"kind":"silence"}',
+                            },
+                        }
+                    ),
+                    "",
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            participant = CodexParticipant(
+                profile=profile,
+                config={"session_mode": "fresh", "timeout_seconds": 5},
+                binding=binding,
+                state_directory=directory,
+            )
+            with mock.patch(
+                "nunchi.integrations.codex_v2.subprocess.Popen",
+                return_value=Process(),
+            ) as popen:
+                result = participant(
+                    wake={
+                        "request_id": "r",
+                        "self": {"participant_id": "vigil"},
+                        "room": {"id": "42"},
+                        "events": [],
+                    },
+                    expand=lambda **_: {},
+                    cancel=threading.Event(),
+                )
+        self.assertIsNone(result)
+        command = popen.call_args.args[0]
+        self.assertNotIn("--full-auto", command)
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("--strict-config", command)
+        self.assertIn("read-only", command)
+        self.assertIn("--output-schema", command)
+        for feature in ("shell_tool", "unified_exec", "apps", "plugins"):
+            self.assertIn(feature, command)
+        child_env = popen.call_args.kwargs["env"]
+        self.assertNotIn("NUNCHI_DISCORD_TOKEN", child_env)
+        self.assertTrue(
+            set(child_env).issubset(
+                {
+                    "CODEX_HOME",
+                    "HOME",
+                    "LANG",
+                    "LC_ALL",
+                    "LOGNAME",
+                    "PATH",
+                    "TMPDIR",
+                    "USER",
+                }
+            )
+        )
+
+    def test_codex_persistent_task_is_bound_to_profile_actor_room_and_behavior(self):
+        profile, binding = self._codex_identity()
+        thread_id = "019f9432-9300-7dd1-8225-d7f10f921968"
+        with tempfile.TemporaryDirectory() as directory:
+            first = CodexParticipant(
+                profile=profile,
+                config={"session_mode": "persistent", "model": "model-a"},
+                binding=binding,
+                state_directory=directory,
+            )
+            first._save_session(thread_id)
+            self.assertEqual(thread_id, first._load_session())
+            changed = CodexParticipant(
+                profile=profile,
+                config={"session_mode": "persistent", "model": "model-b"},
+                binding=binding,
+                state_directory=directory,
+            )
+            with self.assertRaises(RuntimeError):
+                changed._load_session()
+
+    def test_codex_registers_and_rejects_wrong_target_before_observation(self):
+        secret = "s" * 32
+        verifier = ToolAuthorizer(
+            secret=secret.encode(),
+            participant_routes={"vigil": frozenset({"42"})},
+        )
+
+        class Client:
+            def call_tool(self, name, arguments):
+                supplied = dict(arguments)
+                authorization = supplied.pop("_nunchi_authorization")
+                ok, detail = verifier.verify(
+                    authorization=authorization,
+                    tool=name,
+                    arguments=supplied,
+                )
+                if not ok:
+                    return {"isError": True, "content": detail}
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "registered": True,
+                                    "participant_id": "vigil",
+                                    "room_id": "42",
+                                    "transport_self_actor_id": "discord:actor:9",
+                                }
+                            ),
+                        }
+                    ],
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / "profile.json"
+            profile_data = {
+                "profile_id": "vigil",
+                "participant_id": "vigil",
+                "actor_id": "discord:actor:9",
+                "instructions": "Contribute carefully.",
+                "provenance": "trusted:test",
+            }
+            raw = json.dumps(profile_data).encode()
+            profile_path.write_bytes(raw)
+            config = {
+                "schema_version": 2,
+                "binding": {
+                    "participant_id": "vigil",
+                    "actor_id": "discord:actor:9",
+                    "platform": "discord",
+                    "room_id": "42",
+                    "continuity_scope_id": "discord:42",
+                },
+                "profile": {
+                    "path": str(profile_path),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                },
+                "attention": {
+                    "policy": {"preattention_enabled": False},
+                    "model": {},
+                },
+                "limits": {},
+                "state_directory": directory,
+                "transport": {
+                    "url": "http://127.0.0.1:3993/mcp",
+                    "timeout_seconds": 5,
+                    "output_key_env": "TEST_NUNCHI_OUTPUT_KEY",
+                },
+                "codex": {"session_mode": "fresh"},
+            }
+            with mock.patch.dict(
+                os.environ,
+                {"TEST_NUNCHI_OUTPUT_KEY": secret},
+                clear=False,
+            ):
+                runtime = CodexRoomRuntime(config, Client())
+            runtime.register_transport()
+            before = runtime.pipeline.observation.retained_events()
+            with self.assertRaises(ValidationError):
+                runtime.handle(
+                    {
+                        "schema_version": 2,
+                        "delivery_id": "d1",
+                        "room_id": "42",
+                        "event": None,
+                        "actors": {},
+                        "continuity_gap": False,
+                        "target_participant_id": "other",
+                        "transport_self_actor_id": "discord:actor:9",
+                    }
+                )
+            self.assertEqual(before, runtime.pipeline.observation.retained_events())
+
     def test_codex_jsonl_parser_extracts_task_and_exact_action(self):
         output = "\n".join(
             [
@@ -321,8 +660,7 @@ class CodexSurfaceTests(unittest.TestCase):
         secret = b"y" * 32
         verifier = ToolAuthorizer(
             secret=secret,
-            participant_ids=frozenset({"vigil"}),
-            room_ids=frozenset({"42"}),
+            participant_routes={"vigil": frozenset({"42"})},
         )
 
         class Client:

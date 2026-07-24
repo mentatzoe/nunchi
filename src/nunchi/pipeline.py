@@ -70,6 +70,33 @@ class NunchiV2Pipeline:
         actors: Mapping[str, Any] | None,
         authorized_route: bool = True,
     ) -> DeliveryOutcome:
+        observed, token = self.observe_and_offer(
+            delivery_id=delivery_id,
+            event=event,
+            actors=actors,
+            authorized_route=authorized_route,
+        )
+        if token is None:
+            return DeliveryOutcome(
+                observed,
+                (),
+                observed.wake_eligible and observed.audit.event_id is not None,
+            )
+        return DeliveryOutcome(
+            observed,
+            self.run_opportunities(token),
+            False,
+        )
+
+    def observe_and_offer(
+        self,
+        *,
+        delivery_id: str,
+        event: Mapping[str, Any] | None,
+        actors: Mapping[str, Any] | None,
+        authorized_route: bool = True,
+    ) -> tuple[ObservationResult, Any | None]:
+        """Persist one delivery and atomically offer its eligible anchor."""
         observed = self.observation.observe(
             delivery_id=delivery_id,
             event=event,
@@ -77,11 +104,11 @@ class NunchiV2Pipeline:
             authorized_route=authorized_route,
         )
         if not observed.wake_eligible or observed.audit.event_id is None:
-            return DeliveryOutcome(observed, (), False)
-        token = self.scheduler.offer(observed.audit.event_id)
-        if token is None:
-            return DeliveryOutcome(observed, (), True)
+            return observed, None
+        return observed, self.scheduler.offer(observed.audit.event_id)
 
+    def run_opportunities(self, token: Any) -> tuple[OpportunityOutcome, ...]:
+        """Run one active token and every newest-only successor it promotes."""
         opportunities: list[OpportunityOutcome] = []
         while token is not None:
             if not self.scheduler.is_current(token):
@@ -137,10 +164,13 @@ class NunchiV2Pipeline:
                 )
             )
             token = self.scheduler.complete(token)
-        return DeliveryOutcome(observed, tuple(opportunities), False)
+        return tuple(opportunities)
 
     def cancel(self) -> None:
         self.scheduler.cancel()
+        privileged = self.host.privileged
+        if privileged is not None and hasattr(privileged, "cancel"):
+            privileged.cancel()
 
     def restart(self) -> None:
         """Invalidate active/pending work and discard ephemeral authority."""
@@ -150,3 +180,79 @@ class NunchiV2Pipeline:
             privileged = self.host.privileged
             if privileged is not None and hasattr(privileged, "restart"):
                 privileged.restart()
+
+
+class AsyncDeliveryLane:
+    """Non-blocking ingress with one active and one replaceable newest turn.
+
+    Observation and scheduling happen synchronously under a short ingress
+    lock. Participant work runs on one daemon worker, so native callbacks can
+    continue retaining later conversation while the active turn is in flight.
+    """
+
+    def __init__(self, pipeline: NunchiV2Pipeline) -> None:
+        self.pipeline = pipeline
+        self._lock = threading.RLock()
+        self._workers: set[threading.Thread] = set()
+        self._idle = threading.Event()
+        self._idle.set()
+        self._errors: list[str] = []
+
+    def submit(
+        self,
+        *,
+        delivery_id: str,
+        event: Mapping[str, Any] | None,
+        actors: Mapping[str, Any] | None,
+        authorized_route: bool = True,
+    ) -> DeliveryOutcome:
+        with self._lock:
+            observed, token = self.pipeline.observe_and_offer(
+                delivery_id=delivery_id,
+                event=event,
+                actors=actors,
+                authorized_route=authorized_route,
+            )
+            coalesced = (
+                token is None
+                and observed.wake_eligible
+                and observed.audit.event_id is not None
+            )
+            if token is not None:
+                self._idle.clear()
+                worker = threading.Thread(
+                    target=self._run,
+                    args=(token,),
+                    name="nunchi-opportunity-lane",
+                    daemon=True,
+                )
+                self._workers.add(worker)
+                worker.start()
+            return DeliveryOutcome(observed, (), coalesced)
+
+    def _run(self, token: Any) -> None:
+        try:
+            self.pipeline.run_opportunities(token)
+        except BaseException:
+            self.pipeline.cancel()
+            with self._lock:
+                self._errors.append("opportunity worker failed")
+        finally:
+            with self._lock:
+                self._workers.discard(threading.current_thread())
+                if not self._workers:
+                    self._idle.set()
+
+    def drain(self, timeout: float | None = None) -> bool:
+        return self._idle.wait(timeout)
+
+    def cancel(self) -> None:
+        self.pipeline.cancel()
+
+    def restart(self) -> None:
+        self.pipeline.restart()
+
+    @property
+    def errors(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._errors)

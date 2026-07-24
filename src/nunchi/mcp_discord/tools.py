@@ -25,6 +25,27 @@ _MAX_CONTENT_LENGTH = 2000  # Discord's message content limit
 
 TOOL_SCHEMAS: list[dict] = [
     {
+        "name": "register_participant",
+        "description": (
+            "Authenticate this MCP session for one exact Nunchi V2 "
+            "participant/channel route before notifications or tools are available."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "participant_id": {"type": "string"},
+                "channel_id": {"type": "string"},
+                "_nunchi_authorization": {"type": "object"},
+            },
+            "required": [
+                "participant_id",
+                "channel_id",
+                "_nunchi_authorization",
+            ],
+        },
+    },
+    {
         "name": "send_message",
         "description": (
             "Send a message to a Discord channel. Content is posted verbatim "
@@ -183,7 +204,13 @@ class ToolExecutor:
         self._backstop = backstop
         self._authorizer = authorizer
 
-    def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
+    def call(
+        self,
+        name: str,
+        arguments: dict,
+        *,
+        expected_route: tuple[str, str] | None = None,
+    ) -> tuple[dict, bool]:
         """Returns (payload, ok). Error payloads carry an 'error' string."""
         try:
             if not isinstance(arguments, dict):
@@ -194,6 +221,12 @@ class ToolExecutor:
                 authorization=authorization,
                 tool=name,
                 arguments=supplied,
+                expected_participant_id=(
+                    expected_route[0] if expected_route is not None else None
+                ),
+                expected_room_id=(
+                    expected_route[1] if expected_route is not None else None
+                ),
             )
             if not ok:
                 return ({"error": error}, False)

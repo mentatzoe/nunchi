@@ -130,11 +130,16 @@ class ObservationResult:
 @dataclass
 class _ContinuationState:
     handle_id: str
+    request_id: str
     binding: dict[str, str]
     expires_at: datetime
     events: list[dict[str, Any]]
     actors: dict[str, dict[str, Any]]
-    cursors: dict[str, tuple[str, int]]
+    can_fetch_before: bool
+    can_fetch_after: bool
+    can_fetch_around_event: bool
+    delivered_event_ids: set[str]
+    cursors: dict[str, tuple[str, str, tuple[int, ...]]]
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -228,10 +233,12 @@ class ObservationProvider:
         }
         self._delivery_ids: set[str] = set()
         self._event_ids: set[str] = set()
+        self._accepted_event_ids: set[str] = set()
         self._delivery_by_event: dict[str, str] = {}
         self._audits: list[DeliveryAudit] = []
         self._continuations: dict[str, _ContinuationState] = {}
         self._restart_gap = False
+        self._retention_evicted_before = False
         self._lock = threading.RLock()
         if self._path is not None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -248,8 +255,66 @@ class ObservationProvider:
                     )
                 self._restart_gap = True
                 self._continuity = "unknown"
+            if self._audit_path is not None and self._audit_path.exists():
+                self._load_audit_index()
             if self._path.exists():
                 self._load()
+            if len(self._accepted_event_ids) > len(self._events):
+                self._retention_evicted_before = True
+
+    def _load_audit_index(self) -> None:
+        """Restore content-free exact replay identities from durable audit."""
+        assert self._audit_path is not None
+        outcomes = {
+            "recorded",
+            "exact-self-context",
+            "exact-duplicate",
+            "unconstructable",
+            "route-rejected",
+            "continuity-gap",
+        }
+        try:
+            with self._audit_path.open(encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, 1):
+                    if not line.strip():
+                        continue
+                    record = json.loads(line)
+                    if (
+                        not isinstance(record, dict)
+                        or set(record)
+                        != {
+                            "schema_version",
+                            "delivery_id",
+                            "outcome",
+                            "detail",
+                            "event_id",
+                        }
+                        or record["schema_version"] != 2
+                        or not isinstance(record["delivery_id"], str)
+                        or not record["delivery_id"]
+                        or record["outcome"] not in outcomes
+                        or not isinstance(record["detail"], str)
+                        or (
+                            record["event_id"] is not None
+                            and (
+                                not isinstance(record["event_id"], str)
+                                or not record["event_id"]
+                            )
+                        )
+                    ):
+                        raise ValueError(f"invalid audit record at line {line_number}")
+                    self._delivery_ids.add(record["delivery_id"])
+                    if record["event_id"] is not None:
+                        self._event_ids.add(record["event_id"])
+                        if record["outcome"] in (
+                            "recorded",
+                            "exact-self-context",
+                        ):
+                            self._accepted_event_ids.add(record["event_id"])
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise PersistenceError(
+                f"observation delivery audit is untrustworthy: {exc}"
+            ) from exc
 
     def _load(self) -> None:
         assert self._path is not None
@@ -329,32 +394,46 @@ class ObservationProvider:
 
     def _record_audit(self, audit: DeliveryAudit) -> None:
         self._audits.append(audit)
-        if self._audit_path is None:
-            return
-        payload = _canonical_bytes(
-            {
-                "schema_version": 2,
-                "delivery_id": audit.delivery_id,
-                "outcome": audit.outcome,
-                "detail": audit.detail,
-                "event_id": audit.event_id,
-            }
-        ) + b"\n"
-        fd = os.open(
-            self._audit_path,
-            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
-            0o600,
-        )
-        try:
-            if os.write(fd, payload) != len(payload):
-                raise OSError("short delivery-audit write")
-            os.fsync(fd)
-        except OSError as exc:
-            raise PersistenceError(
-                f"observation delivery audit is uncertain: {exc}"
-            ) from exc
-        finally:
-            os.close(fd)
+        if self._audit_path is not None:
+            existed = self._audit_path.exists()
+            payload = _canonical_bytes(
+                {
+                    "schema_version": 2,
+                    "delivery_id": audit.delivery_id,
+                    "outcome": audit.outcome,
+                    "detail": audit.detail,
+                    "event_id": audit.event_id,
+                }
+            ) + b"\n"
+            fd = os.open(
+                self._audit_path,
+                os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short delivery-audit write")
+                os.fsync(fd)
+            except OSError as exc:
+                raise PersistenceError(
+                    f"observation delivery audit is uncertain: {exc}"
+                ) from exc
+            finally:
+                os.close(fd)
+            if not existed:
+                try:
+                    directory_fd = os.open(self._audit_path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except OSError as exc:
+                    raise PersistenceError(
+                        "observation delivery-audit directory persistence is uncertain"
+                    ) from exc
+        self._delivery_ids.add(audit.delivery_id)
+        if audit.event_id is not None:
+            self._event_ids.add(audit.event_id)
 
     def _persist_gap_state(self) -> None:
         if self._continuity_path is None:
@@ -372,6 +451,11 @@ class ObservationProvider:
             os.close(fd)
         try:
             os.replace(temporary, self._continuity_path)
+            directory_fd = os.open(self._continuity_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         except OSError as exc:
             raise PersistenceError(
                 f"observation continuity state is uncertain: {exc}"
@@ -395,6 +479,7 @@ class ObservationProvider:
             checked_actors[actor_id] = deepcopy(dict(actor))
         self._delivery_ids.add(delivery_id)
         self._event_ids.add(event["id"])
+        self._accepted_event_ids.add(event["id"])
         self._delivery_by_event[event["id"]] = delivery_id
         self._events.append(deepcopy(dict(event)))
         self._actors.update(checked_actors)
@@ -403,16 +488,12 @@ class ObservationProvider:
     def _trim_retention(self) -> None:
         while len(self._events) > self.limits.retention_events:
             removed = self._events.popleft()
-            self._event_ids.discard(removed["id"])
-            delivery_id = self._delivery_by_event.pop(removed["id"], None)
-            if delivery_id is not None:
-                self._delivery_ids.discard(delivery_id)
+            self._delivery_by_event.pop(removed["id"], None)
+            self._retention_evicted_before = True
         while self._events and len(_canonical_bytes(list(self._events))) > self.limits.retention_bytes:
             removed = self._events.popleft()
-            self._event_ids.discard(removed["id"])
-            delivery_id = self._delivery_by_event.pop(removed["id"], None)
-            if delivery_id is not None:
-                self._delivery_ids.discard(delivery_id)
+            self._delivery_by_event.pop(removed["id"], None)
+            self._retention_evicted_before = True
         referenced = {self.binding.actor_id}
         for event in self._events:
             referenced.update(_actor_refs(event))
@@ -472,7 +553,9 @@ class ObservationProvider:
                 deepcopy(self._actors),
                 set(self._delivery_ids),
                 set(self._event_ids),
+                set(self._accepted_event_ids),
                 dict(self._delivery_by_event),
+                self._retention_evicted_before,
             )
             self._append_memory(delivery_id, checked, checked_actors)
             try:
@@ -483,7 +566,9 @@ class ObservationProvider:
                     self._actors,
                     self._delivery_ids,
                     self._event_ids,
+                    self._accepted_event_ids,
                     self._delivery_by_event,
+                    self._retention_evicted_before,
                 ) = previous
                 raise
             if checked.get("author_id") == self.binding.actor_id:
@@ -571,7 +656,9 @@ class ObservationProvider:
             events = [deepcopy(all_events[index]) for index in indices]
             first = indices[0]
             last = indices[-1]
-            if first > 0:
+            retained_more_before = first > 0
+            retained_more_after = last < len(all_events) - 1
+            if retained_more_before or self._retention_evicted_before:
                 truncated.add("events")
             referenced = {self.binding.actor_id}
             for event in events:
@@ -587,8 +674,10 @@ class ObservationProvider:
                 "max_events": self.limits.snapshot_events,
                 "max_bytes": self.limits.snapshot_bytes,
                 "max_age_seconds": self.limits.snapshot_age_seconds,
-                "has_more_before": first > 0,
-                "has_more_after": last < len(all_events) - 1,
+                "has_more_before": (
+                    retained_more_before or self._retention_evicted_before
+                ),
+                "has_more_after": retained_more_after,
                 "has_gaps": self._restart_gap or any(
                     b - a > 1 for a, b in zip(indices, indices[1:])
                 ),
@@ -608,11 +697,15 @@ class ObservationProvider:
                 "trigger_event_id": trigger_event_id,
                 "coverage": coverage,
             }
-            if continuation and (coverage["has_more_before"] or coverage["has_more_after"]):
+            if continuation and (retained_more_before or retained_more_after):
                 request["continuation"] = self._issue_continuation(
+                    request_id=rid,
                     trigger_event_id=trigger_event_id,
                     events=all_events,
                     actors=self._actors,
+                    delivered_event_ids={event["id"] for event in events},
+                    can_fetch_before=retained_more_before,
+                    can_fetch_after=retained_more_after,
                 )
             checked = validate_attention_request(request)
             body = {
@@ -639,9 +732,13 @@ class ObservationProvider:
     def _issue_continuation(
         self,
         *,
+        request_id: str,
         trigger_event_id: str,
         events: list[dict[str, Any]],
         actors: Mapping[str, Any],
+        delivered_event_ids: set[str],
+        can_fetch_before: bool,
+        can_fetch_after: bool,
     ) -> dict[str, Any]:
         handle_id = f"ctx:{secrets.token_urlsafe(24)}"
         binding = {
@@ -655,19 +752,24 @@ class ObservationProvider:
         )
         state = _ContinuationState(
             handle_id=handle_id,
+            request_id=request_id,
             binding=binding,
             expires_at=expires_at,
             events=deepcopy(events),
             actors=deepcopy(dict(actors)),
+            can_fetch_before=can_fetch_before,
+            can_fetch_after=can_fetch_after,
+            can_fetch_around_event=can_fetch_before or can_fetch_after,
+            delivered_event_ids=set(delivered_event_ids),
             cursors={},
         )
         self._continuations[handle_id] = state
         return {
             "handle_id": handle_id,
             "bound_to": deepcopy(binding),
-            "can_fetch_before": True,
-            "can_fetch_after": True,
-            "can_fetch_around_event": True,
+            "can_fetch_before": state.can_fetch_before,
+            "can_fetch_after": state.can_fetch_after,
+            "can_fetch_around_event": state.can_fetch_around_event,
             "max_events_per_fetch": self.limits.continuation_events,
             "max_bytes_per_fetch": self.limits.continuation_bytes,
             "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
@@ -707,54 +809,92 @@ class ObservationProvider:
             current = now or datetime.now(timezone.utc)
             if state is None or current >= state.expires_at:
                 raise ValidationError("continuation handle is unknown or expired")
+            if request["request_id"] != state.request_id:
+                raise ValidationError("continuation request ID does not match the issued handle")
             if dict(host_context) != state.binding:
                 raise ValidationError("continuation host context does not match the issued binding")
             if request["max_events"] > self.limits.continuation_events:
                 raise ValidationError("continuation event cap exceeds issued authority")
             if request["max_bytes"] > self.limits.continuation_bytes:
                 raise ValidationError("continuation byte cap exceeds issued authority")
-            anchor = request.get("anchor_event_id") or state.binding["trigger_event_id"]
             by_id = {event["id"]: index for index, event in enumerate(state.events)}
-            if anchor not in by_id:
-                raise ValidationError("continuation anchor is outside the issued context")
             direction = request["direction"]
+            direction_allowed = {
+                "before": state.can_fetch_before,
+                "after": state.can_fetch_after,
+                "around": state.can_fetch_around_event,
+            }[direction]
+            if not direction_allowed:
+                raise ValidationError("continuation direction is not authorized by the handle")
             cursor = request.get("cursor")
             if cursor is not None:
                 if cursor not in state.cursors:
                     raise ValidationError("continuation cursor is not bound to this handle")
-                cursor_direction, offset = state.cursors.pop(cursor)
+                cursor_direction, cursor_anchor, stored_indices = state.cursors.pop(cursor)
                 if cursor_direction != direction:
                     raise ValidationError("continuation cursor direction mismatch")
+                requested_anchor = request.get("anchor_event_id")
+                if requested_anchor is not None and requested_anchor != cursor_anchor:
+                    raise ValidationError("continuation cursor anchor mismatch")
+                anchor = cursor_anchor
+                candidate_indices = [
+                    index
+                    for index in stored_indices
+                    if state.events[index]["id"] not in state.delivered_event_ids
+                ]
             else:
-                offset = by_id[anchor]
-            if direction == "before":
-                candidates = state.events[:offset]
-                candidates = list(reversed(candidates))
-            elif direction == "after":
-                candidates = state.events[offset + 1 :]
-            else:
-                candidates = state.events
-                offset = 0
-            selected: list[dict[str, Any]] = []
+                anchor = request.get("anchor_event_id") or state.binding["trigger_event_id"]
+                if anchor not in by_id:
+                    raise ValidationError("continuation anchor is outside the issued context")
+                anchor_index = by_id[anchor]
+                if direction == "before":
+                    candidate_indices = list(range(anchor_index - 1, -1, -1))
+                elif direction == "after":
+                    candidate_indices = list(range(anchor_index + 1, len(state.events)))
+                else:
+                    candidate_indices = sorted(
+                        (
+                            index
+                            for index in range(len(state.events))
+                            if index != anchor_index
+                        ),
+                        key=lambda index: (abs(index - anchor_index), index),
+                    )
+                candidate_indices = [
+                    index
+                    for index in candidate_indices
+                    if state.events[index]["id"] not in state.delivered_event_ids
+                ]
+            selected_indices: list[int] = []
             used_bytes = 2
-            for event in candidates:
-                event_bytes = len(_canonical_bytes(event)) + (1 if selected else 0)
-                if len(selected) >= request["max_events"] or used_bytes + event_bytes > request["max_bytes"]:
+            truncated_by: set[str] = set()
+            for index in candidate_indices:
+                event = state.events[index]
+                event_bytes = len(_canonical_bytes(event)) + (
+                    1 if selected_indices else 0
+                )
+                if len(selected_indices) >= request["max_events"]:
+                    truncated_by.add("events")
                     break
-                selected.append(deepcopy(event))
+                if used_bytes + event_bytes > request["max_bytes"]:
+                    truncated_by.add("bytes")
+                    break
+                selected_indices.append(index)
                 used_bytes += event_bytes
-            if direction == "before":
-                selected.reverse()
-            exhausted = len(selected) == len(candidates)
+            exhausted = len(selected_indices) == len(candidate_indices)
+            selected = [
+                deepcopy(state.events[index])
+                for index in sorted(selected_indices)
+            ]
+            state.delivered_event_ids.update(event["id"] for event in selected)
             next_cursor = None
             if not exhausted:
                 next_cursor = f"cur:{secrets.token_urlsafe(24)}"
-                advance = len(selected)
-                if direction == "before":
-                    next_offset = max(0, offset - advance)
-                else:
-                    next_offset = offset + advance
-                state.cursors[next_cursor] = (direction, next_offset)
+                state.cursors[next_cursor] = (
+                    direction,
+                    anchor,
+                    tuple(candidate_indices[len(selected_indices) :]),
+                )
             referenced = set()
             for event in selected:
                 referenced.update(_actor_refs(event))
@@ -775,7 +915,7 @@ class ObservationProvider:
                     "has_more_before": not exhausted if direction == "before" else None,
                     "has_more_after": not exhausted if direction == "after" else None,
                     "has_gaps": self._restart_gap,
-                    "truncated_by": [] if exhausted else ["events"],
+                    "truncated_by": sorted(truncated_by),
                     "continuity": self._continuity,
                     "has_restart_gap": self._restart_gap,
                 },

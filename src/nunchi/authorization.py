@@ -68,6 +68,16 @@ def canonical_operation_digest(operation: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
+def _sanitized_effect_result(result: TransportResult) -> TransportResult:
+    details = {
+        "sent": "privileged effect confirmed",
+        "failed": "privileged effect failed",
+        "unknown": "privileged effect acknowledgement is unknown",
+        "unavailable": "privileged effect is unavailable",
+    }
+    return TransportResult(result.delivery, details[result.delivery])
+
+
 @dataclass(frozen=True)
 class CapabilityRule:
     requester_actor_id: str
@@ -199,6 +209,7 @@ class AuthorizationJournal:
         self._records: list[dict[str, Any]] = []
         self._consumed_effects: set[str] = set()
         self._unknown_effects: set[str] = set()
+        self._idempotency_keys: dict[str, str | None] = {}
         self._lock = threading.RLock()
         if self.path.exists():
             self._load()
@@ -210,25 +221,186 @@ class AuthorizationJournal:
                     if not line.strip():
                         continue
                     record = json.loads(line)
-                    if not isinstance(record, dict) or not record.get("kind"):
-                        raise ValueError(f"line {line_number} is not an audit record")
+                    self._validate_record(record, line_number=line_number)
                     self._records.append(record)
                     if record["kind"] == "effect_commit":
                         self._consumed_effects.add(record["effect_fingerprint"])
-                    if (
-                        record["kind"] == "effect_result"
-                        and record.get("outcome") == "UNKNOWN"
-                    ):
-                        self._unknown_effects.add(record["effect_fingerprint"])
+                        self._idempotency_keys[record["effect_fingerprint"]] = record[
+                            "idempotency_key"
+                        ]
+                    if record["kind"] == "effect_result":
+                        if record["outcome"] == "UNKNOWN":
+                            self._unknown_effects.add(record["effect_fingerprint"])
+                        elif record["outcome"] == "CONFIRMED":
+                            self._unknown_effects.discard(record["effect_fingerprint"])
         except (OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
             raise AuthorizationError(
                 f"authorization journal is not trustworthy at startup: {exc}"
             ) from exc
 
+    @staticmethod
+    def _validate_record(record: Any, *, line_number: int | None = None) -> None:
+        label = f" at line {line_number}" if line_number is not None else ""
+        if not isinstance(record, dict):
+            raise ValueError(f"authorization audit record is not an object{label}")
+        kind = record.get("kind")
+        shapes = {
+            "authorization_contract": {"kind", "record", "recorded_at"},
+            "effect_commit": {
+                "kind",
+                "effect_fingerprint",
+                "action_id",
+                "decision_id",
+                "action_digest",
+                "idempotency_key",
+                "committed_at",
+            },
+            "effect_retry_commit": {
+                "kind",
+                "effect_fingerprint",
+                "action_id",
+                "decision_id",
+                "action_digest",
+                "idempotency_key",
+                "retry_id",
+                "duplicate_effect_risk",
+                "committed_at",
+            },
+            "effect_result": {
+                "kind",
+                "effect_fingerprint",
+                "action_id",
+                "outcome",
+                "detail",
+                "recorded_at",
+            },
+        }
+        if kind not in shapes or set(record) != shapes[kind]:
+            raise ValueError(f"authorization audit record has an invalid closed shape{label}")
+        if kind == "authorization_contract":
+            contract = record["record"]
+            contract_shapes = {
+                "request": (
+                    {
+                        "schema_version",
+                        "kind",
+                        "request_id",
+                        "binding",
+                        "requested_at",
+                    },
+                    set(),
+                ),
+                "decision": (
+                    {
+                        "schema_version",
+                        "kind",
+                        "request_id",
+                        "decision_id",
+                        "binding",
+                        "outcome",
+                        "reason",
+                        "policy_provenance",
+                        "evaluated_at",
+                        "expires_at",
+                        "revocation_checked_at",
+                        "revocation_status",
+                        "persistence_status",
+                        "authorization_path",
+                    },
+                    {"approval_challenge_id", "approval_completion_id"},
+                ),
+                "approval_challenge": (
+                    {
+                        "schema_version",
+                        "kind",
+                        "request_id",
+                        "approval_challenge_id",
+                        "binding",
+                        "policy_provenance",
+                        "approver_ids",
+                        "expires_at",
+                        "host_only",
+                    },
+                    set(),
+                ),
+                "approval_completion": (
+                    {
+                        "schema_version",
+                        "kind",
+                        "request_id",
+                        "approval_completion_id",
+                        "approval_challenge_id",
+                        "binding",
+                        "authenticated_approver_id",
+                        "completed_at",
+                        "recheck",
+                        "host_only",
+                    },
+                    set(),
+                ),
+            }
+            if (
+                not isinstance(contract, dict)
+                or contract.get("schema_version") != 1
+                or contract.get("kind") not in contract_shapes
+            ):
+                raise ValueError(f"authorization contract record is malformed{label}")
+            required, optional = contract_shapes[contract["kind"]]
+            if required - set(contract) or set(contract) - required - optional:
+                raise ValueError(
+                    f"authorization contract record has an invalid closed shape{label}"
+                )
+            if (
+                not isinstance(contract.get("request_id"), str)
+                or not contract["request_id"]
+                or not isinstance(contract.get("binding"), dict)
+                or not isinstance(record["recorded_at"], str)
+            ):
+                raise ValueError(f"authorization contract identity is malformed{label}")
+        else:
+            if (
+                not isinstance(record["effect_fingerprint"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", record["effect_fingerprint"])
+                or not isinstance(record["action_id"], str)
+                or not record["action_id"]
+            ):
+                raise ValueError(f"authorization effect identity is malformed{label}")
+        if kind in {"effect_commit", "effect_retry_commit"}:
+            if (
+                not isinstance(record["decision_id"], str)
+                or not record["decision_id"]
+                or not isinstance(record["action_digest"], dict)
+                or not isinstance(record["committed_at"], str)
+                or
+                record["idempotency_key"] is not None
+                and (
+                    not isinstance(record["idempotency_key"], str)
+                    or not record["idempotency_key"]
+                )
+            ):
+                raise ValueError(f"authorization idempotency key is malformed{label}")
+        if kind == "effect_retry_commit" and record["duplicate_effect_risk"] is not True:
+            raise ValueError(f"effect retry must record duplicate risk{label}")
+        if kind == "effect_result" and record["outcome"] not in {
+            "CONFIRMED",
+            "UNKNOWN",
+            "FAILED",
+        }:
+            raise ValueError(f"authorization effect outcome is malformed{label}")
+        if kind == "effect_result" and (
+            not isinstance(record["detail"], str)
+            or not isinstance(record["recorded_at"], str)
+        ):
+            raise ValueError(f"authorization effect result is malformed{label}")
+
     def append(self, record: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(record, Mapping) or not isinstance(record.get("kind"), str):
             raise ValidationError("authorization audit record must have a kind")
         checked = deepcopy(dict(record))
+        try:
+            self._validate_record(checked)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         payload = (
             json.dumps(
                 checked,
@@ -240,6 +412,7 @@ class AuthorizationJournal:
             + "\n"
         ).encode("utf-8")
         with self._lock:
+            existed = self.path.exists()
             fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
             try:
                 written = os.write(fd, payload)
@@ -252,11 +425,28 @@ class AuthorizationJournal:
                 ) from exc
             finally:
                 os.close(fd)
+            if not existed:
+                try:
+                    directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except OSError as exc:
+                    raise AuthorizationError(
+                        "authorization journal directory persistence is uncertain"
+                    ) from exc
             self._records.append(checked)
             if checked["kind"] == "effect_commit":
                 self._consumed_effects.add(checked["effect_fingerprint"])
-            if checked["kind"] == "effect_result" and checked.get("outcome") == "UNKNOWN":
-                self._unknown_effects.add(checked["effect_fingerprint"])
+                self._idempotency_keys[checked["effect_fingerprint"]] = checked[
+                    "idempotency_key"
+                ]
+            if checked["kind"] == "effect_result":
+                if checked["outcome"] == "UNKNOWN":
+                    self._unknown_effects.add(checked["effect_fingerprint"])
+                elif checked["outcome"] == "CONFIRMED":
+                    self._unknown_effects.discard(checked["effect_fingerprint"])
         return deepcopy(checked)
 
     def consumed(self, fingerprint: str) -> bool:
@@ -266,6 +456,10 @@ class AuthorizationJournal:
     def unknown(self, fingerprint: str) -> bool:
         with self._lock:
             return fingerprint in self._unknown_effects
+
+    def idempotency_key(self, fingerprint: str) -> str | None:
+        with self._lock:
+            return self._idempotency_keys.get(fingerprint)
 
     def records(self) -> tuple[dict[str, Any], ...]:
         with self._lock:
@@ -280,6 +474,7 @@ class _PendingApproval:
     operation: dict[str, Any]
     effect_fingerprint: str
     cancel: threading.Event
+    unknown_retry: bool = False
 
 
 class AuthorizationCoordinator:
@@ -397,9 +592,12 @@ class AuthorizationCoordinator:
         binding: Mapping[str, Any],
         policy: PolicySnapshot,
         now: datetime,
+        retry_unknown: bool = False,
     ) -> tuple[str, str, CapabilityRule | None]:
         fingerprint = self._effect_fingerprint(binding)
-        if self.journal.consumed(fingerprint):
+        if self.journal.consumed(fingerprint) and not (
+            retry_unknown and self.journal.unknown(fingerprint)
+        ):
             return "DENY", "replay", None
         rule = self._matching_rule(policy, binding)
         if rule is None:
@@ -512,10 +710,11 @@ class AuthorizationCoordinator:
         )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
-        except BaseException as exc:
-            result = TransportResult("unknown", f"privileged acknowledgement lost: {exc}")
+        except BaseException:
+            result = TransportResult("unknown", "privileged acknowledgement was lost")
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "privileged executor returned no attestation")
+        result = _sanitized_effect_result(result)
         native_outcome = "CONFIRMED" if result.delivery == "sent" else (
             "UNKNOWN" if result.delivery == "unknown" else "FAILED"
         )
@@ -525,6 +724,90 @@ class AuthorizationCoordinator:
                 "effect_fingerprint": fingerprint,
                 "action_id": binding["action_id"],
                 "outcome": native_outcome,
+                "detail": result.detail,
+                "recorded_at": _iso(_now()),
+            }
+        )
+        return result
+
+    def _retry_unknown_effect(
+        self,
+        *,
+        binding: Mapping[str, Any],
+        operation: Mapping[str, Any],
+        decision: Mapping[str, Any],
+        rule: CapabilityRule,
+        cancel: threading.Event,
+        authenticated_approval: bool,
+    ) -> TransportResult:
+        """Retry one previously unknown effect under fresh exact authority."""
+        if cancel.is_set():
+            return TransportResult("failed", "unknown-effect retry was cancelled")
+        fingerprint = self._effect_fingerprint(binding)
+        if not self.journal.consumed(fingerprint) or not self.journal.unknown(fingerprint):
+            return TransportResult("failed", "unknown-effect retry has no unknown predecessor")
+        policy = self.policy_source.load()
+        now = _now()
+        outcome, reason, current_rule = self._evaluate(
+            binding=binding,
+            policy=policy,
+            now=now,
+            retry_unknown=True,
+        )
+        authority_matches = (
+            (authenticated_approval and outcome in {"ALLOW", "APPROVAL_REQUIRED"})
+            or (
+                not authenticated_approval
+                and outcome == "ALLOW"
+                and reason == "policy-allow"
+                and rule.target_idempotency
+            )
+        )
+        if (
+            not authority_matches
+            or current_rule != rule
+            or policy.provenance != decision["policy_provenance"]
+            or now >= _parse_time(decision["expires_at"])
+            or self.observation.resolve_event(binding["origin_event_id"]) is None
+            or canonical_operation_digest(operation) != binding["action_digest"]
+        ):
+            return TransportResult("failed", "unknown-effect retry authority changed")
+        expected_key = f"nunchi:{fingerprint}" if rule.target_idempotency else None
+        if self.journal.idempotency_key(fingerprint) != expected_key:
+            return TransportResult("failed", "unknown-effect target idempotency binding changed")
+        retry_id = f"effect-retry:{uuid4()}"
+        self.journal.append(
+            {
+                "kind": "effect_retry_commit",
+                "effect_fingerprint": fingerprint,
+                "action_id": binding["action_id"],
+                "decision_id": decision["decision_id"],
+                "action_digest": deepcopy(binding["action_digest"]),
+                "idempotency_key": expected_key,
+                "retry_id": retry_id,
+                "duplicate_effect_risk": True,
+                "committed_at": _iso(now),
+            }
+        )
+        try:
+            result = self.executors[binding["capability"]](operation, expected_key)
+        except BaseException:
+            result = TransportResult("unknown", "privileged acknowledgement was lost")
+        if not isinstance(result, TransportResult):
+            result = TransportResult("unknown", "privileged executor returned no attestation")
+        result = _sanitized_effect_result(result)
+        self.journal.append(
+            {
+                "kind": "effect_result",
+                "effect_fingerprint": fingerprint,
+                "action_id": binding["action_id"],
+                "outcome": (
+                    "CONFIRMED"
+                    if result.delivery == "sent"
+                    else "UNKNOWN"
+                    if result.delivery == "unknown"
+                    else "FAILED"
+                ),
                 "detail": result.detail,
                 "recorded_at": _iso(_now()),
             }
@@ -556,14 +839,27 @@ class AuthorizationCoordinator:
             self._persist_contract(request)
             try:
                 policy = self.policy_source.load()
-            except BaseException as exc:
-                return TransportResult("failed", f"trusted authorization policy unavailable: {exc}")
+            except BaseException:
+                return TransportResult("failed", "trusted authorization policy is unavailable")
             evaluated_at = _strictly_after(requested_at)
+            fingerprint = self._effect_fingerprint(binding)
+            unknown_retry = self.journal.unknown(fingerprint)
             outcome, reason, rule = self._evaluate(
                 binding=binding,
                 policy=policy,
                 now=evaluated_at,
+                retry_unknown=unknown_retry,
             )
+            if (
+                unknown_retry
+                and outcome == "ALLOW"
+                and rule is not None
+                and not rule.target_idempotency
+            ):
+                # A target without idempotency can only be retried after a
+                # fresh authenticated operator accepts the duplicate risk.
+                outcome = "APPROVAL_REQUIRED"
+                reason = "approval-required"
             if outcome == "APPROVAL_REQUIRED":
                 challenge_id = f"approval:{secrets.token_urlsafe(24)}"
                 decision = self._decision(
@@ -596,8 +892,9 @@ class AuthorizationCoordinator:
                     decision=decision,
                     challenge=challenge,
                     operation=operation,
-                    effect_fingerprint=self._effect_fingerprint(binding),
+                    effect_fingerprint=fingerprint,
                     cancel=cancel,
+                    unknown_retry=unknown_retry,
                 )
                 return TransportResult("unavailable", "authenticated operator approval required")
             decision = self._decision(
@@ -612,6 +909,15 @@ class AuthorizationCoordinator:
             self._persist_contract(decision)
             if outcome != "ALLOW" or rule is None:
                 return TransportResult("failed", f"privileged action denied: {reason}")
+            if unknown_retry:
+                return self._retry_unknown_effect(
+                    binding=binding,
+                    operation=operation,
+                    decision=decision,
+                    rule=rule,
+                    cancel=cancel,
+                    authenticated_approval=False,
+                )
             return self._dispatch_once(
                 binding=binding,
                 operation=operation,
@@ -621,12 +927,17 @@ class AuthorizationCoordinator:
             )
 
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
-        """Return inspectable host-only challenges without operation secrets."""
+        """Return the exact host-only proposal an operator must inspect."""
         with self._lock:
             return tuple(
                 {
                     "challenge": deepcopy(item.challenge),
                     "request": deepcopy(item.request),
+                    "origin_observation": self.observation.resolve_event(
+                        item.request["binding"]["origin_event_id"]
+                    ),
+                    "operation": deepcopy(item.operation),
+                    "duplicate_effect_risk": item.unknown_retry,
                 }
                 for item in self._pending.values()
             )
@@ -656,11 +967,22 @@ class AuthorizationCoordinator:
                 binding=binding,
                 policy=policy,
                 now=now,
+                retry_unknown=pending.unknown_retry,
             )
             # Approval is the sole missing authority.  The matching rule may
             # still report APPROVAL_REQUIRED; the authenticated completion
             # supplies that exact authority while every other fact is rechecked.
-            if outcome != "APPROVAL_REQUIRED" or reason != "approval-required" or rule is None:
+            valid_authority = (
+                pending.unknown_retry
+                and outcome in {"ALLOW", "APPROVAL_REQUIRED"}
+                and rule is not None
+            ) or (
+                not pending.unknown_retry
+                and outcome == "APPROVAL_REQUIRED"
+                and reason == "approval-required"
+                and rule is not None
+            )
+            if not valid_authority:
                 return TransportResult("failed", "policy changed before approval completion")
             if policy.provenance != challenge["policy_provenance"]:
                 return TransportResult("failed", "policy revision changed before approval completion")
@@ -704,6 +1026,15 @@ class AuthorizationCoordinator:
             allow["expires_at"] = completion["recheck"]["expires_at"]
             self._persist_contract(completion)
             self._persist_contract(allow)
+            if pending.unknown_retry:
+                return self._retry_unknown_effect(
+                    binding=binding,
+                    operation=pending.operation,
+                    decision=allow,
+                    rule=rule,
+                    cancel=pending.cancel,
+                    authenticated_approval=True,
+                )
             # The dispatch recheck expects a direct allow.  The authenticated
             # completion is the only difference; every rule fact remains exact.
             return self._dispatch_approved_once(
@@ -759,10 +1090,11 @@ class AuthorizationCoordinator:
         )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
-        except BaseException as exc:
-            result = TransportResult("unknown", f"privileged acknowledgement lost: {exc}")
+        except BaseException:
+            result = TransportResult("unknown", "privileged acknowledgement was lost")
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "privileged executor returned no attestation")
+        result = _sanitized_effect_result(result)
         self.journal.append(
             {
                 "kind": "effect_result",
@@ -781,9 +1113,11 @@ class AuthorizationCoordinator:
         )
         return result
 
-    def restart(self) -> None:
+    def cancel(self) -> None:
         """Discard pending approvals; durable consumed effects remain blocked."""
         with self._lock:
             for pending in self._pending.values():
                 pending.cancel.set()
             self._pending.clear()
+
+    restart = cancel

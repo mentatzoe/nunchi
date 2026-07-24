@@ -6,7 +6,10 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 import json
+import math
+import queue
 import threading
+import time
 from typing import Any, Literal, Protocol
 
 from .errors import NunchiError, ValidationError
@@ -17,6 +20,8 @@ from .v2_contracts import (
     validate_attention_request,
     validate_participant_wake,
 )
+
+_MAX_CONTEXT_EXPANSIONS = 3
 
 
 class ParticipantError(NunchiError):
@@ -253,13 +258,22 @@ class ParticipantTurnHost:
         scheduler: ConversationOpportunityScheduler,
         receipts: ReceiptJournal | None = None,
         privileged: PrivilegedCoordinator | None = None,
+        participant_timeout_seconds: float = 300.0,
     ) -> None:
+        if (
+            isinstance(participant_timeout_seconds, bool)
+            or not isinstance(participant_timeout_seconds, (int, float))
+            or not math.isfinite(float(participant_timeout_seconds))
+            or participant_timeout_seconds <= 0
+        ):
+            raise ValueError("participant timeout must be positive and finite")
         self.observation = observation
         self.participant = participant
         self.transport = transport
         self.scheduler = scheduler
         self.receipts = receipts or observation.receipts
         self.privileged = privileged
+        self.participant_timeout_seconds = float(participant_timeout_seconds)
         self.invocation_count = 0
 
     def _make_wake(
@@ -341,6 +355,7 @@ class ParticipantTurnHost:
         host_continuation = request.get("continuation")
         expansion_calls = 0
         expansion_cursors: dict[tuple[str, str], str] = {}
+        expanded_event_ids: set[str] = set()
 
         def expand(
             *,
@@ -354,6 +369,8 @@ class ParticipantTurnHost:
                 raise ParticipantError("context expansion cancelled")
             if not host_continuation:
                 raise ParticipantError("context expansion is unavailable")
+            if expansion_calls >= _MAX_CONTEXT_EXPANSIONS:
+                raise ParticipantError("context expansion call cap exceeded")
             fetch: dict[str, Any] = {
                 "request_id": wake["request_id"],
                 "handle_id": host_continuation["handle_id"],
@@ -371,9 +388,15 @@ class ParticipantTurnHost:
             expansion_calls += 1
             page = dict(
                 self.observation.fetch_context(
-                fetch,
-                host_context=host_continuation["bound_to"],
+                    fetch,
+                    host_context=host_continuation["bound_to"],
                 )
+            )
+            expanded_event_ids.update(
+                event["id"]
+                for event in page.get("events", ())
+                if isinstance(event, Mapping)
+                and isinstance(event.get("id"), str)
             )
             next_cursor = page.pop("next_cursor", None)
             if next_cursor is not None:
@@ -384,14 +407,53 @@ class ParticipantTurnHost:
             page["has_next_page"] = next_cursor is not None
             return page
 
-        try:
-            self.invocation_count += 1
-            raw_action = self.participant(
-                wake=deepcopy(wake),
-                expand=expand,
-                cancel=token.cancel_event,
-            )
-        except BaseException:
+        result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+        def invoke() -> None:
+            try:
+                result_queue.put_nowait(
+                    (
+                        "ok",
+                        self.participant(
+                            wake=deepcopy(wake),
+                            expand=expand,
+                            cancel=token.cancel_event,
+                        ),
+                    )
+                )
+            except BaseException:
+                result_queue.put_nowait(("error", None))
+
+        self.invocation_count += 1
+        worker = threading.Thread(
+            target=invoke,
+            name=f"nunchi-participant-{token.generation}",
+            daemon=True,
+        )
+        worker.start()
+        deadline = time.monotonic() + self.participant_timeout_seconds
+        invocation_result: tuple[str, Any] | None = None
+        while invocation_result is None:
+            if token.cancel_event.is_set() or not self.scheduler.is_current(token):
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if self.scheduler.is_current(token):
+                    self._append_host_receipt(
+                        wake,
+                        expansion_calls=expansion_calls,
+                        outcome="unknown",
+                    )
+                    self.scheduler.cancel()
+                else:
+                    token.cancel_event.set()
+                return TransportResult("failed", "participant deadline exceeded")
+            try:
+                invocation_result = result_queue.get(timeout=min(0.05, remaining))
+            except queue.Empty:
+                continue
+        status, raw_action = invocation_result
+        if status == "error":
             if self.scheduler.is_current(token):
                 self._append_host_receipt(
                     wake,
@@ -419,6 +481,7 @@ class ParticipantTurnHost:
             return TransportResult("failed", "participant returned an invalid action")
 
         visible_event_ids = {event["id"] for event in wake["events"]}
+        visible_event_ids.update(expanded_event_ids)
         if action["origin_event_id"] not in visible_event_ids:
             self._append_host_receipt(
                 wake,
@@ -426,6 +489,16 @@ class ParticipantTurnHost:
                 outcome="unknown",
             )
             return TransportResult("failed", "action origin is absent from participant facts")
+        if (
+            action["kind"] in ("reply", "reaction")
+            and action["target_event_id"] not in visible_event_ids
+        ):
+            self._append_host_receipt(
+                wake,
+                expansion_calls=expansion_calls,
+                outcome="unknown",
+            )
+            return TransportResult("failed", "action target is absent from participant facts")
 
         def dispatch() -> TransportResult:
             # This append and the native call share the scheduler's commit
@@ -449,9 +522,9 @@ class ParticipantTurnHost:
 
         try:
             committed, result = self.scheduler.commit_dispatch(token, dispatch)
-        except BaseException as exc:
+        except BaseException:
             committed = True
-            result = TransportResult("unknown", f"dispatch acknowledgement lost: {exc}")
+            result = TransportResult("unknown", "dispatch acknowledgement was lost")
         if not committed:
             return None
         if not isinstance(result, TransportResult):
