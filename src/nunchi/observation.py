@@ -43,6 +43,7 @@ class ObservationLimits:
     continuation_events: int = 24
     continuation_bytes: int = 32_768
     continuation_ttl_seconds: int = 300
+    continuation_handles: int = 64
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
@@ -204,6 +205,11 @@ class ObservationProvider:
             if self._path is not None
             else None
         )
+        self._replay_path = (
+            self._path.with_name(self._path.name + ".replay-reservations.jsonl")
+            if self._path is not None
+            else None
+        )
         self._continuity_path = (
             self._path.with_name(self._path.name + ".continuity.json")
             if self._path is not None
@@ -236,6 +242,8 @@ class ObservationProvider:
         self._accepted_event_ids: set[str] = set()
         self._delivery_by_event: dict[str, str] = {}
         self._audits: list[DeliveryAudit] = []
+        self._reserved_replays: set[tuple[str, str]] = set()
+        self._committed_replays: set[tuple[str, str]] = set()
         self._continuations: dict[str, _ContinuationState] = {}
         self._restart_gap = False
         self._retention_evicted_before = False
@@ -255,12 +263,52 @@ class ObservationProvider:
                     )
                 self._restart_gap = True
                 self._continuity = "unknown"
+            if self._replay_path is not None and self._replay_path.exists():
+                self._load_replay_index()
             if self._audit_path is not None and self._audit_path.exists():
                 self._load_audit_index()
             if self._path.exists():
                 self._load()
+            if self._reserved_replays - self._committed_replays:
+                self._restart_gap = True
+                self._continuity = "unknown"
             if len(self._accepted_event_ids) > len(self._events):
                 self._retention_evicted_before = True
+
+    def _load_replay_index(self) -> None:
+        """Restore reservations written before mutable observation content."""
+        assert self._replay_path is not None
+        try:
+            with self._replay_path.open(encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, 1):
+                    if not line.strip():
+                        continue
+                    record = json.loads(line)
+                    if (
+                        not isinstance(record, dict)
+                        or set(record)
+                        != {"schema_version", "delivery_id", "event_id"}
+                        or record["schema_version"] != 2
+                        or any(
+                            not isinstance(record[name], str) or not record[name]
+                            for name in ("delivery_id", "event_id")
+                        )
+                    ):
+                        raise ValueError(
+                            f"invalid replay reservation at line {line_number}"
+                        )
+                    pair = (record["delivery_id"], record["event_id"])
+                    if pair in self._reserved_replays:
+                        raise ValueError(
+                            f"duplicate replay reservation at line {line_number}"
+                        )
+                    self._reserved_replays.add(pair)
+                    self._delivery_ids.add(record["delivery_id"])
+                    self._event_ids.add(record["event_id"])
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise PersistenceError(
+                f"observation replay reservations are untrustworthy: {exc}"
+            ) from exc
 
     def _load_audit_index(self) -> None:
         """Restore content-free exact replay identities from durable audit."""
@@ -311,6 +359,9 @@ class ObservationProvider:
                             "exact-self-context",
                         ):
                             self._accepted_event_ids.add(record["event_id"])
+                            self._committed_replays.add(
+                                (record["delivery_id"], record["event_id"])
+                            )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise PersistenceError(
                 f"observation delivery audit is untrustworthy: {exc}"
@@ -393,7 +444,6 @@ class ObservationProvider:
             ) from exc
 
     def _record_audit(self, audit: DeliveryAudit) -> None:
-        self._audits.append(audit)
         if self._audit_path is not None:
             existed = self._audit_path.exists()
             payload = _canonical_bytes(
@@ -431,9 +481,75 @@ class ObservationProvider:
                     raise PersistenceError(
                         "observation delivery-audit directory persistence is uncertain"
                     ) from exc
+        self._audits.append(audit)
         self._delivery_ids.add(audit.delivery_id)
         if audit.event_id is not None:
             self._event_ids.add(audit.event_id)
+            if audit.outcome in ("recorded", "exact-self-context"):
+                self._committed_replays.add((audit.delivery_id, audit.event_id))
+
+    def _reserve_replay(self, delivery_id: str, event_id: str) -> None:
+        """Durably make one native delivery non-wakeable before content writes."""
+        pair = (delivery_id, event_id)
+        if pair in self._reserved_replays:
+            raise PersistenceError("observation replay reservation already exists")
+        if self._replay_path is not None:
+            existed = self._replay_path.exists()
+            payload = _canonical_bytes(
+                {
+                    "schema_version": 2,
+                    "delivery_id": delivery_id,
+                    "event_id": event_id,
+                }
+            ) + b"\n"
+            fd = os.open(
+                self._replay_path,
+                os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short replay-reservation write")
+                os.fsync(fd)
+            except OSError as exc:
+                self._reserved_replays.add(pair)
+                self._delivery_ids.add(delivery_id)
+                self._event_ids.add(event_id)
+                raise PersistenceError(
+                    f"observation replay reservation is uncertain: {exc}"
+                ) from exc
+            finally:
+                os.close(fd)
+            self._reserved_replays.add(pair)
+            self._delivery_ids.add(delivery_id)
+            self._event_ids.add(event_id)
+            if not existed:
+                try:
+                    directory_fd = os.open(self._replay_path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except OSError as exc:
+                    raise PersistenceError(
+                        "observation replay-reservation directory persistence "
+                        "is uncertain"
+                    ) from exc
+        else:
+            self._reserved_replays.add(pair)
+            self._delivery_ids.add(delivery_id)
+            self._event_ids.add(event_id)
+
+    def _mark_persistence_uncertain(self) -> None:
+        self._restart_gap = True
+        self._continuity = "unknown"
+        self._continuations.clear()
+        try:
+            self._persist_gap_state()
+        except (OSError, PersistenceError):
+            # The durable replay reservation still prevents a stale wake after
+            # restart even if the separate coverage marker cannot be replaced.
+            pass
 
     def _persist_gap_state(self) -> None:
         if self._continuity_path is None:
@@ -551,12 +667,15 @@ class ObservationProvider:
             previous = (
                 deepcopy(self._events),
                 deepcopy(self._actors),
-                set(self._delivery_ids),
-                set(self._event_ids),
                 set(self._accepted_event_ids),
                 dict(self._delivery_by_event),
                 self._retention_evicted_before,
             )
+            try:
+                self._reserve_replay(delivery_id, checked["id"])
+            except BaseException:
+                self._mark_persistence_uncertain()
+                raise
             self._append_memory(delivery_id, checked, checked_actors)
             try:
                 self._persist_snapshot()
@@ -564,12 +683,11 @@ class ObservationProvider:
                 (
                     self._events,
                     self._actors,
-                    self._delivery_ids,
-                    self._event_ids,
                     self._accepted_event_ids,
                     self._delivery_by_event,
                     self._retention_evicted_before,
                 ) = previous
+                self._mark_persistence_uncertain()
                 raise
             if checked.get("author_id") == self.binding.actor_id:
                 outcome = "exact-self-context"
@@ -580,7 +698,11 @@ class ObservationProvider:
                 eligible = True
                 detail = "canonical event recorded"
             audit = DeliveryAudit(delivery_id, outcome, detail, checked["id"])
-            self._record_audit(audit)
+            try:
+                self._record_audit(audit)
+            except BaseException:
+                self._mark_persistence_uncertain()
+                raise
             return ObservationResult(audit, eligible)
 
     def _selected_indices(self, trigger_event_id: str) -> tuple[list[int], set[str]]:
@@ -740,6 +862,7 @@ class ObservationProvider:
         can_fetch_before: bool,
         can_fetch_after: bool,
     ) -> dict[str, Any]:
+        self._prune_continuations(datetime.now(timezone.utc))
         handle_id = f"ctx:{secrets.token_urlsafe(24)}"
         binding = {
             "participant_id": self.binding.participant_id,
@@ -775,6 +898,17 @@ class ObservationProvider:
             "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
         }
 
+    def _prune_continuations(self, current: datetime) -> None:
+        expired = [
+            handle_id
+            for handle_id, state in self._continuations.items()
+            if current >= state.expires_at
+        ]
+        for handle_id in expired:
+            self._continuations.pop(handle_id, None)
+        while len(self._continuations) >= self.limits.continuation_handles:
+            self._continuations.pop(next(iter(self._continuations)))
+
     def fetch_context(
         self,
         request: Mapping[str, Any],
@@ -805,9 +939,10 @@ class ObservationProvider:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValidationError(f"continuation fetch {name} must be positive")
         with self._lock:
-            state = self._continuations.get(request["handle_id"])
             current = now or datetime.now(timezone.utc)
-            if state is None or current >= state.expires_at:
+            self._prune_continuations(current)
+            state = self._continuations.get(request["handle_id"])
+            if state is None:
                 raise ValidationError("continuation handle is unknown or expired")
             if request["request_id"] != state.request_id:
                 raise ValidationError("continuation request ID does not match the issued handle")

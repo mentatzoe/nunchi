@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from urllib.parse import urlencode
 import urllib.error
@@ -74,15 +75,25 @@ class TelegramTransport:
             raise ValidationError("Telegram getMe response lacks a stable actor ID")
         return f"telegram:actor:{actor_id}"
 
-    def updates(self, offset: int | None):
+    def updates(
+        self,
+        offset: int | None,
+        *,
+        timeout_seconds: int | None = None,
+        limit: int | None = None,
+    ):
         payload = {
-            "timeout": self.poll_timeout,
+            "timeout": (
+                self.poll_timeout if timeout_seconds is None else timeout_seconds
+            ),
             "allowed_updates": json.dumps(
                 ["message", "channel_post", "my_chat_member", "chat_member"]
             ),
         }
         if offset is not None:
             payload["offset"] = offset
+        if limit is not None:
+            payload["limit"] = limit
         return self._call("getUpdates", payload)
 
 
@@ -147,6 +158,24 @@ def _save_backfill_complete(path: Path) -> None:
         os.close(directory_fd)
 
 
+def _poll_updates(
+    transport: TelegramTransport,
+    *,
+    offset: int | None,
+    backfilling: bool,
+):
+    if backfilling:
+        # Telegram defines a negative offset as a bounded tail read that
+        # forgets older pending updates. This establishes one finite startup
+        # frontier even if the room remains active.
+        return transport.updates(
+            -100,
+            timeout_seconds=0,
+            limit=100,
+        )
+    return transport.updates(offset)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -207,7 +236,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         offset = int(offset_path.read_text()) if offset_path.exists() else None
         backfilling = not backfill_path.exists()
         while True:
-            updates = transport.updates(offset)
+            updates = _poll_updates(
+                transport,
+                offset=offset,
+                backfilling=backfilling,
+            )
             if not isinstance(updates, list):
                 raise ValidationError("Telegram getUpdates result must be an array")
             for update in updates:
@@ -220,7 +253,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 offset = max(offset or 0, update["update_id"] + 1)
             if offset is not None:
                 _save_offset(offset_path, offset)
-            if backfilling and not updates:
+            if backfilling:
+                runtime.pipeline.observation.mark_continuity_gap(
+                    delivery_id=(
+                        "telegram:startup-backfill-gap:"
+                        f"{time.time_ns()}"
+                    ),
+                    detail=(
+                        "Telegram startup used a bounded native tail; older or "
+                        "concurrent pre-frontier updates are not asserted complete"
+                    ),
+                )
                 _save_backfill_complete(backfill_path)
                 backfilling = False
             if args.once:

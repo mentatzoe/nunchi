@@ -134,6 +134,16 @@ def _static_probe():
     }
 
 
+def _declare_fresh_gateway_gap(runtime: ReferenceAdapterRuntime) -> None:
+    runtime.pipeline.observation.mark_continuity_gap(
+        delivery_id=f"discord:standalone-startup-gap:{time.time_ns()}",
+        detail=(
+            "fresh standalone Discord gateway session cannot attest "
+            "events missed before READY"
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -186,6 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     config=config,
                     transport=DiscordPyTransport(bot, asyncio.get_running_loop()),
                 )
+                _declare_fresh_gateway_gap(runtime_holder["runtime"])
 
         @bot.event
         async def on_disconnect():

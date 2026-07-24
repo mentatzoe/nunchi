@@ -41,10 +41,18 @@ contribution. Silence produces no transport line.
 
 ## Backfill
 
-Matrix's first `/sync` batch and Telegram's first `getUpdates` batch are
-recorded as context and offset/token state, not scheduled as fresh work.
-Restart never schedules retained observations. Discord gateway resume
-continuity is transport-attested; a bounded queue or client-delivery loss
+Matrix's first `/sync` batch is recorded as context and token state, not
+scheduled as fresh work. Telegram establishes a finite startup frontier with
+one native negative-offset tail read (at most 100 updates): that tail is
+context-only, older pending updates are deliberately forgotten, and an
+explicit coverage gap is retained before ordinary long polling begins. A busy
+room therefore cannot hold Telegram in backfill forever or turn stale backlog
+into wake work.
+
+Restart never schedules retained observations. A fresh Discord process has no
+durable gateway resume session, so both the shared and standalone transports
+declare a source gap before accepting post-start facts. Within-process resume
+continuity is transport-attested; a bounded queue or client-delivery loss also
 produces an explicit persistent gap.
 
 ## Errors

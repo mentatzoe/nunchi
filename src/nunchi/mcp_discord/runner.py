@@ -62,8 +62,19 @@ class GatewayRunner:
         self._allowed_channel_ids = allowed_channel_ids or frozenset()
         self._membership_room_ids = membership_room_ids
         self._on_source_gap = on_source_gap
+        self._initial_gap_declared = False
 
     async def run(self, shutdown: asyncio.Event) -> None:
+        if (
+            not self._initial_gap_declared
+            and not self._protocol.can_resume
+            and self._on_source_gap is not None
+        ):
+            # Gateway session state is intentionally process-local. A fresh
+            # process therefore cannot prove that no Discord events occurred
+            # between the prior process and this IDENTIFY.
+            self._on_source_gap()
+            self._initial_gap_declared = True
         backoff = self._initial_backoff
         while not shutdown.is_set():
             url = self._protocol.connect_url()

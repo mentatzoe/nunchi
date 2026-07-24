@@ -91,8 +91,11 @@ inside the host. The model sees only expansion availability booleans; the
 normal participant receives a mediated function. Returned pages omit handles,
 cursors, scope bindings, and expiry. Repeated requests use host-retained
 cursors, never repeat already delivered events, and stop after three pages per
-turn. Coverage may truthfully report evicted older facts without offering an
-unfulfillable continuation. Restart discards all continuation authority.
+turn. Expired handles are pruned and a configured positive handle cap evicts
+the oldest remaining authority, so retained continuation state is bounded as
+well as expiring. Coverage may truthfully report evicted older facts without
+offering an unfulfillable continuation. Restart discards all continuation
+authority.
 
 ## Scheduling and recovery
 

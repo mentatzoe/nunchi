@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 from nunchi import cli
+from nunchi.adapters.discord import _declare_fresh_gateway_gap
+from nunchi.adapters.telegram import TelegramTransport, _poll_updates
 from nunchi.errors import ValidationError
 from nunchi.install import initialize, verify
 from nunchi.mcp_discord.authorization import (
@@ -20,6 +22,8 @@ from nunchi.mcp_discord.authorization import (
     make_tool_authorization,
 )
 from nunchi.mcp_discord.config import load_config
+from nunchi.mcp_discord.gateway import GatewayProtocol
+from nunchi.mcp_discord.runner import GatewayRunner
 from nunchi.mcp_discord.server import (
     AuthenticatedSessionRegistry,
     GapAwareEnqueuer,
@@ -128,6 +132,14 @@ class BoundedPersistenceTests(unittest.TestCase):
             with self.assertRaises(PersistenceError):
                 foundation(persistence_path=path)
 
+    def test_corrupt_replay_reservation_fails_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+            replay = path.with_name(path.name + ".replay-reservations.jsonl")
+            replay.write_text('{"event_id":"e1"}\n')
+            with self.assertRaises(PersistenceError):
+                foundation(persistence_path=path)
+
     def test_atomic_persistence_failure_rolls_back_and_does_not_wake(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "observations.jsonl"
@@ -144,6 +156,81 @@ class BoundedPersistenceTests(unittest.TestCase):
                     )
             self.assertEqual((), pipeline.observation.retained_events())
             self.assertEqual([], model.calls)
+
+    def test_replay_reservation_precedes_content_and_audit_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+            limits = ObservationLimits(
+                retention_events=2,
+                retention_bytes=100_000,
+                snapshot_events=2,
+                snapshot_bytes=100_000,
+            )
+            first, first_model, _, _ = foundation(
+                persistence_path=path,
+                limits=limits,
+            )
+            with mock.patch.object(
+                first.observation,
+                "_record_audit",
+                side_effect=PersistenceError("simulated audit loss"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    first.handle_delivery(
+                        delivery_id="d1",
+                        event=message("e1"),
+                        actors={"human:zoe": {"kind": "human"}},
+                    )
+            self.assertEqual([], first_model.calls)
+            replay_path = path.with_name(path.name + ".replay-reservations.jsonl")
+            self.assertTrue(replay_path.exists())
+
+            after_loss, _, _, _ = foundation(
+                persistence_path=path,
+                limits=limits,
+            )
+            for index in (2, 3, 4):
+                after_loss.observation.observe(
+                    delivery_id=f"d{index}",
+                    event=message(f"e{index}"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+            restored, restored_model, _, _ = foundation(
+                persistence_path=path,
+                limits=limits,
+            )
+            replay = restored.handle_delivery(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual("exact-duplicate", replay.observation.audit.outcome)
+            self.assertEqual([], restored_model.calls)
+            snapshot = restored.observation.build_snapshot("e4")
+            self.assertTrue(snapshot["coverage"]["has_gaps"])
+
+    def test_uncertain_replay_reservation_blocks_same_process_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "observations.jsonl"
+            pipeline, model, _, _ = foundation(persistence_path=path)
+            with mock.patch(
+                "nunchi.observation.os.write",
+                side_effect=OSError("simulated reservation uncertainty"),
+            ):
+                with self.assertRaises(PersistenceError):
+                    pipeline.handle_delivery(
+                        delivery_id="d1",
+                        event=message("e1"),
+                        actors={"human:zoe": {"kind": "human"}},
+                    )
+            retry = pipeline.handle_delivery(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual("exact-duplicate", retry.observation.audit.outcome)
+            self.assertEqual([], model.calls)
+            self.assertEqual((), pipeline.observation.retained_events())
 
     def test_durable_gap_survives_restart_and_invalidates_continuation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -270,6 +357,43 @@ class BoundedPersistenceTests(unittest.TestCase):
             cursor = page.get("next_cursor")
         self.assertEqual(["e2", "e1", "e0"], seen)
         self.assertIsNone(cursor)
+
+    def test_continuation_handles_are_pruned_and_capacity_bounded(self):
+        pipeline, _, _, _ = foundation(
+            limits=ObservationLimits(
+                retention_events=10,
+                retention_bytes=100_000,
+                snapshot_events=1,
+                snapshot_bytes=100_000,
+                continuation_events=1,
+                continuation_bytes=10_000,
+                continuation_handles=3,
+            )
+        )
+        for index in range(4):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        first = pipeline.observation.build_snapshot("e3")["continuation"]
+        for _ in range(9):
+            pipeline.observation.build_snapshot("e3")
+        self.assertEqual(3, len(pipeline.observation._continuations))
+        with self.assertRaises(ValidationError):
+            pipeline.observation.fetch_context(
+                {
+                    "request_id": next(
+                        state.request_id
+                        for state in pipeline.observation._continuations.values()
+                    ),
+                    "handle_id": first["handle_id"],
+                    "direction": "before",
+                    "max_events": 1,
+                    "max_bytes": 100,
+                },
+                host_context=first["bound_to"],
+            )
 
 
 class HostMediationTests(unittest.TestCase):
@@ -530,6 +654,23 @@ class DurableToolAuthorizationTests(unittest.TestCase):
 
 
 class TransportGapTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_shared_gateway_declares_gap_before_connect(self):
+        gaps = []
+        shutdown = asyncio.Event()
+
+        async def fail_connect(_url):
+            shutdown.set()
+            raise OSError("offline test")
+
+        runner = GatewayRunner(
+            GatewayProtocol("test-token"),
+            lambda _event: None,
+            on_source_gap=lambda: gaps.append("gap"),
+            connect=fail_connect,
+        )
+        await runner.run(shutdown)
+        self.assertEqual(["gap"], gaps)
+
     async def test_unauthenticated_or_wrong_route_session_never_receives(self):
         class Session:
             def __init__(self):
@@ -691,6 +832,38 @@ class TransportGapTests(unittest.IsolatedAsyncioTestCase):
             )
 
 
+class ReferenceStartupTests(unittest.TestCase):
+    def test_standalone_discord_fresh_ready_declares_gap(self):
+        runtime = mock.Mock()
+        _declare_fresh_gateway_gap(runtime)
+        call = runtime.pipeline.observation.mark_continuity_gap.call_args.kwargs
+        self.assertTrue(call["delivery_id"].startswith("discord:standalone-startup-gap:"))
+        self.assertIn("before READY", call["detail"])
+
+    def test_telegram_backfill_is_one_bounded_tail_poll(self):
+        with mock.patch.dict(os.environ, {"TELEGRAM_TOKEN": "secret"}, clear=False):
+            transport = TelegramTransport(
+                {
+                    "bot_token_env": "TELEGRAM_TOKEN",
+                    "poll_timeout_seconds": 30,
+                }
+            )
+        transport._call = mock.Mock(return_value=[])
+        self.assertEqual(
+            [],
+            _poll_updates(transport, offset=123, backfilling=True),
+        )
+        method, payload = transport._call.call_args.args
+        self.assertEqual("getUpdates", method)
+        self.assertEqual(-100, payload["offset"])
+        self.assertEqual(0, payload["timeout"])
+        self.assertEqual(100, payload["limit"])
+        transport._call.reset_mock()
+        _poll_updates(transport, offset=123, backfilling=False)
+        self.assertEqual(123, transport._call.call_args.args[1]["offset"])
+        self.assertEqual(30, transport._call.call_args.args[1]["timeout"])
+
+
 class InstalledSurfaceTests(unittest.TestCase):
     def test_installer_creates_private_v2_only_state(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -717,6 +890,7 @@ class InstalledSurfaceTests(unittest.TestCase):
     def test_packaging_and_codex_bundle_have_no_v1_execution_paths(self):
         root = Path(__file__).resolve().parents[2]
         pyproject = (root / "pyproject.toml").read_text()
+        self.assertIn('requires = ["setuptools==83.0.0"]', pyproject)
         for retired in (
             "nunchi-codex-prompt-gate",
             "nunchi-codex-send-gate",

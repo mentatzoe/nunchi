@@ -41,7 +41,8 @@ Trusted configuration owns:
 - exact participant, native self actor, platform, room, and continuity scope;
 - participant profile and delegated attention model;
 - attention suppression/recovery/margin/error policy;
-- bounded retention, snapshot, age, continuation, and expiry limits;
+- bounded retention, snapshot, age, continuation-page, continuation-handle,
+  and expiry limits;
 - participant model or fixed Codex model/session settings;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
@@ -74,7 +75,11 @@ can receive notifications or invoke tools. Notifications carry the
 gateway-attested bot actor and exact target participant. The bounded queue
 never replaces an accepted event. If an event or one participant delivery is
 lost, a durable per-route audit is written; after restart, that route receives
-an explicit continuity gap before any later event.
+an explicit continuity gap before any later event. Because gateway resume
+credentials are intentionally process-local, every fresh shared or standalone
+Discord process declares a source gap before it accepts post-start facts;
+within-process resumable reconnects preserve their narrower attested
+continuity.
 
 ## Restart and recovery
 
@@ -83,12 +88,16 @@ Restart:
 1. cancels active and pending conversation opportunities;
 2. discards continuation handles and pending approvals;
 3. retains bounded canonical observations as context only;
-4. retains receipt, authorization, output-nonce, and transport audits;
+4. retains content-free replay reservations plus observation, receipt,
+   authorization, output-nonce, and transport audits;
 5. never promotes retained events into new wake work.
 
 Corrupt or uncertain observation, receipt, authorization, nonce, session, or
 continuity state fails closed. Operator recovery uses a new state directory or
 an evidence-backed repair; the runtime never silently rewrites untrusted state.
+Canonical delivery and event identities are fsynced to a content-free replay
+reservation before mutable observation content. If the content or final audit
+commit is uncertain, the event cannot wake again and coverage becomes unknown.
 
 ## Rollback
 
