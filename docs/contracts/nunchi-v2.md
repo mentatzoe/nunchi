@@ -3,10 +3,9 @@
 **Owner**: Codex owns the shared portable contracts. Consumers use these
 schemas rather than maintaining private variants.
 
-**Status**: these five contracts are the shared seam consumed by the V2
-program slices. V1 remains the current product until the atomic V2 merge is
-verified on `main`; nothing in this document claims the V2 lifecycle is the
-running product today.
+**Status**: these six contracts are the implemented shared seam in the V2
+candidate. Candidate source behavior does not by itself establish installed,
+live, integrated, or released status.
 
 **Field-level authority**: this repository-owned reference and
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
@@ -31,10 +30,9 @@ resolved by narrowing the corpus.
 ### Privileged-action boundary
 
 `I-010F PrivilegedActionAuthorizationV2@1` has a machine-readable schema,
-deterministic flow validator, and adversarial corpus. It is a contract, not an
-executable authorization system. The participant host must still implement the
-guard, trusted policy loading, authenticated approval, durable one-use
-consumption, and effect dispatch.
+deterministic flow validator, adversarial corpus, and an executable shared
+coordinator. Platform hosts still own their trusted policy source,
+authenticated approval seam, and native effect executors.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`

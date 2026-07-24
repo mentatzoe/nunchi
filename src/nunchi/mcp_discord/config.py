@@ -40,6 +40,11 @@ class Config:
     backstop_max_sends: int = _DEFAULT_BACKSTOP_MAX_SENDS
     backstop_window_seconds: float = _DEFAULT_BACKSTOP_WINDOW_SECONDS
     drain_timeout_seconds: float = _DEFAULT_DRAIN_TIMEOUT_SECONDS
+    allowed_channel_ids: tuple[str, ...] = ()
+    participant_ids: tuple[str, ...] = ()
+    membership_room_ids: tuple[str, ...] = ()
+    output_hmac_key: bytes = field(default=b"", repr=False)
+    state_directory: str = ""
 
 
 def _require(environ: Mapping[str, str], name: str) -> str:
@@ -71,6 +76,33 @@ def _get_float(environ: Mapping[str, str], name: str, default: float) -> float:
 
 def load_config(environ: Mapping[str, str]) -> Config:
     """Build a :class:`Config` from *environ*; raises RuntimeError on bad input."""
+    allowed = tuple(
+        dict.fromkeys(
+            item.strip()
+            for item in _require(environ, "NUNCHI_DISCORD_ALLOWED_CHANNEL_IDS").split(",")
+            if item.strip()
+        )
+    )
+    participants = tuple(
+        dict.fromkeys(
+            item.strip()
+            for item in _require(environ, "NUNCHI_DISCORD_PARTICIPANT_IDS").split(",")
+            if item.strip()
+        )
+    )
+    if not allowed or any(not item.isdigit() for item in allowed):
+        raise RuntimeError("NUNCHI_DISCORD_ALLOWED_CHANNEL_IDS must list numeric channel IDs")
+    if not participants:
+        raise RuntimeError("NUNCHI_DISCORD_PARTICIPANT_IDS must list at least one participant")
+    membership_raw = environ.get("NUNCHI_DISCORD_MEMBERSHIP_ROOM_IDS", "").strip()
+    membership = tuple(
+        dict.fromkeys(item.strip() for item in membership_raw.split(",") if item.strip())
+    ) or allowed
+    if any(item not in allowed for item in membership):
+        raise RuntimeError("membership room IDs must be a subset of allowed channel IDs")
+    output_key = _require(environ, "NUNCHI_DISCORD_OUTPUT_HMAC_KEY").encode()
+    if len(output_key) < 32:
+        raise RuntimeError("NUNCHI_DISCORD_OUTPUT_HMAC_KEY must be at least 32 bytes")
     return Config(
         token=_require(environ, "NUNCHI_DISCORD_TOKEN"),
         host=environ.get("NUNCHI_MCP_DISCORD_HOST", "").strip() or _DEFAULT_HOST,
@@ -85,4 +117,9 @@ def load_config(environ: Mapping[str, str]) -> Config:
         drain_timeout_seconds=_get_float(
             environ, "NUNCHI_MCP_DISCORD_DRAIN_TIMEOUT_SECONDS", _DEFAULT_DRAIN_TIMEOUT_SECONDS
         ),
+        allowed_channel_ids=allowed,
+        participant_ids=participants,
+        membership_room_ids=membership,
+        output_hmac_key=output_key,
+        state_directory=_require(environ, "NUNCHI_DISCORD_STATE_DIRECTORY"),
     )

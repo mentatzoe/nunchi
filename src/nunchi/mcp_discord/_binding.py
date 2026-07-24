@@ -9,7 +9,7 @@ tracking, notification push, and the uvicorn/Starlette lifecycle.
 Custom vendor notifications: the SDK's ServerNotification union is closed,
 but ``ServerSession.send_notification`` serializes with ``model_dump()`` and
 only needs ``method`` and ``params`` fields, so a duck-typed pydantic model
-carries ``notifications/discord/message`` (delivered on the session's
+carries ``notifications/nunchi/v2/discord-event`` (delivered on the session's
 standalone SSE stream since it has no related request).
 
 Session tracking: the low-level Server exposes sessions only inside request
@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from pathlib import Path
 import signal
 
 import uvicorn
@@ -35,12 +36,18 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from .config import Config
+from .authorization import ToolAuthorizer
 from .events import NOTIFICATION_METHOD
 from .gateway import GatewayProtocol
 from .ratelimit import SendBackstop
 from .rest import DiscordRestClient
 from .runner import GatewayFatalError, GatewayRunner
-from .server import InFlight, enqueue_event, pump_notifications
+from .server import (
+    GapAwareEnqueuer,
+    InFlight,
+    TransportAuditJournal,
+    pump_notifications,
+)
 from .tools import TOOL_SCHEMAS, ToolExecutor
 
 logger = logging.getLogger("nunchi.mcp_discord.binding")
@@ -71,15 +78,18 @@ class SessionRegistry:
         return list(self._sessions.values())
 
 
-async def broadcast(registry: SessionRegistry, params: dict) -> None:
-    """Push one discord/message notification to every live session."""
+async def broadcast(registry: SessionRegistry, params: dict) -> bool:
+    """Push one shared V2 Discord notification to every live session."""
     notification = _VendorNotification(method=NOTIFICATION_METHOD, params=params)
+    delivered = False
     for session in registry.sessions():
         try:
             await session.send_notification(notification)  # type: ignore[arg-type]
+            delivered = True
         except Exception as exc:  # noqa: BLE001 — one dead client must not stop the rest
             logger.info("dropping MCP session after failed send: %s", exc)
             registry.discard(session)
+    return delivered
 
 
 def build_server(
@@ -117,7 +127,16 @@ def serve(config: Config) -> int:
     in_flight = InFlight()
     backstop = SendBackstop(config.backstop_max_sends, config.backstop_window_seconds)
     rest = DiscordRestClient(config.token)
-    executor = ToolExecutor(rest, backstop)
+    executor = ToolExecutor(
+        rest,
+        backstop,
+        authorizer=ToolAuthorizer(
+            secret=config.output_hmac_key,
+            participant_ids=frozenset(config.participant_ids),
+            room_ids=frozenset(config.allowed_channel_ids),
+            journal_path=Path(config.state_directory) / "output-authorizations.jsonl",
+        ),
+    )
     server = build_server(executor, registry, in_flight)
     session_manager = StreamableHTTPSessionManager(app=server, event_store=None)
 
@@ -125,12 +144,26 @@ def serve(config: Config) -> int:
     async def lifespan(_app):
         shutdown = asyncio.Event()
         queue: asyncio.Queue = asyncio.Queue(maxsize=config.queue_maxsize)
+        enqueuer = GapAwareEnqueuer(
+            queue,
+            TransportAuditJournal(
+                Path(config.state_directory) / "transport-delivery-audit.jsonl"
+            ),
+        )
         protocol = GatewayProtocol(config.token)
-        runner = GatewayRunner(protocol, lambda event: enqueue_event(queue, event))
+        runner = GatewayRunner(
+            protocol,
+            enqueuer,
+            allowed_channel_ids=frozenset(config.allowed_channel_ids),
+            membership_room_ids=config.membership_room_ids,
+        )
         gateway_task = asyncio.create_task(runner.run(shutdown), name="discord-gateway")
         pump_task = asyncio.create_task(
             pump_notifications(
-                queue, lambda params: broadcast(registry, params), shutdown=shutdown
+                queue,
+                lambda params: broadcast(registry, params),
+                shutdown=shutdown,
+                on_delivery_gap=enqueuer.declare_delivery_gap,
             ),
             name="notification-pump",
         )

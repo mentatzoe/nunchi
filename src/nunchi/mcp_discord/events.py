@@ -1,43 +1,10 @@
-"""Message events and the MCP notification contract.
-
-The load-bearing rule of this transport: a MESSAGE_CREATE is dropped if and
-only if it was authored by our own bot user. Every other author — human or
-bot — is delivered. Plain Discord content is preserved; rich-only messages
-get a tagged text fallback from embeds/components/attachments so downstream
-admission does not mistake visible peer speech for an empty event. There is no
-gate logic in this transport.
-
-Notification contract (any MCP harness can consume this):
-
-    method: "notifications/discord/message"
-    params:
-        guild_id       str | None   (None for DMs)
-        channel_id     str
-        message_id     str
-        author_id      str
-        author_name    str
-        author_is_bot  bool
-        content        str
-        timestamp      str | None   (ISO 8601, as sent by Discord)
-        mentioned_user_ids     list[str]
-        reply_to_message_id    str | None
-        reply_to_author_id     str | None
-        reply_to_author_name   str | None
-        reply_to_author_is_bot bool | None
-        reply_to_content       str | None
-
-Snowflake IDs are strings to survive JSON consumers with 53-bit numbers.
-"""
+"""Truth-preserving Discord text rendering and the shared V2 notification."""
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger("nunchi.mcp_discord.events")
-
-NOTIFICATION_METHOD = "notifications/discord/message"
+NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 _MAX_NORMALIZED_CONTENT = 6000
 
 
@@ -174,102 +141,42 @@ def message_addressing(data: dict) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class MessageEvent:
-    """One inbound Discord message, normalized for the MCP surface."""
+def v2_notification_from_dispatch(
+    event_type: str,
+    data: dict,
+    *,
+    sequence: int | None,
+    room_id: str | None = None,
+) -> dict:
+    """Build the closed shared V2 notification for one gateway dispatch.
 
-    guild_id: str | None
-    channel_id: str
-    message_id: str
-    author_id: str
-    author_name: str
-    author_is_bot: bool
-    content: str
-    timestamp: str | None
-    mentioned_user_ids: tuple[str, ...]
-    reply_to_message_id: str | None
-    reply_to_author_id: str | None
-    reply_to_author_name: str | None
-    reply_to_author_is_bot: bool | None
-    reply_to_content: str | None
-
-
-def message_event_from_create(data: dict) -> MessageEvent:
-    """Normalize a MESSAGE_CREATE dispatch payload."""
-    author = data.get("author") or {}
-    guild_id = data.get("guild_id")
-    addressing = message_addressing(data)
-    return MessageEvent(
-        guild_id=str(guild_id) if guild_id is not None else None,
-        channel_id=str(data.get("channel_id", "")),
-        message_id=str(data.get("id", "")),
-        author_id=str(author.get("id", "")),
-        author_name=str(author.get("username", "")),
-        author_is_bot=bool(author.get("bot", False)),
-        content=message_text(data),
-        timestamp=data.get("timestamp"),
-        mentioned_user_ids=tuple(addressing["mentioned_user_ids"]),
-        reply_to_message_id=addressing["reply_to_message_id"],
-        reply_to_author_id=addressing["reply_to_author_id"],
-        reply_to_author_name=addressing["reply_to_author_name"],
-        reply_to_author_is_bot=addressing["reply_to_author_is_bot"],
-        reply_to_content=addressing["reply_to_content"],
-    )
-
-
-def _looks_content_stripped(data: dict) -> bool:
-    """Empty content with no embeds/attachments/etc is the signature of a
-    missing MESSAGE_CONTENT intent (legitimately empty messages carry one of
-    these)."""
-    return not (
-        data.get("embeds")
-        or data.get("attachments")
-        or data.get("components")
-        or data.get("sticker_items")
-        or data.get("poll")
-    )
-
-
-def filter_message_create(data: dict, own_user_id: str | None) -> MessageEvent | None:
-    """Drop ONLY self-authored messages; warn loudly on stripped content.
-
-    Returns None for self-authored messages (author.id == our bot user id).
-    Bot-authored messages from other bots are delivered — that is the point
-    of this transport. Messages with empty content are still delivered, but
-    when the emptiness looks like a missing MESSAGE_CONTENT intent a WARNING
-    is logged with the remediation step.
+    Self-authored messages are deliberately preserved.  Exact self is a
+    participant-specific observation fact and only suppresses that
+    participant's wake; the transport must not erase it for other consumers or
+    later context.
     """
-    event = message_event_from_create(data)
-    if own_user_id is not None and event.author_id == str(own_user_id):
-        return None
-    if not event.content and _looks_content_stripped(data):
-        logger.warning(
-            "MESSAGE_CREATE %s in channel %s arrived with empty content and no "
-            "embeds/attachments — the MESSAGE_CONTENT privileged intent is "
-            "probably not enabled for this bot. Enable 'MESSAGE CONTENT INTENT' "
-            "in the Discord Developer Portal (Bot -> Privileged Gateway Intents). "
-            "Delivering the notification with empty content.",
-            event.message_id,
-            event.channel_id,
-        )
-    return event
+    from nunchi.adapters.v2 import normalize_discord_gateway
+    from nunchi.observation import ParticipantBinding
 
-
-def notification_params(event: MessageEvent) -> dict:
-    """The exact params object for notifications/discord/message."""
+    native = dict(data)
+    if room_id is not None:
+        native["room_id"] = room_id
+    placeholder = ParticipantBinding(
+        participant_id="transport",
+        actor_id="discord:actor:transport",
+        platform="discord",
+        room_id=str(room_id or data.get("channel_id") or data.get("guild_id") or "unknown"),
+        continuity_scope_id=f"discord:{room_id or data.get('channel_id') or data.get('guild_id') or 'unknown'}",
+    )
+    delivery = normalize_discord_gateway(
+        {"t": event_type, "s": sequence, "d": native},
+        placeholder,
+    )
     return {
-        "guild_id": event.guild_id,
-        "channel_id": event.channel_id,
-        "message_id": event.message_id,
-        "author_id": event.author_id,
-        "author_name": event.author_name,
-        "author_is_bot": event.author_is_bot,
-        "content": event.content,
-        "timestamp": event.timestamp,
-        "mentioned_user_ids": list(event.mentioned_user_ids),
-        "reply_to_message_id": event.reply_to_message_id,
-        "reply_to_author_id": event.reply_to_author_id,
-        "reply_to_author_name": event.reply_to_author_name,
-        "reply_to_author_is_bot": event.reply_to_author_is_bot,
-        "reply_to_content": event.reply_to_content,
+        "schema_version": 2,
+        "delivery_id": delivery.delivery_id,
+        "room_id": delivery.room_id,
+        "event": delivery.event,
+        "actors": delivery.actors,
+        "continuity_gap": False,
     }

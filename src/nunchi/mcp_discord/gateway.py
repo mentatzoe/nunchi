@@ -6,8 +6,9 @@ events to dispatch, reconnect requests). No sockets, no clocks — the asyncio
 shell lives in :mod:`.runner`, which makes disconnect/resume behavior fully
 testable offline.
 
-Intents: GUILD_MESSAGES | MESSAGE_CONTENT. MESSAGE_CONTENT is a *privileged*
-intent — it must be enabled per bot in the Discord Developer Portal
+Intents: GUILD_MEMBERS | GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS |
+MESSAGE_CONTENT. GUILD_MEMBERS and MESSAGE_CONTENT are *privileged* intents;
+they must be enabled per bot in the Discord Developer Portal
 (Applications -> your app -> Bot -> Privileged Gateway Intents -> MESSAGE
 CONTENT INTENT), or the gateway closes the connection with code 4014 and
 message content arrives empty on verified bots. See
@@ -22,9 +23,11 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
+GUILD_MEMBERS = 1 << 1
 GUILD_MESSAGES = 1 << 9
+GUILD_MESSAGE_REACTIONS = 1 << 10
 MESSAGE_CONTENT = 1 << 15
-INTENTS = GUILD_MESSAGES | MESSAGE_CONTENT
+INTENTS = GUILD_MEMBERS | GUILD_MESSAGES | GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT
 
 DEFAULT_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
@@ -45,9 +48,13 @@ _IDENTIFY_CLOSE_CODES = frozenset({4007, 4009})
 
 _CLOSE_HINTS = {
     4004: "authentication failed — check NUNCHI_DISCORD_TOKEN",
-    4013: "invalid intents — this build requests GUILD_MESSAGES | MESSAGE_CONTENT",
+    4013: (
+        "invalid intents — this build requests GUILD_MEMBERS | GUILD_MESSAGES | "
+        "GUILD_MESSAGE_REACTIONS | MESSAGE_CONTENT"
+    ),
     4014: (
-        "disallowed intents — enable 'MESSAGE CONTENT INTENT' for this bot in the "
+        "disallowed intents — enable 'SERVER MEMBERS INTENT' and "
+        "'MESSAGE CONTENT INTENT' for this bot in the "
         "Discord Developer Portal (Bot -> Privileged Gateway Intents)"
     ),
 }
@@ -194,8 +201,14 @@ class GatewayProtocol:
         if event == "RESUMED":
             self.ready = True
             return []
-        if event == "MESSAGE_CREATE":
-            return [Dispatch("MESSAGE_CREATE", data)]
+        if event in {
+            "MESSAGE_CREATE",
+            "MESSAGE_REACTION_ADD",
+            "MESSAGE_REACTION_REMOVE",
+            "GUILD_MEMBER_ADD",
+            "GUILD_MEMBER_REMOVE",
+        }:
+            return [Dispatch(event, data)]
         return []
 
     # ------------------------------------------------------------------ #

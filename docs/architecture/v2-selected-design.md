@@ -4,10 +4,9 @@
 > preserves the decisions selected from Aleph Vault PR 67 (`bdd1ebb`), as
 > clarified by PR 68 (`c834e8c`) and the 2026-07-20
 > implementation clarification on live-conversation freshness and privileged
-> action authorization. Program implementation authority is granted, but the
-> repository's `main` branch still implements V1. V2 becomes current only after
-> one atomic successor satisfies the completion goal, is accepted, merged, and
-> verified on `main`.
+> action authorization. The shared V2 candidate now implements this design;
+> it becomes integrated or released only after exact-candidate verification,
+> acceptance, and atomic merge.
 
 This is the self-contained readable architecture authority. The cited Vault
 commits establish provenance only; understanding or continuing Nunchi does not

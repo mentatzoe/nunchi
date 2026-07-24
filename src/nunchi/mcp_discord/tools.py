@@ -15,6 +15,7 @@ import logging
 from typing import Protocol
 
 from .events import message_addressing, message_text
+from .authorization import ToolAuthorizer
 from .ratelimit import SendBackstop
 from .rest import DiscordRestError
 
@@ -31,6 +32,7 @@ TOOL_SCHEMAS: list[dict] = [
         ),
         "inputSchema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "channel_id": {"type": "string", "description": "Target channel snowflake ID."},
                 "content": {
@@ -38,8 +40,9 @@ TOOL_SCHEMAS: list[dict] = [
                     "maxLength": _MAX_CONTENT_LENGTH,
                     "description": "Message text (max 2000 chars).",
                 },
+                "_nunchi_authorization": {"type": "object"},
             },
-            "required": ["channel_id", "content"],
+            "required": ["channel_id", "content", "_nunchi_authorization"],
         },
     },
     {
@@ -50,6 +53,7 @@ TOOL_SCHEMAS: list[dict] = [
         ),
         "inputSchema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "channel_id": {"type": "string", "description": "Channel snowflake ID."},
                 "message_id": {"type": "string", "description": "Message snowflake ID to reply to."},
@@ -58,8 +62,39 @@ TOOL_SCHEMAS: list[dict] = [
                     "maxLength": _MAX_CONTENT_LENGTH,
                     "description": "Reply text (max 2000 chars).",
                 },
+                "_nunchi_authorization": {"type": "object"},
             },
-            "required": ["channel_id", "message_id", "content"],
+            "required": ["channel_id", "message_id", "content", "_nunchi_authorization"],
+        },
+    },
+    {
+        "name": "add_reaction",
+        "description": "Add this bot's reaction to one message through a one-use V2 host authorization.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "channel_id": {"type": "string"},
+                "message_id": {"type": "string"},
+                "reaction": {"type": "string"},
+                "_nunchi_authorization": {"type": "object"},
+            },
+            "required": ["channel_id", "message_id", "reaction", "_nunchi_authorization"],
+        },
+    },
+    {
+        "name": "remove_reaction",
+        "description": "Remove this bot's own reaction through a one-use V2 host authorization.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "channel_id": {"type": "string"},
+                "message_id": {"type": "string"},
+                "reaction": {"type": "string"},
+                "_nunchi_authorization": {"type": "object"},
+            },
+            "required": ["channel_id", "message_id", "reaction", "_nunchi_authorization"],
         },
     },
     {
@@ -70,6 +105,7 @@ TOOL_SCHEMAS: list[dict] = [
         ),
         "inputSchema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "channel_id": {"type": "string", "description": "Channel snowflake ID."},
                 "limit": {
@@ -83,8 +119,9 @@ TOOL_SCHEMAS: list[dict] = [
                     "type": "string",
                     "description": "Only messages before this message snowflake ID.",
                 },
+                "_nunchi_authorization": {"type": "object"},
             },
-            "required": ["channel_id"],
+            "required": ["channel_id", "_nunchi_authorization"],
         },
     },
 ]
@@ -102,6 +139,10 @@ class RestLike(Protocol):
     def get_messages(
         self, channel_id: str, *, limit: int = 50, before: str | None = None
     ) -> list[dict]: ...
+
+    def add_reaction(self, channel_id: str, message_id: str, reaction: str) -> None: ...
+
+    def remove_reaction(self, channel_id: str, message_id: str, reaction: str) -> None: ...
 
 
 def shape_message(msg: dict) -> dict:
@@ -131,22 +172,72 @@ def _snowflake(value: object) -> str | None:
 class ToolExecutor:
     """Validates and executes tool calls. Sync — run via asyncio.to_thread."""
 
-    def __init__(self, rest: RestLike, backstop: SendBackstop) -> None:
+    def __init__(
+        self,
+        rest: RestLike,
+        backstop: SendBackstop,
+        *,
+        authorizer: ToolAuthorizer,
+    ) -> None:
         self._rest = rest
         self._backstop = backstop
+        self._authorizer = authorizer
 
     def call(self, name: str, arguments: dict) -> tuple[dict, bool]:
         """Returns (payload, ok). Error payloads carry an 'error' string."""
         try:
+            if not isinstance(arguments, dict):
+                return ({"error": "tool arguments must be an object"}, False)
+            supplied = dict(arguments)
+            authorization = supplied.pop("_nunchi_authorization", None)
+            ok, error = self._authorizer.verify(
+                authorization=authorization,
+                tool=name,
+                arguments=supplied,
+            )
+            if not ok:
+                return ({"error": error}, False)
+            arguments = supplied
             if name == "send_message":
                 return self._send(arguments, reply=False)
             if name == "reply_message":
                 return self._send(arguments, reply=True)
+            if name == "add_reaction":
+                return self._reaction(arguments, remove=False)
+            if name == "remove_reaction":
+                return self._reaction(arguments, remove=True)
             if name == "read_history":
                 return self._history(arguments)
             return ({"error": f"unknown tool: {name}"}, False)
         except DiscordRestError as exc:
             return ({"error": str(exc)}, False)
+
+    def _reaction(self, arguments: dict, *, remove: bool) -> tuple[dict, bool]:
+        channel_id = _snowflake(arguments.get("channel_id"))
+        message_id = _snowflake(arguments.get("message_id"))
+        reaction = arguments.get("reaction")
+        if channel_id is None or message_id is None:
+            return ({"error": "channel_id and message_id must be numeric snowflakes"}, False)
+        if not isinstance(reaction, str) or not reaction.strip() or len(reaction) > 100:
+            return ({"error": "reaction must be a non-empty bounded string"}, False)
+        wait = self._backstop.try_acquire(channel_id)
+        if wait > 0:
+            return ({"error": f"send backstop exceeded; retry in {wait:.1f}s"}, False)
+        if remove:
+            self._rest.remove_reaction(channel_id, message_id, reaction)
+        else:
+            self._rest.add_reaction(channel_id, message_id, reaction)
+        return (
+            {
+                "reaction": {
+                    "channel_id": channel_id,
+                    "message_id": message_id,
+                    "reaction": reaction,
+                    "operation": "remove" if remove else "add",
+                }
+            },
+            True,
+        )
 
     def _send(self, arguments: dict, *, reply: bool) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))

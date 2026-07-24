@@ -5,10 +5,11 @@ This is the implementation entrypoint. The target is the product described in
 
 ## Current truth
 
-The runnable repository is still V1. V2 is incomplete until one reviewed
-candidate satisfies the completion goal and cuts over atomically. Historical
-branches, packets, approvals, and evidence may be reused only after their code
-and behavior pass against the current upstream implementation.
+The `codex/v2-shared-foundation` candidate is the first runnable shared V2
+implementation. It remains incomplete and unintegrated until exact-candidate
+installed/live proof and non-author review pass. Hermes and Claude Code are
+outside this candidate's explicit scope. Historical branches, packets,
+approvals, and evidence are not proof for these bytes.
 
 Use four plain status terms:
 

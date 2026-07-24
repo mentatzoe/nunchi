@@ -18,7 +18,7 @@ import logging
 import random
 from typing import Awaitable, Callable
 
-from .events import MessageEvent, filter_message_create
+from .events import v2_notification_from_dispatch
 from .gateway import (
     CloseAndReconnect,
     Dispatch,
@@ -45,8 +45,10 @@ class GatewayRunner:
     def __init__(
         self,
         protocol: GatewayProtocol,
-        on_event: Callable[[MessageEvent], None],
+        on_event: Callable[[dict], None],
         *,
+        allowed_channel_ids: frozenset[str] | None = None,
+        membership_room_ids: tuple[str, ...] = (),
         connect: Callable[[str], Awaitable] | None = None,
         rng: Callable[[], float] = random.random,
         initial_backoff: float = 1.0,
@@ -56,6 +58,8 @@ class GatewayRunner:
         self._connect = connect or WSClient.connect
         self._rng = rng
         self._initial_backoff = initial_backoff
+        self._allowed_channel_ids = allowed_channel_ids or frozenset()
+        self._membership_room_ids = membership_room_ids
 
     async def run(self, shutdown: asyncio.Event) -> None:
         backoff = self._initial_backoff
@@ -115,12 +119,30 @@ class GatewayRunner:
                         if action.payload.get("op") == 1:
                             self._protocol.mark_heartbeat_sent()
                     elif isinstance(action, Dispatch):
-                        if action.event == "MESSAGE_CREATE":
-                            event = filter_message_create(
-                                action.data, self._protocol.own_user_id
-                            )
-                            if event is not None:
-                                self._on_event(event)
+                        if action.event in {
+                            "MESSAGE_CREATE",
+                            "MESSAGE_REACTION_ADD",
+                            "MESSAGE_REACTION_REMOVE",
+                        }:
+                            channel_id = str(action.data.get("channel_id") or "")
+                            if channel_id in self._allowed_channel_ids:
+                                self._on_event(
+                                    v2_notification_from_dispatch(
+                                        action.event,
+                                        action.data,
+                                        sequence=self._protocol.seq,
+                                    )
+                                )
+                        elif action.event in {"GUILD_MEMBER_ADD", "GUILD_MEMBER_REMOVE"}:
+                            for room_id in self._membership_room_ids:
+                                self._on_event(
+                                    v2_notification_from_dispatch(
+                                        action.event,
+                                        action.data,
+                                        sequence=self._protocol.seq,
+                                        room_id=room_id,
+                                    )
+                                )
                     elif isinstance(action, CloseAndReconnect):
                         logger.info(
                             "gateway asked us to reconnect (resume=%s)", action.resume

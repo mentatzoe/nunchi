@@ -18,6 +18,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
@@ -26,7 +27,7 @@ from .ratelimit import RateLimiter
 logger = logging.getLogger("nunchi.mcp_discord.rest")
 
 API_BASE_URL = "https://discord.com/api/v10"
-_USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 0.2.0)"
+_USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 2.0.0)"
 _TIMEOUT_SECONDS = 15.0
 
 # method, url, headers, body -> (status, lower-cased headers, body)
@@ -113,6 +114,20 @@ class DiscordRestClient:
             path += f"&before={before}"
         result = self._request("GET", path)
         return result if isinstance(result, list) else []
+
+    def add_reaction(self, channel_id: str, message_id: str, reaction: str) -> None:
+        encoded = urllib.parse.quote(reaction, safe="")
+        self._request(
+            "PUT",
+            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+        )
+
+    def remove_reaction(self, channel_id: str, message_id: str, reaction: str) -> None:
+        encoded = urllib.parse.quote(reaction, safe="")
+        self._request(
+            "DELETE",
+            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+        )
 
     # ------------------------------------------------------------------ #
     # Request core
