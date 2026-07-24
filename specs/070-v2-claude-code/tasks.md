@@ -10,7 +10,7 @@ description: "Slice delivery task plan for the V2 Claude Code harness (dormant u
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned participant / source**: Station — evidence/governance/assignments/station-v2-claude-owner-2026-07-16.md
+**Assigned participant / source**: Claude — evidence/governance/assignments/claude-v2-claude-owner-2026-07-24.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/070-v2-claude-code`
 
