@@ -47,7 +47,9 @@ single effect-commit point.
 High-impact work defaults to `APPROVAL_REQUIRED` unless trusted operator policy
 explicitly preauthorizes the exact actor, capability, and scope. The challenge
 is host-only, expiring, bound to the exact digest, and accepts only an exact
-authenticated approver. Approval must cause a fresh recheck before a new allow.
+authenticated approver. Approval must cause a fresh recheck before a new allow:
+the later authenticated decision must retain that recheck's policy, expiry,
+revocation, and persistence facts and be timestamped after it.
 
 The host executes nothing when any fact is missing, ambiguous, expired,
 revoked, mismatched, replayed, or not durably persisted. It drops pending
@@ -59,7 +61,8 @@ runtime responsibilities belong to slice `040`.
 
 The A3 tests prove schema closure, digest shape, and deterministic correlation
 rules for supplied records, including substitution, wrong-approver, replay,
-expiry, revocation, and unknown-persistence cases. They do not prove that a
+approval-recheck drift, expiry, revocation, and unknown-persistence cases. They
+do not prove that a
 platform delivery is authentic, an operator is authenticated, a policy is
 trusted, persistence actually succeeded, or an effect ran once. Those claims
 require the later guard, transport, integration, and live evidence.

@@ -77,7 +77,8 @@ This A3 seam is a closed host-facing union, always carrying a `schema_version:
   naming the allowed approvers. It carries no reusable approval secret.
 - **`approval_completion`** names the exact authenticated approver and a fresh
   policy/revocation/expiry/persistence recheck. A later authenticated-approval
-  decision must name that exact completion and match its recheck outcome.
+  decision must name that exact completion, match its outcome and policy/
+  expiry/revocation/persistence facts, and occur after that recheck.
 
 `binding.action_digest` is a closed object: `algorithm` is exactly `sha256`,
 `value` is exactly 64 lowercase hexadecimal characters, and

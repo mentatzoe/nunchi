@@ -128,6 +128,48 @@ class AuthorizationFlowCases(unittest.TestCase):
         errors = validate_privileged_action_authorization_flow(flow)
         self.assertTrue(any("missing host-only challenge" in error for error in errors), errors)
 
+    def test_authenticated_allow_must_match_and_follow_its_fresh_recheck(self):
+        mutations = (
+            (
+                "policy provenance",
+                lambda decision: decision["policy_provenance"].update(
+                    {"revision": "2026-07-24T02:00:00Z"}
+                ),
+                "policy_provenance: must equal the authenticated recheck",
+            ),
+            (
+                "expiry",
+                lambda decision: decision.update({"expires_at": "2026-07-24T02:00:00Z"}),
+                "expires_at: must equal records[3].recheck.expires_at",
+            ),
+            (
+                "revocation status",
+                lambda decision: decision.update({"revocation_status": "revoked"}),
+                "revocation_status: must equal the authenticated recheck",
+            ),
+            (
+                "persistence status",
+                lambda decision: decision.update({"persistence_status": "unknown"}),
+                "persistence_status: must equal the authenticated recheck",
+            ),
+            (
+                "evaluation and revocation timestamps",
+                lambda decision: decision.update(
+                    {
+                        "evaluated_at": "2026-07-24T01:05:30Z",
+                        "revocation_checked_at": "2026-07-24T01:05:30Z",
+                    }
+                ),
+                "must be later than records[3].recheck",
+            ),
+        )
+        for name, mutate, expected in mutations:
+            with self.subTest(name=name):
+                flow = make_authenticated_approval_flow()
+                mutate(flow[-1])
+                errors = validate_privileged_action_authorization_flow(flow)
+                self.assertTrue(any(expected in error for error in errors), errors)
+
     def test_completion_cannot_authorize_more_than_one_decision(self):
         flow = make_authenticated_approval_flow()
         second_allow = deepcopy(flow[-1])

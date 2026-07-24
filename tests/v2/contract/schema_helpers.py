@@ -1801,6 +1801,21 @@ def _authorization_not_after(
     return True
 
 
+def _authorization_same_moment(
+    errors: list[str], left_path: str, left: datetime | None, right_path: str, right: datetime | None
+) -> bool:
+    if left is None or right is None:
+        return False
+    try:
+        if left != right:
+            errors.append(f"{left_path}: must equal {right_path}")
+            return False
+    except TypeError:
+        errors.append(f"{left_path}: is not comparable with {right_path}")
+        return False
+    return True
+
+
 def _authorization_binding_invariant_errors(binding: dict[str, Any], path: str) -> list[str]:
     """Local invariants that bind duplicated scope/requester facts together."""
     errors: list[str] = []
@@ -2115,6 +2130,66 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
             errors.append(
                 f"records[{index}].outcome: must equal the authenticated recheck outcome"
             )
+        recheck = completion["recheck"]
+        if not semantic_equal(decision["policy_provenance"], recheck["policy_provenance"]):
+            errors.append(
+                f"records[{index}].policy_provenance: must equal the authenticated recheck"
+            )
+        if decision["revocation_status"] != recheck["revocation_status"]:
+            errors.append(
+                f"records[{index}].revocation_status: must equal the authenticated recheck"
+            )
+        if decision["persistence_status"] != recheck["persistence_status"]:
+            errors.append(
+                f"records[{index}].persistence_status: must equal the authenticated recheck"
+            )
+        decision_evaluated = _authorization_timestamp(
+            errors, f"records[{index}].evaluated_at", decision["evaluated_at"]
+        )
+        recheck_evaluated = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.evaluated_at",
+            recheck["evaluated_at"],
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].evaluated_at",
+            decision_evaluated,
+            f"records[{completion_index}].recheck.evaluated_at",
+            recheck_evaluated,
+        )
+        decision_checked = _authorization_timestamp(
+            errors,
+            f"records[{index}].revocation_checked_at",
+            decision["revocation_checked_at"],
+        )
+        recheck_checked = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.revocation_checked_at",
+            recheck["revocation_checked_at"],
+        )
+        _authorization_after(
+            errors,
+            f"records[{index}].revocation_checked_at",
+            decision_checked,
+            f"records[{completion_index}].recheck.revocation_checked_at",
+            recheck_checked,
+        )
+        decision_expiry = _authorization_timestamp(
+            errors, f"records[{index}].expires_at", decision["expires_at"]
+        )
+        recheck_expiry = _authorization_timestamp(
+            errors,
+            f"records[{completion_index}].recheck.expires_at",
+            recheck["expires_at"],
+        )
+        _authorization_same_moment(
+            errors,
+            f"records[{index}].expires_at",
+            decision_expiry,
+            f"records[{completion_index}].recheck.expires_at",
+            recheck_expiry,
+        )
     return errors
 
 
