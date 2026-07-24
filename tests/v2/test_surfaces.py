@@ -1006,6 +1006,13 @@ class CodexSurfaceTests(unittest.TestCase):
             valid.call_tool("send_message", {}),
         )
 
+    def test_mcp_client_pins_canonical_streamable_http_path(self):
+        bare = StreamableMCPClient("http://127.0.0.1:3993/mcp")
+        canonical = StreamableMCPClient("http://127.0.0.1:3993/mcp/")
+
+        self.assertEqual("http://127.0.0.1:3993/mcp/", bare.url)
+        self.assertEqual("http://127.0.0.1:3993/mcp/", canonical.url)
+
 
 class NativeAcknowledgementTests(unittest.TestCase):
     def test_matrix_missing_event_id_is_unknown(self):

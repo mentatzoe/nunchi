@@ -25,7 +25,11 @@ def _iter_sse(lines) -> Iterator[str]:
 
 class StreamableMCPClient:
     def __init__(self, url: str, *, timeout_seconds: float = 30) -> None:
-        self.url = url
+        # Starlette mounts the streamable-HTTP app at ``/mcp/`` and redirects
+        # the documented bare ``/mcp`` path with HTTP 307.  urllib deliberately
+        # refuses to replay a POST across that redirect, so pin the canonical
+        # endpoint before any initialize or tool request can carry a body.
+        self.url = url if url.endswith("/") else f"{url}/"
         self.timeout_seconds = timeout_seconds
         self.session_id: str | None = None
         self._next_id = 1
