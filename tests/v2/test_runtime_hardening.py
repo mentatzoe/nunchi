@@ -724,6 +724,15 @@ class InstalledSurfaceTests(unittest.TestCase):
             "nunchi admit",
         ):
             self.assertNotIn(retired, pyproject)
+        for retired_module in (
+            "adapters.py",
+            "loader.py",
+            "report.py",
+            "invariants.py",
+        ):
+            self.assertFalse(
+                (root / "evals" / "verdict_suite" / retired_module).exists()
+            )
         hooks = json.loads(
             (
                 root

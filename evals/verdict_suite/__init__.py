@@ -1,1 +1,1 @@
-"""Classifier verdict evaluation runner and V1 regression corpus."""
+"""V2 lifecycle conformance entry point; V1 fixtures are inert evidence."""
