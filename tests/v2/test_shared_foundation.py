@@ -184,6 +184,27 @@ class ObservationTests(unittest.TestCase):
             event["id"] for event in pipeline.observation.retained_events()
         ])
 
+    def test_exact_self_membership_cause_is_context_only(self):
+        pipeline, model, _, _ = foundation()
+        result = pipeline.handle_delivery(
+            delivery_id="d-membership",
+            event={
+                "id": "e-membership",
+                "type": "membership",
+                "scope": {"kind": "room", "id": "42"},
+                "subject_actor_id": "human:zoe",
+                "caused_by_actor_id": "discord:bot:9",
+                "change": "join",
+            },
+            actors={
+                "human:zoe": {"display_name": "Zoe", "kind": "human"},
+                "discord:bot:9": {"display_name": "Vigil", "kind": "bot"},
+            },
+        )
+        self.assertEqual("exact-self-context", result.observation.audit.outcome)
+        self.assertFalse(result.observation.wake_eligible)
+        self.assertEqual([], model.calls)
+
     def test_duplicate_unconstructable_and_route_rejection_never_call_model(self):
         pipeline, model, _, _ = foundation()
         first = pipeline.handle_delivery(

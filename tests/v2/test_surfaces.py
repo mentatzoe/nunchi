@@ -280,13 +280,20 @@ class ToolAuthorizationTests(unittest.TestCase):
             },
         )
 
-    def authorization(self, arguments, *, now=None):
+    def authorization(
+        self,
+        arguments,
+        *,
+        now=None,
+        tool="send_message",
+        request_id="request-1",
+    ):
         return make_tool_authorization(
             secret=self.secret,
-            request_id="request-1",
+            request_id=request_id,
             participant_id="vigil",
             room_id="42",
-            tool="send_message",
+            tool=tool,
             arguments=arguments,
             now=now,
         )
@@ -397,7 +404,14 @@ class ToolAuthorizationTests(unittest.TestCase):
             **arguments,
             "_nunchi_authorization": self.authorization(arguments),
         }
-        sent, ok = executor.call("send_message", authorized)
+        unbound, ok = executor.call("send_message", authorized)
+        self.assertFalse(ok, unbound)
+        self.assertEqual([], rest.calls)
+        sent, ok = executor.call(
+            "send_message",
+            authorized,
+            expected_self_actor_id="discord:actor:9",
+        )
         self.assertTrue(ok, sent)
         self.assertEqual(1, len(rest.calls))
 
@@ -418,9 +432,66 @@ class ToolAuthorizationTests(unittest.TestCase):
                 **arguments,
                 "_nunchi_authorization": self.authorization(arguments),
             },
+            expected_self_actor_id="discord:actor:9",
         )
         self.assertTrue(ok)
         self.assertEqual("unknown", payload["delivery"]["status"])
+
+    def test_tool_executor_requires_exact_message_effect_and_self(self):
+        class Rest:
+            response = {}
+
+            def create_message(self, *_args, **_kwargs):
+                return deepcopy(self.response)
+
+        rest = Rest()
+        executor = ToolExecutor(
+            rest,
+            SendBackstop(10, 10),
+            authorizer=self.authorizer,
+        )
+        arguments = {
+            "channel_id": "42",
+            "message_id": "77",
+            "content": "expected",
+        }
+
+        sequence = 0
+
+        def call(response):
+            nonlocal sequence
+            sequence += 1
+            rest.response = response
+            return executor.call(
+                "reply_message",
+                {
+                    **arguments,
+                    "_nunchi_authorization": self.authorization(
+                        arguments,
+                        tool="reply_message",
+                        request_id=f"reply-{sequence}",
+                    ),
+                },
+                expected_self_actor_id="discord:actor:9",
+            )
+
+        valid = {
+            "id": "101",
+            "channel_id": "42",
+            "author": {"id": "9", "username": "Vigil", "bot": True},
+            "content": "expected",
+            "message_reference": {"message_id": "77"},
+        }
+        self.assertTrue(call(valid)[1])
+        for mutation in (
+            {"content": "DIFFERENT"},
+            {"message_reference": {"message_id": "88"}},
+            {"author": {"id": "10", "username": "Other", "bot": True}},
+        ):
+            with self.subTest(mutation=mutation):
+                payload, ok = call({**valid, **mutation})
+                self.assertTrue(ok)
+                self.assertEqual("unknown", payload["delivery"]["status"])
 
 
 class CodexSurfaceTests(unittest.TestCase):
@@ -713,6 +784,8 @@ class CodexSurfaceTests(unittest.TestCase):
                                         "channel_id": "42",
                                         "author_id": "9",
                                         "author_is_bot": True,
+                                        "content": "hello",
+                                        "reply_to_message_id": None,
                                     }
                                 }
                             ),
@@ -721,7 +794,13 @@ class CodexSurfaceTests(unittest.TestCase):
                 }
 
         client = Client()
-        transport = MCPDiscordTransport(client, "42", "vigil", secret)
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            secret,
+        )
         result = transport.dispatch(
             action={
                 "kind": "message",
@@ -745,7 +824,13 @@ class CodexSurfaceTests(unittest.TestCase):
             def call_tool(self, _name, _arguments):
                 return {"isError": False, "content": []}
 
-        transport = MCPDiscordTransport(Client(), "42", "vigil", b"y" * 32)
+        transport = MCPDiscordTransport(
+            Client(),
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
         result = transport.dispatch(
             action={
                 "kind": "message",
@@ -759,6 +844,65 @@ class CodexSurfaceTests(unittest.TestCase):
             },
         )
         self.assertEqual("unknown", result.delivery)
+
+    def test_codex_mcp_reply_requires_exact_effect_and_self(self):
+        class Client:
+            message = {}
+
+            def call_tool(self, _name, _arguments):
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"message": self.message}),
+                        }
+                    ],
+                }
+
+        client = Client()
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
+        action = {
+            "kind": "reply",
+            "origin_event_id": "discord:message:1",
+            "target_event_id": "discord:message:77",
+            "text": "expected",
+        }
+        wake = {
+            "request_id": "request-1",
+            "self": {"participant_id": "vigil"},
+            "room": {"id": "42"},
+        }
+        valid = {
+            "message_id": "101",
+            "channel_id": "42",
+            "author_id": "9",
+            "author_is_bot": True,
+            "content": "expected",
+            "reply_to_message_id": "77",
+        }
+        client.message = valid
+        self.assertEqual(
+            "sent",
+            transport.dispatch(action=action, wake=wake).delivery,
+        )
+        for mutation in (
+            {"content": "DIFFERENT"},
+            {"reply_to_message_id": "88"},
+            {"author_id": "10"},
+        ):
+            with self.subTest(mutation=mutation):
+                client.message = {**valid, **mutation}
+                self.assertEqual(
+                    "unknown",
+                    transport.dispatch(action=action, wake=wake).delivery,
+                )
 
     def test_codex_mcp_reaction_requires_exact_echo(self):
         class Client:
@@ -783,7 +927,13 @@ class CodexSurfaceTests(unittest.TestCase):
                 }
 
         client = Client()
-        transport = MCPDiscordTransport(client, "42", "vigil", b"y" * 32)
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
         action = {
             "kind": "reaction",
             "origin_event_id": "discord:message:1",

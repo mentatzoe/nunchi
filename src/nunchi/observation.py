@@ -689,10 +689,16 @@ class ObservationProvider:
                 ) = previous
                 self._mark_persistence_uncertain()
                 raise
-            if checked.get("author_id") == self.binding.actor_id:
+            if (
+                checked.get("author_id") == self.binding.actor_id
+                or checked.get("caused_by_actor_id") == self.binding.actor_id
+            ):
                 outcome = "exact-self-context"
                 eligible = False
-                detail = "exact transport self retained as context without self wake"
+                detail = (
+                    "exact transport self author or cause retained as context "
+                    "without self wake"
+                )
             else:
                 outcome = "recorded"
                 eligible = True
@@ -862,7 +868,10 @@ class ObservationProvider:
         can_fetch_before: bool,
         can_fetch_after: bool,
     ) -> dict[str, Any]:
-        self._prune_continuations(datetime.now(timezone.utc))
+        self._prune_continuations(
+            datetime.now(timezone.utc),
+            reserve_capacity=True,
+        )
         handle_id = f"ctx:{secrets.token_urlsafe(24)}"
         binding = {
             "participant_id": self.binding.participant_id,
@@ -898,7 +907,12 @@ class ObservationProvider:
             "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
         }
 
-    def _prune_continuations(self, current: datetime) -> None:
+    def _prune_continuations(
+        self,
+        current: datetime,
+        *,
+        reserve_capacity: bool = False,
+    ) -> None:
         expired = [
             handle_id
             for handle_id, state in self._continuations.items()
@@ -906,8 +920,9 @@ class ObservationProvider:
         ]
         for handle_id in expired:
             self._continuations.pop(handle_id, None)
-        while len(self._continuations) >= self.limits.continuation_handles:
-            self._continuations.pop(next(iter(self._continuations)))
+        if reserve_capacity:
+            while len(self._continuations) >= self.limits.continuation_handles:
+                self._continuations.pop(next(iter(self._continuations)))
 
     def fetch_context(
         self,

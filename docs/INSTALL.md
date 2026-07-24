@@ -82,11 +82,13 @@ within-process resumable reconnects preserve their narrower attested
 continuity.
 
 Output success is target-attested. Message results must include a non-empty
-native message identity for the exact room and authenticated bot; reaction
-results must echo the exact room, target, operation, and reaction. The Codex
-consumer also verifies JSON-RPC request correlation and the single MCP text
-result. Empty, stale, mismatched, or malformed acknowledgements are recorded
-as unknown rather than sent.
+native message identity for the exact room and authenticated bot and must echo
+the exact submitted content plus the exact reply target or absence of one.
+Reaction results must echo the exact room, target, operation, and reaction.
+The Codex consumer independently rechecks those facts, JSON-RPC request
+correlation, and the single MCP text result. Empty, stale, cross-bot,
+wrong-content, wrong-reply, mismatched, or malformed acknowledgements are
+recorded as unknown rather than sent.
 
 ## Restart and recovery
 

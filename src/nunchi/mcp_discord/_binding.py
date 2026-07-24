@@ -139,12 +139,16 @@ def build_server(
         route = registry.route(session)
         if route is None:
             raise RuntimeError("MCP session is not authenticated for a participant route")
+        registered = registry.session_for(*route)
+        if registered is None or registered[0] is not session:
+            raise RuntimeError("MCP session route lost its authenticated self binding")
         with in_flight.track():
             payload, ok = await asyncio.to_thread(
                 executor.call,
                 name,
                 supplied,
                 expected_route=route,
+                expected_self_actor_id=registered[1],
             )
         if not ok:
             # The lowlevel server converts exceptions into isError tool results.

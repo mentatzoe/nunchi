@@ -44,9 +44,11 @@ A consumer of the shared Discord transport must:
 6. invoke output/history tools only from that authenticated session with a
    fresh exact-operation authorization;
 7. correlate every JSON-RPC response to the exact request and report `sent`
-   only after the tool payload attests the expected native room, effect, and
-   new message or reaction identity. Empty, stale, mismatched, or malformed
-   acknowledgements are `unknown`, never synthetic success.
+   only after the tool payload attests the expected native room, exact
+   authenticated self, submitted content, reply target or non-reply effect,
+   and new message or reaction identity. Empty, stale, cross-bot,
+   wrong-content, wrong-reply, mismatched, or malformed acknowledgements are
+   `unknown`, never synthetic success.
 
 The server configuration maps participant IDs directly to numeric room arrays.
 There is no participant/room cross product and no unauthenticated broadcast.
@@ -95,11 +97,13 @@ inside the host. The model sees only expansion availability booleans; the
 normal participant receives a mediated function. Returned pages omit handles,
 cursors, scope bindings, and expiry. Repeated requests use host-retained
 cursors, never repeat already delivered events, and stop after three pages per
-turn. Expired handles are pruned and a configured positive handle cap evicts
-the oldest remaining authority, so retained continuation state is bounded as
-well as expiring. Coverage may truthfully report evicted older facts without
-offering an unfulfillable continuation. Restart discards all continuation
-authority.
+turn. Expired handles are pruned. A configured positive handle cap evicts the
+oldest remaining authority only when reserving capacity for a newly issued
+handle; fetching never revokes a known unexpired handle as a capacity side
+effect. The wake refresh does not mint a second discarded capability.
+Continuation state is therefore bounded as well as expiring. Coverage may
+truthfully report evicted older facts without offering an unfulfillable
+continuation. Restart discards all continuation authority.
 
 ## Scheduling and recovery
 

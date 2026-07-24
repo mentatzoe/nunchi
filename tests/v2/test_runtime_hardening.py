@@ -380,6 +380,18 @@ class BoundedPersistenceTests(unittest.TestCase):
         for _ in range(9):
             pipeline.observation.build_snapshot("e3")
         self.assertEqual(3, len(pipeline.observation._continuations))
+        retained_id, retained = next(iter(pipeline.observation._continuations.items()))
+        retained_page = pipeline.observation.fetch_context(
+            {
+                "request_id": retained.request_id,
+                "handle_id": retained_id,
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 10_000,
+            },
+            host_context=retained.binding,
+        )
+        self.assertEqual(1, len(retained_page["events"]))
         with self.assertRaises(ValidationError):
             pipeline.observation.fetch_context(
                 {
@@ -419,6 +431,7 @@ class HostMediationTests(unittest.TestCase):
                 snapshot_bytes=100_000,
                 continuation_events=2,
                 continuation_bytes=10_000,
+                continuation_handles=1,
             ),
         )
         for index in range(3):

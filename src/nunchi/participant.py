@@ -296,6 +296,7 @@ class ParticipantTurnHost:
         fresh = self.observation.build_snapshot(
             checked_request["trigger_event_id"],
             request_id=checked_request["request_id"],
+            continuation=False,
             record_receipt=False,
         )
         # Continuation capability is retained only by this host.  The

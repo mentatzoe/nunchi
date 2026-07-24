@@ -526,11 +526,20 @@ class MCPDiscordTransport:
         client: StreamableMCPClient,
         room_id: str,
         participant_id: str,
+        actor_id: str,
         output_secret: bytes,
     ) -> None:
+        if (
+            not isinstance(actor_id, str)
+            or not actor_id.startswith("discord:actor:")
+            or not actor_id.removeprefix("discord:actor:").isdigit()
+        ):
+            raise ValidationError("Codex Discord transport actor binding is invalid")
         self.client = client
         self.room_id = room_id
         self.participant_id = participant_id
+        self.actor_id = actor_id
+        self.native_actor_id = actor_id.removeprefix("discord:actor:")
         self.output_secret = output_secret
 
     @staticmethod
@@ -628,9 +637,15 @@ class MCPDiscordTransport:
                 not isinstance(message_id, str)
                 or not message_id.isdigit()
                 or message.get("channel_id") != self.room_id
-                or not isinstance(message.get("author_id"), str)
-                or not message["author_id"].isdigit()
+                or message.get("author_id") != self.native_actor_id
                 or message.get("author_is_bot") is not True
+                or message.get("content") != action["text"]
+                or message.get("reply_to_message_id")
+                != (
+                    arguments["message_id"]
+                    if name == "reply_message"
+                    else None
+                )
             ):
                 return TransportResult(
                     "unknown",
@@ -734,6 +749,7 @@ class CodexRoomRuntime:
                 client,
                 self.binding.room_id,
                 self.binding.participant_id,
+                self.binding.actor_id,
                 self._output_secret(config["transport"]),
             ),
             scheduler=scheduler,

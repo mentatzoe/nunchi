@@ -210,11 +210,33 @@ class ToolExecutor:
         arguments: dict,
         *,
         expected_route: tuple[str, str] | None = None,
+        expected_self_actor_id: str | None = None,
     ) -> tuple[dict, bool]:
         """Returns (payload, ok). Error payloads carry an 'error' string."""
         try:
             if not isinstance(arguments, dict):
                 return ({"error": "tool arguments must be an object"}, False)
+            expected_author_id = (
+                expected_self_actor_id.removeprefix("discord:actor:")
+                if (
+                    isinstance(expected_self_actor_id, str)
+                    and expected_self_actor_id.startswith("discord:actor:")
+                    and expected_self_actor_id.removeprefix(
+                        "discord:actor:"
+                    ).isdigit()
+                )
+                else None
+            )
+            if name in {
+                "send_message",
+                "reply_message",
+                "add_reaction",
+                "remove_reaction",
+            } and expected_author_id is None:
+                return (
+                    {"error": "authenticated Discord self identity is unavailable"},
+                    False,
+                )
             supplied = dict(arguments)
             authorization = supplied.pop("_nunchi_authorization", None)
             ok, error = self._authorizer.verify(
@@ -232,9 +254,17 @@ class ToolExecutor:
                 return ({"error": error}, False)
             arguments = supplied
             if name == "send_message":
-                return self._send(arguments, reply=False)
+                return self._send(
+                    arguments,
+                    reply=False,
+                    expected_author_id=expected_author_id,
+                )
             if name == "reply_message":
-                return self._send(arguments, reply=True)
+                return self._send(
+                    arguments,
+                    reply=True,
+                    expected_author_id=expected_author_id,
+                )
             if name == "add_reaction":
                 return self._reaction(arguments, remove=False)
             if name == "remove_reaction":
@@ -272,7 +302,13 @@ class ToolExecutor:
             True,
         )
 
-    def _send(self, arguments: dict, *, reply: bool) -> tuple[dict, bool]:
+    def _send(
+        self,
+        arguments: dict,
+        *,
+        reply: bool,
+        expected_author_id: str,
+    ) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))
         if channel_id is None:
             return ({"error": "channel_id must be a numeric snowflake string"}, False)
@@ -318,11 +354,20 @@ class ToolExecutor:
         author_id = (
             _snowflake(author.get("id")) if isinstance(author, dict) else None
         )
+        shaped = shape_message(created) if isinstance(created, dict) else None
+        acknowledged_reply = (
+            shaped.get("reply_to_message_id")
+            if isinstance(shaped, dict)
+            else None
+        )
         if (
             created_id is None
             or created_channel != channel_id
-            or author_id is None
+            or author_id != expected_author_id
             or author.get("bot") is not True
+            or not isinstance(shaped, dict)
+            or shaped.get("content") != content
+            or acknowledged_reply != reply_to
         ):
             return (
                 {
@@ -336,7 +381,7 @@ class ToolExecutor:
                 },
                 True,
             )
-        return ({"message": shape_message(created)}, True)
+        return ({"message": shaped}, True)
 
     def _history(self, arguments: dict) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))
