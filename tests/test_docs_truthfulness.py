@@ -156,7 +156,8 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
         required = (
             "The runnable repository and published `0.2.0` package are V1",
             "selected but incomplete V2 product",
-            "required privileged-action authorization successor is not integrated",
+            "portable schemas include privileged-action authorization",
+            "executable privileged-action guard is still missing",
             "historical branches, packets, approvals, and evidence are inputs",
             "Platform work starts only when its shared dependencies are implemented",
             "Planning artifacts, lifecycle labels, and handoff packets are not completion",

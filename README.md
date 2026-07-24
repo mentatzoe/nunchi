@@ -14,8 +14,9 @@ woken participant a normal act-or-silence turn.
 
 The current V2 baseline is:
 
-- contract slice `010` is integrated through amendments A1/A2;
-- the required privileged-action authorization successor is not integrated;
+- the portable schemas include privileged-action authorization and
+  deterministic correlation tests;
+- the executable privileged-action guard is still missing;
 - observation, attention, participant host, shared transport, platform
   integrations, security closure, packaging, and cutover remain incomplete;
 - historical branches, packets, approvals, and evidence are inputs, not proof

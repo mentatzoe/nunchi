@@ -15,6 +15,8 @@ installed runtime they substantiate.
 - `packaging/` — historical package/install smoke.
 - `examples/` — captured demonstration output; illustrative, not a parity
   claim.
+- `v2/contract/` — deterministic portable-contract validation records; these
+  prove schema and correlation behavior, not installed runtime enforcement.
 - `governance/` — historical workflow and ownership provenance; never current
   status or V2 runtime evidence.
 
