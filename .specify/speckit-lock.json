@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "package": "specify-cli",
-  "version": "0.12.11",
-  "source": "https://github.com/github/spec-kit.git",
-  "tag": "v0.12.11",
-  "commit": "e802a7dd52a6eceba9403cbbf40e60dced043238"
-}

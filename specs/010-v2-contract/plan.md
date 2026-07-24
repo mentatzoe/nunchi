@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Contract
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/contract` | **Date**: 2026-07-11 (corpus-path and documentation-matrix refresh 2026-07-17; post-rejection R1/R2/R3 alignment to the clarified spec, same day; post-rejection R4/R5/R6 selected-design-fidelity alignment 2026-07-18) | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/010-v2-contract/spec.md`

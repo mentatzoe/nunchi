@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Participant Wake
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/participant-wake` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/040-v2-participant-wake/spec.md`

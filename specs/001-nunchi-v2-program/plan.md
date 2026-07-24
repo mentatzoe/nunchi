@@ -1,5 +1,10 @@
 # Implementation Plan: Nunchi V2 End-to-End Parity
 
+> **Reference only.** Architecture and integration decisions remain useful.
+> SpecKit, lifecycle, assignment, worktree, task, candidate, handoff, and
+> acceptance instructions in this document are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Branch**: `integration/v2` | **Date**: 2026-07-11 | **Spec**: `spec.md`
 
 **Input**: The repository-owned selected design at

@@ -1,5 +1,8 @@
 # Planning Research: V2 Program Decomposition
 
+> **Reference only.** This preserves design background, not an executable
+> workflow or current status. Follow `docs/v2-delivery.md`.
+
 This file records control-plane decomposition decisions only. It does not define
 or contain product contracts.
 
