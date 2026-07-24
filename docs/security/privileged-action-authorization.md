@@ -1,10 +1,9 @@
-# Privileged action authorization boundary (A3 active implementation)
+# Privileged action authorization boundary (A3 implementation complete; acceptance pending)
 
-`I-010F PrivilegedActionAuthorizationV2@1` is an active contract
+`I-010F PrivilegedActionAuthorizationV2@1` is a complete contract
 implementation, not a running authorization system. It defines the facts a
-later host guard must correlate before a privileged effect. This implementation
-is not frozen, accepted, or an effective upstream dependency until separate
-`v2-integrator` review.
+later host guard must correlate before a privileged effect. Independent
+acceptance is pending, so it is not yet an effective upstream dependency.
 
 ## What is protected
 
@@ -60,7 +59,7 @@ approvals on restart instead of reconstructing them from room history. A full
 implementation must bound pending state and make cancellation race-safe; those
 runtime responsibilities belong to slice `040`.
 
-## What this active implementation proves and does not prove
+## What this complete implementation proves and does not prove
 
 The A3 tests prove schema closure, digest shape, and deterministic correlation
 rules for supplied records, including substitution, wrong-approver, replay,

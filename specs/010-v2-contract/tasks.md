@@ -646,22 +646,22 @@ It does not reopen I-010A–E, implement an executor, or start any dependent
 slice. The amendment record remains append-only and A2 remains effective until
 `v2-integrator` accepts A3's exact successor.
 
-- [ ] T050 Record the immutable A3 predecessor, assignment, fixed scope, task
+- [X] T050 Record the immutable A3 predecessor, assignment, fixed scope, task
   manifest, and zero-blocker analysis in
   `evidence/v2/contract/amendment-A3-privileged-action-authorization.md`.
-- [ ] T051 Define the closed `I-010F@1` schema and its stdlib validator for
+- [X] T051 Define the closed `I-010F@1` schema and its stdlib validator for
   exact digest, trusted requester/origin, capability/scope, policy,
   expiry/revocation/persistence, decision, and host-only approval facts.
-- [ ] T052 Add the focused S18 tests and corpus: dual-validator document
+- [X] T052 Add the focused S18 tests and corpus: dual-validator document
   conformance plus runtime-only correlation, substitution, approval, replay,
   expiry, revocation, and one-use boundary cases.
-- [ ] T053 Regenerate the A3 evidence and manifest at the exact candidate tree
+- [X] T053 Regenerate the A3 evidence and manifest at the exact candidate tree
   with stable case IDs, validator identities, expected/observed results, and
   authoritative per-class counts.
-- [ ] T054 Update `docs/contracts/nunchi-v2.md` and create
+- [X] T054 Update `docs/contracts/nunchi-v2.md` and create
   `docs/security/privileged-action-authorization.md`, including the explicit
   execution and persistence limitations.
-- [ ] T055 Run the focused dual-validator command, full offline baseline,
+- [X] T055 Run the focused dual-validator command, full offline baseline,
   governance/CLI checks, and eval discovery; then prepare the exact candidate
   and A3 packet for separate `v2-integrator` review.
 

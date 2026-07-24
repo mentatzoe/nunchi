@@ -28,15 +28,16 @@ resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
-| `I-010F PrivilegedActionAuthorizationV2` | `@1` active implementation, not accepted | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` implementation complete; acceptance pending | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
-### Amendment A3 active implementation — not accepted
+### Amendment A3 implementation complete; acceptance pending
 
-`I-010F PrivilegedActionAuthorizationV2@1` is under active A3 implementation
-with a machine-readable schema, deterministic validator, and S18 corpus. It
-is **not frozen, accepted, effective, executable, or current runtime
-behavior**. `v2-integrator` must accept a later exact handoff packet before a
-consumer may rely on it; slice `040` later implements the guard and effects.
+`I-010F PrivilegedActionAuthorizationV2@1` is complete with a
+machine-readable schema, deterministic validator, and S18 corpus. Independent
+acceptance is pending. It is **not yet an effective upstream dependency,
+executable, or current runtime behavior**. `v2-integrator` must accept its
+exact handoff packet before a consumer may rely on it; slice `040` later
+implements the guard and effects.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`
@@ -61,7 +62,7 @@ observation  ->  AttentionRequestV2   (host assembles factual events)
 These are lifecycle boundaries, not social state: no contract carries a
 composed reply, an admission meta-answer, or a social permission ledger.
 
-## I-010F PrivilegedActionAuthorizationV2@1 active implementation
+## I-010F PrivilegedActionAuthorizationV2@1 implementation complete; acceptance pending
 
 This A3 seam is a closed host-facing union, always carrying a `schema_version:
 1`, a non-secret `request_id`, and one exact `binding`:

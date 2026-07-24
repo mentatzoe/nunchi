@@ -45,3 +45,26 @@ a bearer grant. The candidate must be separately reviewed and accepted by
 The schema and deterministic corpus bind exact supplied facts. Slice `040`
 still owns host-side origin resolution, policy and revocation recheck,
 persistence, cancellation, one-use consumption, and effect execution.
+
+## Convergence checkpoint — 2026-07-24
+
+**Amendment phase**: CONVERGED
+
+**Implementation result**: COMPLETE — `I-010F@1` schema, deterministic flow
+validator, S18 corpus, generated evidence, ordinary-path documentation, and
+explicit execution/persistence limitations agree.
+
+**Verification result**: PASS — focused authorization tests (20 tests, 1
+explicit baseline-oracle skip); stdlib contract suite (215 tests, 4 explicit
+baseline-oracle skips); pinned offline dual-validator suite (215 tests, 0
+skipped); full repository baseline; governance/CLI check; evaluation discovery;
+evidence verification; and `git diff --check` all passed.
+
+**Independent review**: COMPLETE — the review findings on missing host-only
+challenge, final-decision/recheck correlation, stale decision and recheck
+revocation timestamps, approval ordering, and challenge-policy provenance were
+fixed with focused regressions. The latest targeted re-review confirmed the
+approval-recheck freshness repair.
+
+**Acceptance state**: PENDING — A3 is not yet an effective dependency. A
+separate exact handoff packet and `v2-integrator` acceptance remain required.

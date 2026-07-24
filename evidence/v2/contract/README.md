@@ -1,18 +1,18 @@
-# Slice 010 contract evidence manifest (T018; regenerated for active A3 implementation)
+# Slice 010 contract evidence manifest (T018; A3 implementation complete, acceptance pending)
 
-**Recorded on**: 2026-07-24 in the `v2-contract-owner` worktree. A3 remains an
-active, unaccepted implementation: this manifest does not freeze or accept it,
-establish an effective dependency, or authorize an action.
+**Recorded on**: 2026-07-24 in the `v2-contract-owner` worktree. A3's
+implementation is complete and independently reviewed; acceptance is pending.
+This manifest does not establish an effective dependency or authorize an action.
 
 **Amendment disposition**: A3 adds the
 `privileged-action-authorization.jsonl` aggregate file for
 `I-010F PrivilegedActionAuthorizationV2@1`. All four aggregate files were
-regenerated against the active implementation corpus so their validator
+regenerated against the completed implementation corpus so their validator
 identities, expected results, and manifest counts describe one tree. This
 leaves accepted A1/A2 history intact; it does not supersede their effective
 commit until separate integrator acceptance.
 
-**What changed (active amendment A3 implementation)**: the new S18 corpus carries the
+**What changed (completed amendment A3 implementation)**: the new S18 corpus carries the
 closed request/decision/challenge/completion union and rejects malformed digest
 profiles, public operation or room/model authority fields, action/digest/
 requester/capability substitution, missing or wrong challenge/approver,
@@ -66,7 +66,7 @@ distinguished by the `validator` field.
 
 ## Commands and results
 
-The verified offline dual-validator command for the active A3 implementation:
+The verified offline dual-validator command for the completed A3 implementation:
 
 ```sh
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
@@ -86,10 +86,10 @@ Result (2026-07-24): `governance boundary + CLI: OK (SpecKit 0.12.11)` — zero
 product schemas, tests, fixtures, evaluation assets, evidence, or product
 documentation under the SpecKit directories.
 
-The full repository baseline (`python3 -m unittest`) passed on the active A3
-implementation tree on 2026-07-24. Its oracle-absence skips now include all
-four corpus suites; a later exact handoff packet must record its complete
-command output before separate acceptance review.
+The full repository baseline (`python3 -m unittest`) passed on the completed
+A3 implementation tree on 2026-07-24. Its oracle-absence skips now include all
+four corpus suites; the exact handoff packet will record its complete command
+output before separate acceptance review.
 
 Evidence generation and shape verification:
 
