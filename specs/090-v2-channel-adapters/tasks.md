@@ -10,7 +10,7 @@ description: "Slice delivery task plan for V2 standalone channel adapters (dorma
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned participant / source**: mid-dev — evidence/governance/assignments/mid-dev-v2-adapters-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-adapters-owner-2026-07-24.md
 
 **SpecKit binding**: `python3 scripts/run_slice_workflow.py run speckit specs/090-v2-channel-adapters`
 

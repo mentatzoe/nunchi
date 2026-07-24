@@ -30,7 +30,7 @@ not the dated baseline
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
+**Assigned program participant / source (declaration)**: Codex — evidence/governance/assignments/codex-v2-program-owner-2026-07-24.md
 
 **2026-07-11 reset baseline — slice state**: every slice `010` through `110` is
 `PLANNED`; all product tasks below are dormant. Live facts derive from the

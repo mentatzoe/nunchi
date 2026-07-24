@@ -9,7 +9,7 @@
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-security-owner-2026-07-23.md
+**Assigned participant / source**: Claude — evidence/governance/assignments/claude-v2-security-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 

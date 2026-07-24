@@ -21,7 +21,7 @@ candidate/handoff attempts
 
 **Program implementation authority**: `GRANTED`
 
-**Assigned program participant / source (declaration)**: Zoe — evidence/governance/assignments/zoe-v2-program-owner-2026-07-16.md
+**Assigned program participant / source (declaration)**: Codex — evidence/governance/assignments/codex-v2-program-owner-2026-07-24.md
 
 **Implementation authorization**: `evidence/governance/v2-implementation-authorization.md`
 

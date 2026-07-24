@@ -8,7 +8,7 @@
 
 **Accountable owner lane**: `v2-codex-owner`
 
-**Assigned participant / source**: Vigil — evidence/governance/assignments/vigil-v2-codex-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-codex-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/080-v2-codex`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/080-v2-codex`
 
