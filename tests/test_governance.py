@@ -183,6 +183,28 @@ class GovernanceBoundaryTests(unittest.TestCase):
     def test_repository_governance_boundary_is_clean(self):
         self.assertEqual(check_governance.validate(ROOT), [])
 
+    def test_activation_metadata_uses_the_plan_at_its_starting_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            relative = Path("specs/010-v2-contract/plan.md")
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            base_plan = (
+                "# Plan\n\nI-010A\n\nS01\n\n"
+                "`evidence/v2/contract/base.jsonl`\n"
+            )
+            path.write_text(base_plan, encoding="utf-8")
+            starting_commit = self._init_git_repo(root)
+            path.write_text(base_plan + "\nI-010F\n\nS18\n", encoding="utf-8")
+            self._commit_all(root, "append accepted amendment plan")
+
+            self.assertEqual(
+                check_governance._activation_bound_plan_text(
+                    root, starting_commit, relative
+                ),
+                base_plan,
+            )
+
     def test_product_artifact_is_rejected_under_specs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

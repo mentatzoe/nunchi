@@ -83,6 +83,8 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   - `I-010D ContextContinuationV2@1`
   - `I-010E AttentionReceiptV2@2` (amended post-acceptance from `@1`; see FR-010
     amendment A1)
+  - `I-010F PrivilegedActionAuthorizationV2@1` (post-acceptance amendment A3;
+    a contract seam only, with execution remaining in slice `040`)
 - **Integration handoff**: `v2-contract-owner` lands and versions the ordinary
   schemas and their deterministic contract tests, then hands the exact commit,
   verification commands, interface inventory, and known limitations to all
@@ -142,6 +144,14 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   lifecycle evidence at a packet commit? → A: By reference to the slice
   declarations and lifecycle evidence, never as a hard-coded
   state-specific claim that a later transition falsifies (R6; SC-005).
+
+### Post-Acceptance Amendment A3 — Session 2026-07-24
+
+- Q: How must `I-010F PrivilegedActionAuthorizationV2@1` represent the digest
+  of the exact proposed operation? → A: As a closed object containing
+  algorithm `sha256`, a 64-character lowercase hexadecimal digest, and a
+  non-empty canonicalization-profile ID. The profile ID makes the bytes being
+  hashed explicit across hosts; the operation itself remains host-only.
 
 ## User Scenarios & Testing
 
@@ -522,6 +532,28 @@ participant outcomes and binding failures.
   outcome; transport hygiene and routing/send facts. A document the
   selected design declares valid that either validator rejects is a
   contract defect, not a corpus error.
+- **FR-015**: Amendment A3 MUST define `I-010F
+  PrivilegedActionAuthorizationV2@1` as a closed host-facing union of an
+  action request, immutable decision, host-only approval challenge, and
+  authenticated approval completion. Every member MUST bind one exact action
+  ID, SHA-256 digest and canonicalization-profile ID, participant, trusted
+  origin event, transport-derived requester, namespaced capability, bounded
+  platform/room/continuity/participant/resource scope, and trusted policy
+  provenance. The union MUST express only `ALLOW`, `DENY`, or
+  `APPROVAL_REQUIRED`; it MUST carry neither the operation body nor a bearer
+  grant, room-controlled authority, model-controlled authority, credential,
+  policy file, or approval secret. An allow is valid only for the exact bound
+  request and is one-use at the later host effect-commit point.
+- **FR-016**: A3's deterministic semantic tests MUST reject an allow when the
+  action, digest, origin, requester, capability, scope, policy, expiry,
+  revocation, persistence, or approval binding changes or is unknown. An
+  approval completion MUST name a trusted authenticated approver in the exact
+  challenge's approver set, match its unexpired action binding, and undergo a
+  fresh policy/revocation/expiry/digest recheck before a new allow. Ordinary
+  text, reactions, quotes, aliases, role labels, copied challenges or
+  decisions, and model assertions never satisfy that requirement. Slice `040`
+  owns storage, recheck-at-execution, consumption, and effect execution; A3
+  defines the portable contract and its deterministic boundary checks only.
 
 ### Key Entities
 
@@ -539,6 +571,9 @@ participant outcomes and binding failures.
 - **Participant Wake and Attention Receipt**: The normal-turn input and immutable
   correlated stage records, with observation, classifier/bypass, host,
   participant, and transport facts kept separate.
+- **Privileged Action Authorization**: A non-secret, exact-bound audit seam for
+  a host proposal and its policy decision; it is not an action executor,
+  policy store, approval UI, or conversational permission ledger.
 
 ## Success Criteria
 
@@ -590,6 +625,13 @@ participant outcomes and binding failures.
 - **SC-006**: A repository-boundary check finds zero product schemas, tests,
   fixtures, evaluation assets, evidence, or product documentation under this
   SpecKit directory.
+- **SC-007**: The A3 corpus accepts valid direct allow, deny,
+  approval-required, and authenticated-approval records and rejects every
+  enumerated malformed digest, forged requester, substituted action/digest/
+  capability/scope/origin, expired/revoked/unknown-persistence, wrong
+  approver, replay, copied-approval, and unexpected-field case. The exact
+  candidate evidence names both validators and their observed result for every
+  S18 case.
 
 ## Assumptions
 

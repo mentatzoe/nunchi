@@ -2510,6 +2510,22 @@ def _git_file_text(root: Path, commit: str, relative: Path) -> str | None:
     return completed.stdout.replace("\r\n", "\n")
 
 
+def _activation_bound_plan_text(
+    root: Path,
+    starting_commit: str,
+    plan_relative: Path,
+) -> str | None:
+    """Return the plan version immutable activation evidence was bound to.
+
+    Later amendments can extend the current plan.  They must not require
+    changing terminal activation evidence created from an earlier plan.
+    """
+
+    if not re.fullmatch(r"[0-9a-f]{40}", starting_commit):
+        return None
+    return _git_file_text(root, starting_commit, plan_relative)
+
+
 def _git_path_exists_at_commit(root: Path, commit: str, relative: Path) -> bool:
     completed = _git(root, "cat-file", "-e", f"{commit}:{relative.as_posix()}")
     return completed is not None and completed.returncode == 0
@@ -3330,7 +3346,16 @@ def _slice_lifecycle_evidence_errors(
         plan_relative = Path("specs") / dirname / "plan.md"
         if _repo_path_is_safe(root, plan_relative, require_file=True):
             plan_text = (root / plan_relative).read_text(encoding="utf-8")
-            expected_interfaces = set(INTERFACE_ID.findall(plan_text))
+            activation_plan_text = _activation_bound_plan_text(
+                root, activation_starting_commit, plan_relative
+            )
+            if activation_plan_text is None:
+                errors.append(
+                    f"{relative}: Starting commit must contain the bound plan.md "
+                    "used by immutable activation evidence"
+                )
+                activation_plan_text = plan_text
+            expected_interfaces = set(INTERFACE_ID.findall(activation_plan_text))
             observed_interfaces = set(
                 INTERFACE_ID.findall(_clean_metadata(activation, "Interfaces"))
             )
@@ -3339,7 +3364,7 @@ def _slice_lifecycle_evidence_errors(
                     f"{relative}: Interfaces must enumerate exactly "
                     f"{sorted(expected_interfaces)} from the bound plan"
                 )
-            expected_scenes = set(SCENE_ID.findall(plan_text))
+            expected_scenes = set(SCENE_ID.findall(activation_plan_text))
             observed_scenes = set(
                 SCENE_ID.findall(_clean_metadata(activation, "Acceptance scenes"))
             )
@@ -3357,7 +3382,7 @@ def _slice_lifecycle_evidence_errors(
                 not target.startswith("evidence/v2/")
                 or target.endswith("/")
                 or any(character in target for character in "*?[]")
-                or f"`{target}`" not in plan_text
+                or f"`{target}`" not in activation_plan_text
                 for target in evidence_targets
             ):
                 errors.append(

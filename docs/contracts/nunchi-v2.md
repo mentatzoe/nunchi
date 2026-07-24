@@ -28,17 +28,15 @@ resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` candidate, not accepted | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
-### Planned completion amendment
+### Amendment A3 candidate — not accepted
 
-The selected product also requires `I-010F
-PrivilegedActionAuthorizationV2@1`. It is not part of the accepted contract
-packet above: no machine-readable schema, corpus, or accepted amendment exists
-for it on this baseline. The `v2-contract-owner` must deliver that seam through
-the versioned amendment path, and `v2-integrator` must accept the exact
-successor before any consumer may cite or implement `I-010F`. Target semantics
-remain in the selected architecture and umbrella plan; they are not current
-contract truth.
+`I-010F PrivilegedActionAuthorizationV2@1` is now an A3 implementation
+candidate with a machine-readable schema, deterministic validator, and S18
+corpus. It is **not accepted**, effective, executable, or current runtime
+behavior. `v2-integrator` must accept its exact successor packet before a
+consumer may rely on it; slice `040` later implements the guard and effects.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
 (the design's own field; there is no separate `interface`/`version`
@@ -62,6 +60,53 @@ observation  ->  AttentionRequestV2   (host assembles factual events)
 
 These are lifecycle boundaries, not social state: no contract carries a
 composed reply, an admission meta-answer, or a social permission ledger.
+
+## I-010F PrivilegedActionAuthorizationV2@1 candidate
+
+This A3 seam is a closed host-facing union, always carrying a `schema_version:
+1`, a non-secret `request_id`, and one exact `binding`:
+
+- **`request`** records a unique action ID, participant, exact origin event,
+  namespaced capability, bounded platform/room/continuity/participant/resource
+  scope, transport-derived requester, and a digest of the operation. The raw
+  operation remains host-only.
+- **`decision`** records `ALLOW`, `DENY`, or `APPROVAL_REQUIRED`, the reason,
+  trusted operator-policy provenance, evaluation/expiry/revocation/persistence
+  facts, and either direct-policy or authenticated-approval provenance.
+- **`approval_challenge`** is an expiring, exact-bound, host-only reference
+  naming the allowed approvers. It carries no reusable approval secret.
+- **`approval_completion`** names the exact authenticated approver and a fresh
+  policy/revocation/expiry/persistence recheck. A later authenticated-approval
+  decision must name that exact completion and match its recheck outcome.
+
+`binding.action_digest` is a closed object: `algorithm` is exactly `sha256`,
+`value` is exactly 64 lowercase hexadecimal characters, and
+`canonicalization_profile` is non-empty. The profile says how the host formed
+the hidden operation bytes; a hash without that profile is not portable enough
+to authorize across hosts.
+
+The deterministic flow validator rejects a changed action, digest, origin,
+requester, capability, scope, challenge, approver, policy provenance, expiry,
+revocation, or persistence fact. It also rejects duplicate decision IDs,
+multiple completions of one challenge, and multiple decisions from one
+completion. Room text, reactions, quotes, aliases, model assertions, copied
+decisions, and unknown fields cannot become authorization facts because the
+union is closed.
+
+This is deliberately not a bearer-capability format. Schema and corpus success
+does not attest a native event, authenticate an approver, load a policy, retain
+state across restart, or execute anything. `I-040B` must resolve the retained
+canonical event, recheck all facts immediately before execution, persist the
+new decision, and consume one allow at one effect-commit point. Unknown
+persistence, restart, expiry, revocation, replay, capacity exhaustion, or any
+binding mismatch means no effect.
+
+Focused checks:
+
+```sh
+python3 -m unittest tests.v2.contract.test_privileged_action_authorization
+uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+```
 
 ## I-010A AttentionRequestV2@1
 

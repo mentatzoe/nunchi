@@ -591,3 +591,288 @@ Acceptance by a dependent owner does not transfer schema ownership.
 ## Complexity Tracking
 
 No constitution violation or justified complexity exception is planned.
+
+## Post-Acceptance Amendment A3 Plan — I-010F Privileged Action Authorization
+
+This section is the only A3 planning delta. It supplements the accepted slice
+without reopening or re-planning its terminal delivery. The slice remains
+`ACCEPTED`; `I-010A` through `I-010E`, completed tasks T001–T049,
+`slice-activation.md`, `slice-candidate.md`, `slice-handoff.md`,
+`slice-acceptance.md`, amendment A1, amendment A2, and the accepted-amendment
+ledger remain immutable. No product artifact is created during planning.
+
+### Amendment binding and technical context
+
+| Binding fact | Fixed A3 value |
+|---|---|
+| Amendment | `A3` |
+| Stable owner lane | `v2-contract-owner` |
+| Current assigned participant / source | Codex — `evidence/governance/assignments/codex-v2-contract-owner-2026-07-23.md` |
+| Interface delta | `I-010F PrivilegedActionAuthorizationV2 @0 -> @1` |
+| Prior effective commit | `26a6b531fa146ba1f1f5fcd1c4d191041b141301` |
+| Prior effective packet | `evidence/v2/contract/amendment-A2-decision-margin-boundary.md` |
+| Delivery branch/worktree | `v2/contract-a3` in `.worktrees/v2-contract-a3/`; the later bound delivery run records its exact clean starting commit |
+| Runtime constraint | Python 3.11+ standard library; no new runtime dependency |
+| Portable contract | JSON Schema Draft 2020-12 at one exact ordinary path |
+| Validation | Explicit stdlib validator plus dev/test-only `jsonschema==4.26.0`, using the same committed corpus |
+| Lifecycle result | Amendment `HANDOFF_READY` only; `v2-integrator` separately accepts or rejects the exact candidate and packet |
+
+The candidate and its recorded clean starting commit must both descend from the
+prior effective commit. The candidate diff from that starting commit must stay
+inside the fixed amendment scope below. Acceptance alone may append one A3
+entry to `evidence/v2/contract/slice-amendments.md`; the delivering owner does
+not edit that ledger, self-accept the amendment, or change the terminal slice
+state.
+
+### Research decisions
+
+- **Decision — one closed authorization union**: `I-010F@1` is one closed
+  tagged union covering the host-facing authorization request, immutable
+  decision, host-only approval challenge, and authenticated approval
+  completion facts. **Rationale**: one portable seam must correlate the exact
+  proposal with every later decision while keeping policy and approval
+  authority outside the participant and room. **Alternatives considered**:
+  unrelated request and decision documents without an exact correlation
+  binding — rejected because they permit cross-action substitution.
+- **Decision — canonical digest object**: the exact proposed operation is
+  represented by a closed digest object containing algorithm `sha256`, a
+  64-character lowercase hexadecimal value, and a non-empty
+  canonicalization-profile ID. The operation bytes remain host-only.
+  **Rationale**: the digest is useless across hosts unless the byte
+  canonicalization is explicit. **Alternatives considered**: a bare hash
+  string or embedding the operation — rejected for ambiguity and secret or
+  payload leakage.
+- **Decision — requester is derived, never asserted by room input**: the
+  proposal carries the exact origin event and scope; the guard-facing decision
+  carries the requester derived from trusted observations. A participant- or
+  room-supplied requester identity never validates as authorization evidence.
+  **Rationale**: transport provenance, not names, roles, mentions, replies,
+  quotes, or model claims, establishes the requester. **Alternatives
+  considered**: accepting a requester field from the proposed action —
+  rejected as an authority-confusion path.
+- **Decision — no bearer allow**: `ALLOW`, `DENY`, and `APPROVAL_REQUIRED` are
+  immutable digest-bound decisions, not reusable tokens. An allow is usable
+  only by the host for its exact action ID, digest, requester, participant,
+  origin, capability, scope, policy provenance, and validity interval, and is
+  consumed at the first effect-commit point. **Rationale**: a copied decision
+  must never authorize another action. **Alternatives considered**: a reusable
+  capability or approval token exposed to the participant — rejected by the
+  selected security boundary.
+- **Decision — approval remains host-only and authenticated**:
+  `APPROVAL_REQUIRED` binds a bounded, expiring challenge to the exact action,
+  approver set, and policy. Approval completion records an authenticated exact
+  approver and requires a fresh policy, revocation, expiry, scope, and digest
+  recheck before a new one-use allow. **Rationale**: ordinary room text,
+  reactions, quotes, copied challenges, and model assertions cannot approve an
+  effect. **Alternatives considered**: treating conversational approval as
+  authority — rejected.
+
+No `NEEDS CLARIFICATION` remains for A3.
+
+### Entity, state, and validation plan
+
+The portable schema plans these closed entities without embedding an operation,
+credential, policy file, approval secret, or room authorization roster:
+
+- **Authorization request**: unique action ID; participant ID; exact origin
+  event ID; capability; platform, room, continuity-scope, participant, and
+  resource scope; the canonical digest object; and non-secret correlation
+  metadata.
+- **Derived requester**: exact transport-attested actor ID plus the trusted
+  origin-event and scope binding used to derive it.
+- **Authorization decision**: action and decision IDs; the same exact digest
+  and binding; derived requester; `ALLOW`, `DENY`, or
+  `APPROVAL_REQUIRED`; a closed reason code; trusted policy provenance;
+  evaluation time; expiry/revocation facts; and the authorization path
+  (`direct-policy` or `authenticated-approval`) where applicable.
+- **Approval challenge and completion**: host-only challenge reference,
+  exact bound action/digest/requester/capability/scope, exact approver set,
+  expiry, authenticated approver attestation, and recheck outcome. These facts
+  remain off the participant and classifier surfaces.
+
+The only authorization motion is proposal to `ALLOW`, `DENY`, or
+`APPROVAL_REQUIRED`; an authenticated approval completion may yield a new
+digest-identical `ALLOW` after recheck, otherwise it yields `DENY`.
+Expiry, revocation, restart, cancellation before effect commit, replay,
+capacity exhaustion, unknown persistence, or any binding mismatch yields zero
+execution. The schema proves document shape; deterministic semantic tests
+prove correlation, binding, transition, replay, and one-use rules at this
+contract boundary. Slice `040` later owns the executing guard and coordinator.
+
+The dual-validator corpus must include valid direct allow, deny, approval
+required, and authenticated-approval completion records plus adversarial cases
+for forged requester identity, alias/role/mention/quote authority, room or
+cross-room policy text, missing or malformed digest fields, unknown
+canonicalization profile, action/digest/capability/scope/origin substitution,
+expired or revoked policy, copied/ordinary-text approval, wrong approver,
+challenge replay, decision replay, cross-participant reuse, and unexpected
+fields. Runtime-only sequences must prove an allow cannot be reused and an
+approval completion cannot authorize changed bytes.
+
+### Fixed amendment scope
+
+The A3 record's `Fixed scope paths` must contain the following exact managed
+planning paths and ordinary paths. The managed paths remain control plane only:
+this planning step appends only `plan.md`; the later tasks step may append only
+the A3 task delta to `tasks.md`; and no product artifact may be created under
+`specs/`.
+
+| Artifact | Exact path |
+|---|---|
+| Existing A3 requirements/clarification section | `specs/010-v2-contract/spec.md` |
+| This labelled A3 plan section | `specs/010-v2-contract/plan.md` |
+| Append-only A3 task delta | `specs/010-v2-contract/tasks.md` |
+| Portable schema | `schemas/v2/privileged-action-authorization.schema.json` |
+| Shared stdlib contract adapter and corpus runner | `tests/v2/contract/schema_helpers.py` |
+| Focused deterministic tests | `tests/v2/contract/test_privileged_action_authorization.py` |
+| Reusable adversarial corpus | `evals/v2/contract/privileged-action-authorization/cases.jsonl` |
+| Authoritative corpus counts | `evals/v2/contract/privileged-action-authorization/expected-counts.json` |
+| Regenerated S18 contract evidence | `evidence/v2/contract/privileged-action-authorization.jsonl` |
+| Regenerated contract evidence manifest | `evidence/v2/contract/README.md` |
+| Single append-only A3 initialization/candidate/handoff/decision packet | `evidence/v2/contract/amendment-A3-privileged-action-authorization.md` |
+| Portable contract reference | `docs/contracts/nunchi-v2.md` |
+| Operator and integrator security guide | `docs/security/privileged-action-authorization.md` |
+
+The accepted-amendment record is initialized before implementation with its
+constitutionally required metadata, exact task IDs/hash, this exact fixed
+scope, analysis result, branch, and worktree. Candidate, verification,
+evidence, documentation, limitations, and `HANDOFF_READY` facts append to that
+same record. The terminal candidate and handoff streams and the A1/A2 records
+are not A3 packet targets.
+
+### Planned amendment task manifest
+
+The next bound `speckit.tasks` step appends exactly these unchecked tasks after
+completed T049, without editing completed task history:
+
+| Planned ID | A3 task |
+|---|---|
+| T050 | Verify the current owner assignment, exact predecessor/packet, clean descendant starting commit, zero-blocker analysis, immutable terminal/A1/A2 hashes, and initialize the full A3 amendment record with the final normalized A3 task hash before implementation. |
+| T051 | Define the closed `I-010F@1` schema and extend the stdlib validator for exact digest, origin/requester, capability/scope/policy, expiry/revocation, decision, and host-only approval bindings. |
+| T052 | Add the exact focused test and corpus files, including dual-validator conformance and deterministic adversarial correlation, replay, approval, and one-use cases. |
+| T053 | Run and regenerate the S18 contract evidence and manifest at the exact candidate tree, with stable case IDs, validator identities, expected/observed results, and per-class counts. |
+| T054 | Update the two owner-controlled docs, validate their schema/examples/commands, and record every file-by-file `UPDATE`, `NO_IMPACT`, and `HANDOFF` result in the A3 packet. |
+| T055 | Run the focused dual-validator command, full offline baseline, governance/CLI checks, eval discovery, boundary/immutability/diff checks, freeze the exact candidate, and append the candidate plus amendment `HANDOFF_READY` packet for separate integrator review. |
+
+The normalized digest cannot be written truthfully until `speckit.tasks`
+materializes this delta. That step must pin the exact T050–T055 manifest and
+write its normalized SHA256 into the A3 record before T051 begins; later task
+mutation requires a fresh bound amendment run.
+
+### Acceptance scene, evidence, and commands
+
+| Scene | Required A3 contract observation | Ordinary evidence target |
+|---|---|---|
+| `S18` Provenance-bound privileged action | Exact transport-derived requester, origin, participant, capability, scope, policy, expiry/revocation, digest, and authenticated approval stay correlated; room/model assertions, copied approval, replay, substitution, or unknown persistence never validate an allow for execution. | `evidence/v2/contract/privileged-action-authorization.jsonl` and `evidence/v2/contract/README.md` |
+
+The later delivery records exact results for:
+
+```sh
+uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+python3 -m unittest
+python3 scripts/check_governance.py --check-cli
+python3 -m evals.verdict_suite.runner --list
+git diff --check
+```
+
+It also records a focused standard-library test command for
+`tests.v2.contract.test_privileged_action_authorization`, verifies the control
+plane contains no product artifact, verifies the candidate diff is contained
+by the fixed scope, and proves the terminal lifecycle files plus accepted A1/A2
+records are byte-for-byte unchanged.
+
+### A3 README/docs impact matrix
+
+This matrix is exact over `README.md`, the root guidance/change documents,
+the new A3 security guide, and every current non-archived Markdown file under
+`docs/`. Each path has one disposition; no row names a directory or wildcard.
+
+| Exact path | Disposition | Owner / accepting owner | Validation, rationale, or exact handoff delta |
+|---|---|---|---|
+| `AGENTS.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | Rationale: the repository guidance already defines accepted-amendment mode, A3's complete record schema, control-plane separation, and lifecycle ownership; A3 changes no execution rule or product claim in this file. |
+| `CHANGELOG.md` | `HANDOFF` | T054 / `v2-contract-owner`; accepts: `v2-integrator` | After A3 acceptance, add one unreleased entry naming I-010F@1, its exact schema path, effective commit, and packet; state that this is an accepted contract prerequisite, not current V2 runtime behavior, cutover, release, or promotion. |
+| `CLAUDE.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | Rationale: A3 follows the existing direct in-wrapper skill-dispatch, accepted-amendment, stdlib runtime, and bound-workflow rules; its candidate requires no further Claude execution-guidance change. |
+| `README.md` | `HANDOFF` | T054 / `v2-contract-owner`; accepts: `v2-integrator` | After A3 acceptance, replace only the audited-baseline claim that I-010F is missing with the exact accepted A3 effective commit and packet; retain V1 as current, retain downstream lifecycle truth, and do not imply cutover, release, or promotion. |
+| `docs/INSTALL.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | A3 adds no runtime dependency, package, install step, configuration key, or executable surface; `jsonschema==4.26.0` remains dev/test-only in the existing offline validation command. |
+| `docs/STABILITY.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | This document describes the current V1 public surface. A3 is an unintegrated V2 contract amendment and changes no current stability promise or package interface. |
+| `docs/adapters.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | No adapter implements I-010F in slice 010. Adapter-specific privileged-action enforcement remains owned by slices 040 and 060–110 after they accept the exact A3 packet. |
+| `docs/architecture/v2-selected-design.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The selected design already fixes the action/origin/capability/scope/digest, transport-derived requester, policy recheck, approval, replay, and no-bearer boundary; A3 implements that authority without changing it. |
+| `docs/contracts/channel-adapter-v1.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The historical/current V1 adapter contract remains unchanged; A3 adds no bridge and no adapter runtime behavior. |
+| `docs/contracts/nunchi-v2.md` | `UPDATE` | T054 / `v2-contract-owner` | Add I-010F@1 at its exact schema path; replace the planned-completion placeholder with lifecycle-truthful A3 candidate/acceptance wording; document every union member, digest profile, host-only field, semantic rule, adversarial class, version, and runnable dual-validator command; validate links and examples against both validators. |
+| `docs/contracts/verdict-suite-data-model-v1.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | I-010F carries no V1 verdict-suite envelope, verdict, confidence, fixture, or runner field. |
+| `docs/contracts/verdict-suite-requirements-v1.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | A3 neither changes the V1 verdict-suite requirements nor uses that suite as authorization evidence. |
+| `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The existing V1 verdict runner, inputs, commands, and outputs are untouched; A3 uses the separate contract corpus runner. |
+| `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The social-verdict corpus and evidence claims remain unchanged and cannot establish privileged-action authority. |
+| `docs/governance/execution-spine.md` | `HANDOFF` | T054 / `v2-contract-owner`; accepts: `v2-program-owner` | After integrator acceptance and the A3 ledger append, replace the statement that A3 is the next missing amendment with the exact accepted effective commit/packet and retain the rule that each downstream owner must separately accept that binding. |
+| `docs/integration.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | A3 defines a portable contract only; the current V1 integration commands and behavior remain truthful until later component delivery and atomic cutover. |
+| `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The Hermes V1 patch test plan has no I-010F consumer; Hermes authorization integration and proof belong to its later bound slice. |
+| `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The Hermes V1 patch description remains current and receives no partial V2 authorization claim. |
+| `docs/security/privileged-action-authorization.md` | `UPDATE` | T054 / `v2-contract-owner` | Create the exact contract-level trust-boundary guide: protected assets, trusted inputs, host-only data, digest canonicalization, decision/approval state, safe defaults, replay/expiry/revocation behavior, unsupported third-party bypasses, examples, limitations, and focused validation commands. |
+| `docs/v2-completion-goal.md` | `NO_IMPACT` | T054 / `v2-contract-owner` | The completion goal already requires the exact provenance, scope, policy, digest, authenticated approval, one-use, restart, and effect-commit properties; A3 supplies one prerequisite contract without weakening or declaring the goal complete. |
+
+Every `NO_IMPACT` rationale must be rechecked against the exact A3 candidate
+diff and copied into the ordinary A3 packet. `HANDOFF` is valid only after the
+named accepting owner records the exact claim delta at the correct lifecycle
+boundary; it is not evidence that the target already changed. Documentation
+freshness cannot pass until both `UPDATE` files and every row's validation or
+handoff delta are recorded against the exact candidate.
+
+### Limitations and downstream compatibility
+
+- A3 defines and validates the portable contract only. It does not implement
+  slice 040's privileged-action guard, load policy, authenticate an operator
+  surface, retain pending proposals, execute an effect, or make an arbitrary
+  third-party tool safe.
+- Schema validity alone does not attest a transport event, policy, approval,
+  persistence result, or effect. The stdlib semantic validator proves only the
+  contract-bound deterministic rules for supplied trusted facts; runtime and
+  live provenance remain downstream obligations.
+- I-010A through I-010E remain byte-for-byte and version-identical. A future
+  digest algorithm or incompatible canonicalization change requires another
+  explicit versioned amendment.
+- At amendment `HANDOFF_READY`, A2 remains the effective dependency. Rejection
+  preserves A2 and requires a fresh bound run. Only integrator acceptance plus
+  one chained ledger entry establishes I-010F@1 as effective.
+- After acceptance, every slice `020`–`110` must independently accept the same
+  exact A3 commit and packet before its readiness gate. Any already activated
+  consumer would have to stop using its candidate until exact-successor
+  compatibility is re-attested; current declarations leave those slices
+  `PLANNED`.
+- A3 does not make V2 current, complete, integrated, cut over, verified,
+  released, or promoted.
+
+### Planning gate status
+
+The semantic constitution gates below pass, but the current mechanical
+governance gate is **BLOCKED**. `scripts/check_governance.py` derives the
+historical activation's `Interfaces` and `Acceptance scenes` sets by scanning
+the entire current plan. It therefore requires immutable
+`evidence/v2/contract/slice-activation.md` to be rewritten with A3's new
+interface and S18 scene, contrary to accepted-amendment mode. The observed
+errors are:
+
+- activation interfaces must enumerate A3's new interface from the bound plan;
+- activation scenes must enumerate S18 from the bound plan.
+
+Do not rewrite the activation or hide the amendment identifiers to satisfy
+that check. Before A3 delivery can start, the governance validator needs a
+separately authorized amendment-aware rule that compares terminal activation
+only with the terminal plan scope and validates the A3 interface/scene against
+the append-only A3 record and task delta.
+
+### Amendment constitution re-check
+
+| Gate | A3 result |
+|---|---|
+| Selected product boundary | PASS — authorization remains deterministic execution safety and never becomes social attention judgment. |
+| Truthful identity and authority | PASS — requester derives from the exact trusted origin event; aliases, room text, model claims, and copied approvals carry no authority. |
+| Atomic contract parity | PASS — one versioned ordinary-path seam is planned for every later consumer; no V1 bridge or local consumer fork is permitted. |
+| Evidence before claims | PASS — exact schema, tests, corpus, evidence, docs, commands, and limitations are planned without claiming implementation or acceptance. |
+| Control-plane boundary | PASS — only this existing `plan.md` changes during planning; all product and evidence artifacts are future exact ordinary paths. |
+| Single-owner lifecycle | PASS — the stable owner lane delivers only A3 to `HANDOFF_READY`; the separate integrator decision and ledger append are not fabricated. |
+| Documentation freshness | PASS — `README.md`, both affected owner-controlled documents, and every current ordinary doc receive one exact file-level disposition. |
+| Mechanical governance closure | BLOCKED — the checker conflates the appended amendment scope with immutable terminal activation metadata. |
+
+Post-design re-check: BLOCKED on the amendment-aware governance defect above.
+The A3 plan introduces no constitution exception and no unresolved
+clarification.

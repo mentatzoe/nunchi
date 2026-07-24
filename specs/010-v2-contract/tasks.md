@@ -638,3 +638,35 @@ do not let a dependent implementation silently define the shared interface.
   regenerate as current-attempt records, and `evidence/v2/contract/
   handoff.md` appends a new section without rewriting the attempt-1/2/3/4/5
   sections.
+
+## Phase 13: Post-Acceptance Amendment A3 — Privileged Action Authorization
+
+This bounded successor adds only `I-010F PrivilegedActionAuthorizationV2@1`.
+It does not reopen I-010A–E, implement an executor, or start any dependent
+slice. The amendment record remains append-only and A2 remains effective until
+`v2-integrator` accepts A3's exact successor.
+
+- [ ] T050 Record the immutable A3 predecessor, assignment, fixed scope, task
+  manifest, and zero-blocker analysis in
+  `evidence/v2/contract/amendment-A3-privileged-action-authorization.md`.
+- [ ] T051 Define the closed `I-010F@1` schema and its stdlib validator for
+  exact digest, trusted requester/origin, capability/scope, policy,
+  expiry/revocation/persistence, decision, and host-only approval facts.
+- [ ] T052 Add the focused S18 tests and corpus: dual-validator document
+  conformance plus runtime-only correlation, substitution, approval, replay,
+  expiry, revocation, and one-use boundary cases.
+- [ ] T053 Regenerate the A3 evidence and manifest at the exact candidate tree
+  with stable case IDs, validator identities, expected/observed results, and
+  authoritative per-class counts.
+- [ ] T054 Update `docs/contracts/nunchi-v2.md` and create
+  `docs/security/privileged-action-authorization.md`, including the explicit
+  execution and persistence limitations.
+- [ ] T055 Run the focused dual-validator command, full offline baseline,
+  governance/CLI checks, and eval discovery; then prepare the exact candidate
+  and A3 packet for separate `v2-integrator` review.
+
+## A3 Dependencies & Execution Order
+
+T050 precedes T051. T051 precedes T052. T052 precedes T053 and T054; T053 and
+T054 precede T055. No downstream slice starts until separate A3 acceptance
+records its exact effective commit and packet.

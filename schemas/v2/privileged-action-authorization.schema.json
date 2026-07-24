@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/privileged-action-authorization.schema.json",
+  "title": "PrivilegedActionAuthorizationV2",
+  "description": "I-010F PrivilegedActionAuthorizationV2@1. A closed host-facing union for a non-secret privileged-action request, its immutable policy decision, a host-only approval challenge, and an authenticated approval completion. It records the exact digest-bound proposal and decision facts; it does not carry an operation body, credential, policy file, bearer grant, or execution result. Slice 040 owns execution-time recheck, persistence, one-use consumption, and effects.",
+  "oneOf": [
+    {"$ref": "#/$defs/request"},
+    {"$ref": "#/$defs/decision"},
+    {"$ref": "#/$defs/approvalChallenge"},
+    {"$ref": "#/$defs/approvalCompletion"}
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actionDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value", "canonicalization_profile"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "canonicalization_profile": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "resourceScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/nonEmptyString"},
+        "id": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "room_id",
+        "continuity_scope_id",
+        "participant_id",
+        "resource"
+      ],
+      "properties": {
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "room_id": {"$ref": "#/$defs/nonEmptyString"},
+        "continuity_scope_id": {"$ref": "#/$defs/nonEmptyString"},
+        "participant_id": {"$ref": "#/$defs/nonEmptyString"},
+        "resource": {"$ref": "#/$defs/resourceScope"}
+      }
+    },
+    "derivedRequester": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id", "origin_event_id", "source"],
+      "properties": {
+        "actor_id": {"$ref": "#/$defs/nonEmptyString"},
+        "origin_event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "source": {"const": "transport-attested-origin-event"}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "participant_id",
+        "origin_event_id",
+        "capability",
+        "scope",
+        "action_digest",
+        "derived_requester"
+      ],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/nonEmptyString"},
+        "participant_id": {"$ref": "#/$defs/nonEmptyString"},
+        "origin_event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "capability": {
+          "type": "string",
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9_.-]*\\.[a-z0-9_.-]+$"
+        },
+        "scope": {"$ref": "#/$defs/scope"},
+        "action_digest": {"$ref": "#/$defs/actionDigest"},
+        "derived_requester": {"$ref": "#/$defs/derivedRequester"}
+      }
+    },
+    "policyProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "policy_id", "revision"],
+      "properties": {
+        "source": {"const": "trusted-operator-policy"},
+        "policy_id": {"$ref": "#/$defs/nonEmptyString"},
+        "revision": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "kind", "request_id", "binding", "requested_at"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "request"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "requested_at": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "request_id",
+        "decision_id",
+        "binding",
+        "outcome",
+        "reason",
+        "policy_provenance",
+        "evaluated_at",
+        "expires_at",
+        "revocation_checked_at",
+        "revocation_status",
+        "persistence_status",
+        "authorization_path"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "decision"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "decision_id": {"$ref": "#/$defs/nonEmptyString"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "outcome": {"enum": ["ALLOW", "DENY", "APPROVAL_REQUIRED"]},
+        "reason": {
+          "enum": [
+            "policy-allow",
+            "policy-deny",
+            "approval-required",
+            "binding-mismatch",
+            "expired",
+            "revoked",
+            "persistence-unknown",
+            "replay",
+            "unauthorized"
+          ]
+        },
+        "policy_provenance": {"$ref": "#/$defs/policyProvenance"},
+        "evaluated_at": {"$ref": "#/$defs/nonEmptyString"},
+        "expires_at": {"$ref": "#/$defs/nonEmptyString"},
+        "revocation_checked_at": {"$ref": "#/$defs/nonEmptyString"},
+        "revocation_status": {"enum": ["clear", "revoked", "unknown"]},
+        "persistence_status": {"enum": ["durable", "unknown"]},
+        "authorization_path": {"enum": ["direct-policy", "authenticated-approval"]},
+        "approval_challenge_id": {"$ref": "#/$defs/nonEmptyString"},
+        "approval_completion_id": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "approvalChallenge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "request_id",
+        "approval_challenge_id",
+        "binding",
+        "policy_provenance",
+        "approver_ids",
+        "expires_at",
+        "host_only"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "approval_challenge"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "approval_challenge_id": {"$ref": "#/$defs/nonEmptyString"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "policy_provenance": {"$ref": "#/$defs/policyProvenance"},
+        "approver_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "expires_at": {"$ref": "#/$defs/nonEmptyString"},
+        "host_only": {"const": true}
+      }
+    },
+    "recheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "policy_provenance",
+        "evaluated_at",
+        "expires_at",
+        "revocation_checked_at",
+        "revocation_status",
+        "persistence_status"
+      ],
+      "properties": {
+        "outcome": {"enum": ["ALLOW", "DENY"]},
+        "policy_provenance": {"$ref": "#/$defs/policyProvenance"},
+        "evaluated_at": {"$ref": "#/$defs/nonEmptyString"},
+        "expires_at": {"$ref": "#/$defs/nonEmptyString"},
+        "revocation_checked_at": {"$ref": "#/$defs/nonEmptyString"},
+        "revocation_status": {"enum": ["clear", "revoked", "unknown"]},
+        "persistence_status": {"enum": ["durable", "unknown"]}
+      }
+    },
+    "approvalCompletion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "request_id",
+        "approval_completion_id",
+        "approval_challenge_id",
+        "binding",
+        "authenticated_approver_id",
+        "completed_at",
+        "recheck",
+        "host_only"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"const": "approval_completion"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "approval_completion_id": {"$ref": "#/$defs/nonEmptyString"},
+        "approval_challenge_id": {"$ref": "#/$defs/nonEmptyString"},
+        "binding": {"$ref": "#/$defs/binding"},
+        "authenticated_approver_id": {"$ref": "#/$defs/nonEmptyString"},
+        "completed_at": {"$ref": "#/$defs/nonEmptyString"},
+        "recheck": {"$ref": "#/$defs/recheck"},
+        "host_only": {"const": true}
+      }
+    }
+  }
+}
