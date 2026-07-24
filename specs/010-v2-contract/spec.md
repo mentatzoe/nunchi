@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Contract
 
+> **Reference only.** Product requirements and interfaces remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `v2/contract`
 
 **Created**: 2026-07-11

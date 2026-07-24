@@ -6,8 +6,8 @@
 > implementation clarification on live-conversation freshness and privileged
 > action authorization. Program implementation authority is granted, but the
 > repository's `main` branch still implements V1. V2 becomes current only after
-> the atomic successor is accepted, merged, and verified as
-> `CUTOVER_VERIFIED`.
+> one atomic successor satisfies the completion goal, is accepted, merged, and
+> verified on `main`.
 
 This is the self-contained readable architecture authority. The cited Vault
 commits establish provenance only; understanding or continuing Nunchi does not

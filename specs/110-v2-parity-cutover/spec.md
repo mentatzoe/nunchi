@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Parity and Atomic Cutover
 
+> **Reference only.** Product requirements and acceptance scenes remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `integration/v2`
 
 **Created**: 2026-07-11

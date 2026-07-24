@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Standalone Channel Adapters
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/channel-adapters` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/090-v2-channel-adapters/spec.md`

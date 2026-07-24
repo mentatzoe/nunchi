@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Retired the executable SpecKit workflow, generated task/checklist control
+  plane, and slice lifecycle as implementation authority. Detailed product
+  specifications and technical plans remain reference material; V2 now uses
+  ordinary dependency-ordered implementation PRs governed by
+  `docs/v2-delivery.md` and the completion goal.
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

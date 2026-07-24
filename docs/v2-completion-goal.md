@@ -24,7 +24,8 @@ candidate.
 The binding decision chain is the **Authority order** in repository-root
 `AGENTS.md`, including the Zoe-selected Nunchi decisions and technical design
 recorded by Aleph Vault PR 67 (`bdd1ebb`), the contract clarification in PR 68
-(`c834e8c`), and `.specify/memory/constitution.md`. Zoe may durably supersede a
+(`c834e8c`), and the repository-owned selected design and contract. Zoe may
+durably supersede a
 selected decision only through an explicit product decision that names the old
 decision, its replacement, and every affected requirement and surface, and
 amends that chain. The Vault commits are provenance; the binding decisions
@@ -251,7 +252,7 @@ Nunchi V2 is complete only when all of the following are true:
     and bytes remain exact; any mismatch is a blocker requiring a new closure
     and affected review. Every blocking proof is rerun against that exact
     `main` commit and current-state documentation is validated against
-    installed behavior before V2 becomes `CUTOVER_VERIFIED`. A post-merge
+    installed behavior before V2 is complete. A post-merge
     blocker forbids any verified-current claim and requires an immediate revert
     or a newly frozen, fully reviewed, Zoe-accepted successor. Release and
     promotion remain separate decisions.
@@ -267,8 +268,8 @@ Before final evidence begins, a committed release-proof profile freezes:
   `specs/001-nunchi-v2-program/plan.md`, copied unchanged into an ordinary-path
   release profile and executable/evidence manifest, plus stricter public cases
   and reviewer-held challenge cases precommitted by digest and count under
-  independent custody; the SpecKit path is provenance, never a build, test,
-  evaluation, install, or runtime dependency;
+  independent custody; reference definitions are provenance, never a build,
+  test, evaluation, install, or runtime dependency;
 - participant profiles, model families and versions, materially different
   parameterizations, sampling settings or seeds where available,
   configurations, trial counts, complete-run inclusion rules, and

@@ -1,274 +1,92 @@
-# Nunchi Agent Guidelines
+# Nunchi contributor guidance
 
 Nunchi is a portable pre-attention gate for turn-aware participants in shared
-conversation.
+conversation. The objective is a coherent, secure, installable V2 product—not
+completion of a planning process.
 
-## Authority order
+## Read first
 
-Read these before substantive work, in this order:
+1. `docs/v2-completion-goal.md` for the product outcome and end conditions.
+2. `docs/architecture/v2-selected-design.md` for the selected design.
+3. `docs/contracts/nunchi-v2.md` for the portable contract.
+4. `docs/v2-delivery.md` for current ownership, dependency order, and delivery.
+5. The relevant `specs/<slice>/spec.md` and `plan.md` as detailed reference.
+6. Ordinary source, schemas, tests, evaluations, evidence, and installed
+   runtimes for what actually exists and works.
 
-1. Repository-owned `docs/architecture/v2-selected-design.md` and
-   `docs/contracts/nunchi-v2.md`, preserving the Zoe-selected decisions from
-   Aleph Vault PR 67 (`bdd1ebb`) and PR 68 (`c834e8c`). The external commits
-   are provenance; no contributor needs a Vault checkout.
-2. `.specify/memory/constitution.md`.
-3. This file and `CLAUDE.md` for runtime-specific execution guidance.
-4. `specs/001-nunchi-v2-program/` and the one owned slice being worked.
-5. Ordinary-path source, schemas, tests, evals, evidence, and docs for what is
-   currently implemented and proven.
+The repository-owned design preserves Zoe's decisions from Aleph Vault PR 67
+(`bdd1ebb`) and PR 68 (`c834e8c`); no Vault checkout or conversation history is
+required. If documents disagree, the completion goal and selected design win.
+Code and reproducible behavior determine implementation truth.
 
-Higher authority wins. SpecKit artifacts organize work; they do not redefine
-the selected design or current implementation truth.
+## Delivery rules
 
-## Program and slice lifecycle
+- Start V2 work from a clean checkout of current `integration/v2`, normally in
+  an isolated worktree and ordinary implementation branch.
+- Work on the earliest missing dependency. Do not start or reuse downstream or
+  platform work until all required upstream behavior is implemented, tested,
+  reviewed, and present on `integration/v2`.
+- A changed upstream interface invalidates affected downstream work unless an
+  exact comparison and independent review prove the consumed behavior and
+  bytes unchanged.
+- Implement product code, tests, evaluations, installation, and documentation
+  in ordinary repository paths. Use normal commits and pull requests.
+- Plans, labels, packets, reviews, documents, and evidence do not substitute
+  for working behavior. If implementation is blocked, report the concrete
+  missing outcome and stop; do not manufacture progress with governance work.
+- “Unaccepted implementation” means unfinished. Say `missing`, `implemented
+  but unverified`, `verified`, or `integrated` in status reports.
+- Source review, installed-runtime verification, live evaluation, integration,
+  and release are distinct claims. State exactly which one has passed.
+- Preserve user changes and avoid destructive operations outside the exact
+  requested scope.
 
-The 2026-07-11 governance-reset baseline recorded the V2 program as `READY`,
-program implementation authority as `NOT_GRANTED`, and every slice `010`
-through `110` as `PLANNED` with its product tasks dormant. That is a dated
-snapshot, not a permanently current status table. Before acting, resolve live
-program progress from `specs/001-nunchi-v2-program/`, implementation authority
-from `evidence/governance/v2-implementation-authorization.md`, and the bound
-slice's state and occupant from its declarations plus immutable activation and
-acceptance records and append-only candidate/handoff attempt streams. The
-planning-baseline amendment distinguishes program `READY` from `PLANNING`.
+## Ownership
 
-The repository currently implements V1 (`PASS / ACK / ASK / SPEAK`). The
-selected, unimplemented V2 target uses `SUPPRESS / WAKE / DEFER` plus separate
-operational `ERROR`, followed by a normal participant act-or-silence turn.
-V1 remains current until the atomic V2 merge is verified on `main` and program
-state is `CUTOVER_VERIFIED`.
-Never describe a planned or partially delivered V2 slice as current behavior.
+Stable product identities survive session turnover:
 
-Program progress and implementation authority are separate facts. Each slice
-uses this lifecycle:
+| Work | Owner |
+|---|---|
+| Contract, observation, attention core, participant host, shared transport, Codex, reference adapters, integration, packaging, and product docs | Codex |
+| Hermes integration | Aleph |
+| Claude Code integration | Claude |
+| Security assurance | Claude, with non-author review of Claude-authored code and the assurance candidate |
+| Product scope and final completion decision | Zoe |
 
-```text
-PLANNED -> READY -> ACTIVE -> CONVERGED -> HANDOFF_READY -> ACCEPTED
-```
-
-- `PLANNED` means its control-plane artifacts agree and implementation is
-  dormant.
-- `READY` requires the complete program implementation-authority record, one
-  assigned participant in the accountable owner lane, terminally `ACCEPTED`
-  upstream slices recorded as ordered current effective full commits plus
-  matching terminal or amendment packets and per-consumer acceptance
-  references, zero CRITICAL/HIGH analysis findings, an isolated worktree, and
-  ordinary-path activation evidence. Slice `110` requires every upstream slice
-  `010`–`100` to be `ACCEPTED`.
-- `ACTIVE` is implementation by that owner within the bound slice.
-- `CONVERGED` means implementation, tests/evaluations, evidence, task state,
-  and limitations agree.
-- `HANDOFF_READY` additionally requires documentation freshness for the exact
-  candidate and a complete handoff packet.
-- `ACCEPTED` means `v2-integrator` accepted the exact commit and packet for
-  slices `010`–`100`, or Zoe accepted the exact slice-`110` candidate. Each
-  dependent owner separately accepts every required upstream handoff before
-  its own slice can become `READY`; dependency acceptance does not replace the
-  slice-level acceptance decision. Only slice `110` may integrate and cut over
-  the program.
-
-Rejection appends a `REJECTED` handoff decision and returns the same owner to
-`ACTIVE`; rework appends a new candidate and handoff without deleting history.
-Because the rejected handoff's delivery run already completed, the owner starts
-a new bound `run speckit` for that slice and never resumes the completed run.
-The same new-run rule applies when convergence appends tasks: retain the
-original activation, remain `ACTIVE`, and re-enter through authority and
-readiness checks. Fixes requested by a paused post-convergence gate may resume
-that run only while its task graph is unchanged.
-
-An already `ACCEPTED` slice may issue a bounded versioned successor through the
-same delivery workflow's accepted-amendment mode. The slice remains
-`ACCEPTED`; its activation, terminal candidate, terminal handoff, terminal
-acceptance, and prior amendment records remain immutable. The stable owner lane
-must have one valid current occupant from a durable Zoe/delegate assignment.
-Before implementation, one append-only amendment record fixes the amendment
-ID, interface and versions, current effective predecessor commit and packet,
-ordinary-path scope, task manifest, evidence, documentation dispositions, and
-limitations. The candidate must descend from that predecessor. The integrator
-records `ACCEPTED` or `REJECTED` in the same amendment record; rejection leaves
-the prior effective binding in force and requires a fresh bound run.
-Acceptance alone appends one entry to `slice-amendments.md`, changing the
-effective commit and packet for consumers without rewriting terminal slice
-history. Historical A1/A2 records retain their accepted schema; A3 and later
-must satisfy the complete amendment schema.
-
-If an accepted upstream successor appears after a dependent activates, the
-dependent's historical activation and acceptance evidence is preserved, but
-its candidate is blocked from further use until the dependent owner appends a
-compatibility re-attestation tied to the exact effective successor commit and
-packet. Incompatible candidates are replaced; sunk cost never authorizes
-continued downstream work.
-There is no central mutable slice-state registry. State is derived from the
-slice declaration, immutable activation/acceptance records, and append-only
-candidate/handoff evidence. These are repository-governance facts only:
-they MUST NOT become a runtime registry, conversation state, classifier input,
-receipt field, participant roster, social ledger, or memory service.
-
-## SpecKit execution spine
-
-- Required CLI version: exactly `0.12.11`.
-- Installed integrations: Codex and Claude; Codex is the default.
-- Both workflows operate on one existing slice. Invoke them only through
-  `scripts/run_slice_workflow.py`; it runs the canonical preflight, sets the
-  slice environment in the workflow process, pins the slice input, integration
-  manifest and installed skill bytes, workflow digest, and initial task graph,
-  and leaves `.specify/feature.json`
-  unchanged. The wrapper may record exactly one task-graph transition when a
-  resume crosses the workflow's unique successful `speckit.tasks` step; before
-  that boundary, after it, and on every later resume the current task graph is
-  immutable.
-- Planning-only existing-slice workflow: `nunchi-plan`. It never creates or
-  replaces a feature.
-- Existing-slice delivery workflow: `speckit`. Its implementation-authority
-  and slice-readiness gates are mandatory before `implement`; it ends at
-  `HANDOFF_READY`, before the recipient's separate acceptance or rejection.
-- Each slice has one accountable owner lane. Reviewers do not silently co-own.
-- The assigned slice participant writes only that slice's declarations and
-  lifecycle evidence; `v2-program-owner` writes program facts and never another
-  participant's slice evidence. `v2-integrator` records every slice acceptance
-  or rejection; for slice `110`, it copies Zoe's decision without owning it.
-- Use isolated worktrees for non-trivial slice implementation.
-
-Invoke the selected workflow with the exact bound slice:
-
-```sh
-python3 scripts/run_slice_workflow.py run nunchi-plan specs/<exact-slice>
-python3 scripts/run_slice_workflow.py run speckit specs/<exact-slice>
-python3 scripts/run_slice_workflow.py resume <run-id>
-```
-
-An initial `run` may append `--integration claude` or `--integration codex`;
-the runner pins that choice, its manifest, and the exact installed skill bytes;
-resume cannot change them.
-The runner verifies exact SpecKit `0.12.11` and its pinned PEP-610 source commit
-before both run and resume, then resolves and pins the concrete integration.
-
-The implementation-authority record is
-`evidence/governance/v2-implementation-authorization.md`. It documents Zoe's
-external grant for the complete program and MUST enumerate exactly all eleven
-slices (`010` through `110`). A partial or extra-scope record is invalid and
-keeps every slice dormant. The record does not grant authority itself, make any
-slice `READY`, or authorize cutover, release, or promotion. The assigned
-`v2-program-owner` copies the external decision and includes `Recorded by:
-v2-program-owner`. Slice readiness is checked separately against its
-dependencies, owner, analysis, worktree, and activation evidence.
-
-Zoe, or an assigner named in a durable delegation from Zoe, may assign the
-`v2-program-owner` lane and a participant to each slice owner lane. Record a
-slice occupant as `<participant identity>` —
-`evidence/governance/assignments/<record>.md`. That non-symlink record MUST have
-exactly one `Assignee`, `Lane`, `Assigned by`, ISO `Assigned on`, and durable
-`Authority reference`. When `Assigned by` is not Zoe, it also MUST have
-`Delegated by: Zoe` and a durable `Delegation reference`. Transient chat or
-session memory is not a durable assignment. Assignment may precede
-implementation
-authority so planning can proceed, but it does not authorize implementation or
-make a slice `READY`. Keep assignment in the program or bound-slice declaration
-and copy it into activation evidence; never create a central assignment
-registry.
-
-Slice `110` has a separate program tail after its delivery workflow reaches
-`HANDOFF_READY`. Zoe's durable exact-candidate decision is recorded in
-`evidence/v2/parity/slice-acceptance.md` by the assigned `v2-integrator`; on
-acceptance, the assigned `v2-program-owner` records only the program-level copy
-in `evidence/v2/parity/cutover-acceptance.md`. This establishes slice
-`ACCEPTED` and program `CUTOVER_ACCEPTED`. The integrator may then perform one
-atomic merge. That merge remains verification-pending and MUST NOT present V2
-as verified current behavior. Only exact-main verification plus final
-current-state documentation validation, recorded together in a docs/evidence-
-only follow-up at `evidence/v2/parity/post-merge-verification.md`, establishes
-`CUTOVER_VERIFIED`; release and promotion remain separate decisions.
-
-SpecKit-managed paths are control plane only:
-
-- `.specify/`
-- `specs/`
-- `.agents/skills/speckit-*`
-- `.claude/skills/speckit-*`
-
-They may contain tool configuration, constitution, specs, plans, planning
-research, requirement-quality checklists, tasks, owners, dependencies, and
-workflow state. They may never contain product source, machine-readable
-contracts/schemas, executable tests, fixtures, eval runners/corpora, evidence,
-runtime assets, or product documentation.
-
-Product artifacts belong under `src/`, `schemas/`, `tests/`, `evals/`,
-`evidence/`, `integrations/`, `scripts/`, and `docs/`. Build, test, eval, docs,
-packaging, release, and runtime commands must not depend on managed paths.
-
-The standard SpecKit plan command normally proposes `data-model.md`,
-`contracts/`, and `quickstart.md` inside a feature directory. Nunchi's
-constitution forbids those outputs. Record interface and validation planning in
-`plan.md`; create actual schemas/contracts under `schemas/` and runnable guides
-under `docs/` only during authorized slice implementation.
-
-## Documentation freshness
-
-Documentation is a blocking part of every implementation slice. Each spec,
-plan, and task graph must explicitly review `README.md` and every ordinary-path
-document affected by behavior, interfaces, configuration/defaults,
-installation, entry points, supported surfaces, security posture, evidence
-grade, limitations, version/current state, diagrams, examples, or commands.
-
-Use exactly one disposition per reviewed surface:
-
-- `UPDATE`: land and validate the affected docs with the candidate.
-- `NO_IMPACT`: list exact reviewed paths and concrete rationale in ordinary
-  handoff evidence.
-- `HANDOFF`: for shared/integrator-owned docs only, provide the exact required
-  claim delta and accepting owner. It is not a no-impact finding.
-
-Name exact affected files; a generic directory or wildcard is not a review when
-the paths are already known. Slice task checkboxes remain dormant until the
-external grant is documented at
-`evidence/governance/v2-implementation-authorization.md`, enumerates exactly
-all slices `010` through `110`, and the separate slice-readiness gate passes.
-
-Intermediate V2 slices update their owned component docs and hand global
-current-state wording to `v2-integrator`; they must not claim partial V2 as
-current. Slice `110` must update `README.md` and affected cross-surface docs as
-part of the atomic cutover, while truthfully marking the merged candidate
-`CUTOVER_ACCEPTED` with exact-main verification and final documentation
-pending. After exact-main verification, a docs/evidence-only follow-up finalizes
-and validates current-state wording; only then may the program become
-`CUTOVER_VERIFIED`. No implementation may converge or hand off until the
-documentation-freshness gate passes for the exact candidate.
+Platform owners receive a stable shared interface only after its upstream
+implementation is integrated. The integrator remains accountable for the whole
+product and may reject or replace inherited work.
 
 ## Product invariants
 
-- Only a participant-shaped model may make a social suppression judgment.
-- Deterministic code handles transport-proven non-events, never conversational
-  meaning.
+- Only the exact participant's delegated model may make a social suppression
+  judgment.
+- Deterministic code handles transport-proven non-events, lifecycle, and
+  authority—not conversational meaning.
 - Uncertainty wakes or defers.
-- Trusted preattention bypass wakes directly with no fabricated model result.
-- Exact self binding is separate from loose names and aliases.
-- Context is bounded, structured, coverage-honest, and optionally expandable.
-- Continuation authority is host-only; the classifier sees no opaque handle,
-  binding, cursor, expiry, or fetch secret.
+- Trusted preattention bypass wakes directly without a fabricated model result.
+- Exact self binding is separate from names, aliases, and roles.
+- Context is bounded, structured, coverage-honest, and optionally expandable;
+  continuation authority remains host-only.
 - Observation, attention, participant-host, and transport receipts are
-  immutable, request-correlated, and singly attested by their owner.
-- There is no social handled/open ledger, obligation queue, or inferred roster.
-- Preattention is judged once; no send-time social reclassification.
-- A woken participant contributes directly or sends nothing; no meta-answer.
-- V2 must cut over atomically across all in-tree consumers and prove parity.
+  immutable, request-correlated, and written only by their owning stage.
+- There is no social handled/open ledger, obligation queue, inferred roster, or
+  send-time social reclassification.
+- A woken participant contributes directly or sends nothing.
+- Privileged effects require current, provenance-bound authorization for the
+  exact action immediately before dispatch.
+- V2 cuts over atomically across every required in-tree surface; no executable
+  V1 compatibility path remains.
 
-## Commands
+## Verification
+
+Use the smallest relevant tests while developing, then run:
 
 ```sh
-python3 scripts/check_governance.py --check-cli
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 ```
 
-The test suite is stdlib `unittest`, offline, and deterministic unless a command
-explicitly performs a live provider evaluation. Current package/runtime details
-remain in `CLAUDE.md`, `README.md`, and `docs/`.
-
-## Definition of done
-
-A slice is ready only when its spec, plan, tasks, owner, dependencies,
-interfaces, integration strategy, acceptance scenes, and evidence requirements
-agree; analysis has no CRITICAL/HIGH findings; and the governance boundary
-passes. Product completion additionally requires ordinary-path implementation,
-tests, evidence, installed-runtime provenance, accepted README/docs
-dispositions and validation, and integrator handoff.
+Deterministic tests are offline. Live provider and platform evaluations are
+explicit, attributable runs. Green tests alone do not prove installed or live
+behavior; the completion goal defines the final proof.

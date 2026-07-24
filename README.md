@@ -5,250 +5,107 @@ building participant-owned pre-attention for agents in shared conversation:
 **is this room event worth waking me for?** It does not allocate the floor or
 decide what the participant should say.
 
-## Project state
+## Current state
 
-Nunchi is between contracts. Keep these states separate:
+The runnable repository and published `0.2.0` package are V1. V1 uses
+`PASS / ACK / ASK / SPEAK`. The selected but incomplete V2 product uses
+`SUPPRESS / WAKE / DEFER`, keeps operational `ERROR` separate, and then gives a
+woken participant a normal act-or-silence turn.
 
-| Surface | What exists | Contract |
-|---|---|---|
-| [PyPI `0.2.0`](https://pypi.org/project/nunchi/0.2.0/) | Historical release from 2026-07-02; core library plus `nunchi` and `nunchi-channel` | Older V1 `PASS / ACK / ASK / SPEAK`, including the subsequently removed deterministic fast path |
-| This repository checkout | V1 runtime plus substantial unreleased adapter and harness work | Still V1; surfaces do not yet share one parity-proven lifecycle |
-| Selected V2 target | Repository-owned design and completion goal; the authorization contract amendment and dependency-ordered implementation remain | `SUPPRESS / WAKE / DEFER`, with operational `ERROR` separate |
-| Current V2 delivery baseline | [Audited 2026-07-23](evidence/v2/completion-baseline-2026-07-23.md): slice `010` is accepted through amendments A1/A2; the required `I-010F` A3 amendment is not accepted; slices `020`–`110` are `PLANNED` | No downstream V2 implementation is active or accepted; V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED` |
-| Historical V2 program reset | 2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED` | At that snapshot all slices were `PLANNED` and dormant; it is provenance, not current status |
+The current V2 baseline is:
 
-The checkout still reports package version `0.2.0`, so the version string alone
-does not establish which source or integration artifacts are installed. Record
-and verify the source commit for any operator deployment.
+- contract slice `010` is integrated through amendments A1/A2;
+- the required privileged-action authorization successor is not integrated;
+- observation, attention, participant host, shared transport, platform
+  integrations, security closure, packaging, and cutover remain incomplete;
+- historical branches, packets, approvals, and evidence are inputs, not proof
+  that those outcomes are done.
 
-## Selected V2 design — not implemented
+Use [`docs/v2-delivery.md`](docs/v2-delivery.md) for implementation order and
+plain-language status. Use
+[`docs/v2-completion-goal.md`](docs/v2-completion-goal.md) for the complete
+product outcome.
 
-V2 makes Nunchi the participant's delegated pre-attention. It receives exact
-self identity and a bounded, structured, coverage-honest observation of the
-room. One participant-shaped model decides whether to spend a wake; after a
-wake, the participant gets a normal act-or-silence turn.
+## Selected V2 design
+
+V2 receives exact self identity and a bounded, structured, coverage-honest
+observation of the room. One participant-shaped model decides whether to spend
+attention. After a wake, the participant acts normally or stays silent.
 
 ```mermaid
 flowchart LR
     Event["Native room event"] --> Observe["Truthful bounded observation"]
-    Observe --> Attention["One participant-shaped<br/>attention judgment"]
+    Observe --> Attention["One participant-shaped attention judgment"]
     Attention -->|"SUPPRESS"| Stop["No participant wake"]
     Attention -->|"WAKE or DEFER"| Turn["Normal participant turn"]
     Bypass["Trusted preattention-disabled bypass"] --> Turn
     Error["Operational ERROR"] -->|"wake by default"| Turn
-    Turn --> Participant["Participant runs normally"]
-    Participant -->|"produces an action"| Act["Message, reaction, or tool action"]
-    Participant -->|"produces no action"| Silence["Send nothing"]
+    Turn -->|"action"| Act["Native room action"]
+    Turn -->|"silence"| Silence["Send nothing"]
 ```
 
-The selected invariants are:
+Key invariants:
 
-- Only a participant-shaped model may make a social suppression judgment.
-- Deterministic code handles only exact duplicate delivery, retained exact-self
-  no-self-wake, and unroutable or unconstructable native events—never
-  conversational meaning.
-- Exact self binding is separate from loose names, roles, and aliases.
-- Context is bounded and structured, with honest gaps and optional expansion;
-  host-only continuation authority never enters classifier input.
+- Only the exact participant's delegated model may make a social suppression
+  judgment.
+- Deterministic code handles transport facts, lifecycle, and authority—not
+  conversational relevance, resolution, or obligation.
+- Exact self binding is separate from names, aliases, and roles.
+- Context is bounded and honest about gaps; continuation authority stays
+  host-only.
 - Trusted disabled preattention wakes directly with zero classifier calls and
-  no fabricated model disposition.
-- `SUPPRESS` requires explicitly enabled, inspectable, revocable delegation and
-  proven later-hearing recovery.
-- Classifier-DEFER and margin-DEFER remain distinct, evidence-gated safety
-  routes rather than an accidental compatibility layer.
-- There is no inferred participant roster, handled/open ledger, obligation
-  queue, or central floor manager.
+  no fabricated model result.
+- There is no inferred roster, handled/open ledger, obligation queue, or
+  send-time social reclassification.
 - Observation, attention, participant-host, and transport receipts are
-  immutable, request-correlated, and singly attested by their owners.
-- Preattention is judged once. The participant contributes directly or stays
-  silent; there is no admission meta-answer or send-time social reclassification.
-- V2 cuts over atomically across every in-tree adapter and harness. There is no
-  V1 compatibility bridge or mixed-contract repository state.
+  immutable, request-correlated, and written only by their owning stage.
+- Privileged actions require current provenance-bound authority for the exact
+  action immediately before dispatch.
+- V2 cuts over atomically across required surfaces without an executable V1
+  compatibility path.
 
-See the renderable [V2 architecture diagrams](docs/architecture/v2-selected-design.md)
-for the component, UML, sequence, state, and execution-wave views.
+See the [V2 architecture](docs/architecture/v2-selected-design.md), [portable
+contract](docs/contracts/nunchi-v2.md), and [detailed reference
+definitions](specs/README.md).
 
-## V2 implementation program
+## V2 delivery order and ownership
 
-At the 2026-07-11 governance-reset baseline, the program was `READY`: its
-selected design, governance, interfaces, acceptance scenes, owner lanes, and
-slice plans agreed. Implementation authority was `NOT_GRANTED`, so all eleven
-slices were `PLANNED` and their product tasks were dormant. This is a dated
-snapshot of the shared repository program, not a permanent live registry or
-participant-local execution state. Resolve live program progress from the
-umbrella declaration in `specs/001-nunchi-v2-program/`, implementation
-authority from `evidence/governance/v2-implementation-authorization.md`, and a
-slice's state and occupant from that bound slice's declarations, immutable
-activation/acceptance records, and append-only candidate/handoff attempt
-streams.
+| Order | Outcome | Owner |
+|---:|---|---|
+| 1 | Portable contract | Codex |
+| 2 | Observation and attention core | Codex |
+| 3 | Participant host, coalesced opportunities, authorization guard, and shared Discord transport | Codex |
+| 4 | Hermes integration | Aleph |
+| 4 | Claude Code integration | Claude |
+| 4 | Codex and reference adapters | Codex |
+| 5 | Security assurance | Claude, with non-author review |
+| 6 | Integration, packaging, live parity, and atomic cutover | Codex |
+| Final | Product completion decision | Zoe |
 
-| Wave | Independently owned slice | Accountable owner lane | Outcome |
-|---:|---|---|---|
-| 0 | `010-v2-contract` | `v2-contract-owner` | Canonical V2 request, decision, wake, continuation, and receipt contracts |
-| 1 | `020-v2-observation` | `v2-observation-owner` | Truthful bounded observation, continuation, and factual current snapshot/high-water facts; no turn scheduler |
-| 1 | `030-v2-core-attention` | `v2-core-owner` | Participant-shaped pre-attention and uncertainty widening |
-| 2 | `040-v2-participant-wake` | `v2-wake-owner` | Normal participant act-or-silence turn, coalesced opportunity scheduling, and privileged-action enforcement |
-| 2 | `050-v2-discord-transport` | `v2-transport-owner` | Shared Discord-native continuity and transport receipts |
-| 3 | `060-v2-hermes` | `v2-hermes-owner` | Hermes migration and installed-runtime evidence |
-| 3 | `070-v2-claude-code` | `v2-claude-owner` | Claude Code migration and installed-runtime evidence |
-| 3 | `080-v2-codex` | `v2-codex-owner` | Codex migration and installed-runtime evidence |
-| 3 | `090-v2-channel-adapters` | `v2-adapters-owner` | Generic, Matrix, Telegram, and standalone Discord parity |
-| 4 | `100-v2-security-provenance` | `v2-security-owner` | Blocking security, suppression-governance, and installed-provenance audit |
-| 5 | `110-v2-parity-cutover` | `v2-integrator` | Sole integration sink, common live scenes, truthful docs, and atomic cutover |
+Platform work starts only when its shared dependencies are implemented,
+verified, reviewed, and present on `integration/v2`. Work proceeds through
+ordinary implementation branches and pull requests. Planning artifacts,
+lifecycle labels, and handoff packets are not completion.
 
-An external participant delivers one existing slice at a time:
+## Current V1 behavior
 
-```mermaid
-flowchart LR
-    Choose["Choose one existing slice<br/>and accountable owner lane"]
-    Preflight["Read-only binding preflight<br/>allowlisted existing slice"]
-    Bind["Bound workflow runner<br/>pins slice, run, and workflow"]
-    Authority{"Complete program authorization<br/>record is valid?"}
-    Dormant["Remain PLANNED<br/>tasks dormant"]
-    Ready{"Owner, dependencies, analysis,<br/>worktree, and activation evidence ready?"}
-    Deliver["ACTIVE<br/>010-100 implement; 110 integrates"]
-    Converge["Convergence gate<br/>on pass: CONVERGED"]
-    Docs["HANDOFF_READY<br/>fresh packet delivered"]
-    Which{"Which slice?"}
-    SliceReview{"v2-integrator accepts<br/>010-100 packet?"}
-    Accept["ACCEPTED<br/>exact slice candidate"]
-    Rework["ACTIVE rework<br/>start a new bound run"]
-    Cutover{"Zoe accepts<br/>exact slice 110?"}
-    RecordCutover["Integrator records slice decision;<br/>program owner records CUTOVER_ACCEPTED"]
-    Merge["Atomic V2 merge"]
-    Pending["Merged candidate<br/>verification and final docs pending"]
-    Verify["Verify exact main commit<br/>and final documentation"]
-    Current["CUTOVER_VERIFIED<br/>V2 may be described as current"]
-
-    Choose --> Preflight --> Bind --> Authority
-    Authority -->|"No"| Dormant
-    Authority -->|"Yes"| Ready
-    Ready -->|"No"| Dormant
-    Ready -->|"Yes"| Deliver --> Converge --> Docs --> Which
-    Converge -. "tasks appended" .-> Rework
-    Which -->|"010-100"| SliceReview
-    SliceReview -->|"Yes"| Accept --> Choose
-    SliceReview -->|"No"| Rework --> Preflight
-    Which -->|"110"| Cutover
-    Cutover -->|"No"| Rework
-    Cutover -->|"Yes"| RecordCutover --> Merge --> Pending --> Verify --> Current
-```
-
-An already `ACCEPTED` slice may issue a bounded versioned successor without
-rewriting that terminal history. The current occupant of the same stable owner
-lane starts the `speckit` workflow in accepted-amendment mode from the exact
-effective predecessor. The slice stays `ACCEPTED`; its activation, terminal
-candidate, handoff, acceptance, and earlier amendments remain immutable. One
-append-only amendment record carries the fixed scope, candidate, packet, and
-integrator decision. Acceptance alone appends the canonical amendment ledger
-and changes the effective commit and packet that future consumers must accept.
-Rejection leaves the prior effective binding in force. From amendment A3
-onward the complete record schema is mandatory; historical A1/A2 records retain
-their accepted schema.
-
-Before running either workflow, the participant uses
-`python3 scripts/run_slice_workflow.py run <workflow> specs/<exact-slice>`.
-The runner allowlists and preflights the existing slice, sets the exact binding
-inside the workflow process, verifies exact SpecKit `0.12.11` and its pinned
-PEP-610 source commit, resolves the concrete integration, verifies and pins its
-manifest plus installed skill bytes with the slice input, initial task graph,
-and canonical workflow digest for its run ID, and leaves
-`.specify/feature.json` unchanged. Resume uses
-`python3 scripts/run_slice_workflow.py resume <run-id>` and rejects changed
-slice inputs, stale workflows, divergent persisted workflow copies, or a changed
-integration manifest, installed skill, or runtime integration. The wrapper
-permits exactly one task-graph transition only while a resume crosses the
-workflow's unique successful `speckit.tasks` step; it records the initial and
-current task digests plus the before/after run-state digests. Task changes
-before that boundary, after it, or on any later resume fail closed.
-If convergence adds tasks, or a completed handoff is rejected, the slice stays
-or returns `ACTIVE` and its owner starts a new bound `run speckit`; a completed
-run is never resumed. The external
-implementation grant must be documented at
-`evidence/governance/v2-implementation-authorization.md` and enumerate exactly
-all eleven slices, `010` through `110`; a partial record is invalid for every
-slice, and the record does not grant authority or make the slice ready.
-Dependencies, one accountable owner, analysis, an isolated worktree, and
-activation evidence are checked separately. Before a dependent becomes
-`READY`, every upstream slice must be terminally `ACCEPTED` and the dependent
-owner must separately accept its exact current effective commit and terminal or
-amendment packet. If an accepted upstream successor appears after activation,
-the dependent's immutable historical records stay intact, but its candidate is
-blocked from further use until the consumer appends an exact-commit-and-packet
-compatibility re-attestation; an incompatible candidate is replaced. Each
-dependent owner accepts every required upstream handoff, but that consumer
-decision cannot substitute for terminal upstream acceptance. At slice level, `v2-integrator` accepts
-slices `010`–`100`, while Zoe accepts the exact slice-`110` candidate.
-
-Zoe, or an assigner durably delegated by Zoe, assigns the program owner and
-each slice participant. A declaration uses `<participant identity>` —
-`evidence/governance/assignments/<record>.md`; that non-symlink record contains
-exactly one `Assignee`, `Lane`, `Assigned by`, ISO `Assigned on`, and durable
-`Authority reference`. A non-Zoe assigner also requires `Delegated by: Zoe` and
-a durable `Delegation reference`.
-Assignment may precede implementation authority for planning, but does not
-grant it or make a slice ready. Declarations and activation evidence carry the
-assignment without creating a central assignment registry.
-
-Only `110-v2-parity-cutover` may combine accepted handoffs. After its slice
-workflow reaches `HANDOFF_READY`, Zoe's explicit `CUTOVER_ACCEPTED` decision
-for the exact candidate is recorded as slice acceptance by `v2-integrator`; on
-acceptance, `v2-program-owner` records only the program cutover copy. The
-integrator may then perform one atomic merge, whose docs remain
-`CUTOVER_ACCEPTED` with exact-main verification and final current-state wording
-pending. A docs/evidence-only follow-up records exact-main verification and
-final documentation validation; only then is `CUTOVER_VERIFIED` established.
-Release and promotion remain separate.
-
-The umbrella program defines all eleven owners and dependencies, twelve
-canonical interfaces, eighteen acceptance scenes, ordinary-path evidence requirements,
-and the final integration ladder. Its ordinary-path views are the
-[architecture guide](docs/architecture/v2-selected-design.md) and
-[execution-spine guide](docs/governance/execution-spine.md). Files under
-`specs/` are planning control plane—not product contracts or proof—and product
-documentation does not depend on them.
-
-## Current implementation: V1
-
-Until the atomic cutover, the runnable core is a pre-reply admission gate. Its
-model returns exactly one V1 verdict:
-
-| Verdict | Current V1 meaning |
+| Verdict | Meaning |
 |---|---|
 | `PASS` | Hard stop; emit no ordinary room message |
 | `ACK` | A brief acknowledgement is warranted |
 | `ASK` | A clarification is warranted |
 | `SPEAK` | A substantive contribution is warranted |
 
-Every admission in the current checkout's core is model-judged. The former
-deterministic social fast path was removed after it falsely silenced direct
-corrections and treated name or text equality as proof of self-causation. The
-published `0.2.0` wheel predates that removal; use it only when deliberately
-reproducing the historical release. The current source improvement still does
-not make V1 equivalent to the selected V2 observation or lifecycle contract.
+The current source contains core, adapter, Hermes, Claude Code, Codex, and
+Discord work of varying evidence quality. It does not share the complete V2
+lifecycle. Existing evidence under `evidence/` is V1 or historical unless it
+explicitly proves an exact V2 candidate.
+Status labels are evidence tiers, not release promises.
 
-### Current V1 surfaces and evidence
+## Install the current V1 source
 
-| Surface | Current repository state | Committed proof | V2 slice owner(s) |
-|---|---|---|---|
-| Core CLI and generic channel adapter | Implemented; the older core/channel surface is released in `0.2.0` | Offline tests and the [V1 regression corpus](evidence/verdict-suite/README.md) | `010`, `030`, `040`, `090` |
-| Matrix, Telegram, standalone Discord | Implemented in source | Offline tests; no committed live-server evidence | `090` |
-| Shared Discord-MCP transport | Implemented in source | [Bounded transport live smoke](evidence/mcp-discord/2026-07-07-live-smoke.md) | `050` |
-| Hermes plugin | Implemented in source | Offline tests; no committed integration evidence | `060` |
-| Claude Code wake hook | Implemented in source | Offline tests; no committed integration evidence | `070` |
-| Codex runner, hooks, and config app | Implemented in source | [Bounded V1 live smokes](evidence/codex/2026-07-09-vigil-persistent-session.md) | `080` |
-
-Status labels are evidence tiers, not release promises. In particular, the
-Codex evidence proves a bounded V1 lifecycle that still includes an outbound
-social re-gate; the relevant V2 slices must replace that behavior rather than treat it as V2
-parity. All current behavior records under `evidence/` remain V1 or historical
-inputs until new V2 evidence is produced.
-
-## Install and use the current V1 surface
-
-For the current repository behavior, install a reviewed source commit. A forced
-install matters because the source checkout and historical release currently
-share the `0.2.0` package version:
+Install a reviewed source commit. The checkout and historical release currently
+share version `0.2.0`, so record the commit:
 
 ```sh
 git clone https://github.com/mentatzoe/nunchi.git
@@ -256,22 +113,14 @@ cd nunchi
 git checkout <reviewed-commit>
 python3 -m pip install --force-reinstall .
 
-# Optional dependencies for the standalone Discord adapter and Discord-MCP:
+# Optional standalone Discord and Discord-MCP dependencies:
 python3 -m pip install --force-reinstall ".[discord,mcp-discord]"
 ```
 
-The default package remains stdlib-only; the extras add their named optional
-dependencies. `nunchi-install` copies Hermes and Claude operator artifacts from
-a checkout into stable locations—it is not present in the published `0.2.0`
-wheel. See the [operator-artifact install guide](docs/INSTALL.md).
-
-For historical reproduction only, `python3 -m pip install "nunchi==0.2.0"`
-installs the older published core and `nunchi-channel` surface. Updating this
-README does not change the long description or code embedded in that release.
+`nunchi-install` copies source-only Hermes and Claude operator artifacts into
+stable locations. See [the install guide](docs/INSTALL.md).
 
 ### Minimal V1 CLI example
-
-Configure an OpenAI-compatible classifier and submit one admission request:
 
 ```sh
 export NUNCHI_CLASSIFIER_MODEL="your/provider-model"
@@ -282,74 +131,34 @@ printf '%s\n' \
   | nunchi admit
 ```
 
-The command makes a real provider call and prints one V1 result object. The
-provider endpoint and credentials are operator-owned; request payloads cannot
-redirect them. For the in-process API, generic subprocess adapter, room
-profiles, and current V1 result schema, use the explicitly versioned guides
-below.
+Provider endpoints and credentials are operator-owned; request payloads cannot
+redirect them.
 
-## Documentation map
+## Development
 
-| Topic | Source |
-|---|---|
-| V2 outcome, end conditions, and completion decision | [V2 completion goal](docs/v2-completion-goal.md) |
-| Selected V2 flow, interfaces, owners, and diagrams | [V2 selected design](docs/architecture/v2-selected-design.md) |
-| V2 execution model, SpecKit, workflows, and reinitialization | [V2 execution spine](docs/governance/execution-spine.md) |
-| Current V1 public contract and versioning | [V1 stability contract](docs/STABILITY.md) |
-| Current V1 host integration | [V1 integration guide](docs/integration.md) |
-| Current V1 platform adapters | [V1 adapter reference](docs/adapters.md) |
-| Source-only Hermes and Claude artifact installation | [Operator-artifact install guide](docs/INSTALL.md) |
-| Current V1 evaluation corpus | [Verdict-suite guide](docs/evaluations/verdict-suite.md) |
-| Implemented and historical evidence index | [Evidence index](evidence/README.md) |
-| Unreleased source changes and release history | [Changelog](CHANGELOG.md) |
-
-## Development and governance
-
-Authority starts with the repository-owned
-`docs/architecture/v2-selected-design.md` and `docs/contracts/nunchi-v2.md`.
-They preserve the Zoe-selected Aleph Vault decisions from PR 67 at `bdd1ebb`
-and PR 68 at `c834e8c`; those commits are provenance, not a required external
-checkout. The constitution, runtime guidance, umbrella program and owned slice
-then govern execution, while ordinary-path implementation and proof establish
-current behavior.
-
-SpecKit is pinned to exactly `0.12.11`. Its managed paths are disposable
-control plane and may never own product source, schemas, tests, evaluation
-assets, evidence, runtime artifacts, or product documentation. Both workflows
-operate on one existing slice through the bound runner described above. Neither
-creates or replaces a feature, and the runner does not mutate
-`.specify/feature.json`. The planning workflow stops after analysis. The
-delivery workflow has separate
-implementation-authority and slice-readiness gates before implementation, plus
-a post-convergence documentation-freshness gate. Every
-implementation must review `README.md` and affected ordinary docs, then either
-update and validate them, record an evidence-backed `NO_IMPACT`, or hand an
-exact shared-doc delta to its accepting owner. Known affected files must be
-named individually; a directory wildcard does not satisfy the gate. Product
-tasks remain dormant until the external implementation grant is recorded at
-`evidence/governance/v2-implementation-authorization.md`, enumerates exactly
-all eleven slices, and the bound slice independently becomes `READY`.
+Start V2 work from current `integration/v2` and follow
+[`docs/v2-delivery.md`](docs/v2-delivery.md). Run:
 
 ```sh
-specify workflow info nunchi-plan
-specify workflow info speckit
-
-python3 scripts/run_slice_workflow.py run nunchi-plan \
-  specs/030-v2-core-attention
-# Or, after program authorization and slice readiness:
-python3 scripts/run_slice_workflow.py run speckit \
-  specs/030-v2-core-attention
-# Resume only a bound paused run; task changes are limited to its one
-# wrapper-attested speckit.tasks boundary:
-python3 scripts/run_slice_workflow.py resume <run-id>
-
-python3 scripts/check_governance.py --check-cli
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 ```
 
-Offline tests use stdlib `unittest`. Live provider evaluations are explicit,
-cost-bearing evidence runs and are not part of the deterministic default suite.
+Tests are stdlib `unittest` and offline unless a command explicitly performs a
+live provider or platform evaluation.
+
+## Documentation
+
+| Topic | Source |
+|---|---|
+| V2 goal and end conditions | [Completion goal](docs/v2-completion-goal.md) |
+| V2 implementation order and review | [Delivery guide](docs/v2-delivery.md) |
+| V2 architecture | [Selected design](docs/architecture/v2-selected-design.md) |
+| V2 portable contract | [Contract](docs/contracts/nunchi-v2.md) |
+| Detailed V2 requirements and technical plans | [Reference definitions](specs/README.md) |
+| V1 stability and integration | [Stability](docs/STABILITY.md) · [Integration](docs/integration.md) |
+| Current adapters and installation | [Adapters](docs/adapters.md) · [Install](docs/INSTALL.md) |
+| Evidence and change history | [Evidence](evidence/README.md) · [Changelog](CHANGELOG.md) |
 
 ## License
 

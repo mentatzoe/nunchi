@@ -1,5 +1,10 @@
 # Program Specification: Nunchi V2 End-to-End Parity
 
+> **Reference only.** Product requirements, interfaces, and acceptance scenes
+> remain useful. SpecKit, lifecycle, assignment, worktree, task, candidate,
+> handoff, and acceptance instructions in this document are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `integration/v2`
 
 **Created**: 2026-07-11

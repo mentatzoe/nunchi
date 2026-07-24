@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Parity and Atomic Cutover
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `integration/v2` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/110-v2-parity-cutover/spec.md`

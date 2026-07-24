@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import re
-import tomllib
 import types
 import unittest
 from pathlib import Path
@@ -22,20 +21,11 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _ADAPTERS_MD = _REPO_ROOT / "docs" / "adapters.md"
 _README_MD = _REPO_ROOT / "README.md"
-_AGENTS_MD = _REPO_ROOT / "AGENTS.md"
-_CLAUDE_MD = _REPO_ROOT / "CLAUDE.md"
 _EXECUTION_SPINE_MD = _REPO_ROOT / "docs" / "governance" / "execution-spine.md"
+_DELIVERY_MD = _REPO_ROOT / "docs" / "v2-delivery.md"
 _SPECS_README = _REPO_ROOT / "specs" / "README.md"
-_EVIDENCE_README = _REPO_ROOT / "evidence" / "README.md"
-_LIFECYCLE_AMENDMENT = (
-    _REPO_ROOT
-    / "evidence"
-    / "governance"
-    / "slice-lifecycle-amendment-2026-07-11.md"
-)
 _INSTALL_MD = _REPO_ROOT / "docs" / "INSTALL.md"
 _MCP_DISCORD_README = _REPO_ROOT / "integrations" / "mcp-discord" / "README.md"
-_PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _HERMES_PLUGIN = _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "__init__.py"
 
 # (module name, env var, adapters.md env-table row key)
@@ -159,39 +149,18 @@ class AdapterStatusClaimDisciplineTest(unittest.TestCase):
 class ReadmeContractStateDisciplineTest(unittest.TestCase):
     """The landing page must not collapse release, checkout, and V2 truth."""
 
-    def test_readme_separates_current_version_and_program_lifecycle(self) -> None:
+    def test_readme_separates_current_v1_from_incomplete_v2(self) -> None:
         text = _README_MD.read_text(encoding="utf-8")
         normalized_text = " ".join(text.split())
-        project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
-        source_version = project["project"]["version"]
-        bound_runner = (
-            "python3 scripts/run_slice_workflow.py run <workflow> "
-            + "specs"
-            + "/<exact-slice>"
-        )
-        persisted_feature_state = ".specify" + "/feature.json"
 
         required = (
-            f"checkout still reports package version `{source_version}`",
-            "including the subsequently removed deterministic fast path",
-            "2026-07-11 reset baseline snapshot: program `READY`; implementation authority `NOT_GRANTED`",
-            "At that snapshot all slices were `PLANNED` and dormant",
-            "V1 remains current until the atomic merge is post-merge verified as `CUTOVER_VERIFIED`",
-            "dated snapshot of the shared repository program, not a permanent live registry",
-            "Resolve live program progress from the umbrella declaration",
-            "evidence/governance/v2-implementation-authorization.md",
-            "the record does not grant authority or make the slice ready",
-            bound_runner,
-            "allowlists and preflights the existing slice",
-            f"leaves `{persisted_feature_state}` unchanged",
-            "sets the exact binding inside the workflow process",
-            "Each dependent owner accepts every required upstream handoff",
-            "At slice level, `v2-integrator` accepts slices `010`–`100`, while Zoe accepts the exact slice-`110` candidate",
-            "Only `110-v2-parity-cutover` may combine accepted handoffs",
-            "Zoe's explicit `CUTOVER_ACCEPTED` decision",
-            "Selected V2 design — not implemented",
-            "Current implementation: V1",
-            "Status labels are evidence tiers",
+            "The runnable repository and published `0.2.0` package are V1",
+            "selected but incomplete V2 product",
+            "required privileged-action authorization successor is not integrated",
+            "historical branches, packets, approvals, and evidence are inputs",
+            "Platform work starts only when its shared dependencies are implemented",
+            "Planning artifacts, lifecycle labels, and handoff packets are not completion",
+            "Start V2 work from current `integration/v2`",
         )
         for phrase in required:
             with self.subTest(required=phrase):
@@ -203,97 +172,48 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
             "classifier verdict test suite is the merge contract",
             "Goal 1",
             "Goal 2",
-            "v2-goal-2-authorization.md",
+            "scripts/run_slice_workflow.py",
+            "scripts/check_governance.py",
+            "specify workflow",
         )
         for phrase in forbidden:
             with self.subTest(forbidden=phrase):
                 self.assertNotIn(phrase, text)
 
-    def test_external_guidance_resolves_live_state_from_authoritative_artifacts(self) -> None:
-        guidance_paths = (
-            _AGENTS_MD,
-            _CLAUDE_MD,
-            _README_MD,
-            _EXECUTION_SPINE_MD,
-            _SPECS_README,
-            _EVIDENCE_README,
-            _LIFECYCLE_AMENDMENT,
-        )
-        for path in guidance_paths:
-            with self.subTest(path=path.relative_to(_REPO_ROOT)):
-                normalized = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertIn("2026-07-11", normalized)
-                self.assertIn("001-nunchi-v2-program", normalized)
-                self.assertIn(
-                    "evidence/governance/v2-implementation-authorization.md",
-                    normalized,
-                )
-                self.assertIn("activation", normalized)
-                self.assertIn("candidate", normalized)
-                self.assertIn("handoff", normalized)
-                self.assertIn("acceptance", normalized)
-
-    def test_both_slice_workflows_use_the_bound_read_only_runner(self) -> None:
-        workflow_guidance_paths = (
-            _AGENTS_MD,
-            _CLAUDE_MD,
-            _README_MD,
-            _EXECUTION_SPINE_MD,
-            _SPECS_README,
-            _LIFECYCLE_AMENDMENT,
-        )
-        persisted_feature_state = ".specify" + "/feature.json"
-        direct_stateful_helper = (
-            ".specify" + "/scripts/bash/check-prerequisites.sh"
-        )
-        for path in workflow_guidance_paths:
-            with self.subTest(path=path.relative_to(_REPO_ROOT)):
-                normalized = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertIn("scripts/run_slice_workflow.py", normalized)
-                self.assertIn("run nunchi-plan", normalized)
-                self.assertIn("run speckit", normalized)
-                self.assertIn("resume <run-id>", normalized)
-                self.assertIn("010", normalized)
-                self.assertIn("110", normalized)
-                self.assertIn("nunchi-plan", normalized)
-                self.assertIn("speckit", normalized)
-                self.assertIn(persisted_feature_state, normalized)
-                self.assertNotIn(direct_stateful_helper, normalized)
-
-    def test_workflow_evidence_pins_existing_slice_cycles(self) -> None:
-        normalized = " ".join(
-            _LIFECYCLE_AMENDMENT.read_text(encoding="utf-8").split()
-        )
+    def test_delivery_guide_is_product_first(self) -> None:
+        normalized = " ".join(_DELIVERY_MD.read_text(encoding="utf-8").split())
         required = (
-            "Nunchi Existing-Slice Planning Cycle",
-            "version `1.4.0` with nine steps",
-            "beginning at `bind-existing-slice`",
-            "no `speckit.specify` or implementation step",
-            "version `2.5.0` with eighteen steps",
+            "Missing",
+            "Implemented, unverified",
+            "Verified",
+            "Integrated",
+            "Select the earliest missing product behavior",
+            "A packet, label, test file, or report does not pass merely by existing",
+            "platform-owned",
+            "non-author review",
         )
         for phrase in required:
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
 
-    def test_slice_acceptance_is_distinct_from_dependency_acceptance(self) -> None:
-        acceptance_paths = (
-            _AGENTS_MD,
-            _CLAUDE_MD,
-            _README_MD,
-            _EXECUTION_SPINE_MD,
-            _SPECS_README,
-            _LIFECYCLE_AMENDMENT,
+    def test_spec_workflow_is_retired(self) -> None:
+        self.assertFalse(
+            [path for path in (_REPO_ROOT / ".specify").rglob("*") if path.is_file()]
         )
-        for path in acceptance_paths:
-            with self.subTest(path=path.relative_to(_REPO_ROOT)):
-                normalized = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertIn("v2-integrator", normalized)
-                self.assertIn("Zoe", normalized)
-                self.assertIn("010", normalized)
-                self.assertIn("100", normalized)
-                self.assertIn("110", normalized)
-                self.assertIn("dependent", normalized)
-                self.assertIn("upstream handoff", normalized)
+        self.assertFalse((_REPO_ROOT / "scripts" / "run_slice_workflow.py").exists())
+        self.assertFalse((_REPO_ROOT / "scripts" / "check_governance.py").exists())
+        self.assertFalse(list(_REPO_ROOT.glob("specs/**/tasks.md")))
+        self.assertFalse(list(_REPO_ROOT.glob("specs/**/checklists/*.md")))
+        for path in sorted(_REPO_ROOT.glob("specs/*/spec.md")) + sorted(
+            _REPO_ROOT.glob("specs/*/plan.md")
+        ):
+            with self.subTest(reference=path.relative_to(_REPO_ROOT)):
+                self.assertIn("**Reference only.**", path.read_text(encoding="utf-8"))
+
+        specs_readme = _SPECS_README.read_text(encoding="utf-8")
+        retired = _EXECUTION_SPINE_MD.read_text(encoding="utf-8")
+        self.assertIn("reference documents, not an executable workflow", specs_readme)
+        self.assertIn("retired on 2026-07-24", retired)
 
     def test_source_only_install_guides_do_not_claim_pypi_surfaces(self) -> None:
         install_text = _INSTALL_MD.read_text(encoding="utf-8")
