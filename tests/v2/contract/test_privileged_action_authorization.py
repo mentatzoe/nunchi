@@ -102,6 +102,7 @@ class AuthorizationFlowCases(unittest.TestCase):
             ("persistence_status", "unknown"),
             ("revocation_status", "revoked"),
             ("expires_at", "2026-07-24T01:01:00Z"),
+            ("revocation_checked_at", "2000-01-01T00:00:00Z"),
         ):
             with self.subTest(field=field):
                 flow = [make_authorization_request(), make_authorization_decision()]
@@ -127,6 +128,28 @@ class AuthorizationFlowCases(unittest.TestCase):
         flow = [make_authorization_request(), make_authorization_decision("APPROVAL_REQUIRED")]
         errors = validate_privileged_action_authorization_flow(flow)
         self.assertTrue(any("missing host-only challenge" in error for error in errors), errors)
+
+    def test_completion_must_follow_its_approval_required_decision(self):
+        flow = make_authenticated_approval_flow()
+        flow[3]["completed_at"] = "2026-07-24T00:30:00Z"
+        flow[3]["recheck"]["evaluated_at"] = "2026-07-24T00:31:00Z"
+        flow[3]["recheck"]["revocation_checked_at"] = "2026-07-24T00:31:00Z"
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any("completed_at: must be later than records[1].evaluated_at" in error for error in errors),
+            errors,
+        )
+
+    def test_approval_recheck_must_keep_the_challenge_policy(self):
+        flow = make_authenticated_approval_flow()
+        revision = "2026-07-24T02:00:00Z"
+        flow[3]["recheck"]["policy_provenance"]["revision"] = revision
+        flow[-1]["policy_provenance"]["revision"] = revision
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any("recheck.policy_provenance: must equal the approval challenge" in error for error in errors),
+            errors,
+        )
 
     def test_authenticated_allow_must_match_and_follow_its_fresh_recheck(self):
         mutations = (

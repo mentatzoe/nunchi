@@ -28,14 +28,14 @@ resolved by narrowing the corpus.
 | `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
 | `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
-| `I-010F PrivilegedActionAuthorizationV2` | `@1` candidate, not accepted | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
+| `I-010F PrivilegedActionAuthorizationV2` | `@1` active implementation, not accepted | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
-### Amendment A3 candidate — not accepted
+### Amendment A3 active implementation — not accepted
 
-`I-010F PrivilegedActionAuthorizationV2@1` is now an A3 implementation
-candidate with a machine-readable schema, deterministic validator, and S18
-corpus. It is **not accepted**, effective, executable, or current runtime
-behavior. `v2-integrator` must accept its exact successor packet before a
+`I-010F PrivilegedActionAuthorizationV2@1` is under active A3 implementation
+with a machine-readable schema, deterministic validator, and S18 corpus. It
+is **not frozen, accepted, effective, executable, or current runtime
+behavior**. `v2-integrator` must accept a later exact handoff packet before a
 consumer may rely on it; slice `040` later implements the guard and effects.
 
 Only the request carries an explicit generation tag, `schema_version: 2`
@@ -61,7 +61,7 @@ observation  ->  AttentionRequestV2   (host assembles factual events)
 These are lifecycle boundaries, not social state: no contract carries a
 composed reply, an admission meta-answer, or a social permission ledger.
 
-## I-010F PrivilegedActionAuthorizationV2@1 candidate
+## I-010F PrivilegedActionAuthorizationV2@1 active implementation
 
 This A3 seam is a closed host-facing union, always carrying a `schema_version:
 1`, a non-secret `request_id`, and one exact `binding`:
@@ -76,9 +76,11 @@ This A3 seam is a closed host-facing union, always carrying a `schema_version:
 - **`approval_challenge`** is an expiring, exact-bound, host-only reference
   naming the allowed approvers. It carries no reusable approval secret.
 - **`approval_completion`** names the exact authenticated approver and a fresh
-  policy/revocation/expiry/persistence recheck. A later authenticated-approval
-  decision must name that exact completion, match its outcome and policy/
-  expiry/revocation/persistence facts, and occur after that recheck.
+  policy/revocation/expiry/persistence recheck. It must follow its originating
+  approval-required decision and retain the challenge's policy provenance. A
+  later authenticated-approval decision must name that exact completion, match
+  its outcome and policy/expiry/revocation/persistence facts, and occur after
+  that recheck.
 
 `binding.action_digest` is a closed object: `algorithm` is exactly `sha256`,
 `value` is exactly 64 lowercase hexadecimal characters, and
@@ -88,11 +90,12 @@ to authorize across hosts.
 
 The deterministic flow validator rejects a changed action, digest, origin,
 requester, capability, scope, challenge, approver, policy provenance, expiry,
-revocation, or persistence fact. It also rejects duplicate decision IDs,
-multiple completions of one challenge, and multiple decisions from one
-completion. Room text, reactions, quotes, aliases, model assertions, copied
-decisions, and unknown fields cannot become authorization facts because the
-union is closed.
+revocation, or persistence fact; stale revocation results; a completion that
+predates its approval-required decision; and recheck policy drift. It also
+rejects duplicate decision IDs, multiple completions of one challenge, and
+multiple decisions from one completion. Room text, reactions, quotes, aliases,
+model assertions, copied decisions, and unknown fields cannot become
+authorization facts because the union is closed.
 
 This is deliberately not a bearer-capability format. Schema and corpus success
 does not attest a native event, authenticate an approver, load a policy, retain
@@ -106,7 +109,7 @@ Focused checks:
 
 ```sh
 python3 -m unittest tests.v2.contract.test_privileged_action_authorization
-uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
 ## I-010A AttentionRequestV2@1

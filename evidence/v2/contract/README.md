@@ -1,18 +1,18 @@
-# Slice 010 contract evidence manifest (T018; regenerated for A3 candidate)
+# Slice 010 contract evidence manifest (T018; regenerated for active A3 implementation)
 
-**Recorded on**: 2026-07-24 in the `v2-contract-owner` worktree. A3 remains a
-candidate: this manifest does not accept it, establish an effective dependency,
-or authorize an action.
+**Recorded on**: 2026-07-24 in the `v2-contract-owner` worktree. A3 remains an
+active, unaccepted implementation: this manifest does not freeze or accept it,
+establish an effective dependency, or authorize an action.
 
 **Amendment disposition**: A3 adds the
 `privileged-action-authorization.jsonl` aggregate file for
 `I-010F PrivilegedActionAuthorizationV2@1`. All four aggregate files were
-regenerated against the exact candidate corpus so their validator identities,
-expected results, and manifest counts describe one tree. This leaves accepted
-A1/A2 history intact; it does not supersede their effective commit until
-separate integrator acceptance.
+regenerated against the active implementation corpus so their validator
+identities, expected results, and manifest counts describe one tree. This
+leaves accepted A1/A2 history intact; it does not supersede their effective
+commit until separate integrator acceptance.
 
-**What changed (amendment A3 candidate)**: the new S18 corpus carries the
+**What changed (active amendment A3 implementation)**: the new S18 corpus carries the
 closed request/decision/challenge/completion union and rejects malformed digest
 profiles, public operation or room/model authority fields, action/digest/
 requester/capability substitution, missing or wrong challenge/approver,
@@ -66,42 +66,36 @@ distinguished by the `validator` field.
 
 ## Commands and results
 
-The exact offline dual-validator command (the sole complete run):
-
-```sh
-uv run --offline --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
-```
-
-The A3 candidate's isolated, offline dual-validator run was:
+The verified offline dual-validator command for the active A3 implementation:
 
 ```sh
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
 ```
 
-Result (2026-07-24): **212 tests, OK, 0 skipped** — every oracle-side check
+Result (2026-07-24): **214 tests, OK, 0 skipped** — every oracle-side check
 ran; only the explicit per-class oracle skips applied inside the corpus runner
 (counted below).
 
-The boundary-only SC-006 verification, run with no flags:
+The SC-006 boundary and CLI verification:
 
 ```sh
-python3 scripts/check_governance.py
+python3 scripts/check_governance.py --check-cli
 ```
 
-Result (2026-07-19): `governance boundary: OK (SpecKit 0.12.11)` — zero
+Result (2026-07-24): `governance boundary + CLI: OK (SpecKit 0.12.11)` — zero
 product schemas, tests, fixtures, evaluation assets, evidence, or product
 documentation under the SpecKit directories.
 
-The full repository baseline (`python3 -m unittest`) passed on the A3 candidate
-tree on 2026-07-24. Its oracle-absence skips now include all four corpus suites;
-the exact candidate packet records the complete command output rather than
-repeating the inherited A2 count here.
+The full repository baseline (`python3 -m unittest`) passed on the active A3
+implementation tree on 2026-07-24. Its oracle-absence skips now include all
+four corpus suites; a later exact handoff packet must record its complete
+command output before separate acceptance review.
 
 Evidence generation and shape verification:
 
 ```sh
-uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence
-uv run --offline --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --write-evidence
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m tests.v2.contract.schema_helpers --verify-evidence
 ```
 
 Result (2026-07-24): attention-request 98 records, attention-decision 134

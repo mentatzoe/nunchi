@@ -1954,6 +1954,13 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
                 errors.append(f"records[{index}].revocation_status: ALLOW requires clear")
             if decision["persistence_status"] != "durable":
                 errors.append(f"records[{index}].persistence_status: ALLOW requires durable")
+            _authorization_same_moment(
+                errors,
+                f"records[{index}].revocation_checked_at",
+                checked,
+                f"records[{index}].evaluated_at",
+                evaluated,
+            )
         if path == "direct-policy":
             if completion_id is not None:
                 errors.append(
@@ -2061,6 +2068,21 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
                     errors.append(
                         f"records[{index}].completed_at: is not comparable with challenge expiry"
                     )
+            proposal = challenge_decisions.get(challenge_id)
+            if proposal is not None:
+                proposal_index, proposal_record = proposal
+                proposal_time = _authorization_timestamp(
+                    errors,
+                    f"records[{proposal_index}].evaluated_at",
+                    proposal_record["evaluated_at"],
+                )
+                _authorization_after(
+                    errors,
+                    f"records[{index}].completed_at",
+                    completed,
+                    f"records[{proposal_index}].evaluated_at",
+                    proposal_time,
+                )
             recheck = completion["recheck"]
             recheck_time = _authorization_timestamp(
                 errors, f"records[{index}].recheck.evaluated_at", recheck["evaluated_at"]
@@ -2101,6 +2123,10 @@ def validate_privileged_action_authorization_flow(records: Any) -> list[str]:
                     errors.append(
                         f"records[{index}].recheck.persistence_status: ALLOW requires durable"
                     )
+            if not semantic_equal(recheck["policy_provenance"], challenge["policy_provenance"]):
+                errors.append(
+                    f"records[{index}].recheck.policy_provenance: must equal the approval challenge"
+                )
 
     for index, decision in decisions:
         if decision["authorization_path"] != "authenticated-approval":
