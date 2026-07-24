@@ -81,6 +81,13 @@ Discord process declares a source gap before it accepts post-start facts;
 within-process resumable reconnects preserve their narrower attested
 continuity.
 
+Output success is target-attested. Message results must include a non-empty
+native message identity for the exact room and authenticated bot; reaction
+results must echo the exact room, target, operation, and reaction. The Codex
+consumer also verifies JSON-RPC request correlation and the single MCP text
+result. Empty, stale, mismatched, or malformed acknowledgements are recorded
+as unknown rather than sent.
+
 ## Restart and recovery
 
 Restart:

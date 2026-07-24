@@ -534,12 +534,30 @@ class MCPDiscordTransport:
         self.output_secret = output_secret
 
     @staticmethod
-    def _tool_error(result: Any) -> str | None:
+    def _tool_payload(result: Any) -> tuple[Mapping[str, Any] | None, str]:
         if not isinstance(result, Mapping):
-            return "MCP tool returned an invalid result"
+            return None, "unknown"
         if result.get("isError") is True:
-            return "MCP tool failed"
-        return None
+            return None, "failed"
+        if result.get("isError") is not False:
+            return None, "unknown"
+        content = result.get("content")
+        if not isinstance(content, list) or len(content) != 1:
+            return None, "unknown"
+        item = content[0]
+        if (
+            not isinstance(item, Mapping)
+            or item.get("type") != "text"
+            or not isinstance(item.get("text"), str)
+        ):
+            return None, "unknown"
+        try:
+            payload = json.loads(item["text"])
+        except json.JSONDecodeError:
+            return None, "unknown"
+        if not isinstance(payload, Mapping):
+            return None, "unknown"
+        return payload, "ok"
 
     def dispatch(self, *, action, wake) -> TransportResult:
         if wake["room"]["id"] != self.room_id:
@@ -576,10 +594,67 @@ class MCPDiscordTransport:
             result = self.client.call_tool(name, arguments)
         except BaseException:
             return TransportResult("unknown", "Discord MCP acknowledgement was lost")
-        error = self._tool_error(result)
-        if error:
-            return TransportResult("failed", error)
-        return TransportResult("sent", f"mcp:{name}")
+        payload, status = self._tool_payload(result)
+        if status == "failed":
+            return TransportResult("failed", "Discord MCP tool failed")
+        if status != "ok" or payload is None:
+            return TransportResult(
+                "unknown",
+                "Discord MCP acknowledgement was malformed or incomplete",
+            )
+        delivery = payload.get("delivery")
+        if (
+            isinstance(delivery, Mapping)
+            and set(delivery) == {"status", "detail"}
+            and delivery.get("status") == "unknown"
+            and isinstance(delivery.get("detail"), str)
+            and delivery["detail"]
+        ):
+            return TransportResult(
+                "unknown",
+                "Discord target acknowledgement did not confirm the effect",
+            )
+        if name in ("send_message", "reply_message"):
+            if set(payload) != {"message"} or not isinstance(
+                payload.get("message"), Mapping
+            ):
+                return TransportResult(
+                    "unknown",
+                    "Discord message acknowledgement has an invalid shape",
+                )
+            message = payload["message"]
+            message_id = message.get("message_id")
+            if (
+                not isinstance(message_id, str)
+                or not message_id.isdigit()
+                or message.get("channel_id") != self.room_id
+                or not isinstance(message.get("author_id"), str)
+                or not message["author_id"].isdigit()
+                or message.get("author_is_bot") is not True
+            ):
+                return TransportResult(
+                    "unknown",
+                    "Discord message acknowledgement lacks exact native identity",
+                )
+            return TransportResult("sent", f"discord:message:{message_id}")
+        expected_reaction = {
+            "channel_id": self.room_id,
+            "message_id": arguments["message_id"],
+            "reaction": arguments["reaction"],
+            "operation": "add" if name == "add_reaction" else "remove",
+        }
+        if payload != {"reaction": expected_reaction}:
+            return TransportResult(
+                "unknown",
+                "Discord reaction acknowledgement lacks exact native identity",
+            )
+        return TransportResult(
+            "sent",
+            (
+                f"discord:reaction:{arguments['message_id']}:"
+                f"{arguments['reaction']}:{expected_reaction['operation']}"
+            ),
+        )
 
 
 class CodexRoomRuntime:

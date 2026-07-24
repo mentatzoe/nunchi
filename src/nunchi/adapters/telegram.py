@@ -66,6 +66,20 @@ class TelegramTransport:
         except (urllib.error.URLError, OSError, json.JSONDecodeError):
             return TransportResult("unknown", "Telegram acknowledgement was lost")
         message_id = result.get("message_id") if isinstance(result, dict) else None
+        chat = result.get("chat") if isinstance(result, dict) else None
+        chat_id = chat.get("id") if isinstance(chat, Mapping) else None
+        if (
+            isinstance(message_id, bool)
+            or not isinstance(message_id, int)
+            or message_id < 1
+            or isinstance(chat_id, bool)
+            or not isinstance(chat_id, (str, int))
+            or str(chat_id) != str(wake["room"]["id"])
+        ):
+            return TransportResult(
+                "unknown",
+                "Telegram acknowledgement lacked exact native message identity",
+            )
         return TransportResult("sent", f"telegram:message:{wake['room']['id']}:{message_id}")
 
     def authenticated_actor_id(self) -> str:

@@ -306,6 +306,36 @@ class ToolExecutor:
                 False,
             )
         created = self._rest.create_message(channel_id, content, reply_to_message_id=reply_to)
+        created_id = (
+            _snowflake(created.get("id")) if isinstance(created, dict) else None
+        )
+        created_channel = (
+            _snowflake(created.get("channel_id"))
+            if isinstance(created, dict)
+            else None
+        )
+        author = created.get("author") if isinstance(created, dict) else None
+        author_id = (
+            _snowflake(author.get("id")) if isinstance(author, dict) else None
+        )
+        if (
+            created_id is None
+            or created_channel != channel_id
+            or author_id is None
+            or author.get("bot") is not True
+        ):
+            return (
+                {
+                    "delivery": {
+                        "status": "unknown",
+                        "detail": (
+                            "Discord create-message acknowledgement lacked "
+                            "target-attested message identity"
+                        ),
+                    }
+                },
+                True,
+            )
         return ({"message": shape_message(created)}, True)
 
     def _history(self, arguments: dict) -> tuple[dict, bool]:

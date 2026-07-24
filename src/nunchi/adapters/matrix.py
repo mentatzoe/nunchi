@@ -90,7 +90,16 @@ class MatrixTransport:
         except (urllib.error.URLError, OSError, json.JSONDecodeError):
             return TransportResult("unknown", "Matrix acknowledgement was lost")
         event_id = payload.get("event_id") if isinstance(payload, dict) else None
-        return TransportResult("sent", str(event_id or "matrix-sent"))
+        if (
+            not isinstance(event_id, str)
+            or not event_id.startswith("$")
+            or not event_id[1:]
+        ):
+            return TransportResult(
+                "unknown",
+                "Matrix acknowledgement lacked a native event ID",
+            )
+        return TransportResult("sent", event_id)
 
     def authenticated_actor_id(self) -> str:
         payload = self._request("GET", "/_matrix/client/v3/account/whoami")

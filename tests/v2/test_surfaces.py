@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,7 @@ from nunchi.integrations.codex_v2 import (
     MCPDiscordTransport,
     _parse_codex_output,
 )
+from nunchi.integrations.mcp_client import StreamableMCPClient
 from nunchi.mcp_discord.authorization import ToolAuthorizer, make_tool_authorization
 from nunchi.mcp_discord.events import v2_notification_from_dispatch
 from nunchi.mcp_discord.ratelimit import SendBackstop
@@ -399,6 +401,27 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.assertTrue(ok, sent)
         self.assertEqual(1, len(rest.calls))
 
+    def test_tool_executor_does_not_confirm_malformed_create_response(self):
+        class Rest:
+            def create_message(self, *_args, **_kwargs):
+                return {}
+
+        executor = ToolExecutor(
+            Rest(),
+            SendBackstop(5, 10),
+            authorizer=self.authorizer,
+        )
+        arguments = {"channel_id": "42", "content": "hello"}
+        payload, ok = executor.call(
+            "send_message",
+            {
+                **arguments,
+                "_nunchi_authorization": self.authorization(arguments),
+            },
+        )
+        self.assertTrue(ok)
+        self.assertEqual("unknown", payload["delivery"]["status"])
+
 
 class CodexSurfaceTests(unittest.TestCase):
     @staticmethod
@@ -678,7 +701,24 @@ class CodexSurfaceTests(unittest.TestCase):
                 if not ok:
                     return {"isError": True, "content": detail}
                 self.calls.append((name, supplied))
-                return {"isError": False, "content": []}
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "message": {
+                                        "message_id": "101",
+                                        "channel_id": "42",
+                                        "author_id": "9",
+                                        "author_is_bot": True,
+                                    }
+                                }
+                            ),
+                        }
+                    ],
+                }
 
         client = Client()
         transport = MCPDiscordTransport(client, "42", "vigil", secret)
@@ -694,10 +734,181 @@ class CodexSurfaceTests(unittest.TestCase):
                 "room": {"id": "42"},
             },
         )
-        self.assertEqual(TransportResult("sent", "mcp:send_message"), result)
+        self.assertEqual(TransportResult("sent", "discord:message:101"), result)
         self.assertEqual(
             [("send_message", {"channel_id": "42", "content": "hello"})],
             client.calls,
+        )
+
+    def test_codex_mcp_transport_treats_unattested_success_as_unknown(self):
+        class Client:
+            def call_tool(self, _name, _arguments):
+                return {"isError": False, "content": []}
+
+        transport = MCPDiscordTransport(Client(), "42", "vigil", b"y" * 32)
+        result = transport.dispatch(
+            action={
+                "kind": "message",
+                "origin_event_id": "discord:message:1",
+                "text": "hello",
+            },
+            wake={
+                "request_id": "request-1",
+                "self": {"participant_id": "vigil"},
+                "room": {"id": "42"},
+            },
+        )
+        self.assertEqual("unknown", result.delivery)
+
+    def test_codex_mcp_reaction_requires_exact_echo(self):
+        class Client:
+            wrong = False
+
+            def call_tool(self, name, arguments):
+                payload = {
+                    "reaction": {
+                        "channel_id": arguments["channel_id"],
+                        "message_id": (
+                            "999" if self.wrong else arguments["message_id"]
+                        ),
+                        "reaction": arguments["reaction"],
+                        "operation": "add" if name == "add_reaction" else "remove",
+                    }
+                }
+                return {
+                    "isError": False,
+                    "content": [
+                        {"type": "text", "text": json.dumps(payload)}
+                    ],
+                }
+
+        client = Client()
+        transport = MCPDiscordTransport(client, "42", "vigil", b"y" * 32)
+        action = {
+            "kind": "reaction",
+            "origin_event_id": "discord:message:1",
+            "target_event_id": "discord:message:101",
+            "reaction": "✅",
+            "operation": "add",
+        }
+        wake = {
+            "request_id": "request-1",
+            "self": {"participant_id": "vigil"},
+            "room": {"id": "42"},
+        }
+        self.assertEqual(
+            "sent",
+            transport.dispatch(action=action, wake=wake).delivery,
+        )
+        client.wrong = True
+        self.assertEqual(
+            "unknown",
+            transport.dispatch(action=action, wake=wake).delivery,
+        )
+
+    def test_mcp_json_response_must_correlate_request_id(self):
+        class Response(io.BytesIO):
+            headers = {"content-type": "application/json"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        client = StreamableMCPClient("http://127.0.0.1:3993/mcp")
+        client.session_id = "session"
+        client._post = mock.Mock(
+            return_value=Response(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 999,
+                        "result": {"isError": False, "content": []},
+                    }
+                ).encode()
+            )
+        )
+        with self.assertRaises(RuntimeError):
+            client.call_tool("send_message", {})
+
+        valid = StreamableMCPClient("http://127.0.0.1:3993/mcp")
+        valid.session_id = "session"
+        valid._post = mock.Mock(
+            return_value=Response(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {
+                            "isError": False,
+                            "content": [{"type": "text", "text": "{}"}],
+                        },
+                    }
+                ).encode()
+            )
+        )
+        self.assertEqual(
+            {
+                "isError": False,
+                "content": [{"type": "text", "text": "{}"}],
+            },
+            valid.call_tool("send_message", {}),
+        )
+
+
+class NativeAcknowledgementTests(unittest.TestCase):
+    def test_matrix_missing_event_id_is_unknown(self):
+        with mock.patch.dict(
+            os.environ,
+            {"MATRIX_TOKEN": "secret"},
+            clear=False,
+        ):
+            transport = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.example",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        transport._request = mock.Mock(return_value={})
+        result = transport.dispatch(
+            action={
+                "kind": "message",
+                "origin_event_id": "matrix:event:$1",
+                "text": "hello",
+            },
+            wake={"room": {"id": "!room:example"}},
+        )
+        self.assertEqual("unknown", result.delivery)
+
+    def test_telegram_missing_or_wrong_message_identity_is_unknown(self):
+        with mock.patch.dict(
+            os.environ,
+            {"TELEGRAM_TOKEN": "secret"},
+            clear=False,
+        ):
+            transport = TelegramTransport(
+                {"bot_token_env": "TELEGRAM_TOKEN"}
+            )
+        wake = {"room": {"id": "42"}}
+        action = {
+            "kind": "message",
+            "origin_event_id": "telegram:message:42:1",
+            "text": "hello",
+        }
+        for response in ({}, {"message_id": 7, "chat": {"id": 43}}):
+            with self.subTest(response=response):
+                transport._call = mock.Mock(return_value=response)
+                self.assertEqual(
+                    "unknown",
+                    transport.dispatch(action=action, wake=wake).delivery,
+                )
+        transport._call = mock.Mock(
+            return_value={"message_id": 7, "chat": {"id": 42}}
+        )
+        self.assertEqual(
+            TransportResult("sent", "telegram:message:42:7"),
+            transport.dispatch(action=action, wake=wake),
         )
 
 

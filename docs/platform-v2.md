@@ -42,7 +42,11 @@ A consumer of the shared Discord transport must:
 4. cancel active and pending work before applying a targeted continuity gap;
 5. submit ordinary live events through the asynchronous active/newest lane;
 6. invoke output/history tools only from that authenticated session with a
-   fresh exact-operation authorization.
+   fresh exact-operation authorization;
+7. correlate every JSON-RPC response to the exact request and report `sent`
+   only after the tool payload attests the expected native room, effect, and
+   new message or reaction identity. Empty, stale, mismatched, or malformed
+   acknowledgements are `unknown`, never synthetic success.
 
 The server configuration maps participant IDs directly to numeric room arrays.
 There is no participant/room cross product and no unauthenticated broadcast.

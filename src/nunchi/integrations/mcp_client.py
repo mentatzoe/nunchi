@@ -91,17 +91,23 @@ class StreamableMCPClient:
                 messages = _iter_sse(response)
                 for data in messages:
                     payload = json.loads(data)
-                    if payload.get("id") == request_id:
+                    if isinstance(payload, dict) and payload.get("id") == request_id:
                         break
                 else:
                     raise RuntimeError(f"MCP {method} returned no correlated response")
             else:
                 payload = json.load(response)
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"MCP {method} response is not an object")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("jsonrpc") != "2.0"
+            or payload.get("id") != request_id
+        ):
+            raise RuntimeError(f"MCP {method} returned an uncorrelated response")
+        if ("result" in payload) == ("error" in payload):
+            raise RuntimeError(f"MCP {method} response has an invalid result shape")
         if "error" in payload:
             raise RuntimeError(f"MCP {method} failed: {payload['error']}")
-        return payload.get("result")
+        return payload["result"]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         return self.call("tools/call", {"name": name, "arguments": arguments})

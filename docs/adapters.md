@@ -60,4 +60,7 @@ produces an explicit persistent gap.
 Malformed or unconstructable native input is audited without a fabricated
 social decision. Wrong routes, exact duplicates, and exact self are not wake
 eligible. Provider errors follow the configured `WAKE` or `NO_WAKE` operational
-policy and remain `status: error`.
+policy and remain `status: error`. Matrix and Telegram report output as sent
+only when the native response includes a stable message/event identity for the
+exact target room; a successful HTTP envelope with a missing or mismatched
+native acknowledgement remains `unknown`.
