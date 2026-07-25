@@ -649,6 +649,13 @@ class ToolAuthorizationTests(unittest.TestCase):
 
 class CodexSurfaceTests(unittest.TestCase):
     @staticmethod
+    def _installed_codex():
+        return mock.patch(
+            "nunchi.integrations.codex_v2.shutil.which",
+            return_value="/trusted/bin/codex",
+        )
+
+    @staticmethod
     def _codex_identity():
         return (
             ParticipantProfile(
@@ -670,7 +677,7 @@ class CodexSurfaceTests(unittest.TestCase):
 
     def test_codex_participant_rejects_arbitrary_process_configuration(self):
         profile, binding = self._codex_identity()
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
             for config in (
                 {"binary": "/tmp/attacker"},
                 {"args": ["--full-auto"]},
@@ -684,6 +691,26 @@ class CodexSurfaceTests(unittest.TestCase):
                         binding=binding,
                         state_directory=directory,
                     )
+
+    def test_codex_participant_requires_executable_on_trusted_path(self):
+        profile, binding = self._codex_identity()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch(
+                "nunchi.integrations.codex_v2.shutil.which",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(
+                ValidationError,
+                "Codex executable is not installed on trusted PATH",
+            ),
+        ):
+            CodexParticipant(
+                profile=profile,
+                config={"session_mode": "fresh"},
+                binding=binding,
+                state_directory=directory,
+            )
 
     def test_codex_process_is_fixed_read_only_tool_less_and_env_bounded(self):
         profile, binding = self._codex_identity()
@@ -710,7 +737,7 @@ class CodexSurfaceTests(unittest.TestCase):
                     "",
                 )
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
             participant = CodexParticipant(
                 profile=profile,
                 config={"session_mode": "fresh", "timeout_seconds": 5},
@@ -734,6 +761,7 @@ class CodexSurfaceTests(unittest.TestCase):
             schema = json.loads(participant.output_schema_path.read_text())
         self.assertIsNone(result)
         command = popen.call_args.args[0]
+        self.assertEqual("/trusted/bin/codex", command[0])
         self.assertNotIn("--full-auto", command)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
         self.assertIn("--ignore-user-config", command)
@@ -769,7 +797,7 @@ class CodexSurfaceTests(unittest.TestCase):
     def test_codex_persistent_task_is_bound_to_profile_actor_room_and_behavior(self):
         profile, binding = self._codex_identity()
         thread_id = "019f9432-9300-7dd1-8225-d7f10f921968"
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
             first = CodexParticipant(
                 profile=profile,
                 config={"session_mode": "persistent", "model": "model-a"},
@@ -859,10 +887,13 @@ class CodexSurfaceTests(unittest.TestCase):
                 },
                 "codex": {"session_mode": "fresh"},
             }
-            with mock.patch.dict(
-                os.environ,
-                {"TEST_NUNCHI_OUTPUT_KEY": secret},
-                clear=False,
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"TEST_NUNCHI_OUTPUT_KEY": secret},
+                    clear=False,
+                ),
+                self._installed_codex(),
             ):
                 runtime = CodexRoomRuntime(config, Client())
             runtime.register_transport()
