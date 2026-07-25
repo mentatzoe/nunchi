@@ -59,7 +59,7 @@ nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-v2-config = "nunchi_hermes_v2.cli:main"
 
 [project.entry-points."hermes_agent.plugins"]
-nunchi-v2 = "nunchi_hermes_v2:register"
+nunchi-v2 = "nunchi_hermes_v2"
 
 [tool.setuptools.packages.find]
 where = ["src", "integrations/hermes/nunchi-gate"]

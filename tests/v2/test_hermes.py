@@ -1026,7 +1026,8 @@ class HermesV2ContractTests(unittest.TestCase):
         root = Path(__file__).parents[2]
         pyproject = (root / "pyproject.toml").read_text()
         self.assertIn("[project.entry-points.\"hermes_agent.plugins\"]", pyproject)
-        self.assertIn("nunchi-v2", pyproject)
+        self.assertIn('nunchi-v2 = "nunchi_hermes_v2"', pyproject)
+        self.assertNotIn('nunchi-v2 = "nunchi_hermes_v2:register"', pyproject)
         plugin = root / "integrations" / "hermes" / "nunchi-gate"
         self.assertFalse((plugin / "gate.py").exists())
         self.assertFalse((plugin / "classifier.py").exists())
