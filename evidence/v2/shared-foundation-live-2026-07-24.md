@@ -306,7 +306,7 @@ event.
 ### Fresh non-author disposition
 
 Reviewer `/root/foundation_final_candidate_review` (generated identity Dirac;
-exact model identifier unavailable) approved exact clean evidence candidate
+OpenAI `gpt-5.6-sol`) approved exact clean evidence candidate
 `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker. The
 review matched the abort record to raw transcript records 7543-7544, reproduced
 the configuration and wheel hashes, verified that the rejected launch preceded
