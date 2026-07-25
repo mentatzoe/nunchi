@@ -183,6 +183,7 @@ class FakeCtx:
     def __init__(self, llm=None, *, profile_name="default", tool_results=None):
         self.llm = llm or FakeLlm([])
         self.profile_name = profile_name
+        self.gateway_message_hook_api_version = 2
         self.tool_results = list(tool_results or [])
         self.hooks = {}
         self.commands = {}
@@ -249,10 +250,26 @@ class HermesV2ContractTests(unittest.TestCase):
             profile="default",
         )
 
-    def event(self, *, platform="discord", actor="7", room="42", message_id="100", text="hello", raw=None):
+    def event(
+        self,
+        *,
+        platform="discord",
+        actor="7",
+        room="42",
+        message_id="100",
+        text="hello",
+        raw=None,
+        mentioned_user_ids=(),
+        mentions_room=False,
+    ):
         return FakeEvent(
             text=text,
             message_id=message_id,
+            message_type="text",
+            media_urls=(),
+            media_types=(),
+            mentioned_user_ids=tuple(mentioned_user_ids),
+            mentions_room=mentions_room,
             timestamp=datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc),
             source=self.source(platform=platform, actor=actor, room=room),
             raw_message=raw,
@@ -290,17 +307,21 @@ class HermesV2ContractTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(Exception):
                 canonical_actor_id(*args)
 
-    def test_discord_event_normalization_does_not_read_private_native_mentions(self):
+    def test_discord_event_normalization_uses_only_public_attested_mentions(self):
         self.require_surface()
         mentioned = FakeRawDiscordAuthor("9", "Vigil", bot=True)
         event, actors = normalize_message_event(
-            self.event(raw=FakeRawDiscordMessage(mentions=[mentioned], mention_everyone=True)),
+            self.event(
+                raw=FakeRawDiscordMessage(mentions=[mentioned], mention_everyone=True),
+                mentioned_user_ids=("9",),
+                mentions_room=True,
+            ),
             binding=self.binding(),
         )
         self.assertEqual("discord:message:100", event["id"])
         self.assertEqual("discord:actor:7", event["author_id"])
-        self.assertEqual([], event["mentioned_actor_ids"])
-        self.assertFalse(event["mentions_room"])
+        self.assertEqual(["discord:actor:9"], event["mentioned_actor_ids"])
+        self.assertTrue(event["mentions_room"])
         self.assertEqual("unknown", actors["discord:actor:7"]["kind"])
         self.assertEqual("bot", actors["discord:actor:9"]["kind"])
 
@@ -313,6 +334,82 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual([], event["mentioned_actor_ids"])
         self.assertFalse(event["mentions_room"])
         self.assertEqual({"telegram:actor:7", "telegram:actor:9"}, set(actors))
+
+    def test_unconstructable_hermes_event_is_audited_and_never_scheduled(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            malformed = self.event()
+            malformed.message_type = "photo"
+            malformed.media_urls = ("/private/cache/photo.jpg",)
+            malformed.media_types = ("image/jpeg",)
+
+            result = asyncio.run(
+                plugin.gateway_message(
+                    event=malformed,
+                    route=malformed.source,
+                    delivery=FakeDelivery([]),
+                )
+            )
+
+            self.assertEqual("handled", result["decision"])
+            runtime = plugin._rooms[("discord", "42")]
+            audits = runtime.observation.delivery_audits()
+            self.assertEqual("unconstructable", audits[-1].outcome)
+            self.assertEqual((), runtime.observation.retained_events())
+
+    def test_restart_is_atomic_against_new_delivery_binding(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            runtime = plugin._rooms[("discord", "42")]
+            original_restart = runtime.pipeline.restart
+            restart_entered = threading.Event()
+            release_restart = threading.Event()
+            ingress_done = threading.Event()
+
+            def blocked_restart():
+                original_restart()
+                restart_entered.set()
+                release_restart.wait(1)
+
+            runtime.pipeline.restart = blocked_restart
+            restart_thread = threading.Thread(target=runtime.restart)
+            restart_thread.start()
+            self.assertTrue(restart_entered.wait(0.5))
+
+            incoming = self.event(message_id="atomic-new")
+
+            def accept_ingress():
+                loop = asyncio.new_event_loop()
+                try:
+                    runtime.handle(
+                        incoming,
+                        incoming.source,
+                        FakeDelivery([]),
+                        loop,
+                    )
+                finally:
+                    loop.close()
+                    ingress_done.set()
+
+            ingress_thread = threading.Thread(target=accept_ingress)
+            ingress_thread.start()
+            self.assertFalse(ingress_done.wait(0.05))
+            release_restart.set()
+            restart_thread.join(0.5)
+            ingress_thread.join(0.5)
+
+            self.assertFalse(restart_thread.is_alive())
+            self.assertFalse(ingress_thread.is_alive())
+            self.assertIn("discord:message:atomic-new", runtime.transport._deliveries)
+            runtime.cancel()
 
     def test_pinned_config_rejects_byte_change_closed_shape_and_profile_mismatch(self):
         self.require_surface()
@@ -327,6 +424,7 @@ class HermesV2ContractTests(unittest.TestCase):
             }
             profile_path = root / "profile.json"
             profile_path.write_text(json.dumps(profile))
+            profile_path.chmod(0o600)
             profile_sha = hashlib.sha256(profile_path.read_bytes()).hexdigest()
             config = {
                 "schema_version": 2,
@@ -360,6 +458,7 @@ class HermesV2ContractTests(unittest.TestCase):
             }
             config_path = root / "config.json"
             config_path.write_text(json.dumps(config))
+            config_path.chmod(0o600)
             config_sha = hashlib.sha256(config_path.read_bytes()).hexdigest()
             loaded = load_pinned_hermes_config(
                 config_path,
@@ -368,6 +467,22 @@ class HermesV2ContractTests(unittest.TestCase):
             )
             self.assertEqual("default", loaded.hermes_profile)
             self.assertEqual(1, len(loaded.rooms))
+            config_path.chmod(0o644)
+            with self.assertRaises(Exception):
+                load_pinned_hermes_config(
+                    config_path,
+                    expected_sha256=config_sha,
+                    hermes_profile="default",
+                )
+            config_path.chmod(0o600)
+            config_path.write_text(json.dumps({**config, "rooms": []}))
+            empty_sha = hashlib.sha256(config_path.read_bytes()).hexdigest()
+            with self.assertRaises(Exception):
+                load_pinned_hermes_config(
+                    config_path,
+                    expected_sha256=empty_sha,
+                    hermes_profile="default",
+                )
             config_path.write_text(json.dumps({**config, "extra": True}))
             with self.assertRaises(Exception):
                 load_pinned_hermes_config(
@@ -540,6 +655,92 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("unknown", unknown.delivery)
         self.assertNotIn("ack lost", unknown.detail)
 
+    def test_native_transport_timeout_cancels_submitted_delivery(self):
+        self.require_surface()
+        transport = HermesNativeTransport(binding=self.binding(), timeout_seconds=0.01)
+        delivery = FakeDelivery([FakeSendResult(True, "555")])
+        transport.bind("discord:message:100", delivery, SimpleNamespace(is_closed=lambda: False))
+        submitted = []
+
+        class TimedOutFuture:
+            def __init__(self, coroutine):
+                self.coroutine = coroutine
+                self.cancelled = False
+
+            def result(self, timeout):
+                raise TimeoutError
+
+            def cancel(self):
+                self.cancelled = True
+                self.coroutine.close()
+                return True
+
+        def submit(coroutine, loop):
+            future = TimedOutFuture(coroutine)
+            submitted.append(future)
+            return future
+
+        with mock.patch("asyncio.run_coroutine_threadsafe", side_effect=submit):
+            result = transport.dispatch(
+                action={"kind": "message", "origin_event_id": "discord:message:100", "text": "hello"},
+                wake={"room": {"id": "42"}},
+            )
+
+        self.assertEqual("unknown", result.delivery)
+        self.assertTrue(submitted[0].cancelled)
+
+    def test_native_transport_cancel_invalidates_pending_delivery(self):
+        self.require_surface()
+        transport = HermesNativeTransport(binding=self.binding(), timeout_seconds=1)
+        delivery = FakeDelivery([FakeSendResult(True, "555")])
+        transport.bind("discord:message:100", delivery, SimpleNamespace(is_closed=lambda: False))
+        started = threading.Event()
+        released = threading.Event()
+        submitted = []
+
+        class PendingFuture:
+            def __init__(self, coroutine):
+                self.coroutine = coroutine
+                self.cancelled = False
+
+            def result(self, timeout):
+                started.set()
+                released.wait(timeout)
+                if self.cancelled:
+                    raise TimeoutError
+                return SimpleNamespace(status="sent", message_id="555")
+
+            def cancel(self):
+                self.cancelled = True
+                self.coroutine.close()
+                released.set()
+                return True
+
+        def submit(coroutine, loop):
+            future = PendingFuture(coroutine)
+            submitted.append(future)
+            return future
+
+        result_box = []
+        with mock.patch("asyncio.run_coroutine_threadsafe", side_effect=submit):
+            worker = threading.Thread(
+                target=lambda: result_box.append(
+                    transport.dispatch(
+                        action={"kind": "message", "origin_event_id": "discord:message:100", "text": "hello"},
+                        wake={"room": {"id": "42"}},
+                    )
+                )
+            )
+            worker.start()
+            self.assertTrue(started.wait(0.5))
+            transport.cancel()
+            worker.join(0.5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(submitted[0].cancelled)
+        self.assertEqual("unknown", result_box[0].delivery)
+        self.assertEqual({}, transport._deliveries)
+
     def test_native_transport_rejects_cross_room_and_unretained_target(self):
         self.require_surface()
         transport = HermesNativeTransport(
@@ -612,6 +813,17 @@ class HermesV2ContractTests(unittest.TestCase):
                 result = effects.executors[capability](operation, None)
                 self.assertEqual("unknown", result.delivery)
 
+    def test_delegate_effect_rejects_unbounded_extra_arguments(self):
+        self.require_surface()
+        ctx = FakeCtx(tool_results=[{"status": "dispatched", "delegation_id": "d1"}])
+        effects = HermesToolEffects(ctx, enabled_capabilities=("hermes.task.delegate",))
+        rejected = effects.executors["hermes.task.delegate"](
+            {"goal": "inspect", "background": True},
+            None,
+        )
+        self.assertEqual("failed", rejected.delivery)
+        self.assertEqual([], ctx.dispatched)
+
     def test_privileged_scope_is_host_derived_and_participant_mismatch_fails(self):
         self.require_surface()
 
@@ -629,7 +841,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "self": {"participant_id": "vigil"},
             "room": {"platform": "discord", "id": "42"},
         }
-        operation = {"path": "/tmp/target.txt", "content": "safe"}
+        operation = {"path": "relative-target.txt", "content": "safe"}
         expected = HermesToolEffects.derived_resource("workspace.file.write", operation, wake)
         mismatch = coordinator.execute_proposal(
             proposal={
@@ -653,6 +865,10 @@ class HermesV2ContractTests(unittest.TestCase):
         )
         self.assertEqual("sent", accepted.delivery)
         self.assertEqual(1, len(core.calls))
+        self.assertEqual(
+            expected["id"],
+            core.calls[0]["proposal"]["operation"]["path"],
+        )
 
     def test_privileged_policy_resolves_requester_and_rejects_replay(self):
         self.require_surface()
@@ -783,7 +999,12 @@ class HermesV2ContractTests(unittest.TestCase):
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
-        self.assertNotIn("PASS", json.dumps(probe))
+        self.assertEqual(1, probe["loaded_profile_count"])
+        public_blob = json.dumps(probe)
+        self.assertNotIn("PASS", public_blob)
+        self.assertNotIn("fixture", public_blob)
+        self.assertNotIn("hermes_profile", public_blob)
+        self.assertNotIn("rooms", public_blob)
 
         source = (PLUGIN_ROOT / "nunchi_hermes_v2" / "__init__.py").read_text()
         for forbidden in (

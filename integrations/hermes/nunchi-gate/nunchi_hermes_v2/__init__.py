@@ -19,6 +19,7 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import threading
 from typing import Any, Callable, Mapping, Sequence
 
@@ -40,6 +41,19 @@ def _nonempty(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValidationError(f"{label} must be a non-empty string")
     return value
+
+
+def _require_private_regular_file(path: Path, label: str) -> None:
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ValidationError(f"{label} is unreadable") from exc
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValidationError(f"{label} must be a regular file")
+    if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+        raise ValidationError(f"{label} must be owned by the Hermes user")
+    if metadata.st_mode & 0o077:
+        raise ValidationError(f"{label} must not be accessible by group or other users")
 
 
 def _closed(mapping: Any, *, required: set[str], optional: set[str] = set(), label: str) -> dict[str, Any]:
@@ -115,6 +129,18 @@ def normalize_message_event(
         raise ValidationError("message has no transport-attested author id")
     if message_id is None or str(message_id) == "":
         raise ValidationError("message has no transport-attested message id")
+    if getattr(event, "message_type", None) != "text":
+        raise ValidationError("Hermes message type is not supported by the V2 canonical mapping")
+    if getattr(event, "media_urls", ()) or getattr(event, "media_types", ()):
+        raise ValidationError("Hermes media payload has no V2 canonical mapping")
+    mentioned_user_ids = getattr(event, "mentioned_user_ids", None)
+    mentions_room = getattr(event, "mentions_room", None)
+    if not isinstance(mentioned_user_ids, (list, tuple)) or any(
+        not isinstance(item, str) or not item for item in mentioned_user_ids
+    ):
+        raise ValidationError("message has no transport-attested mention identities")
+    if not isinstance(mentions_room, bool):
+        raise ValidationError("message has no transport-attested room-mention fact")
 
     author_id = canonical_actor_id(platform, str(user_id))
     actors: dict[str, dict[str, str]] = {
@@ -127,13 +153,21 @@ def normalize_message_event(
             "kind": "unknown",
         },
     }
+    canonical_mentions = sorted(
+        {canonical_actor_id(platform, item) for item in mentioned_user_ids}
+    )
+    for mentioned_actor_id in canonical_mentions:
+        actors.setdefault(
+            mentioned_actor_id,
+            {"display_name": mentioned_actor_id, "kind": "unknown"},
+        )
     canonical: dict[str, Any] = {
         "id": canonical_event_id(platform, str(message_id)),
         "type": "message",
         "author_id": author_id,
         "text": str(getattr(event, "text", "") or ""),
-        "mentioned_actor_ids": [],
-        "mentions_room": False,
+        "mentioned_actor_ids": canonical_mentions,
+        "mentions_room": mentions_room,
     }
     stamp = _timestamp(getattr(event, "timestamp", None))
     if stamp is not None:
@@ -359,6 +393,7 @@ class HermesNativeTransport:
         self._runner = coroutine_runner
         self._lock = threading.RLock()
         self._deliveries: dict[str, tuple[Any, asyncio.AbstractEventLoop | None]] = {}
+        self._pending: set[Any] = set()
 
     def bind(
         self,
@@ -383,7 +418,24 @@ class HermesNativeTransport:
             coroutine.close()
             raise RuntimeError("Hermes gateway event loop is unavailable")
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-        return future.result(timeout=self.timeout_seconds)
+        with self._lock:
+            self._pending.add(future)
+        try:
+            return future.result(timeout=self.timeout_seconds)
+        except BaseException:
+            future.cancel()
+            raise
+        finally:
+            with self._lock:
+                self._pending.discard(future)
+
+    def cancel(self) -> None:
+        """Invalidate retained routes and cancel every unacknowledged native call."""
+        with self._lock:
+            pending = tuple(self._pending)
+            self._deliveries.clear()
+        for future in pending:
+            future.cancel()
 
     def dispatch(self, *, action: Mapping[str, Any], wake: Mapping[str, Any]) -> TransportResult:
         if wake.get("room", {}).get("id") != self.binding.room_id:
@@ -432,6 +484,34 @@ class HermesNativeTransport:
         return TransportResult("unknown", "native platform returned no trustworthy acknowledgement")
 
 
+def _valid_delegate_operation(operation: Mapping[str, Any]) -> bool:
+    role = operation.get("role")
+    if role is not None and role not in {"leaf", "orchestrator"}:
+        return False
+    if "goal" in operation:
+        return (
+            set(operation).issubset({"goal", "context", "role"})
+            and isinstance(operation.get("goal"), str)
+            and bool(operation["goal"])
+            and ("context" not in operation or isinstance(operation["context"], str))
+        )
+    if set(operation) != {"tasks"}:
+        return False
+    tasks = operation.get("tasks")
+    if not isinstance(tasks, list) or not 1 <= len(tasks) <= 3:
+        return False
+    for task in tasks:
+        if not isinstance(task, Mapping) or not set(task).issubset({"goal", "context", "role"}):
+            return False
+        if not isinstance(task.get("goal"), str) or not task["goal"]:
+            return False
+        if "context" in task and not isinstance(task["context"], str):
+            return False
+        if "role" in task and task["role"] not in {"leaf", "orchestrator"}:
+            return False
+    return True
+
+
 class HermesToolEffects:
     """Fixed, host-owned capability-to-tool map. Participant text cannot select tools."""
 
@@ -449,7 +529,7 @@ class HermesToolEffects:
                 and op.get("deliver", "origin") == "origin"
             ),
         ),
-        "hermes.task.delegate": ("delegate_task", lambda op: "goal" in op or "tasks" in op),
+        "hermes.task.delegate": ("delegate_task", _valid_delegate_operation),
         "workspace.file.write": (
             "write_file",
             lambda op: (
@@ -561,16 +641,29 @@ class HermesPrivilegedCoordinator:
         cancel: threading.Event,
     ) -> TransportResult:
         try:
+            checked_proposal = deepcopy(dict(proposal))
+            capability = str(checked_proposal.get("capability", ""))
+            operation = dict(checked_proposal.get("operation", {}))
+            if capability in {"workspace.file.write", "workspace.file.patch"}:
+                path = operation.get("path")
+                if not isinstance(path, str) or not path:
+                    raise ValidationError("workspace effect has no exact target path")
+                operation["path"] = str(Path(path).expanduser().resolve())
+                checked_proposal["operation"] = operation
             derived = HermesToolEffects.derived_resource(
-                str(proposal.get("capability", "")),
-                proposal.get("operation", {}),
+                capability,
+                operation,
                 wake,
             )
-        except (ValidationError, AttributeError, TypeError):
+        except (ValidationError, AttributeError, TypeError, ValueError):
             return TransportResult("failed", "privileged resource could not be derived by the host")
-        if proposal.get("resource") != derived:
+        if checked_proposal.get("resource") != derived:
             return TransportResult("failed", "participant resource does not match the host-derived effect target")
-        return self.coordinator.execute_proposal(proposal=proposal, wake=wake, cancel=cancel)
+        return self.coordinator.execute_proposal(
+            proposal=checked_proposal,
+            wake=wake,
+            cancel=cancel,
+        )
 
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
         return self.coordinator.pending_for_operator()
@@ -633,7 +726,9 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
     binding = ParticipantBinding(**binding_data)
 
     profile_ref = _closed(room["profile"], required={"path", "sha256"}, label=f"rooms[{index}].profile")
-    profile = ParticipantProfile.load(profile_ref["path"], expected_sha256=profile_ref["sha256"])
+    profile_path = Path(_nonempty(profile_ref["path"], "participant profile path")).expanduser()
+    _require_private_regular_file(profile_path, "participant profile")
+    profile = ParticipantProfile.load(profile_path, expected_sha256=profile_ref["sha256"])
     if profile.participant_id != binding.participant_id or profile.actor_id != binding.actor_id:
         raise ValidationError("participant profile does not match exact trusted room binding")
 
@@ -729,6 +824,7 @@ def load_pinned_hermes_config(path: str | Path, *, expected_sha256: str, hermes_
     if not _SHA256.fullmatch(expected_sha256):
         raise ValidationError("Hermes plugin config sha256 must be 64 lowercase hex")
     source = Path(path).expanduser()
+    _require_private_regular_file(source, "Hermes V2 config")
     try:
         raw = source.read_bytes()
     except OSError as exc:
@@ -751,8 +847,8 @@ def load_pinned_hermes_config(path: str | Path, *, expected_sha256: str, hermes_
     if configured_profile != hermes_profile:
         raise ValidationError("Hermes V2 config belongs to a different Hermes profile")
     state_root = Path(_nonempty(config["state_root"], "state_root")).expanduser()
-    if not isinstance(config["rooms"], list):
-        raise ValidationError("rooms must be an array")
+    if not isinstance(config["rooms"], list) or not config["rooms"]:
+        raise ValidationError("rooms must be a non-empty array")
     rooms = tuple(_room_config(room, index=index) for index, room in enumerate(config["rooms"]))
     keys = [(room.binding.platform, room.binding.room_id) for room in rooms]
     if len(keys) != len(set(keys)):
@@ -784,6 +880,7 @@ def _default_config_loader(profile: str) -> HermesPluginConfig:
 class _RoomRuntime:
     def __init__(self, config: HermesRoomConfig, *, state_root: Path, ctx: Any) -> None:
         self.config = config
+        self._lifecycle_lock = threading.RLock()
         identity = json.dumps(
             {
                 "profile": getattr(ctx, "profile_name", "default"),
@@ -864,20 +961,57 @@ class _RoomRuntime:
         delivery: Any,
         loop: asyncio.AbstractEventLoop,
     ) -> Any:
-        canonical, actors = normalize_message_event(
-            event,
-            route=route,
-            binding=self.config.binding,
-        )
-        delivery_id = f"hermes:{canonical['id']}"
+        with self._lifecycle_lock:
+            return self._handle_admitted(event, route, delivery, loop)
+
+    def _handle_admitted(
+        self,
+        event: Any,
+        route: Any,
+        delivery: Any,
+        loop: asyncio.AbstractEventLoop,
+    ) -> Any:
+        native_message_id = getattr(event, "message_id", None)
+        if native_message_id is not None and str(native_message_id):
+            delivery_id = f"hermes:{canonical_event_id(self.config.binding.platform, str(native_message_id))}"
+        else:
+            fingerprint = json.dumps(
+                {
+                    "platform": self.config.binding.platform,
+                    "room": self.config.binding.room_id,
+                    "timestamp": _timestamp(getattr(event, "timestamp", None)),
+                    "text_sha256": hashlib.sha256(
+                        str(getattr(event, "text", "") or "").encode()
+                    ).hexdigest(),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            delivery_id = f"hermes:unconstructable:{hashlib.sha256(fingerprint).hexdigest()}"
+        try:
+            canonical, actors = normalize_message_event(
+                event,
+                route=route,
+                binding=self.config.binding,
+            )
+        except (ValidationError, AttributeError, TypeError, ValueError):
+            return self.observation.observe(
+                delivery_id=delivery_id,
+                event=None,
+                actors=None,
+            )
         self.transport.bind(canonical["id"], delivery, loop)
         return self.pipeline.submit(delivery_id=delivery_id, event=canonical, actors=actors)
 
     def cancel(self) -> None:
-        self.pipeline.cancel()
+        with self._lifecycle_lock:
+            self.pipeline.cancel()
+            self.transport.cancel()
 
     def restart(self) -> None:
-        self.pipeline.restart()
+        with self._lifecycle_lock:
+            self.pipeline.restart()
+            self.transport.cancel()
 
 
 class NunchiHermesV2Plugin:
@@ -1165,6 +1299,22 @@ class _ProfileMultiplexNunchiPlugin:
         active["profile_probes"] = profile_probes
         return active
 
+    def public_probe(self) -> dict[str, Any]:
+        """Return route-independent status without profile or binding metadata."""
+        with self._lock:
+            probes = tuple(plugin.probe() for plugin in self._plugins.values())
+        operational = bool(probes) and all(probe.get("operational") is True for probe in probes)
+        result: dict[str, Any] = {
+            "plugin": _PLUGIN_ID,
+            "generation": 2,
+            "v1_fallback": False,
+            "operational": operational,
+            "loaded_profile_count": len(probes),
+        }
+        if not operational:
+            result["failure"] = "configuration-invalid"
+        return result
+
     def restart(self) -> None:
         with self._lock:
             plugins = tuple(self._plugins.values())
@@ -1175,6 +1325,8 @@ class _ProfileMultiplexNunchiPlugin:
 
 
 def register(ctx: Any, *, config_loader: Callable[[str], HermesPluginConfig] | None = None) -> Any:
+    if getattr(ctx, "gateway_message_hook_api_version", None) != 2:
+        raise ValidationError("Hermes gateway-message hook API version 2 is required")
     loader = config_loader or _default_config_loader
     profile = _nonempty(getattr(ctx, "profile_name", None) or "default", "Hermes profile")
     plugin: Any = _ProfileMultiplexNunchiPlugin(
@@ -1189,7 +1341,7 @@ def register(ctx: Any, *, config_loader: Callable[[str], HermesPluginConfig] | N
         args = (raw_args or "").strip().lower()
         if args not in {"", "probe", "status"}:
             return json.dumps({"error": "usage: /nunchi-v2 [probe]"}, sort_keys=True)
-        return json.dumps(plugin.probe(), sort_keys=True)
+        return json.dumps(plugin.public_probe(), sort_keys=True)
 
     ctx.register_command(
         "nunchi-v2",
