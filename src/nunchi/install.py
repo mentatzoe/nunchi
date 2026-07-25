@@ -52,7 +52,7 @@ def _manifest(config_root: Path, state_root: Path) -> dict[str, Any]:
         "config_root": str(config_root.resolve()),
         "state_root": str(state_root.resolve()),
         "v1_fallback": False,
-        "excluded_integrations": ["hermes", "claude-code"],
+        "excluded_integrations": ["hermes"],
     }
 
 
@@ -121,7 +121,7 @@ def verify(config_root: Path) -> dict[str, Any]:
         or document["product_version"] != __version__
         or document["generation"] != 2
         or document["v1_fallback"] is not False
-        or document["excluded_integrations"] != ["hermes", "claude-code"]
+        or document["excluded_integrations"] != ["hermes"]
         or Path(document["config_root"]).resolve() != config_root.resolve()
     ):
         raise InstallError("V2 install marker does not match this installed artifact")
@@ -160,7 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "generation": 2,
                 "artifact_installable": True,
                 "v1_fallback": False,
-                "excluded_integrations": ["hermes", "claude-code"],
+                "excluded_integrations": ["hermes"],
             }
     except (InstallError, OSError, ValueError) as exc:
         print(f"nunchi-install: {exc}", file=sys.stderr)

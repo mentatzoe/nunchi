@@ -16,9 +16,13 @@ effect commit point.
 
 This candidate implements the shared foundation, generic/Discord/Matrix/
 Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
-and Codex room presence. Hermes and Claude Code are explicitly excluded: this
-candidate does not implement, repair, arm, install, or live-test their V2
-integrations.
+Codex room presence, and Claude Code room presence. Hermes is explicitly
+excluded: this candidate does not implement, repair, arm, install, or
+live-test its V2 integration.
+
+Claude Code passes source, deterministic, and clean-installed-artifact checks;
+its live real-room evidence is not yet recorded. See
+`evidence/v2/claude-code/README.md` for exactly what is and is not proven.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, prompt hook, send-time social reclassifier, or fallback.

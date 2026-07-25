@@ -1,7 +1,9 @@
 # V2 platform interface and conformance
 
-This is the complete downstream interface for Hermes and Claude Code. Those
-integrations are not implemented or armed by the shared-foundation candidate.
+This is the complete downstream interface for Hermes and Claude Code. Neither
+was implemented or armed by the shared-foundation candidate. Claude Code has
+since been implemented against this interface in
+`src/nunchi/integrations/claude_code_v2.py`; Hermes remains unimplemented.
 
 ## Required owners
 

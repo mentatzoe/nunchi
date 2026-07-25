@@ -56,6 +56,7 @@ nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
+nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

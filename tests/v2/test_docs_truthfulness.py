@@ -23,7 +23,8 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "Conversation events are observations, not reply obligations",
             "Only the exact participant's delegated attention model",
             "There is no executable V1 `admit` command",
-            "Hermes and Claude Code are explicitly excluded",
+            "Hermes is explicitly excluded",
+            "its live real-room evidence is not yet recorded",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:
@@ -43,6 +44,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",
             "non-author review",
+            "Implemented, unverified\" is not a softer \"Verified",
             FOUNDATION_COMMIT,
             "git merge-base --is-ancestor",
             "docs/platform-v2.md",
@@ -73,6 +75,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
             "complete downstream interface for Hermes and Claude Code",
+            "Hermes remains unimplemented",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",

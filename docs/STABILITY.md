@@ -12,6 +12,7 @@ The stable public boundary is the closed V2 contract in
 - `nunchi-telegram`
 - `nunchi-mcp-discord`
 - `nunchi-codex-room-runner`
+- `nunchi-claude-code-room-runner`
 
 No V1 request, verdict, hook, responder, configuration, or exit-code contract
 is stable or executable.
