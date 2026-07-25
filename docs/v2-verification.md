@@ -21,7 +21,7 @@ and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes; exact-successor independent review is pending |
-| independent review | fresh non-author Codex review of exact final commit with no blocker | reviewer `/root/foundation_final_candidate_review` found no implementation blocker at `755091b` but rejected its predecessor-only live proof; pending fresh review of this exact-successor live-evidence closure |
+| independent review | fresh non-author Codex review of exact final commit with no blocker | reviewer `/root/foundation_final_candidate_review` found no product or matrix blocker at `85553e2` but rejected a false zero-margin chronology; the append-only correction is pending exact-successor review |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
 every row in scope to name immutable evidence.
@@ -70,8 +70,16 @@ checks at exact candidate
 blocker. It rejected one remaining proof boundary because the native matrix
 still named predecessor wheel `36975d5f...` while the successful
 acknowledgement path had changed. The attributable exact-successor run below
-closes that stated boundary; the reviewer must now examine this evidence
-successor before the row can pass.
+closes that stated boundary.
+
+The same reviewer then rejected exact evidence commit `85553e2` solely because
+its zero-margin chronology falsely said the discarded configuration received
+no event. Retained artifacts instead prove one failed configuration-pin launch
+and one later zero-margin SUPPRESS execution. The append-only correction names
+that execution and keeps it outside the acceptance matrix; the ordinary
+active-`0.12` natural SUPPRESS remains the matrix result. The reviewer must
+approve the exact correction successor before the independent-review row can
+pass.
 
 The earlier non-author reviewer `/root/final_b97_exact_review` approved
 `b97f0d50ac3855e9b279db21a60fe4a6ed28ecd6` and its documentation-only

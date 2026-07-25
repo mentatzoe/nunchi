@@ -256,3 +256,39 @@ application flags were restored from temporary `557056` to exact original
 Both pre-existing Vigil launch agents were restored and observed running.
 Hermes and Claude Code were not installed, repaired, changed, armed, or
 exercised.
+
+### Correction: zero-margin chronology
+
+The statement at lines 210-215 of exact candidate `85553e2` is false. The
+proposed zero-margin configuration did receive one event before it was
+discarded, and an earlier launch attempt failed its trusted configuration pin.
+This append-only correction preserves that history instead of rewriting it.
+
+- The zero-margin configuration SHA-256 was
+  `13ef4927832dd51b512766b59dc40be41b33aeab2e0aba5f319299a58e25a628`.
+  It retained the same Nous `openai/gpt-5.6-luna` delegated attention model
+  and policy provenance, but set the active `effective_margin` to `0.0` with
+  margin source
+  `operator-live-smoke:suppress-zero-margin@2026-07-25`.
+- One launch was rejected before the runner registered because its adapter
+  configuration bytes did not match the trusted SHA-256 pin. It admitted no
+  event and produced no social result.
+- A later correctly pinned launch received native trigger
+  `1530380597091111013`, delivery
+  `discord:gateway:2ed21f246b0eeb29bf499a7d303bb7ec:8:MESSAGE_CREATE:1530380597091111013`,
+  and request
+  `discord:1530259309802295316:fc710602-3fbc-4394-9384-446015068169`.
+  The transport audit recorded `accepted` and `client-delivered`; the
+  observation and attention stages then recorded classifier/effective
+  `SUPPRESS` under
+  `operator-live-smoke:suppress-policy@2026-07-25`. There was no
+  participant-host or output-transport stage.
+
+This zero-margin result is intentionally not a matrix acceptance result:
+changing the uncertainty margin to force the deterministic valve does not
+demonstrate natural participant-shaped suppression. The operator raised that
+objection after the event, the setup was discarded, and the later ordinary
+active-`0.12` result at trigger `1530381617506422794` remains the matrix's
+natural SUPPRESS evidence. The omitted execution and failed launch were
+evidence-recording errors; they do not replace or invalidate the independently
+correlated six-scene matrix.
