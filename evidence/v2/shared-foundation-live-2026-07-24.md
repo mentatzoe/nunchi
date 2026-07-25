@@ -292,3 +292,13 @@ active-`0.12` result at trigger `1530381617506422794` remains the matrix's
 natural SUPPRESS evidence. The omitted execution and failed launch were
 evidence-recording errors; they do not replace or invalidate the independently
 correlated six-scene matrix.
+
+The previously omitted failed launch is retained verbatim and attributed in
+`evidence/v2/shared-foundation-zero-margin-abort-2026-07-25.json`. Its local
+Codex execution transcript records tool call
+`call_st3beJHaY5M4L1mjBQ8Z5Rq7` at `2026-07-25T01:04:25.161Z`, the exact
+command, actual configuration hash, incorrectly supplied hash, runner exit
+status `3`, unredacted raw output, runtime and launch identity, and source
+record hash. The enclosing diagnostic shell command exited `0`; the launched
+runner itself rejected the mismatched pin before registration and admitted no
+event.
