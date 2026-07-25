@@ -5,7 +5,8 @@
 Build and install the exact candidate into a new environment:
 
 ```sh
-uv build --offline
+SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+  PYTHONHASHSEED=0 uv build --offline
 python3 -m venv /tmp/nunchi-v2-clean
 /tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
   dist/nunchi-2.0.0-py3-none-any.whl

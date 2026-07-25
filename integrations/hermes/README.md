@@ -27,7 +27,8 @@ These are host admission settings, not Nunchi authority. Unauthorized events are
 Build once, record the digest, then install that exact wheel into the Hermes runtime environment:
 
 ```bash
-uv build --offline
+SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+  PYTHONHASHSEED=0 uv build --offline
 WHEEL=dist/nunchi-2.0.0-py3-none-any.whl
 shasum -a 256 "$WHEEL"
 
@@ -127,7 +128,8 @@ python3 -m unittest \
   tests.v2.test_runtime_hardening \
   tests.v2.test_hermes
 python3 -m evals.verdict_suite.runner
-uv build --offline
+SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+  PYTHONHASHSEED=0 uv build --offline
 ```
 
 Then install the built wheel into a fresh Hermes environment/home, verify entry-point discovery and `/nunchi-v2 probe`, restart, and run the live Discord and Telegram scenes required by `docs/platform-v2.md`. Record candidate SHA, wheel digest, Hermes version/commit, Hermes Python executable, profile/config/profile-policy digests, native event/output IDs, and exact command output. Evidence from a remediated predecessor is stale.
