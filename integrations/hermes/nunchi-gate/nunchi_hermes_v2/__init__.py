@@ -855,8 +855,6 @@ class _RoomRuntime:
             host=host,
         )
         self.pipeline = AsyncDeliveryLane(pipeline)
-        self._delivery = 0
-        self._lock = threading.Lock()
 
     def handle(
         self,
@@ -870,9 +868,7 @@ class _RoomRuntime:
             route=route,
             binding=self.config.binding,
         )
-        with self._lock:
-            self._delivery += 1
-            delivery_id = f"hermes:{self.config.binding.platform}:{self.config.binding.room_id}:{self._delivery}"
+        delivery_id = f"hermes:{canonical['id']}"
         self.transport.bind(canonical["id"], delivery, loop)
         return self.pipeline.submit(delivery_id=delivery_id, event=canonical, actors=actors)
 

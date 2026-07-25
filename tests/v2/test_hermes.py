@@ -899,6 +899,52 @@ class HermesV2ContractTests(unittest.TestCase):
             plugin.restart()
             self.assertFalse(scheduler.is_current(next_token))
 
+    def test_runtime_restart_does_not_reuse_delivery_id_for_a_new_native_event(self):
+        """A process-local counter must not replay-drop the first event after restart."""
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            submitted = []
+
+            def capture(**kwargs):
+                submitted.append(kwargs)
+                return kwargs
+
+            first_plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            first_runtime = first_plugin._rooms[("discord", "42")]
+            first_runtime.pipeline = SimpleNamespace(submit=capture)
+            first_event = self.event(message_id="100")
+            first_runtime.handle(
+                first_event,
+                first_event.source,
+                FakeDelivery([]),
+                None,
+            )
+
+            restarted_plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            restarted_runtime = restarted_plugin._rooms[("discord", "42")]
+            restarted_runtime.pipeline = SimpleNamespace(submit=capture)
+            second_event = self.event(message_id="101")
+            restarted_runtime.handle(
+                second_event,
+                second_event.source,
+                FakeDelivery([]),
+                None,
+            )
+
+            self.assertEqual(
+                [
+                    "hermes:discord:message:100",
+                    "hermes:discord:message:101",
+                ],
+                [item["delivery_id"] for item in submitted],
+            )
+
     def test_profile_participant_room_state_isolation(self):
         self.require_surface()
         with tempfile.TemporaryDirectory() as directory:
