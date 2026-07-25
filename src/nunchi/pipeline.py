@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextvars import copy_context
 from dataclasses import dataclass
 import threading
 import time
@@ -172,10 +173,11 @@ class NunchiV2Pipeline:
         return tuple(opportunities)
 
     def cancel(self) -> None:
-        self.scheduler.cancel()
-        privileged = self.host.privileged
-        if privileged is not None and hasattr(privileged, "cancel"):
-            privileged.cancel()
+        with self._lifecycle_lock:
+            self.scheduler.cancel()
+            privileged = self.host.privileged
+            if privileged is not None and hasattr(privileged, "cancel"):
+                privileged.cancel()
 
     def restart(self) -> None:
         """Invalidate active/pending work and discard ephemeral authority."""
@@ -225,9 +227,10 @@ class AsyncDeliveryLane:
             )
             if token is not None:
                 self._idle.clear()
+                ingress_context = copy_context()
                 worker = threading.Thread(
-                    target=self._run,
-                    args=(token,),
+                    target=ingress_context.run,
+                    args=(self._run, token),
                     name="nunchi-opportunity-lane",
                     daemon=True,
                 )

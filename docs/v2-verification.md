@@ -3,13 +3,21 @@
 This file is updated only with attributable commands and artifacts. A green
 source suite is not installed or live evidence.
 
-## Candidate scope
+## Current integration scope
+
+The current candidate includes the Hermes V2 participant integration from
+slice 060. Its exact source, artifact, installed-runtime, review, and live
+evidence is tracked under `specs/060-v2-hermes/` and the delivery PR. Claude
+Code remains excluded.
+
+## Historical shared-foundation candidate scope
 
 Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
 reference adapters, shared Discord MCP transport, and Codex.
 
-Excluded: Hermes and Claude Code implementation, repair, arming, installation,
-and live evaluation.
+At the time of this shared-foundation record, Hermes and Claude Code were both
+excluded. That statement is historical and does not describe the current
+slice-060 successor.
 
 ## Required evidence
 
@@ -26,7 +34,7 @@ and live evaluation.
 Do not reinterpret `pending` as failure or success. Final acceptance requires
 every row in scope to name immutable evidence.
 
-## Exact source/artifact evidence
+## Historical shared-foundation source/artifact evidence
 
 The repaired implementation candidate is
 `c5f5e6c0c7e2fd6af1bf888ca9a86a7a8f4d7e63`, based on the same

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -737,6 +738,96 @@ class AttentionAndHostTests(unittest.TestCase):
         restart.join(2)
         self.assertFalse(ingress.is_alive())
         self.assertFalse(restart.is_alive())
+        self.assertIsNotNone(token_box[0])
+        self.assertFalse(pipeline.scheduler.is_current(token_box[0]))
+
+    def test_async_delivery_lane_preserves_ingress_runtime_context(self):
+        routed_profile = contextvars.ContextVar("routed_profile", default="missing")
+        attention_seen = []
+        participant_seen = []
+        transport_seen = []
+        model = FixtureModel()
+        original_judge = model.judge
+
+        def judge(**kwargs):
+            attention_seen.append(routed_profile.get())
+            return original_judge(**kwargs)
+
+        model.judge = judge
+        transport = RecordingTransport()
+        original_dispatch = transport.dispatch
+
+        def dispatch(**kwargs):
+            transport_seen.append(routed_profile.get())
+            return original_dispatch(**kwargs)
+
+        transport.dispatch = dispatch
+        pipeline, _, _, _ = foundation(
+            model=model,
+            participant=lambda **kwargs: participant_seen.append(
+                routed_profile.get()
+            )
+            or {
+                "kind": "message",
+                "origin_event_id": kwargs["wake"]["trigger_event_id"],
+                "text": "profile-bound output",
+            },
+            transport=transport,
+        )
+        lane = AsyncDeliveryLane(pipeline)
+        marker = routed_profile.set("work")
+        try:
+            lane.submit(
+                delivery_id="profile-context",
+                event=message("profile-context-event"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        finally:
+            routed_profile.reset(marker)
+
+        self.assertTrue(lane.drain(2))
+        self.assertEqual(["work"], attention_seen)
+        self.assertEqual(["work"], participant_seen)
+        self.assertEqual(["work"], transport_seen)
+
+    def test_cancel_cannot_be_overtaken_by_pre_cancel_ingress(self):
+        pipeline, _, _, _ = foundation()
+        retained = threading.Event()
+        release = threading.Event()
+        original_observe = pipeline.observation.observe
+        token_box = []
+
+        def blocked_observe(**kwargs):
+            result = original_observe(**kwargs)
+            retained.set()
+            release.wait(2)
+            return result
+
+        pipeline.observation.observe = blocked_observe
+        ingress = threading.Thread(
+            target=lambda: token_box.append(
+                pipeline.observe_and_offer(
+                    delivery_id="cancel-race",
+                    event=message("cancel-race-event"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )[1]
+            )
+        )
+        ingress.start()
+        self.assertTrue(retained.wait(1))
+
+        cancelled = threading.Event()
+        cancel = threading.Thread(
+            target=lambda: (pipeline.cancel(), cancelled.set())
+        )
+        cancel.start()
+        self.assertFalse(cancelled.wait(0.05))
+
+        release.set()
+        ingress.join(2)
+        cancel.join(2)
+        self.assertFalse(ingress.is_alive())
+        self.assertFalse(cancel.is_alive())
         self.assertIsNotNone(token_box[0])
         self.assertFalse(pipeline.scheduler.is_current(token_box[0]))
 

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 
@@ -777,7 +778,6 @@ class HermesV2ContractTests(unittest.TestCase):
         self.require_surface()
         ctx = FakeCtx()
         plugin = register(ctx, config_loader=lambda profile: SimpleNamespace(hermes_profile=profile, rooms=(), provenance={}))
-        self.assertIsInstance(plugin, NunchiHermesV2Plugin)
         self.assertEqual({"gateway_message", "gateway_session_cancel"}, set(ctx.hooks))
         self.assertIn("nunchi-v2", ctx.commands)
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
@@ -798,6 +798,95 @@ class HermesV2ContractTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
+
+    def test_register_routes_multiplexed_profiles_to_profile_owned_instances(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            configs = {
+                profile: self.plugin_config(root / profile, profile_name=profile)
+                for profile in ("default", "work")
+            }
+            loaded = []
+
+            def load(profile):
+                loaded.append(profile)
+                return configs[profile]
+
+            ctx = FakeCtx(profile_name="default")
+            plugin = register(ctx, config_loader=load)
+            event = self.event(actor="9")
+            event.source.profile = "work"
+
+            result = asyncio.run(
+                ctx.hooks["gateway_message"](
+                    event=event,
+                    route=event.source,
+                    delivery=FakeDelivery([]),
+                )
+            )
+
+            self.assertEqual("handled", result["decision"])
+            self.assertEqual(["default", "work"], loaded)
+            self.assertEqual(["default", "work"], plugin.probe()["loaded_profiles"])
+
+    def test_missing_multiplexed_profile_config_fails_closed_for_that_profile(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            ctx = FakeCtx(profile_name="default")
+
+            def load(profile):
+                if profile != "default":
+                    raise ValueError("missing secondary profile secret")
+                return self.plugin_config(directory, profile_name=profile)
+
+            register(ctx, config_loader=load)
+            event = self.event(actor="9")
+            event.source.profile = "work"
+            result = asyncio.run(
+                ctx.hooks["gateway_message"](
+                    event=event,
+                    route=event.source,
+                    delivery=FakeDelivery([]),
+                )
+            )
+
+            self.assertEqual("handled", result["decision"])
+            self.assertEqual("nunchi-v2:configuration-invalid", result["reason"])
+
+    def test_multiplexed_cancellation_targets_only_the_routed_profile(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            configs = {
+                profile: self.plugin_config(root / profile, profile_name=profile)
+                for profile in ("default", "work")
+            }
+            ctx = FakeCtx(profile_name="default")
+            plugin = register(ctx, config_loader=configs.__getitem__)
+            event = self.event(actor="9")
+            event.source.profile = "work"
+            asyncio.run(
+                ctx.hooks["gateway_message"](
+                    event=event,
+                    route=event.source,
+                    delivery=FakeDelivery([]),
+                )
+            )
+            default_runtime = plugin._plugins["default"]._rooms[("discord", "42")]
+            work_runtime = plugin._plugins["work"]._rooms[("discord", "42")]
+            default_runtime.cancel = mock.Mock()
+            work_runtime.cancel = mock.Mock()
+
+            asyncio.run(
+                ctx.hooks["gateway_session_cancel"](
+                    route=event.source,
+                    reason="stop",
+                )
+            )
+
+            work_runtime.cancel.assert_called_once_with()
+            default_runtime.cancel.assert_not_called()
 
     def test_end_to_end_native_hook_wakes_participant_and_attests_send(self):
         self.require_surface()

@@ -1,8 +1,7 @@
 """Initialize and verify stable operator state for an installed V2 artifact.
 
-This installer deliberately has no Hermes or Claude Code artifact paths.  It
-never discovers a repository checkout and cannot install, upgrade, arm, or
-remove either excluded integration.
+This installer initializes the shared V2 state root. Hermes has its own
+digest-pinned profile configurator; Claude Code remains outside this artifact.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from typing import Any
 from . import __version__
 
 MARKER_NAME = "install.json"
-MARKER_SCHEMA = 2
+MARKER_SCHEMA = 3
 
 
 class InstallError(RuntimeError):
@@ -52,7 +51,8 @@ def _manifest(config_root: Path, state_root: Path) -> dict[str, Any]:
         "config_root": str(config_root.resolve()),
         "state_root": str(state_root.resolve()),
         "v1_fallback": False,
-        "excluded_integrations": ["hermes", "claude-code"],
+        "included_integrations": ["hermes"],
+        "excluded_integrations": ["claude-code"],
     }
 
 
@@ -111,17 +111,19 @@ def verify(config_root: Path) -> dict[str, Any]:
         "config_root",
         "state_root",
         "v1_fallback",
+        "included_integrations",
         "excluded_integrations",
     }
     if not isinstance(document, dict) or set(document) != required:
         raise InstallError("V2 install marker has an invalid closed shape")
     if (
-        document["schema_version"] != 2
+        document["schema_version"] != MARKER_SCHEMA
         or document["product"] != "nunchi"
         or document["product_version"] != __version__
         or document["generation"] != 2
         or document["v1_fallback"] is not False
-        or document["excluded_integrations"] != ["hermes", "claude-code"]
+        or document["included_integrations"] != ["hermes"]
+        or document["excluded_integrations"] != ["claude-code"]
         or Path(document["config_root"]).resolve() != config_root.resolve()
     ):
         raise InstallError("V2 install marker does not match this installed artifact")
@@ -160,7 +162,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "generation": 2,
                 "artifact_installable": True,
                 "v1_fallback": False,
-                "excluded_integrations": ["hermes", "claude-code"],
+                "included_integrations": ["hermes"],
+                "excluded_integrations": ["claude-code"],
             }
     except (InstallError, OSError, ValueError) as exc:
         print(f"nunchi-install: {exc}", file=sys.stderr)

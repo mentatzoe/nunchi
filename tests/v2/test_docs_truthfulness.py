@@ -23,7 +23,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "Conversation events are observations, not reply obligations",
             "Only the exact participant's delegated attention model",
             "There is no executable V1 `admit` command",
-            "Hermes and Claude Code are explicitly excluded",
+            "Hermes V2 participant integration",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:

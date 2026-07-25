@@ -15,7 +15,8 @@ atomic V2 cutover.
 | prompt/send hooks and second judgment | host-owned Codex room runner and single output commit tests |
 | per-adapter V1 gates | canonical Discord, Matrix, Telegram, and generic normalization/conformance tests |
 | transport send backstop only | exact one-use HMAC, durable replay journal, bounded queue gap, and native result tests |
-| Hermes and Claude Code integration tests | outside this candidate by explicit product scope; no V2 implementation or arming claim |
+| Hermes integration tests | `tests/v2/test_hermes.py`, slice-060 replay, clean-wheel entry-point and installed-runtime verification |
+| Claude Code integration tests | outside this candidate by explicit product scope; no V2 implementation or arming claim |
 | repository-copy installer | clean-wheel install, stable V2 state initialization, permission and no-fallback tests |
 
 The portable schema corpus in `tests/v2/contract/` remains the oracle for the

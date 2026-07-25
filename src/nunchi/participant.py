@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field
 import json
@@ -446,7 +447,8 @@ class ParticipantTurnHost:
 
         self.invocation_count += 1
         worker = threading.Thread(
-            target=invoke,
+            target=copy_context().run,
+            args=(invoke,),
             name=f"nunchi-participant-{token.generation}",
             daemon=True,
         )
@@ -599,7 +601,8 @@ class ParticipantTurnHost:
                     dispatch_queue.put_nowait(("ok", result))
 
             threading.Thread(
-                target=invoke_dispatch,
+                target=copy_context().run,
+                args=(invoke_dispatch,),
                 name=f"nunchi-transport-{token.generation}",
                 daemon=True,
             ).start()

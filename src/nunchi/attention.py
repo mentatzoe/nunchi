@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -434,7 +435,12 @@ class AttentionEngine:
 
         with self._lock:
             self.call_count += 1
-        worker = threading.Thread(target=invoke, name="nunchi-attention-call", daemon=True)
+        worker = threading.Thread(
+            target=copy_context().run,
+            args=(invoke,),
+            name="nunchi-attention-call",
+            daemon=True,
+        )
         worker.start()
         while True:
             if cancel is not None and cancel.is_set():

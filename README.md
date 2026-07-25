@@ -16,9 +16,8 @@ effect commit point.
 
 This candidate implements the shared foundation, generic/Discord/Matrix/
 Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
-and Codex room presence. Hermes and Claude Code are explicitly excluded: this
-candidate does not implement, repair, arm, install, or live-test their V2
-integrations.
+Codex room presence, and the Hermes V2 participant integration. Claude Code
+remains outside this candidate and has no implementation or arming claim.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, prompt hook, send-time social reclassifier, or fallback.
@@ -47,6 +46,7 @@ nunchi-discord --probe
 nunchi-matrix --probe
 nunchi-telegram --probe
 nunchi-codex-room-runner --probe
+nunchi-hermes-v2-config --help
 ```
 
 Configured runtimes require exact SHA-256 pins for participant profiles and

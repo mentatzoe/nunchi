@@ -1083,17 +1083,105 @@ class _FailClosedNunchiPlugin:
         }
 
 
+class _ProfileMultiplexNunchiPlugin:
+    """Route each public hook to the exact Hermes profile's Nunchi instance."""
+
+    def __init__(
+        self,
+        *,
+        ctx: Any,
+        loader: Callable[[str], HermesPluginConfig],
+        initial_profile: str,
+    ) -> None:
+        self.ctx = ctx
+        self.loader = loader
+        self.initial_profile = initial_profile
+        self._lock = threading.RLock()
+        self._plugins: dict[str, Any] = {}
+        self._plugin_for(initial_profile)
+
+    def _plugin_for(self, profile: str) -> Any:
+        with self._lock:
+            existing = self._plugins.get(profile)
+            if existing is not None:
+                return existing
+            try:
+                config = self.loader(profile)
+                if config.hermes_profile != profile:
+                    raise ValidationError(
+                        "loaded Nunchi V2 config belongs to another Hermes profile"
+                    )
+                plugin: Any = NunchiHermesV2Plugin(config=config, ctx=self.ctx)
+            except Exception:
+                logger.error(
+                    "Nunchi V2 configuration failed for routed profile; "
+                    "registering profile-wide fail-closed behavior"
+                )
+                plugin = _FailClosedNunchiPlugin(profile)
+            self._plugins[profile] = plugin
+            return plugin
+
+    def _route_plugin(self, route: Any) -> Any:
+        profile = _nonempty(
+            getattr(route, "profile", None) or self.initial_profile,
+            "Hermes route profile",
+        )
+        return self._plugin_for(profile)
+
+    async def gateway_message(
+        self,
+        *,
+        event: Any,
+        route: Any,
+        delivery: Any,
+    ) -> Mapping[str, Any] | None:
+        return await self._route_plugin(route).gateway_message(
+            event=event,
+            route=route,
+            delivery=delivery,
+        )
+
+    async def gateway_session_cancel(
+        self,
+        *,
+        route: Any,
+        reason: str,
+        **kwargs: Any,
+    ) -> None:
+        await self._route_plugin(route).gateway_session_cancel(
+            route=route,
+            reason=reason,
+            **kwargs,
+        )
+
+    def probe(self) -> dict[str, Any]:
+        with self._lock:
+            profile_probes = {
+                profile: plugin.probe()
+                for profile, plugin in sorted(self._plugins.items())
+            }
+        active = deepcopy(profile_probes[self.initial_profile])
+        active["loaded_profiles"] = sorted(profile_probes)
+        active["profile_probes"] = profile_probes
+        return active
+
+    def restart(self) -> None:
+        with self._lock:
+            plugins = tuple(self._plugins.values())
+        for plugin in plugins:
+            restart = getattr(plugin, "restart", None)
+            if callable(restart):
+                restart()
+
+
 def register(ctx: Any, *, config_loader: Callable[[str], HermesPluginConfig] | None = None) -> Any:
     loader = config_loader or _default_config_loader
     profile = _nonempty(getattr(ctx, "profile_name", None) or "default", "Hermes profile")
-    try:
-        config = loader(profile)
-        if config.hermes_profile != profile:
-            raise ValidationError("loaded Nunchi V2 config belongs to another Hermes profile")
-        plugin: Any = NunchiHermesV2Plugin(config=config, ctx=ctx)
-    except Exception:
-        logger.error("Nunchi V2 configuration failed; registering profile-wide fail-closed hook")
-        plugin = _FailClosedNunchiPlugin(profile)
+    plugin: Any = _ProfileMultiplexNunchiPlugin(
+        ctx=ctx,
+        loader=loader,
+        initial_profile=profile,
+    )
     ctx.register_hook("gateway_message", plugin.gateway_message)
     ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)
 

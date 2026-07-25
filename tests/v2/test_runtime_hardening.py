@@ -973,8 +973,10 @@ class InstalledSurfaceTests(unittest.TestCase):
             result = initialize(config, state)
             self.assertEqual("initialized", result["status"])
             checked = verify(config)
+            self.assertEqual(3, checked["schema_version"])
             self.assertFalse(checked["v1_fallback"])
-            self.assertEqual(["hermes", "claude-code"], checked["excluded_integrations"])
+            self.assertEqual(["hermes"], checked["included_integrations"])
+            self.assertEqual(["claude-code"], checked["excluded_integrations"])
             self.assertEqual(0, config.stat().st_mode & 0o077)
             self.assertEqual(0, state.stat().st_mode & 0o077)
 

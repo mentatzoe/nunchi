@@ -71,6 +71,13 @@ NUNCHI_HERMES_V2_CONFIG_SHA256_DEFAULT=<64 lowercase hex>
 
 Set them in that Hermes profile's trusted environment, then restart Hermes. The unscoped names are accepted only as a single-profile compatibility spelling for profile `default`; non-default profiles require scoped names.
 
+In a multiplexed Hermes gateway, the process-global entry point dispatches each
+hook to a profile-owned Nunchi instance selected from the immutable route
+profile. Configure and pin the scoped environment pair for every served
+profile that can reach the hook. Instances are loaded lazily; a missing or
+invalid secondary-profile configuration fails closed for that routed profile
+instead of falling through to its ordinary Hermes agent.
+
 The config is closed and exact. It binds:
 
 - Hermes profile;
@@ -110,7 +117,11 @@ These are post-authorization DM control messages, not slash commands or particip
 /nunchi-v2 probe
 ```
 
-The probe reports generation 2, `v1_fallback: false`, Hermes profile, config digest, participant/profile binding, isolated state directory, and enabled capability names. It does not expose provider credentials, room conversation, or authorization operation contents.
+The probe reports generation 2, `v1_fallback: false`, the active Hermes profile,
+loaded profile names and per-profile status, config digest,
+participant/profile binding, isolated state directory, and enabled capability
+names. It does not expose provider credentials, room conversation, or
+authorization operation contents.
 
 The native adapter reports `sent` only with a positive acknowledgement and a non-empty native message ID. Rejection is `failed`; timeout, exception, malformed, or unattributable acknowledgement is `unknown`; unsupported reaction surfaces are `unavailable`. None of those states is rewritten as social success.
 
