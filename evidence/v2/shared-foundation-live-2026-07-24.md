@@ -302,3 +302,15 @@ status `3`, unredacted raw output, runtime and launch identity, and source
 record hash. The enclosing diagnostic shell command exited `0`; the launched
 runner itself rejected the mismatched pin before registration and admitted no
 event.
+
+### Fresh non-author disposition
+
+Reviewer `/root/foundation_final_candidate_review` (generated identity Dirac;
+exact model identifier unavailable) approved exact clean evidence candidate
+`8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker. The
+review matched the abort record to raw transcript records 7543-7544, reproduced
+the configuration and wheel hashes, verified that the rejected launch preceded
+registration and admitted no event, and rechecked the accepted six-scene
+matrix, excluded zero-margin result, gap handling, cleanup, and platform
+boundaries. The reviewer also confirmed that this successor changed no product,
+test, schema, integration, Hermes, or Claude Code bytes.

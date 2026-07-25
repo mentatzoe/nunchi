@@ -20,8 +20,8 @@ and live evaluation.
 | deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | verified offline 8/8 against source and the installed artifact |
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
-| downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes; exact-successor independent review is pending |
-| independent review | fresh non-author Codex review of exact final commit with no blocker | reviewer `/root/foundation_final_candidate_review` found no product or matrix blocker at `85553e2` but rejected a false zero-margin chronology; the append-only correction is pending exact-successor review |
+| downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
+| independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; exact model identifier unavailable) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
 every row in scope to name immutable evidence.
@@ -77,9 +77,17 @@ its zero-margin chronology falsely said the discarded configuration received
 no event. Retained artifacts instead prove one failed configuration-pin launch
 and one later zero-margin SUPPRESS execution. The append-only correction names
 that execution and keeps it outside the acceptance matrix; the ordinary
-active-`0.12` natural SUPPRESS remains the matrix result. The reviewer must
-approve the exact correction successor before the independent-review row can
-pass.
+active-`0.12` natural SUPPRESS remains the matrix result. The exact aborted-run
+command, wrong supplied pin, timestamps, runtime identity, runner exit `3`,
+unredacted output, and raw-transcript record hash are retained in
+`evidence/v2/shared-foundation-zero-margin-abort-2026-07-25.json`.
+
+The reviewer approved exact clean evidence candidate
+`8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker after
+matching that record to the raw transcript and rechecking the installed,
+native-room, recovery, cleanup, exclusion, and platform-interface boundaries.
+This documentation-only successor records that external disposition; it does
+not self-approve.
 
 The earlier non-author reviewer `/root/final_b97_exact_review` approved
 `b97f0d50ac3855e9b279db21a60fe4a6ed28ecd6` and its documentation-only
