@@ -16,8 +16,8 @@ effect commit point.
 
 This candidate implements the shared foundation, generic/Discord/Matrix/
 Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
-Codex room presence, and an incomplete Hermes V2 platform integration source
-successor. The Hermes source reuses Nunchi's shared observation, attention,
+Codex room presence, and incomplete Hermes and Claude Code V2 platform
+integrations. The Hermes source reuses Nunchi's shared observation, attention,
 scheduling, wake, and receipt behavior around the stock participant. It
 currently accepts only Hermes 0.19.0 and configured Discord or Telegram rooms.
 Other Hermes platforms remain outside Nunchi and keep stock behavior; attempts
@@ -33,15 +33,22 @@ participant starts remain guarded; Hermes's pre-model 👀 is blocked until the
 shared ACK path owns that signal and its receipt. These are explicit product
 gaps, not supported behavior.
 
-The current dirty source passes its focused Hermes and shared-core tests. Its
-full source, package, installed-runtime, exact-review, and live-platform gates
-must be rerun before acceptance. Earlier Hermes evidence belongs to a
-superseded implementation and is not current proof. Hermes gaps are tracked in
+Hermes source and focused tests exist, but its installed-runtime and live
+platform gates remain open. Earlier Hermes evidence belongs to a superseded
+implementation and is not current proof. Hermes gaps are tracked in
 [issues #38](https://github.com/mentatzoe/nunchi/issues/38) and
 [#42](https://github.com/mentatzoe/nunchi/issues/42), with supported-surface
-parity tracked in [#44](https://github.com/mentatzoe/nunchi/issues/44). Claude
-Code remains outside this candidate. This candidate is partial. This candidate
-is not verified, integrated, or V2-complete.
+parity tracked in [#44](https://github.com/mentatzoe/nunchi/issues/44).
+Claude Code passes source, deterministic, and clean-installed-artifact checks;
+its live real-room evidence and supported-surface closure remain open in
+[#39](https://github.com/mentatzoe/nunchi/issues/39) and
+[#43](https://github.com/mentatzoe/nunchi/issues/43). See
+`evidence/v2/claude-code/README.md` for exactly what is and is not proven.
+
+Shared ACK remains open in [#40](https://github.com/mentatzoe/nunchi/issues/40),
+and combined acceptance remains open in
+[#41](https://github.com/mentatzoe/nunchi/issues/41). This candidate is partial
+and is not verified, release-ready, or V2-complete.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, V1 prompt hook, send-time social reclassifier, or fallback.

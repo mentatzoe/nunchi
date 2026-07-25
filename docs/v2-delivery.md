@@ -10,9 +10,20 @@ Shared-foundation commit
 implementation. Its source, clean installed artifact, deterministic and
 adversarial suites, real-room matrix, and exact-head non-author review passed.
 It is **Integrated** only when that exact commit is reachable from the fetched
-`integration/v2` head. Hermes and Claude Code remain outside the foundation's
+`integration/v2` head. Hermes and Claude Code remained outside the foundation's
 scope; their owners consume the integrated interface but must separately
 implement and prove their platform behavior.
+
+Per-surface status beyond the foundation:
+
+| Surface | Status | What is outstanding |
+|---|---|---|
+| Codex | Verified, Integrated | — |
+| Hermes | Landed, unverified | source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
+| Claude Code | Implemented, unverified | live real-room evidence and exact-head non-author review; source, deterministic, and clean-installed-artifact checks passed (`evidence/v2/claude-code/README.md`) |
+
+Neither unverified platform may be described as done, live, or parity-ready
+until its open gates pass.
 
 Use five plain status terms:
 

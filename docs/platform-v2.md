@@ -1,10 +1,9 @@
 # V2 platform interface and conformance
 
-This is the current downstream interface for Hermes and Claude Code. Shared
-ACK behavior may extend it and remains open in issue #40. The incomplete
-Hermes source successor consumes these shared owners; its current dirty bytes
-have source-test evidence only. Claude Code is not implemented by this
-candidate.
+This is the current downstream interface for Hermes and Claude Code. Both
+platform implementations consume the shared owners, but neither has completed
+its installed and live acceptance. Shared ACK behavior may extend this
+interface and remains open in issue #40.
 
 ## Required owners
 

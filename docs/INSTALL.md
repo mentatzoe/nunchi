@@ -76,7 +76,8 @@ Hermes or Claude Code artifact operations.
 
 Every configured adapter uses a JSON file whose exact bytes are pinned by
 `--config-sha256` or `NUNCHI_ADAPTER_CONFIG_SHA256`. The Codex runner uses
-`NUNCHI_CODEX_CONFIG_SHA256`. The profile entry contains its own exact
+`NUNCHI_CODEX_CONFIG_SHA256`; the Claude Code runner uses
+`NUNCHI_CLAUDE_CODE_CONFIG_SHA256`. The profile entry contains its own exact
 `path`/`sha256` pin.
 
 Trusted configuration owns:
@@ -87,9 +88,11 @@ Trusted configuration owns:
 - bounded retention, snapshot, age, continuation-page, continuation-handle,
   and expiry limits; every byte bound includes the referenced actor IDs and
   metadata as well as events;
-- participant model for Nunchi-owned hosts, or fixed Codex model/session
-  settings; Hermes keeps its own participant model and prompt, while Nunchi
-  keeps the shared attention prompt, model selection, and lifecycle behavior;
+- participant model, or fixed Codex or Claude Code model/session settings;
+- Hermes keeps its own participant model and prompt, while Nunchi keeps the
+  shared attention prompt, model selection, and lifecycle behavior;
+- for Claude Code, the transport output-key variable name, which may not
+  be one the participant turn can read;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
 
