@@ -1,572 +1,344 @@
-"""Discord adapter for nunchi.
-
-Requires discord.py (not a default dependency — opt-in only). The `[discord]`
-extra is not on PyPI yet (the published 0.2.0 release predates this adapter);
-install from source:
-
-    pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git"
-    # or, from a checkout:
-    pip install ".[discord]"
-
-Joins Discord channels as a gated participant. Uses discord.py's event-driven
-client with the message_content intent. Every inbound text message is run
-through the nunchi admission gate; non-silent verdicts invoke a pluggable
-responder callable.
-
-Required env vars:
-    NUNCHI_DISCORD_TOKEN      Bot token (from the Discord Developer Portal)
-    NUNCHI_DISCORD_CHANNELS   Comma-separated channel IDs to watch (integers)
-
-Optional env vars:
-    NUNCHI_DISCORD_PEER_BOTS    Comma-separated bot user IDs treated as
-                                gated peers (used with NUNCHI_DISCORD_BOT_POLICY)
-    NUNCHI_DISCORD_BOT_POLICY   "all" (default) or "allowlist"
-                                - "all": process all bot messages (skip only self)
-                                - "allowlist": skip bots NOT in NUNCHI_DISCORD_PEER_BOTS,
-                                  but still process those in the peer list
-    NUNCHI_DISCORD_MAX_EVENTS   Stop after this many gated events (for bounded test
-                                runs / integration tests). Unset = run forever.
-    NUNCHI_DISCORD_LOG          JSONL receipt log path
-                                (default: ~/.nunchi/discord-gate.jsonl)
-    NUNCHI_DISCORD_AGENT_ID     Agent identity (default: bot_<username>)
-    NUNCHI_DISCORD_ALIASES      Comma-separated additional identities this agent
-                                answers to (display names, nicknames, secondary
-                                handles, mention snowflakes). Sent as
-                                agent.aliases so addressing recognizes the full
-                                bundle. NOTE: a Discord mention token is the
-                                numeric snowflake, NOT the display name — put
-                                names here, never in a mention-id knob.
-                                Optional; absent means behavior is unchanged.
-    NUNCHI_DISCORD_HISTORY      History window per channel (default: 20)
-    NUNCHI_DISCORD_BACKSTOP_MAX_SENDS
-                                Send backstop (amplification-loops guard, default
-                                ON): max sends per channel per window (default: 5)
-    NUNCHI_DISCORD_BACKSTOP_WINDOW_SECONDS
-                                Send backstop window in seconds (default: 10).
-                                When the cap trips, the send is suppressed and
-                                the receipt records action='rate-limited'.
-    NUNCHI_RESPONDER_MODEL      LLM model for the built-in demo responder
-    OPENROUTER_API_KEY          API key for the demo responder
-    NUNCHI_CLASSIFIER_MODEL     Model used by both classifier and demo responder
-
-NOTE: The built-in demo responder uses synchronous urllib calls inside an async
-event handler. This blocks the discord.py event loop briefly during LLM calls.
-For production use, supply your own async-compatible responder callable.
-
-The responder callback contract:
-    respond(trigger: dict, history: list[dict], gate_result: ChannelGateResult)
-        -> str | None
-
-Return a string to send to the channel, or None to stay silent.
-"""
+"""Installed standalone Discord V2 adapter using reactive gateway events."""
 
 from __future__ import annotations
 
+import argparse
+import asyncio
 import json
-import logging
 import os
-import sys
-import time
 from pathlib import Path
-from typing import Callable
+import sys
+import threading
+import time
+from collections.abc import Mapping, Sequence
 
-from ._backstop import backstop_from_env
-from ._responder import _demo_responder
-from .channel import ChannelGateResult, gate as channel_gate, parse_alias_csv
-
-logger = logging.getLogger("nunchi.adapters.discord")
-
-_DEFAULT_HISTORY_LEN = 20
-_DEFAULT_LOG_FILE = "~/.nunchi/discord-gate.jsonl"
-
-
-# --------------------------------------------------------------------------- #
-# Pure import-safe helpers (no discord.py dependency)
-# These functions can be imported and tested without discord.py installed.
-# --------------------------------------------------------------------------- #
+from .. import __version__
+from ..errors import NunchiError, ValidationError
+from ..participant import TransportResult
+from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
 
-def _resolve_author_kind(
-    user_id: int,
-    own_user_id: int,
-    is_bot: bool,
-    bot_policy: str,
-    peer_bot_ids: frozenset[int],
-) -> str:
-    """Map a Discord user to an author_kind string.
+class DurableGatewaySequence:
+    """Fsync a monotonic occurrence ID for callbacks lacking native IDs."""
 
-    Returns one of:
-    - "self"     — own bot user
-    - "peer_bot" — a bot that should be gated as a peer
-    - "human"    — a human user
-    - "_skip"    — a bot that should be silently ignored under allowlist policy
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._value = 0
+        self._lock = threading.Lock()
+        if self.path.exists():
+            try:
+                state = json.loads(self.path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValidationError(
+                    "Discord synthetic sequence state is untrustworthy"
+                ) from exc
+            if (
+                not isinstance(state, dict)
+                or set(state) != {"schema_version", "value"}
+                or state["schema_version"] != 2
+                or isinstance(state["value"], bool)
+                or not isinstance(state["value"], int)
+                or state["value"] < 0
+            ):
+                raise ValidationError(
+                    "Discord synthetic sequence state has an invalid closed shape"
+                )
+            self._value = state["value"]
 
-    Under bot_policy "all", every bot (excluding self) is "peer_bot".
-    Under bot_policy "allowlist", bots not in peer_bot_ids return "_skip";
-    bots in peer_bot_ids return "peer_bot".
-    """
-    if user_id == own_user_id:
-        return "self"
-    if is_bot:
-        if bot_policy == "allowlist":
-            return "peer_bot" if user_id in peer_bot_ids else "_skip"
-        # "all" policy: process all bots as peer_bot
-        return "peer_bot"
-    return "human"
-
-
-def _append_to_history(
-    history: list[dict],
-    msg: dict,
-    history_len: int,
-) -> list[dict]:
-    """Return a new trimmed history list with *msg* appended.
-
-    The original list is never mutated. The result is trimmed to at most
-    ``history_len`` items.
-    """
-    result = list(history)
-    result.append(msg)
-    if len(result) > history_len:
-        result = result[-history_len:]
-    return result
-
-
-def _build_receipt(
-    channel_id: int,
-    trigger: dict,
-    history_len: int,
-    result: ChannelGateResult | None,
-    action: str,
-    elapsed_ms: int,
-    error: str | None = None,
-) -> dict:
-    """Build a JSONL receipt record (same field shape as matrix/telegram adapters)."""
-    record: dict = {
-        "ts": trigger.get("timestamp"),
-        "room_id": str(channel_id),
-        "event_id": trigger.get("message_id"),
-        "author": trigger.get("author"),
-        "author_kind": trigger.get("author_kind"),
-        "history_len": history_len,
-        "verdict": result.verdict if result else None,
-        "silent": result.silent if result else None,
-        "action": action,
-        "elapsed_ms": elapsed_ms,
-        "reasons": list(result.reasons[:3]) if result else [],
-        "confidences": result.confidences if result else {},
-    }
-    if error is not None:
-        record["error"] = error
-    return record
+    def next(self) -> int:
+        with self._lock:
+            value = self._value + 1
+            payload = json.dumps(
+                {"schema_version": 2, "value": value},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            temporary = self.path.with_suffix(".tmp")
+            fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+            try:
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short Discord synthetic-sequence write")
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(temporary, self.path)
+            directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            self._value = value
+            return value
 
 
-def _write_receipt(log_path: Path, record: dict) -> None:
-    """Append one JSON line to the receipt log."""
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with log_path.open("a") as fh:
-            fh.write(json.dumps(record) + "\n")
-    except OSError as exc:
-        logger.warning("Could not write receipt to %s: %s", log_path, exc)
+class DiscordPyTransport:
+    def __init__(self, bot, loop: asyncio.AbstractEventLoop) -> None:
+        self.bot = bot
+        self.loop = loop
+
+    async def _dispatch(self, action, wake):
+        channel_id = int(wake["room"]["id"])
+        channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+        if action["kind"] == "message":
+            sent = await channel.send(action["text"])
+            return TransportResult("sent", f"discord:message:{sent.id}")
+        if action["kind"] == "reply":
+            target_id = int(action["target_event_id"].removeprefix("discord:message:"))
+            target = channel.get_partial_message(target_id)
+            sent = await target.reply(action["text"], mention_author=False)
+            return TransportResult("sent", f"discord:message:{sent.id}")
+        if action["kind"] == "reaction":
+            target_id = int(action["target_event_id"].removeprefix("discord:message:"))
+            target = channel.get_partial_message(target_id)
+            if action["operation"] == "add":
+                await target.add_reaction(action["reaction"])
+            else:
+                if self.bot.user is None:
+                    return TransportResult("failed", "Discord self identity is unavailable")
+                await target.remove_reaction(action["reaction"], self.bot.user)
+            return TransportResult("sent", f"discord:reaction:{target_id}")
+        return TransportResult("unavailable", "Discord action is unsupported")
+
+    def dispatch(self, *, action, wake) -> TransportResult:
+        future = asyncio.run_coroutine_threadsafe(self._dispatch(action, wake), self.loop)
+        try:
+            result = future.result(timeout=30)
+        except asyncio.TimeoutError:
+            return TransportResult("unknown", "Discord acknowledgement deadline expired")
+        except BaseException:
+            return TransportResult("unknown", "Discord acknowledgement was lost")
+        return result
 
 
-# --------------------------------------------------------------------------- #
-# Env-var helpers
-# --------------------------------------------------------------------------- #
-
-
-def _require_env(name: str) -> str:
-    val = os.environ.get(name, "").strip()
-    if not val:
-        raise RuntimeError(f"Required environment variable {name} is not set.")
-    return val
-
-
-# --------------------------------------------------------------------------- #
-# Console script entry point
-# --------------------------------------------------------------------------- #
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Entry point for the ``nunchi-discord`` console script.
-
-    Usage::
-
-        nunchi-discord [--dry-run]
-
-    discord.py is event-driven; there is no ``--once`` flag. To bound the run
-    for testing, set NUNCHI_DISCORD_MAX_EVENTS=N — the client exits after N
-    gated events.
-
-    Flags:
-        --dry-run   Run the gate but never send; receipts record 'dry-run'.
-    """
-    try:
-        import discord
-    except ImportError:
-        print(
-            "nunchi-discord: discord.py is not installed.\n"
-            "Install it with: pip install discord.py\n"
-            "(or reinstall nunchi from source with the extra: "
-            'pip install "nunchi[discord] @ git+https://github.com/mentatzoe/nunchi.git")',
-            file=sys.stderr,
-        )
-        return 1
-
-    import argparse
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
+def _parser():
+    parser = argparse.ArgumentParser(prog="nunchi-discord")
+    parser.add_argument("--config")
+    parser.add_argument(
+        "--config-sha256",
+        default=os.environ.get("NUNCHI_ADAPTER_CONFIG_SHA256"),
     )
+    parser.add_argument("--probe", action="store_true")
+    return parser
 
-    parser = argparse.ArgumentParser(
-        prog="nunchi-discord",
-        description=(
-            "nunchi-discord: join Discord channels as a gated participant. "
-            "Reads NUNCHI_DISCORD_TOKEN and NUNCHI_DISCORD_CHANNELS from env."
+
+def _static_probe():
+    return {
+        "product": "nunchi",
+        "product_version": __version__,
+        "generation": 2,
+        "surface": "discord",
+        "capabilities": CAPABILITIES["discord"],
+        "configured": False,
+        "v1_fallback": False,
+    }
+
+
+def _declare_fresh_gateway_gap(runtime: ReferenceAdapterRuntime) -> None:
+    runtime.pipeline.observation.mark_continuity_gap(
+        delivery_id=f"discord:standalone-startup-gap:{time.time_ns()}",
+        detail=(
+            "fresh standalone Discord gateway session cannot attest "
+            "events missed before READY"
         ),
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run the gate but never send; receipts record action='dry-run'.",
-    )
-    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
-    # Validate required env vars before touching the network
-    missing = []
-    for var in ("NUNCHI_DISCORD_TOKEN", "NUNCHI_DISCORD_CHANNELS"):
-        if not os.environ.get(var, "").strip():
-            missing.append(var)
-    if missing:
-        print(
-            "nunchi-discord: required environment variables not set:\n"
-            + "\n".join(f"  {v}" for v in missing)
-            + "\n\nSee the module docstring for setup instructions.",
-            file=sys.stderr,
-        )
-        return 1
 
-    # Parse config
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
     try:
-        token = _require_env("NUNCHI_DISCORD_TOKEN")
-        channels_raw = _require_env("NUNCHI_DISCORD_CHANNELS")
-        channel_ids = frozenset(int(c.strip()) for c in channels_raw.split(",") if c.strip())
-    except (RuntimeError, ValueError) as exc:
-        print(f"nunchi-discord: configuration error: {exc}", file=sys.stderr)
-        return 1
+        if not args.config:
+            if args.probe:
+                print(json.dumps(_static_probe(), sort_keys=True, separators=(",", ":")))
+                return 0
+            raise ValidationError("--config is required")
+        if not args.config_sha256:
+            raise ValidationError("--config-sha256 is required")
+        config = load_pinned_config(args.config, args.config_sha256)
+        transport_raw = config.get("transport")
+        if not isinstance(transport_raw, Mapping):
+            raise ValidationError("Discord config must contain transport")
+        if set(transport_raw) - {"bot_token_env"}:
+            raise ValidationError("Discord transport config has unexpected fields")
+        token_env = str(transport_raw.get("bot_token_env", "DISCORD_BOT_TOKEN"))
+        token = os.environ.get(token_env)
+        if not token:
+            raise ValidationError(f"Discord credential is absent from {token_env}")
+        try:
+            import discord
+        except ImportError as exc:
+            raise ValidationError(
+                "Discord runtime requires the installed nunchi[discord] extra"
+            ) from exc
 
-    peer_bots_raw = os.environ.get("NUNCHI_DISCORD_PEER_BOTS", "")
-    peer_bot_ids: frozenset[int] = frozenset(
-        int(b.strip()) for b in peer_bots_raw.split(",") if b.strip()
-    )
+        intents = discord.Intents.none()
+        intents.guilds = True
+        intents.messages = True
+        intents.message_content = True
+        intents.reactions = True
+        intents.members = True
+        bot = discord.Client(intents=intents)
+        runtime_holder = {}
 
-    bot_policy = os.environ.get("NUNCHI_DISCORD_BOT_POLICY", "all").strip().lower()
-    if bot_policy not in ("all", "allowlist"):
-        print(
-            f"nunchi-discord: NUNCHI_DISCORD_BOT_POLICY must be 'all' or 'allowlist', got {bot_policy!r}",
-            file=sys.stderr,
-        )
-        return 1
-
-    history_len_raw = os.environ.get("NUNCHI_DISCORD_HISTORY", str(_DEFAULT_HISTORY_LEN))
-    try:
-        history_len = int(history_len_raw)
-    except ValueError:
-        history_len = _DEFAULT_HISTORY_LEN
-
-    log_path = Path(os.environ.get("NUNCHI_DISCORD_LOG", _DEFAULT_LOG_FILE)).expanduser()
-
-    # Additional identities this one agent answers to (agent.aliases).
-    aliases = parse_alias_csv(os.environ.get("NUNCHI_DISCORD_ALIASES"))
-
-    max_events_raw = os.environ.get("NUNCHI_DISCORD_MAX_EVENTS", "")
-    max_events: int | None = int(max_events_raw) if max_events_raw.strip().isdigit() else None
-
-    # Per-channel send backstop (amplification-loops guard) — default ON.
-    backstop = backstop_from_env("NUNCHI_DISCORD")
-
-    # Responder setup (resolved after we know the agent_id)
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("NUNCHI_CLASSIFIER_API_KEY", "")
-    responder_model = (
-        os.environ.get("NUNCHI_RESPONDER_MODEL")
-        or os.environ.get("NUNCHI_CLASSIFIER_MODEL")
-        or ""
-    )
-    base_url = (
-        os.environ.get("NUNCHI_CLASSIFIER_BASE_URL")
-        or os.environ.get("OPENAI_BASE_URL")
-        or "https://openrouter.ai/api/v1"
-    )
-
-    # ------------------------------------------------------------------ #
-    # Define the discord.Client subclass here (where discord is in scope)
-    # ------------------------------------------------------------------ #
-
-    class NunchiDiscordClient(discord.Client):
-        """discord.py client that gates every inbound channel message."""
-
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            # Resolved after on_ready
-            self._own_user_id: int | None = None
-            self._agent_id: str = ""
-            # Per-channel in-memory history: channel_id -> list[dict]
-            self._channel_history: dict[int, list[dict]] = {}
-            # Channels backfilled on first event
-            self._backfilled: set[int] = set()
-            self._event_count: int = 0
-            # Build responder closure once we have agent_id (updated in on_ready)
-            self._responder: Callable[[dict, list[dict], ChannelGateResult], str | None] | None = None
-
-        async def on_ready(self):
-            assert self.user is not None
-            self._own_user_id = self.user.id
-            username = self.user.name
-
-            agent_id_raw = os.environ.get("NUNCHI_DISCORD_AGENT_ID", "").strip()
-            self._agent_id = agent_id_raw if agent_id_raw else f"bot_{username}"
-
-            if api_key and responder_model:
-                _agent_id_capture = self._agent_id
-
-                def _resp(
-                    trigger: dict,
-                    history: list[dict],
-                    gate_result: ChannelGateResult,
-                ) -> str | None:
-                    return _demo_responder(
-                        trigger,
-                        history,
-                        gate_result,
-                        agent_id=_agent_id_capture,
-                        model=responder_model,
-                        api_key=api_key,
-                        base_url=base_url,
-                    )
-
-                self._responder = _resp
-            else:
-                logger.info(
-                    "Demo responder disabled: set OPENROUTER_API_KEY and NUNCHI_RESPONDER_MODEL "
-                    "(or NUNCHI_CLASSIFIER_MODEL) to enable it."
+        @bot.event
+        async def on_ready():
+            actor_id = f"discord:actor:{bot.user.id}"
+            if actor_id != config["binding"]["actor_id"]:
+                await bot.close()
+                raise RuntimeError("authenticated Discord bot does not match exact self binding")
+            if "runtime" not in runtime_holder:
+                runtime_holder["synthetic_sequence"] = DurableGatewaySequence(
+                    Path(config["state_directory"])
+                    / "discord-synthetic-sequence.json"
                 )
+                runtime_holder["runtime"] = ReferenceAdapterRuntime(
+                    surface="discord",
+                    config=config,
+                    transport=DiscordPyTransport(bot, asyncio.get_running_loop()),
+                )
+                _declare_fresh_gateway_gap(runtime_holder["runtime"])
 
-            logger.info(
-                "Discord bot ready as %s (id=%s) agent_id=%s channels=%s",
-                self.user,
-                self._own_user_id,
-                self._agent_id,
-                sorted(channel_ids),
+        @bot.event
+        async def on_disconnect():
+            runtime = runtime_holder.get("runtime")
+            if runtime is None:
+                return
+            runtime.lane.cancel()
+            runtime.pipeline.observation.mark_continuity_gap(
+                delivery_id=f"discord:standalone-stream-gap:{time.time_ns()}",
+                detail="standalone Discord gateway continuity is uncertain",
             )
 
-        async def on_message(self, message):
-            if message.channel.id not in channel_ids:
+        async def process(payload):
+            runtime = runtime_holder.get("runtime")
+            if runtime is None:
                 return
-            if not message.content or not message.content.strip():
-                return
+            try:
+                await asyncio.to_thread(runtime.submit, payload)
+            except BaseException:
+                print("discord delivery error", file=sys.stderr)
 
-            assert self._own_user_id is not None, "on_message fired before on_ready"
-
-            user_id: int = message.author.id
-            is_bot: bool = message.author.bot
-
-            author_kind = _resolve_author_kind(
-                user_id, self._own_user_id, is_bot, bot_policy, peer_bot_ids
-            )
-
-            if author_kind == "_skip":
-                # Bot not in allowlist — ignore silently
-                return
-
-            username: str = str(getattr(message.author, "name", str(user_id)))
-            msg_record = {
-                "content": message.content.strip(),
-                "author": username,
-                "author_kind": author_kind,
-                "message_id": str(message.id),
-                "timestamp": str(int(message.created_at.timestamp()))
-                if message.created_at
-                else None,
+        @bot.event
+        async def on_message(message):
+            payload = {
+                "t": "MESSAGE_CREATE",
+                "s": None,
+                "d": {
+                    "id": str(message.id),
+                    "channel_id": str(message.channel.id),
+                    "guild_id": str(message.guild.id) if message.guild else None,
+                    "author": {
+                        "id": str(message.author.id),
+                        "username": message.author.name,
+                        "global_name": getattr(message.author, "global_name", None),
+                        "display_name": message.author.display_name,
+                        "bot": message.author.bot,
+                    },
+                    "content": message.content,
+                    "mentions": [
+                        {
+                            "id": str(member.id),
+                            "username": member.name,
+                            "global_name": getattr(member, "global_name", None),
+                            "display_name": member.display_name,
+                            "bot": member.bot,
+                        }
+                        for member in message.mentions
+                    ],
+                    "mention_everyone": message.mention_everyone,
+                    "timestamp": message.created_at.isoformat().replace("+00:00", "Z"),
+                    "message_reference": (
+                        {"message_id": str(message.reference.message_id)}
+                        if message.reference and message.reference.message_id
+                        else None
+                    ),
+                    "thread": (
+                        {"id": str(message.channel.id)}
+                        if isinstance(message.channel, discord.Thread)
+                        else None
+                    ),
+                },
             }
+            await process(payload)
 
-            ch_id: int = message.channel.id
-
-            if author_kind == "self":
-                # Record own messages in history but don't gate
-                self._channel_history[ch_id] = _append_to_history(
-                    self._channel_history.get(ch_id, []), msg_record, history_len
-                )
-                return
-
-            # Backfill history on the first event per channel
-            if ch_id not in self._backfilled:
-                await self._backfill(message.channel)
-                self._backfilled.add(ch_id)
-
-            current_history = list(
-                self._channel_history.get(ch_id, [])[-history_len:]
-            )
-            # Append trigger to history for future context
-            self._channel_history[ch_id] = _append_to_history(
-                self._channel_history.get(ch_id, []), msg_record, history_len
+        async def reaction_payload(raw, event_type):
+            await process(
+                {
+                    "t": event_type,
+                    "s": runtime_holder["synthetic_sequence"].next(),
+                    "delivery_epoch": "standalone-durable",
+                    "d": {
+                        "channel_id": str(raw.channel_id),
+                        "guild_id": str(raw.guild_id) if raw.guild_id else None,
+                        "user_id": str(raw.user_id),
+                        "message_id": str(raw.message_id),
+                        "emoji": {
+                            "id": str(raw.emoji.id) if raw.emoji.id else None,
+                            "name": raw.emoji.name,
+                        },
+                    },
+                }
             )
 
-            # Gate and respond (synchronous gate call inside async handler)
-            await self._gate_and_respond(ch_id, msg_record, current_history)
+        @bot.event
+        async def on_raw_reaction_add(payload):
+            await reaction_payload(payload, "MESSAGE_REACTION_ADD")
 
-            # Max-events shutdown for bounded runs
-            self._event_count += 1
-            if max_events is not None and self._event_count >= max_events:
-                logger.info("NUNCHI_DISCORD_MAX_EVENTS=%d reached; shutting down.", max_events)
-                await self.close()
+        @bot.event
+        async def on_raw_reaction_remove(payload):
+            await reaction_payload(payload, "MESSAGE_REACTION_REMOVE")
 
-        async def _backfill(self, channel) -> None:
-            """Seed history from the channel's 10 most recent messages."""
-            try:
-                messages = []
-                async for msg in channel.history(limit=10, oldest_first=False):
-                    messages.append(msg)
-                # oldest_first=False means newest first; reverse for chronological
-                for msg in reversed(messages):
-                    if not msg.content or not msg.content.strip():
-                        continue
-                    user_id = msg.author.id
-                    is_bot = msg.author.bot
-                    ak = _resolve_author_kind(
-                        user_id, self._own_user_id, is_bot, bot_policy, peer_bot_ids
-                    )
-                    if ak == "_skip":
-                        continue
-                    rec = {
-                        "content": msg.content.strip(),
-                        "author": str(getattr(msg.author, "name", str(user_id))),
-                        "author_kind": ak,
-                        "message_id": str(msg.id),
-                        "timestamp": str(int(msg.created_at.timestamp()))
-                        if msg.created_at
-                        else None,
-                    }
-                    self._channel_history[channel.id] = _append_to_history(
-                        self._channel_history.get(channel.id, []), rec, history_len
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("History backfill failed for channel %s: %s", channel.id, exc)
+        async def member_payload(member, event_type):
+            await process(
+                {
+                    "t": event_type,
+                    "s": runtime_holder["synthetic_sequence"].next(),
+                    "delivery_epoch": "standalone-durable",
+                    "d": {
+                        "guild_id": str(member.guild.id),
+                        "room_id": str(config["binding"]["room_id"]),
+                        "user": {
+                            "id": str(member.id),
+                            "username": member.name,
+                            "global_name": getattr(member, "global_name", None),
+                            "bot": member.bot,
+                        },
+                    },
+                }
+            )
 
-        async def _gate_and_respond(
-            self,
-            channel_id: int,
-            trigger_record: dict,
-            history_snapshot: list[dict],
-        ) -> None:
-            t0 = time.monotonic()
-            try:
-                result: ChannelGateResult = channel_gate(
-                    trigger_record,
-                    history_snapshot,
-                    agent_id=self._agent_id,
-                    agent_aliases=aliases or None,
-                    fail_policy="open",
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.error(
-                    "Gate error msg=%s channel=%s: %s",
-                    trigger_record.get("message_id"),
-                    channel_id,
-                    exc,
-                )
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                receipt = _build_receipt(channel_id, trigger_record, len(history_snapshot), None, "error", elapsed_ms, error=str(exc))
-                _write_receipt(log_path, receipt)
-                return
+        @bot.event
+        async def on_member_join(member):
+            await member_payload(member, "GUILD_MEMBER_ADD")
 
-            elapsed_ms = int((time.monotonic() - t0) * 1000)
+        @bot.event
+        async def on_member_remove(member):
+            await member_payload(member, "GUILD_MEMBER_REMOVE")
 
-            if result.silent:
-                logger.debug("PASS (silent) msg=%s channel=%s", trigger_record.get("message_id"), channel_id)
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "silent", elapsed_ms))
-                return
+        if args.probe:
+            # Config and credential integrity have been checked; no live
+            # connection is claimed by this non-mutating probe.
+            result = _static_probe()
+            result.update(
+                {
+                    "configured": True,
+                    "participant_id": config["binding"]["participant_id"],
+                    "actor_id": config["binding"]["actor_id"],
+                    "room_id": config["binding"]["room_id"],
+                }
+            )
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+            return 0
+        bot.run(token, log_handler=None)
+        runtime = runtime_holder.get("runtime")
+        if runtime is not None:
+            runtime.lane.cancel()
+            runtime.drain(35)
+        return 0
+    except (NunchiError, ValueError) as exc:
+        print(f"discord adapter error: {exc}", file=sys.stderr)
+        return 3 if isinstance(exc, ValidationError) else 1
 
-            if args.dry_run:
-                logger.info("[dry-run] verdict=%s msg=%s channel=%s", result.verdict, trigger_record.get("message_id"), channel_id)
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "dry-run", elapsed_ms))
-                return
 
-            if self._responder is None:
-                logger.info("verdict=%s (no responder) msg=%s channel=%s", result.verdict, trigger_record.get("message_id"), channel_id)
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "silent", elapsed_ms))
-                return
-
-            try:
-                reply_text = self._responder(trigger_record, history_snapshot, result)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Responder error msg=%s: %s", trigger_record.get("message_id"), exc)
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "error", elapsed_ms, error=str(exc)))
-                return
-
-            if reply_text is None:
-                logger.debug("Responder declined msg=%s", trigger_record.get("message_id"))
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "responder-declined", elapsed_ms))
-                return
-
-            # Empty-send guard: never post empty/whitespace-only text to the
-            # channel.
-            if not reply_text.strip():
-                logger.info(
-                    "Responder returned empty text; suppressing send msg=%s channel=%s",
-                    trigger_record.get("message_id"),
-                    channel_id,
-                )
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "empty-suppressed", elapsed_ms))
-                return
-
-            # Send backstop: sliding-window cap on sends per channel (default
-            # ON). A tripped cap suppresses the send — it never queues.
-            wait = backstop.try_acquire(str(channel_id))
-            if wait > 0:
-                logger.warning(
-                    "Send backstop tripped channel=%s (max %d per %.0fs); suppressing send, retry in %.1fs",
-                    channel_id,
-                    backstop.max_sends,
-                    backstop.window_seconds,
-                    wait,
-                )
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "rate-limited", elapsed_ms))
-                return
-
-            try:
-                channel = self.get_channel(channel_id)
-                if channel is None:
-                    raise RuntimeError(f"Channel {channel_id} not found in cache")
-                await channel.send(reply_text)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("channel.send error msg=%s channel=%s: %s", trigger_record.get("message_id"), channel_id, exc)
-                _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "error", elapsed_ms, error=str(exc)))
-                return
-
-            logger.info("spoke verdict=%s msg=%s channel=%s", result.verdict, trigger_record.get("message_id"), channel_id)
-            _write_receipt(log_path, _build_receipt(channel_id, trigger_record, len(history_snapshot), result, "spoke", elapsed_ms))
-
-    # ------------------------------------------------------------------ #
-    # Launch
-    # ------------------------------------------------------------------ #
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-
-    client = NunchiDiscordClient(intents=intents)
-
-    print(
-        f"nunchi-discord starting\n"
-        f"  channels   : {sorted(channel_ids)}\n"
-        f"  bot_policy : {bot_policy}\n"
-        f"  dry_run    : {args.dry_run}\n"
-        f"  log        : {log_path}",
-        file=sys.stderr,
-    )
-
-    client.run(token, log_handler=None)
-    return 0
+if __name__ == "__main__":
+    raise SystemExit(main())

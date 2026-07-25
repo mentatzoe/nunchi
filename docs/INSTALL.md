@@ -1,246 +1,127 @@
-# Installing Nunchi's operator artifacts (`nunchi-install`)
+# Install and operate Nunchi V2
 
-> **Source-checkout V1 tooling:** `nunchi-install` landed after the published
-> `0.2.0` wheel and is not present in that release. Install a reviewed current
-> source commit and retain its checkout because the Hermes and Claude artifacts
-> copied by this command live outside the Python package.
+## Artifact installation
 
-Nunchi ships integration artifacts that must live in **stable operator
-locations**, decoupled from any git checkout:
-
-| Artifact | Source (in the repo) | Installed to |
-|----------|----------------------|--------------|
-| Hermes gateway plugin | `integrations/hermes/nunchi-gate/` | `$HERMES_HOME/plugins/nunchi-gate/` (default `~/.hermes`) |
-| Claude Code hook | `integrations/claude-code/nunchi_prompt_gate.py` | `~/.claude/hooks/` (+ its shell wrapper) |
-| `nunchi-channel` CLI | the `nunchi` package | your `PATH` (via `pip install nunchi`) |
-
-`nunchi-install` installs the first two groups by **copying** — never
-symlinking — and stamps each destination with the source commit it was built
-from. It checks that `nunchi-channel` is on `PATH` (it does not install it).
-
-## Why we copy, not symlink
-
-This installer exists because of a real incident.
-
-- **The Hermes plugin was symlinked** from `~/.hermes/plugins/nunchi-gate`
-  into a live git checkout. Hermes ran whatever the symlink pointed at. When
-  the checkout **switched branches**, the running plugin silently became that
-  branch's code — a stale, unintended plugin, with no signal to the operator.
-  A gate that reads the room is worthless if a `git checkout` elsewhere on the
-  machine quietly swaps it for last week's logic.
-- **The Claude Code hooks were registered by floating checkout paths**
-  (`/Volumes/.../integrations/claude-code/...`) directly in `settings.json`.
-  When that path moved or the volume unmounted, the hooks broke.
-
-The fix is to **copy** each artifact into a stable, checkout-independent
-location, and to point `settings.json` at **stable wrapper paths** under
-`~/.claude/hooks/` rather than at a repo. A branch switch in the checkout can
-no longer change the running plugin; upgrades are explicit (`nunchi-install
-upgrade`) and leave a version stamp you can audit with `nunchi-install
-verify`. If a symlinked destination is found, it is detected, its target
-recorded, backed up, and replaced with a real copy.
-
-## Prerequisites
-
-`nunchi-install` copies **from a checkout** (the `integrations/` tree is not
-part of the published wheel). Install the current source, then run the command
-from inside that checkout—or point it at one with `--repo-root`:
+Build and install the exact candidate into a new environment:
 
 ```sh
-git clone https://github.com/mentatzoe/nunchi.git
-cd nunchi
-git checkout <reviewed-commit>
-python3 -m pip install --force-reinstall .
-nunchi-install install      # source auto-discovered from the current checkout
+python3 -m build
+python3 -m venv /tmp/nunchi-v2-clean
+/tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
+  dist/nunchi-2.0.0-py3-none-any.whl
+/tmp/nunchi-v2-clean/bin/nunchi probe
+/tmp/nunchi-v2-clean/bin/nunchi-install probe
 ```
 
-From a source tree without installing:
+The wheel is the review subject. A source checkout on `PYTHONPATH` is not
+installed-artifact evidence.
+
+Initialize stable operator-owned directories:
 
 ```sh
-PYTHONPATH=src python3 -m nunchi.install install
+nunchi-install init \
+  --config-root "$NUNCHI_CONFIG_ROOT" \
+  --state-root "$NUNCHI_STATE_ROOT"
+nunchi-install verify --config-root "$NUNCHI_CONFIG_ROOT"
 ```
 
-## Commands
+Both roots must be private to the operator (`0700`). Runtime journals and
+markers are created `0600`. The installer has no repository discovery and no
+Hermes or Claude Code artifact operations.
 
-### `install`
+## Trusted configuration
 
-Copies all three artifact groups. Any existing copy is backed up (timestamped
-`.bak`) before being overwritten; a symlinked destination is replaced with a
-real copy (see below). Prints the `settings.json` snippet at the end.
+Every configured adapter uses a JSON file whose exact bytes are pinned by
+`--config-sha256` or `NUNCHI_ADAPTER_CONFIG_SHA256`. The Codex runner uses
+`NUNCHI_CODEX_CONFIG_SHA256`. The profile entry contains its own exact
+`path`/`sha256` pin.
 
-```sh
-nunchi-install install
+Trusted configuration owns:
+
+- exact participant, native self actor, platform, room, and continuity scope;
+- participant profile and delegated attention model;
+- attention suppression/recovery/margin/error policy;
+- bounded retention, snapshot, age, continuation-page, continuation-handle,
+  and expiry limits; every byte bound includes the referenced actor IDs and
+  metadata as well as events;
+- participant model or fixed Codex model/session settings;
+- stable state directory and optional pinned privileged-action policy;
+- native transport endpoint and credential environment-variable names.
+
+Room text cannot supply or override any of these values.
+
+## Shared Discord transport
+
+Install `nunchi[mcp-discord]`, then set:
+
+```text
+NUNCHI_DISCORD_TOKEN
+NUNCHI_DISCORD_PARTICIPANT_ROUTES
+NUNCHI_DISCORD_OUTPUT_HMAC_KEY
+NUNCHI_DISCORD_STATE_DIRECTORY
 ```
 
-### `upgrade`
+`NUNCHI_DISCORD_PARTICIPANT_ROUTES` is a closed JSON object such as
+`{"codex":["123456789"]}`. It defines exact participant/room pairs, never a
+participant-by-room cross product.
 
-Re-copies **only** the artifacts whose source commit differs from the
-installed stamp (or that are missing / symlinked). Backs up the old copy
-first. In-sync artifacts are skipped. Use `--force` to re-copy regardless.
+`NUNCHI_DISCORD_OUTPUT_HMAC_KEY` must be at least 32 bytes and shared only
+between the host-owned participant runner and transport. Output/history tool
+calls require a short-lived, exact-operation HMAC. Accepted nonces are fsynced
+before native dispatch and remain replay-blocked across restart.
 
-```sh
-nunchi-install upgrade
-nunchi-install upgrade --force
-```
+The transport requests message, reaction, membership, and message-content
+gateway intents. Each MCP session must authenticate one exact route before it
+can receive notifications or invoke tools. Notifications carry the
+gateway-attested bot actor and exact target participant. The bounded queue
+never replaces an accepted event. If an event or one participant delivery is
+lost, a durable per-route audit is written; after restart, that route receives
+an explicit continuity gap before any later event. Because gateway resume
+credentials are intentionally process-local, every fresh shared or standalone
+Discord process declares a source gap before it accepts post-start facts;
+within-process resumable reconnects preserve their narrower attested
+continuity.
 
-### `verify`
+Output success is target-attested. Message results must include a non-empty
+native message identity for the exact room and authenticated bot and must echo
+the exact submitted content plus the exact reply target or absence of one.
+Reaction results must echo the exact room, target, operation, and reaction.
+The Codex consumer independently rechecks those facts, JSON-RPC request
+correlation, and the single MCP text result. Empty, stale, cross-bot,
+wrong-content, wrong-reply, mismatched, or malformed acknowledgements are
+recorded as unknown rather than sent.
 
-Reports installed-vs-repo drift per artifact, one of:
+`participant_timeout_seconds` is the host's total opportunity deadline despite
+the compatibility name: observation packet construction, delegated attention,
+the participant turn, expansion, privileged authorization, and native
+transport acknowledgement all consume the same budget. A stage timeout may be
+narrower, but no provider or network wait may extend the total deadline; a
+late native result is recorded as `unknown` and cannot revive the opportunity.
+Before any native effect, the shared host persists a participant-host
+`unknown` handoff receipt. The separately owned transport stage alone may
+later attest `sent`; if receipt persistence consumes the remaining deadline,
+the host makes zero native calls and records a failed transport stage.
 
-- `in-sync` — installed stamp matches the current source commit;
-- `stale` — installed, but from a different commit (or unmanaged/no stamp);
-- `not-installed` — nothing installed;
-- `symlink-found` — the destination is a symlink (the exact bug this tool
-  fixes) — run `install`/`upgrade` to replace it with a real copy.
+## Restart and recovery
 
-```sh
-nunchi-install verify
-```
+Restart:
 
-### `uninstall`
+1. cancels active and pending conversation opportunities;
+2. discards continuation handles and pending approvals;
+3. retains bounded canonical observations as context only;
+4. retains content-free replay reservations plus observation, receipt,
+   authorization, output-nonce, and transport audits;
+5. never promotes retained events into new wake work.
 
-Removes the installed copies. If `install` had replaced a symlink, the
-original symlink is restored. Operator files the installer did not create
-(e.g. your own notes in `~/.claude/hooks/`, and any `.bak` backups) are left
-untouched.
+Corrupt or uncertain observation, receipt, authorization, nonce, session, or
+continuity state fails closed. Operator recovery uses a new state directory or
+an evidence-backed repair; the runtime never silently rewrites untrusted state.
+Canonical delivery and event identities are fsynced to a content-free replay
+reservation before mutable observation content. If the content or final audit
+commit is uncertain, the event cannot wake again and coverage becomes unknown.
 
-```sh
-nunchi-install uninstall
-```
+## Rollback
 
-### `print-claude-settings`
-
-Prints just the `settings.json` hook registration snippet (see below).
-
-```sh
-nunchi-install print-claude-settings
-```
-
-## Global flags
-
-| Flag | Effect |
-|------|--------|
-| `--dry-run` | Print every planned action; touch nothing on disk. |
-| `--prefix DIR` | Base dir; homes default to `DIR/.hermes` and `DIR/.claude`. |
-| `--hermes-home DIR` | Hermes home (default `$HERMES_HOME` or `~/.hermes`). |
-| `--claude-home DIR` | Claude Code home (default `~/.claude`). |
-| `--repo-root DIR` | Source checkout to copy from (default: auto-discovered). |
-| `--only GROUP` | Limit to `hermes`, `claude`, and/or `cli` (repeatable). |
-
-Flags work before or after the subcommand: `nunchi-install --dry-run install`
-and `nunchi-install install --dry-run` are equivalent.
-
-## Registering the Claude Code hooks in `settings.json`
-
-`nunchi-install` **does not edit `settings.json`** — that file is yours. After
-an install it prints the exact block to merge (regenerate any time with
-`nunchi-install print-claude-settings`). The commands point at the **stable
-wrapper paths**, never a repo checkout:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/nunchi-user-prompt-submit.sh",
-            "timeout": 35
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-(The printed snippet uses your resolved absolute `~/.claude` path.) Restart or
-reload the Claude Code session for `settings.json` changes to take effect.
-
-**Upgrading from the two-hook layout:** nunchi retired its send-time
-(`PreToolUse`) gate — one judgment per turn, at wake. `nunchi-install
-upgrade` removes the retired hook files (with backups) and `verify` flags any
-leftovers, but `settings.json` is operator-owned: delete the `PreToolUse`
-entry pointing at `nunchi-pretool-reply.sh` yourself.
-
-### The wrapper is fail-open
-
-The wrapper (`nunchi-user-prompt-submit.sh`) sources its operator env file(s)
-(see below), then runs the Python hook.
-**Any** failure — a missing hook file, no `python3`, a hook error — exits `0`,
-so a missing or broken gate can never block Claude Code.
-
-### Hook configuration lives in operator env files (the sturdy path)
-
-Your agent's identity is **not** baked into the wrappers — the installer
-rewrites the wrappers on every `upgrade`, so anything inline there would be
-lost. Instead each wrapper sources operator-owned env files that the installer
-**writes the wrappers to reference but never creates or overwrites**. Your
-config therefore survives every upgrade.
-
-Two layers, sourced in order (a later file's exports win):
-
-| File | Sourced by | Purpose |
-|------|-----------|---------|
-| `~/.claude/nunchi-gate.env` | the wrapper | shared identity (`NUNCHI_HOOK_*`), classifier env |
-| `~/.claude/nunchi-user-prompt-submit.env` | the wrapper, after the shared file | hook-scoped overrides |
-
-Put identity — `NUNCHI_HOOK_AGENT_ID`, `NUNCHI_HOOK_ALIASES`,
-`NUNCHI_HOOK_MENTION_ID`, `NUNCHI_HOOK_PEER_BOTS`, `NUNCHI_CHANNEL_BIN`, and any
-classifier credentials — in `nunchi-gate.env`. DEFER knobs (`NUNCHI_DEFER`,
-`NUNCHI_DEFER_MARGIN`) are operator-only and live here too.
-
-Copy the annotated example to get started (the installer never touches your
-live files, so copying by hand is the intended flow):
-
-```sh
-cp integrations/claude-code/nunchi-gate.env.example ~/.claude/nunchi-gate.env
-# then edit for your agent's identity and roster
-```
-
-## The shared CLI is a separate deploy surface
-
-`nunchi-install` copies **hook artifacts**. The `nunchi-channel` CLI the hooks
-shell out to is installed separately (pip / `uv tool`) and can lag this repo
-even when every hook file is current — that exact gap shipped a stale core for
-half a day on 2026-07-10 (hooks at the new commit, CLI still carrying removed
-behavior). `nunchi-install verify` therefore reports the CLI as
-`present-unverified`: it can confirm presence, never provenance.
-
-After any change to `src/nunchi/` (classifier, adapters, fastpath removal),
-refresh the shared CLI explicitly:
-
-```sh
-uv tool install --force --from /path/to/turnaware nunchi   # uv-managed
-# or: pip install --upgrade /path/to/turnaware
-```
-
-Then prove the running binary, not the install command: replay a known case
-through the wrapper and check the receipt (`classifier_model`, behavior), or
-run `nunchi-channel` directly on a fixture. An env var pointing
-`NUNCHI_CHANNEL_BIN` at a pilot shim or old copy silently overrides all of
-this — if a replay shows behavior the new code cannot produce, hunt the
-override first.
-
-## Version stamps
-
-Each destination gets a `.nunchi-install.json` marker recording the source
-commit (`git rev-parse HEAD`, falling back to a `VERSION` file or `"unknown"`),
-the source path, the install timestamp, and the files copied. `verify` and
-`upgrade` read it to detect drift. A replaced symlink also records its old
-target and backup path there.
-
-## What is still manual
-
-`nunchi-install` is honest about its scope. It does **not**:
-
-- edit `settings.json` (it prints the snippet; you merge it);
-- install `nunchi-channel` (run `pip install nunchi`);
-- configure the classifier env (`NUNCHI_CLASSIFIER_MODEL`, `OPENROUTER_API_KEY`
-  — see [`integration.md`](integration.md));
-- enable the Hermes plugin (`plugins.enabled` / the `nunchi:` block in
-  `~/.hermes/config.yaml`) or set `DISCORD_ALLOW_BOTS` — see the
-  [Hermes README](../integrations/hermes/README.md);
-- apply the operator-carried [Hermes core patch](integrations/hermes-core-patch.md) or the Claude Code
-  transport-patch (separate, documented manual steps).
+Stop V2 processes before changing artifacts. Rollback is an atomic deployment
+choice: do not run V1 and V2 participants in one room/session. Retain the V2
+state directory for audit, but do not feed V2 journals to a V1 runtime.

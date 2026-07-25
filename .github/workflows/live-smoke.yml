@@ -3,7 +3,8 @@ name: live-smoke
 # MANUAL ONLY. Makes a real provider call (it costs money), so it never runs on
 # push or pull_request -- only when a maintainer dispatches it. It is the drift
 # detector: run it at release time, or when a provider/model regression is
-# suspected, to confirm the configured model still returns a usable verdict.
+# suspected, to confirm the configured delegated attention model returns one
+# valid participant-bound V2 decision.
 # If the OPENROUTER_API_KEY secret is not set, the job skips cleanly (exit 0).
 on:
   workflow_dispatch:
@@ -16,7 +17,7 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      NUNCHI_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
+      NUNCHI_ATTENTION_MODEL: google/gemini-3.1-flash-lite
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -24,17 +25,83 @@ jobs:
           python-version: "3.12"
       - name: Install Nunchi
         run: pip install .
-      - name: One real admit call, assert a verdict is returned
+      - name: Prepare one exact V2 attention request
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from nunchi.observation import ObservationProvider, ParticipantBinding
+          from nunchi.receipts import ReceiptJournal
+
+          profile = {
+              "profile_id": "ci-live",
+              "participant_id": "ci-live",
+              "actor_id": "discord:actor:999",
+              "instructions": "Wake for direct engineering questions; otherwise suppress only when confident.",
+              "provenance": "github-actions:live-smoke",
+          }
+          config = {
+              "policy": {
+                  "provenance": "github-actions:live-smoke@1",
+                  "margin_source": "github-actions:live-smoke",
+              },
+              "model": {
+                  "model": os.environ["NUNCHI_ATTENTION_MODEL"],
+                  "api_key_env": "NUNCHI_ATTENTION_API_KEY",
+              },
+          }
+          profile_raw = json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()
+          config_raw = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+          Path("/tmp/nunchi-live-profile.json").write_bytes(profile_raw)
+          Path("/tmp/nunchi-live-config.json").write_bytes(config_raw)
+          journal = ReceiptJournal("/tmp/nunchi-live-receipts.jsonl")
+          observation = ObservationProvider(
+              ParticipantBinding(
+                  participant_id="ci-live",
+                  actor_id="discord:actor:999",
+                  platform="discord",
+                  room_id="ci-live-room",
+                  continuity_scope_id="discord:ci-live-room",
+              ),
+              receipts=journal,
+          )
+          observation.observe(
+              delivery_id="ci-live-delivery",
+              event={
+                  "id": "discord:message:ci-live",
+                  "type": "message",
+                  "author_id": "discord:actor:1",
+                  "text": "Can you review the authorization boundary?",
+                  "mentioned_actor_ids": ["discord:actor:999"],
+                  "mentions_room": False,
+              },
+              actors={
+                  "discord:actor:1": {"kind": "human"},
+                  "discord:actor:999": {"kind": "bot"},
+              },
+          )
+          request = observation.build_snapshot("discord:message:ci-live")
+          Path("/tmp/nunchi-live-request.json").write_text(json.dumps(request))
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write("NUNCHI_PROFILE_SHA256=" + hashlib.sha256(profile_raw).hexdigest() + "\n")
+              env.write("NUNCHI_ATTENTION_CONFIG_SHA256=" + hashlib.sha256(config_raw).hexdigest() + "\n")
+          PY
+      - name: One real V2 attention call
         # Secret scoped to this step only, so the install step never sees it.
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          NUNCHI_ATTENTION_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+          if [ -z "${NUNCHI_ATTENTION_API_KEY:-}" ]; then
             echo "No OPENROUTER_API_KEY secret -- skipping live smoke."
             exit 0
           fi
-          echo "Live smoke: model=${NUNCHI_CLASSIFIER_MODEL}, fixture=tests/fixtures/speak.json"
-          nunchi admit --input tests/fixtures/speak.json \
-            | python -c 'import json,sys; r=json.load(sys.stdin); assert "verdict" in r, "no verdict in result"; print("live smoke OK: verdict=%s model=%s" % (r["verdict"], r.get("classifier_model")))'
+          echo "Live smoke: model=${NUNCHI_ATTENTION_MODEL}, interface=I-030A"
+          nunchi attention \
+            --input /tmp/nunchi-live-request.json \
+            --profile /tmp/nunchi-live-profile.json \
+            --config /tmp/nunchi-live-config.json \
+            --receipt-journal /tmp/nunchi-live-receipts.jsonl \
+            | python -c 'import json,sys; r=json.load(sys.stdin); assert r["status"] in ("ok","bypass","error"); print("live V2 smoke OK: status=%s" % r["status"])'

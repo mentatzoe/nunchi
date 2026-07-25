@@ -1,27 +1,47 @@
-"""Internal callable admission core.
+"""Public Nunchi V2 attention API.
 
-There is deliberately NO deterministic pre-classifier layer here. The room's
-baseline (2026-07-10): suppression may be deterministic only where mechanically
-provable from the envelope — and the current envelope carries no transport-bound
-identity, so nothing qualifies. The former fast-path's mention rule suppressed
-the operator's direct correction of an agent (referential mention read as floor
-assignment), and its self-echo rule accepted name-equality and text-equality as
-proof of self-causation, which they are not (a human repeating "Thanks." is not
-the agent's echo). Every admission is judged by the classifier; deterministic
-short-circuits may return only when the message contract carries an
-adapter-asserted, transport-bound runtime identity (schema-v2).
+There is no V1 request translation or verdict fallback.  Callers supply a
+validated participant profile, one delegated attention model, trusted policy,
+and the same receipt journal that already contains the observation stage.
 """
 
-from .classifiers import classify
-from .models import result_to_dict
-from .schema import validate_request, validate_result
+from __future__ import annotations
+
+from collections.abc import Mapping
+import threading
+from typing import Any
+
+from .attention import (
+    AttentionEngine,
+    AttentionModel,
+    AttentionPolicy,
+    ParticipantProfile,
+)
+from .receipts import ReceiptJournal
+from .v2_contracts import validate_attention_request
 
 
-def evaluate(request, *, classifier: str | None = None, classifier_config: dict | None = None):
-    """Evaluate one admission request through the selected classifier path."""
+def evaluate(
+    request: Mapping[str, Any],
+    *,
+    profile: ParticipantProfile,
+    model: AttentionModel | None,
+    policy: AttentionPolicy | None = None,
+    receipts: ReceiptJournal,
+    cancel: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Return one I-010B decision for one I-010A request.
 
-    admission_request = validate_request(request)
-    result = classify(admission_request, classifier=classifier, classifier_config=classifier_config)
-    payload = result_to_dict(result)
-    validate_result(payload)
-    return payload
+    ``model=None`` is valid only when trusted policy disables pre-attention;
+    otherwise the operational error branch is returned.  The function never
+    invokes a second classifier and never returns V1 PASS/ACK/ASK/SPEAK as the
+    social result.
+    """
+    checked = validate_attention_request(request)
+    engine = AttentionEngine(
+        profile=profile,
+        model=model,
+        policy=policy,
+        receipts=receipts,
+    )
+    return engine.judge(checked, cancel=cancel)

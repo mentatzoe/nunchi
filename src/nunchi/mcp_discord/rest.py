@@ -5,7 +5,9 @@ block the event loop. Retry policy:
 
 - 429: honor retry-after (body ``retry_after`` or Retry-After header,
   global flag respected), retry up to ``max_retries`` times;
-- 5xx: bounded retry with short backoff;
+- 5xx: bounded retry with short backoff for reads only; mutating requests
+  return uncertainty immediately because retrying without target idempotency
+  could duplicate an effect;
 - 401/403 (and other 4xx): non-retryable — abort immediately. Permanent
   auth/permission errors must not burn retries.
 
@@ -18,6 +20,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
@@ -26,7 +29,7 @@ from .ratelimit import RateLimiter
 logger = logging.getLogger("nunchi.mcp_discord.rest")
 
 API_BASE_URL = "https://discord.com/api/v10"
-_USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 0.2.0)"
+_USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 2.0.0)"
 _TIMEOUT_SECONDS = 15.0
 
 # method, url, headers, body -> (status, lower-cased headers, body)
@@ -114,6 +117,20 @@ class DiscordRestClient:
         result = self._request("GET", path)
         return result if isinstance(result, list) else []
 
+    def add_reaction(self, channel_id: str, message_id: str, reaction: str) -> None:
+        encoded = urllib.parse.quote(reaction, safe="")
+        self._request(
+            "PUT",
+            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+        )
+
+    def remove_reaction(self, channel_id: str, message_id: str, reaction: str) -> None:
+        encoded = urllib.parse.quote(reaction, safe="")
+        self._request(
+            "DELETE",
+            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+        )
+
     # ------------------------------------------------------------------ #
     # Request core
     # ------------------------------------------------------------------ #
@@ -158,6 +175,11 @@ class DiscordRestClient:
                 )
 
             if 500 <= status < 600:
+                if method != "GET":
+                    raise DiscordRestError(
+                        status,
+                        f"Discord API {status} on {route}; effect outcome is unknown",
+                    )
                 attempts += 1
                 if attempts > self._max_retries:
                     raise DiscordRestError(status, f"Discord API {status} on {route}; retries exhausted")

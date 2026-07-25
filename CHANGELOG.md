@@ -2,9 +2,19 @@
 
 ## Unreleased
 
-- Added the portable privileged-action authorization schema, deterministic flow
-  validator, adversarial corpus, and security boundary documentation. This does
-  not implement or enable the host-side action guard.
+- Implemented the shared V2 runtime: canonical bounded observation and
+  continuation, participant-shaped attention, coalescing opportunity
+  scheduler, participant wake/silence, staged receipts, execution-time
+  privileged authorization, shared Discord transport, CLI, Codex, and generic,
+  Discord, Matrix, and Telegram reference adapters.
+- Removed executable V1 verdict, adapter gate, Codex hook/send-gate/config-app,
+  installer, and compatibility entry points. Historical V1 tests and documents
+  remain only as an explicit retirement record.
+- Added deterministic lifecycle evaluation, adversarial runtime coverage,
+  stable private V2 state initialization, clean-artifact probes, and the
+  downstream platform interface/conformance contract.
+- Hermes and Claude Code V2 integrations remain explicitly outside this
+  candidate and are neither implemented nor armed.
 - Retired the executable SpecKit workflow, generated task/checklist control
   plane, and slice lifecycle as implementation authority. Detailed product
   specifications and technical plans remain reference material; V2 now uses

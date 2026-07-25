@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nunchi"
-version = "0.2.0"
-description = "Read-the-room admission gate for agents on shared chat surfaces: should this agent speak now?"
+version = "2.0.0"
+description = "Participant-shaped pre-attention for secure shared conversations"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT OR Apache-2.0" }
@@ -17,7 +17,7 @@ keywords = [
   "nunchi",
   "agents",
   "llm",
-  "admission-gate",
+  "pre-attention",
   "turn-taking",
   "read-the-room",
   "moderation",
@@ -39,6 +39,7 @@ classifiers = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
 mcp-discord = ["mcp>=1.9,<2"]
+test = ["jsonschema==4.26.0"]
 
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"
@@ -47,19 +48,14 @@ Issues = "https://github.com/mentatzoe/nunchi/issues"
 
 [project.scripts]
 nunchi = "nunchi.cli:main"
+nunchi-conformance = "nunchi.conformance:main"
 nunchi-install = "nunchi.install:main"
 nunchi-channel = "nunchi.adapters.channel:main"
 nunchi-matrix = "nunchi.adapters.matrix:main"
 nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
-nunchi-codex-prompt-gate = "nunchi.integrations.codex_prompt_gate:main"
-nunchi-codex-send-gate = "nunchi.integrations.codex_send_gate:main"
-nunchi-codex-room-runner = "nunchi.integrations.codex_room_runner:main"
-nunchi-codex-config-app = "nunchi.integrations.codex_config_app:main"
+nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"nunchi.integrations" = ["*.html"]

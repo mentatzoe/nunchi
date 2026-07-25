@@ -2,11 +2,11 @@
 
 This ordinary repository tree owns committed run records.
 
-All product-behavior records currently present describe V1 or historical pre-V2
-behavior. They do not prove the selected V2 attention/wake lifecycle. Governance
-governance records are historical provenance only. Future V2 product records
-will live under `evidence/v2/` and must identify the exact candidate and
-installed runtime they substantiate.
+Product-behavior records outside `evidence/v2/` describe V1 or historical
+pre-V2 behavior and do not prove the selected V2 attention/wake lifecycle.
+Exact-candidate V2 records live under `evidence/v2/` and identify the source,
+installed runtime, and scope they substantiate. Governance records are
+historical provenance only.
 
 - `verdict-suite/` — classifier replay, bake-off, performance, and room-session
   records.

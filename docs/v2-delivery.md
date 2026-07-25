@@ -5,10 +5,14 @@ This is the implementation entrypoint. The target is the product described in
 
 ## Current truth
 
-The runnable repository is still V1. V2 is incomplete until one reviewed
-candidate satisfies the completion goal and cuts over atomically. Historical
-branches, packets, approvals, and evidence may be reused only after their code
-and behavior pass against the current upstream implementation.
+Shared-foundation commit
+`014546d2ec685341106b177bcf2f6e52e758e0a9` is the verified runnable V2
+implementation. Its source, clean installed artifact, deterministic and
+adversarial suites, real-room matrix, and exact-head non-author review passed.
+It is **Integrated** only when that exact commit is reachable from the fetched
+`integration/v2` head. Hermes and Claude Code remain outside the foundation's
+scope; their owners consume the integrated interface but must separately
+implement and prove their platform behavior.
 
 Use four plain status terms:
 
@@ -38,6 +42,29 @@ Nothing else means done.
 is Codex-owned. Claude owns security assurance, with non-author review for
 Claude-authored code and the assurance candidate. Zoe owns product scope and
 the final completion decision.
+
+## Platform-owner handoff
+
+Hermes and Claude Code owners start only from a fetched `integration/v2` that
+contains the verified foundation:
+
+```sh
+git fetch origin integration/v2
+git merge-base --is-ancestor \
+  014546d2ec685341106b177bcf2f6e52e758e0a9 \
+  origin/integration/v2
+```
+
+A nonzero result means the dependency is not integrated and platform work must
+not consume a side branch as a substitute. Once the ancestry check passes:
+
+1. Read `docs/platform-v2.md` for the complete shared-owner and platform seam.
+2. Read `docs/contracts/nunchi-v2.md` for the portable closed contracts.
+3. Run the shared suite under `tests/v2/contract` and the runtime commands in
+   the platform document before adding native cases.
+4. Implement only the platform-owned wrapper and native identity, transport,
+   cancellation, persistence, and live-proof obligations. Do not fork social
+   judgment or authority semantics into the integration.
 
 ## Working agreement
 

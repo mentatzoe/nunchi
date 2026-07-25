@@ -5,9 +5,8 @@ on:
     branches: [main]
   pull_request:
 
-# Nunchi is stdlib-only and its tests are fully offline (the classifier is
-# stubbed via NUNCHI_CLASSIFIER_TEST_RESULT), so CI needs no provider secrets.
-# Live-provider evidence is captured manually at release time, not in CI.
+# Deterministic V2 tests are offline. Live-provider and real-room evidence are
+# separate attributable release checks.
 permissions:
   contents: read
 
@@ -24,8 +23,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install the pinned contract oracle
+        run: python -m pip install '.[test]'
       - name: Run the full offline suite
         run: python -m unittest --verbose
+      - name: Run the dual-validator contract corpus
+        run: python -m unittest discover -s tests/v2/contract -p 'test_*.py'
       - name: Verdict-suite CLI loads the corpus (smoke)
         run: python3 -m evals.verdict_suite.runner --list
 
@@ -43,21 +46,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" python -m build --wheel
+          WHEEL="$(find dist -maxdepth 1 -name 'nunchi-*.whl' -print -quit)"
+          test -n "$WHEEL"
+          sha256sum "$WHEEL"
           python -m venv /tmp/venv
-          /tmp/venv/bin/python -m pip install --upgrade pip
-          /tmp/venv/bin/python -m pip install .
-          # Importable without the tests/ sys.path shim
-          /tmp/venv/bin/python -c "import nunchi; from nunchi.adapters import channel; print('import OK')"
-          # Console scripts are installed
-          /tmp/venv/bin/nunchi --help >/dev/null
-          # End-to-end through the installed console scripts, offline (stubbed classifier)
-          export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["ci smoke"]}'
-          echo '{"trigger":{"content":"dalgos, summarize the change","id":"t-1"},"context":[],"classifier":"product"}' \
-            | /tmp/venv/bin/nunchi admit | grep -q '"verdict": "SPEAK"'
-          # Channel adapter: default output is transport-neutral JSON ...
-          PASS_PAYLOAD='{"trigger":{"content":"vigil, rebase","message_id":"m-1"},"history":[],"agent":{"id":"dalgos"}}'
-          export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["ci"]}'
-          echo "$PASS_PAYLOAD" | /tmp/venv/bin/nunchi-channel | grep -q '"silent": true'
-          # ... and --format cc-connect opts into the cc-connect sentinel
-          echo "$PASS_PAYLOAD" | /tmp/venv/bin/nunchi-channel --format cc-connect | grep -q '^CC_CONNECT_SILENT_PASS$'
+          /tmp/venv/bin/python -m pip install --no-deps "$WHEEL"
+          cd /tmp
+          /tmp/venv/bin/python -c "import nunchi; print(nunchi.__file__)"
+          /tmp/venv/bin/nunchi probe
+          /tmp/venv/bin/nunchi-conformance
+          /tmp/venv/bin/nunchi-install probe
+          /tmp/venv/bin/nunchi-channel --probe
+          /tmp/venv/bin/nunchi-discord --probe
+          /tmp/venv/bin/nunchi-matrix --probe
+          /tmp/venv/bin/nunchi-telegram --probe
+          /tmp/venv/bin/nunchi-codex-room-runner --probe
           echo "packaging smoke OK"
