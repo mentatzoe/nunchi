@@ -22,3 +22,9 @@ The portable schema corpus in `tests/v2/contract/` remains the oracle for the
 published platform interface. The adversarial runtime suite adds relational,
 lifecycle, persistence, authorization, transport, and installed-entry-point
 checks that JSON Schema cannot express.
+
+Documentation truthfulness is active V2 coverage at
+`tests/v2/test_docs_truthfulness.py`. The retired top-level V1 documentation
+test was removed when the live integration guard was ported; its V1 adapter
+defaults, release-state claims, and source-only installation assertions are
+recoverable from git history but are not executable V2 expectations.
