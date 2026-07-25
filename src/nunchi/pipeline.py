@@ -98,15 +98,16 @@ class NunchiV2Pipeline:
         authorized_route: bool = True,
     ) -> tuple[ObservationResult, Any | None]:
         """Persist one delivery and atomically offer its eligible anchor."""
-        observed = self.observation.observe(
-            delivery_id=delivery_id,
-            event=event,
-            actors=actors,
-            authorized_route=authorized_route,
-        )
-        if not observed.wake_eligible or observed.audit.event_id is None:
-            return observed, None
-        return observed, self.scheduler.offer(observed.audit.event_id)
+        with self._lifecycle_lock:
+            observed = self.observation.observe(
+                delivery_id=delivery_id,
+                event=event,
+                actors=actors,
+                authorized_route=authorized_route,
+            )
+            if not observed.wake_eligible or observed.audit.event_id is None:
+                return observed, None
+            return observed, self.scheduler.offer(observed.audit.event_id)
 
     def run_opportunities(self, token: Any) -> tuple[OpportunityOutcome, ...]:
         """Run one active token and every newest-only successor it promotes."""

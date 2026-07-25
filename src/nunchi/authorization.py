@@ -225,13 +225,16 @@ class AuthorizationJournal:
                     self._records.append(record)
                     if record["kind"] == "effect_commit":
                         self._consumed_effects.add(record["effect_fingerprint"])
+                        self._unknown_effects.add(record["effect_fingerprint"])
                         self._idempotency_keys[record["effect_fingerprint"]] = record[
                             "idempotency_key"
                         ]
+                    if record["kind"] == "effect_retry_commit":
+                        self._unknown_effects.add(record["effect_fingerprint"])
                     if record["kind"] == "effect_result":
                         if record["outcome"] == "UNKNOWN":
                             self._unknown_effects.add(record["effect_fingerprint"])
-                        elif record["outcome"] == "CONFIRMED":
+                        else:
                             self._unknown_effects.discard(record["effect_fingerprint"])
         except (OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
             raise AuthorizationError(
@@ -439,13 +442,16 @@ class AuthorizationJournal:
             self._records.append(checked)
             if checked["kind"] == "effect_commit":
                 self._consumed_effects.add(checked["effect_fingerprint"])
+                self._unknown_effects.add(checked["effect_fingerprint"])
                 self._idempotency_keys[checked["effect_fingerprint"]] = checked[
                     "idempotency_key"
                 ]
+            if checked["kind"] == "effect_retry_commit":
+                self._unknown_effects.add(checked["effect_fingerprint"])
             if checked["kind"] == "effect_result":
                 if checked["outcome"] == "UNKNOWN":
                     self._unknown_effects.add(checked["effect_fingerprint"])
-                elif checked["outcome"] == "CONFIRMED":
+                else:
                     self._unknown_effects.discard(checked["effect_fingerprint"])
         return deepcopy(checked)
 

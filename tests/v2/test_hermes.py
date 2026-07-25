@@ -417,6 +417,9 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("host-model", model.model_id)
         self.assertEqual("nunchi-v2-attention", llm.calls[0]["purpose"])
         self.assertIn("json_schema", llm.calls[0])
+        trusted_profile = self.profile().instructions
+        self.assertIn(trusted_profile, llm.calls[0]["instructions"])
+        self.assertNotIn(trusted_profile, llm.calls[0]["input"][0]["text"])
         call_blob = json.dumps(llm.calls[0], default=str)
         self.assertNotIn("api_key", call_blob.lower())
 
@@ -944,6 +947,28 @@ class HermesV2ContractTests(unittest.TestCase):
                 ],
                 [item["delivery_id"] for item in submitted],
             )
+
+    def test_runtime_restart_still_rejects_replay_of_same_native_event(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            first_plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            first_runtime = first_plugin._rooms[("discord", "42")]
+            event = self.event(message_id="replayed")
+            first = first_runtime.handle(event, event.source, FakeDelivery([]), None)
+
+            restarted_plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(),
+            )
+            restarted_runtime = restarted_plugin._rooms[("discord", "42")]
+            replay = restarted_runtime.handle(event, event.source, FakeDelivery([]), None)
+
+            self.assertEqual("recorded", first.observation.audit.outcome)
+            self.assertEqual("exact-duplicate", replay.observation.audit.outcome)
+            self.assertFalse(replay.observation.wake_eligible)
 
     def test_profile_participant_room_state_isolation(self):
         self.require_surface()

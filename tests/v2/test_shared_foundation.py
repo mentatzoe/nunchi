@@ -699,6 +699,47 @@ class AttentionAndHostTests(unittest.TestCase):
             [event["id"] for event in pipeline.observation.retained_events()],
         )
 
+    def test_restart_cannot_promote_pre_restart_ingress_into_new_generation(self):
+        pipeline, _, _, _ = foundation()
+        retained = threading.Event()
+        release = threading.Event()
+        original_observe = pipeline.observation.observe
+        token_box = []
+
+        def blocked_observe(**kwargs):
+            result = original_observe(**kwargs)
+            retained.set()
+            release.wait(2)
+            return result
+
+        pipeline.observation.observe = blocked_observe
+        ingress = threading.Thread(
+            target=lambda: token_box.append(
+                pipeline.observe_and_offer(
+                    delivery_id="restart-race",
+                    event=message("restart-race-event"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )[1]
+            )
+        )
+        ingress.start()
+        self.assertTrue(retained.wait(1))
+
+        restarted = threading.Event()
+        restart = threading.Thread(
+            target=lambda: (pipeline.restart(), restarted.set())
+        )
+        restart.start()
+        self.assertFalse(restarted.wait(0.05))
+
+        release.set()
+        ingress.join(2)
+        restart.join(2)
+        self.assertFalse(ingress.is_alive())
+        self.assertFalse(restart.is_alive())
+        self.assertIsNotNone(token_box[0])
+        self.assertFalse(pipeline.scheduler.is_current(token_box[0]))
+
     def test_twenty_events_during_slow_turn_create_one_fresh_opportunity(self):
         release = threading.Event()
         model = FixtureModel(block=release)
@@ -790,6 +831,27 @@ class AuthorizationTests(unittest.TestCase):
         )
         self.journal = AuthorizationJournal(Path(self.temp.name) / "authorization.jsonl")
         self.native_calls = []
+
+    def test_bare_effect_commit_recovers_as_unknown_after_restart(self):
+        path = Path(self.temp.name) / "bare-effect-commit.jsonl"
+        fingerprint = "a" * 64
+        journal = AuthorizationJournal(path)
+        journal.append(
+            {
+                "kind": "effect_commit",
+                "effect_fingerprint": fingerprint,
+                "action_id": "action:1",
+                "decision_id": "decision:1",
+                "action_digest": {"sha256": "b" * 64},
+                "idempotency_key": None,
+                "committed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        recovered = AuthorizationJournal(path)
+
+        self.assertTrue(recovered.consumed(fingerprint))
+        self.assertTrue(recovered.unknown(fingerprint))
 
     def coordinator(self, policy=None, result=None):
         def execute(operation, idempotency_key):
