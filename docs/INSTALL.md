@@ -5,7 +5,7 @@
 Build and install the exact candidate into a new environment:
 
 ```sh
-python3 -m build
+uv build --offline
 python3 -m venv /tmp/nunchi-v2-clean
 /tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
   dist/nunchi-2.0.0-py3-none-any.whl
@@ -26,15 +26,18 @@ nunchi-install verify --config-root "$NUNCHI_CONFIG_ROOT"
 ```
 
 Both roots must be private to the operator (`0700`). Runtime journals and
-markers are created `0600`. The installer has no repository discovery and no
-Hermes or Claude Code artifact operations.
+markers are created `0600`. The generic installer has no repository discovery
+or platform-artifact copy operations. Hermes V2 is shipped as a wheel entry
+point and has a separate pinned-bundle generator described below.
 
 ## Trusted configuration
 
 Every configured adapter uses a JSON file whose exact bytes are pinned by
 `--config-sha256` or `NUNCHI_ADAPTER_CONFIG_SHA256`. The Codex runner uses
-`NUNCHI_CODEX_CONFIG_SHA256`. The profile entry contains its own exact
-`path`/`sha256` pin.
+`NUNCHI_CODEX_CONFIG_SHA256`. Hermes uses profile-scoped
+`NUNCHI_HERMES_V2_CONFIG_<PROFILE>` and
+`NUNCHI_HERMES_V2_CONFIG_SHA256_<PROFILE>`. The profile entry contains its own
+exact `path`/`sha256` pin.
 
 Trusted configuration owns:
 
@@ -102,6 +105,45 @@ Before any native effect, the shared host persists a participant-host
 later attest `sent`; if receipt persistence consumes the remaining deadline,
 the host makes zero native calls and records a failed transport stage.
 
+## Hermes native plugin
+
+The same wheel exposes `nunchi-v2` in the `hermes_agent.plugins` entry-point
+group and `nunchi-hermes-v2-config` as the pinned configuration generator.
+Install the exact wheel into the Python environment used by Hermes, enable
+`nunchi-v2`, generate one private bundle per Hermes profile/participant/room
+binding, set the printed profile-scoped environment keys, and restart Hermes.
+
+The plugin claims only configured routes after Hermes host authorization. The
+bound Discord channel/thread or Telegram group/topic must be configured so
+ordinary unmentioned messages reach the gateway callback; otherwise Hermes has
+withheld observation before participant attention can run. Telegram topic room
+IDs use `CHAT_ID:topic:TOPIC_ID`.
+
+Keep the room mention/command-gated until the exact Hermes core artifact and
+Nunchi wheel are installed, configuration is pinned, the plugin is enabled and
+Hermes has restarted, and `/nunchi-v2 probe` reports `operational: true` with
+the expected route and digests. Only then admit unmentioned room traffic. A
+verified configuration failure registers a profile-wide fail-closed hook and
+reports `operational: false`; admission gating also protects against an entry
+point that could not be imported at all.
+
+The plugin invokes delegated attention and the ordinary participant turn
+through Hermes' host-owned structured LLM facade. Ordinary actions return
+through the public route-bound delivery capability. Privileged proposals use
+the shared authorization coordinator and a fixed capability-to-tool map.
+Approval inspection/completion is accepted only in an authorized DM from an
+exact approver actor:
+
+```text
+nunchi-v2 approvals
+nunchi-v2 approve APPROVAL_CHALLENGE_ID
+```
+
+`/nunchi-v2 probe` reports generation, exact binding/config provenance, state
+partition, and capabilities. A valid installation reports generation 2 and
+`v1_fallback: false`. Full commands and admission settings are in
+`integrations/hermes/README.md`.
+
 ## Restart and recovery
 
 Restart:
@@ -122,6 +164,10 @@ commit is uncertain, the event cannot wake again and coverage becomes unknown.
 
 ## Rollback
 
-Stop V2 processes before changing artifacts. Rollback is an atomic deployment
-choice: do not run V1 and V2 participants in one room/session. Retain the V2
-state directory for audit, but do not feed V2 journals to a V1 runtime.
+First restore mention/command-only admission for every bound room and verify
+ordinary unmentioned traffic no longer reaches the participant seam. Then stop
+Hermes and V2 processes before disabling the plugin or changing artifacts.
+Rollback is an atomic Hermes-core/Nunchi deployment choice: do not run V1 and
+V2 participants in one room/session. Retain the V2 state directory for audit,
+but do not feed V2 journals to a V1 runtime. Never leave an observation-open
+room with the V2 entry point absent, disabled, or non-operational.

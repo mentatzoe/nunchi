@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "slice": "060-v2-hermes",
+  "mode": "replay",
+  "source_mode": "repository-fixture",
+  "evidence_mode": "deterministic-replay",
+  "evidence_claims": {
+    "source_behavior": false,
+    "installed": false,
+    "live": false
+  },
+  "description": "Complete slice-060 offline replay inventory. These declarative fixtures exercise the replay oracle only and are never source, installed-runtime, Discord, Telegram, or live evidence.",
+  "required_scenario_ids": [
+    "HM060-INGRESS-AUTHORIZED",
+    "HM060-INGRESS-UNBOUND",
+    "HM060-IDENTITY-EXACT",
+    "HM060-ATTENTION-SUPPRESS",
+    "HM060-WAKE-MESSAGE",
+    "HM060-DIRECT-SILENCE",
+    "HM060-TIMEOUT-FAIL-CLOSED",
+    "HM060-ERROR-FAIL-CLOSED",
+    "HM060-MALFORMED-OUTPUT",
+    "HM060-WORK-STALE",
+    "HM060-WORK-REPLAYED",
+    "HM060-ONE-ACTIVE-NEWEST-PENDING",
+    "HM060-RESTART-INVALIDATES",
+    "HM060-CANCEL-INVALIDATES",
+    "HM060-RECEIPT-SENT",
+    "HM060-RECEIPT-FAILED",
+    "HM060-RECEIPT-UNKNOWN",
+    "HM060-CAPABILITY-ALLOW",
+    "HM060-CAPABILITY-DENY",
+    "HM060-CAPABILITY-EXPIRY",
+    "HM060-CAPABILITY-REPLAY",
+    "HM060-ROUTE-DISCORD",
+    "HM060-ROUTE-TELEGRAM"
+  ],
+  "fixture_files": [
+    "cases.jsonl"
+  ],
+  "scenarios": [
+    {
+      "id": "HM060-INGRESS-AUTHORIZED",
+      "fixture": "cases.jsonl#HM060-INGRESS-AUTHORIZED",
+      "category": "authorized-ingress",
+      "requirements": ["acceptance:authorized-observation-only", "platform-v2:inputs"]
+    },
+    {
+      "id": "HM060-INGRESS-UNBOUND",
+      "fixture": "cases.jsonl#HM060-INGRESS-UNBOUND",
+      "category": "unbound-ingress",
+      "requirements": ["acceptance:authorized-observation-only", "platform-v2:shared-discord-2"]
+    },
+    {
+      "id": "HM060-IDENTITY-EXACT",
+      "fixture": "cases.jsonl#HM060-IDENTITY-EXACT",
+      "category": "exact-identity",
+      "requirements": ["acceptance:hermes-exact-identity", "spec-060:FR-001"]
+    },
+    {
+      "id": "HM060-ATTENTION-SUPPRESS",
+      "fixture": "cases.jsonl#HM060-ATTENTION-SUPPRESS",
+      "category": "suppress",
+      "requirements": ["acceptance:participant-owned-attention", "spec-060:FR-004"]
+    },
+    {
+      "id": "HM060-WAKE-MESSAGE",
+      "fixture": "cases.jsonl#HM060-WAKE-MESSAGE",
+      "category": "wake-message",
+      "requirements": ["acceptance:direct-contribution-or-silence", "spec-060:FR-005"]
+    },
+    {
+      "id": "HM060-DIRECT-SILENCE",
+      "fixture": "cases.jsonl#HM060-DIRECT-SILENCE",
+      "category": "direct-silence",
+      "requirements": ["acceptance:direct-contribution-or-silence", "spec-060:FR-007"]
+    },
+    {
+      "id": "HM060-TIMEOUT-FAIL-CLOSED",
+      "fixture": "cases.jsonl#HM060-TIMEOUT-FAIL-CLOSED",
+      "category": "timeout-fail-closed",
+      "requirements": ["acceptance:concurrency-and-restart", "platform-v2:scheduling-and-recovery"]
+    },
+    {
+      "id": "HM060-ERROR-FAIL-CLOSED",
+      "fixture": "cases.jsonl#HM060-ERROR-FAIL-CLOSED",
+      "category": "error-fail-closed",
+      "requirements": ["acceptance:participant-owned-attention", "completion-goal:end-condition-4"]
+    },
+    {
+      "id": "HM060-MALFORMED-OUTPUT",
+      "fixture": "cases.jsonl#HM060-MALFORMED-OUTPUT",
+      "category": "malformed-output",
+      "requirements": ["acceptance:participant-owned-attention", "contract:I-010B-error"]
+    },
+    {
+      "id": "HM060-WORK-STALE",
+      "fixture": "cases.jsonl#HM060-WORK-STALE",
+      "category": "stale-work",
+      "requirements": ["acceptance:concurrency-and-restart", "completion-goal:end-condition-3"]
+    },
+    {
+      "id": "HM060-WORK-REPLAYED",
+      "fixture": "cases.jsonl#HM060-WORK-REPLAYED",
+      "category": "replayed-work",
+      "requirements": ["acceptance:concurrency-and-restart", "completion-goal:end-condition-3"]
+    },
+    {
+      "id": "HM060-ONE-ACTIVE-NEWEST-PENDING",
+      "fixture": "cases.jsonl#HM060-ONE-ACTIVE-NEWEST-PENDING",
+      "category": "scheduler-coalescing",
+      "requirements": ["acceptance:concurrency-and-restart", "platform-v2:scheduling-and-recovery"]
+    },
+    {
+      "id": "HM060-RESTART-INVALIDATES",
+      "fixture": "cases.jsonl#HM060-RESTART-INVALIDATES",
+      "category": "restart",
+      "requirements": ["acceptance:concurrency-and-restart", "spec-060:FR-013"]
+    },
+    {
+      "id": "HM060-CANCEL-INVALIDATES",
+      "fixture": "cases.jsonl#HM060-CANCEL-INVALIDATES",
+      "category": "cancel",
+      "requirements": ["acceptance:concurrency-and-restart", "platform-v2:scheduling-and-recovery"]
+    },
+    {
+      "id": "HM060-RECEIPT-SENT",
+      "fixture": "cases.jsonl#HM060-RECEIPT-SENT",
+      "category": "transport-sent",
+      "requirements": ["acceptance:native-transport-truth", "contract:I-010E-transport"]
+    },
+    {
+      "id": "HM060-RECEIPT-FAILED",
+      "fixture": "cases.jsonl#HM060-RECEIPT-FAILED",
+      "category": "transport-failed",
+      "requirements": ["acceptance:native-transport-truth", "contract:I-010E-transport"]
+    },
+    {
+      "id": "HM060-RECEIPT-UNKNOWN",
+      "fixture": "cases.jsonl#HM060-RECEIPT-UNKNOWN",
+      "category": "transport-unknown",
+      "requirements": ["acceptance:native-transport-truth", "platform-v2:shared-discord-7"]
+    },
+    {
+      "id": "HM060-CAPABILITY-ALLOW",
+      "fixture": "cases.jsonl#HM060-CAPABILITY-ALLOW",
+      "category": "privileged-allow",
+      "requirements": ["acceptance:privileged-effects", "contract:I-010F"]
+    },
+    {
+      "id": "HM060-CAPABILITY-DENY",
+      "fixture": "cases.jsonl#HM060-CAPABILITY-DENY",
+      "category": "privileged-deny",
+      "requirements": ["acceptance:privileged-effects", "completion-goal:end-condition-5"]
+    },
+    {
+      "id": "HM060-CAPABILITY-EXPIRY",
+      "fixture": "cases.jsonl#HM060-CAPABILITY-EXPIRY",
+      "category": "privileged-expiry",
+      "requirements": ["acceptance:privileged-effects", "contract:I-010F"]
+    },
+    {
+      "id": "HM060-CAPABILITY-REPLAY",
+      "fixture": "cases.jsonl#HM060-CAPABILITY-REPLAY",
+      "category": "privileged-replay",
+      "requirements": ["acceptance:privileged-effects", "platform-v2:scheduling-and-recovery"]
+    },
+    {
+      "id": "HM060-ROUTE-DISCORD",
+      "fixture": "cases.jsonl#HM060-ROUTE-DISCORD",
+      "category": "discord-normalized-route",
+      "requirements": ["acceptance:hermes-exact-identity", "acceptance:discord-live-surface"]
+    },
+    {
+      "id": "HM060-ROUTE-TELEGRAM",
+      "fixture": "cases.jsonl#HM060-ROUTE-TELEGRAM",
+      "category": "telegram-normalized-route",
+      "requirements": ["acceptance:hermes-exact-identity", "acceptance:telegram-live-surface"]
+    }
+  ]
+}

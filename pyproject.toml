@@ -56,6 +56,10 @@ nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
+nunchi-hermes-v2-config = "nunchi_hermes_v2.cli:main"
+
+[project.entry-points."hermes_agent.plugins"]
+nunchi-v2 = "nunchi_hermes_v2:register"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "integrations/hermes/nunchi-gate"]

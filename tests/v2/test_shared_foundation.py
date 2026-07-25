@@ -537,10 +537,16 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("unknown", stream[-1]["body"]["outcome"])
 
     def test_host_total_deadline_bounds_native_transport_wait(self):
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
         class SlowTransport(RecordingTransport):
             def dispatch(self, *, action, wake):
                 self.calls.append((deepcopy(action), deepcopy(wake)))
-                time.sleep(0.15)
+                entered.set()
+                release.wait(2)
+                finished.set()
                 return TransportResult("sent", "late-native")
 
         transport = SlowTransport()
@@ -554,21 +560,21 @@ class AttentionAndHostTests(unittest.TestCase):
             participant_timeout_seconds=0.05,
             transport=transport,
         )
-        started = time.monotonic()
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
             actors={"human:zoe": {"kind": "human"}},
         )
-        elapsed = time.monotonic() - started
         result = outcome.opportunities[0].transport
         self.assertIsNotNone(result)
         self.assertEqual("unknown", result.delivery)
-        self.assertLess(elapsed, 0.13)
+        self.assertTrue(entered.is_set())
+        self.assertFalse(finished.is_set())
         self.assertFalse(pipeline.scheduler.active)
         stream = receipts.records(outcome.opportunities[0].request_id)
         self.assertEqual("unknown", stream[-1]["body"]["delivery"])
-        time.sleep(0.16)
+        release.set()
+        self.assertTrue(finished.wait(1))
         self.assertFalse(pipeline.scheduler.active)
 
     def test_receipt_persistence_crossing_deadline_never_claims_sent_or_dispatches(self):
@@ -609,19 +615,25 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("failed", stream[3]["body"]["delivery"])
 
     def test_host_total_deadline_spans_attention_participant_and_transport(self):
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
         class PhasedModel(FixtureModel):
             def judge(self, **kwargs):
-                time.sleep(0.04)
+                time.sleep(0.05)
                 return super().judge(**kwargs)
 
         class PhasedTransport(RecordingTransport):
             def dispatch(self, *, action, wake):
                 self.calls.append((deepcopy(action), deepcopy(wake)))
-                time.sleep(0.04)
+                entered.set()
+                release.wait(2)
+                finished.set()
                 return TransportResult("sent", "late-native")
 
         def participant(**_):
-            time.sleep(0.04)
+            time.sleep(0.05)
             return {
                 "kind": "message",
                 "origin_event_id": "e1",
@@ -631,21 +643,22 @@ class AttentionAndHostTests(unittest.TestCase):
         pipeline, _, _, _ = foundation(
             model=PhasedModel(),
             participant=participant,
-            policy=AttentionPolicy(timeout_seconds=0.1),
-            participant_timeout_seconds=0.1,
+            policy=AttentionPolicy(timeout_seconds=0.5),
+            participant_timeout_seconds=0.5,
             transport=PhasedTransport(),
         )
-        started = time.monotonic()
         outcome = pipeline.handle_delivery(
             delivery_id="d1",
             event=message("e1"),
             actors={"human:zoe": {"kind": "human"}},
         )
-        elapsed = time.monotonic() - started
         result = outcome.opportunities[0].transport
         self.assertIsNotNone(result)
         self.assertNotEqual("sent", result.delivery)
-        self.assertLess(elapsed, 0.18)
+        self.assertTrue(entered.is_set())
+        self.assertFalse(finished.is_set())
+        release.set()
+        self.assertTrue(finished.wait(1))
         self.assertFalse(pipeline.scheduler.active)
 
     def test_async_live_ingress_is_active_plus_newest_not_fifo(self):
@@ -845,12 +858,13 @@ class AuthorizationTests(unittest.TestCase):
                 "impact": "high",
             }
         )
-        loaded = threading.Event()
+        policy_started = threading.Event()
+        release_policy = threading.Event()
 
         class DelayedApprovalPolicy:
             def load(inner):
-                time.sleep(0.08)
-                loaded.set()
+                policy_started.set()
+                release_policy.wait()
                 return PolicySnapshot(
                     "policy",
                     "delayed-approval",
@@ -860,8 +874,8 @@ class AuthorizationTests(unittest.TestCase):
 
         coordinator = self.coordinator(policy=DelayedApprovalPolicy())
         self.pipeline.host.privileged = coordinator
-        self.pipeline.host.host_timeout_seconds = 0.03
-        self.pipeline.host.participant_timeout_seconds = 0.03
+        self.pipeline.host.host_timeout_seconds = 1.0
+        self.pipeline.host.participant_timeout_seconds = 1.0
         self.pipeline.host.participant = lambda **_: {
             "kind": "privileged",
             "origin_event_id": "e2",
@@ -870,17 +884,31 @@ class AuthorizationTests(unittest.TestCase):
             "operation": {"path": "README.md", "content": "bounded"},
         }
 
-        outcome = self.pipeline.handle_delivery(
-            delivery_id="d2",
-            event=message("e2"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
+        outcome_holder = {}
+
+        def run_delivery():
+            outcome_holder["outcome"] = self.pipeline.handle_delivery(
+                delivery_id="d2",
+                event=message("e2"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        worker = threading.Thread(target=run_delivery)
+        worker.start()
+        self.assertTrue(policy_started.wait(2))
+        wait_until = time.monotonic() + 2
+        while self.pipeline.scheduler.active and time.monotonic() < wait_until:
+            time.sleep(0.001)
+        self.assertFalse(self.pipeline.scheduler.active)
+        release_policy.set()
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+        outcome = outcome_holder["outcome"]
 
         self.assertIn(
             outcome.opportunities[0].transport.delivery,
-            ("failed", "unknown"),
+            ("failed", "unknown", "unavailable"),
         )
-        self.assertTrue(loaded.wait(1))
         self.assertEqual((), coordinator.pending_for_operator())
         self.assertEqual([], self.native_calls)
 

@@ -110,10 +110,10 @@ Hermes Telegram parity scene
 ### Consumes
 
 - `I-010A AttentionRequestV2@1`
-- `I-010B AttentionDecisionV2@1`
+- `I-010B AttentionDecisionV2@2`
 - `I-010C ParticipantWakeV2@1`
 - `I-010D ContextContinuationV2@1`
-- `I-010E AttentionReceiptV2@1`
+- `I-010E AttentionReceiptV2@2`
 - `I-020A ObservationProviderV2@1`
 - `I-030A AttentionEngineV2@1`
 - `I-040A ParticipantTurnHostV2@1`
