@@ -176,3 +176,83 @@ from the exact successor's clean installed wheel using controlled
 lost/malformed/5xx acknowledgements. This differential boundary is explicit
 for the final reviewer to accept or reject; it is not represented as an exact
 successor live-room run.
+
+## Exact-successor native closure
+
+Date: 2026-07-25
+
+The fresh non-author reviewer
+`/root/foundation_final_candidate_review` rejected exact candidate
+`755091b749876fa0954b42a9d5e86e2424c37b8b` on one proof boundary: the
+successful acknowledgement and target-attestation bytes had changed, so the
+predecessor native matrix could not be reused. The reviewer found no
+implementation blocker and independently reproduced the source, installed,
+contract, lifecycle, focused, acknowledgement, retry, exclusion, and artifact
+checks described above.
+
+The exact candidate was then installed again from wheel SHA-256
+`f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`
+into a new Python 3.14 environment with `mcp==1.28.1`. Imports resolved from
+that environment's `site-packages`. The same Vigil application, channel,
+participant binding, Nous attention model, Codex OAuth participant, and
+external credential boundaries from the earlier run were retained.
+
+Pinned configuration hashes for this closure were:
+
+| Purpose | Configuration SHA-256 |
+|---|---|
+| ordinary WAKE and classifier DEFER | `c3af5eb05f513f5bafcc9bb42c038cebb7493913c87b1cdfae85113469332292` |
+| ordinary margin DEFER and SUPPRESS state | `43d9cd370d70c14e4bb2824ba1edeb73dc5248770104960012b1f7c416681dfd` |
+| trusted bypass | `01a9434ce7fc0ac18a367a9ab67f65b87aac7d4fd7eadad6e34186548d33baa5` |
+| provider failure | `0ce47d1e3dd8dba602958936eb7dac61b91a50d0767f1b8bb460563adbc8150b` |
+| participant profile | `5a87469fbba0330b21d7d5024d8d0d16c2b12a597eebfb0e3572750d386bdfcc` |
+
+The ordinary-policy configurations used the same participant profile, Nous
+model, active `0.12` uncertainty margin, and policy provenance; they differed
+only in private state path to keep the scenario horizon explicit. A proposed
+zero-margin configuration received no event and was discarded after the
+operator correctly objected that forcing the valve would not demonstrate a
+natural model-shaped SUPPRESS. No result from it appears below.
+
+### Exact-successor room matrix
+
+| Scene | Native trigger | Correlated request | Observable result |
+|---|---|---|---|
+| WAKE and contribution | `1530376861610152066` | `discord:1530259309802295316:9c5cd1ae-9884-42fe-abba-1e0edba316a3` | classifier/effective `WAKE`; participant handoff persisted as `unknown`; transport `sent`; target-attested Vigil message `1530376904006172692` contained exactly `NUNCHI-V2-WAKE-755091B` |
+| direct classifier DEFER and silence | `1530377627913949236` | `discord:1530259309802295316:c9c5e32d-5d20-46e8-a5ac-ea3362dd0e23` | classifier/effective `DEFER`, valve `classifier-defer`; participant invoked and chose `silent`; no transport stage or Discord reply |
+| margin DEFER and silence | `1530379287683662018` | `discord:1530259309802295316:e481ea36-4726-4886-b4cd-7beba01a8810` | classifier `SUPPRESS`, effective `DEFER`, valve `margin-defer`, active margin `0.12`; participant invoked and chose `silent`; no transport stage or Discord reply |
+| natural SUPPRESS | `1530381617506422794` | `discord:1530259309802295316:e8de84ff-afc6-4475-969a-f7cdecab33f0` | classifier/effective `SUPPRESS` under the same ordinary policy and active margin; stream ended at attention with no participant-host or transport stage |
+| trusted bypass and silence | `1530384130628386858` | `discord:1530259309802295316:5bdf2c87-9090-46a1-a807-b30c8b7d65d5` | `classifier_not_invoked: true`, cause `preattention-disabled`, wake source `PREATTENTION_BYPASS`; participant invoked and chose `silent`; no transport stage or Discord reply |
+| provider error fallback | `1530384526650507376` | `discord:1530259309802295316:f9adfa19-b404-4a59-b41e-7073d081f572` | operational `provider-failure` with no fabricated social disposition; wake source `ERROR_FALLBACK`; participant handoff persisted as `unknown`; transport `sent`; target-attested Vigil message `1530384564755759177` contained exactly `NUNCHI-V2-ERROR-FALLBACK-755091B` |
+
+One additional ordinary-policy attempt was retained rather than concealed:
+trigger `1530378829028262029`, request
+`discord:1530259309802295316:8e691172-e520-455a-89d1-879ced1e5afb`.
+Because the bounded context still contained the earlier unresolved direct
+request, the delegated model returned classifier/effective `DEFER`; the
+participant chose silence. That truthful result is not used as the SUPPRESS
+claim.
+
+Every admitted native trigger above was received live after its pinned runner
+registered. Scenario-state changes are not represented as one uninterrupted
+participant session. The shared Discord gateway and exact installed artifact
+remained fixed across them. The WAKE and error-fallback sends exercised the
+repaired successful acknowledgement, shaping, exact-bot, exact-room,
+exact-content, authorization, and target-attestation path that the reviewer
+identified as lacking native successor proof.
+
+### Exact-successor recovery and cleanup
+
+Fresh transport startup declared source uncertainty. Carrier message
+`1530371404242096199` was recorded as `queue-rejected` while gap
+`discord:transport-gap:037c9a98-cdfb-4fc2-9efe-49c532fa8433` was signaled and
+delivered. The carrier created no observation, attention decision, participant
+invocation, or later reply; the later WAKE trigger was newly admitted rather
+than replayed.
+
+After the matrix, the exact-successor runner and transport stopped. Vigil's
+application flags were restored from temporary `557056` to exact original
+`524288`; the saved flag state and temporary output-HMAC key were deleted.
+Both pre-existing Vigil launch agents were restored and observed running.
+Hermes and Claude Code were not installed, repaired, changed, armed, or
+exercised.

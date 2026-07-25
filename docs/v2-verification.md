@@ -19,9 +19,9 @@ and live evaluation.
 | clean artifact | wheel hash; new venv; installed probes; no checkout imports; installed smoke | verified; two exact-source builds produced byte-identical wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; clean Python 3.14 install, installer init/verify, all entry-point probes, and MCP 1.28.1 construction passed |
 | deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | verified offline 8/8 against source and the installed artifact |
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
-| real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed implementation predecessor `ca4404b`; see `evidence/v2/shared-foundation-live-2026-07-24.md`. The successor changes only uncertain post-effect closure and is covered by installed differential probes; the successful room matrix was not rerun |
+| real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes; exact-successor independent review is pending |
-| independent review | fresh non-author Codex review of exact final commit with no blocker | pending fresh review of the repaired implementation and this append-only evidence successor |
+| independent review | fresh non-author Codex review of exact final commit with no blocker | reviewer `/root/foundation_final_candidate_review` found no implementation blocker at `755091b` but rejected its predecessor-only live proof; pending fresh review of this exact-successor live-evidence closure |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
 every row in scope to name immutable evidence.
@@ -64,6 +64,15 @@ malformed nested responses, and propagates the uncertainty through Codex.
 The same non-author reviewer must approve the exact evidence successor before
 the independent-review row can pass.
 
+That reviewer then reproduced the repaired implementation and installed-wheel
+checks at exact candidate
+`755091b749876fa0954b42a9d5e86e2424c37b8b`, finding no implementation
+blocker. It rejected one remaining proof boundary because the native matrix
+still named predecessor wheel `36975d5f...` while the successful
+acknowledgement path had changed. The attributable exact-successor run below
+closes that stated boundary; the reviewer must now examine this evidence
+successor before the row can pass.
+
 The earlier non-author reviewer `/root/final_b97_exact_review` approved
 `b97f0d50ac3855e9b279db21a60fe4a6ed28ecd6` and its documentation-only
 successor. That is historical input, not approval of the current candidate:
@@ -89,14 +98,17 @@ and zero transport stages for SUPPRESS and participant silence. The
 content-bounded record names every request and native message ID:
 `evidence/v2/shared-foundation-live-2026-07-24.md`.
 
-The final repair changes only classification of uncertain Discord
-acknowledgements after an attempted effect and the retry policy for mutating
-5xx responses. It does not change successful ingress, attention, participant,
-authorization, target-attestation, or successful-send behavior exercised by
-the matrix. The repaired wheel was therefore rerun through installed
-deterministic and adversarial checks, including direct lost/malformed/5xx
-acknowledgement probes, rather than fabricating a real-room failure response
-that Discord did not emit.
+On 2026-07-25, exact installed candidate `755091b` and wheel
+`f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`
+repeated the native matrix after the reviewer rejected differential-only
+proof. Under pinned, attributable configurations it produced natural
+effective SUPPRESS, WAKE with a target-attested contribution, direct
+classifier DEFER with participant silence, margin DEFER with participant
+silence, trusted bypass with zero classifier invocation, and provider-error
+fallback with a target-attested contribution. A fresh source gap rejected its
+carrier and was delivered before the first admitted scene. The append-only
+evidence record names every exact trigger, request, output, and configuration
+hash.
 
 Vigil's temporary Server Members intent was restored to its exact original
 application flags, the temporary HMAC key was deleted, temporary V2 processes
