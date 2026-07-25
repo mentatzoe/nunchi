@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_AGENTS_MD = _REPO_ROOT / "AGENTS.md"
 _ADAPTERS_MD = _REPO_ROOT / "docs" / "adapters.md"
 _README_MD = _REPO_ROOT / "README.md"
 _EXECUTION_SPINE_MD = _REPO_ROOT / "docs" / "governance" / "execution-spine.md"
@@ -196,6 +197,24 @@ class ReadmeContractStateDisciplineTest(unittest.TestCase):
         for phrase in required:
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
+
+    def test_agent_guidance_cannot_turn_process_friction_into_a_stop_condition(
+        self,
+    ) -> None:
+        normalized = " ".join(_AGENTS_MD.read_text(encoding="utf-8").split())
+        required = (
+            "not by itself a blocker",
+            "continue other unblocked product work",
+            "Do not narrow supported behavior",
+            "Ask Zoe only when a choice materially changes product behavior",
+        )
+        for phrase in required:
+            with self.subTest(required=phrase):
+                self.assertIn(phrase, normalized)
+        self.assertNotIn(
+            "report the concrete missing outcome and stop",
+            normalized,
+        )
 
     def test_spec_workflow_is_retired(self) -> None:
         self.assertFalse(
