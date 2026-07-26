@@ -123,7 +123,10 @@ IDs use `CHAT_ID:topic:TOPIC_ID`.
 Keep the room mention/command-gated until the exact Hermes core artifact and
 Nunchi wheel are installed, configuration is pinned, the plugin is enabled and
 Hermes has restarted, and `/nunchi-v2 probe` reports `operational: true` with
-the expected route and digests. Only then admit unmentioned room traffic. A
+the expected public artifact, host-seam, patch, interface, and aggregate config
+digests. Separately inspect the private `0600` config/profile files locally and
+verify their exact profile, participant, actor, room/topic, state root, and
+enabled capabilities. Only then admit unmentioned room traffic. A
 verified configuration failure registers a profile-wide fail-closed hook and
 reports `operational: false`; admission gating also protects against an entry
 point that could not be imported at all.
@@ -140,8 +143,11 @@ nunchi-v2 approvals
 nunchi-v2 approve APPROVAL_CHALLENGE_ID
 ```
 
-`/nunchi-v2 probe` reports generation, exact binding/config provenance, state
-partition, and capabilities. A valid installation reports generation 2 and
+`/nunchi-v2 probe` is deliberately redacted: it reports generation,
+loaded-profile count, full Nunchi package identity and version, consumed V2
+interface versions, verified Hermes/patch identity, and aggregate configuration
+provenance. It does not report route bindings, profile names, state paths, or
+capability names. A valid installation reports generation 2 and
 `v1_fallback: false`. Full commands and admission settings are in
 `integrations/hermes/README.md`.
 

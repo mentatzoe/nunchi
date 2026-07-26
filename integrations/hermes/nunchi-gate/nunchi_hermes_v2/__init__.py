@@ -23,6 +23,7 @@ import stat
 import threading
 from typing import Any, Callable, Mapping, Sequence
 
+from nunchi import __version__ as nunchi_version
 from nunchi.attention import AttentionEngine, AttentionPolicy, ParticipantProfile
 from nunchi.authorization import AuthorizationCoordinator, AuthorizationJournal, PinnedFilePolicySource
 from nunchi.observation import ObservationLimits, ObservationProvider, ParticipantBinding
@@ -58,12 +59,58 @@ def _require_private_regular_file(path: Path, label: str) -> None:
         raise ValidationError(f"{label} must not be accessible by group or other users")
 
 
+def _nunchi_artifact_sha256(
+    *,
+    package_roots: Mapping[str, Path] | None = None,
+) -> str:
+    """Fingerprint every shipped shared-runtime and Hermes-integration byte."""
+
+    if package_roots is None:
+        import nunchi as nunchi_package
+
+        package_roots = {
+            "nunchi": Path(nunchi_package.__file__).resolve().parent,
+            "nunchi_hermes_v2": Path(__file__).resolve().parent,
+        }
+    entries: list[dict[str, str]] = []
+    for package_name, root_value in sorted(package_roots.items()):
+        root = Path(root_value).resolve()
+        if not root.is_dir():
+            raise ValidationError("Nunchi artifact package root is unavailable")
+        for source in sorted(root.rglob("*")):
+            relative = source.relative_to(root)
+            if "__pycache__" in relative.parts or source.suffix == ".pyc":
+                continue
+            if source.is_symlink():
+                raise ValidationError("Nunchi artifact contains a non-regular shipped path")
+            if source.is_dir():
+                continue
+            if not source.is_file():
+                raise ValidationError("Nunchi artifact contains a non-regular shipped path")
+            entries.append(
+                {
+                    "path": f"{package_name}/{relative.as_posix()}",
+                    "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                }
+            )
+    if not entries:
+        raise ValidationError("Nunchi artifact contains no shipped files")
+    canonical = json.dumps(
+        {"files": entries, "schema_version": 1},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _validate_live_recovery_evidence(
     payload: Any,
     *,
     binding: ParticipantBinding,
+    hermes_profile: str,
     participant_profile_sha256: str,
-    hermes_hook_source_sha256: str,
+    nunchi_artifact_sha256: str,
+    hermes_host_seam_sha256: str,
 ) -> None:
     evidence = _closed(
         payload,
@@ -71,15 +118,21 @@ def _validate_live_recovery_evidence(
             "schema_version",
             "kind",
             "surface",
+            "hermes_profile",
             "room_id",
             "continuity_scope_id",
             "participant_id",
             "actor_id",
             "participant_profile_sha256",
-            "nunchi_integration_sha256",
-            "hermes_hook_source_sha256",
+            "nunchi_artifact_sha256",
+            "hermes_host_seam_sha256",
             "gateway_message_hook_api_version",
+            "nunchi_contract_version",
+            "participant_interface_version",
             "live_run_id",
+            "live_run_started_at",
+            "live_candidate_commit",
+            "live_artifact_sha256",
             "suppressed_native_message_id",
             "suppressed_at",
             "later_native_message_id",
@@ -88,28 +141,36 @@ def _validate_live_recovery_evidence(
         },
         label="suppression recovery evidence",
     )
-    if evidence["schema_version"] != 1 or evidence["kind"] != "live-platform-recovery":
-        raise ValidationError("suppression recovery evidence is not a live V1 attestation")
+    if evidence["schema_version"] != 2 or evidence["kind"] != "live-platform-recovery":
+        raise ValidationError("suppression recovery evidence is not a live recovery schema-v2 attestation")
     expected = {
         "surface": binding.platform,
+        "hermes_profile": _nonempty(hermes_profile, "Hermes profile"),
         "room_id": binding.room_id,
         "continuity_scope_id": binding.continuity_scope_id,
         "participant_id": binding.participant_id,
         "actor_id": binding.actor_id,
         "participant_profile_sha256": participant_profile_sha256,
         "gateway_message_hook_api_version": 2,
+        "nunchi_contract_version": 2,
+        "participant_interface_version": 2,
         "later_hearing": "verified",
     }
     if any(evidence.get(key) != value for key, value in expected.items()):
         raise ValidationError("suppression recovery evidence does not verify this binding")
-    integration_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    if evidence["nunchi_integration_sha256"] != integration_sha:
-        raise ValidationError("suppression recovery evidence targets different Nunchi source")
-    if evidence["hermes_hook_source_sha256"] != hermes_hook_source_sha256:
-        raise ValidationError("suppression recovery evidence targets different Hermes hook source")
+    if (
+        evidence["nunchi_artifact_sha256"] != nunchi_artifact_sha256
+        or evidence["live_artifact_sha256"] != nunchi_artifact_sha256
+    ):
+        raise ValidationError("suppression recovery evidence targets a different Nunchi artifact")
+    if evidence["hermes_host_seam_sha256"] != hermes_host_seam_sha256:
+        raise ValidationError("suppression recovery evidence targets a different Hermes host seam")
     run_id = evidence["live_run_id"]
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{16,128}", run_id):
         raise ValidationError("suppression recovery evidence has invalid live run identity")
+    candidate_commit = evidence["live_candidate_commit"]
+    if not isinstance(candidate_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_commit):
+        raise ValidationError("suppression recovery evidence has invalid candidate identity")
     suppressed_id = _nonempty(
         evidence["suppressed_native_message_id"], "suppressed native message id"
     )
@@ -119,11 +180,20 @@ def _validate_live_recovery_evidence(
     if suppressed_id == later_id:
         raise ValidationError("suppression recovery evidence must attest a later message")
     try:
+        run_started_at = datetime.fromisoformat(
+            str(evidence["live_run_started_at"]).replace("Z", "+00:00")
+        )
         suppressed_at = datetime.fromisoformat(str(evidence["suppressed_at"]).replace("Z", "+00:00"))
         later_at = datetime.fromisoformat(str(evidence["later_observed_at"]).replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValidationError("suppression recovery evidence timestamps are invalid") from exc
-    if suppressed_at.tzinfo is None or later_at.tzinfo is None or later_at <= suppressed_at:
+    if (
+        run_started_at.tzinfo is None
+        or suppressed_at.tzinfo is None
+        or later_at.tzinfo is None
+        or suppressed_at < run_started_at
+        or later_at <= suppressed_at
+    ):
         raise ValidationError("suppression recovery evidence does not establish later hearing")
 
 
@@ -837,7 +907,12 @@ class HermesPluginConfig:
     provenance: Mapping[str, str]
 
 
-def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
+def _room_config(
+    raw: Any,
+    *,
+    index: int,
+    hermes_profile: str,
+) -> HermesRoomConfig:
     room = _closed(
         raw,
         required={"binding", "profile", "attention", "participant", "limits", "authorization"},
@@ -893,8 +968,10 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
         _validate_live_recovery_evidence(
             evidence_payload,
             binding=binding,
+            hermes_profile=hermes_profile,
             participant_profile_sha256=str(profile_ref["sha256"]),
-            hermes_hook_source_sha256=_current_hermes_hook_source_sha256(),
+            nunchi_artifact_sha256=_nunchi_artifact_sha256(),
+            hermes_host_seam_sha256=_current_hermes_hook_source_sha256(),
         )
         recovery_evidence = {"path": str(evidence_path.resolve()), "sha256": evidence_sha}
     elif recovery_evidence is not None:
@@ -980,7 +1057,14 @@ def load_pinned_hermes_config(path: str | Path, *, expected_sha256: str, hermes_
     state_root = Path(_nonempty(config["state_root"], "state_root")).expanduser()
     if not isinstance(config["rooms"], list) or not config["rooms"]:
         raise ValidationError("rooms must be a non-empty array")
-    rooms = tuple(_room_config(room, index=index) for index, room in enumerate(config["rooms"]))
+    rooms = tuple(
+        _room_config(
+            room,
+            index=index,
+            hermes_profile=configured_profile,
+        )
+        for index, room in enumerate(config["rooms"])
+    )
     keys = [(room.binding.platform, room.binding.room_id) for room in rooms]
     if len(keys) != len(set(keys)):
         raise ValidationError("Hermes V2 room bindings must be unique per platform and room")
@@ -1378,7 +1462,7 @@ class _ProfileMultiplexNunchiPlugin:
         host_seam_sha256: str,
         host_patch_sha256: str,
         supported_hermes_commit: str,
-        nunchi_integration_sha256: str,
+        nunchi_artifact_sha256: str,
     ) -> None:
         self.ctx = ctx
         self.loader = loader
@@ -1386,7 +1470,7 @@ class _ProfileMultiplexNunchiPlugin:
         self.host_seam_sha256 = host_seam_sha256
         self.host_patch_sha256 = host_patch_sha256
         self.supported_hermes_commit = supported_hermes_commit
-        self.nunchi_integration_sha256 = nunchi_integration_sha256
+        self.nunchi_artifact_sha256 = nunchi_artifact_sha256
         self._lock = threading.RLock()
         self._plugins: dict[str, Any] = {}
         self._plugin_for(initial_profile)
@@ -1480,7 +1564,11 @@ class _ProfileMultiplexNunchiPlugin:
             "host_seam_sha256": self.host_seam_sha256,
             "host_patch_sha256": self.host_patch_sha256,
             "supported_hermes_commit": self.supported_hermes_commit,
-            "nunchi_integration_sha256": self.nunchi_integration_sha256,
+            "nunchi_artifact_sha256": self.nunchi_artifact_sha256,
+            "nunchi_version": nunchi_version,
+            "nunchi_contract_version": 2,
+            "participant_interface_version": 2,
+            "gateway_message_hook_api_version": 2,
         }
         if operational:
             config_identity = json.dumps(
@@ -1519,7 +1607,7 @@ def register(
     ):
         raise ValidationError("Hermes host seam identity is invalid")
     bundle = HostPatchBundle.bundled()
-    nunchi_integration_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    nunchi_artifact_sha256 = _nunchi_artifact_sha256()
     loader = config_loader or _default_config_loader
     profile = _nonempty(getattr(ctx, "profile_name", None) or "default", "Hermes profile")
     plugin: Any = _ProfileMultiplexNunchiPlugin(
@@ -1529,7 +1617,7 @@ def register(
         host_seam_sha256=host_seam_sha256,
         host_patch_sha256=bundle.patch_sha256,
         supported_hermes_commit=bundle.supported_hermes_commit,
-        nunchi_integration_sha256=nunchi_integration_sha256,
+        nunchi_artifact_sha256=nunchi_artifact_sha256,
     )
     ctx.register_hook("gateway_message", plugin.gateway_message)
     ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)
@@ -1543,7 +1631,7 @@ def register(
     ctx.register_command(
         "nunchi-v2",
         probe_command,
-        description="Report Nunchi V2 installed identity and binding provenance",
+        description="Report redacted Nunchi V2 artifact and configuration provenance",
         args_hint="[probe]",
     )
     return plugin

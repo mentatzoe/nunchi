@@ -42,7 +42,7 @@ hermes plugins enable nunchi-v2
 
 If a historical user plugin exists at `~/.hermes/plugins/nunchi-gate`, disable and remove it before enabling V2. Do not run V1 and V2 on the same route.
 
-Keep each candidate room on Hermes' normal mention/command admission setting during installation. Install the exact Hermes core candidate and Nunchi wheel, generate and pin configuration, enable the plugin, restart Hermes, and require `/nunchi-v2 probe` to report `operational: true`, generation 2, and the expected digests and route binding. Only then enable unmentioned-message admission for that exact room. This ordering prevents a broken or undiscovered entry point from silently falling through to the normal Hermes agent.
+Keep each candidate room on Hermes' normal mention/command admission setting during installation. Install the exact Hermes core candidate and Nunchi wheel, generate and pin configuration, enable the plugin, restart Hermes, and require `/nunchi-v2 probe` to report `operational: true`, generation 2, and the expected public artifact, host-seam, patch, interface, and aggregate configuration digests. Separately inspect the private `0600` config/profile files locally and verify the exact profile, participant, actor, room, state root, and enabled capabilities before changing admission. Only then enable unmentioned-message admission for that exact room. This ordering prevents a broken or undiscovered entry point from silently falling through to the normal Hermes agent.
 
 ## Generate pinned configuration
 
@@ -62,7 +62,7 @@ nunchi-hermes-v2-config \
   --name Aleph
 ```
 
-The command writes `0600` JSON files under a `0700` directory and prints their SHA-256 digests plus the exact profile-scoped environment keys. Suppression is disabled by default. It may be enabled only with `--enable-suppression --suppression-recovery-evidence PATH`, where the pinned JSON evidence identifies the matching platform and records `"later_hearing": "verified"`. For profile `default` they are:
+The command writes `0600` JSON files under a `0700` directory and prints their SHA-256 digests plus the exact profile-scoped environment keys. Suppression is disabled by default. It may be enabled only with `--enable-suppression --suppression-recovery-evidence PATH`. That private, pinned recovery-schema-v2 attestation must bind the exact Hermes profile, participant profile, actor, room, continuity scope, full installed Nunchi package file-set digest, verified Hermes host-seam digest, V2 contract/interface versions, candidate commit, live-run identity/start time, and attributable suppressed/later native IDs and timestamps; it must record `"later_hearing": "verified"`. Any profile, artifact, interface, host-seam, or binding change invalidates it. For profile `default` the environment keys are:
 
 ```text
 NUNCHI_HERMES_V2_CONFIG_DEFAULT=/absolute/path/hermes-v2-config.json
@@ -117,11 +117,15 @@ These are post-authorization DM control messages, not slash commands or particip
 /nunchi-v2 probe
 ```
 
-The probe reports generation 2, `v1_fallback: false`, the active Hermes profile,
-loaded profile names and per-profile status, config digest,
-participant/profile binding, isolated state directory, and enabled capability
-names. It does not expose provider credentials, room conversation, or
-authorization operation contents.
+The public probe reports generation 2, `v1_fallback: false`, operational state,
+loaded-profile count, Nunchi version and full package file-set digest, consumed
+V2 contract/interface versions, the supported Hermes commit, verified host-seam
+and patch digests, and an aggregate configuration-set digest. It deliberately
+does not expose profile names, participant/actor/room bindings, state or trusted
+file paths, capability names, provider credentials, room conversation, or
+authorization contents. Verify those private values directly from the pinned
+`0600` config/profile files on the host before opening room admission; the
+public command is not a route-inspection endpoint.
 
 The native adapter reports `sent` only with a positive acknowledgement and a non-empty native message ID. Rejection is `failed`; timeout, exception, malformed, or unattributable acknowledgement is `unknown`; unsupported reaction surfaces are `unavailable`. None of those states is rewritten as social success.
 

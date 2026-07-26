@@ -362,33 +362,112 @@ class HermesV2ContractTests(unittest.TestCase):
         self.require_surface()
         binding = self.binding()
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "live-platform-recovery",
             "surface": binding.platform,
+            "hermes_profile": "default",
             "room_id": binding.room_id,
             "continuity_scope_id": binding.continuity_scope_id,
             "participant_id": binding.participant_id,
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
-            "nunchi_integration_sha256": hashlib.sha256(
-                Path(hermes_module.__file__).read_bytes()
-            ).hexdigest(),
-            "hermes_hook_source_sha256": "0" * 64,
+            "nunchi_artifact_sha256": "c" * 64,
+            "hermes_host_seam_sha256": "0" * 64,
             "gateway_message_hook_api_version": 2,
+            "nunchi_contract_version": 2,
+            "participant_interface_version": 2,
             "live_run_id": "live-run-12345678",
+            "live_run_started_at": "2026-07-26T00:00:00+00:00",
+            "live_candidate_commit": "d" * 40,
+            "live_artifact_sha256": "c" * 64,
             "suppressed_native_message_id": "m1",
-            "suppressed_at": "2026-07-26T00:00:00+00:00",
+            "suppressed_at": "2026-07-26T00:00:01+00:00",
             "later_native_message_id": "m2",
-            "later_observed_at": "2026-07-26T00:00:01+00:00",
+            "later_observed_at": "2026-07-26T00:00:02+00:00",
             "later_hearing": "verified",
         }
-        with self.assertRaisesRegex(ValidationError, "different Hermes hook source"):
+        with self.assertRaisesRegex(ValidationError, "different Hermes host seam"):
             hermes_module._validate_live_recovery_evidence(
                 payload,
                 binding=binding,
+                hermes_profile="default",
                 participant_profile_sha256="b" * 64,
-                hermes_hook_source_sha256="a" * 64,
+                nunchi_artifact_sha256="c" * 64,
+                hermes_host_seam_sha256="a" * 64,
             )
+
+    def test_live_recovery_evidence_rejects_profile_or_artifact_rebinding(self):
+        self.require_surface()
+        binding = self.binding()
+        payload = {
+            "schema_version": 2,
+            "kind": "live-platform-recovery",
+            "surface": binding.platform,
+            "hermes_profile": "default",
+            "room_id": binding.room_id,
+            "continuity_scope_id": binding.continuity_scope_id,
+            "participant_id": binding.participant_id,
+            "actor_id": binding.actor_id,
+            "participant_profile_sha256": "b" * 64,
+            "nunchi_artifact_sha256": "c" * 64,
+            "hermes_host_seam_sha256": "a" * 64,
+            "gateway_message_hook_api_version": 2,
+            "nunchi_contract_version": 2,
+            "participant_interface_version": 2,
+            "live_run_id": "live-run-12345678",
+            "live_run_started_at": "2026-07-26T00:00:00+00:00",
+            "live_candidate_commit": "d" * 40,
+            "live_artifact_sha256": "c" * 64,
+            "suppressed_native_message_id": "m1",
+            "suppressed_at": "2026-07-26T00:00:01+00:00",
+            "later_native_message_id": "m2",
+            "later_observed_at": "2026-07-26T00:00:02+00:00",
+            "later_hearing": "verified",
+        }
+        for field, value, message in (
+            ("hermes_profile", "other", "does not verify this binding"),
+            ("nunchi_artifact_sha256", "e" * 64, "different Nunchi artifact"),
+            ("live_artifact_sha256", "e" * 64, "different Nunchi artifact"),
+        ):
+            with self.subTest(field=field):
+                changed = dict(payload)
+                changed[field] = value
+                with self.assertRaisesRegex(ValidationError, message):
+                    hermes_module._validate_live_recovery_evidence(
+                        changed,
+                        binding=binding,
+                        hermes_profile="default",
+                        participant_profile_sha256="b" * 64,
+                        nunchi_artifact_sha256="c" * 64,
+                        hermes_host_seam_sha256="a" * 64,
+                    )
+
+    def test_nunchi_artifact_identity_covers_shared_and_hermes_package_bytes(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = root / "nunchi"
+            hermes = root / "nunchi_hermes_v2"
+            shared.mkdir()
+            hermes.mkdir()
+            (shared / "pipeline.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (hermes / "__init__.py").write_text("VALUE = 2\n", encoding="utf-8")
+            (hermes / "host_patch.py").write_text("VALUE = 3\n", encoding="utf-8")
+            (hermes / "host_patch_assets").mkdir()
+            (hermes / "host_patch_assets" / "manifest.json").write_text(
+                '{"schema_version":1}\n', encoding="utf-8"
+            )
+
+            first = hermes_module._nunchi_artifact_sha256(
+                package_roots={"nunchi": shared, "nunchi_hermes_v2": hermes}
+            )
+            (shared / "pipeline.py").write_text("VALUE = 4\n", encoding="utf-8")
+            second = hermes_module._nunchi_artifact_sha256(
+                package_roots={"nunchi": shared, "nunchi_hermes_v2": hermes}
+            )
+
+            self.assertRegex(first, r"^[0-9a-f]{64}$")
+            self.assertNotEqual(first, second)
 
     def test_current_host_source_identity_binds_exact_verified_patch_bundle(self):
         self.require_surface()
@@ -1344,7 +1423,11 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("a" * 64, probe["host_seam_sha256"])
         self.assertEqual("17b2204135bf370cc94447195a5c74ed2dfb5fd814f061853ada81768f38b573", probe["host_patch_sha256"])
         self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
-        self.assertRegex(probe["nunchi_integration_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(2, probe["nunchi_contract_version"])
+        self.assertEqual(2, probe["participant_interface_version"])
+        self.assertEqual(2, probe["gateway_message_hook_api_version"])
+        self.assertRegex(probe["nunchi_version"], r"^\d+\.\d+\.\d+")
         self.assertRegex(probe["configuration_set_sha256"], r"^[0-9a-f]{64}$")
         public_blob = json.dumps(probe)
         self.assertNotIn("PASS", public_blob)
