@@ -11,10 +11,10 @@ The wheel carries both the patch and a closed manifest under
 `nunchi_hermes_v2/host_patch_assets/`. The manifest pins:
 
 - untouched Hermes commit `243a01d5d72555061406de84890b2e9622f409cb`;
-- manifest SHA-256 `4fa50ce69c27571fa217ee2801515e8b13e4206078c80fd79f0e038c129af248`,
+- manifest SHA-256 `18a39dc55c040710d4d67db1a6ca6429d4baa0330b167fa3515e0fb1c2d2eb24`,
   pinned independently in installed applicator code;
 - 19 declared regular-file paths;
-- patch SHA-256 `9c8cd474773952d777a09dc9422c05bc12409cf22797bca72a54bec05cec1422`;
+- patch SHA-256 `451902c81f529581e7e8639203d483e7a86c1a57fdf3bd139ad0142bc05557a0`;
 - the closed patch operation and path set; and
 - every touched path's exact pre-apply and post-apply SHA-256 and Git mode.
 
@@ -101,10 +101,20 @@ message ID cannot establish success.
 A V2 `gateway_message` hook and any legacy behavior-changing
 `pre_gateway_dispatch` hook are mutually exclusive. Hermes refuses ordinary
 ingress before invoking either hook when both are registered, while the public
-Nunchi probe reports `legacy-pre-dispatch-conflict`. Startup-restored and
-historical replay are fenced before legacy pre-dispatch regardless, so replay
-cannot execute old social-judgment code. Legacy pre-dispatch continues to run
-for non-V2 installations.
+Nunchi probe reports `legacy-pre-dispatch-conflict`. Synthetic startup-restored
+and historical replay are fenced before legacy pre-dispatch regardless, so
+replay cannot execute old social-judgment code. Live native ingress accepted
+while startup restoration is running remains live: Hermes queues it FIFO and,
+once restoration releases it, offers it exactly once to the participant seam
+and then ordinary dispatch when the participant passes. Legacy pre-dispatch
+continues to run for non-V2 installations.
+
+Telegram topic capabilities use the same canonical room identity as participant
+bindings and native acknowledgements: `CHAT_ID:topic:TOPIC_ID`. The host keeps
+the raw chat and topic IDs inside adapter callbacks, but adapter-produced sends,
+replies, and reactions attest the canonical room. Route-bound participant
+effects are strict: a missing topic or reply target fails rather than retrying
+into the root chat.
 
 ## Removal
 

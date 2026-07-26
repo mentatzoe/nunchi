@@ -645,7 +645,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..5d8ec503e5bb428a9e4ddc706022acc1
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c860d4a1271 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..cee3ca4da4c146eaee657f993dabe48863867c5d 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -708,7 +708,22 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
          running_agent = self._running_agents.get(session_key)
  
          effective_mode = self._busy_input_mode
-@@ -9582,6 +9621,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -7463,10 +7502,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                     getattr(getattr(source, "platform", None), "value", None),
+                 )
+                 continue
+-            # Mark this replay so _handle_message does not queue it again while
+-            # the restore gate remains closed for any fresh inbound arrivals.
++            # This is accepted live ingress, not recovery replay. Mark it only
++            # to bypass this still-closed startup gate; participant and ordinary
++            # dispatch must both see it exactly once.
+             try:
+-                setattr(event, "_hermes_startup_restore_replay", True)
++                setattr(event, "_hermes_startup_restore_queued_live", True)
+             except Exception:
+                 pass
+             await adapter.handle_message(event)
+@@ -9582,6 +9622,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
  
              self._running = False
              self._draining = True
@@ -734,7 +749,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
  
              stop_watchdog = getattr(self, "_stop_systemd_watchdog", None)
              if callable(stop_watchdog):
-@@ -10742,6 +10800,66 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10742,6 +10801,66 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          )
          return switched
  
@@ -801,7 +816,15 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
      async def _handle_message(self, event: MessageEvent) -> Optional[str]:
          """
          Handle an incoming message from any platform.
-@@ -10813,46 +10931,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10801,6 +10920,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+             getattr(self, "_startup_restore_in_progress", False)
+             and not is_internal
+             and not getattr(event, "_hermes_startup_restore_replay", False)
++            and not getattr(event, "_hermes_startup_restore_queued_live", False)
+         ):
+             self._queue_startup_restore_event(event)
+             return None
+@@ -10813,46 +10933,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          if not is_internal:
              self._scale_to_zero_note_real_inbound()
  
@@ -852,7 +875,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
  
          if is_internal:
              pass
-@@ -10907,6 +10989,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10907,6 +10991,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      # Record rate limit so subsequent messages are silently ignored
                      self.pairing_store._record_rate_limit(platform_name, source.user_id)
              return None
@@ -879,7 +902,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
          
          # Intercept messages that are responses to a pending /update prompt.
          # The update process (detached) wrote .update_prompt.json; the watcher
-@@ -11186,6 +11288,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11186,6 +11290,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # _interrupt_requested.  Force-clean _running_agents so the session
              # is unlocked and subsequent messages are processed normally.
              if _cmd_def_inner and _cmd_def_inner.name == "stop":
@@ -891,7 +914,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
                  await self._interrupt_and_clear_session(
                      _quick_key,
                      source,
-@@ -11203,6 +11310,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11203,6 +11312,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # doesn't get re-processed as a user message after the
              # interrupt completes.
              if _cmd_def_inner and _cmd_def_inner.name == "new":
@@ -905,7 +928,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
                  # Clear any pending messages so the old text doesn't replay
                  await self._interrupt_and_clear_session(
                      _quick_key,
-@@ -11212,7 +11326,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11212,7 +11328,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  )
                  # Clean up the running agent entry so the reset handler
                  # doesn't think an agent is still active.
@@ -914,7 +937,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
  
              # /queue <prompt> — queue without interrupting.
              # Semantics: each /queue invocation produces its own full agent
-@@ -11413,6 +11527,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11413,6 +11529,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      f"mid-turn. Wait for the current response or `/stop` first."
                  )
  
@@ -939,7 +962,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
              if event.message_type == MessageType.PHOTO:
                  logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
                  adapter = self._adapter_for_source(source)
-@@ -11468,14 +11600,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11468,14 +11602,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          merge_text=True,
                      )
                  return None
@@ -954,7 +977,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
              if self._busy_input_mode == "queue":
                  logger.debug("PRIORITY queue follow-up for session %s", _quick_key)
                  self._queue_or_replace_pending_event(_quick_key, event)
-@@ -12264,6 +12388,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12264,6 +12390,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          _run_generation = self._begin_session_run_generation(_quick_key)
  
          try:
@@ -970,7 +993,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
              _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
              # Goal continuation: after the agent returns a final response
              # for this turn, check any standing /goal — the judge will
-@@ -12835,6 +12968,359 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12835,6 +12970,376 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  pass
          return source
  
@@ -1085,8 +1108,16 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
 +        adapter = self._adapter_for_source(source)
 +        delivery_platform = source.platform
 +        delivery_chat_id = str(source.chat_id)
++        delivery_room_id = delivery_chat_id
++        if delivery_platform == Platform.TELEGRAM and source.thread_id is not None:
++            delivery_thread_id = str(source.thread_id)
++            if delivery_thread_id:
++                delivery_room_id = f"{delivery_chat_id}:topic:{delivery_thread_id}"
 +        delivery_message_id = str(event.message_id or "")
 +        delivery_metadata = self._thread_metadata_for_source(source, event.message_id)
++        if delivery_room_id != delivery_chat_id:
++            delivery_metadata = dict(delivery_metadata or {})
++            delivery_metadata["_hermes_require_topic_route"] = True
 +        delivery_via_relay = (
 +            getattr(source, "delivered_via_upstream_relay", False) is True
 +        )
@@ -1157,6 +1188,15 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
 +            react: Any = getattr(adapter, "react", None)
 +            if not callable(react):
 +                return SendResult(success=False)
++            if delivery_platform == Platform.TELEGRAM:
++                metadata = dict(delivery_metadata) if delivery_metadata else None
++                return await react(
++                    delivery_chat_id,
++                    delivery_message_id,
++                    reaction,
++                    operation=operation,
++                    metadata=metadata,
++                )
 +            return await react(
 +                delivery_chat_id,
 +                delivery_message_id,
@@ -1179,7 +1219,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
 +            reply_callback=_reply_to_source,
 +            react_callback=_react_to_source,
 +            platform=str(getattr(delivery_platform, "value", delivery_platform)),
-+            room_id=delivery_chat_id,
++            room_id=delivery_room_id,
 +            profile=delivery_profile,
 +            self_actor_id=authenticated_actor,
 +            source_message_id=delivery_message_id or None,
@@ -1330,7 +1370,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c86
      async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
          """Inner handler that runs under the _running_agents sentinel guard."""
          _msg_start_time = time.time()
-@@ -12848,22 +13334,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12848,22 +13353,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
          )
  
@@ -1907,7 +1947,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..fdfa416ace38e5fcc562c2cc745a3456
          """Wait for the quiet period then dispatch the aggregated text.
  
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991060521cf 100644
+index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ad9755efe4677b95a8b75267b19a0b497f5f9701 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -10,6 +10,7 @@ Uses python-telegram-bot library for:
@@ -1959,7 +1999,26 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
      MEDIA_GROUP_WAIT_SECONDS = 0.8
      _GENERAL_TOPIC_THREAD_ID = "1"
  
-@@ -1856,9 +1877,24 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -1088,6 +1109,18 @@ class TelegramAdapter(BasePlatformAdapter):
+         thread_id = metadata.get("thread_id") or metadata.get("message_thread_id")
+         return str(thread_id) if thread_id is not None else None
+ 
++    @classmethod
++    def _native_delivery_room_id(
++        cls,
++        chat_id: str,
++        metadata: Optional[Dict[str, Any]],
++    ) -> str:
++        """Return the route identity attested by a native Telegram effect."""
++        thread_id = cls._metadata_thread_id(metadata)
++        if thread_id:
++            return f"{chat_id}:topic:{thread_id}"
++        return str(chat_id)
++
+     @classmethod
+     def _metadata_direct_messages_topic_id(cls, metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+         if not metadata:
+@@ -1856,9 +1889,24 @@ class TelegramAdapter(BasePlatformAdapter):
                  rich_sent_store.record(str(chat_id), str(message_id), content)
              except Exception:
                  pass
@@ -1969,7 +2028,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
 +        if native_message_id is not None and actor_id is not None:
 +            native_ack = NativeDeliveryAck(
 +                platform="telegram",
-+                room_id=str(chat_id),
++                room_id=self._native_delivery_room_id(str(chat_id), metadata),
 +                self_actor_id=actor_id,
 +                effect_kind="reply" if reply_to_id is not None else "send",
 +                submitted_content=content,
@@ -1985,15 +2044,46 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
          )
  
      async def _try_edit_rich(
-@@ -4293,6 +4329,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -4293,8 +4341,12 @@ class TelegramAdapter(BasePlatformAdapter):
                  ]
              
              message_ids = []
 +            reply_attested_id = None
              thread_id = self._metadata_thread_id(metadata)
              requested_thread_id = self._message_thread_id_for_send(thread_id)
++            require_topic_route = bool(
++                metadata and metadata.get("_hermes_require_topic_route")
++            )
              used_thread_fallback = False
-@@ -4504,6 +4541,8 @@ class TelegramAdapter(BasePlatformAdapter):
+             
+             try:
+@@ -4413,6 +4465,16 @@ class TelegramAdapter(BasePlatformAdapter):
+                                     )
+                                     continue
+                                 # Second failure: the thread is genuinely gone.
++                                # Route-bound participant effects may never fall
++                                # back into the root chat after authorizing a topic.
++                                if require_topic_route:
++                                    return SendResult(
++                                        success=False,
++                                        error=_redact_telegram_error_text(send_err),
++                                        retryable=False,
++                                    )
++                                # Ordinary Hermes delivery retains its historical
++                                # fallback behavior outside the strict V2 seam.
+                                 # Retry without ``message_thread_id`` so the
+                                 # message still reaches the chat, and prune
+                                 # the stale binding so future inbound
+@@ -4431,7 +4493,7 @@ class TelegramAdapter(BasePlatformAdapter):
+                                 continue
+                             err_lower = str(send_err).lower()
+                             if "message to be replied not found" in err_lower and reply_to_id is not None:
+-                                if private_dm_topic_send:
++                                if private_dm_topic_send or require_topic_route:
+                                     safe_send_error = _redact_telegram_error_text(send_err)
+                                     return SendResult(
+                                         success=False,
+@@ -4504,6 +4566,8 @@ class TelegramAdapter(BasePlatformAdapter):
                                  await asyncio.sleep(wait)
                                  continue
                          raise
@@ -2002,7 +2092,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
                  message_ids.append(str(msg.message_id))
  
              # Re-trigger typing indicator after sending a message.
-@@ -4522,14 +4561,29 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -4522,14 +4586,29 @@ class TelegramAdapter(BasePlatformAdapter):
                  except Exception:
                      pass  # Typing failures are non-fatal
  
@@ -2012,7 +2102,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
 +            if native_message_id is not None and actor_id is not None:
 +                native_ack = NativeDeliveryAck(
 +                    platform="telegram",
-+                    room_id=str(chat_id),
++                    room_id=self._native_delivery_room_id(str(chat_id), metadata),
 +                    self_actor_id=actor_id,
 +                    effect_kind="reply" if reply_attested_id is not None else "send",
 +                    submitted_content=content,
@@ -2033,7 +2123,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
              )
              
          except Exception as e:
-@@ -8495,6 +8549,34 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8495,6 +8574,34 @@ class TelegramAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -2068,7 +2158,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -8509,11 +8591,26 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8509,11 +8616,26 @@ class TelegramAdapter(BasePlatformAdapter):
  
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
@@ -2095,7 +2185,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
              # Append text from the follow-up chunk
              if event.text:
                  existing.text = f"{existing.text}\n{event.text}" if existing.text else event.text
-@@ -8531,6 +8628,16 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8531,6 +8653,16 @@ class TelegramAdapter(BasePlatformAdapter):
              self._flush_text_batch(key)
          )
  
@@ -2112,7 +2202,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
      async def _flush_text_batch(self, key: str) -> None:
          """Wait for the quiet period then dispatch the aggregated text.
  
-@@ -8618,10 +8725,30 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8618,10 +8750,30 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping photo batch enqueue after disconnect started")
              return
  
@@ -2143,7 +2233,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -8926,10 +9053,26 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8926,10 +9078,26 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping media group enqueue after disconnect started")
              return
  
@@ -2170,7 +2260,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -9350,8 +9493,14 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9350,8 +9518,14 @@ class TelegramAdapter(BasePlatformAdapter):
              _chat_id_str if thread_id_str else None,
          )
  
@@ -2186,7 +2276,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
              message_type=msg_type,
              source=source,
              raw_message=message,
-@@ -9362,6 +9511,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9362,6 +9536,10 @@ class TelegramAdapter(BasePlatformAdapter):
              auto_skill=topic_skill,
              channel_prompt=_channel_prompt,
              timestamp=message.date,
@@ -2197,7 +2287,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
          )
  
      # ── Message reactions (processing lifecycle) ──────────────────────────
-@@ -9406,6 +9559,49 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9406,6 +9584,51 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[%s] clear reactions failed: %s", self.name, _redact_telegram_error_text(e))
              return False
  
@@ -2208,6 +2298,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
 +        reaction: str,
 +        *,
 +        operation: str = "add",
++        metadata: Optional[Dict[str, Any]] = None,
 +    ) -> SendResult:
 +        """Apply one reaction to an exact Telegram message."""
 +        if operation not in {"add", "remove"}:
@@ -2220,12 +2311,13 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991
 +        actor_id = self.authenticated_actor_id()
 +        ack = None
 +        if succeeded and actor_id is not None:
++            native_room_id = self._native_delivery_room_id(str(chat_id), metadata)
 +            identity = "\x00".join(
-+                ("telegram", str(chat_id), actor_id, str(message_id), operation, reaction)
++                ("telegram", native_room_id, actor_id, str(message_id), operation, reaction)
 +            )
 +            ack = NativeDeliveryAck(
 +                platform="telegram",
-+                room_id=str(chat_id),
++                room_id=native_room_id,
 +                self_actor_id=actor_id,
 +                effect_kind="react",
 +                target_message_id=str(message_id),
@@ -2383,10 +2475,10 @@ index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..e873323faf9025a86d074fbc40ef05db
      adapter = DiscordAdapter(PlatformConfig(enabled=True, token="fake-token"))
 diff --git a/tests/gateway/test_gateway_message_hooks.py b/tests/gateway/test_gateway_message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8b67989d2449780efb1330109f7962aaf7d99c2a
+index 0000000000000000000000000000000000000000..02f3bcc058297281ade08037f9b6677085dbe669
 --- /dev/null
 +++ b/tests/gateway/test_gateway_message_hooks.py
-@@ -0,0 +1,1588 @@
+@@ -0,0 +1,1754 @@
 +"""Public contract tests for the generic gateway user-message hook."""
 +
 +import asyncio
@@ -2398,6 +2490,7 @@ index 0000000000000000000000000000000000000000..8b67989d2449780efb1330109f7962aa
 +
 +import pytest
 +
++from gateway.config import GatewayConfig, Platform, PlatformConfig
 +from gateway.message_hooks import (
 +    GatewayDelivery,
 +    GatewayDeliveryReceipt,
@@ -2412,7 +2505,6 @@ index 0000000000000000000000000000000000000000..8b67989d2449780efb1330109f7962aa
 +    SendResult,
 +)
 +from gateway.session import SessionSource, build_session_key
-+from gateway.config import GatewayConfig, Platform, PlatformConfig
 +
 +
 +def _source() -> SessionSource:
@@ -3320,6 +3412,172 @@ index 0000000000000000000000000000000000000000..8b67989d2449780efb1330109f7962aa
 +    participant_hook.assert_not_awaited()
 +    running_agent.interrupt.assert_not_called()
 +    runner._queue_or_replace_pending_event.assert_not_called()
++
++
++@pytest.mark.asyncio
++async def test_live_ingress_queued_during_startup_restore_is_observed_once(monkeypatch):
++    runner, adapter = _runner_for_dispatch()
++    runner._startup_restore_in_progress = True
++    runner._startup_restore_queue = []
++    adapter.handle_message = AsyncMock(side_effect=runner._handle_message)
++    participant_hook = AsyncMock(return_value=[{"decision": "pass"}])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_args, **_kwargs: [])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", participant_hook)
++    event = _event()
++
++    await runner._handle_message(event)
++
++    participant_hook.assert_not_awaited()
++    runner._handle_message_with_agent.assert_not_awaited()
++    assert runner._startup_restore_queue == [event]
++
++    drained = await runner._drain_startup_restore_queue()
++
++    assert drained == 1
++    assert runner._startup_restore_queue == []
++    participant_hook.assert_awaited_once()
++    runner._handle_message_with_agent.assert_awaited_once()
++    assert runner._handle_message_with_agent.await_args.args[0] is event
++
++
++def test_telegram_native_ack_room_includes_topic_identity():
++    from plugins.platforms.telegram.adapter import TelegramAdapter
++
++    assert (
++        TelegramAdapter._native_delivery_room_id(
++            "-100", {"thread_id": "42"}
++        )
++        == "-100:topic:42"
++    )
++    assert TelegramAdapter._native_delivery_room_id("-100", None) == "-100"
++
++
++@pytest.mark.asyncio
++async def test_telegram_strict_topic_effect_never_falls_back_to_root_chat():
++    from telegram.error import BadRequest
++
++    from plugins.platforms.telegram.adapter import TelegramAdapter
++
++    adapter = object.__new__(TelegramAdapter)
++    config = PlatformConfig(enabled=True, token="fake-token")
++    adapter.config = config
++    adapter._config = config
++    adapter._platform = Platform.TELEGRAM
++    adapter.platform = Platform.TELEGRAM
++    adapter._connected = True
++    adapter._dm_topics = {}
++    adapter._dm_topics_config = []
++    adapter._reply_to_mode = "first"
++    adapter._fallback_ips = []
++    adapter._polling_conflict_count = 0
++    adapter._polling_network_error_count = 0
++    adapter._polling_error_callback_ref = None
++    call_log = []
++
++    async def send_message(**kwargs):
++        call_log.append(dict(kwargs))
++        raise BadRequest("Message thread not found")
++
++    adapter._bot = SimpleNamespace(send_message=send_message)
++    result = await adapter.send(
++        chat_id="-100",
++        content="participant effect",
++        metadata={
++            "thread_id": "42",
++            "_hermes_require_topic_route": True,
++        },
++    )
++
++    assert result.success is False
++    assert result.retryable is False
++    assert len(call_log) == 2
++    assert all(call["message_thread_id"] == 42 for call in call_log)
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("operation", ["send", "reply", "react"])
++async def test_telegram_topic_delivery_uses_canonical_room_identity(
++    monkeypatch, operation
++):
++    runner, adapter = _runner_for_dispatch()
++    source = dataclasses.replace(
++        _source(),
++        platform=Platform.TELEGRAM,
++        scope_id=None,
++        chat_id="-100",
++        chat_type="group",
++        thread_id="42",
++    )
++    event = dataclasses.replace(_event(), source=source)
++
++    async def send_native(chat_id, content, reply_to=None, metadata=None):
++        assert metadata["_hermes_require_topic_route"] is True
++        return SendResult(
++            success=True,
++            message_id="telegram-out-1",
++            native_delivery_ack=NativeDeliveryAck(
++                platform="telegram",
++                room_id=f"{chat_id}:topic:{metadata['thread_id']}",
++                self_actor_id="9",
++                effect_kind="reply" if reply_to is not None else "send",
++                submitted_content=content,
++                reply_to_message_id=str(reply_to) if reply_to is not None else None,
++                message_id="telegram-out-1",
++                effect_id="telegram-out-1",
++            ),
++        )
++
++    async def react_native(
++        chat_id, message_id, reaction, *, operation="add", metadata=None
++    ):
++        assert metadata["_hermes_require_topic_route"] is True
++        return SendResult(
++            success=True,
++            message_id=str(message_id),
++            native_delivery_ack=NativeDeliveryAck(
++                platform="telegram",
++                room_id=f"{chat_id}:topic:{metadata['thread_id']}",
++                self_actor_id="9",
++                effect_kind="react",
++                target_message_id=str(message_id),
++                reaction=reaction,
++                reaction_operation=operation,
++                effect_id="telegram:reaction:topic-effect",
++            ),
++        )
++
++    adapter.send = AsyncMock(side_effect=send_native)
++    adapter.react = AsyncMock(side_effect=react_native)
++    runner.adapters = {Platform.TELEGRAM: adapter}
++    runner._profile_adapters = {"work": {Platform.TELEGRAM: adapter}}
++    receipts = []
++
++    async def hook(_name, **kwargs):
++        assert kwargs["route"].chat_id == "-100"
++        assert kwargs["route"].thread_id == "42"
++        if operation == "send":
++            receipts.append(await kwargs["delivery"].send("topic message"))
++        elif operation == "reply":
++            receipts.append(await kwargs["delivery"].reply("topic reply"))
++        else:
++            receipts.append(await kwargs["delivery"].react("+1"))
++        return [{"decision": "handled"}]
++
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_args, **_kwargs: [])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", hook)
++
++    await runner._handle_message(event)
++
++    assert len(receipts) == 1
++    receipt = receipts[0]
++    assert receipt.status == "sent"
++    assert receipt.room_id == "-100:topic:42"
++    assert receipt.effect_kind == operation
++    if operation == "react":
++        assert receipt.target_message_id == "incoming-1"
++        assert receipt.effect_id == "telegram:reaction:topic-effect"
++    else:
++        assert receipt.message_id == "telegram-out-1"
 +
 +
 +@pytest.mark.asyncio
