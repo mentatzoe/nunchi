@@ -1016,6 +1016,56 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
 
+    def test_pipeline_cancel_invalidates_privileged_effect_while_policy_is_blocked(self):
+        policy_started = threading.Event()
+        release_policy = threading.Event()
+
+        class BlockingPolicy:
+            def __init__(inner):
+                inner.calls = 0
+
+            def load(inner):
+                inner.calls += 1
+                if inner.calls == 2:
+                    policy_started.set()
+                    release_policy.wait(2)
+                return self.policy.load()
+
+        coordinator = self.coordinator(policy=BlockingPolicy())
+        self.pipeline.host.privileged = coordinator
+        self.pipeline.host.participant = lambda **_: self.proposal()
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                self.pipeline.handle_delivery(
+                    delivery_id="d2",
+                    event=message("e2"),
+                    actors={"human:zoe": {"kind": "human"}},
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(policy_started.wait(1))
+        cancel_done = threading.Event()
+        cancel_worker = threading.Thread(
+            target=lambda: (self.pipeline.cancel(), cancel_done.set())
+        )
+        cancel_worker.start()
+        try:
+            self.assertTrue(
+                cancel_done.wait(0.25),
+                "pipeline cancellation blocked behind privileged dispatch",
+            )
+        finally:
+            release_policy.set()
+            worker.join(2)
+            cancel_worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(cancel_worker.is_alive())
+        self.assertEqual([], self.native_calls)
+
     def test_host_deadline_during_policy_load_never_publishes_stale_approval(self):
         approval_rule = CapabilityRule(
             **{
@@ -1129,6 +1179,160 @@ class AuthorizationTests(unittest.TestCase):
             if record["kind"] == "authorization_contract"
         ][:2]
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
+
+    def test_cancel_invalidates_direct_effect_while_policy_recheck_is_blocked(self):
+        policy_started = threading.Event()
+        release_policy = threading.Event()
+
+        class BlockingPolicy:
+            def __init__(inner):
+                inner.calls = 0
+
+            def load(inner):
+                inner.calls += 1
+                if inner.calls == 2:
+                    policy_started.set()
+                    release_policy.wait(2)
+                return self.policy.load()
+
+        coordinator = self.coordinator(policy=BlockingPolicy())
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                coordinator.execute_proposal(
+                    proposal=self.proposal(),
+                    wake=self.wake,
+                    cancel=threading.Event(),
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(policy_started.wait(1))
+        cancel_done = threading.Event()
+        cancel_worker = threading.Thread(
+            target=lambda: (coordinator.cancel(), cancel_done.set())
+        )
+        cancel_worker.start()
+        try:
+            self.assertTrue(
+                cancel_done.wait(0.25),
+                "lifecycle invalidation blocked behind authorization work",
+            )
+        finally:
+            release_policy.set()
+            worker.join(2)
+            cancel_worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(cancel_worker.is_alive())
+        self.assertEqual("failed", result_holder["result"].delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_cancel_invalidates_authenticated_approval_during_policy_recheck(self):
+        high_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        snapshot = PolicySnapshot(
+            "policy",
+            "r1",
+            (high_rule,),
+            ("operator:zoe",),
+        )
+        policy_started = threading.Event()
+        release_policy = threading.Event()
+
+        class BlockingApprovalPolicy:
+            def __init__(inner):
+                inner.calls = 0
+
+            def load(inner):
+                inner.calls += 1
+                if inner.calls == 2:
+                    policy_started.set()
+                    release_policy.wait(2)
+                return deepcopy(snapshot)
+
+        coordinator = self.coordinator(policy=BlockingApprovalPolicy())
+        initial = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unavailable", initial.delivery)
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                coordinator.complete_authenticated_approval(
+                    approval_challenge_id=challenge_id,
+                    authenticated_approver_id="operator:zoe",
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(policy_started.wait(1))
+        coordinator.cancel()
+        release_policy.set()
+        worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual("failed", result_holder["result"].delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_cancel_invalidates_unknown_retry_during_policy_recheck(self):
+        snapshot = self.policy.load()
+        policy_started = threading.Event()
+        release_policy = threading.Event()
+
+        class BlockingRetryPolicy:
+            def __init__(inner):
+                inner.calls = 0
+
+            def load(inner):
+                inner.calls += 1
+                if inner.calls == 4:
+                    policy_started.set()
+                    release_policy.wait(2)
+                return deepcopy(snapshot)
+
+        coordinator = self.coordinator(
+            policy=BlockingRetryPolicy(),
+            result=TransportResult("unknown", "native outcome ambiguous"),
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unknown", first.delivery)
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                coordinator.execute_proposal(
+                    proposal=self.proposal(),
+                    wake=self.wake,
+                    cancel=threading.Event(),
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(policy_started.wait(1))
+        coordinator.cancel()
+        release_policy.set()
+        worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual("failed", result_holder["result"].delivery)
+        self.assertEqual(1, len(self.native_calls))
 
     def test_policy_revocation_between_initial_check_and_commit_makes_zero_calls(self):
         allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))

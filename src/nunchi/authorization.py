@@ -480,6 +480,7 @@ class _PendingApproval:
     operation: dict[str, Any]
     effect_fingerprint: str
     cancel: threading.Event
+    lifecycle_generation: int
     unknown_retry: bool = False
 
 
@@ -509,6 +510,30 @@ class AuthorizationCoordinator:
         self.approval_ttl_seconds = approval_ttl_seconds
         self._pending: dict[str, _PendingApproval] = {}
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.Lock()
+        self._lifecycle_generation = 0
+
+    def _capture_lifecycle(self) -> int:
+        with self._lifecycle_lock:
+            return self._lifecycle_generation
+
+    def _lifecycle_is_current(
+        self,
+        generation: int,
+        cancel: threading.Event,
+    ) -> bool:
+        if cancel.is_set():
+            return False
+        with self._lifecycle_lock:
+            return generation == self._lifecycle_generation and not cancel.is_set()
+
+    def _invalidate_lifecycle(self) -> None:
+        # This fence is deliberately independent from authorization and effect
+        # locks. A host lifecycle boundary must become visible immediately even
+        # while policy I/O, journal persistence, approval work, or an executor
+        # is blocking under ``self._lock``.
+        with self._lifecycle_lock:
+            self._lifecycle_generation += 1
 
     @staticmethod
     def _matching_rule(
@@ -677,12 +702,13 @@ class AuthorizationCoordinator:
         decision: Mapping[str, Any],
         rule: CapabilityRule,
         cancel: threading.Event,
+        lifecycle_generation: int,
     ) -> TransportResult:
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "privileged work cancelled before commit")
         # Exact execution-time policy and origin recheck.
         current_policy = self.policy_source.load()
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "privileged work cancelled during policy recheck")
         moment = _now()
         outcome, reason, current_rule = self._evaluate(
@@ -706,7 +732,7 @@ class AuthorizationCoordinator:
         idempotency_key = (
             f"nunchi:{fingerprint}" if rule.target_idempotency else None
         )
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "privileged work cancelled before effect commit")
         # Persisting consumption is the one-use gate immediately before native
         # dispatch.  An uncertain write makes zero calls.
@@ -721,7 +747,7 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(moment),
             }
         )
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "privileged work cancelled before native effect")
         # Persistence can itself consume the remaining grant lifetime or
         # overlap a policy revocation. Reload every deterministic authority
@@ -735,7 +761,7 @@ class AuthorizationCoordinator:
             committed_recheck=True,
         )
         if (
-            cancel.is_set()
+            not self._lifecycle_is_current(lifecycle_generation, cancel)
             or outcome != "ALLOW"
             or reason != "policy-allow"
             or current_rule != rule
@@ -747,6 +773,11 @@ class AuthorizationCoordinator:
             return TransportResult(
                 "failed",
                 "authorization changed before native effect",
+            )
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
+            return TransportResult(
+                "failed",
+                "privileged work cancelled at native effect boundary",
             )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
@@ -778,16 +809,17 @@ class AuthorizationCoordinator:
         decision: Mapping[str, Any],
         rule: CapabilityRule,
         cancel: threading.Event,
+        lifecycle_generation: int,
         authenticated_approval: bool,
     ) -> TransportResult:
         """Retry one previously unknown effect under fresh exact authority."""
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "unknown-effect retry was cancelled")
         fingerprint = self._effect_fingerprint(binding)
         if not self.journal.consumed(fingerprint) or not self.journal.unknown(fingerprint):
             return TransportResult("failed", "unknown-effect retry has no unknown predecessor")
         policy = self.policy_source.load()
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "unknown-effect retry was cancelled during policy recheck")
         now = _now()
         outcome, reason, current_rule = self._evaluate(
@@ -818,7 +850,7 @@ class AuthorizationCoordinator:
         if self.journal.idempotency_key(fingerprint) != expected_key:
             return TransportResult("failed", "unknown-effect target idempotency binding changed")
         retry_id = f"effect-retry:{uuid4()}"
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "unknown-effect retry was cancelled before commit")
         self.journal.append(
             {
@@ -833,7 +865,7 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "unknown-effect retry was cancelled before native effect")
         policy = self.policy_source.load()
         now = _now()
@@ -853,7 +885,7 @@ class AuthorizationCoordinator:
             )
         )
         if (
-            cancel.is_set()
+            not self._lifecycle_is_current(lifecycle_generation, cancel)
             or not authority_matches
             or current_rule != rule
             or policy.provenance != decision["policy_provenance"]
@@ -865,6 +897,11 @@ class AuthorizationCoordinator:
             return TransportResult(
                 "failed",
                 "unknown-effect retry authority changed before native effect",
+            )
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
+            return TransportResult(
+                "failed",
+                "unknown-effect retry cancelled at native effect boundary",
             )
         try:
             result = self.executors[binding["capability"]](operation, expected_key)
@@ -899,16 +936,17 @@ class AuthorizationCoordinator:
         cancel: threading.Event,
     ) -> TransportResult:
         """Authorize one proposal; never accepts room text as authority."""
-        if cancel.is_set():
+        lifecycle_generation = self._capture_lifecycle()
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "privileged proposal was already cancelled")
         with self._lock:
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was already cancelled")
             try:
                 binding, operation = self._build_binding(proposal, wake)
             except (AuthorizationError, ValidationError) as exc:
                 return TransportResult("failed", str(exc))
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was cancelled before audit")
             requested_at = _now()
             request_id = f"authorization:{uuid4()}"
@@ -920,13 +958,13 @@ class AuthorizationCoordinator:
                 "requested_at": _iso(requested_at),
             }
             self._persist_contract(request)
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was cancelled during audit")
             try:
                 policy = self.policy_source.load()
             except BaseException:
                 return TransportResult("failed", "trusted authorization policy is unavailable")
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was cancelled during policy load")
             evaluated_at = _strictly_after(requested_at)
             fingerprint = self._effect_fingerprint(binding)
@@ -947,7 +985,7 @@ class AuthorizationCoordinator:
                 # fresh authenticated operator accepts the duplicate risk.
                 outcome = "APPROVAL_REQUIRED"
                 reason = "approval-required"
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was cancelled during evaluation")
             if outcome == "APPROVAL_REQUIRED":
                 challenge_id = f"approval:{secrets.token_urlsafe(24)}"
@@ -974,13 +1012,13 @@ class AuthorizationCoordinator:
                     ),
                     "host_only": True,
                 }
-                if cancel.is_set():
+                if not self._lifecycle_is_current(lifecycle_generation, cancel):
                     return TransportResult("failed", "privileged proposal was cancelled before challenge")
                 self._persist_contract(decision)
-                if cancel.is_set():
+                if not self._lifecycle_is_current(lifecycle_generation, cancel):
                     return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._persist_contract(challenge)
-                if cancel.is_set():
+                if not self._lifecycle_is_current(lifecycle_generation, cancel):
                     return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._pending[challenge_id] = _PendingApproval(
                     request=request,
@@ -989,9 +1027,10 @@ class AuthorizationCoordinator:
                     operation=operation,
                     effect_fingerprint=fingerprint,
                     cancel=cancel,
+                    lifecycle_generation=lifecycle_generation,
                     unknown_retry=unknown_retry,
                 )
-                if cancel.is_set():
+                if not self._lifecycle_is_current(lifecycle_generation, cancel):
                     self._pending.pop(challenge_id, None)
                     return TransportResult("failed", "privileged proposal was cancelled before challenge publication")
                 return TransportResult("unavailable", "authenticated operator approval required")
@@ -1005,7 +1044,7 @@ class AuthorizationCoordinator:
                 authorization_path="direct-policy",
             )
             self._persist_contract(decision)
-            if cancel.is_set():
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
                 return TransportResult("failed", "privileged proposal was cancelled during decision audit")
             if outcome != "ALLOW" or rule is None:
                 return TransportResult("failed", f"privileged action denied: {reason}")
@@ -1016,6 +1055,7 @@ class AuthorizationCoordinator:
                     decision=decision,
                     rule=rule,
                     cancel=cancel,
+                    lifecycle_generation=lifecycle_generation,
                     authenticated_approval=False,
                 )
             return self._dispatch_once(
@@ -1024,6 +1064,7 @@ class AuthorizationCoordinator:
                 decision=decision,
                 rule=rule,
                 cancel=cancel,
+                lifecycle_generation=lifecycle_generation,
             )
 
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
@@ -1032,7 +1073,10 @@ class AuthorizationCoordinator:
             now = _now()
             for challenge_id, item in tuple(self._pending.items()):
                 if (
-                    item.cancel.is_set()
+                    not self._lifecycle_is_current(
+                        item.lifecycle_generation,
+                        item.cancel,
+                    )
                     or now >= _parse_time(item.challenge["expires_at"])
                 ):
                     self._pending.pop(challenge_id, None)
@@ -1063,7 +1107,7 @@ class AuthorizationCoordinator:
             now = _strictly_after(_parse_time(pending.decision["evaluated_at"]))
             challenge = pending.challenge
             if (
-                pending.cancel.is_set()
+                not self._lifecycle_is_current(pending.lifecycle_generation, pending.cancel)
                 or now >= _parse_time(challenge["expires_at"])
                 or authenticated_approver_id not in challenge["approver_ids"]
             ):
@@ -1071,7 +1115,7 @@ class AuthorizationCoordinator:
             policy = self.policy_source.load()
             now = _strictly_after(now)
             if (
-                pending.cancel.is_set()
+                not self._lifecycle_is_current(pending.lifecycle_generation, pending.cancel)
                 or now >= _parse_time(challenge["expires_at"])
             ):
                 return TransportResult("failed", "approval was cancelled or expired during policy recheck")
@@ -1099,7 +1143,7 @@ class AuthorizationCoordinator:
                 return TransportResult("failed", "policy changed before approval completion")
             if policy.provenance != challenge["policy_provenance"]:
                 return TransportResult("failed", "policy revision changed before approval completion")
-            if pending.cancel.is_set():
+            if not self._lifecycle_is_current(pending.lifecycle_generation, pending.cancel):
                 return TransportResult("failed", "approval was cancelled before completion audit")
             completion_id = f"approval-completion:{uuid4()}"
             recheck_at = _strictly_after(now)
@@ -1140,10 +1184,10 @@ class AuthorizationCoordinator:
             # correlated ALLOW cannot extend it.
             allow["expires_at"] = completion["recheck"]["expires_at"]
             self._persist_contract(completion)
-            if pending.cancel.is_set():
+            if not self._lifecycle_is_current(pending.lifecycle_generation, pending.cancel):
                 return TransportResult("failed", "approval was cancelled during completion audit")
             self._persist_contract(allow)
-            if pending.cancel.is_set():
+            if not self._lifecycle_is_current(pending.lifecycle_generation, pending.cancel):
                 return TransportResult("failed", "approval was cancelled during completion audit")
             if pending.unknown_retry:
                 return self._retry_unknown_effect(
@@ -1152,6 +1196,7 @@ class AuthorizationCoordinator:
                     decision=allow,
                     rule=rule,
                     cancel=pending.cancel,
+                    lifecycle_generation=pending.lifecycle_generation,
                     authenticated_approval=True,
                 )
             # The dispatch recheck expects a direct allow.  The authenticated
@@ -1162,6 +1207,7 @@ class AuthorizationCoordinator:
                 decision=allow,
                 rule=rule,
                 cancel=pending.cancel,
+                lifecycle_generation=pending.lifecycle_generation,
             )
 
     def _dispatch_approved_once(
@@ -1172,11 +1218,12 @@ class AuthorizationCoordinator:
         decision: Mapping[str, Any],
         rule: CapabilityRule,
         cancel: threading.Event,
+        lifecycle_generation: int,
     ) -> TransportResult:
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "approved work was cancelled before commit")
         policy = self.policy_source.load()
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "approved work was cancelled during policy recheck")
         now = _now()
         outcome, reason, current_rule = self._evaluate(
@@ -1198,7 +1245,7 @@ class AuthorizationCoordinator:
         if self.journal.consumed(fingerprint):
             return TransportResult("failed", "approved action replay rejected")
         idempotency_key = f"nunchi:{fingerprint}" if rule.target_idempotency else None
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "approved work was cancelled before effect commit")
         self.journal.append(
             {
@@ -1211,7 +1258,7 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
-        if cancel.is_set():
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
             return TransportResult("failed", "approved work was cancelled before native effect")
         policy = self.policy_source.load()
         now = _now()
@@ -1222,7 +1269,7 @@ class AuthorizationCoordinator:
             committed_recheck=True,
         )
         if (
-            cancel.is_set()
+            not self._lifecycle_is_current(lifecycle_generation, cancel)
             or outcome != "APPROVAL_REQUIRED"
             or reason != "approval-required"
             or current_rule != rule
@@ -1234,6 +1281,11 @@ class AuthorizationCoordinator:
             return TransportResult(
                 "failed",
                 "approved authority changed before native effect",
+            )
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
+            return TransportResult(
+                "failed",
+                "approved work cancelled at native effect boundary",
             )
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
@@ -1261,10 +1313,15 @@ class AuthorizationCoordinator:
         return result
 
     def cancel(self) -> None:
-        """Discard pending approvals; durable consumed effects remain blocked."""
-        with self._lock:
-            for pending in self._pending.values():
-                pending.cancel.set()
-            self._pending.clear()
+        """Synchronously invalidate all privileged work and pending approvals."""
+        self._invalidate_lifecycle()
+        # Replacing the map is an atomic visibility boundary on supported
+        # CPython hosts and does not wait behind policy, audit, approval, or
+        # executor work holding ``self._lock``. In-flight paths retain their
+        # own generation and must fail their next lifecycle check.
+        pending = self._pending
+        self._pending = {}
+        for item in pending.values():
+            item.cancel.set()
 
     restart = cancel

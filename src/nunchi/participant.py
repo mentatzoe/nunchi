@@ -124,17 +124,20 @@ class ConversationOpportunityScheduler:
         token: OpportunityToken,
         dispatcher: Callable[[], Any],
     ) -> tuple[bool, Any | None]:
-        """Order cancellation against the single output/effect commit point.
+        """Reserve one dispatch, then run it outside the scheduler lock.
 
-        The lock covers the current-token check and native dispatch call.
-        Cancellation ordered first prevents the call.  Cancellation ordered
-        after cannot relabel a dispatch that already reached the transport.
+        Cancellation and dispatch reservation are ordered by ``self._lock``.
+        The potentially blocking authorization or transport path is not: after
+        reservation, cancellation can synchronously set the token event and
+        invalidate host-owned lifecycle/effect fences. Platform transports and
+        privileged coordinators must recheck those fences at their exact native
+        invocation boundary.
         """
         with self._lock:
             if not self._matches(token) or self._dispatch_committed:
                 return False, None
             self._dispatch_committed = True
-            return True, dispatcher()
+        return True, dispatcher()
 
     @property
     def active(self) -> bool:

@@ -1593,6 +1593,10 @@ class _ProfileMultiplexNunchiPlugin:
             if callable(restart):
                 restart()
 
+    def gateway_shutdown(self, *, reason: str, **_: Any) -> None:
+        """Synchronously fence every routed runtime at global host shutdown."""
+        self.restart()
+
 
 def register(
     ctx: Any,
@@ -1624,6 +1628,7 @@ def register(
     )
     ctx.register_hook("gateway_message", plugin.gateway_message)
     ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)
+    ctx.register_hook("gateway_shutdown", plugin.gateway_shutdown)
 
     def probe_command(raw_args: str) -> str:
         args = (raw_args or "").strip().lower()

@@ -1477,14 +1477,18 @@ class HermesV2ContractTests(unittest.TestCase):
             ),
             host_identity_loader=lambda: "a" * 64,
         )
-        self.assertEqual({"gateway_message", "gateway_session_cancel"}, set(ctx.hooks))
+        self.assertEqual(
+            {"gateway_message", "gateway_session_cancel", "gateway_shutdown"},
+            set(ctx.hooks),
+        )
+        ctx.hooks["gateway_shutdown"](reason="stop")
         self.assertIn("nunchi-v2", ctx.commands)
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("a" * 64, probe["host_seam_sha256"])
-        self.assertEqual("d3135254b3eea1237db8bfb0e597a5a74e20c26edaa02d8b57d5e6a1d6fdaa42", probe["host_patch_sha256"])
+        self.assertEqual("6dd25b27a9c8f24d48ba31b552839c69b38e83a99e6c045a79b33eb3423c7f5a", probe["host_patch_sha256"])
         self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])

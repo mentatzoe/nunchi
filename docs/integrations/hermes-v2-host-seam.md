@@ -11,7 +11,7 @@ The wheel carries both the patch and a closed manifest under
 `nunchi_hermes_v2/host_patch_assets/`. The manifest pins:
 
 - untouched Hermes commit `243a01d5d72555061406de84890b2e9622f409cb`;
-- patch SHA-256 `d3135254b3eea1237db8bfb0e597a5a74e20c26edaa02d8b57d5e6a1d6fdaa42`;
+- patch SHA-256 `6dd25b27a9c8f24d48ba31b552839c69b38e83a99e6c045a79b33eb3423c7f5a`;
 - every touched path and its exact post-apply SHA-256 identity.
 
 A different commit, dirty tree, partial seam, divergent file, unsafe path,
@@ -58,6 +58,12 @@ paths, and private configuration paths.
 Suppression-recovery evidence binds the same verified host-seam digest. Evidence
 from an older stock commit, patch, touched-file set, Nunchi integration, actor,
 profile, or route cannot authorize recovery-sensitive suppression.
+
+The seam also exposes a synchronous `gateway_shutdown` lifecycle boundary.
+Hermes fires it immediately after closing gateway acceptance and before agent
+draining, finalization, or adapter teardown. Nunchi invalidates every routed
+runtime, pending approval, retry, delivery capability, and privileged lifecycle
+generation before that callback returns.
 
 ## Removal
 
