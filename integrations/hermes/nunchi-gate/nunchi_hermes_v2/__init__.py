@@ -392,7 +392,11 @@ class HermesNativeTransport:
         self.timeout_seconds = float(timeout_seconds)
         self._runner = coroutine_runner
         self._lock = threading.RLock()
-        self._deliveries: dict[str, tuple[Any, asyncio.AbstractEventLoop | None]] = {}
+        self._generation = 0
+        self._deliveries: dict[
+            str,
+            tuple[Any, asyncio.AbstractEventLoop | None, int],
+        ] = {}
         self._pending: set[Any] = set()
 
     def bind(
@@ -407,18 +411,26 @@ class HermesNativeTransport:
         if not callable(getattr(delivery, "send", None)):
             raise ValidationError("Hermes delivery capability has no public send method")
         with self._lock:
-            self._deliveries[canonical_event] = (delivery, loop)
+            self._deliveries[canonical_event] = (delivery, loop, self._generation)
             while len(self._deliveries) > 256:
                 self._deliveries.pop(next(iter(self._deliveries)))
 
-    def _run(self, coroutine: Any, loop: asyncio.AbstractEventLoop | None) -> Any:
-        if self._runner is not None:
-            return self._runner(coroutine, self.timeout_seconds)
-        if loop is None or loop.is_closed():
-            coroutine.close()
-            raise RuntimeError("Hermes gateway event loop is unavailable")
-        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+    def _run(
+        self,
+        coroutine: Any,
+        loop: asyncio.AbstractEventLoop | None,
+        generation: int,
+    ) -> Any:
         with self._lock:
+            if generation != self._generation:
+                coroutine.close()
+                raise RuntimeError("Hermes delivery generation was invalidated")
+            if self._runner is not None:
+                return self._runner(coroutine, self.timeout_seconds)
+            if loop is None or loop.is_closed():
+                coroutine.close()
+                raise RuntimeError("Hermes gateway event loop is unavailable")
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
             self._pending.add(future)
         try:
             return future.result(timeout=self.timeout_seconds)
@@ -433,6 +445,7 @@ class HermesNativeTransport:
         """Invalidate retained routes and cancel every unacknowledged native call."""
         with self._lock:
             pending = tuple(self._pending)
+            self._generation += 1
             self._deliveries.clear()
         for future in pending:
             future.cancel()
@@ -449,7 +462,7 @@ class HermesNativeTransport:
             bound = self._deliveries.get(target)
         if bound is None:
             return TransportResult("failed", "native target is not retained in the bound route")
-        delivery, loop = bound
+        delivery, loop, generation = bound
         try:
             if kind == "reaction":
                 method = getattr(delivery, "react", None)
@@ -458,14 +471,19 @@ class HermesNativeTransport:
                 receipt = self._run(
                     method(str(action.get("reaction", "")), operation=str(action.get("operation", "add"))),
                     loop,
+                    generation,
                 )
             elif kind == "reply":
                 method = getattr(delivery, "reply", None)
                 if not callable(method):
                     return TransportResult("unavailable", "native reply capability is unavailable")
-                receipt = self._run(method(str(action.get("text", ""))), loop)
+                receipt = self._run(method(str(action.get("text", ""))), loop, generation)
             else:
-                receipt = self._run(delivery.send(str(action.get("text", ""))), loop)
+                receipt = self._run(
+                    delivery.send(str(action.get("text", ""))),
+                    loop,
+                    generation,
+                )
         except TimeoutError:
             return TransportResult("unknown", "native acknowledgement timed out")
         except BaseException:

@@ -741,6 +741,46 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("unknown", result_box[0].delivery)
         self.assertEqual({}, transport._deliveries)
 
+    def test_native_transport_cancel_fences_dispatch_selected_before_invalidation(self):
+        self.require_surface()
+        selected = threading.Event()
+        release = threading.Event()
+        native_executed = threading.Event()
+
+        async def native_send():
+            native_executed.set()
+            return SimpleNamespace(status="sent", message_id="555")
+
+        class BlockingDelivery:
+            def send(self, _text):
+                selected.set()
+                release.wait(1)
+                return native_send()
+
+        transport = HermesNativeTransport(
+            binding=self.binding(),
+            coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+        )
+        transport.bind("discord:message:100", BlockingDelivery())
+        result_box = []
+        worker = threading.Thread(
+            target=lambda: result_box.append(
+                transport.dispatch(
+                    action={"kind": "message", "origin_event_id": "discord:message:100", "text": "hello"},
+                    wake={"room": {"id": "42"}},
+                )
+            )
+        )
+        worker.start()
+        self.assertTrue(selected.wait(0.5))
+        transport.cancel()
+        release.set()
+        worker.join(0.5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(native_executed.is_set())
+        self.assertEqual("unknown", result_box[0].delivery)
+
     def test_native_transport_rejects_cross_room_and_unretained_target(self):
         self.require_surface()
         transport = HermesNativeTransport(
