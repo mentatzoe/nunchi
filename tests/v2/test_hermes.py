@@ -300,6 +300,61 @@ class HermesV2ContractTests(unittest.TestCase):
             provenance={"path": "fixture", "sha256": "f" * 64},
         )
 
+    def test_room_runtime_state_partition_uses_routed_config_profile(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.plugin_config(directory)
+            ctx = SimpleNamespace(
+                profile_name="default",
+                llm=FakeLlm([]),
+                tools={},
+            )
+            default_runtime = hermes_module._RoomRuntime(
+                config.rooms[0],
+                state_root=config.state_root,
+                ctx=ctx,
+                profile_name="default",
+            )
+            work_runtime = hermes_module._RoomRuntime(
+                config.rooms[0],
+                state_root=config.state_root,
+                ctx=ctx,
+                profile_name="work",
+            )
+            self.assertNotEqual(default_runtime.room_dir, work_runtime.room_dir)
+
+    def test_live_recovery_evidence_requires_current_host_source_identity(self):
+        self.require_surface()
+        binding = self.binding()
+        payload = {
+            "schema_version": 1,
+            "kind": "live-platform-recovery",
+            "surface": binding.platform,
+            "room_id": binding.room_id,
+            "continuity_scope_id": binding.continuity_scope_id,
+            "participant_id": binding.participant_id,
+            "actor_id": binding.actor_id,
+            "participant_profile_sha256": "b" * 64,
+            "nunchi_integration_sha256": hashlib.sha256(
+                Path(hermes_module.__file__).read_bytes()
+            ).hexdigest(),
+            "hermes_hook_source_sha256": "0" * 64,
+            "gateway_message_hook_api_version": 2,
+            "live_run_id": "live-run-12345678",
+            "suppressed_native_message_id": "m1",
+            "suppressed_at": "2026-07-26T00:00:00+00:00",
+            "later_native_message_id": "m2",
+            "later_observed_at": "2026-07-26T00:00:01+00:00",
+            "later_hearing": "verified",
+        }
+        with self.assertRaisesRegex(ValidationError, "different Hermes hook source"):
+            hermes_module._validate_live_recovery_evidence(
+                payload,
+                binding=binding,
+                participant_profile_sha256="b" * 64,
+                hermes_hook_source_sha256="a" * 64,
+            )
+
     def test_hermes_runtime_declares_only_delivered_event_visibility(self):
         self.require_surface()
         for platform in ("discord", "telegram"):
@@ -1526,6 +1581,43 @@ class HermesV2ContractTests(unittest.TestCase):
             for artifact in (result["config"]["path"], result["participant_profile"]["path"]):
                 self.assertEqual(0o600, os.stat(artifact).st_mode & 0o777)
 
+    def test_config_rejects_public_authorization_policy_file(self):
+        self.require_surface()
+        from nunchi_hermes_v2.cli import create_bundle, parser
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            instructions = root / "instructions.md"
+            instructions.write_text("Contribute naturally.\n")
+            policy = root / "authorization.json"
+            policy.write_text("{}\n")
+            os.chmod(policy, 0o644)
+            result = create_bundle(
+                parser().parse_args(
+                    [
+                        "--hermes-profile", "default",
+                        "--platform", "discord",
+                        "--room-id", "42",
+                        "--actor-id", "9",
+                        "--participant-id", "vigil",
+                        "--profile-id", "vigil-default",
+                        "--instructions-file", str(instructions),
+                        "--output-dir", str(root / "bundle"),
+                        "--state-root", str(root / "state"),
+                        "--authorization-policy", str(policy),
+                    ]
+                )
+            )
+            with self.assertRaisesRegex(
+                ValidationError,
+                "authorization policy must not be accessible",
+            ):
+                load_pinned_hermes_config(
+                    result["config"]["path"],
+                    expected_sha256=result["config"]["sha256"],
+                    hermes_profile="default",
+                )
+
     def test_config_cli_rejects_synthetic_recovery_fixture_for_suppression(self):
         self.require_surface()
         from nunchi_hermes_v2.cli import create_bundle, parser
@@ -1555,15 +1647,19 @@ class HermesV2ContractTests(unittest.TestCase):
             result = create_bundle(
                 parser().parse_args(base + ["--suppression-recovery-evidence", str(evidence)])
             )
-            with self.assertRaisesRegex(
-                ValidationError,
-                "suppression recovery evidence",
+            with mock.patch(
+                "nunchi_hermes_v2._current_hermes_hook_source_sha256",
+                return_value="a" * 64,
             ):
-                load_pinned_hermes_config(
-                    result["config"]["path"],
-                    expected_sha256=result["config"]["sha256"],
-                    hermes_profile="default",
-                )
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "suppression recovery evidence",
+                ):
+                    load_pinned_hermes_config(
+                        result["config"]["path"],
+                        expected_sha256=result["config"]["sha256"],
+                        hermes_profile="default",
+                    )
 
     def test_packaging_entrypoint_and_v1_plugin_runtime_are_retired(self):
         root = Path(__file__).parents[2]

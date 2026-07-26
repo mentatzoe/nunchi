@@ -61,6 +61,7 @@ def _validate_live_recovery_evidence(
     *,
     binding: ParticipantBinding,
     participant_profile_sha256: str,
+    hermes_hook_source_sha256: str,
 ) -> None:
     evidence = _closed(
         payload,
@@ -74,7 +75,7 @@ def _validate_live_recovery_evidence(
             "actor_id",
             "participant_profile_sha256",
             "nunchi_integration_sha256",
-            "hermes_commit",
+            "hermes_hook_source_sha256",
             "gateway_message_hook_api_version",
             "live_run_id",
             "suppressed_native_message_id",
@@ -102,9 +103,8 @@ def _validate_live_recovery_evidence(
     integration_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     if evidence["nunchi_integration_sha256"] != integration_sha:
         raise ValidationError("suppression recovery evidence targets different Nunchi source")
-    hermes_commit = evidence["hermes_commit"]
-    if not isinstance(hermes_commit, str) or not _SHA256.fullmatch(hermes_commit):
-        raise ValidationError("suppression recovery evidence has invalid Hermes identity")
+    if evidence["hermes_hook_source_sha256"] != hermes_hook_source_sha256:
+        raise ValidationError("suppression recovery evidence targets different Hermes hook source")
     run_id = evidence["live_run_id"]
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{16,128}", run_id):
         raise ValidationError("suppression recovery evidence has invalid live run identity")
@@ -138,6 +138,27 @@ def _closed(mapping: Any, *, required: set[str], optional: set[str] = set(), lab
             + (f"; unexpected={sorted(extra)}" if extra else "")
         )
     return result
+
+
+def _current_hermes_hook_source_sha256() -> str:
+    """Fingerprint the exact installed public hook implementation used by this plugin."""
+    try:
+        from gateway import message_hooks as host_message_hooks
+        from gateway import run as host_gateway_run
+
+        modules = (host_message_hooks, host_gateway_run)
+        digest = hashlib.sha256()
+        for module in modules:
+            source = Path(module.__file__).resolve()
+            if not source.is_file():
+                raise OSError(f"missing host source: {source}")
+            digest.update(module.__name__.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(source.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+    except (ImportError, OSError, TypeError) as exc:
+        raise ValidationError("Hermes hook source identity is unavailable") from exc
 
 
 def canonical_actor_id(platform: str, native_actor_id: str) -> str:
@@ -863,6 +884,7 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
             evidence_payload,
             binding=binding,
             participant_profile_sha256=str(profile_ref["sha256"]),
+            hermes_hook_source_sha256=_current_hermes_hook_source_sha256(),
         )
         recovery_evidence = {"path": str(evidence_path.resolve()), "sha256": evidence_sha}
     elif recovery_evidence is not None:
@@ -896,6 +918,7 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
         )
         policy = _closed(authorization["policy"], required={"path", "sha256"}, label=f"rooms[{index}].authorization.policy")
         authorization_path = Path(_nonempty(policy["path"], "authorization policy path")).expanduser()
+        _require_private_regular_file(authorization_path, "authorization policy")
         authorization_sha = _nonempty(policy["sha256"], "authorization policy sha256")
         if not _SHA256.fullmatch(authorization_sha):
             raise ValidationError("authorization policy sha256 must be 64 lowercase hex")
@@ -976,12 +999,19 @@ def _default_config_loader(profile: str) -> HermesPluginConfig:
 
 
 class _RoomRuntime:
-    def __init__(self, config: HermesRoomConfig, *, state_root: Path, ctx: Any) -> None:
+    def __init__(
+        self,
+        config: HermesRoomConfig,
+        *,
+        state_root: Path,
+        ctx: Any,
+        profile_name: str,
+    ) -> None:
         self.config = config
         self._lifecycle_lock = threading.RLock()
         identity = json.dumps(
             {
-                "profile": getattr(ctx, "profile_name", "default"),
+                "profile": _nonempty(profile_name, "Hermes profile name"),
                 "participant": config.binding.participant_id,
                 "platform": config.binding.platform,
                 "room": config.binding.room_id,
@@ -1123,7 +1153,12 @@ class NunchiHermesV2Plugin:
         self.ctx = ctx
         self._rooms: dict[tuple[str, str], _RoomRuntime] = {}
         for room in config.rooms:
-            runtime = _RoomRuntime(room, state_root=config.state_root, ctx=ctx)
+            runtime = _RoomRuntime(
+                room,
+                state_root=config.state_root,
+                ctx=ctx,
+                profile_name=config.hermes_profile,
+            )
             self._rooms[(room.binding.platform, room.binding.room_id)] = runtime
 
     def _route_for_event(self, event: Any, route: Any) -> _RoomRuntime | None:
