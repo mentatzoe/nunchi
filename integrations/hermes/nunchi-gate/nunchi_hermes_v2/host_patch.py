@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import hashlib
 import json
 import os
@@ -224,6 +225,12 @@ class _Snapshot:
     mode: int | None
 
 
+@dataclass(frozen=True)
+class _InventoryLeaf:
+    info: os.stat_result
+    data: bytes
+
+
 def _optional_digest(value: Any) -> str | None:
     if value is None:
         return None
@@ -414,8 +421,10 @@ def _parse_tree(raw: bytes) -> dict[str, _TreeEntry]:
     return result
 
 
-def _head_tree(root: Path) -> dict[str, _TreeEntry]:
-    return _parse_tree(_git(root, "ls-tree", "-rz", "--full-tree", "HEAD").stdout)
+def _tree_at(root: Path, revision: str) -> dict[str, _TreeEntry]:
+    return _parse_tree(
+        _git(root, "ls-tree", "-rz", "--full-tree", revision).stdout
+    )
 
 
 def _index_tree(root: Path) -> dict[str, _TreeEntry]:
@@ -451,15 +460,46 @@ def _git_object_id(data: bytes, algorithm: str) -> str:
     return digest.hexdigest()
 
 
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        left.st_mode,
+        left.st_uid,
+        left.st_size,
+        left.st_mtime_ns,
+        left.st_ctime_ns,
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        right.st_mode,
+        right.st_uid,
+        right.st_size,
+        right.st_mtime_ns,
+        right.st_ctime_ns,
+    )
+
+
+def _read_descriptor(descriptor: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
 def _filesystem_entries(
     root: Path,
-) -> tuple[dict[str, os.stat_result], dict[str, os.stat_result]]:
+    *,
+    pinned_root_fd: int | None = None,
+) -> tuple[dict[str, os.stat_result], dict[str, _InventoryLeaf]]:
     directories: dict[str, os.stat_result] = {}
-    leaves: dict[str, os.stat_result] = {}
+    leaves: dict[str, _InventoryLeaf] = {}
 
-    def visit(directory: Path, prefix: str) -> None:
+    def visit(directory_fd: int, prefix: str) -> None:
         try:
-            entries = list(os.scandir(directory))
+            entries = list(os.scandir(directory_fd))
         except OSError as exc:
             raise HostPatchError("cannot inventory Hermes filesystem") from exc
         for entry in entries:
@@ -469,21 +509,93 @@ def _filesystem_entries(
             if not _safe_relative_path(relative):
                 raise HostPatchError("Hermes filesystem inventory contains an unsafe path")
             try:
-                info = entry.stat(follow_symlinks=False)
+                info = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
             except OSError as exc:
                 raise HostPatchError("cannot inventory Hermes filesystem") from exc
             if stat.S_ISDIR(info.st_mode):
-                _verify_owned_directory(info)
-                directories[relative] = info
-                visit(Path(entry.path), relative)
-            elif stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
-                if info.st_uid != os.getuid():
-                    raise HostPatchError("Hermes filesystem ownership mismatch")
-                leaves[relative] = info
+                flags = (
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                )
+                try:
+                    child_fd = os.open(entry.name, flags, dir_fd=directory_fd)
+                except OSError as exc:
+                    raise HostPatchError("cannot open Hermes filesystem directory safely") from exc
+                try:
+                    opened = os.fstat(child_fd)
+                    if not _same_inode(info, opened):
+                        raise HostPatchError("Hermes filesystem directory changed during inventory")
+                    _verify_owned_directory(opened)
+                    directories[relative] = opened
+                    visit(child_fd, relative)
+                    closing = os.stat(
+                        entry.name,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                    if not _same_inode(opened, closing):
+                        raise HostPatchError("Hermes filesystem directory changed during inventory")
+                finally:
+                    os.close(child_fd)
+                continue
+            if stat.S_ISREG(info.st_mode):
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                try:
+                    leaf_fd = os.open(entry.name, flags, dir_fd=directory_fd)
+                except OSError as exc:
+                    raise HostPatchError("cannot open Hermes filesystem leaf safely") from exc
+                try:
+                    opened = os.fstat(leaf_fd)
+                    if not stat.S_ISREG(opened.st_mode) or not _same_inode(info, opened):
+                        raise HostPatchError("Hermes filesystem leaf changed during inventory")
+                    data = _read_descriptor(leaf_fd)
+                    if not _same_inode(opened, os.fstat(leaf_fd)):
+                        raise HostPatchError("Hermes filesystem leaf changed during inventory")
+                finally:
+                    os.close(leaf_fd)
+                closing = os.stat(
+                    entry.name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+                if not _same_inode(opened, closing):
+                    raise HostPatchError("Hermes filesystem leaf changed during inventory")
+            elif stat.S_ISLNK(info.st_mode):
+                try:
+                    data = os.fsencode(os.readlink(entry.name, dir_fd=directory_fd))
+                    closing = os.stat(
+                        entry.name,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except OSError as exc:
+                    raise HostPatchError("cannot read Hermes filesystem symlink safely") from exc
+                if not _same_inode(info, closing):
+                    raise HostPatchError("Hermes filesystem symlink changed during inventory")
+                opened = closing
             else:
                 raise HostPatchError("Hermes filesystem inventory contains a non-regular path")
+            if opened.st_uid != os.getuid():
+                raise HostPatchError("Hermes filesystem ownership mismatch")
+            leaves[relative] = _InventoryLeaf(info=opened, data=data)
 
-    visit(root, "")
+        try:
+            closing_names = {entry.name for entry in os.scandir(directory_fd)}
+        except OSError as exc:
+            raise HostPatchError("cannot close Hermes filesystem inventory") from exc
+        if closing_names != {entry.name for entry in entries}:
+            raise HostPatchError("Hermes filesystem directory changed during inventory")
+
+    root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        root_fd = os.dup(pinned_root_fd) if pinned_root_fd is not None else os.open(root, root_flags)
+    except OSError as exc:
+        raise HostPatchError("cannot open Hermes filesystem root safely") from exc
+    try:
+        visit(root_fd, "")
+    finally:
+        os.close(root_fd)
     return directories, leaves
 
 
@@ -495,18 +607,6 @@ def _expected_directories(paths: Sequence[str] | set[str]) -> set[str]:
             result.add(parent.as_posix())
             parent = parent.parent
     return result
-
-
-def _read_worktree_bytes(root: Path, relative: str, info: os.stat_result) -> bytes:
-    target = root / relative
-    try:
-        if stat.S_ISLNK(info.st_mode):
-            return os.fsencode(os.readlink(target))
-        if stat.S_ISREG(info.st_mode):
-            return target.read_bytes()
-    except OSError as exc:
-        raise HostPatchError("cannot read Hermes filesystem inventory") from exc
-    raise HostPatchError("Hermes filesystem inventory contains a non-regular path")
 
 
 def _mode_for_info(info: os.stat_result) -> str:
@@ -559,15 +659,16 @@ def _verify_filesystem(
     head_tree: Mapping[str, _TreeEntry],
     *,
     applied: bool,
+    pinned_root_fd: int | None = None,
 ) -> None:
     expected_paths = _expected_applied_paths(head_tree, bundle) if applied else set(head_tree)
-    directories, leaves = _filesystem_entries(root)
+    directories, leaves = _filesystem_entries(root, pinned_root_fd=pinned_root_fd)
     if set(leaves) != expected_paths or set(directories) != _expected_directories(expected_paths):
         raise HostPatchError("Hermes source tree is not clean: filesystem inventory mismatch")
     object_format = _git(root, "rev-parse", "--show-object-format").stdout.decode("ascii").strip()
-    for path, info in leaves.items():
-        actual_mode = _mode_for_info(info)
-        data = _read_worktree_bytes(root, path, info)
+    for path, leaf in leaves.items():
+        actual_mode = _mode_for_info(leaf.info)
+        data = leaf.data
         spec = bundle.files.get(path)
         if applied and spec is not None:
             if spec.post_mode is None or spec.post_sha256 is None:
@@ -584,33 +685,42 @@ def _verify_filesystem(
             raise HostPatchError("Hermes filesystem content mismatch")
 
 
-def _touched_match(root: Path, bundle: HostPatchBundle, *, applied: bool) -> bool:
-    for path, spec in bundle.files.items():
-        target = root / path
-        expected_sha = spec.post_sha256 if applied else spec.pre_sha256
-        try:
-            info = target.lstat()
-        except FileNotFoundError:
-            if expected_sha is not None:
-                return False
-            continue
-        except OSError:
-            return False
-        if expected_sha is None or not stat.S_ISREG(info.st_mode):
-            return False
-        try:
-            if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha:
-                return False
-        except OSError:
-            return False
-    return True
+def _verify_root_descriptor(root: Path, root_fd: int) -> None:
+    try:
+        opened = os.fstat(root_fd)
+        current = root.lstat()
+    except OSError as exc:
+        raise HostPatchError("Hermes transaction root identity is unavailable") from exc
+    if not _same_inode(opened, current):
+        raise HostPatchError("Hermes transaction root changed")
+    _verify_owned_directory(opened)
 
 
-def _verify_state(root: Path, bundle: HostPatchBundle, *, applied: bool) -> None:
-    head_tree = _head_tree(root)
+def _verify_state(
+    root: Path,
+    bundle: HostPatchBundle,
+    *,
+    applied: bool,
+    pinned_root_fd: int | None = None,
+) -> None:
+    if pinned_root_fd is not None:
+        _verify_root_descriptor(root, pinned_root_fd)
+    if _head(root) != bundle.supported_hermes_commit:
+        raise HostPatchError("unsupported Hermes commit")
+    head_tree = _tree_at(root, bundle.supported_hermes_commit)
     _verify_index(root, head_tree)
     _verify_manifest_preimages(root, bundle, head_tree)
-    _verify_filesystem(root, bundle, head_tree, applied=applied)
+    _verify_filesystem(
+        root,
+        bundle,
+        head_tree,
+        applied=applied,
+        pinned_root_fd=pinned_root_fd,
+    )
+    if _head(root) != bundle.supported_hermes_commit:
+        raise HostPatchError("unsupported Hermes commit")
+    if pinned_root_fd is not None:
+        _verify_root_descriptor(root, pinned_root_fd)
 
 
 def _materialized_patch(root: Path, bundle: HostPatchBundle) -> dict[str, _Snapshot]:
@@ -653,7 +763,7 @@ def _materialized_patch(root: Path, bundle: HostPatchBundle) -> dict[str, _Snaps
             if hashlib.sha256(data).hexdigest() != spec.post_sha256:
                 raise HostPatchError("isolated patch result digest mismatch")
             plan[path] = _Snapshot(True, data, int(spec.post_mode[-3:], 8))
-        head_tree = _head_tree(clone)
+        head_tree = _tree_at(clone, bundle.supported_hermes_commit)
         changed = {
             path
             for path in set(index) | set(head_tree)
@@ -709,39 +819,32 @@ def _open_parent(root_fd: int, relative: str) -> tuple[int, str]:
         raise
 
 
-def _snapshot_paths(root: Path, paths: Sequence[str]) -> dict[str, _Snapshot]:
-    root_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+def _snapshot_paths(root: Path | int, paths: Sequence[str]) -> dict[str, _Snapshot]:
+    owns_root_fd = not isinstance(root, int)
+    root_fd = (
+        os.open(
+            root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        if owns_root_fd
+        else root
+    )
     snapshots: dict[str, _Snapshot] = {}
     try:
         for relative in paths:
             parent_fd, leaf = _open_parent(root_fd, relative)
             try:
-                try:
-                    info = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    snapshots[relative] = _Snapshot(False, None, None)
-                    continue
-                if not stat.S_ISREG(info.st_mode):
-                    raise HostPatchError(f"non-regular touched path: {relative}")
-                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                descriptor = os.open(leaf, flags, dir_fd=parent_fd)
-                try:
-                    opened_info = os.fstat(descriptor)
-                    if not stat.S_ISREG(opened_info.st_mode):
-                        raise HostPatchError(f"non-regular touched path: {relative}")
-                    with os.fdopen(descriptor, "rb", closefd=False) as stream:
-                        data = stream.read()
-                finally:
-                    os.close(descriptor)
-                snapshots[relative] = _Snapshot(
-                    True,
-                    data,
-                    stat.S_IMODE(opened_info.st_mode),
-                )
+                snapshot = _read_leaf_snapshot(parent_fd, leaf)
+                if snapshot.existed and (snapshot.data is None or snapshot.mode is None):
+                    raise HostPatchError(f"incomplete touched path snapshot: {relative}")
+                snapshots[relative] = snapshot
             finally:
                 os.close(parent_fd)
     finally:
-        os.close(root_fd)
+        if owns_root_fd:
+            os.close(root_fd)
     return snapshots
 
 
@@ -766,57 +869,282 @@ def _verify_snapshot_preimages(
             raise HostPatchError("transaction snapshot digest does not match pre-apply identity")
 
 
-def _write_snapshot(root_fd: int, relative: str, snapshot: _Snapshot) -> None:
+def _snapshot_content_matches(
+    snapshots: Mapping[str, _Snapshot],
+    bundle: HostPatchBundle,
+    *,
+    applied: bool,
+) -> bool:
+    for path, spec in bundle.files.items():
+        snapshot = snapshots.get(path)
+        if snapshot is None:
+            return False
+        expected = spec.post_sha256 if applied else spec.pre_sha256
+        if snapshot.existed != (expected is not None):
+            return False
+        if expected is not None and (
+            snapshot.data is None
+            or hashlib.sha256(snapshot.data).hexdigest() != expected
+        ):
+            return False
+    return True
+
+
+def _snapshots_equal(left: _Snapshot, right: _Snapshot) -> bool:
+    return (
+        left.existed == right.existed
+        and left.data == right.data
+        and left.mode == right.mode
+    )
+
+
+def _read_leaf_snapshot(parent_fd: int, leaf: str) -> _Snapshot:
+    try:
+        before = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return _Snapshot(False, None, None)
+    except OSError as exc:
+        raise HostPatchError("cannot inspect transaction target") from exc
+    if not stat.S_ISREG(before.st_mode):
+        raise HostPatchError("transaction target is not a regular file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(leaf, flags, dir_fd=parent_fd)
+    except OSError as exc:
+        raise HostPatchError("cannot open transaction target safely") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not _same_inode(before, opened):
+            raise HostPatchError("transaction target changed while opening")
+        data = _read_descriptor(descriptor)
+        if not _same_inode(opened, os.fstat(descriptor)):
+            raise HostPatchError("transaction target changed while reading")
+    finally:
+        os.close(descriptor)
+    try:
+        closing = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise HostPatchError("transaction target changed after reading") from exc
+    if not _same_inode(opened, closing):
+        raise HostPatchError("transaction target changed after reading")
+    return _Snapshot(True, data, stat.S_IMODE(opened.st_mode))
+
+
+def _exchange_names(parent_fd: int, left: str, right: str) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        function = getattr(libc, "renameatx_np", None)
+        flag = 0x00000002  # RENAME_SWAP
+    elif sys.platform.startswith("linux"):
+        function = getattr(libc, "renameat2", None)
+        flag = 0x00000002  # RENAME_EXCHANGE
+    else:  # pragma: no cover - the supported Hermes host is POSIX macOS/Linux
+        function = None
+        flag = 0
+    if function is None:
+        raise HostPatchError("atomic transaction exchange is unavailable")
+    function.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    function.restype = ctypes.c_int
+    if function(
+        parent_fd,
+        os.fsencode(left),
+        parent_fd,
+        os.fsencode(right),
+        flag,
+    ) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def _write_temporary(
+    parent_fd: int,
+    leaf: str,
+    snapshot: _Snapshot,
+) -> str:
+    if not snapshot.existed or snapshot.data is None or snapshot.mode is None:
+        raise HostPatchError("invalid transaction postimage")
+    temporary = f".{leaf}.nunchi-{secrets.token_hex(16)}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    created = False
+    try:
+        descriptor = os.open(temporary, flags, snapshot.mode, dir_fd=parent_fd)
+        created = True
+        view = memoryview(snapshot.data)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("zero-byte transaction write")
+            view = view[written:]
+        os.fchmod(descriptor, snapshot.mode)
+        os.fsync(descriptor)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+            descriptor = None
+        if created:
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    return temporary
+
+
+def _write_snapshot(
+    root_fd: int,
+    relative: str,
+    desired: _Snapshot,
+    expected: _Snapshot,
+) -> None:
     parent_fd, leaf = _open_parent(root_fd, relative)
     try:
-        if not snapshot.existed:
-            try:
-                info = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
-            except FileNotFoundError:
+        current = _read_leaf_snapshot(parent_fd, leaf)
+        if not _snapshots_equal(current, expected):
+            raise HostPatchError("transaction target changed before commit")
+        if not desired.existed:
+            if not expected.existed:
                 return
-            if not stat.S_ISREG(info.st_mode):
-                raise OSError("refusing to remove non-regular transaction target")
-            os.unlink(leaf, dir_fd=parent_fd)
+            temporary = f".{leaf}.nunchi-{secrets.token_hex(16)}"
+            try:
+                os.rename(leaf, temporary, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                moved = _read_leaf_snapshot(parent_fd, temporary)
+                if not _snapshots_equal(moved, expected):
+                    raise HostPatchError("transaction target changed during removal")
+                os.unlink(temporary, dir_fd=parent_fd)
+            except Exception:
+                try:
+                    temporary_state = _read_leaf_snapshot(parent_fd, temporary)
+                    leaf_state = _read_leaf_snapshot(parent_fd, leaf)
+                    if temporary_state.existed and not leaf_state.existed:
+                        os.link(
+                            temporary,
+                            leaf,
+                            src_dir_fd=parent_fd,
+                            dst_dir_fd=parent_fd,
+                            follow_symlinks=False,
+                        )
+                        os.unlink(temporary, dir_fd=parent_fd)
+                    elif temporary_state.existed:
+                        raise HostPatchError(
+                            "cannot restore transaction target without clobbering data"
+                        )
+                except Exception as restore_exc:
+                    os.fsync(parent_fd)
+                    raise HostPatchError(
+                        "transaction removal failed and displaced data was preserved"
+                    ) from restore_exc
+                os.fsync(parent_fd)
+                raise
             os.fsync(parent_fd)
             return
-        if snapshot.data is None or snapshot.mode is None:
-            raise OSError("invalid transaction snapshot")
-        temporary = f".{leaf}.nunchi-{secrets.token_hex(16)}"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(temporary, flags, snapshot.mode, dir_fd=parent_fd)
+        temporary = _write_temporary(parent_fd, leaf, desired)
+        exchanged = False
         try:
-            view = memoryview(snapshot.data)
-            while view:
-                written = os.write(descriptor, view)
-                view = view[written:]
-            os.fchmod(descriptor, snapshot.mode)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.replace(temporary, leaf, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-        os.fsync(parent_fd)
+            if not expected.existed:
+                try:
+                    os.link(
+                        temporary,
+                        leaf,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError as exc:
+                    raise HostPatchError("transaction create target appeared before commit") from exc
+                os.unlink(temporary, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+                return
+            _exchange_names(parent_fd, temporary, leaf)
+            exchanged = True
+            displaced = _read_leaf_snapshot(parent_fd, temporary)
+            if not _snapshots_equal(displaced, expected):
+                raise HostPatchError("transaction target changed during atomic exchange")
+            os.unlink(temporary, dir_fd=parent_fd)
+            exchanged = False
+            os.fsync(parent_fd)
+        except BaseException:
+            if exchanged:
+                try:
+                    _exchange_names(parent_fd, temporary, leaf)
+                    exchanged = False
+                except BaseException:
+                    # The displaced preimage remains at the temporary name. Do not
+                    # unlink unknown data merely to make rollback look clean.
+                    os.fsync(parent_fd)
+                    raise
+            try:
+                os.unlink(temporary, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+            except FileNotFoundError:
+                pass
+            raise
     finally:
         os.close(parent_fd)
 
 
-def _write_plan(root: Path, plan: Mapping[str, _Snapshot]) -> None:
-    root_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-    try:
-        for relative in sorted(plan):
-            _write_snapshot(root_fd, relative, plan[relative])
-    finally:
-        os.close(root_fd)
+def _write_plan(
+    root_fd: int,
+    plan: Mapping[str, _Snapshot],
+    expected: Mapping[str, _Snapshot],
+) -> list[str]:
+    completed: list[str] = []
+    for relative in sorted(plan):
+        _write_snapshot(root_fd, relative, plan[relative], expected[relative])
+        completed.append(relative)
+    return completed
+
+
+def _rollback_plan(
+    root_fd: int,
+    snapshots: Mapping[str, _Snapshot],
+    postimages: Mapping[str, _Snapshot],
+) -> None:
+    failures: list[BaseException] = []
+    for relative in sorted(snapshots, reverse=True):
+        try:
+            parent_fd, leaf = _open_parent(root_fd, relative)
+            try:
+                current = _read_leaf_snapshot(parent_fd, leaf)
+            finally:
+                os.close(parent_fd)
+            if _snapshots_equal(current, snapshots[relative]):
+                continue
+            if not _snapshots_equal(current, postimages[relative]):
+                raise HostPatchError("transaction target changed before rollback")
+            _write_snapshot(
+                root_fd,
+                relative,
+                snapshots[relative],
+                postimages[relative],
+            )
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise HostPatchError("one or more transaction paths could not be rolled back") from failures[0]
 
 
 def inspect_host(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
     root = _validated_root(source)
     if _head(root) != bundle.supported_hermes_commit:
         raise HostPatchError("unsupported Hermes commit")
-    if _touched_match(root, bundle, applied=True):
+    touched = _snapshot_paths(root, tuple(bundle.files))
+    if _snapshot_content_matches(touched, bundle, applied=True):
         _verify_state(root, bundle, applied=True)
         return _result(root, bundle, status="applied", changed=False)
     _verify_state(root, bundle, applied=False)
     _materialized_patch(root, bundle)
+    _verify_state(root, bundle, applied=False)
     return _result(root, bundle, status="ready", changed=False)
 
 
@@ -827,18 +1155,50 @@ def apply_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
         if state["status"] == "applied":
             return state
         plan = _materialized_patch(root, bundle)
-        snapshots = _snapshot_paths(root, tuple(bundle.files))
-        _verify_snapshot_preimages(snapshots, bundle)
+        root_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
         try:
-            _write_plan(root, plan)
-            _verify_state(root, bundle, applied=True)
-        except BaseException as exc:
+            root_fd = os.open(root, root_flags)
+        except OSError as exc:
+            raise HostPatchError("cannot pin Hermes transaction root") from exc
+        try:
+            snapshots = _snapshot_paths(root_fd, tuple(bundle.files))
+            _verify_snapshot_preimages(snapshots, bundle)
+            _verify_state(
+                root,
+                bundle,
+                applied=False,
+                pinned_root_fd=root_fd,
+            )
             try:
-                _write_plan(root, snapshots)
-                _verify_state(root, bundle, applied=False)
-            except BaseException as rollback_exc:
-                raise HostPatchError("host patch failed and rollback verification failed") from rollback_exc
-            raise HostPatchError("host patch verification failed; complete mutation rolled back") from exc
+                _write_plan(root_fd, plan, snapshots)
+                _verify_state(
+                    root,
+                    bundle,
+                    applied=True,
+                    pinned_root_fd=root_fd,
+                )
+            except BaseException as exc:
+                try:
+                    _rollback_plan(root_fd, snapshots, plan)
+                    _verify_state(
+                        root,
+                        bundle,
+                        applied=False,
+                        pinned_root_fd=root_fd,
+                    )
+                except BaseException as rollback_exc:
+                    raise HostPatchError(
+                        "host patch failed and rollback verification failed"
+                    ) from rollback_exc
+                raise HostPatchError(
+                    "host patch verification failed; complete mutation rolled back"
+                ) from exc
+        finally:
+            os.close(root_fd)
         return _result(root, bundle, status="applied", changed=True)
 
 
@@ -849,9 +1209,12 @@ def _result(
     status: str,
     changed: bool,
 ) -> dict[str, Any]:
+    observed_commit = _head(root)
+    if observed_commit != bundle.supported_hermes_commit:
+        raise HostPatchError("unsupported Hermes commit")
     return {
         "changed": changed,
-        "hermes_commit": bundle.supported_hermes_commit,
+        "hermes_commit": observed_commit,
         "hermes_source": str(root),
         "manifest_sha256": bundle.manifest_sha256,
         "patch_sha256": bundle.patch_sha256,

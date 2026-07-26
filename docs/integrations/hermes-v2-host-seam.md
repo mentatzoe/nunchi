@@ -52,12 +52,17 @@ reapply the seam.
 The applicator parses the patch into a closed path/operation/mode set, proves it
 matches the manifest, and materializes its result against the exact stock index
 inside an isolated temporary Git repository. The host transaction is serialized
-with a private lock. It re-verifies the exact HEAD, index, full filesystem
-inventory, content, modes, and manifest preimages immediately before mutation;
-snapshots every permitted target through descriptor-relative no-follow reads;
-then installs only the isolated verified bytes through exclusive random
-temporaries and descriptor-relative atomic replacement. Git never applies the
-patch directly to the live host worktree.
+with a private lock. It re-verifies the exact HEAD by literal supported commit,
+the real index, full filesystem inventory, content, modes, and manifest preimages
+immediately before mutation. Filesystem traversal and reads are rooted in pinned
+descriptors, use descriptor-relative no-follow opens, compare opened identities,
+and close each directory inventory before acceptance. The live transaction pins
+one root descriptor across snapshot, conditional mutation, rollback, and
+verification. Creates are no-clobber links from exclusive random temporaries;
+modifications use an atomic name exchange and verify the displaced file against
+the snapshot before committing it. Every pre-exchange failure removes and syncs
+its temporary, including short/zero writes. Git never applies the patch directly
+to the live host worktree.
 
 After mutation the same independent verifier proves the complete applied state.
 Any failure restores every permitted path and then proves the complete stock

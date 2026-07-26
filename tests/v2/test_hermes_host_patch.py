@@ -105,6 +105,25 @@ class HostPatchApplicatorTests(unittest.TestCase):
         with self.assertRaisesRegex(HostPatchError, "unsupported Hermes commit"):
             inspect_host(self.repo, self.bundle)
 
+    def test_head_change_after_initial_check_cannot_fabricate_supported_receipt(self) -> None:
+        _git(self.repo, "commit", "--allow-empty", "-q", "-m", "same-tree successor")
+        successor = _git(self.repo, "rev-parse", "HEAD").strip()
+        _git(self.repo, "reset", "--hard", "-q", self.base_commit)
+        real_head = host_patch._head
+        calls = 0
+
+        def move_after_first_check(root):
+            nonlocal calls
+            observed = real_head(root)
+            calls += 1
+            if calls == 1:
+                _git(self.repo, "reset", "--hard", "-q", successor)
+            return observed
+
+        with mock.patch.object(host_patch, "_head", side_effect=move_after_first_check):
+            with self.assertRaisesRegex(HostPatchError, "unsupported Hermes commit"):
+                inspect_host(self.repo, self.bundle)
+
     def test_dirty_source_fails_closed_before_mutation(self) -> None:
         (self.repo / "unrelated.txt").write_text("dirty\n", encoding="utf-8")
 
@@ -203,8 +222,59 @@ class HostPatchApplicatorTests(unittest.TestCase):
         (self.repo / "host.py").unlink()
         (self.repo / "host.py").symlink_to("outside.py")
 
-        with self.assertRaisesRegex(HostPatchError, "mode|non-regular"):
+        with self.assertRaisesRegex(HostPatchError, "mode|regular"):
             apply_host_patch(self.repo, self.bundle)
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor semantics required")
+    def test_leaf_swapped_to_symlink_during_inventory_is_rejected(self) -> None:
+        outside = self.root / "outside.py"
+        outside.write_text("value = 'stock'\n", encoding="utf-8")
+        real_open = os.open
+        swapped = False
+
+        def race_open(path, flags, mode=0o777, *, dir_fd=None):
+            nonlocal swapped
+            if path == "host.py" and dir_fd is not None and not swapped:
+                swapped = True
+                (self.repo / "host.py").unlink()
+                (self.repo / "host.py").symlink_to(outside)
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(host_patch.os, "open", side_effect=race_open):
+            with self.assertRaises(HostPatchError):
+                inspect_host(self.repo, self.bundle)
+        self.assertTrue(swapped)
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor semantics required")
+    def test_directory_swapped_to_symlink_during_inventory_is_rejected(self) -> None:
+        package = self.repo / "pkg"
+        package.mkdir()
+        (package / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+        _git(self.repo, "add", "pkg/module.py")
+        _git(self.repo, "commit", "-q", "-m", "tracked package")
+        manifest = json.loads(self.manifest_path.read_text())
+        manifest["supported_hermes_commit"] = _git(self.repo, "rev-parse", "HEAD").strip()
+        self.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        bundle = HostPatchBundle.from_paths(self.manifest_path, self.patch_path)
+        outside = self.root / "outside-directory"
+        outside.mkdir()
+        (outside / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+        real_open = os.open
+        swapped = False
+
+        def race_open(path, flags, mode=0o777, *, dir_fd=None):
+            nonlocal swapped
+            if path == "pkg" and dir_fd is not None and not swapped:
+                swapped = True
+                (package / "module.py").unlink()
+                package.rmdir()
+                package.symlink_to(outside, target_is_directory=True)
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(host_patch.os, "open", side_effect=race_open):
+            with self.assertRaises(HostPatchError):
+                inspect_host(self.repo, bundle)
+        self.assertTrue(swapped)
 
     @unittest.skipIf(os.name == "nt", "symlink semantics differ on Windows")
     def test_symlink_repository_root_is_rejected(self) -> None:
@@ -217,10 +287,15 @@ class HostPatchApplicatorTests(unittest.TestCase):
     def test_post_write_verification_failure_restores_complete_ready_state(self) -> None:
         real_verify = host_patch._verify_state
 
-        def fail_applied(root, bundle, *, applied):
+        def fail_applied(root, bundle, *, applied, pinned_root_fd=None):
             if applied:
                 raise HostPatchError("injected post-write failure")
-            return real_verify(root, bundle, applied=applied)
+            return real_verify(
+                root,
+                bundle,
+                applied=applied,
+                pinned_root_fd=pinned_root_fd,
+            )
 
         with mock.patch.object(host_patch, "_verify_state", side_effect=fail_applied):
             with self.assertRaisesRegex(HostPatchError, "complete mutation rolled back"):
@@ -232,9 +307,13 @@ class HostPatchApplicatorTests(unittest.TestCase):
 
     def test_touched_preimage_change_during_transaction_fails_before_write(self) -> None:
         real_snapshot = host_patch._snapshot_paths
+        calls = 0
 
         def mutate_before_snapshot(root, paths):
-            (Path(root) / "host.py").write_text("value = 'raced'\n", encoding="utf-8")
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                (self.repo / "host.py").write_text("value = 'raced'\n", encoding="utf-8")
             return real_snapshot(root, paths)
 
         with mock.patch.object(
@@ -248,26 +327,131 @@ class HostPatchApplicatorTests(unittest.TestCase):
         self.assertEqual((self.repo / "host.py").read_text(), "value = 'raced'\n")
         self.assertFalse((self.repo / "new_boundary.py").exists())
 
+    def test_touched_preimage_change_after_snapshot_is_not_overwritten(self) -> None:
+        real_write = host_patch._write_plan
+        raced = False
+
+        def mutate_before_write(*args, **kwargs):
+            nonlocal raced
+            if not raced:
+                raced = True
+                (self.repo / "host.py").write_text("value = 'late-race'\n", encoding="utf-8")
+            return real_write(*args, **kwargs)
+
+        with mock.patch.object(host_patch, "_write_plan", side_effect=mutate_before_write):
+            with self.assertRaises(HostPatchError):
+                apply_host_patch(self.repo, self.bundle)
+
+        self.assertEqual((self.repo / "host.py").read_text(), "value = 'late-race'\n")
+        self.assertFalse((self.repo / "new_boundary.py").exists())
+
+    def test_modify_race_at_atomic_exchange_is_restored_not_overwritten(self) -> None:
+        real_exchange = host_patch._exchange_names
+        raced = False
+
+        def mutate_at_exchange(parent_fd, left, right):
+            nonlocal raced
+            if not raced and right == "host.py":
+                raced = True
+                (self.repo / "host.py").write_text(
+                    "value = 'exchange-race'\n",
+                    encoding="utf-8",
+                )
+            return real_exchange(parent_fd, left, right)
+
+        with mock.patch.object(
+            host_patch,
+            "_exchange_names",
+            side_effect=mutate_at_exchange,
+        ):
+            with self.assertRaisesRegex(HostPatchError, "rollback verification failed"):
+                apply_host_patch(self.repo, self.bundle)
+
+        self.assertTrue(raced)
+        self.assertEqual(
+            (self.repo / "host.py").read_text(),
+            "value = 'exchange-race'\n",
+        )
+        self.assertFalse((self.repo / "new_boundary.py").exists())
+
+    def test_create_race_at_no_clobber_commit_is_preserved(self) -> None:
+        real_temporary = host_patch._write_temporary
+        raced = False
+
+        def create_at_commit(parent_fd, leaf, snapshot):
+            nonlocal raced
+            temporary = real_temporary(parent_fd, leaf, snapshot)
+            if not raced and leaf == "new_boundary.py":
+                raced = True
+                (self.repo / leaf).write_text("CONCURRENT = True\n", encoding="utf-8")
+            return temporary
+
+        with mock.patch.object(
+            host_patch,
+            "_write_temporary",
+            side_effect=create_at_commit,
+        ):
+            with self.assertRaisesRegex(HostPatchError, "rollback verification failed"):
+                apply_host_patch(self.repo, self.bundle)
+
+        self.assertTrue(raced)
+        self.assertEqual((self.repo / "host.py").read_text(), "value = 'stock'\n")
+        self.assertEqual(
+            (self.repo / "new_boundary.py").read_text(),
+            "CONCURRENT = True\n",
+        )
+
+    def test_temporary_is_removed_when_write_fails_before_replace(self) -> None:
+        real_open = os.open
+        real_write = os.write
+        temporary_descriptors: set[int] = set()
+        injected = False
+
+        def track_temporary_open(path, flags, mode=0o777, *, dir_fd=None):
+            descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+            if isinstance(path, str) and ".nunchi-" in path:
+                temporary_descriptors.add(descriptor)
+            return descriptor
+
+        def fail_first_write(descriptor, data):
+            nonlocal injected
+            if not injected and descriptor in temporary_descriptors:
+                injected = True
+                raise OSError("injected temporary write failure")
+            return real_write(descriptor, data)
+
+        with (
+            mock.patch.object(host_patch.os, "open", side_effect=track_temporary_open),
+            mock.patch.object(host_patch.os, "write", side_effect=fail_first_write),
+        ):
+            with self.assertRaisesRegex(HostPatchError, "complete mutation rolled back"):
+                apply_host_patch(self.repo, self.bundle)
+
+        self.assertTrue(injected)
+        self.assertEqual((self.repo / "host.py").read_text(), "value = 'stock'\n")
+        self.assertFalse((self.repo / "new_boundary.py").exists())
+        self.assertEqual(list(self.repo.glob(".*.nunchi-*")), [])
+
     def test_rollback_write_failure_is_reported_without_fabricating_success(self) -> None:
         real_verify = host_patch._verify_state
-        real_write = host_patch._write_plan
-        writes = 0
 
-        def fail_applied(root, bundle, *, applied):
+        def fail_applied(root, bundle, *, applied, pinned_root_fd=None):
             if applied:
                 raise HostPatchError("injected post-write failure")
-            return real_verify(root, bundle, applied=applied)
-
-        def fail_rollback(root, plan):
-            nonlocal writes
-            writes += 1
-            if writes == 2:
-                raise OSError("injected rollback write failure")
-            return real_write(root, plan)
+            return real_verify(
+                root,
+                bundle,
+                applied=applied,
+                pinned_root_fd=pinned_root_fd,
+            )
 
         with (
             mock.patch.object(host_patch, "_verify_state", side_effect=fail_applied),
-            mock.patch.object(host_patch, "_write_plan", side_effect=fail_rollback),
+            mock.patch.object(
+                host_patch,
+                "_rollback_plan",
+                side_effect=OSError("injected rollback write failure"),
+            ),
         ):
             with self.assertRaisesRegex(HostPatchError, "rollback verification failed"):
                 apply_host_patch(self.repo, self.bundle)
@@ -311,7 +495,7 @@ class HostPatchApplicatorTests(unittest.TestCase):
             mock.patch.object(host_patch.secrets, "token_hex", return_value="fixed"),
             mock.patch.object(host_patch, "_snapshot_paths", side_effect=plant_symlink),
         ):
-            with self.assertRaisesRegex(HostPatchError, "rollback verification failed"):
+            with self.assertRaisesRegex(HostPatchError, "inventory"):
                 apply_host_patch(self.repo, self.bundle)
 
         self.assertEqual(outside.read_text(), "outside\n")
