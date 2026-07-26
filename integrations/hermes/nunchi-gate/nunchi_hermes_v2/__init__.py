@@ -56,6 +56,75 @@ def _require_private_regular_file(path: Path, label: str) -> None:
         raise ValidationError(f"{label} must not be accessible by group or other users")
 
 
+def _validate_live_recovery_evidence(
+    payload: Any,
+    *,
+    binding: ParticipantBinding,
+    participant_profile_sha256: str,
+) -> None:
+    evidence = _closed(
+        payload,
+        required={
+            "schema_version",
+            "kind",
+            "surface",
+            "room_id",
+            "continuity_scope_id",
+            "participant_id",
+            "actor_id",
+            "participant_profile_sha256",
+            "nunchi_integration_sha256",
+            "hermes_commit",
+            "gateway_message_hook_api_version",
+            "live_run_id",
+            "suppressed_native_message_id",
+            "suppressed_at",
+            "later_native_message_id",
+            "later_observed_at",
+            "later_hearing",
+        },
+        label="suppression recovery evidence",
+    )
+    if evidence["schema_version"] != 1 or evidence["kind"] != "live-platform-recovery":
+        raise ValidationError("suppression recovery evidence is not a live V1 attestation")
+    expected = {
+        "surface": binding.platform,
+        "room_id": binding.room_id,
+        "continuity_scope_id": binding.continuity_scope_id,
+        "participant_id": binding.participant_id,
+        "actor_id": binding.actor_id,
+        "participant_profile_sha256": participant_profile_sha256,
+        "gateway_message_hook_api_version": 2,
+        "later_hearing": "verified",
+    }
+    if any(evidence.get(key) != value for key, value in expected.items()):
+        raise ValidationError("suppression recovery evidence does not verify this binding")
+    integration_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if evidence["nunchi_integration_sha256"] != integration_sha:
+        raise ValidationError("suppression recovery evidence targets different Nunchi source")
+    hermes_commit = evidence["hermes_commit"]
+    if not isinstance(hermes_commit, str) or not _SHA256.fullmatch(hermes_commit):
+        raise ValidationError("suppression recovery evidence has invalid Hermes identity")
+    run_id = evidence["live_run_id"]
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{16,128}", run_id):
+        raise ValidationError("suppression recovery evidence has invalid live run identity")
+    suppressed_id = _nonempty(
+        evidence["suppressed_native_message_id"], "suppressed native message id"
+    )
+    later_id = _nonempty(
+        evidence["later_native_message_id"], "later native message id"
+    )
+    if suppressed_id == later_id:
+        raise ValidationError("suppression recovery evidence must attest a later message")
+    try:
+        suppressed_at = datetime.fromisoformat(str(evidence["suppressed_at"]).replace("Z", "+00:00"))
+        later_at = datetime.fromisoformat(str(evidence["later_observed_at"]).replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError("suppression recovery evidence timestamps are invalid") from exc
+    if suppressed_at.tzinfo is None or later_at.tzinfo is None or later_at <= suppressed_at:
+        raise ValidationError("suppression recovery evidence does not establish later hearing")
+
+
 def _closed(mapping: Any, *, required: set[str], optional: set[str] = set(), label: str) -> dict[str, Any]:
     if not isinstance(mapping, Mapping):
         raise ValidationError(f"{label} must be an object")
@@ -118,6 +187,18 @@ def normalize_message_event(
     source = route or getattr(event, "source", None)
     if source is None:
         raise ValidationError("message has no public route context")
+    coverage_gaps = getattr(event, "coverage_gaps", ())
+    if not isinstance(coverage_gaps, (list, tuple)) or any(
+        not isinstance(item, str) or not item for item in coverage_gaps
+    ):
+        raise ValidationError("Hermes snapshot coverage metadata is malformed")
+    route_coverage_gaps = getattr(source, "coverage_gaps", ())
+    if not isinstance(route_coverage_gaps, (list, tuple)) or any(
+        not isinstance(item, str) or not item for item in route_coverage_gaps
+    ):
+        raise ValidationError("Hermes route coverage metadata is malformed")
+    if coverage_gaps or route_coverage_gaps:
+        raise ValidationError("Hermes snapshot coverage is incomplete")
     platform = _platform_name(source)
     if platform != binding.platform:
         raise ValidationError("event platform does not match trusted room binding")
@@ -770,6 +851,7 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
         evidence_sha = _nonempty(evidence_ref["sha256"], "recovery evidence sha256")
         if not _SHA256.fullmatch(evidence_sha):
             raise ValidationError("recovery evidence sha256 must be 64 lowercase hex")
+        _require_private_regular_file(evidence_path, "suppression recovery evidence")
         try:
             evidence_bytes = evidence_path.read_bytes()
             evidence_payload = json.loads(evidence_bytes)
@@ -777,13 +859,11 @@ def _room_config(raw: Any, *, index: int) -> HermesRoomConfig:
             raise ValidationError("suppression recovery evidence is unreadable or invalid") from exc
         if hashlib.sha256(evidence_bytes).hexdigest() != evidence_sha:
             raise ValidationError("suppression recovery evidence does not match its pinned digest")
-        if not isinstance(evidence_payload, Mapping):
-            raise ValidationError("suppression recovery evidence must be an object")
-        if (
-            evidence_payload.get("surface") != binding.platform
-            or evidence_payload.get("later_hearing") != "verified"
-        ):
-            raise ValidationError("suppression recovery evidence does not verify this binding")
+        _validate_live_recovery_evidence(
+            evidence_payload,
+            binding=binding,
+            participant_profile_sha256=str(profile_ref["sha256"]),
+        )
         recovery_evidence = {"path": str(evidence_path.resolve()), "sha256": evidence_sha}
     elif recovery_evidence is not None:
         raise ValidationError("recovery evidence is only valid when suppression is enabled")
@@ -923,6 +1003,11 @@ class _RoomRuntime:
             limits=config.limits,
             receipts=receipts,
             persistence_path=room_dir / "observation.jsonl",
+            event_visibility={
+                "message": "live-only",
+                "reaction": "unavailable",
+                "membership": "unavailable",
+            },
         )
         attention = AttentionEngine(
             profile=config.profile,
@@ -1023,13 +1108,13 @@ class _RoomRuntime:
 
     def cancel(self) -> None:
         with self._lifecycle_lock:
-            self.pipeline.cancel()
             self.transport.cancel()
+            self.pipeline.cancel()
 
     def restart(self) -> None:
         with self._lifecycle_lock:
-            self.pipeline.restart()
             self.transport.cancel()
+            self.pipeline.restart()
 
 
 class NunchiHermesV2Plugin:

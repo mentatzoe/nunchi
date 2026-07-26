@@ -27,6 +27,7 @@ from nunchi.authorization import (
     PolicySnapshot,
     StaticPolicySource,
 )
+from nunchi.errors import ValidationError
 from nunchi.observation import ObservationLimits, ObservationProvider, ParticipantBinding
 from nunchi.participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
 from nunchi.pipeline import NunchiV2Pipeline
@@ -299,6 +300,42 @@ class HermesV2ContractTests(unittest.TestCase):
             provenance={"path": "fixture", "sha256": "f" * 64},
         )
 
+    def test_hermes_runtime_declares_only_delivered_event_visibility(self):
+        self.require_surface()
+        for platform in ("discord", "telegram"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                binding = self.binding(platform=platform)
+                room = hermes_module.HermesRoomConfig(
+                    binding=binding,
+                    profile=self.profile(binding),
+                    attention=AttentionPolicy(),
+                    suppression_recovery_evidence=None,
+                    participant_timeout_seconds=5,
+                    participant_max_expansions=2,
+                    limits=ObservationLimits(),
+                    authorization_policy_path=None,
+                    authorization_policy_sha256=None,
+                    enabled_capabilities=(),
+                )
+                plugin = NunchiHermesV2Plugin(
+                    config=HermesPluginConfig(
+                        hermes_profile="default",
+                        state_root=Path(directory),
+                        rooms=(room,),
+                        provenance={"path": "fixture", "sha256": "f" * 64},
+                    ),
+                    ctx=FakeCtx(),
+                )
+                runtime = plugin._rooms[(platform, "42")]
+                self.assertEqual(
+                    {
+                        "message": "live-only",
+                        "reaction": "unavailable",
+                        "membership": "unavailable",
+                    },
+                    runtime.observation._visibility,
+                )
+
     def test_canonical_ids_are_platform_scoped_and_reject_empty_parts(self):
         self.require_surface()
         self.assertEqual("discord:actor:7", canonical_actor_id("discord", "7"))
@@ -324,6 +361,14 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertTrue(event["mentions_room"])
         self.assertEqual("unknown", actors["discord:actor:7"]["kind"])
         self.assertEqual("bot", actors["discord:actor:9"]["kind"])
+
+    def test_normalization_rejects_bounded_host_snapshot_coverage_gaps(self):
+        self.require_surface()
+        event = self.event()
+        event.coverage_gaps = ("text-overflow",)
+
+        with self.assertRaisesRegex(ValidationError, "coverage is incomplete"):
+            normalize_message_event(event, binding=self.binding())
 
     def test_telegram_normalization_does_not_infer_unavailable_mentions(self):
         self.require_surface()
@@ -655,6 +700,60 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("unknown", unknown.delivery)
         self.assertNotIn("ack lost", unknown.detail)
 
+    def test_native_transport_uses_public_reply_and_reaction_capabilities(self):
+        self.require_surface()
+
+        class RichDelivery(FakeDelivery):
+            async def reply(self, content):
+                self.calls.append({"kind": "reply", "content": content})
+                return self.results.pop(0)
+
+            async def react(self, reaction, *, operation="add"):
+                self.calls.append(
+                    {"kind": "reaction", "reaction": reaction, "operation": operation}
+                )
+                return self.results.pop(0)
+
+        transport = HermesNativeTransport(
+            binding=self.binding(),
+            coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+        )
+        reply_delivery = RichDelivery(
+            [SimpleNamespace(status="sent", message_id="556")]
+        )
+        transport.bind("discord:message:100", reply_delivery)
+        reply = transport.dispatch(
+            action={
+                "kind": "reply",
+                "target_event_id": "discord:message:100",
+                "text": "threaded",
+            },
+            wake={"room": {"id": "42"}},
+        )
+        self.assertEqual("sent", reply.delivery)
+        self.assertEqual("discord:message:556", reply.detail)
+        self.assertEqual([{"kind": "reply", "content": "threaded"}], reply_delivery.calls)
+
+        reaction_delivery = RichDelivery(
+            [SimpleNamespace(status="sent", message_id="100")]
+        )
+        transport.bind("discord:message:101", reaction_delivery)
+        reaction = transport.dispatch(
+            action={
+                "kind": "reaction",
+                "target_event_id": "discord:message:101",
+                "reaction": "👍",
+                "operation": "add",
+            },
+            wake={"room": {"id": "42"}},
+        )
+        self.assertEqual("sent", reaction.delivery)
+        self.assertEqual("native reaction acknowledged", reaction.detail)
+        self.assertEqual(
+            [{"kind": "reaction", "reaction": "👍", "operation": "add"}],
+            reaction_delivery.calls,
+        )
+
     def test_native_transport_timeout_cancels_submitted_delivery(self):
         self.require_surface()
         transport = HermesNativeTransport(binding=self.binding(), timeout_seconds=0.01)
@@ -780,6 +879,26 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertFalse(native_executed.is_set())
         self.assertEqual("unknown", result_box[0].delivery)
+
+    def test_room_cancel_invalidates_transport_before_blocking_pipeline_cancel(self):
+        self.require_surface()
+        runtime = object.__new__(hermes_module._RoomRuntime)
+        runtime._lifecycle_lock = threading.RLock()
+        runtime.transport = mock.Mock()
+
+        def pipeline_cancel():
+            self.assertTrue(
+                runtime.transport.cancel.called,
+                "transport generation must invalidate before scheduler cancellation can block",
+            )
+
+        runtime.pipeline = mock.Mock()
+        runtime.pipeline.cancel.side_effect = pipeline_cancel
+
+        runtime.cancel()
+
+        runtime.transport.cancel.assert_called_once_with()
+        runtime.pipeline.cancel.assert_called_once_with()
 
     def test_native_transport_rejects_cross_room_and_unretained_target(self):
         self.require_surface()
@@ -1407,7 +1526,7 @@ class HermesV2ContractTests(unittest.TestCase):
             for artifact in (result["config"]["path"], result["participant_profile"]["path"]):
                 self.assertEqual(0o600, os.stat(artifact).st_mode & 0o777)
 
-    def test_config_cli_requires_pinned_recovery_evidence_to_enable_suppression(self):
+    def test_config_cli_rejects_synthetic_recovery_fixture_for_suppression(self):
         self.require_surface()
         from nunchi_hermes_v2.cli import create_bundle, parser
 
@@ -1432,16 +1551,19 @@ class HermesV2ContractTests(unittest.TestCase):
 
             evidence = root / "recovery-evidence.json"
             evidence.write_text('{"surface":"discord","later_hearing":"verified"}\n')
+            os.chmod(evidence, 0o600)
             result = create_bundle(
                 parser().parse_args(base + ["--suppression-recovery-evidence", str(evidence)])
             )
-            loaded = load_pinned_hermes_config(
-                result["config"]["path"],
-                expected_sha256=result["config"]["sha256"],
-                hermes_profile="default",
-            )
-            self.assertTrue(loaded.rooms[0].attention.suppression_enabled)
-            self.assertTrue(loaded.rooms[0].attention.suppression_recovery_verified)
+            with self.assertRaisesRegex(
+                ValidationError,
+                "suppression recovery evidence",
+            ):
+                load_pinned_hermes_config(
+                    result["config"]["path"],
+                    expected_sha256=result["config"]["sha256"],
+                    hermes_profile="default",
+                )
 
     def test_packaging_entrypoint_and_v1_plugin_runtime_are_retired(self):
         root = Path(__file__).parents[2]
