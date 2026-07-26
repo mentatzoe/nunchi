@@ -29,7 +29,7 @@ python3 -m unittest tests.v2.test_hermes
 
 ## Artifact and installed-runtime proof
 
-- Build sdist and wheel from a clean candidate.
+- Build the reproducible wheel from a clean candidate; sdists are not release evidence.
 - Install the wheel into a fresh Python environment and the exact Hermes runtime environment used for the probe.
 - Use a fresh isolated `HERMES_HOME`; enable only `nunchi-v2`; install pinned profile/config/policy files with private permissions.
 - Verify plugin discovery, closed/pinned configuration, profile and package provenance, state-root isolation, clean restart, V2 probe output, and absence of a repository checkout dependency.

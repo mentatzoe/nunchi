@@ -1,0 +1,2 @@
+# Patch artifacts preserve exact upstream source bytes; do not lint their payload as repository text.
+*.patch -whitespace

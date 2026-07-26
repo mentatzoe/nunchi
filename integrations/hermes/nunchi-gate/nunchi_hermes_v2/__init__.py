@@ -31,6 +31,8 @@ from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
 from nunchi.receipts import ReceiptJournal
 from nunchi.v2_contracts import ValidationError, validate_canonical_event
 
+from .host_patch import HostPatchBundle, HostPatchError, inspect_host
+
 
 logger = logging.getLogger(__name__)
 _PLUGIN_ID = "nunchi-v2"
@@ -141,24 +143,32 @@ def _closed(mapping: Any, *, required: set[str], optional: set[str] = set(), lab
 
 
 def _current_hermes_hook_source_sha256() -> str:
-    """Fingerprint the exact installed public hook implementation used by this plugin."""
+    """Fingerprint the exact verified stock-host plus Nunchi seam identity."""
     try:
         from gateway import message_hooks as host_message_hooks
-        from gateway import run as host_gateway_run
 
-        modules = (host_message_hooks, host_gateway_run)
-        digest = hashlib.sha256()
-        for module in modules:
-            source = Path(module.__file__).resolve()
-            if not source.is_file():
-                raise OSError(f"missing host source: {source}")
-            digest.update(module.__name__.encode("utf-8"))
-            digest.update(b"\0")
-            digest.update(source.read_bytes())
-            digest.update(b"\0")
-        return digest.hexdigest()
-    except (ImportError, OSError, TypeError) as exc:
-        raise ValidationError("Hermes hook source identity is unavailable") from exc
+        source = Path(host_message_hooks.__file__).resolve()
+        if source.name != "message_hooks.py" or source.parent.name != "gateway":
+            raise HostPatchError("Hermes hook source is outside the supported source layout")
+        host_root = source.parent.parent.resolve()
+        bundle = HostPatchBundle.bundled()
+        state = inspect_host(host_root, bundle)
+        if state.get("status") != "applied":
+            raise HostPatchError("Hermes host seam is not applied")
+        identity = {
+            "patch_sha256": bundle.patch_sha256,
+            "post_apply_sha256": dict(bundle.post_apply_sha256),
+            "schema_version": 1,
+            "supported_hermes_commit": bundle.supported_hermes_commit,
+        }
+        canonical = json.dumps(
+            identity,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+    except (HostPatchError, ImportError, OSError, TypeError, ValueError) as exc:
+        raise ValidationError("Hermes host seam identity is unavailable") from exc
 
 
 def canonical_actor_id(platform: str, native_actor_id: str) -> str:
@@ -1013,6 +1023,7 @@ class _RoomRuntime:
             {
                 "profile": _nonempty(profile_name, "Hermes profile name"),
                 "participant": config.binding.participant_id,
+                "actor": config.binding.actor_id,
                 "platform": config.binding.platform,
                 "room": config.binding.room_id,
                 "continuity": config.binding.continuity_scope_id,
@@ -1364,10 +1375,18 @@ class _ProfileMultiplexNunchiPlugin:
         ctx: Any,
         loader: Callable[[str], HermesPluginConfig],
         initial_profile: str,
+        host_seam_sha256: str,
+        host_patch_sha256: str,
+        supported_hermes_commit: str,
+        nunchi_integration_sha256: str,
     ) -> None:
         self.ctx = ctx
         self.loader = loader
         self.initial_profile = initial_profile
+        self.host_seam_sha256 = host_seam_sha256
+        self.host_patch_sha256 = host_patch_sha256
+        self.supported_hermes_commit = supported_hermes_commit
+        self.nunchi_integration_sha256 = nunchi_integration_sha256
         self._lock = threading.RLock()
         self._plugins: dict[str, Any] = {}
         self._plugin_for(initial_profile)
@@ -1438,18 +1457,40 @@ class _ProfileMultiplexNunchiPlugin:
         return active
 
     def public_probe(self) -> dict[str, Any]:
-        """Return route-independent status without profile or binding metadata."""
+        """Return exact non-secret provenance without route or binding metadata."""
         with self._lock:
             probes = tuple(plugin.probe() for plugin in self._plugins.values())
         operational = bool(probes) and all(probe.get("operational") is True for probe in probes)
+        config_digests: list[str] = []
+        if operational:
+            for probe in probes:
+                provenance = probe.get("config_provenance")
+                digest = provenance.get("sha256") if isinstance(provenance, dict) else None
+                if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+                    operational = False
+                    config_digests = []
+                    break
+                config_digests.append(digest)
         result: dict[str, Any] = {
             "plugin": _PLUGIN_ID,
             "generation": 2,
             "v1_fallback": False,
             "operational": operational,
             "loaded_profile_count": len(probes),
+            "host_seam_sha256": self.host_seam_sha256,
+            "host_patch_sha256": self.host_patch_sha256,
+            "supported_hermes_commit": self.supported_hermes_commit,
+            "nunchi_integration_sha256": self.nunchi_integration_sha256,
         }
-        if not operational:
+        if operational:
+            config_identity = json.dumps(
+                sorted(config_digests),
+                separators=(",", ":"),
+            ).encode("utf-8")
+            result["configuration_set_sha256"] = hashlib.sha256(
+                config_identity
+            ).hexdigest()
+        else:
             result["failure"] = "configuration-invalid"
         return result
 
@@ -1462,15 +1503,33 @@ class _ProfileMultiplexNunchiPlugin:
                 restart()
 
 
-def register(ctx: Any, *, config_loader: Callable[[str], HermesPluginConfig] | None = None) -> Any:
+def register(
+    ctx: Any,
+    *,
+    config_loader: Callable[[str], HermesPluginConfig] | None = None,
+    host_identity_loader: Callable[[], str] | None = None,
+) -> Any:
     if getattr(ctx, "gateway_message_hook_api_version", None) != 2:
         raise ValidationError("Hermes gateway-message hook API version 2 is required")
+    host_seam_sha256 = (
+        host_identity_loader or _current_hermes_hook_source_sha256
+    )()
+    if not isinstance(host_seam_sha256, str) or not _SHA256.fullmatch(
+        host_seam_sha256
+    ):
+        raise ValidationError("Hermes host seam identity is invalid")
+    bundle = HostPatchBundle.bundled()
+    nunchi_integration_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     loader = config_loader or _default_config_loader
     profile = _nonempty(getattr(ctx, "profile_name", None) or "default", "Hermes profile")
     plugin: Any = _ProfileMultiplexNunchiPlugin(
         ctx=ctx,
         loader=loader,
         initial_profile=profile,
+        host_seam_sha256=host_seam_sha256,
+        host_patch_sha256=bundle.patch_sha256,
+        supported_hermes_commit=bundle.supported_hermes_commit,
+        nunchi_integration_sha256=nunchi_integration_sha256,
     )
     ctx.register_hook("gateway_message", plugin.gateway_message)
     ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)

@@ -323,6 +323,41 @@ class HermesV2ContractTests(unittest.TestCase):
             )
             self.assertNotEqual(default_runtime.room_dir, work_runtime.room_dir)
 
+    def test_room_runtime_state_partition_uses_exact_actor_identity(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = Path(directory)
+            ctx = SimpleNamespace(
+                profile_name="default",
+                llm=FakeLlm([]),
+                tools={},
+            )
+
+            def runtime_for(actor: str):
+                binding = self.binding(actor=actor)
+                room = hermes_module.HermesRoomConfig(
+                    binding=binding,
+                    profile=self.profile(binding),
+                    attention=AttentionPolicy(),
+                    suppression_recovery_evidence=None,
+                    participant_timeout_seconds=5,
+                    participant_max_expansions=2,
+                    limits=ObservationLimits(),
+                    authorization_policy_path=None,
+                    authorization_policy_sha256=None,
+                    enabled_capabilities=(),
+                )
+                return hermes_module._RoomRuntime(
+                    room,
+                    state_root=state_root,
+                    ctx=ctx,
+                    profile_name="default",
+                )
+
+            first = runtime_for("9")
+            rebound = runtime_for("10")
+            self.assertNotEqual(first.room_dir, rebound.room_dir)
+
     def test_live_recovery_evidence_requires_current_host_source_identity(self):
         self.require_surface()
         binding = self.binding()
@@ -354,6 +389,86 @@ class HermesV2ContractTests(unittest.TestCase):
                 participant_profile_sha256="b" * 64,
                 hermes_hook_source_sha256="a" * 64,
             )
+
+    def test_current_host_source_identity_binds_exact_verified_patch_bundle(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "gateway" / "message_hooks.py"
+            source.parent.mkdir()
+            source.write_text("API_VERSION = 2\n", encoding="utf-8")
+            host_module = SimpleNamespace(__file__=str(source))
+            gateway_module = SimpleNamespace(message_hooks=host_module)
+            bundle = SimpleNamespace(
+                supported_hermes_commit="1" * 40,
+                patch_sha256="2" * 64,
+                post_apply_sha256={
+                    "gateway/message_hooks.py": "3" * 64,
+                    "gateway/run.py": "4" * 64,
+                },
+            )
+            canonical = json.dumps(
+                {
+                    "patch_sha256": bundle.patch_sha256,
+                    "post_apply_sha256": bundle.post_apply_sha256,
+                    "schema_version": 1,
+                    "supported_hermes_commit": bundle.supported_hermes_commit,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+
+            with (
+                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
+                mock.patch.object(
+                    hermes_module.HostPatchBundle,
+                    "bundled",
+                    return_value=bundle,
+                ),
+                mock.patch.object(
+                    hermes_module,
+                    "inspect_host",
+                    return_value={"status": "applied"},
+                ) as inspect,
+            ):
+                actual = hermes_module._current_hermes_hook_source_sha256()
+
+            inspect.assert_called_once_with(root.resolve(), bundle)
+            self.assertEqual(hashlib.sha256(canonical).hexdigest(), actual)
+
+    def test_current_host_source_identity_fails_closed_when_patch_state_is_unverified(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "gateway" / "message_hooks.py"
+            source.parent.mkdir()
+            source.write_text("API_VERSION = 2\n", encoding="utf-8")
+            gateway_module = SimpleNamespace(
+                message_hooks=SimpleNamespace(__file__=str(source))
+            )
+            bundle = SimpleNamespace(
+                supported_hermes_commit="1" * 40,
+                patch_sha256="2" * 64,
+                post_apply_sha256={"gateway/message_hooks.py": "3" * 64},
+            )
+            with (
+                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
+                mock.patch.object(
+                    hermes_module.HostPatchBundle,
+                    "bundled",
+                    return_value=bundle,
+                ),
+                mock.patch.object(
+                    hermes_module,
+                    "inspect_host",
+                    side_effect=hermes_module.HostPatchError("divergent host"),
+                ),
+                self.assertRaisesRegex(
+                    ValidationError,
+                    "Hermes host seam identity is unavailable",
+                ),
+            ):
+                hermes_module._current_hermes_hook_source_sha256()
 
     def test_hermes_runtime_declares_only_delivered_event_visibility(self):
         self.require_surface()
@@ -1190,7 +1305,11 @@ class HermesV2ContractTests(unittest.TestCase):
         def broken(_profile):
             raise ValueError("digest mismatch")
 
-        plugin = register(ctx, config_loader=broken)
+        plugin = register(
+            ctx,
+            config_loader=broken,
+            host_identity_loader=lambda: "a" * 64,
+        )
         result = asyncio.run(
             ctx.hooks["gateway_message"](
                 event=self.event(),
@@ -1207,18 +1326,35 @@ class HermesV2ContractTests(unittest.TestCase):
     def test_register_exposes_public_post_auth_hooks_and_probe_command(self):
         self.require_surface()
         ctx = FakeCtx()
-        plugin = register(ctx, config_loader=lambda profile: SimpleNamespace(hermes_profile=profile, rooms=(), provenance={}))
+        plugin = register(
+            ctx,
+            config_loader=lambda profile: SimpleNamespace(
+                hermes_profile=profile,
+                rooms=(),
+                provenance={"sha256": "c" * 64},
+            ),
+            host_identity_loader=lambda: "a" * 64,
+        )
         self.assertEqual({"gateway_message", "gateway_session_cancel"}, set(ctx.hooks))
         self.assertIn("nunchi-v2", ctx.commands)
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
+        self.assertEqual("a" * 64, probe["host_seam_sha256"])
+        self.assertEqual("039b5d6052073ba3fe4dc1d23a41a0c40a7c2e16db53373ecef9001ecd0b8861", probe["host_patch_sha256"])
+        self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
+        self.assertRegex(probe["nunchi_integration_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(probe["configuration_set_sha256"], r"^[0-9a-f]{64}$")
         public_blob = json.dumps(probe)
         self.assertNotIn("PASS", public_blob)
         self.assertNotIn("fixture", public_blob)
         self.assertNotIn("hermes_profile", public_blob)
         self.assertNotIn("rooms", public_blob)
+        self.assertNotIn("state_directory", public_blob)
+        self.assertNotIn("actor_id", public_blob)
+        self.assertNotIn("participant_id", public_blob)
+        self.assertNotIn("room_id", public_blob)
 
         source = (PLUGIN_ROOT / "nunchi_hermes_v2" / "__init__.py").read_text()
         for forbidden in (
@@ -1233,6 +1369,22 @@ class HermesV2ContractTests(unittest.TestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
+
+    def test_register_fails_before_configuration_when_host_seam_is_unverified(self):
+        self.require_surface()
+        ctx = FakeCtx()
+        config_loader = mock.Mock()
+
+        with self.assertRaisesRegex(ValidationError, "host seam"):
+            register(
+                ctx,
+                config_loader=config_loader,
+                host_identity_loader=mock.Mock(
+                    side_effect=ValidationError("Hermes host seam identity is unavailable")
+                ),
+            )
+
+        config_loader.assert_not_called()
 
     def test_register_routes_multiplexed_profiles_to_profile_owned_instances(self):
         self.require_surface()
@@ -1249,7 +1401,11 @@ class HermesV2ContractTests(unittest.TestCase):
                 return configs[profile]
 
             ctx = FakeCtx(profile_name="default")
-            plugin = register(ctx, config_loader=load)
+            plugin = register(
+                ctx,
+                config_loader=load,
+                host_identity_loader=lambda: "a" * 64,
+            )
             event = self.event(actor="9")
             event.source.profile = "work"
 
@@ -1275,7 +1431,11 @@ class HermesV2ContractTests(unittest.TestCase):
                     raise ValueError("missing secondary profile secret")
                 return self.plugin_config(directory, profile_name=profile)
 
-            register(ctx, config_loader=load)
+            register(
+                ctx,
+                config_loader=load,
+                host_identity_loader=lambda: "a" * 64,
+            )
             event = self.event(actor="9")
             event.source.profile = "work"
             result = asyncio.run(
@@ -1298,7 +1458,11 @@ class HermesV2ContractTests(unittest.TestCase):
                 for profile in ("default", "work")
             }
             ctx = FakeCtx(profile_name="default")
-            plugin = register(ctx, config_loader=configs.__getitem__)
+            plugin = register(
+                ctx,
+                config_loader=configs.__getitem__,
+                host_identity_loader=lambda: "a" * 64,
+            )
             event = self.event(actor="9")
             event.source.profile = "work"
             asyncio.run(
