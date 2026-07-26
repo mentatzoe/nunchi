@@ -317,8 +317,9 @@ def normalize_message_event(
         raise ValidationError("Hermes media payload has no V2 canonical mapping")
     mentioned_user_ids = getattr(event, "mentioned_user_ids", None)
     mentions_room = getattr(event, "mentions_room", None)
-    if not isinstance(mentioned_user_ids, (list, tuple)) or any(
-        not isinstance(item, str) or not item for item in mentioned_user_ids
+    if mentioned_user_ids is not None and (
+        not isinstance(mentioned_user_ids, (list, tuple))
+        or any(not isinstance(item, str) or not item for item in mentioned_user_ids)
     ):
         raise ValidationError("message has no transport-attested mention identities")
     if not isinstance(mentions_room, bool):
@@ -335,10 +336,12 @@ def normalize_message_event(
             "kind": "unknown",
         },
     }
-    canonical_mentions = sorted(
-        {canonical_actor_id(platform, item) for item in mentioned_user_ids}
+    canonical_mentions = (
+        None
+        if mentioned_user_ids is None
+        else sorted({canonical_actor_id(platform, item) for item in mentioned_user_ids})
     )
-    for mentioned_actor_id in canonical_mentions:
+    for mentioned_actor_id in canonical_mentions or ():
         actors.setdefault(
             mentioned_actor_id,
             {"display_name": mentioned_actor_id, "kind": "unknown"},

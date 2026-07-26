@@ -169,7 +169,7 @@ def _event_refs(event: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _actor_refs(event: Mapping[str, Any]) -> set[str]:
     if event["type"] == "message":
-        return {event["author_id"], *event["mentioned_actor_ids"]}
+        return {event["author_id"], *(event["mentioned_actor_ids"] or ())}
     if event["type"] == "reaction":
         return {event["author_id"]}
     result = {event["subject_actor_id"]}

@@ -269,7 +269,9 @@ class HermesV2ContractTests(unittest.TestCase):
             message_type="text",
             media_urls=(),
             media_types=(),
-            mentioned_user_ids=tuple(mentioned_user_ids),
+            mentioned_user_ids=(
+                None if mentioned_user_ids is None else tuple(mentioned_user_ids)
+            ),
             mentions_room=mentions_room,
             timestamp=datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc),
             source=self.source(platform=platform, actor=actor, room=room),
@@ -279,8 +281,16 @@ class HermesV2ContractTests(unittest.TestCase):
             metadata={},
         )
 
-    def plugin_config(self, root, *, profile_name="default", policy=None, timeout=5):
-        binding = self.binding()
+    def plugin_config(
+        self,
+        root,
+        *,
+        profile_name="default",
+        policy=None,
+        timeout=5,
+        binding=None,
+    ):
+        binding = binding or self.binding()
         room = hermes_module.HermesRoomConfig(
             binding=binding,
             profile=self.profile(binding),
@@ -622,12 +632,65 @@ class HermesV2ContractTests(unittest.TestCase):
     def test_telegram_normalization_does_not_infer_unavailable_mentions(self):
         self.require_surface()
         event, actors = normalize_message_event(
-            self.event(platform="telegram", actor="7", room="-10042"),
+            self.event(
+                platform="telegram",
+                actor="7",
+                room="-10042",
+                mentioned_user_ids=None,
+            ),
             binding=self.binding(platform="telegram", actor="9", room="-10042"),
         )
-        self.assertEqual([], event["mentioned_actor_ids"])
+        self.assertIsNone(event["mentioned_actor_ids"])
         self.assertFalse(event["mentions_room"])
         self.assertEqual({"telegram:actor:7", "telegram:actor:9"}, set(actors))
+
+    def test_telegram_unknown_mentions_still_reach_participant_attention(self):
+        self.require_surface()
+        attention = FakeStructuredResult(
+            {
+                "disposition": "WAKE",
+                "reasons": ["mention truth is unknown; inspect content"],
+                "evidence_event_ids": ["telegram:message:100"],
+                "legacy_verdict_confidences": {
+                    "PASS": 0.1,
+                    "ACK": 0.1,
+                    "ASK": 0.1,
+                    "SPEAK": 0.7,
+                },
+            }
+        )
+        action = FakeStructuredResult({"kind": "silence"})
+        binding = self.binding(platform="telegram", actor="9", room="-10042")
+        with tempfile.TemporaryDirectory() as directory:
+            llm = FakeLlm([attention, action])
+            plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory, binding=binding),
+                ctx=FakeCtx(llm),
+            )
+            native = self.event(
+                platform="telegram",
+                actor="7",
+                room="-10042",
+                mentioned_user_ids=None,
+            )
+
+            async def scenario():
+                result = await plugin.gateway_message(
+                    event=native,
+                    route=native.source,
+                    delivery=FakeDelivery([]),
+                )
+                self.assertEqual("handled", result["decision"])
+                runtime = plugin._rooms[("telegram", "-10042")]
+                self.assertTrue(await asyncio.to_thread(runtime.pipeline.drain, 2))
+                self.assertIsNone(
+                    runtime.observation.retained_events()[-1]["mentioned_actor_ids"]
+                )
+
+            asyncio.run(scenario())
+            self.assertEqual(2, len(llm.calls))
+            self.assertEqual("nunchi-v2-attention", llm.calls[0]["purpose"])
+            self.assertEqual("nunchi-v2-participant-turn", llm.calls[1]["purpose"])
 
     def test_unconstructable_hermes_event_is_audited_and_never_scheduled(self):
         self.require_surface()

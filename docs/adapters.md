@@ -10,6 +10,13 @@ normalized before attention and cannot alter trusted binding or policy.
 | Matrix | message, reaction add, membership | message, reply, reaction add | bounded persisted plus `/sync` | portable room-wide mention relation unavailable; reaction removal unavailable without native reaction event ID |
 | Telegram | message, membership | message, reply | live-only visibility with bounded retained state | ordinary history, reactions, and portable room-wide mentions unavailable |
 
+For every surface, `mentioned_actor_ids: []` means the transport completely
+attested actor-targeted mentions and found none. `mentioned_actor_ids: null`
+means exact actor identities are unavailable (for example, a Telegram
+`@username` entity without an immutable user ID). The latter remains a
+constructable event and reaches participant-owned attention as explicit
+uncertainty; adapters never rewrite it to a false negative.
+
 `--probe` without configuration reports only static installed capabilities.
 Configured probes verify exact pinned configuration and required credentials
 but do not claim a live connection.

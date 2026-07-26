@@ -131,7 +131,10 @@ A truthful attention request represents:
 - **The typed event union** — array order is authoritative. Every event
   carries `id` and `type`; `message` events add `author_id`, optional
   `timestamp`, `text`, optional `reply_to_event_id`/`thread_root_event_id`,
-  `mentioned_actor_ids`, and `mentions_room`; `reaction` events add
+  `mentioned_actor_ids` (an ID array, or `null` when the transport cannot
+  attest exact actor-targeted mention identities), and `mentions_room`; an
+  empty mention array means complete attestation found no actor-targeted
+  mentions, never unknown. `reaction` events add
   `author_id`, `target_event_id`, `reaction`, and `operation`
   (`add`/`remove`); `membership` events add `scope`
   (`{kind: room/thread/space/unknown, id}`), `subject_actor_id`, optional

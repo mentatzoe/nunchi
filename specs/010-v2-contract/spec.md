@@ -308,7 +308,9 @@ participant outcomes and binding failures.
   (duplicate event IDs reject), literal
   message/reply/thread/reaction/membership facts, distinct actor-targeted
   mention IDs and `mentions_room`, and explicitly unknown or unresolved
-  platform facts. Every typed event's actor reference — message/reaction
+  platform facts. `mentioned_actor_ids: null` means exact actor-targeted
+  mention identities are unavailable, while `[]` means complete attestation
+  found none. Every typed event's actor reference — message/reaction
   `author_id`, message `mentioned_actor_ids`, membership `subject_actor_id`
   and optional `caused_by_actor_id` — MUST resolve to a key present in the
   actor map (rejection R8); a reference absent from `actors` rejects under

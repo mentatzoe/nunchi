@@ -200,7 +200,12 @@ def validate_canonical_event(value: Any, *, path: str = "event") -> dict[str, An
         _nes(doc["author_id"], f"{path}.author_id")
         if not isinstance(doc["text"], str):
             _fail(f"{path}.text", "must be a string")
-        _string_list(doc["mentioned_actor_ids"], f"{path}.mentioned_actor_ids", unique=True)
+        if doc["mentioned_actor_ids"] is not None:
+            _string_list(
+                doc["mentioned_actor_ids"],
+                f"{path}.mentioned_actor_ids",
+                unique=True,
+            )
         if not isinstance(doc["mentions_room"], bool):
             _fail(f"{path}.mentions_room", "must be a boolean")
         for name in ("timestamp", "reply_to_event_id", "thread_root_event_id"):
@@ -250,7 +255,7 @@ def validate_canonical_event(value: Any, *, path: str = "event") -> dict[str, An
 
 def _event_actor_ids(event: Mapping[str, Any]) -> list[str]:
     if event["type"] == "message":
-        return [event["author_id"], *event["mentioned_actor_ids"]]
+        return [event["author_id"], *(event["mentioned_actor_ids"] or ())]
     if event["type"] == "reaction":
         return [event["author_id"]]
     result = [event["subject_actor_id"]]

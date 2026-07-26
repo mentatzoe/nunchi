@@ -47,9 +47,14 @@
         "reply_to_event_id": {"$ref": "#/$defs/nonEmptyString"},
         "thread_root_event_id": {"$ref": "#/$defs/nonEmptyString"},
         "mentioned_actor_ids": {
-          "$comment": "Actor-targeted mention IDs, distinct from mentions_room.",
-          "type": "array",
-          "items": {"$ref": "#/$defs/nonEmptyString"}
+          "$comment": "Actor-targeted mention IDs, distinct from mentions_room. Null means the transport attests that exact actor identities are unavailable; an empty array means complete attestation found no actor-targeted mentions.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {"$ref": "#/$defs/nonEmptyString"}
+            },
+            {"type": "null"}
+          ]
         },
         "mentions_room": {"type": "boolean"}
       }

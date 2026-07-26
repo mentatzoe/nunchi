@@ -163,6 +163,19 @@ def foundation(
 
 
 class ObservationTests(unittest.TestCase):
+    def test_unknown_actor_mentions_remain_constructable_and_reach_attention(self):
+        pipeline, model, _, _ = foundation()
+
+        result = pipeline.handle_delivery(
+            delivery_id="d-unknown-mentions",
+            event=message("e-unknown-mentions", mentioned_actor_ids=None),
+            actors={"human:zoe": {"display_name": "Zoe", "kind": "human"}},
+        )
+
+        self.assertTrue(result.observation.wake_eligible)
+        self.assertEqual(1, len(model.calls))
+        self.assertIsNone(model.calls[0][1]["events"][-1]["mentioned_actor_ids"])
+
     def test_exact_self_is_context_only_but_alias_collision_is_not_self(self):
         pipeline, model, _, _ = foundation()
         self_result = pipeline.handle_delivery(
