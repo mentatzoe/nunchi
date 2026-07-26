@@ -1,21 +1,20 @@
 diff --git a/gateway/message_hooks.py b/gateway/message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8636cb2195a04b44898415fec959c2d63d028be9
+index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f65c8a880
 --- /dev/null
 +++ b/gateway/message_hooks.py
-@@ -0,0 +1,549 @@
+@@ -0,0 +1,553 @@
 +"""Narrow immutable contracts for plugin handling of ordinary gateway messages."""
 +
 +from __future__ import annotations
 +
 +import asyncio
-+import hashlib
 +import inspect
 +import weakref
 +from dataclasses import dataclass
 +from typing import Any, Awaitable, Callable, Literal, Optional
 +
-+from gateway.platforms.base import MessageEvent, SendResult
++from gateway.platforms.base import MessageEvent, NativeDeliveryAck, SendResult
 +from gateway.session import SessionSource
 +from hermes_constants import GATEWAY_MESSAGE_HOOK_API_VERSION
 +
@@ -441,53 +440,58 @@ index 0000000000000000000000000000000000000000..8636cb2195a04b44898415fec959c2d6
 +        return GatewayDeliveryReceipt(status="failed")
 +    if native_result.success is not True or binding.self_actor_id is None:
 +        return GatewayDeliveryReceipt(status="unknown")
-+    native_message_id = _optional_text(native_result.message_id)
++    ack = native_result.native_delivery_ack
++    if not isinstance(ack, NativeDeliveryAck):
++        return GatewayDeliveryReceipt(status="unknown")
++    expected_kind = {"send": "send", "reply": "reply", "react": "react"}[request.kind]
++    expected_reply = binding.source_message_id if request.kind == "reply" else None
++    expected_target = binding.source_message_id if request.kind == "react" else None
++    expected_content = request.content if request.kind != "react" else None
++    expected_reaction = request.content if request.kind == "react" else None
++    expected_operation = request.operation if request.kind == "react" else None
++    if (
++        ack.platform != binding.platform
++        or ack.room_id != binding.room_id
++        or ack.self_actor_id != binding.self_actor_id
++        or ack.effect_kind != expected_kind
++        or ack.submitted_content != expected_content
++        or ack.reply_to_message_id != expected_reply
++        or ack.target_message_id != expected_target
++        or ack.reaction != expected_reaction
++        or ack.reaction_operation != expected_operation
++    ):
++        return GatewayDeliveryReceipt(status="unknown")
 +    if request.kind == "react":
-+        if native_message_id != binding.source_message_id or native_message_id is None:
++        if (
++            ack.message_id is not None
++            or not ack.effect_id
++            or not ack.effect_id.startswith(f"{binding.platform}:reaction:")
++        ):
 +            return GatewayDeliveryReceipt(status="unknown")
-+        reaction_identity = "\x00".join(
-+            (
-+                binding.platform,
-+                binding.room_id,
-+                binding.profile,
-+                binding.self_actor_id,
-+                native_message_id,
-+                request.operation,
-+                request.content,
-+            )
-+        )
-+        effect_id = (
-+            f"{binding.platform}:reaction:"
-+            f"{hashlib.sha256(reaction_identity.encode()).hexdigest()}"
-+        )
-+        return GatewayDeliveryReceipt(
-+            status="sent",
-+            platform=binding.platform,
-+            room_id=binding.room_id,
-+            profile=binding.profile,
-+            self_actor_id=binding.self_actor_id,
-+            effect_kind="react",
-+            target_message_id=native_message_id,
-+            reaction=request.content,
-+            reaction_operation=request.operation,
-+            effect_id=effect_id,
-+        )
-+    if native_message_id:
-+        return GatewayDeliveryReceipt(
-+            status="sent",
-+            platform=binding.platform,
-+            room_id=binding.room_id,
-+            profile=binding.profile,
-+            self_actor_id=binding.self_actor_id,
-+            effect_kind=request.kind,
-+            submitted_content=request.content,
-+            reply_to_message_id=(
-+                binding.source_message_id if request.kind == "reply" else None
-+            ),
-+            message_id=native_message_id,
-+            effect_id=native_message_id,
-+        )
-+    return GatewayDeliveryReceipt(status="unknown")
++    else:
++        native_message_id = _optional_text(native_result.message_id)
++        if (
++            not native_message_id
++            or ack.message_id != native_message_id
++            or ack.effect_id != native_message_id
++            or native_message_id == binding.source_message_id
++        ):
++            return GatewayDeliveryReceipt(status="unknown")
++    return GatewayDeliveryReceipt(
++        status="sent",
++        platform=ack.platform,
++        room_id=ack.room_id,
++        profile=binding.profile,
++        self_actor_id=ack.self_actor_id,
++        effect_kind=ack.effect_kind,
++        submitted_content=ack.submitted_content,
++        reply_to_message_id=ack.reply_to_message_id,
++        target_message_id=ack.target_message_id,
++        reaction=ack.reaction,
++        reaction_operation=ack.reaction_operation,
++        message_id=ack.message_id,
++        effect_id=ack.effect_id,
++    )
 +
 +
 +def _consume_delivery_worker_result(task: asyncio.Task[None]) -> None:
@@ -554,10 +558,51 @@ index 0000000000000000000000000000000000000000..8636cb2195a04b44898415fec959c2d6
 +        for item in items[:count_limit]
 +    )
 diff --git a/gateway/platforms/base.py b/gateway/platforms/base.py
-index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..4bff89fc899f2701372444d4267d02a461b25cc7 100644
+index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..5d8ec503e5bb428a9e4ddc706022acc15a12635c 100644
 --- a/gateway/platforms/base.py
 +++ b/gateway/platforms/base.py
-@@ -3129,6 +3129,17 @@ class BasePlatformAdapter(ABC):
+@@ -505,7 +505,7 @@ import dataclasses
+ from dataclasses import dataclass, field
+ from datetime import datetime
+ from pathlib import Path
+-from typing import Dict, List, Optional, Any, Callable, Awaitable, Tuple, Union
++from typing import Dict, List, Optional, Any, Callable, Awaitable, Tuple, Union, Literal
+ from enum import Enum
+ 
+ from pathlib import Path as _Path
+@@ -1920,6 +1920,23 @@ def coerce_plaintext_gateway_command(event: "MessageEvent") -> None:
+         return
+ 
+ 
++@dataclass(frozen=True)
++class NativeDeliveryAck:
++    """Adapter-produced attestation for one committed native platform effect."""
++
++    platform: str
++    room_id: str
++    self_actor_id: str
++    effect_kind: Literal["send", "reply", "react"]
++    submitted_content: Optional[str] = None
++    reply_to_message_id: Optional[str] = None
++    target_message_id: Optional[str] = None
++    reaction: Optional[str] = None
++    reaction_operation: Optional[Literal["add", "remove"]] = None
++    message_id: Optional[str] = None
++    effect_id: Optional[str] = None
++
++
+ @dataclass
+ class SendResult:
+     """Result of sending a message."""
+@@ -1927,6 +1944,7 @@ class SendResult:
+     message_id: Optional[str] = None
+     error: Optional[str] = None
+     raw_response: Any = None
++    native_delivery_ack: Optional[NativeDeliveryAck] = None
+     # Adapter-specific metadata.  Cross-layer contracts that affect delivery
+     # semantics must be documented at the producer and consumer sites.  Current
+     # known contract: Telegram edit overflow partials set
+@@ -3129,6 +3147,17 @@ class BasePlatformAdapter(ABC):
          """
          pass
  
@@ -575,7 +620,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..4bff89fc899f2701372444d4267d02a4
      # Default: the adapter treats ``finalize=True`` on edit_message as a
      # no-op and is happy to have the stream consumer skip redundant final
      # edits.  Subclasses that *require* an explicit finalize call to close
-@@ -4880,11 +4891,19 @@ class BasePlatformAdapter(ABC):
+@@ -4880,11 +4909,19 @@ class BasePlatformAdapter(ABC):
          # Offloaded: the sync hook must not block the loop.
          await asyncio.to_thread(self._apply_topic_recovery, event)
  
@@ -600,7 +645,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..4bff89fc899f2701372444d4267d02a4
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8afaba1a8 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..d197dd9b700d15d9bc2f162cb4b47c860d4a1271 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -689,16 +734,35 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
  
              stop_watchdog = getattr(self, "_stop_systemd_watchdog", None)
              if callable(stop_watchdog):
-@@ -10742,6 +10800,47 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10742,6 +10800,66 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          )
          return switched
  
 +    def _run_pre_gateway_dispatch(self, event: MessageEvent) -> bool:
-+        """Apply the legacy pre-dispatch policy once; return True when skipped."""
++        """Apply legacy pre-dispatch only when no V2 message seam is active."""
 +        marker = "_hermes_pre_gateway_dispatch_done"
 +        if getattr(event, marker, False):
 +            return False
 +        setattr(event, marker, True)
++        if (
++            getattr(event, "_hermes_startup_restore_replay", False)
++            or getattr(event, "_hermes_historical_replay", False)
++        ):
++            return False
++        try:
++            from hermes_cli.plugins import has_hook as _has_hook
++
++            if _has_hook("gateway_message") and _has_hook("pre_gateway_dispatch"):
++                logger.error(
++                    "Refusing ordinary ingress: gateway_message conflicts with "
++                    "legacy pre_gateway_dispatch"
++                )
++                return True
++        except Exception:
++            # Hook-registry uncertainty cannot authorize a legacy behavior-changing
++            # path in front of participant-owned attention.
++            logger.exception("Could not verify gateway-message hook isolation")
++            return True
 +        try:
 +            from hermes_cli.plugins import invoke_hook as _invoke_hook
 +
@@ -737,7 +801,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
      async def _handle_message(self, event: MessageEvent) -> Optional[str]:
          """
          Handle an incoming message from any platform.
-@@ -10813,46 +10912,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10813,46 +10931,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          if not is_internal:
              self._scale_to_zero_note_real_inbound()
  
@@ -788,7 +852,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
  
          if is_internal:
              pass
-@@ -10907,6 +10970,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10907,6 +10989,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      # Record rate limit so subsequent messages are silently ignored
                      self.pairing_store._record_rate_limit(platform_name, source.user_id)
              return None
@@ -815,7 +879,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
          
          # Intercept messages that are responses to a pending /update prompt.
          # The update process (detached) wrote .update_prompt.json; the watcher
-@@ -11186,6 +11269,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11186,6 +11288,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # _interrupt_requested.  Force-clean _running_agents so the session
              # is unlocked and subsequent messages are processed normally.
              if _cmd_def_inner and _cmd_def_inner.name == "stop":
@@ -827,7 +891,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
                  await self._interrupt_and_clear_session(
                      _quick_key,
                      source,
-@@ -11203,6 +11291,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11203,6 +11310,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # doesn't get re-processed as a user message after the
              # interrupt completes.
              if _cmd_def_inner and _cmd_def_inner.name == "new":
@@ -841,7 +905,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
                  # Clear any pending messages so the old text doesn't replay
                  await self._interrupt_and_clear_session(
                      _quick_key,
-@@ -11212,7 +11307,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11212,7 +11326,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  )
                  # Clean up the running agent entry so the reset handler
                  # doesn't think an agent is still active.
@@ -850,7 +914,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
  
              # /queue <prompt> — queue without interrupting.
              # Semantics: each /queue invocation produces its own full agent
-@@ -11413,6 +11508,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11413,6 +11527,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      f"mid-turn. Wait for the current response or `/stop` first."
                  )
  
@@ -875,7 +939,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
              if event.message_type == MessageType.PHOTO:
                  logger.debug("PRIORITY photo follow-up for session %s — queueing without interrupt", _quick_key)
                  adapter = self._adapter_for_source(source)
-@@ -11468,14 +11581,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11468,14 +11600,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          merge_text=True,
                      )
                  return None
@@ -890,7 +954,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
              if self._busy_input_mode == "queue":
                  logger.debug("PRIORITY queue follow-up for session %s", _quick_key)
                  self._queue_or_replace_pending_event(_quick_key, event)
-@@ -12264,6 +12369,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12264,6 +12388,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          _run_generation = self._begin_session_run_generation(_quick_key)
  
          try:
@@ -906,7 +970,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
              _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
              # Goal continuation: after the agent returns a final response
              # for this turn, check any standing /goal — the judge will
-@@ -12835,6 +12949,359 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12835,6 +12968,359 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  pass
          return source
  
@@ -1266,7 +1330,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8
      async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
          """Inner handler that runs under the _running_agents sentinel guard."""
          _msg_start_time = time.time()
-@@ -12848,22 +13315,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12848,22 +13334,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
          )
  
@@ -1382,7 +1446,7 @@ index 58c365ddb3e74b76096f2e7854d95d23000a6042..d1bc35492801588fdcbc8c4aa2153f21
          # indicator can still be stuck — e.g. Slack's persistent
          # assistant.threads.setStatus survives a gateway restart or a turn
 diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
-index 80142c15db1d52739dff94a29c27b4ec95ac42f0..77c4a903229713af0e368c1ca8ef91ecba4a99f5 100644
+index 80142c15db1d52739dff94a29c27b4ec95ac42f0..fd115a6b1de41b497c70f62d49ff6a7d60345bb8 100644
 --- a/hermes_cli/plugins.py
 +++ b/hermes_cli/plugins.py
 @@ -42,11 +42,12 @@ import os
@@ -1418,7 +1482,7 @@ index 80142c15db1d52739dff94a29c27b4ec95ac42f0..77c4a903229713af0e368c1ca8ef91ec
      # Approval lifecycle hooks. Fired by tools/approval.py when a dangerous
      # command needs an approval decision -- fires for CLI-interactive prompts,
      # gateway/ACP approvals, and smart-mode auxiliary-LLM decisions.
-@@ -386,6 +399,11 @@ class PluginContext:
+@@ -386,6 +399,16 @@ class PluginContext:
          except Exception:
              return "default"
  
@@ -1427,10 +1491,15 @@ index 80142c15db1d52739dff94a29c27b4ec95ac42f0..77c4a903229713af0e368c1ca8ef91ec
 +        """Return the semantic version of the immutable gateway-message hook API."""
 +        return GATEWAY_MESSAGE_HOOK_API_VERSION
 +
++    @property
++    def gateway_message_hook_isolated(self) -> bool:
++        """Return False when legacy behavior-changing ingress hooks coexist."""
++        return not self._manager.has_hook("pre_gateway_dispatch")
++
      # -- tool registration --------------------------------------------------
  
      def register_tool(
-@@ -1241,6 +1259,53 @@ class PluginContext:
+@@ -1241,6 +1264,53 @@ class PluginContext:
          )
  
  
@@ -1484,7 +1553,7 @@ index 80142c15db1d52739dff94a29c27b4ec95ac42f0..77c4a903229713af0e368c1ca8ef91ec
  # ---------------------------------------------------------------------------
  # PluginManager
  # ---------------------------------------------------------------------------
-@@ -1926,6 +1991,55 @@ class PluginManager:
+@@ -1926,6 +1996,55 @@ class PluginManager:
                  )
          return results
  
@@ -1540,7 +1609,7 @@ index 80142c15db1d52739dff94a29c27b4ec95ac42f0..77c4a903229713af0e368c1ca8ef91ec
      def has_hook(self, hook_name: str) -> bool:
          """Return True when at least one callback is registered for a hook."""
          return bool(self._hooks.get(hook_name))
-@@ -2054,6 +2168,26 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
+@@ -2054,6 +2173,26 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> List[Any]:
      return get_plugin_manager().invoke_hook(hook_name, **kwargs)
  
  
@@ -1582,10 +1651,18 @@ index bbf45f4d268f371ab62032e7d8491eb2a0860391..22564cc08ae9cabbd0f9e2ab6f10209d
  _UNSET = object()
  _HERMES_HOME_OVERRIDE: ContextVar[str | object] = ContextVar(
 diff --git a/plugins/platforms/discord/adapter.py b/plugins/platforms/discord/adapter.py
-index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778c062235b 100644
+index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..fdfa416ace38e5fcc562c2cc745a34560e3bc08b 100644
 --- a/plugins/platforms/discord/adapter.py
 +++ b/plugins/platforms/discord/adapter.py
-@@ -858,6 +858,14 @@ def _read_discord_prompt_timeout() -> int:
+@@ -122,6 +122,7 @@ from gateway.platforms.base import (
+     BasePlatformAdapter,
+     MessageEvent,
+     MessageType,
++    NativeDeliveryAck,
+     ProcessingOutcome,
+     SendResult,
+     cache_image_from_url,
+@@ -858,6 +859,14 @@ def _read_discord_prompt_timeout() -> int:
      return seconds
  
  
@@ -1600,7 +1677,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
  class DiscordAdapter(BasePlatformAdapter):
      """
      Discord bot adapter.
-@@ -875,6 +883,7 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -875,6 +884,7 @@ class DiscordAdapter(BasePlatformAdapter):
      # Discord message limits
      MAX_MESSAGE_LENGTH = 2000
      _SPLIT_THRESHOLD = 1900  # near the 2000-char split point
@@ -1608,7 +1685,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
      supports_code_blocks = True  # Discord markdown renders fenced code blocks natively
      splits_long_messages = True  # send() chunks via truncate_message(MAX_MESSAGE_LENGTH)
  
-@@ -2822,6 +2831,40 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -2822,6 +2832,57 @@ class DiscordAdapter(BasePlatformAdapter):
              logger.debug("[%s] remove_reaction failed (%s): %s", self.name, emoji, e)
              return False
  
@@ -1633,9 +1710,26 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
 +                if operation == "add"
 +                else await self._remove_reaction(message, reaction)
 +            )
++            actor_id = self.authenticated_actor_id()
++            ack = None
++            if succeeded and actor_id is not None:
++                identity = "\x00".join(
++                    ("discord", str(chat_id), actor_id, str(message_id), operation, reaction)
++                )
++                ack = NativeDeliveryAck(
++                    platform="discord",
++                    room_id=str(chat_id),
++                    self_actor_id=actor_id,
++                    effect_kind="react",
++                    target_message_id=str(message_id),
++                    reaction=reaction,
++                    reaction_operation="add" if operation == "add" else "remove",
++                    effect_id=f"discord:reaction:{hashlib.sha256(identity.encode()).hexdigest()}",
++                )
 +            return SendResult(
 +                success=succeeded,
 +                message_id=str(message_id) if succeeded else None,
++                native_delivery_ack=ack,
 +            )
 +        except Exception:
 +            return SendResult(success=False, error="Reaction failed")
@@ -1649,7 +1743,50 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
      def _reactions_enabled(self) -> bool:
          """Check if message reactions are enabled via config/env."""
          return os.getenv("DISCORD_REACTIONS", "true").lower() not in {"false", "0", "no"}
-@@ -7567,6 +7610,7 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -2914,6 +2975,7 @@ class DiscordAdapter(BasePlatformAdapter):
+ 
+             message_ids = []
+             reference = None
++            reply_attested = False
+ 
+             if reply_to and self._reply_to_mode != "off":
+                 try:
+@@ -2959,6 +3021,8 @@ class DiscordAdapter(BasePlatformAdapter):
+                         )
+                     else:
+                         raise
++                if i == 0 and chunk_reference is not None:
++                    reply_attested = True
+                 message_ids.append(str(msg.id))
+ 
+             # Track the last message we sent in this channel for history
+@@ -2970,10 +3034,24 @@ class DiscordAdapter(BasePlatformAdapter):
+                 elif not _looks_like_nonconversational_history_message(content):
+                     self._last_self_message_id[_target_id] = message_ids[-1]
+ 
++            actor_id = self.authenticated_actor_id()
++            native_ack = None
++            if message_ids and actor_id is not None:
++                native_ack = NativeDeliveryAck(
++                    platform="discord",
++                    room_id=str(getattr(channel, "id", chat_id)),
++                    self_actor_id=actor_id,
++                    effect_kind="reply" if reply_attested else "send",
++                    submitted_content=content,
++                    reply_to_message_id=str(reply_to) if reply_attested else None,
++                    message_id=message_ids[0],
++                    effect_id=message_ids[0],
++                )
+             result = SendResult(
+                 success=True,
+                 message_id=message_ids[0] if message_ids else None,
+-                raw_response={"message_ids": message_ids}
++                raw_response={"message_ids": message_ids},
++                native_delivery_ack=native_ack,
+             )
+             await asyncio.to_thread(
+                 self._record_discord_response,
+@@ -7567,6 +7645,7 @@ class DiscordAdapter(BasePlatformAdapter):
              if message.reference.resolved:
                  reply_to_text = getattr(message.reference.resolved, "content", None) or None
  
@@ -1657,7 +1794,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
          event = MessageEvent(
              text=event_text,
              message_type=msg_type,
-@@ -7581,6 +7625,10 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7581,6 +7660,10 @@ class DiscordAdapter(BasePlatformAdapter):
              auto_skill=_skills,
              channel_prompt=_channel_prompt,
              channel_context=_channel_context,
@@ -1668,7 +1805,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
          )
  
          # Track thread participation so the bot won't require @mention for
-@@ -7588,6 +7636,9 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7588,6 +7671,9 @@ class DiscordAdapter(BasePlatformAdapter):
          if thread_id:
              self._threads.mark(thread_id)
  
@@ -1678,7 +1815,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
          # Only live plain text messages use split-message batching. Recovery
          # candidates are already complete historical messages; coalescing them
          # would lose constituent IDs and make later restarts replay them.
-@@ -7622,6 +7673,33 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7622,6 +7708,33 @@ class DiscordAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -1712,7 +1849,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -7631,17 +7709,39 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7631,17 +7744,39 @@ class DiscordAdapter(BasePlatformAdapter):
          """
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
@@ -1752,7 +1889,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
  
          prior_task = self._pending_text_batch_tasks.get(key)
          if prior_task and not prior_task.done():
-@@ -7650,6 +7750,16 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7650,6 +7785,16 @@ class DiscordAdapter(BasePlatformAdapter):
              self._flush_text_batch(key)
          )
  
@@ -1770,10 +1907,26 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778
          """Wait for the quiet period then dispatch the aggregated text.
  
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c7062bac869 100644
+index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ac306dcfb58f549872374b82dd25c991060521cf 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
-@@ -589,6 +589,24 @@ class _PollingLifecycleAbort(RuntimeError):
+@@ -10,6 +10,7 @@ Uses python-telegram-bot library for:
+ import asyncio
+ import dataclasses
+ import faulthandler
++import hashlib
+ import inspect
+ import json
+ import logging
+@@ -266,6 +267,7 @@ from gateway.platforms.base import (
+     BasePlatformAdapter,
+     MessageEvent,
+     MessageType,
++    NativeDeliveryAck,
+     ProcessingOutcome,
+     SendResult,
+     classify_send_error,
+@@ -589,6 +591,24 @@ class _PollingLifecycleAbort(RuntimeError):
      """Internal control flow for polling startup fenced by teardown."""
  
  
@@ -1798,7 +1951,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
  class TelegramAdapter(BasePlatformAdapter):
      """
      Telegram bot adapter.
-@@ -613,6 +631,7 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -613,6 +633,7 @@ class TelegramAdapter(BasePlatformAdapter):
      # Threshold for detecting Telegram client-side message splits.
      # When a chunk is near this limit, a continuation is almost certain.
      _SPLIT_THRESHOLD = 4000
@@ -1806,7 +1959,81 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
      MEDIA_GROUP_WAIT_SECONDS = 0.8
      _GENERAL_TOPIC_THREAD_ID = "1"
  
-@@ -8495,6 +8514,34 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -1856,9 +1877,24 @@ class TelegramAdapter(BasePlatformAdapter):
+                 rich_sent_store.record(str(chat_id), str(message_id), content)
+             except Exception:
+                 pass
++        actor_id = self.authenticated_actor_id()
++        native_message_id = str(message_id) if message_id is not None else None
++        native_ack = None
++        if native_message_id is not None and actor_id is not None:
++            native_ack = NativeDeliveryAck(
++                platform="telegram",
++                room_id=str(chat_id),
++                self_actor_id=actor_id,
++                effect_kind="reply" if reply_to_id is not None else "send",
++                submitted_content=content,
++                reply_to_message_id=str(reply_to_id) if reply_to_id is not None else None,
++                message_id=native_message_id,
++                effect_id=native_message_id,
++            )
+         return SendResult(
+             success=True,
+-            message_id=str(message_id) if message_id is not None else None,
++            message_id=native_message_id,
++            native_delivery_ack=native_ack,
+         )
+ 
+     async def _try_edit_rich(
+@@ -4293,6 +4329,7 @@ class TelegramAdapter(BasePlatformAdapter):
+                 ]
+             
+             message_ids = []
++            reply_attested_id = None
+             thread_id = self._metadata_thread_id(metadata)
+             requested_thread_id = self._message_thread_id_for_send(thread_id)
+             used_thread_fallback = False
+@@ -4504,6 +4541,8 @@ class TelegramAdapter(BasePlatformAdapter):
+                                 await asyncio.sleep(wait)
+                                 continue
+                         raise
++                if i == 0 and reply_to_id is not None:
++                    reply_attested_id = str(reply_to_id)
+                 message_ids.append(str(msg.message_id))
+ 
+             # Re-trigger typing indicator after sending a message.
+@@ -4522,14 +4561,29 @@ class TelegramAdapter(BasePlatformAdapter):
+                 except Exception:
+                     pass  # Typing failures are non-fatal
+ 
++            actor_id = self.authenticated_actor_id()
++            native_message_id = message_ids[0] if message_ids else None
++            native_ack = None
++            if native_message_id is not None and actor_id is not None:
++                native_ack = NativeDeliveryAck(
++                    platform="telegram",
++                    room_id=str(chat_id),
++                    self_actor_id=actor_id,
++                    effect_kind="reply" if reply_attested_id is not None else "send",
++                    submitted_content=content,
++                    reply_to_message_id=reply_attested_id,
++                    message_id=native_message_id,
++                    effect_id=native_message_id,
++                )
+             return SendResult(
+                 success=True,
+-                message_id=message_ids[0] if message_ids else None,
++                message_id=native_message_id,
+                 raw_response={
+                     "message_ids": message_ids,
+                     "requested_thread_id": requested_thread_id,
+                     "thread_fallback": used_thread_fallback,
+                 },
++                native_delivery_ack=native_ack,
+             )
+             
+         except Exception as e:
+@@ -8495,6 +8549,34 @@ class TelegramAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -1841,7 +2068,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -8509,11 +8556,26 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8509,11 +8591,26 @@ class TelegramAdapter(BasePlatformAdapter):
  
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
@@ -1868,7 +2095,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
              # Append text from the follow-up chunk
              if event.text:
                  existing.text = f"{existing.text}\n{event.text}" if existing.text else event.text
-@@ -8531,6 +8593,16 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8531,6 +8628,16 @@ class TelegramAdapter(BasePlatformAdapter):
              self._flush_text_batch(key)
          )
  
@@ -1885,7 +2112,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
      async def _flush_text_batch(self, key: str) -> None:
          """Wait for the quiet period then dispatch the aggregated text.
  
-@@ -8618,10 +8690,30 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8618,10 +8725,30 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping photo batch enqueue after disconnect started")
              return
  
@@ -1916,7 +2143,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -8926,10 +9018,26 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8926,10 +9053,26 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping media group enqueue after disconnect started")
              return
  
@@ -1943,7 +2170,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -9350,8 +9458,14 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9350,8 +9493,14 @@ class TelegramAdapter(BasePlatformAdapter):
              _chat_id_str if thread_id_str else None,
          )
  
@@ -1959,7 +2186,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
              message_type=msg_type,
              source=source,
              raw_message=message,
-@@ -9362,6 +9476,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9362,6 +9511,10 @@ class TelegramAdapter(BasePlatformAdapter):
              auto_skill=topic_skill,
              channel_prompt=_channel_prompt,
              timestamp=message.date,
@@ -1970,7 +2197,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
          )
  
      # ── Message reactions (processing lifecycle) ──────────────────────────
-@@ -9406,6 +9524,32 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9406,6 +9559,49 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[%s] clear reactions failed: %s", self.name, _redact_telegram_error_text(e))
              return False
  
@@ -1990,9 +2217,26 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c70
 +            if operation == "add"
 +            else await self._clear_reactions(chat_id, message_id)
 +        )
++        actor_id = self.authenticated_actor_id()
++        ack = None
++        if succeeded and actor_id is not None:
++            identity = "\x00".join(
++                ("telegram", str(chat_id), actor_id, str(message_id), operation, reaction)
++            )
++            ack = NativeDeliveryAck(
++                platform="telegram",
++                room_id=str(chat_id),
++                self_actor_id=actor_id,
++                effect_kind="react",
++                target_message_id=str(message_id),
++                reaction=reaction,
++                reaction_operation="add" if operation == "add" else "remove",
++                effect_id=f"telegram:reaction:{hashlib.sha256(identity.encode()).hexdigest()}",
++            )
 +        return SendResult(
 +            success=succeeded,
 +            message_id=str(message_id) if succeeded else None,
++            native_delivery_ack=ack,
 +        )
 +
 +    def authenticated_actor_id(self) -> Optional[str]:
@@ -2139,10 +2383,10 @@ index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..e873323faf9025a86d074fbc40ef05db
      adapter = DiscordAdapter(PlatformConfig(enabled=True, token="fake-token"))
 diff --git a/tests/gateway/test_gateway_message_hooks.py b/tests/gateway/test_gateway_message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f1494808d
+index 0000000000000000000000000000000000000000..8b67989d2449780efb1330109f7962aaf7d99c2a
 --- /dev/null
 +++ b/tests/gateway/test_gateway_message_hooks.py
-@@ -0,0 +1,1473 @@
+@@ -0,0 +1,1588 @@
 +"""Public contract tests for the generic gateway user-message hook."""
 +
 +import asyncio
@@ -2160,7 +2404,13 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +    GatewayMessageEvent,
 +    GatewayMessageRoute,
 +)
-+from gateway.platforms.base import BasePlatformAdapter, MessageEvent, MessageType, SendResult
++from gateway.platforms.base import (
++    BasePlatformAdapter,
++    MessageEvent,
++    MessageType,
++    NativeDeliveryAck,
++    SendResult,
++)
 +from gateway.session import SessionSource, build_session_key
 +from gateway.config import GatewayConfig, Platform, PlatformConfig
 +
@@ -2303,7 +2553,19 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +    ("native_result", "expected"),
 +    [
 +        (
-+            SendResult(success=True, message_id="out-1"),
++            SendResult(
++                success=True,
++                message_id="out-1",
++                native_delivery_ack=NativeDeliveryAck(
++                    platform="discord",
++                    room_id="room-1",
++                    self_actor_id="bot-9",
++                    effect_kind="send",
++                    submitted_content="host delivery",
++                    message_id="out-1",
++                    effect_id="out-1",
++                ),
++            ),
 +            GatewayDeliveryReceipt(
 +                status="sent",
 +                platform="discord",
@@ -2353,6 +2615,57 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +    assert not hasattr(delivery, "credentials")
 +    assert not hasattr(delivery, "event")
 +    assert not hasattr(delivery, "_send_callback")
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "native_result",
++    [
++        SendResult(success=True, message_id="out-1"),
++        SendResult(
++            success=True,
++            message_id="foreign-1",
++            native_delivery_ack=NativeDeliveryAck(
++                platform="discord",
++                room_id="foreign-room",
++                self_actor_id="foreign-bot",
++                effect_kind="send",
++                submitted_content="host delivery",
++                message_id="foreign-1",
++                effect_id="foreign-1",
++            ),
++        ),
++        SendResult(
++            success=True,
++            message_id="source-1",
++            native_delivery_ack=NativeDeliveryAck(
++                platform="discord",
++                room_id="room-1",
++                self_actor_id="bot-9",
++                effect_kind="send",
++                submitted_content="host delivery",
++                message_id="source-1",
++                effect_id="source-1",
++            ),
++        ),
++    ],
++)
++async def test_route_delivery_rejects_missing_mismatched_or_reused_native_attestation(
++    native_result,
++):
++    async def send_native(_content: str):
++        return native_result
++
++    receipt = await GatewayDelivery(
++        send_native,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="bot-9",
++        source_message_id="source-1",
++    ).send("host delivery")
++
++    assert receipt == GatewayDeliveryReceipt(status="unknown")
 +
 +
 +@pytest.mark.asyncio
@@ -2443,8 +2756,41 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +    runner.config = GatewayConfig(
 +        platforms={Platform.DISCORD: PlatformConfig(enabled=True)}
 +    )
++    async def send_native(chat_id, content, reply_to=None, metadata=None):
++        return SendResult(
++            success=True,
++            message_id="out-1",
++            native_delivery_ack=NativeDeliveryAck(
++                platform="discord",
++                room_id=str(chat_id),
++                self_actor_id="9",
++                effect_kind="reply" if reply_to is not None else "send",
++                submitted_content=content,
++                reply_to_message_id=str(reply_to) if reply_to is not None else None,
++                message_id="out-1",
++                effect_id="out-1",
++            ),
++        )
++
++    async def react_native(chat_id, message_id, reaction, *, operation="add"):
++        return SendResult(
++            success=True,
++            message_id=str(message_id),
++            native_delivery_ack=NativeDeliveryAck(
++                platform="discord",
++                room_id=str(chat_id),
++                self_actor_id="9",
++                effect_kind="react",
++                target_message_id=str(message_id),
++                reaction=reaction,
++                reaction_operation="add" if operation == "add" else "remove",
++                effect_id="discord:reaction:test-effect",
++            ),
++        )
++
 +    adapter = SimpleNamespace(
-+        send=AsyncMock(return_value=SendResult(success=True, message_id="out-1")),
++        send=AsyncMock(side_effect=send_native),
++        react=AsyncMock(side_effect=react_native),
 +        authenticated_actor_id=MagicMock(return_value="9"),
 +        _pending_messages={},
 +    )
@@ -2645,9 +2991,6 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +@pytest.mark.asyncio
 +async def test_route_delivery_reaction_is_bound_to_ingress_message(monkeypatch):
 +    runner, adapter = _runner_for_dispatch()
-+    adapter.react = AsyncMock(
-+        return_value=SendResult(success=True, message_id="in-1")
-+    )
 +    receipts = []
 +
 +    async def hook(name, **kwargs):
@@ -2846,24 +3189,40 @@ index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f
 +
 +
 +@pytest.mark.asyncio
-+async def test_busy_pre_dispatch_skip_runs_before_gateway_message(monkeypatch):
++async def test_busy_legacy_predispatch_conflict_fails_closed_before_any_hook(monkeypatch):
 +    runner, _adapter = _runner_for_dispatch()
 +    event = _event()
 +    session_key = build_session_key(event.source)
 +    participant_hook = AsyncMock()
++    pre_hook = MagicMock(return_value=[{"action": "skip", "reason": "legacy-v1"}])
 +
-+    def pre_hook(name, **_kwargs):
-+        if name == "pre_gateway_dispatch":
-+            return [{"action": "skip", "reason": "fixture"}]
-+        return []
-+
++    monkeypatch.setattr(
++        "hermes_cli.plugins.has_hook",
++        lambda name: name in {"gateway_message", "pre_gateway_dispatch"},
++    )
 +    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", pre_hook)
 +    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", participant_hook)
 +
 +    handled = await runner._handle_active_session_busy_message(event, session_key)
 +
 +    assert handled is True
++    pre_hook.assert_not_called()
 +    participant_hook.assert_not_awaited()
++
++
++@pytest.mark.parametrize(
++    "marker",
++    ["_hermes_startup_restore_replay", "_hermes_historical_replay"],
++)
++def test_replay_never_executes_legacy_predispatch_hook(monkeypatch, marker):
++    runner, _adapter = _runner_for_dispatch()
++    event = _event()
++    setattr(event, marker, True)
++    legacy_hook = MagicMock(return_value=[{"action": "skip", "reason": "legacy-v1"}])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", legacy_hook)
++
++    assert runner._run_pre_gateway_dispatch(event) is False
++    legacy_hook.assert_not_called()
 +
 +
 +@pytest.mark.asyncio

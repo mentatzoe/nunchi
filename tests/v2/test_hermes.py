@@ -221,11 +221,17 @@ class FakeCtx:
         self.gateway_message_hook_api_version = 2
         self.tool_results = list(tool_results or [])
         self.hooks = {}
+        self._manager = SimpleNamespace(_hooks={})
         self.commands = {}
         self.dispatched = []
 
+    @property
+    def gateway_message_hook_isolated(self):
+        return not bool(self._manager._hooks.get("pre_gateway_dispatch"))
+
     def register_hook(self, name, callback):
         self.hooks[name] = callback
+        self._manager._hooks.setdefault(name, []).append(callback)
 
     def register_command(self, name, handler, description="", args_hint=""):
         self.commands[name] = handler
@@ -1266,6 +1272,29 @@ class HermesV2ContractTests(unittest.TestCase):
                     )
                     self.assertEqual("unknown", result.delivery)
 
+    def test_native_transport_rejects_source_identity_reused_by_fresh_message(self):
+        self.require_surface()
+        transport = HermesNativeTransport(
+            binding=self.binding(),
+            profile_name="default",
+            coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+        )
+        transport.bind(
+            "discord:message:100",
+            FakeDelivery([attested_receipt(message_id="100", effect_id="100")]),
+        )
+
+        result = transport.dispatch(
+            action={
+                "kind": "message",
+                "origin_event_id": "discord:message:100",
+                "text": "hello",
+            },
+            wake={"room": {"id": "42"}},
+        )
+
+        self.assertEqual("unknown", result.delivery)
+
     def test_native_transport_timeout_cancels_submitted_delivery(self):
         self.require_surface()
         transport = HermesNativeTransport(binding=self.binding(), timeout_seconds=0.01)
@@ -1665,6 +1694,26 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("configuration-invalid", probe["failure"])
         self.assertNotIn("digest mismatch", json.dumps(probe))
 
+    def test_public_probe_fails_closed_when_legacy_ingress_hook_is_present(self):
+        self.require_surface()
+        ctx = FakeCtx()
+        register(
+            ctx,
+            config_loader=lambda profile: SimpleNamespace(
+                hermes_profile=profile,
+                rooms=(),
+                provenance={"sha256": "c" * 64},
+            ),
+            host_identity_loader=lambda: "a" * 64,
+        )
+        ctx.register_hook("pre_gateway_dispatch", lambda **_kwargs: {"action": "skip"})
+
+        probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
+
+        self.assertFalse(probe["operational"])
+        self.assertEqual("legacy-pre-dispatch-conflict", probe["failure"])
+        self.assertFalse(probe["v1_fallback"])
+
     def test_register_exposes_public_post_auth_hooks_and_probe_command(self):
         self.require_surface()
         ctx = FakeCtx()
@@ -1688,7 +1737,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("a" * 64, probe["host_seam_sha256"])
-        self.assertEqual("a0dc820789c1bb7c1c1a124b00a4ddd874c7a34f4939c31b243d33cb81c11fca", probe["host_patch_sha256"])
+        self.assertEqual("9c8cd474773952d777a09dc9422c05bc12409cf22797bca72a54bec05cec1422", probe["host_patch_sha256"])
         self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])

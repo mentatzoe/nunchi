@@ -5,10 +5,12 @@ source suite is not installed or live evidence.
 
 ## Current integration scope
 
-The current candidate includes the Hermes V2 participant integration from
-slice 060. Its exact source, artifact, installed-runtime, review, and live
-evidence is tracked under `specs/060-v2-hermes/` and the delivery PR. Claude
-Code remains excluded.
+The working successor includes the Hermes V2 participant integration from
+slice 060. Source, wheel, clean-install, and exact-stock-host checks have been
+run locally, but no exact-current committed evidence packet or delivery PR yet
+binds them. Independent exact-current review, live Discord and Telegram
+commissioning, remote integration, and closure remain pending. Claude Code
+remains excluded.
 
 ## Historical shared-foundation candidate scope
 
@@ -21,7 +23,7 @@ slice-060 successor.
 
 ## Required evidence
 
-| Claim | Required proof | Current candidate |
+| Claim | Required proof | Historical shared-foundation candidate |
 |---|---|---|
 | source and contract | exact commit; clean tree; V2 full suite; eval list/run; diff check | verified at repaired implementation commit `c5f5e6c0c7e2fd6af1bf888ca9a86a7a8f4d7e63`; 319 source tests, 218 pinned dual-validator tests with zero skips, 8/8 lifecycle evaluations, clean diff check |
 | clean artifact | wheel hash; new venv; installed probes; no checkout imports; installed smoke | verified; two exact-source builds produced byte-identical wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; clean Python 3.14 install, installer init/verify, all entry-point probes, and MCP 1.28.1 construction passed |

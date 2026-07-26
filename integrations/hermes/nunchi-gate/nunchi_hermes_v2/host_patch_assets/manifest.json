@@ -3,21 +3,21 @@
     "gateway/message_hooks.py": {
       "operation": "create",
       "post_mode": "100644",
-      "post_sha256": "8052292cfe71804669a0ff2564f8fa290cf935c7ff89c03f9d8327646f7f44cf",
+      "post_sha256": "de883e808e8e4f39a6357b9a6250603a8be0c91990d6e8dfc50468567ca8c844",
       "pre_mode": null,
       "pre_sha256": null
     },
     "gateway/platforms/base.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "b3761107d910ded6cd8b8fe1169ca0ce4d7bb21e25d9e90130856678172bb88b",
+      "post_sha256": "c61b947331a142c5d0e7917c388cd90bc8a1e266f2a7e60c8c678fc9f72252fb",
       "pre_mode": "100644",
       "pre_sha256": "a2bbce6165984a23de924dfac16d8b414d0f44139096817b12fbc50030a3c267"
     },
     "gateway/run.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "3198f6440c3dd8d5937e496f2ca68fda5836b39e049fc78c8b13f236e187a779",
+      "post_sha256": "01569f61390905bc7535870e8d8eae59377808d916e6e066c59c5b46dead111c",
       "pre_mode": "100644",
       "pre_sha256": "f588d37d23df0c3eb133723eab8d9f8bf7f672a5069c279afd494f36f4c4e601"
     },
@@ -31,7 +31,7 @@
     "hermes_cli/plugins.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "1688284ec7528926fe752a8b3c58df496e3b318f205eaf809a0e6f663d569445",
+      "post_sha256": "d86014f7a3e7eb3ea459a5301c96fe54eaabed2f75046b3572378f0100c2e798",
       "pre_mode": "100644",
       "pre_sha256": "f7ffb9a63c4701ea7e5dbfe74de83e741c9ba07f33facf2417b14c1c80423659"
     },
@@ -45,14 +45,14 @@
     "plugins/platforms/discord/adapter.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "dee391ed2d45cfbbba8be39c9d417cd2f046eb35f5825980b563a50e9aab8321",
+      "post_sha256": "c2dbfb259acc0cd4f9c394d021a661cc315be289011b2dab4f0262c056a2d082",
       "pre_mode": "100644",
       "pre_sha256": "688645c89d47a504387eb2a28f99fb7e34b877eb8390706274f65f52dddfa412"
     },
     "plugins/platforms/telegram/adapter.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "6a6c72013e449e3fa9efa85f1f406fc7ebb7706cb0cfc86f89f5c71e397ea54d",
+      "post_sha256": "c1f64a9468ea9a1552268c44f9660cd615cf0d5f80e2d68cbcd98349654a85d1",
       "pre_mode": "100644",
       "pre_sha256": "1c3df77d728f8d8afee3eab104f72ba762eaf8de4473f517521db3e735617a23"
     },
@@ -73,7 +73,7 @@
     "tests/gateway/test_gateway_message_hooks.py": {
       "operation": "create",
       "post_mode": "100644",
-      "post_sha256": "629c5922e102b097877b69d2263a1eb09212aa68e5ad422b224c9258259b2f78",
+      "post_sha256": "66f86f7c5ff2f2c13600c56d9174999471c1279e1692ae1693abfcd6d02d2d8f",
       "pre_mode": null,
       "pre_sha256": null
     },
@@ -135,7 +135,7 @@
     }
   },
   "patch": "0002-v2-participant-host-seam.patch",
-  "patch_sha256": "a0dc820789c1bb7c1c1a124b00a4ddd874c7a34f4939c31b243d33cb81c11fca",
+  "patch_sha256": "9c8cd474773952d777a09dc9422c05bc12409cf22797bca72a54bec05cec1422",
   "schema_version": 2,
   "source": "Nunchi-owned compatibility seam for stock Hermes; no upstream merge dependency",
   "supported_hermes_commit": "243a01d5d72555061406de84890b2e9622f409cb"

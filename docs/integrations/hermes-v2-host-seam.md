@@ -11,9 +11,10 @@ The wheel carries both the patch and a closed manifest under
 `nunchi_hermes_v2/host_patch_assets/`. The manifest pins:
 
 - untouched Hermes commit `243a01d5d72555061406de84890b2e9622f409cb`;
-- manifest SHA-256 `243a8fa6961519d6008df81a73e16a9910d98eb0fda99d3958511937df7806cf`,
+- manifest SHA-256 `4fa50ce69c27571fa217ee2801515e8b13e4206078c80fd79f0e038c129af248`,
   pinned independently in installed applicator code;
-- patch SHA-256 `a0dc820789c1bb7c1c1a124b00a4ddd874c7a34f4939c31b243d33cb81c11fca`;
+- 19 declared regular-file paths;
+- patch SHA-256 `9c8cd474773952d777a09dc9422c05bc12409cf22797bca72a54bec05cec1422`;
 - the closed patch operation and path set; and
 - every touched path's exact pre-apply and post-apply SHA-256 and Git mode.
 
@@ -88,12 +89,22 @@ draining, finalization, or adapter teardown. Nunchi invalidates every routed
 runtime, pending approval, retry, delivery capability, and privileged lifecycle
 generation before that callback returns.
 
-For sends, replies, and reactions, the seam returns a closed host-owned native
-acknowledgement. `sent` includes the exact platform, room, routed Hermes
-profile, authenticated native self actor, effect kind, submitted content,
-reply/target identity, and a new message or deterministic reaction-effect
-identity. Missing or mismatched attribution is `unknown`; a bare adapter
-success boolean or target message ID cannot establish success.
+For sends, replies, and reactions, the seam accepts `sent` only from an
+adapter-produced native attestation. The attestation must bind the exact
+platform, room, current authenticated native self actor, effect kind,
+submitted content, reply/target identity, and a genuinely new message or
+deterministic reaction-effect identity; Hermes separately binds the routed
+profile. Missing, reused, or mismatched attribution is `unknown`. A bare
+`SendResult.success`, a request-side copy of expected fields, or a target
+message ID cannot establish success.
+
+A V2 `gateway_message` hook and any legacy behavior-changing
+`pre_gateway_dispatch` hook are mutually exclusive. Hermes refuses ordinary
+ingress before invoking either hook when both are registered, while the public
+Nunchi probe reports `legacy-pre-dispatch-conflict`. Startup-restored and
+historical replay are fenced before legacy pre-dispatch regardless, so replay
+cannot execute old social-judgment code. Legacy pre-dispatch continues to run
+for non-V2 installations.
 
 ## Removal
 

@@ -729,7 +729,7 @@ class HermesNativeTransport:
                 message_id is None
                 or not str(message_id)
                 or str(effect_id or "") != str(message_id)
-                or (kind == "reply" and str(message_id) == target_message_id)
+                or (kind in {"message", "reply"} and str(message_id) == target_message_id)
             ):
                 return TransportResult("unknown", "native send had no attributable new message identity")
             return TransportResult("sent", canonical_event_id(self.binding.platform, str(message_id)))
@@ -1601,7 +1601,16 @@ class _ProfileMultiplexNunchiPlugin:
         """Return exact non-secret provenance without route or binding metadata."""
         with self._lock:
             probes = tuple(plugin.probe() for plugin in self._plugins.values())
-        operational = bool(probes) and all(probe.get("operational") is True for probe in probes)
+        legacy_conflict = getattr(
+            self.ctx,
+            "gateway_message_hook_isolated",
+            False,
+        ) is not True
+        operational = (
+            bool(probes)
+            and not legacy_conflict
+            and all(probe.get("operational") is True for probe in probes)
+        )
         config_digests: list[str] = []
         if operational:
             for probe in probes:
@@ -1636,7 +1645,11 @@ class _ProfileMultiplexNunchiPlugin:
                 config_identity
             ).hexdigest()
         else:
-            result["failure"] = "configuration-invalid"
+            result["failure"] = (
+                "legacy-pre-dispatch-conflict"
+                if legacy_conflict
+                else "configuration-invalid"
+            )
         return result
 
     def restart(self) -> None:

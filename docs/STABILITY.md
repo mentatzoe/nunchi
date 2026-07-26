@@ -12,6 +12,7 @@ The stable public boundary is the closed V2 contract in
 - `nunchi-telegram`
 - `nunchi-mcp-discord`
 - `nunchi-codex-room-runner`
+- `nunchi-conformance`
 - `nunchi-hermes-v2-config`
 - `nunchi-hermes-v2-host-patch`
 
