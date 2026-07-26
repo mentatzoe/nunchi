@@ -1467,7 +1467,7 @@ index bbf45f4d268f371ab62032e7d8491eb2a0860391..22564cc08ae9cabbd0f9e2ab6f10209d
  _UNSET = object()
  _HERMES_HOME_OVERRIDE: ContextVar[str | object] = ContextVar(
 diff --git a/plugins/platforms/discord/adapter.py b/plugins/platforms/discord/adapter.py
-index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce69b0cdd5 100644
+index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1edae4fa9dc 100644
 --- a/plugins/platforms/discord/adapter.py
 +++ b/plugins/platforms/discord/adapter.py
 @@ -858,6 +858,14 @@ def _read_discord_prompt_timeout() -> int:
@@ -1485,7 +1485,15 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
  class DiscordAdapter(BasePlatformAdapter):
      """
      Discord bot adapter.
-@@ -2822,6 +2830,34 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -875,6 +883,7 @@ class DiscordAdapter(BasePlatformAdapter):
+     # Discord message limits
+     MAX_MESSAGE_LENGTH = 2000
+     _SPLIT_THRESHOLD = 1900  # near the 2000-char split point
++    _MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH = 64
+     supports_code_blocks = True  # Discord markdown renders fenced code blocks natively
+     splits_long_messages = True  # send() chunks via truncate_message(MAX_MESSAGE_LENGTH)
+ 
+@@ -2822,6 +2831,34 @@ class DiscordAdapter(BasePlatformAdapter):
              logger.debug("[%s] remove_reaction failed (%s): %s", self.name, emoji, e)
              return False
  
@@ -1520,7 +1528,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
      def _reactions_enabled(self) -> bool:
          """Check if message reactions are enabled via config/env."""
          return os.getenv("DISCORD_REACTIONS", "true").lower() not in {"false", "0", "no"}
-@@ -7567,6 +7603,7 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7567,6 +7604,7 @@ class DiscordAdapter(BasePlatformAdapter):
              if message.reference.resolved:
                  reply_to_text = getattr(message.reference.resolved, "content", None) or None
  
@@ -1528,7 +1536,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
          event = MessageEvent(
              text=event_text,
              message_type=msg_type,
-@@ -7581,6 +7618,10 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7581,6 +7619,10 @@ class DiscordAdapter(BasePlatformAdapter):
              auto_skill=_skills,
              channel_prompt=_channel_prompt,
              channel_context=_channel_context,
@@ -1539,7 +1547,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
          )
  
          # Track thread participation so the bot won't require @mention for
-@@ -7588,6 +7629,9 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7588,6 +7630,9 @@ class DiscordAdapter(BasePlatformAdapter):
          if thread_id:
              self._threads.mark(thread_id)
  
@@ -1549,7 +1557,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
          # Only live plain text messages use split-message batching. Recovery
          # candidates are already complete historical messages; coalescing them
          # would lose constituent IDs and make later restarts replay them.
-@@ -7622,6 +7666,33 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7622,6 +7667,33 @@ class DiscordAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -1583,9 +1591,19 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -7632,16 +7703,29 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7631,17 +7703,39 @@ class DiscordAdapter(BasePlatformAdapter):
+         """
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
++        if existing is not None and len(
++            existing.metadata.get("_gateway_native_events", ())
++        ) >= self._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH:
++            self._dispatch_full_gateway_native_batch(
++                key,
++                self._pending_text_batches,
++                self._pending_text_batch_tasks,
++            )
++            existing = None
          chunk_len = len(event.text or "")
 +        native_snapshot = self._native_gateway_event_snapshot(event)
          if existing is None:
@@ -1613,8 +1631,25 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce
  
          prior_task = self._pending_text_batch_tasks.get(key)
          if prior_task and not prior_task.done():
+@@ -7650,6 +7744,16 @@ class DiscordAdapter(BasePlatformAdapter):
+             self._flush_text_batch(key)
+         )
+ 
++    def _dispatch_full_gateway_native_batch(self, key, batches, tasks) -> None:
++        """Split a full aggregation batch without dropping native ingress."""
++        batch = batches.pop(key)
++        prior_task = tasks.pop(key, None)
++        if prior_task and not prior_task.done():
++            prior_task.cancel()
++        dispatch_task = asyncio.create_task(self.handle_message(batch))
++        self._background_tasks.add(dispatch_task)
++        dispatch_task.add_done_callback(self._background_tasks.discard)
++
+     async def _flush_text_batch(self, key: str) -> None:
+         """Wait for the quiet period then dispatch the aggregated text.
+ 
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a7807435a 100644
+index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..4f54f5610a1abc21e119efcb2a824450b2d25b27 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -589,6 +589,24 @@ class _PollingLifecycleAbort(RuntimeError):
@@ -1642,7 +1677,15 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
  class TelegramAdapter(BasePlatformAdapter):
      """
      Telegram bot adapter.
-@@ -8495,6 +8513,34 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -613,6 +631,7 @@ class TelegramAdapter(BasePlatformAdapter):
+     # Threshold for detecting Telegram client-side message splits.
+     # When a chunk is near this limit, a continuation is almost certain.
+     _SPLIT_THRESHOLD = 4000
++    _MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH = 64
+     MEDIA_GROUP_WAIT_SECONDS = 0.8
+     _GENERAL_TOPIC_THREAD_ID = "1"
+ 
+@@ -8495,6 +8514,34 @@ class TelegramAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -1677,9 +1720,19 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -8510,10 +8556,16 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8509,11 +8556,26 @@ class TelegramAdapter(BasePlatformAdapter):
+ 
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
++        if existing is not None and len(
++            existing.metadata.get("_gateway_native_events", ())
++        ) >= self._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH:
++            self._dispatch_full_gateway_native_batch(
++                key,
++                self._pending_text_batches,
++                self._pending_text_batch_tasks,
++            )
++            existing = None
          chunk_len = len(event.text or "")
 +        native_snapshot = self._native_gateway_event_snapshot(event)
          if existing is None:
@@ -1694,7 +1747,24 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
              # Append text from the follow-up chunk
              if event.text:
                  existing.text = f"{existing.text}\n{event.text}" if existing.text else event.text
-@@ -8618,10 +8670,21 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8531,6 +8593,16 @@ class TelegramAdapter(BasePlatformAdapter):
+             self._flush_text_batch(key)
+         )
+ 
++    def _dispatch_full_gateway_native_batch(self, key, batches, tasks) -> None:
++        """Split a full aggregation batch without dropping native ingress."""
++        batch = batches.pop(key)
++        prior_task = tasks.pop(key, None)
++        if prior_task and not prior_task.done():
++            prior_task.cancel()
++        dispatch_task = asyncio.create_task(self.handle_message(batch))
++        self._background_tasks.add(dispatch_task)
++        dispatch_task.add_done_callback(self._background_tasks.discard)
++
+     async def _flush_text_batch(self, key: str) -> None:
+         """Wait for the quiet period then dispatch the aggregated text.
+ 
+@@ -8618,10 +8690,30 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping photo batch enqueue after disconnect started")
              return
  
@@ -1704,6 +1774,15 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
 +        # topic in the meantime.
 +        self._apply_topic_recovery(event)
          existing = self._pending_photo_batches.get(batch_key)
++        if existing is not None and len(
++            existing.metadata.get("_gateway_native_events", ())
++        ) >= self._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH:
++            self._dispatch_full_gateway_native_batch(
++                batch_key,
++                self._pending_photo_batches,
++                self._pending_photo_batch_tasks,
++            )
++            existing = None
 +        native_snapshot = self._native_gateway_event_snapshot(event)
          if existing is None:
 +            event.metadata["_gateway_native_events"] = (native_snapshot,)
@@ -1716,12 +1795,21 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -8926,10 +8989,17 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -8926,10 +9018,26 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[Telegram] Dropping media group enqueue after disconnect started")
              return
  
 +        self._apply_topic_recovery(event)
          existing = self._media_group_events.get(media_group_id)
++        if existing is not None and len(
++            existing.metadata.get("_gateway_native_events", ())
++        ) >= self._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH:
++            self._dispatch_full_gateway_native_batch(
++                media_group_id,
++                self._media_group_events,
++                self._media_group_tasks,
++            )
++            existing = None
 +        native_snapshot = self._native_gateway_event_snapshot(event)
          if existing is None:
 +            event.metadata["_gateway_native_events"] = (native_snapshot,)
@@ -1734,7 +1822,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
              existing.media_urls.extend(event.media_urls)
              existing.media_types.extend(event.media_types)
              if event.text:
-@@ -9350,8 +9420,14 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9350,8 +9458,14 @@ class TelegramAdapter(BasePlatformAdapter):
              _chat_id_str if thread_id_str else None,
          )
  
@@ -1750,7 +1838,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
              message_type=msg_type,
              source=source,
              raw_message=message,
-@@ -9362,6 +9438,10 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9362,6 +9476,10 @@ class TelegramAdapter(BasePlatformAdapter):
              auto_skill=topic_skill,
              channel_prompt=_channel_prompt,
              timestamp=message.date,
@@ -1761,7 +1849,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a
          )
  
      # ── Message reactions (processing lifecycle) ──────────────────────────
-@@ -9406,6 +9486,27 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9406,6 +9524,27 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[%s] clear reactions failed: %s", self.name, _redact_telegram_error_text(e))
              return False
  
@@ -1822,10 +1910,19 @@ index 7696058ef511b761bb52ee92b7e2c6e8c50dbbbb..b9738ca2d13586eaa7e73992a5489fc9
  async def test_exec_approval_mentions_allowed_users_when_enabled(monkeypatch):
      monkeypatch.setenv("DISCORD_APPROVAL_MENTIONS", "true")
 diff --git a/tests/gateway/test_discord_pending_text_batch_shutdown.py b/tests/gateway/test_discord_pending_text_batch_shutdown.py
-index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..6dabb0e80bd6a115522b3a31981c2e5b80974e53 100644
+index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..e873323faf9025a86d074fbc40ef05db055d7397 100644
 --- a/tests/gateway/test_discord_pending_text_batch_shutdown.py
 +++ b/tests/gateway/test_discord_pending_text_batch_shutdown.py
-@@ -50,6 +50,48 @@ _ensure_discord_mock()
+@@ -3,7 +3,7 @@
+ import asyncio
+ import sys
+ from types import SimpleNamespace
+-from unittest.mock import MagicMock
++from unittest.mock import AsyncMock, MagicMock
+ 
+ import pytest
+ 
+@@ -50,6 +50,88 @@ _ensure_discord_mock()
  from plugins.platforms.discord.adapter import DiscordAdapter  # noqa: E402
  
  
@@ -1869,6 +1966,46 @@ index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..6dabb0e80bd6a115522b3a31981c2e5b
 +    for task in adapter._pending_text_batch_tasks.values():
 +        task.cancel()
 +    await asyncio.gather(*adapter._pending_text_batch_tasks.values(), return_exceptions=True)
++
++
++@pytest.mark.asyncio
++async def test_text_batch_bound_splits_without_dropping_native_events():
++    adapter = DiscordAdapter(PlatformConfig(enabled=True, token="fake-token"))
++    adapter._text_batch_delay_seconds = 99
++    adapter._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH = 2
++    adapter.handle_message = AsyncMock()
++    source = SessionSource(
++        platform=Platform.DISCORD,
++        chat_id="chat",
++        chat_type="group",
++        user_id="7",
++    )
++    events = [
++        MessageEvent(
++            text=f"part-{index}",
++            message_type=MessageType.TEXT,
++            source=source,
++            message_id=f"m{index}",
++            metadata={"mentioned_user_ids": (), "mentions_room": False},
++        )
++        for index in range(3)
++    ]
++
++    for event in events:
++        adapter._enqueue_text_event(event)
++    await asyncio.sleep(0)
++
++    adapter.handle_message.assert_awaited_once()
++    dispatched = adapter.handle_message.await_args.args[0]
++    assert [
++        item.message_id for item in dispatched.metadata["_gateway_native_events"]
++    ] == ["m0", "m1"]
++    pending = adapter._pending_text_batches[adapter._text_batch_key(events[-1])]
++    assert [
++        item.message_id for item in pending.metadata["_gateway_native_events"]
++    ] == ["m2"]
++
++    await adapter.cancel_background_tasks()
 +
 +
  @pytest.mark.asyncio
@@ -3456,10 +3593,18 @@ index cc99d15f5bd13f3335749447a9be1637fbad610c..76f9d19f04d1e5e8900e0686b1b757ec
 +        entities = [_mention_entity(text, mention="@someone")]
 +        assert _attested_mention_user_ids(entities) is None
 diff --git a/tests/gateway/test_telegram_text_batching.py b/tests/gateway/test_telegram_text_batching.py
-index 75f5157edb4533625840cb687b02805efdf516e8..6aef92b1ae18b82d2e2610eb788bdddcfcefb0f6 100644
+index 75f5157edb4533625840cb687b02805efdf516e8..b810d06dc445a52e938499d47220fc4e60ea61a1 100644
 --- a/tests/gateway/test_telegram_text_batching.py
 +++ b/tests/gateway/test_telegram_text_batching.py
-@@ -96,6 +96,125 @@ class TestTextBatching:
+@@ -45,6 +45,7 @@ def _make_adapter():
+     adapter._text_batch_delay_seconds = 0.1  # fast for tests
+     adapter._active_sessions = {}
+     adapter._pending_messages = {}
++    adapter._background_tasks = set()
+     adapter._message_handler = AsyncMock()
+     adapter.handle_message = AsyncMock()
+     return adapter
+@@ -96,6 +97,201 @@ class TestTextBatching:
          assert "part one" in dispatched.text
          assert "split by Telegram" in dispatched.text
  
@@ -3500,6 +3645,82 @@ index 75f5157edb4533625840cb687b02805efdf516e8..6aef92b1ae18b82d2e2610eb788bdddc
 +        native = pending.metadata["_gateway_native_events"]
 +
 +        assert native[0].metadata["mentioned_user_ids"] is None
++        await adapter.disconnect()
++
++    @pytest.mark.asyncio
++    async def test_native_event_batch_bound_splits_without_dropping_events(self):
++        adapter = _make_adapter()
++        adapter._MAX_GATEWAY_NATIVE_EVENTS_PER_BATCH = 2
++        events = []
++        for index in range(3):
++            event = _make_event(f"part-{index}")
++            event.message_id = f"m{index}"
++            events.append(event)
++
++        for event in events:
++            adapter._enqueue_text_event(event)
++        await asyncio.sleep(0)
++
++        adapter.handle_message.assert_awaited_once()
++        dispatched = adapter.handle_message.await_args.args[0]
++        assert [
++            item.message_id
++            for item in dispatched.metadata["_gateway_native_events"]
++        ] == ["m0", "m1"]
++        pending = adapter._pending_text_batches[
++            adapter._text_batch_key(events[-1])
++        ]
++        assert [
++            item.message_id for item in pending.metadata["_gateway_native_events"]
++        ] == ["m2"]
++
++        adapter.handle_message.reset_mock()
++        photos = []
++        for index in range(3):
++            photo = _make_event(f"photo-{index}")
++            photo.message_type = MessageType.PHOTO
++            photo.message_id = f"p{index}"
++            photo.media_urls = [f"file:///p{index}.jpg"]
++            photo.media_types = ["image/jpeg"]
++            photos.append(photo)
++            adapter._enqueue_photo_event("photos", photo)
++        await asyncio.sleep(0)
++
++        adapter.handle_message.assert_awaited_once()
++        dispatched_photo = adapter.handle_message.await_args.args[0]
++        assert [
++            item.message_id
++            for item in dispatched_photo.metadata["_gateway_native_events"]
++        ] == ["p0", "p1"]
++        assert [
++            item.message_id
++            for item in adapter._pending_photo_batches["photos"].metadata[
++                "_gateway_native_events"
++            ]
++        ] == ["p2"]
++
++        adapter.handle_message.reset_mock()
++        for index in range(3):
++            album = _make_event("")
++            album.message_type = MessageType.PHOTO
++            album.message_id = f"a{index}"
++            album.media_urls = [f"file:///a{index}.jpg"]
++            album.media_types = ["image/jpeg"]
++            await adapter._queue_media_group_event("album", album)
++        await asyncio.sleep(0)
++
++        adapter.handle_message.assert_awaited_once()
++        dispatched_album = adapter.handle_message.await_args.args[0]
++        assert [
++            item.message_id
++            for item in dispatched_album.metadata["_gateway_native_events"]
++        ] == ["a0", "a1"]
++        assert [
++            item.message_id
++            for item in adapter._media_group_events["album"].metadata[
++                "_gateway_native_events"
++            ]
++        ] == ["a2"]
 +        await adapter.disconnect()
 +
 +    @pytest.mark.asyncio
