@@ -226,9 +226,19 @@ def _current_hermes_hook_source_sha256() -> str:
         if state.get("status") != "applied":
             raise HostPatchError("Hermes host seam is not applied")
         identity = {
+            "files": {
+                path: {
+                    "operation": spec.operation,
+                    "pre_mode": spec.pre_mode,
+                    "pre_sha256": spec.pre_sha256,
+                    "post_mode": spec.post_mode,
+                    "post_sha256": spec.post_sha256,
+                }
+                for path, spec in bundle.files.items()
+            },
+            "manifest_sha256": bundle.manifest_sha256,
             "patch_sha256": bundle.patch_sha256,
-            "post_apply_sha256": dict(bundle.post_apply_sha256),
-            "schema_version": 1,
+            "schema_version": 2,
             "supported_hermes_commit": bundle.supported_hermes_commit,
         }
         canonical = json.dumps(
@@ -570,10 +580,12 @@ class HermesNativeTransport:
         self,
         *,
         binding: ParticipantBinding,
+        profile_name: str = "default",
         coroutine_runner: Callable[[Any, float], Any] | None = None,
         timeout_seconds: float = 30,
     ) -> None:
         self.binding = binding
+        self.profile_name = _nonempty(profile_name, "Hermes profile name")
         self.timeout_seconds = float(timeout_seconds)
         self._runner = coroutine_runner
         self._lock = threading.RLock()
@@ -676,11 +688,50 @@ class HermesNativeTransport:
 
         status = str(getattr(receipt, "status", "unknown"))
         if status == "sent":
-            if kind == "reaction":
-                return TransportResult("sent", "native reaction acknowledged")
+            target_message_id = target[len(prefix) :]
+            expected_kind = {"message": "send", "reply": "reply", "reaction": "react"}.get(kind)
+            expected_content = (
+                str(action.get("text", "")) if kind in {"message", "reply"} else None
+            )
+            expected_reply = target_message_id if kind == "reply" else None
+            expected_target = target_message_id if kind == "reaction" else None
+            expected_reaction = str(action.get("reaction", "")) if kind == "reaction" else None
+            expected_operation = str(action.get("operation", "add")) if kind == "reaction" else None
+            fields_match = (
+                getattr(receipt, "platform", None) == self.binding.platform
+                and getattr(receipt, "room_id", None) == self.binding.room_id
+                and getattr(receipt, "profile", None) == self.profile_name
+                and canonical_actor_id(
+                    self.binding.platform,
+                    str(getattr(receipt, "self_actor_id", "")),
+                )
+                == self.binding.actor_id
+                and getattr(receipt, "effect_kind", None) == expected_kind
+                and getattr(receipt, "submitted_content", None) == expected_content
+                and getattr(receipt, "reply_to_message_id", None) == expected_reply
+                and getattr(receipt, "target_message_id", None) == expected_target
+                and getattr(receipt, "reaction", None) == expected_reaction
+                and getattr(receipt, "reaction_operation", None) == expected_operation
+            )
+            if not fields_match:
+                return TransportResult("unknown", "native acknowledgement did not match the authorized effect")
             message_id = getattr(receipt, "message_id", None)
-            if message_id is None or not str(message_id):
-                return TransportResult("unknown", "native send succeeded without an attributable message id")
+            effect_id = getattr(receipt, "effect_id", None)
+            if kind == "reaction":
+                if (
+                    message_id is not None
+                    or not isinstance(effect_id, str)
+                    or not effect_id.startswith(f"{self.binding.platform}:reaction:")
+                ):
+                    return TransportResult("unknown", "native reaction had no attributable effect identity")
+                return TransportResult("sent", effect_id)
+            if (
+                message_id is None
+                or not str(message_id)
+                or str(effect_id or "") != str(message_id)
+                or (kind == "reply" and str(message_id) == target_message_id)
+            ):
+                return TransportResult("unknown", "native send had no attributable new message identity")
             return TransportResult("sent", canonical_event_id(self.binding.platform, str(message_id)))
         if status == "failed":
             return TransportResult("failed", "native platform rejected the effect")
@@ -1157,7 +1208,10 @@ class _RoomRuntime:
                     executors=effects.executors,
                 )
             )
-        self.transport = HermesNativeTransport(binding=config.binding)
+        self.transport = HermesNativeTransport(
+            binding=config.binding,
+            profile_name=profile_name,
+        )
         self.scheduler = ConversationOpportunityScheduler(
             f"{config.binding.participant_id}:{config.binding.platform}:{config.binding.room_id}:{config.binding.continuity_scope_id}"
         )

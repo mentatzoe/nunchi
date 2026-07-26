@@ -1,14 +1,15 @@
 diff --git a/gateway/message_hooks.py b/gateway/message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1d00b4630
+index 0000000000000000000000000000000000000000..8636cb2195a04b44898415fec959c2d63d028be9
 --- /dev/null
 +++ b/gateway/message_hooks.py
-@@ -0,0 +1,464 @@
+@@ -0,0 +1,549 @@
 +"""Narrow immutable contracts for plugin handling of ordinary gateway messages."""
 +
 +from __future__ import annotations
 +
 +import asyncio
++import hashlib
 +import inspect
 +import weakref
 +from dataclasses import dataclass
@@ -27,7 +28,18 @@ index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1
 +    """Truthful platform-neutral result of a route-bound host send."""
 +
 +    status: DeliveryStatus
++    platform: Optional[str] = None
++    room_id: Optional[str] = None
++    profile: Optional[str] = None
++    self_actor_id: Optional[str] = None
++    effect_kind: Optional[Literal["send", "reply", "react"]] = None
++    submitted_content: Optional[str] = None
++    reply_to_message_id: Optional[str] = None
++    target_message_id: Optional[str] = None
++    reaction: Optional[str] = None
++    reaction_operation: Optional[Literal["add", "remove"]] = None
 +    message_id: Optional[str] = None
++    effect_id: Optional[str] = None
 +
 +
 +@dataclass(frozen=True, slots=True)
@@ -244,8 +256,18 @@ index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1
 +@dataclass(slots=True)
 +class _DeliveryChannel:
 +    queue: asyncio.Queue[_DeliveryRequest]
++    binding: _DeliveryBinding
 +    revoked: bool = False
 +    consumed: bool = False
++
++
++@dataclass(frozen=True, slots=True)
++class _DeliveryBinding:
++    platform: str
++    room_id: str
++    profile: str
++    self_actor_id: Optional[str]
++    source_message_id: Optional[str]
 +
 +
 +class GatewayDelivery:
@@ -259,10 +281,24 @@ index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1
 +        *,
 +        reply_callback: Callable[[str], Awaitable[Any] | Any] | None = None,
 +        react_callback: Callable[[str, str], Awaitable[Any] | Any] | None = None,
++        platform: str,
++        room_id: str,
++        profile: str,
++        self_actor_id: Optional[str],
++        source_message_id: Optional[str],
 +    ) -> None:
 +        if not callable(send_callback):
 +            raise TypeError("send_callback must be callable")
-+        channel = _DeliveryChannel(queue=asyncio.Queue(maxsize=1))
++        channel = _DeliveryChannel(
++            queue=asyncio.Queue(maxsize=1),
++            binding=_DeliveryBinding(
++                platform=str(platform),
++                room_id=str(room_id),
++                profile=str(profile),
++                self_actor_id=_optional_text(self_actor_id),
++                source_message_id=_optional_text(source_message_id),
++            ),
++        )
 +        _DELIVERY_CHANNELS[self] = channel
 +        worker = asyncio.create_task(
 +            _delivery_worker(
@@ -387,21 +423,70 @@ index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1
 +    except Exception:
 +        receipt = GatewayDeliveryReceipt(status="unknown")
 +    else:
-+        receipt = _normalize_delivery_receipt(native_result)
++        receipt = _normalize_delivery_receipt(native_result, request, channel.binding)
 +        if channel.revoked and receipt.status == "sent":
 +            receipt = GatewayDeliveryReceipt(status="unknown")
 +    if not request.future.done():
 +        request.future.set_result(receipt)
 +
 +
-+def _normalize_delivery_receipt(native_result: Any) -> GatewayDeliveryReceipt:
++def _normalize_delivery_receipt(
++    native_result: Any,
++    request: _DeliveryRequest,
++    binding: _DeliveryBinding,
++) -> GatewayDeliveryReceipt:
 +    if not isinstance(native_result, SendResult):
 +        return GatewayDeliveryReceipt(status="unknown")
 +    if native_result.success is False:
 +        return GatewayDeliveryReceipt(status="failed")
-+    message_id = _optional_text(native_result.message_id)
-+    if native_result.success is True and message_id:
-+        return GatewayDeliveryReceipt(status="sent", message_id=message_id)
++    if native_result.success is not True or binding.self_actor_id is None:
++        return GatewayDeliveryReceipt(status="unknown")
++    native_message_id = _optional_text(native_result.message_id)
++    if request.kind == "react":
++        if native_message_id != binding.source_message_id or native_message_id is None:
++            return GatewayDeliveryReceipt(status="unknown")
++        reaction_identity = "\x00".join(
++            (
++                binding.platform,
++                binding.room_id,
++                binding.profile,
++                binding.self_actor_id,
++                native_message_id,
++                request.operation,
++                request.content,
++            )
++        )
++        effect_id = (
++            f"{binding.platform}:reaction:"
++            f"{hashlib.sha256(reaction_identity.encode()).hexdigest()}"
++        )
++        return GatewayDeliveryReceipt(
++            status="sent",
++            platform=binding.platform,
++            room_id=binding.room_id,
++            profile=binding.profile,
++            self_actor_id=binding.self_actor_id,
++            effect_kind="react",
++            target_message_id=native_message_id,
++            reaction=request.content,
++            reaction_operation=request.operation,
++            effect_id=effect_id,
++        )
++    if native_message_id:
++        return GatewayDeliveryReceipt(
++            status="sent",
++            platform=binding.platform,
++            room_id=binding.room_id,
++            profile=binding.profile,
++            self_actor_id=binding.self_actor_id,
++            effect_kind=request.kind,
++            submitted_content=request.content,
++            reply_to_message_id=(
++                binding.source_message_id if request.kind == "reply" else None
++            ),
++            message_id=native_message_id,
++            effect_id=native_message_id,
++        )
 +    return GatewayDeliveryReceipt(status="unknown")
 +
 +
@@ -515,7 +600,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..4bff89fc899f2701372444d4267d02a4
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..476512eca1a391b184c6f4c9372044d7a533d1c2 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..cea78467354c4963d6a56a14b53f53c8afaba1a8 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -821,7 +906,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..476512eca1a391b184c6f4c9372044d7
              _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
              # Goal continuation: after the agent returns a final response
              # for this turn, check any standing /goal — the judge will
-@@ -12835,6 +12949,342 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12835,6 +12949,359 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  pass
          return source
  
@@ -941,6 +1026,18 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..476512eca1a391b184c6f4c9372044d7
 +        delivery_via_relay = (
 +            getattr(source, "delivered_via_upstream_relay", False) is True
 +        )
++        delivery_profile = str(source.profile or "")
++        if not delivery_profile:
++            from hermes_cli.profiles import get_active_profile_name
++
++            delivery_profile = str(get_active_profile_name())
++        authenticated_actor: Optional[str] = None
++        actor_identity: Any = getattr(adapter, "authenticated_actor_id", None)
++        if callable(actor_identity):
++            try:
++                authenticated_actor = str(actor_identity() or "") or None
++            except Exception:
++                authenticated_actor = None
 +        if delivery_via_relay:
 +            delivery_metadata = dict(delivery_metadata or {})
 +            if source.scope_id:
@@ -1017,6 +1114,11 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..476512eca1a391b184c6f4c9372044d7
 +            _send_to_source,
 +            reply_callback=_reply_to_source,
 +            react_callback=_react_to_source,
++            platform=str(getattr(delivery_platform, "value", delivery_platform)),
++            room_id=delivery_chat_id,
++            profile=delivery_profile,
++            self_actor_id=authenticated_actor,
++            source_message_id=delivery_message_id or None,
 +        )
 +        self._register_gateway_delivery(session_key, delivery)
 +        setattr(event, result_marker, "pending")
@@ -1164,7 +1266,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..476512eca1a391b184c6f4c9372044d7
      async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
          """Inner handler that runs under the _running_agents sentinel guard."""
          _msg_start_time = time.time()
-@@ -12848,22 +13298,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12848,22 +13315,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
          )
  
@@ -1480,7 +1582,7 @@ index bbf45f4d268f371ab62032e7d8491eb2a0860391..22564cc08ae9cabbd0f9e2ab6f10209d
  _UNSET = object()
  _HERMES_HOME_OVERRIDE: ContextVar[str | object] = ContextVar(
 diff --git a/plugins/platforms/discord/adapter.py b/plugins/platforms/discord/adapter.py
-index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1edae4fa9dc 100644
+index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..9a102fa667e392db0b07b63badacc778c062235b 100644
 --- a/plugins/platforms/discord/adapter.py
 +++ b/plugins/platforms/discord/adapter.py
 @@ -858,6 +858,14 @@ def _read_discord_prompt_timeout() -> int:
@@ -1506,7 +1608,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
      supports_code_blocks = True  # Discord markdown renders fenced code blocks natively
      splits_long_messages = True  # send() chunks via truncate_message(MAX_MESSAGE_LENGTH)
  
-@@ -2822,6 +2831,34 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -2822,6 +2831,40 @@ class DiscordAdapter(BasePlatformAdapter):
              logger.debug("[%s] remove_reaction failed (%s): %s", self.name, emoji, e)
              return False
  
@@ -1538,10 +1640,16 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
 +        except Exception:
 +            return SendResult(success=False, error="Reaction failed")
 +
++    def authenticated_actor_id(self) -> Optional[str]:
++        """Return the immutable actor id for the authenticated Discord bot."""
++        actor = getattr(getattr(self, "_client", None), "user", None)
++        actor_id = getattr(actor, "id", None)
++        return str(actor_id) if actor_id is not None else None
++
      def _reactions_enabled(self) -> bool:
          """Check if message reactions are enabled via config/env."""
          return os.getenv("DISCORD_REACTIONS", "true").lower() not in {"false", "0", "no"}
-@@ -7567,6 +7604,7 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7567,6 +7610,7 @@ class DiscordAdapter(BasePlatformAdapter):
              if message.reference.resolved:
                  reply_to_text = getattr(message.reference.resolved, "content", None) or None
  
@@ -1549,7 +1657,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
          event = MessageEvent(
              text=event_text,
              message_type=msg_type,
-@@ -7581,6 +7619,10 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7581,6 +7625,10 @@ class DiscordAdapter(BasePlatformAdapter):
              auto_skill=_skills,
              channel_prompt=_channel_prompt,
              channel_context=_channel_context,
@@ -1560,7 +1668,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
          )
  
          # Track thread participation so the bot won't require @mention for
-@@ -7588,6 +7630,9 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7588,6 +7636,9 @@ class DiscordAdapter(BasePlatformAdapter):
          if thread_id:
              self._threads.mark(thread_id)
  
@@ -1570,7 +1678,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
          # Only live plain text messages use split-message batching. Recovery
          # candidates are already complete historical messages; coalescing them
          # would lose constituent IDs and make later restarts replay them.
-@@ -7622,6 +7667,33 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7622,6 +7673,33 @@ class DiscordAdapter(BasePlatformAdapter):
              profile=event.source.profile,
          )
  
@@ -1604,7 +1712,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
      def _enqueue_text_event(self, event: MessageEvent) -> None:
          """Buffer a text event and reset the flush timer.
  
-@@ -7631,17 +7703,39 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7631,17 +7709,39 @@ class DiscordAdapter(BasePlatformAdapter):
          """
          key = self._text_batch_key(event)
          existing = self._pending_text_batches.get(key)
@@ -1644,7 +1752,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
  
          prior_task = self._pending_text_batch_tasks.get(key)
          if prior_task and not prior_task.done():
-@@ -7650,6 +7744,16 @@ class DiscordAdapter(BasePlatformAdapter):
+@@ -7650,6 +7750,16 @@ class DiscordAdapter(BasePlatformAdapter):
              self._flush_text_batch(key)
          )
  
@@ -1662,7 +1770,7 @@ index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..5b4c193a11cfa1cb4a7bd2b6e459c1ed
          """Wait for the quiet period then dispatch the aggregated text.
  
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..4f54f5610a1abc21e119efcb2a824450b2d25b27 100644
+index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..3a26bd1e7b4788814e2d02b6942c7c7062bac869 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -589,6 +589,24 @@ class _PollingLifecycleAbort(RuntimeError):
@@ -1862,7 +1970,7 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..4f54f5610a1abc21e119efcb2a824450
          )
  
      # ── Message reactions (processing lifecycle) ──────────────────────────
-@@ -9406,6 +9524,27 @@ class TelegramAdapter(BasePlatformAdapter):
+@@ -9406,6 +9524,32 @@ class TelegramAdapter(BasePlatformAdapter):
              logger.debug("[%s] clear reactions failed: %s", self.name, _redact_telegram_error_text(e))
              return False
  
@@ -1886,6 +1994,11 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..4f54f5610a1abc21e119efcb2a824450
 +            success=succeeded,
 +            message_id=str(message_id) if succeeded else None,
 +        )
++
++    def authenticated_actor_id(self) -> Optional[str]:
++        """Return the immutable actor id for the authenticated Telegram bot."""
++        actor_id = getattr(getattr(self, "_bot", None), "id", None)
++        return str(actor_id) if actor_id is not None else None
 +
      async def on_processing_start(self, event: MessageEvent) -> None:
          """Add an in-progress reaction when message processing begins."""
@@ -2026,10 +2139,10 @@ index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..e873323faf9025a86d074fbc40ef05db
      adapter = DiscordAdapter(PlatformConfig(enabled=True, token="fake-token"))
 diff --git a/tests/gateway/test_gateway_message_hooks.py b/tests/gateway/test_gateway_message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c728f137a
+index 0000000000000000000000000000000000000000..319139f33571a578f14be32c5d17009f1494808d
 --- /dev/null
 +++ b/tests/gateway/test_gateway_message_hooks.py
-@@ -0,0 +1,1387 @@
+@@ -0,0 +1,1473 @@
 +"""Public contract tests for the generic gateway user-message hook."""
 +
 +import asyncio
@@ -2191,7 +2304,17 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +    [
 +        (
 +            SendResult(success=True, message_id="out-1"),
-+            GatewayDeliveryReceipt(status="sent", message_id="out-1"),
++            GatewayDeliveryReceipt(
++                status="sent",
++                platform="discord",
++                room_id="room-1",
++                profile="work",
++                self_actor_id="bot-9",
++                effect_kind="send",
++                submitted_content="host delivery",
++                message_id="out-1",
++                effect_id="out-1",
++            ),
 +        ),
 +        (
 +            SendResult(success=False, error="rejected with credential-shaped detail"),
@@ -2212,7 +2335,14 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +        sent_content.append(content)
 +        return native_result
 +
-+    delivery = GatewayDelivery(send_native)
++    delivery = GatewayDelivery(
++        send_native,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="bot-9",
++        source_message_id="source-1",
++    )
 +
 +    assert await delivery.send("host delivery") == expected
 +    assert sent_content == ["host delivery"]
@@ -2226,11 +2356,48 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +
 +
 +@pytest.mark.asyncio
++async def test_route_delivery_cannot_report_sent_without_authenticated_self_actor():
++    async def send_native(_content: str):
++        return SendResult(success=True, message_id="out-1")
++
++    receipt = await GatewayDelivery(
++        send_native,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id=None,
++        source_message_id="source-1",
++    ).send("hello")
++
++    assert receipt == GatewayDeliveryReceipt(status="unknown")
++
++
++def test_discord_and_telegram_expose_authenticated_native_actor_ids():
++    from plugins.platforms.discord.adapter import DiscordAdapter
++    from plugins.platforms.telegram.adapter import TelegramAdapter
++
++    discord = object.__new__(DiscordAdapter)
++    discord._client = SimpleNamespace(user=SimpleNamespace(id=123))
++    telegram = object.__new__(TelegramAdapter)
++    telegram._bot = SimpleNamespace(id=456)
++
++    assert discord.authenticated_actor_id() == "123"
++    assert telegram.authenticated_actor_id() == "456"
++
++
++@pytest.mark.asyncio
 +async def test_route_delivery_reports_raised_send_as_unknown_without_native_details():
 +    async def send_native(_content: str):
 +        raise RuntimeError("transport down")
 +
-+    receipt = await GatewayDelivery(send_native).send("hello")
++    receipt = await GatewayDelivery(
++        send_native,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="bot-9",
++        source_message_id="source-1",
++    ).send("hello")
 +
 +    assert receipt.status == "unknown"
 +    assert receipt.message_id is None
@@ -2244,7 +2411,14 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +    async def send_native(_content: str):
 +        return SendResult(success=True, message_id="out-1")
 +
-+    delivery = GatewayDelivery(send_native)
++    delivery = GatewayDelivery(
++        send_native,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="bot-9",
++        source_message_id="source-1",
++    )
 +
 +    assert not hasattr(delivery, "_send_callback")
 +    assert not hasattr(delivery, "__dict__")
@@ -2271,6 +2445,7 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +    )
 +    adapter = SimpleNamespace(
 +        send=AsyncMock(return_value=SendResult(success=True, message_id="out-1")),
++        authenticated_actor_id=MagicMock(return_value="9"),
 +        _pending_messages={},
 +    )
 +    runner.adapters = {Platform.DISCORD: adapter}
@@ -2445,7 +2620,20 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +
 +    await runner._handle_message(event)
 +
-+    assert receipts == [GatewayDeliveryReceipt(status="sent", message_id="out-1")]
++    assert receipts == [
++        GatewayDeliveryReceipt(
++            status="sent",
++            platform="discord",
++            room_id="channel-1",
++            profile="work",
++            self_actor_id="9",
++            effect_kind="reply",
++            submitted_content="threaded",
++            reply_to_message_id="in-1",
++            message_id="out-1",
++            effect_id="out-1",
++        )
++    ]
 +    adapter.send.assert_awaited_once_with(
 +        "channel-1",
 +        "threaded",
@@ -2477,7 +2665,18 @@ index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c
 +
 +    await runner._handle_message(event)
 +
-+    assert receipts == [GatewayDeliveryReceipt(status="sent", message_id="in-1")]
++    assert len(receipts) == 1
++    assert receipts[0].status == "sent"
++    assert receipts[0].platform == "discord"
++    assert receipts[0].room_id == "channel-1"
++    assert receipts[0].profile == "work"
++    assert receipts[0].self_actor_id == "9"
++    assert receipts[0].effect_kind == "react"
++    assert receipts[0].target_message_id == "in-1"
++    assert receipts[0].reaction == "👍"
++    assert receipts[0].reaction_operation == "add"
++    assert receipts[0].message_id is None
++    assert receipts[0].effect_id.startswith("discord:reaction:")
 +    adapter.react.assert_awaited_once_with(
 +        "channel-1",
 +        "in-1",

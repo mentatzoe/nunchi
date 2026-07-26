@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Imports below the local plugin-path bootstrap are intentional.
+# ruff: noqa: E402
+
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,7 +22,7 @@ PLUGIN_ROOT = Path(__file__).parents[2] / "integrations" / "hermes" / "nunchi-ga
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
-from nunchi.attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from nunchi.attention import AttentionPolicy, ParticipantProfile
 from nunchi.authorization import (
     AuthorizationCoordinator,
     AuthorizationJournal,
@@ -29,8 +32,7 @@ from nunchi.authorization import (
 )
 from nunchi.errors import ValidationError
 from nunchi.observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from nunchi.participant import ConversationOpportunityScheduler, ParticipantTurnHost, TransportResult
-from nunchi.pipeline import NunchiV2Pipeline
+from nunchi.participant import TransportResult
 
 try:
     import nunchi_hermes_v2 as hermes_module
@@ -166,6 +168,38 @@ class FakeDelivery:
         if result.success is False:
             return SimpleNamespace(status="failed", message_id=None, error=result.error)
         return SimpleNamespace(status="unknown", message_id=None, error=None)
+
+
+def attested_receipt(
+    *,
+    platform="discord",
+    room_id="42",
+    profile="default",
+    self_actor_id="9",
+    effect_kind="send",
+    submitted_content: str | None = "hello",
+    reply_to_message_id=None,
+    target_message_id=None,
+    reaction=None,
+    reaction_operation=None,
+    message_id: str | None = "555",
+    effect_id="555",
+):
+    return SimpleNamespace(
+        status="sent",
+        platform=platform,
+        room_id=room_id,
+        profile=profile,
+        self_actor_id=self_actor_id,
+        effect_kind=effect_kind,
+        submitted_content=submitted_content,
+        reply_to_message_id=reply_to_message_id,
+        target_message_id=target_message_id,
+        reaction=reaction,
+        reaction_operation=reaction_operation,
+        message_id=message_id,
+        effect_id=effect_id,
+    )
 
 
 class FakeGateway:
@@ -488,19 +522,43 @@ class HermesV2ContractTests(unittest.TestCase):
             source.write_text("API_VERSION = 2\n", encoding="utf-8")
             host_module = SimpleNamespace(__file__=str(source))
             gateway_module = SimpleNamespace(message_hooks=host_module)
+            file_specs = {
+                "gateway/message_hooks.py": SimpleNamespace(
+                    operation="create",
+                    pre_mode=None,
+                    pre_sha256=None,
+                    post_mode="100644",
+                    post_sha256="3" * 64,
+                ),
+                "gateway/run.py": SimpleNamespace(
+                    operation="modify",
+                    pre_mode="100644",
+                    pre_sha256="4" * 64,
+                    post_mode="100644",
+                    post_sha256="5" * 64,
+                ),
+            }
             bundle = SimpleNamespace(
                 supported_hermes_commit="1" * 40,
+                manifest_sha256="6" * 64,
                 patch_sha256="2" * 64,
-                post_apply_sha256={
-                    "gateway/message_hooks.py": "3" * 64,
-                    "gateway/run.py": "4" * 64,
-                },
+                files=file_specs,
             )
             canonical = json.dumps(
                 {
+                    "files": {
+                        path: {
+                            "operation": spec.operation,
+                            "pre_mode": spec.pre_mode,
+                            "pre_sha256": spec.pre_sha256,
+                            "post_mode": spec.post_mode,
+                            "post_sha256": spec.post_sha256,
+                        }
+                        for path, spec in file_specs.items()
+                    },
+                    "manifest_sha256": bundle.manifest_sha256,
                     "patch_sha256": bundle.patch_sha256,
-                    "post_apply_sha256": bundle.post_apply_sha256,
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "supported_hermes_commit": bundle.supported_hermes_commit,
                 },
                 separators=(",", ":"),
@@ -984,7 +1042,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.require_surface()
         binding = self.binding()
         transport = HermesNativeTransport(binding=binding, coroutine_runner=lambda coro, timeout: asyncio.run(coro))
-        success = FakeDelivery([FakeSendResult(True, "555")])
+        success = FakeDelivery([attested_receipt()])
         transport.bind("discord:message:100", success)
         result = transport.dispatch(
             action={"kind": "message", "origin_event_id": "discord:message:100", "text": "hello"},
@@ -1031,7 +1089,15 @@ class HermesV2ContractTests(unittest.TestCase):
             coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
         )
         reply_delivery = RichDelivery(
-            [SimpleNamespace(status="sent", message_id="556")]
+            [
+                attested_receipt(
+                    effect_kind="reply",
+                    submitted_content="threaded",
+                    reply_to_message_id="100",
+                    message_id="556",
+                    effect_id="556",
+                )
+            ]
         )
         transport.bind("discord:message:100", reply_delivery)
         reply = transport.dispatch(
@@ -1047,7 +1113,17 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual([{"kind": "reply", "content": "threaded"}], reply_delivery.calls)
 
         reaction_delivery = RichDelivery(
-            [SimpleNamespace(status="sent", message_id="100")]
+            [
+                attested_receipt(
+                    effect_kind="react",
+                    submitted_content=None,
+                    target_message_id="101",
+                    reaction="👍",
+                    reaction_operation="add",
+                    message_id=None,
+                    effect_id="discord:reaction:effect-1",
+                )
+            ]
         )
         transport.bind("discord:message:101", reaction_delivery)
         reaction = transport.dispatch(
@@ -1060,11 +1136,135 @@ class HermesV2ContractTests(unittest.TestCase):
             wake={"room": {"id": "42"}},
         )
         self.assertEqual("sent", reaction.delivery)
-        self.assertEqual("native reaction acknowledged", reaction.detail)
+        self.assertEqual("discord:reaction:effect-1", reaction.detail)
         self.assertEqual(
             [{"kind": "reaction", "reaction": "👍", "operation": "add"}],
             reaction_delivery.calls,
         )
+
+    def test_native_transport_rejects_every_mismatched_native_ack_field(self):
+        self.require_surface()
+
+        class RichDelivery(FakeDelivery):
+            async def reply(self, content):
+                return self.results.pop(0)
+
+            async def react(self, reaction, *, operation="add"):
+                return self.results.pop(0)
+
+        for platform in ("discord", "telegram"):
+            binding = self.binding(platform=platform)
+            baseline_send = vars(attested_receipt(platform=platform))
+            send_mismatches = {
+                "platform": "other",
+                "room_id": "elsewhere",
+                "profile": "other-profile",
+                "self_actor_id": "other-actor",
+                "effect_kind": "reply",
+                "submitted_content": "wrong content",
+                "reply_to_message_id": "100",
+                "target_message_id": "100",
+                "message_id": None,
+                "effect_id": "different-effect",
+            }
+            for field, wrong in send_mismatches.items():
+                with self.subTest(platform=platform, kind="send", field=field):
+                    values = {**baseline_send, field: wrong}
+                    transport = HermesNativeTransport(
+                        binding=binding,
+                        profile_name="default",
+                        coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+                    )
+                    transport.bind(
+                        f"{platform}:message:100",
+                        RichDelivery([SimpleNamespace(**values)]),
+                    )
+                    result = transport.dispatch(
+                        action={
+                            "kind": "message",
+                            "origin_event_id": f"{platform}:message:100",
+                            "text": "hello",
+                        },
+                        wake={"room": {"id": "42"}},
+                    )
+                    self.assertEqual("unknown", result.delivery)
+
+            baseline_reply = vars(
+                attested_receipt(
+                    platform=platform,
+                    effect_kind="reply",
+                    submitted_content="threaded",
+                    reply_to_message_id="100",
+                    message_id="556",
+                    effect_id="556",
+                )
+            )
+            for field, wrong in {
+                "reply_to_message_id": None,
+                "message_id": "100",
+                "effect_id": "different-effect",
+            }.items():
+                with self.subTest(platform=platform, kind="reply", field=field):
+                    values = {**baseline_reply, field: wrong}
+                    transport = HermesNativeTransport(
+                        binding=binding,
+                        profile_name="default",
+                        coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+                    )
+                    transport.bind(
+                        f"{platform}:message:100",
+                        RichDelivery([SimpleNamespace(**values)]),
+                    )
+                    result = transport.dispatch(
+                        action={
+                            "kind": "reply",
+                            "target_event_id": f"{platform}:message:100",
+                            "text": "threaded",
+                        },
+                        wake={"room": {"id": "42"}},
+                    )
+                    self.assertEqual("unknown", result.delivery)
+
+            baseline_reaction = vars(
+                attested_receipt(
+                    platform=platform,
+                    effect_kind="react",
+                    submitted_content=None,
+                    target_message_id="101",
+                    reaction="👍",
+                    reaction_operation="add",
+                    message_id=None,
+                    effect_id=f"{platform}:reaction:effect-1",
+                )
+            )
+            for field, wrong in {
+                "target_message_id": "other-target",
+                "reaction": "👎",
+                "reaction_operation": "remove",
+                "message_id": "101",
+                "effect_id": "wrong-reaction-identity",
+            }.items():
+                with self.subTest(platform=platform, kind="reaction", field=field):
+                    values = {**baseline_reaction, field: wrong}
+                    transport = HermesNativeTransport(
+                        binding=binding,
+                        profile_name="default",
+                        coroutine_runner=lambda coroutine, _timeout: asyncio.run(coroutine),
+                    )
+                    transport.bind(
+                        f"{platform}:message:101",
+                        RichDelivery([SimpleNamespace(**values)]),
+                    )
+                    result = transport.dispatch(
+                        action={
+                            "kind": "reaction",
+                            "target_event_id": f"{platform}:message:101",
+                            "reaction": "👍",
+                            "operation": "add",
+                        },
+                        wake={"room": {"id": "42"}},
+                    )
+                    self.assertEqual("unknown", result.delivery)
 
     def test_native_transport_timeout_cancels_submitted_delivery(self):
         self.require_surface()
@@ -1447,7 +1647,7 @@ class HermesV2ContractTests(unittest.TestCase):
         def broken(_profile):
             raise ValueError("digest mismatch")
 
-        plugin = register(
+        register(
             ctx,
             config_loader=broken,
             host_identity_loader=lambda: "a" * 64,
@@ -1468,7 +1668,7 @@ class HermesV2ContractTests(unittest.TestCase):
     def test_register_exposes_public_post_auth_hooks_and_probe_command(self):
         self.require_surface()
         ctx = FakeCtx()
-        plugin = register(
+        register(
             ctx,
             config_loader=lambda profile: SimpleNamespace(
                 hermes_profile=profile,
@@ -1488,7 +1688,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("a" * 64, probe["host_seam_sha256"])
-        self.assertEqual("6dd25b27a9c8f24d48ba31b552839c69b38e83a99e6c045a79b33eb3423c7f5a", probe["host_patch_sha256"])
+        self.assertEqual("a0dc820789c1bb7c1c1a124b00a4ddd874c7a34f4939c31b243d33cb81c11fca", probe["host_patch_sha256"])
         self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])
