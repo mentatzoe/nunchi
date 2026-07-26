@@ -511,6 +511,7 @@ class AuthorizationCoordinator:
         self._pending: dict[str, _PendingApproval] = {}
         self._lock = threading.RLock()
         self._lifecycle_lock = threading.Lock()
+        self._native_effect_lock = threading.Lock()
         self._lifecycle_generation = 0
 
     def _capture_lifecycle(self) -> int:
@@ -534,6 +535,43 @@ class AuthorizationCoordinator:
         # is blocking under ``self._lock``.
         with self._lifecycle_lock:
             self._lifecycle_generation += 1
+
+    def _invoke_native_effect(
+        self,
+        *,
+        capability: str,
+        operation: Mapping[str, Any],
+        idempotency_key: str | None,
+        lifecycle_generation: int,
+        cancel: threading.Event,
+        cancelled_detail: str,
+    ) -> TransportResult:
+        """Cross the revocable lifecycle/native-call boundary exactly once."""
+        with self._native_effect_lock:
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
+                return TransportResult("failed", cancelled_detail)
+            try:
+                executor = self.executors[capability]
+            except BaseException:
+                return TransportResult("unknown", "privileged acknowledgement was lost")
+            # Executor resolution can itself block or execute user-controlled
+            # mapping code. Recheck under the same dispatch barrier before the
+            # actual privileged call.
+            if not self._lifecycle_is_current(lifecycle_generation, cancel):
+                return TransportResult("failed", cancelled_detail)
+            try:
+                result = executor(operation, idempotency_key)
+            except BaseException:
+                result = TransportResult("unknown", "privileged acknowledgement was lost")
+        if not isinstance(result, TransportResult):
+            result = TransportResult("unknown", "privileged executor returned no attestation")
+        result = _sanitized_effect_result(result)
+        if not self._lifecycle_is_current(lifecycle_generation, cancel):
+            return TransportResult(
+                "unknown",
+                "privileged effect completed after lifecycle cancellation",
+            )
+        return result
 
     @staticmethod
     def _matching_rule(
@@ -774,18 +812,14 @@ class AuthorizationCoordinator:
                 "failed",
                 "authorization changed before native effect",
             )
-        if not self._lifecycle_is_current(lifecycle_generation, cancel):
-            return TransportResult(
-                "failed",
-                "privileged work cancelled at native effect boundary",
-            )
-        try:
-            result = self.executors[binding["capability"]](operation, idempotency_key)
-        except BaseException:
-            result = TransportResult("unknown", "privileged acknowledgement was lost")
-        if not isinstance(result, TransportResult):
-            result = TransportResult("unknown", "privileged executor returned no attestation")
-        result = _sanitized_effect_result(result)
+        result = self._invoke_native_effect(
+            capability=binding["capability"],
+            operation=operation,
+            idempotency_key=idempotency_key,
+            lifecycle_generation=lifecycle_generation,
+            cancel=cancel,
+            cancelled_detail="privileged work cancelled at native effect boundary",
+        )
         native_outcome = "CONFIRMED" if result.delivery == "sent" else (
             "UNKNOWN" if result.delivery == "unknown" else "FAILED"
         )
@@ -898,18 +932,14 @@ class AuthorizationCoordinator:
                 "failed",
                 "unknown-effect retry authority changed before native effect",
             )
-        if not self._lifecycle_is_current(lifecycle_generation, cancel):
-            return TransportResult(
-                "failed",
-                "unknown-effect retry cancelled at native effect boundary",
-            )
-        try:
-            result = self.executors[binding["capability"]](operation, expected_key)
-        except BaseException:
-            result = TransportResult("unknown", "privileged acknowledgement was lost")
-        if not isinstance(result, TransportResult):
-            result = TransportResult("unknown", "privileged executor returned no attestation")
-        result = _sanitized_effect_result(result)
+        result = self._invoke_native_effect(
+            capability=binding["capability"],
+            operation=operation,
+            idempotency_key=expected_key,
+            lifecycle_generation=lifecycle_generation,
+            cancel=cancel,
+            cancelled_detail="unknown-effect retry cancelled at native effect boundary",
+        )
         self.journal.append(
             {
                 "kind": "effect_result",
@@ -1287,13 +1317,14 @@ class AuthorizationCoordinator:
                 "failed",
                 "approved work cancelled at native effect boundary",
             )
-        try:
-            result = self.executors[binding["capability"]](operation, idempotency_key)
-        except BaseException:
-            result = TransportResult("unknown", "privileged acknowledgement was lost")
-        if not isinstance(result, TransportResult):
-            result = TransportResult("unknown", "privileged executor returned no attestation")
-        result = _sanitized_effect_result(result)
+        result = self._invoke_native_effect(
+            capability=binding["capability"],
+            operation=operation,
+            idempotency_key=idempotency_key,
+            lifecycle_generation=lifecycle_generation,
+            cancel=cancel,
+            cancelled_detail="approved work cancelled at native effect boundary",
+        )
         self.journal.append(
             {
                 "kind": "effect_result",
@@ -1321,6 +1352,12 @@ class AuthorizationCoordinator:
         # own generation and must fail their next lifecycle check.
         pending = self._pending
         self._pending = {}
+        # Do not return while a native effect can still begin. Invalidation is
+        # visible before this barrier, so blocked executor lookup is fenced by
+        # the generation recheck and an already-running executor is drained
+        # before cancellation reports completion.
+        with self._native_effect_lock:
+            pass
         for item in pending.values():
             item.cancel.set()
 

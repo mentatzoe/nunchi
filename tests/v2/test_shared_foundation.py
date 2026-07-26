@@ -1180,6 +1180,122 @@ class AuthorizationTests(unittest.TestCase):
         ][:2]
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
 
+    def test_cancel_fences_native_effect_between_final_check_and_dispatch(self):
+        coordinator = self.coordinator()
+        entered_dispatch_boundary = threading.Event()
+        release_dispatch_boundary = threading.Event()
+
+        class BlockingExecutors(dict):
+            def __getitem__(inner, key):
+                entered_dispatch_boundary.set()
+                release_dispatch_boundary.wait(2)
+                return super().__getitem__(key)
+
+        coordinator.executors = BlockingExecutors(coordinator.executors)
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                coordinator.execute_proposal(
+                    proposal=self.proposal(),
+                    wake=self.wake,
+                    cancel=threading.Event(),
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(entered_dispatch_boundary.wait(1))
+
+        cancel_returned = threading.Event()
+        cancel_worker = threading.Thread(
+            target=lambda: (coordinator.cancel(), cancel_returned.set())
+        )
+        cancel_worker.start()
+        try:
+            self.assertFalse(
+                cancel_returned.wait(0.1),
+                "cancellation returned while native dispatch could still begin",
+            )
+        finally:
+            release_dispatch_boundary.set()
+            worker.join(2)
+            cancel_worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(cancel_worker.is_alive())
+        self.assertTrue(cancel_returned.is_set())
+        self.assertEqual("failed", result_holder["result"].delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_cancel_fences_native_effect_for_authenticated_approval_dispatch(self):
+        high_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        snapshot = PolicySnapshot(
+            "policy",
+            "r1",
+            (high_rule,),
+            ("operator:zoe",),
+        )
+        coordinator = self.coordinator(policy=StaticPolicySource(snapshot))
+        initial = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unavailable", initial.delivery)
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+
+        entered_dispatch_boundary = threading.Event()
+        release_dispatch_boundary = threading.Event()
+
+        class BlockingExecutors(dict):
+            def __getitem__(inner, key):
+                entered_dispatch_boundary.set()
+                release_dispatch_boundary.wait(2)
+                return super().__getitem__(key)
+
+        coordinator.executors = BlockingExecutors(coordinator.executors)
+        result_holder = {}
+        worker = threading.Thread(
+            target=lambda: result_holder.setdefault(
+                "result",
+                coordinator.complete_authenticated_approval(
+                    approval_challenge_id=challenge_id,
+                    authenticated_approver_id="operator:zoe",
+                ),
+            )
+        )
+        worker.start()
+        self.assertTrue(entered_dispatch_boundary.wait(1))
+
+        cancel_returned = threading.Event()
+        cancel_worker = threading.Thread(
+            target=lambda: (coordinator.cancel(), cancel_returned.set())
+        )
+        cancel_worker.start()
+        try:
+            self.assertFalse(
+                cancel_returned.wait(0.1),
+                "cancellation returned while approved native dispatch could still begin",
+            )
+        finally:
+            release_dispatch_boundary.set()
+            worker.join(2)
+            cancel_worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(cancel_worker.is_alive())
+        self.assertTrue(cancel_returned.is_set())
+        self.assertEqual("failed", result_holder["result"].delivery)
+        self.assertEqual([], self.native_calls)
+
     def test_cancel_invalidates_direct_effect_while_policy_recheck_is_blocked(self):
         policy_started = threading.Event()
         release_policy = threading.Event()

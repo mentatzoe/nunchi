@@ -345,6 +345,110 @@ class HostPatchApplicatorTests(unittest.TestCase):
         self.assertEqual((self.repo / "host.py").read_text(), "value = 'late-race'\n")
         self.assertFalse((self.repo / "new_boundary.py").exists())
 
+    def _nested_package_bundle(self) -> HostPatchBundle:
+        package = self.repo / "pkg"
+        package.mkdir()
+        module = package / "module.py"
+        module.write_text("VALUE = 'stock'\n", encoding="utf-8")
+        _git(self.repo, "add", "pkg/module.py")
+        _git(self.repo, "commit", "-q", "-m", "nested stock")
+        base_commit = _git(self.repo, "rev-parse", "HEAD").strip()
+        stock_digest = hashlib.sha256(module.read_bytes()).hexdigest()
+
+        module.write_text("VALUE = 'patched'\n", encoding="utf-8")
+        nested_patch = self.root / "nested.patch"
+        nested_patch.write_bytes(_git(self.repo, "diff", "--binary", text=False))
+        manifest = {
+            "schema_version": 2,
+            "patch": nested_patch.name,
+            "patch_sha256": hashlib.sha256(nested_patch.read_bytes()).hexdigest(),
+            "supported_hermes_commit": base_commit,
+            "files": {
+                "pkg/module.py": {
+                    "operation": "modify",
+                    "pre_sha256": stock_digest,
+                    "pre_mode": "100644",
+                    "post_sha256": hashlib.sha256(module.read_bytes()).hexdigest(),
+                    "post_mode": "100644",
+                }
+            },
+        }
+        nested_manifest = self.root / "nested-manifest.json"
+        nested_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        bundle = HostPatchBundle.from_paths(nested_manifest, nested_patch)
+        _git(self.repo, "restore", "pkg/module.py")
+        return bundle
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor semantics required")
+    def test_touched_parent_exchange_cannot_mutate_detached_replacement(self) -> None:
+        nested_bundle = self._nested_package_bundle()
+        package = self.repo / "pkg"
+
+        real_write = host_patch._write_plan
+        original_detached = self.root / "original-pkg"
+        replacement_detached = self.root / "replacement-pkg"
+
+        def exchange_parent_during_commit(*args, **kwargs):
+            package.rename(original_detached)
+            package.mkdir()
+            (package / "module.py").write_text("VALUE = 'stock'\n", encoding="utf-8")
+            try:
+                return real_write(*args, **kwargs)
+            finally:
+                package.rename(replacement_detached)
+                original_detached.rename(package)
+
+        with mock.patch.object(
+            host_patch,
+            "_write_plan",
+            side_effect=exchange_parent_during_commit,
+        ):
+            try:
+                apply_host_patch(self.repo, nested_bundle)
+            except HostPatchError:
+                pass
+
+        self.assertEqual(
+            "VALUE = 'stock'\n",
+            (replacement_detached / "module.py").read_text(encoding="utf-8"),
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor semantics required")
+    def test_touched_parent_exchange_not_restored_fails_without_false_rollback(self) -> None:
+        nested_bundle = self._nested_package_bundle()
+        package = self.repo / "pkg"
+
+        real_write = host_patch._write_plan
+        detached = self.root / "detached-pkg"
+
+        def exchange_parent_and_keep_detached(*args, **kwargs):
+            package.rename(detached)
+            package.mkdir()
+            (package / "module.py").write_text("VALUE = 'stock'\n", encoding="utf-8")
+            return real_write(*args, **kwargs)
+
+        with mock.patch.object(
+            host_patch,
+            "_write_plan",
+            side_effect=exchange_parent_and_keep_detached,
+        ):
+            with self.assertRaises(HostPatchError):
+                apply_host_patch(self.repo, nested_bundle)
+
+        # The write went to the pinned original inode (now detached), never to
+        # the attacker's live replacement. Verification re-attested the parent
+        # identity by name, detected the exchange, and failed closed rather
+        # than reporting a clean apply or a false rollback against the
+        # replacement tree.
+        self.assertEqual(
+            "VALUE = 'patched'\n",
+            (detached / "module.py").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            "VALUE = 'stock'\n",
+            (package / "module.py").read_text(encoding="utf-8"),
+        )
+
     def test_modify_race_at_atomic_exchange_is_restored_not_overwritten(self) -> None:
         real_exchange = host_patch._exchange_names
         raced = False

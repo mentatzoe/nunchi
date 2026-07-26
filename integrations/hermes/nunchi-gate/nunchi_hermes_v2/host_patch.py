@@ -226,6 +226,12 @@ class _Snapshot:
 
 
 @dataclass(frozen=True)
+class _PinnedParents:
+    root_fd: int
+    descriptors: Mapping[str, int]
+
+
+@dataclass(frozen=True)
 class _InventoryLeaf:
     info: os.stat_result
     data: bytes
@@ -804,23 +810,86 @@ def _transaction_lock(root: Path) -> Iterator[None]:
             os.close(descriptor)
 
 
-def _open_parent(root_fd: int, relative: str) -> tuple[int, str]:
-    parts = PurePosixPath(relative).parts
+def _open_directory(root_fd: int, relative: str) -> int:
     current = os.dup(root_fd)
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        for part in parts[:-1]:
+        parts = () if relative == "." else PurePosixPath(relative).parts
+        for part in parts:
             next_fd = os.open(part, flags, dir_fd=current)
             os.close(current)
             current = next_fd
-        return current, parts[-1]
+        return current
     except BaseException:
         os.close(current)
         raise
 
 
-def _snapshot_paths(root: Path | int, paths: Sequence[str]) -> dict[str, _Snapshot]:
-    owns_root_fd = not isinstance(root, int)
+def _open_parent(root_fd: int, relative: str) -> tuple[int, str]:
+    path = PurePosixPath(relative)
+    return _open_directory(root_fd, path.parent.as_posix()), path.name
+
+
+def _parent_key(relative: str) -> str:
+    return PurePosixPath(relative).parent.as_posix()
+
+
+def _transaction_parent(
+    root: int | _PinnedParents,
+    relative: str,
+) -> tuple[int, str]:
+    if isinstance(root, _PinnedParents):
+        try:
+            descriptor = root.descriptors[_parent_key(relative)]
+        except KeyError as exc:
+            raise HostPatchError("transaction parent was not pinned") from exc
+        return os.dup(descriptor), PurePosixPath(relative).name
+    return _open_parent(root, relative)
+
+
+def _verify_pinned_parents(parents: _PinnedParents) -> None:
+    for relative, descriptor in parents.descriptors.items():
+        current = _open_directory(parents.root_fd, relative)
+        try:
+            pinned_info = os.fstat(descriptor)
+            current_info = os.fstat(current)
+            _verify_owned_directory(pinned_info)
+            _verify_owned_directory(current_info)
+            if not _same_inode(pinned_info, current_info):
+                raise HostPatchError("Hermes transaction parent changed")
+        finally:
+            os.close(current)
+
+
+@contextlib.contextmanager
+def _pin_touched_parents(
+    root_fd: int,
+    paths: Sequence[str],
+) -> Iterator[_PinnedParents]:
+    descriptors: dict[str, int] = {}
+    try:
+        for relative in paths:
+            parent = _parent_key(relative)
+            if parent in descriptors:
+                continue
+            descriptor = _open_directory(root_fd, parent)
+            try:
+                _verify_owned_directory(os.fstat(descriptor))
+            except BaseException:
+                os.close(descriptor)
+                raise
+            descriptors[parent] = descriptor
+        pinned = _PinnedParents(root_fd=root_fd, descriptors=descriptors)
+        _verify_pinned_parents(pinned)
+        yield pinned
+    finally:
+        for descriptor in descriptors.values():
+            os.close(descriptor)
+
+
+def _snapshot_paths(root: Path | int | _PinnedParents, paths: Sequence[str]) -> dict[str, _Snapshot]:
+    pinned = root if isinstance(root, _PinnedParents) else None
+    owns_root_fd = isinstance(root, Path)
     root_fd = (
         os.open(
             root,
@@ -828,13 +897,17 @@ def _snapshot_paths(root: Path | int, paths: Sequence[str]) -> dict[str, _Snapsh
             | getattr(os, "O_DIRECTORY", 0)
             | getattr(os, "O_NOFOLLOW", 0),
         )
-        if owns_root_fd
+        if isinstance(root, Path)
+        else root.root_fd
+        if isinstance(root, _PinnedParents)
         else root
     )
     snapshots: dict[str, _Snapshot] = {}
     try:
+        if pinned is not None:
+            _verify_pinned_parents(pinned)
         for relative in paths:
-            parent_fd, leaf = _open_parent(root_fd, relative)
+            parent_fd, leaf = _transaction_parent(pinned or root_fd, relative)
             try:
                 snapshot = _read_leaf_snapshot(parent_fd, leaf)
                 if snapshot.existed and (snapshot.data is None or snapshot.mode is None):
@@ -842,6 +915,8 @@ def _snapshot_paths(root: Path | int, paths: Sequence[str]) -> dict[str, _Snapsh
                 snapshots[relative] = snapshot
             finally:
                 os.close(parent_fd)
+        if pinned is not None:
+            _verify_pinned_parents(pinned)
     finally:
         if owns_root_fd:
             os.close(root_fd)
@@ -1002,12 +1077,12 @@ def _write_temporary(
 
 
 def _write_snapshot(
-    root_fd: int,
+    parents: _PinnedParents,
     relative: str,
     desired: _Snapshot,
     expected: _Snapshot,
 ) -> None:
-    parent_fd, leaf = _open_parent(root_fd, relative)
+    parent_fd, leaf = _transaction_parent(parents, relative)
     try:
         current = _read_leaf_snapshot(parent_fd, leaf)
         if not _snapshots_equal(current, expected):
@@ -1094,26 +1169,26 @@ def _write_snapshot(
 
 
 def _write_plan(
-    root_fd: int,
+    parents: _PinnedParents,
     plan: Mapping[str, _Snapshot],
     expected: Mapping[str, _Snapshot],
 ) -> list[str]:
     completed: list[str] = []
     for relative in sorted(plan):
-        _write_snapshot(root_fd, relative, plan[relative], expected[relative])
+        _write_snapshot(parents, relative, plan[relative], expected[relative])
         completed.append(relative)
     return completed
 
 
 def _rollback_plan(
-    root_fd: int,
+    parents: _PinnedParents,
     snapshots: Mapping[str, _Snapshot],
     postimages: Mapping[str, _Snapshot],
 ) -> None:
     failures: list[BaseException] = []
     for relative in sorted(snapshots, reverse=True):
         try:
-            parent_fd, leaf = _open_parent(root_fd, relative)
+            parent_fd, leaf = _transaction_parent(parents, relative)
             try:
                 current = _read_leaf_snapshot(parent_fd, leaf)
             finally:
@@ -1123,7 +1198,7 @@ def _rollback_plan(
             if not _snapshots_equal(current, postimages[relative]):
                 raise HostPatchError("transaction target changed before rollback")
             _write_snapshot(
-                root_fd,
+                parents,
                 relative,
                 snapshots[relative],
                 postimages[relative],
@@ -1165,38 +1240,43 @@ def apply_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
         except OSError as exc:
             raise HostPatchError("cannot pin Hermes transaction root") from exc
         try:
-            snapshots = _snapshot_paths(root_fd, tuple(bundle.files))
-            _verify_snapshot_preimages(snapshots, bundle)
-            _verify_state(
-                root,
-                bundle,
-                applied=False,
-                pinned_root_fd=root_fd,
-            )
-            try:
-                _write_plan(root_fd, plan, snapshots)
+            with _pin_touched_parents(root_fd, tuple(bundle.files)) as parents:
+                snapshots = _snapshot_paths(parents, tuple(bundle.files))
+                _verify_snapshot_preimages(snapshots, bundle)
                 _verify_state(
                     root,
                     bundle,
-                    applied=True,
+                    applied=False,
                     pinned_root_fd=root_fd,
                 )
-            except BaseException as exc:
+                _verify_pinned_parents(parents)
                 try:
-                    _rollback_plan(root_fd, snapshots, plan)
+                    _write_plan(parents, plan, snapshots)
+                    _verify_pinned_parents(parents)
                     _verify_state(
                         root,
                         bundle,
-                        applied=False,
+                        applied=True,
                         pinned_root_fd=root_fd,
                     )
-                except BaseException as rollback_exc:
+                except BaseException as exc:
+                    try:
+                        _verify_pinned_parents(parents)
+                        _rollback_plan(parents, snapshots, plan)
+                        _verify_pinned_parents(parents)
+                        _verify_state(
+                            root,
+                            bundle,
+                            applied=False,
+                            pinned_root_fd=root_fd,
+                        )
+                    except BaseException as rollback_exc:
+                        raise HostPatchError(
+                            "host patch failed and rollback verification failed"
+                        ) from rollback_exc
                     raise HostPatchError(
-                        "host patch failed and rollback verification failed"
-                    ) from rollback_exc
-                raise HostPatchError(
-                    "host patch verification failed; complete mutation rolled back"
-                ) from exc
+                        "host patch verification failed; complete mutation rolled back"
+                    ) from exc
         finally:
             os.close(root_fd)
         return _result(root, bundle, status="applied", changed=True)
