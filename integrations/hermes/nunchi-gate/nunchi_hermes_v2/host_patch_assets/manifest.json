@@ -1,10 +1,10 @@
 {
   "patch": "0002-v2-participant-host-seam.patch",
-  "patch_sha256": "039b5d6052073ba3fe4dc1d23a41a0c40a7c2e16db53373ecef9001ecd0b8861",
+  "patch_sha256": "17b2204135bf370cc94447195a5c74ed2dfb5fd814f061853ada81768f38b573",
   "post_apply_sha256": {
     "gateway/message_hooks.py": "e548aa1b8e4cae2fcf553670065e323aa14e2c2c7841f09206cc52077e220425",
     "gateway/platforms/base.py": "b3761107d910ded6cd8b8fe1169ca0ce4d7bb21e25d9e90130856678172bb88b",
-    "gateway/run.py": "3afe5555fc68d34d7b934e11ffba1880161da16a28bd2c53b9c51b333b7cfebd",
+    "gateway/run.py": "cacd9418c7101a06d07667855f9922b344537dba30fd64458a50768f1e40ad11",
     "gateway/slash_commands.py": "84a7f345cd0d56f3b3c23467e13797c9dc539f62ecd657f872f16b1389f7c6dd",
     "hermes_cli/plugins.py": "648887b912555f10435b6d70b5edb09f06d1a85a022488c247fe6fa3d63b1799",
     "hermes_constants.py": "835cdb938f40547755ce5507c8c211a811e03929f8c2bf5a96fdabb5cb06fb67",
@@ -12,7 +12,7 @@
     "plugins/platforms/telegram/adapter.py": "e09bc5968fcedf5b5fe862539cb5b096082a745c7f5fab925cfdce41c6587461",
     "tests/gateway/test_discord_approval_mentions.py": "f92310bb71683c9cd28b6888de998d9956507bb89718805c71b2944b12a4fa7d",
     "tests/gateway/test_discord_pending_text_batch_shutdown.py": "dc4737acdc6426fda1ca1a1f931a6f8bf1f51451ba6e7aa67bc54eab16aa0946",
-    "tests/gateway/test_gateway_message_hooks.py": "1444dcdc2c293ebb9678b6efd95f64ea1423fee53e9f86a17a2d03385a9de3b8",
+    "tests/gateway/test_gateway_message_hooks.py": "fde88ceaf4d39de0950b161a71a6b9b1890b0067751ae4659466d911c83ba9d4",
     "tests/gateway/test_session_boundary_hooks.py": "4c4b077d4dd92f419668c65ac8e2f353499aa2c36f5ff0a0250fcafb75bdf33d",
     "tests/gateway/test_stop_thread_sibling.py": "7a1f21fac364e230a96aa210cf968c241b4d34a490df69f3e99ff78cb4d6ae8b",
     "tests/gateway/test_telegram_group_gating.py": "dc922b1ae7c4e4911ae14f81693d01cb73ae24164090c243af2568dbf26d967b",

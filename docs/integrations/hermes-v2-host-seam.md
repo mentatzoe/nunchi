@@ -11,7 +11,7 @@ The wheel carries both the patch and a closed manifest under
 `nunchi_hermes_v2/host_patch_assets/`. The manifest pins:
 
 - untouched Hermes commit `243a01d5d72555061406de84890b2e9622f409cb`;
-- patch SHA-256 `039b5d6052073ba3fe4dc1d23a41a0c40a7c2e16db53373ecef9001ecd0b8861`;
+- patch SHA-256 `17b2204135bf370cc94447195a5c74ed2dfb5fd814f061853ada81768f38b573`;
 - every touched path and its exact post-apply SHA-256 identity.
 
 A different commit, dirty tree, partial seam, divergent file, unsafe path,

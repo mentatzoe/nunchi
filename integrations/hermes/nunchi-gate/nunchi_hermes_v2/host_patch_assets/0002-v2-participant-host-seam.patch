@@ -1,6 +1,6 @@
 diff --git a/gateway/message_hooks.py b/gateway/message_hooks.py
 new file mode 100644
-index 0000000000..ea03eb6a0e
+index 0000000000000000000000000000000000000000..ea03eb6a0ec18a8c54dc84b31e26b7c1d00b4630
 --- /dev/null
 +++ b/gateway/message_hooks.py
 @@ -0,0 +1,464 @@
@@ -469,7 +469,7 @@ index 0000000000..ea03eb6a0e
 +        for item in items[:count_limit]
 +    )
 diff --git a/gateway/platforms/base.py b/gateway/platforms/base.py
-index 4f2c0e98fa..4bff89fc89 100644
+index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..4bff89fc899f2701372444d4267d02a461b25cc7 100644
 --- a/gateway/platforms/base.py
 +++ b/gateway/platforms/base.py
 @@ -3129,6 +3129,17 @@ class BasePlatformAdapter(ABC):
@@ -515,7 +515,7 @@ index 4f2c0e98fa..4bff89fc89 100644
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a19255..75076985b7 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..8f726f202c9e9f868385083362eb39689e3af0ec 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -812,7 +812,7 @@ index aac6a19255..75076985b7 100644
              _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
              # Goal continuation: after the agent returns a final response
              # for this turn, check any standing /goal — the judge will
-@@ -12835,6 +12940,338 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12835,6 +12940,342 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  pass
          return source
  
@@ -854,7 +854,10 @@ index aac6a19255..75076985b7 100644
 +            "_hermes_historical_replay",
 +            False,
 +        ):
-+            return False
++            # Recovery is context-only.  Returning True terminally consumes the
++            # replay at both cold and busy call sites; False would bypass only
++            # participant hooks and fall through to the ordinary Hermes agent.
++            return True
 +
 +        async def _run_scoped() -> bool:
 +            native_events = event.metadata.get("_gateway_native_events", ())
@@ -997,9 +1000,10 @@ index aac6a19255..75076985b7 100644
 +            decision = str(result.get("decision", "")).strip().lower()
 +            return decision not in {"continue", "pass"}
 +
-+        # A newly accepted ordinary ingress supersedes every previously issued
-+        # capability for this session before the new one becomes visible.
-+        self._revoke_gateway_deliveries(session_key)
++        # Register each ordinary event's immutable route capability separately.
++        # New ingress may replace the scheduler's newest pending anchor, but it
++        # does not cancel an already-active participant turn.  Capabilities are
++        # revoked only by consumption, expiry, or an explicit session boundary.
 +        delivery = GatewayDelivery(
 +            _send_to_source,
 +            reply_callback=_reply_to_source,
@@ -1151,7 +1155,7 @@ index aac6a19255..75076985b7 100644
      async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
          """Inner handler that runs under the _running_agents sentinel guard."""
          _msg_start_time = time.time()
-@@ -12848,22 +13285,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12848,22 +13289,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
          )
  
@@ -1177,7 +1181,7 @@ index aac6a19255..75076985b7 100644
          session_key = session_entry.session_key
          pinned_session_id = str(
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index 58c365ddb3..d1bc354928 100644
+index 58c365ddb3e74b76096f2e7854d95d23000a6042..d1bc35492801588fdcbc8c4aa2153f21badc1a17 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -103,12 +103,23 @@ class GatewaySlashCommandsMixin:
@@ -1267,7 +1271,7 @@ index 58c365ddb3..d1bc354928 100644
          # indicator can still be stuck — e.g. Slack's persistent
          # assistant.threads.setStatus survives a gateway restart or a turn
 diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
-index 80142c15db..5aa775566a 100644
+index 80142c15db1d52739dff94a29c27b4ec95ac42f0..5aa775566a4727e6fb6b97c7040580c163320575 100644
 --- a/hermes_cli/plugins.py
 +++ b/hermes_cli/plugins.py
 @@ -42,11 +42,12 @@ import os
@@ -1449,7 +1453,7 @@ index 80142c15db..5aa775566a 100644
      """Invoke registered middleware callbacks.
  
 diff --git a/hermes_constants.py b/hermes_constants.py
-index bbf45f4d26..22564cc08a 100644
+index bbf45f4d268f371ab62032e7d8491eb2a0860391..22564cc08ae9cabbd0f9e2ab6f10209d1199df96 100644
 --- a/hermes_constants.py
 +++ b/hermes_constants.py
 @@ -12,6 +12,9 @@ from contextvars import ContextVar, Token
@@ -1463,7 +1467,7 @@ index bbf45f4d26..22564cc08a 100644
  _UNSET = object()
  _HERMES_HOME_OVERRIDE: ContextVar[str | object] = ContextVar(
 diff --git a/plugins/platforms/discord/adapter.py b/plugins/platforms/discord/adapter.py
-index 6e66a2c269..6f82996109 100644
+index 6e66a2c269a4ba4e1f3b43142c1dc20d06425a9b..6f82996109ad659adb28d069e71ac1ce69b0cdd5 100644
 --- a/plugins/platforms/discord/adapter.py
 +++ b/plugins/platforms/discord/adapter.py
 @@ -858,6 +858,14 @@ def _read_discord_prompt_timeout() -> int:
@@ -1610,7 +1614,7 @@ index 6e66a2c269..6f82996109 100644
          prior_task = self._pending_text_batch_tasks.get(key)
          if prior_task and not prior_task.done():
 diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
-index 55ae362bfe..1a36131ce4 100644
+index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..1a36131ce45a8b302784be68dae5c99a7807435a 100644
 --- a/plugins/platforms/telegram/adapter.py
 +++ b/plugins/platforms/telegram/adapter.py
 @@ -589,6 +589,24 @@ class _PollingLifecycleAbort(RuntimeError):
@@ -1786,7 +1790,7 @@ index 55ae362bfe..1a36131ce4 100644
          """Add an in-progress reaction when message processing begins."""
          if not self._reactions_enabled():
 diff --git a/tests/gateway/test_discord_approval_mentions.py b/tests/gateway/test_discord_approval_mentions.py
-index 7696058ef5..b9738ca2d1 100644
+index 7696058ef511b761bb52ee92b7e2c6e8c50dbbbb..b9738ca2d13586eaa7e73992a5489fc94e3bcc48 100644
 --- a/tests/gateway/test_discord_approval_mentions.py
 +++ b/tests/gateway/test_discord_approval_mentions.py
 @@ -8,6 +8,7 @@ import pytest
@@ -1818,7 +1822,7 @@ index 7696058ef5..b9738ca2d1 100644
  async def test_exec_approval_mentions_allowed_users_when_enabled(monkeypatch):
      monkeypatch.setenv("DISCORD_APPROVAL_MENTIONS", "true")
 diff --git a/tests/gateway/test_discord_pending_text_batch_shutdown.py b/tests/gateway/test_discord_pending_text_batch_shutdown.py
-index d89b65f58b..6dabb0e80b 100644
+index d89b65f58b6eb478fa9f0e80dc42cc53736a4dc8..6dabb0e80bd6a115522b3a31981c2e5b80974e53 100644
 --- a/tests/gateway/test_discord_pending_text_batch_shutdown.py
 +++ b/tests/gateway/test_discord_pending_text_batch_shutdown.py
 @@ -50,6 +50,48 @@ _ensure_discord_mock()
@@ -1872,10 +1876,10 @@ index d89b65f58b..6dabb0e80b 100644
      adapter = DiscordAdapter(PlatformConfig(enabled=True, token="fake-token"))
 diff --git a/tests/gateway/test_gateway_message_hooks.py b/tests/gateway/test_gateway_message_hooks.py
 new file mode 100644
-index 0000000000..c7d98a8957
+index 0000000000000000000000000000000000000000..44c7d30bff1fc6fcc36437b7fb65261c728f137a
 --- /dev/null
 +++ b/tests/gateway/test_gateway_message_hooks.py
-@@ -0,0 +1,1309 @@
+@@ -0,0 +1,1387 @@
 +"""Public contract tests for the generic gateway user-message hook."""
 +
 +import asyncio
@@ -2389,7 +2393,7 @@ index 0000000000..c7d98a8957
 +
 +
 +@pytest.mark.asyncio
-+async def test_new_ingress_revokes_prior_retained_delivery(monkeypatch):
++async def test_new_ingress_preserves_prior_retained_delivery_until_boundary(monkeypatch):
 +    runner, adapter = _runner_for_dispatch()
 +    retained = []
 +
@@ -2410,9 +2414,39 @@ index 0000000000..c7d98a8957
 +    await runner._handle_message(second)
 +
 +    assert len(retained) == 2
-+    assert (await retained[0].send("superseded")).status == "failed"
++    assert (await retained[0].send("still-current")).status == "sent"
 +    assert (await retained[1].send("current")).status == "sent"
-+    adapter.send.assert_awaited_once()
++    assert adapter.send.await_count == 2
++
++
++@pytest.mark.asyncio
++async def test_native_batch_preserves_each_retained_delivery_until_consumed(
++    monkeypatch,
++):
++    runner, adapter = _runner_for_dispatch()
++    retained = []
++
++    async def hook(name, **kwargs):
++        if name == "gateway_message":
++            retained.append(kwargs["delivery"])
++            return [{"decision": "handled"}]
++        return []
++
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_args, **_kwargs: [])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", hook, raising=False)
++    first = _event()
++    first.message_id = "m1"
++    second = _event()
++    second.message_id = "m2"
++    merged = _event()
++    merged.metadata["_gateway_native_events"] = (first, second)
++
++    await runner._handle_message(merged)
++
++    assert len(retained) == 2
++    assert (await retained[0].reply("first reply")).status == "sent"
++    assert (await retained[1].send("second message")).status == "sent"
++    assert adapter.send.await_count == 2
 +
 +
 +@pytest.mark.asyncio
@@ -2528,8 +2562,56 @@ index 0000000000..c7d98a8957
 +        build_session_key(event.source),
 +    )
 +
-+    assert suppressed is False
++    assert suppressed is True
 +    participant_hook.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "marker",
++    ["_hermes_startup_restore_replay", "_hermes_historical_replay"],
++)
++async def test_replayed_cold_ingress_is_consumed_before_ordinary_agent(
++    monkeypatch, marker
++):
++    runner, _adapter = _runner_for_dispatch()
++    event = _event()
++    setattr(event, marker, True)
++    participant_hook = AsyncMock()
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_args, **_kwargs: [])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", participant_hook)
++
++    result = await runner._handle_message(event)
++
++    assert result is None
++    participant_hook.assert_not_awaited()
++    runner._handle_message_with_agent.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "marker",
++    ["_hermes_startup_restore_replay", "_hermes_historical_replay"],
++)
++async def test_replayed_busy_ingress_is_consumed_before_queue_or_interrupt(
++    monkeypatch, marker
++):
++    runner, _adapter = _runner_for_dispatch()
++    event = _event()
++    setattr(event, marker, True)
++    session_key = build_session_key(event.source)
++    running_agent = MagicMock()
++    runner._running_agents[session_key] = running_agent
++    participant_hook = AsyncMock()
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_args, **_kwargs: [])
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", participant_hook)
++
++    handled = await runner._handle_active_session_busy_message(event, session_key)
++
++    assert handled is True
++    participant_hook.assert_not_awaited()
++    running_agent.interrupt.assert_not_called()
++    runner._queue_or_replace_pending_event.assert_not_called()
 +
 +
 +@pytest.mark.asyncio
@@ -3186,7 +3268,7 @@ index 0000000000..c7d98a8957
 +        release.set()
 +        manager._hooks["gateway_session_cancel"] = original
 diff --git a/tests/gateway/test_session_boundary_hooks.py b/tests/gateway/test_session_boundary_hooks.py
-index 58eb449adf..8d9c01bef2 100644
+index 58eb449adf9f34930d78f40c50200599ebf6e21d..8d9c01bef26ef0f348e78eb085375bf37f622222 100644
 --- a/tests/gateway/test_session_boundary_hooks.py
 +++ b/tests/gateway/test_session_boundary_hooks.py
 @@ -178,6 +178,23 @@ async def test_hook_error_does_not_break_reset(mock_invoke_hook):
@@ -3214,7 +3296,7 @@ index 58eb449adf..8d9c01bef2 100644
  @patch("hermes_cli.plugins.invoke_hook")
  async def test_idle_expiry_fires_finalize_hook(mock_invoke_hook):
 diff --git a/tests/gateway/test_stop_thread_sibling.py b/tests/gateway/test_stop_thread_sibling.py
-index 72ef4b0741..7f5a537ca7 100644
+index 72ef4b0741fbe3fb756355e49ff1f925daf46261..7f5a537ca7e4ba5df7fd30373c8c1cccac775f9e 100644
 --- a/tests/gateway/test_stop_thread_sibling.py
 +++ b/tests/gateway/test_stop_thread_sibling.py
 @@ -8,7 +8,10 @@ nothing and reply "no active task to stop".  Authorized users should be able to
@@ -3311,7 +3393,7 @@ index 72ef4b0741..7f5a537ca7 100644
      def __init__(self):
          self.cleared = []
 diff --git a/tests/gateway/test_telegram_group_gating.py b/tests/gateway/test_telegram_group_gating.py
-index 1dc9a13a6f..dc17af8174 100644
+index 1dc9a13a6f2ddf9f8acbfac5b0d8fbfd51354732..dc17af81749f104d433cea3716b94116638d9603 100644
 --- a/tests/gateway/test_telegram_group_gating.py
 +++ b/tests/gateway/test_telegram_group_gating.py
 @@ -228,6 +228,27 @@ def test_observed_group_context_uses_shared_source_and_prompt_for_later_mentions
@@ -3343,7 +3425,7 @@ index 1dc9a13a6f..dc17af8174 100644
      from gateway.run import (
          _build_gateway_agent_history,
 diff --git a/tests/gateway/test_telegram_mention_boundaries.py b/tests/gateway/test_telegram_mention_boundaries.py
-index cc99d15f5b..76f9d19f04 100644
+index cc99d15f5bd13f3335749447a9be1637fbad610c..76f9d19f04d1e5e8900e0686b1b757ec7cdc1f0a 100644
 --- a/tests/gateway/test_telegram_mention_boundaries.py
 +++ b/tests/gateway/test_telegram_mention_boundaries.py
 @@ -14,7 +14,7 @@ those contexts.
@@ -3374,7 +3456,7 @@ index cc99d15f5b..76f9d19f04 100644
 +        entities = [_mention_entity(text, mention="@someone")]
 +        assert _attested_mention_user_ids(entities) is None
 diff --git a/tests/gateway/test_telegram_text_batching.py b/tests/gateway/test_telegram_text_batching.py
-index 75f5157edb..6aef92b1ae 100644
+index 75f5157edb4533625840cb687b02805efdf516e8..6aef92b1ae18b82d2e2610eb788bdddcfcefb0f6 100644
 --- a/tests/gateway/test_telegram_text_batching.py
 +++ b/tests/gateway/test_telegram_text_batching.py
 @@ -96,6 +96,125 @@ class TestTextBatching:
@@ -3505,7 +3587,7 @@ index 75f5157edb..6aef92b1ae 100644
          """Three rapid messages should all merge."""
 diff --git a/tests/hermes_cli/test_async_plugin_hooks.py b/tests/hermes_cli/test_async_plugin_hooks.py
 new file mode 100644
-index 0000000000..d140c5e28b
+index 0000000000000000000000000000000000000000..d140c5e28bbca5b125db62a9bc70e1e1cf65709a
 --- /dev/null
 +++ b/tests/hermes_cli/test_async_plugin_hooks.py
 @@ -0,0 +1,154 @@
@@ -3664,7 +3746,7 @@ index 0000000000..d140c5e28b
 +    with pytest.raises(asyncio.CancelledError):
 +        await manager.invoke_hook_async("gateway_message")
 diff --git a/website/docs/developer-guide/plugins/index.md b/website/docs/developer-guide/plugins/index.md
-index 7e748b6c1e..b0ea2f3c5b 100644
+index 7e748b6c1e1cffd7a33512860ee2714047ec8079..b0ea2f3c5b6c52655240e8784cb7cb1a0d320972 100644
 --- a/website/docs/developer-guide/plugins/index.md
 +++ b/website/docs/developer-guide/plugins/index.md
 @@ -607,19 +607,21 @@ Each hook is documented in full on the **[Event Hooks reference](/user-guide/fea
@@ -3693,7 +3775,7 @@ index 7e748b6c1e..b0ea2f3c5b 100644
  #### Return format
  
 diff --git a/website/docs/user-guide/features/hooks.md b/website/docs/user-guide/features/hooks.md
-index cdb957e374..4fa5fa7eb9 100644
+index cdb957e3748b0503e38caebe6c7f35e071bce411..4fa5fa7eb95fe9a69c712d4a171feb214eea7860 100644
 --- a/website/docs/user-guide/features/hooks.md
 +++ b/website/docs/user-guide/features/hooks.md
 @@ -372,9 +372,9 @@ def register(ctx):
