@@ -41,14 +41,14 @@ git merge-base --is-ancestor \
 
 | Claim | Command | Result |
 |---|---|---|
-| repository suite | `python3 -m unittest` | 412 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
+| repository suite | `python3 -m unittest` | 414 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
 | platform conformance | `python3 -m unittest tests.v2.test_claude_code` | 87 tests, OK |
 | shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
 | dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
 | lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
 | reproducible build identity | see [Build identity](#build-identity) | order-independent wheel content digest, stable across build interpreters; the raw zip SHA-256 is **not** cross-environment reproducible and is not claimed |
 | clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
-| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 87 tests, OK, `nunchi` resolved from `site-packages` |
+| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 89 tests, OK, `nunchi` resolved from `site-packages` |
 | installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
 | real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-27.jsonl`) |
 
@@ -158,8 +158,8 @@ Two identities that do reproduce anywhere are recorded instead:
 
 | Identity | Value at this head | Reproduce with |
 |---|---|---|
-| packaged source tree | `9b0a973cb4c0f2fb564e56b1cd3ba875a647cea6` | `git rev-parse HEAD:src` |
-| wheel **content** digest (order-independent) | `3cfa8b7dd7006cdb344187ba3001957d8deec9484a7a19b3d4945ab4708f8943` | recipe below |
+| packaged source tree | `6553c0b04441e5bfcc64f80a0f426e243f668b34` | `git rev-parse HEAD:src` |
+| wheel **content** digest (order-independent) | `05b4f57fabeadf28accd044bfaedfefe0638e370424f9bfd0a65edb9cd7568bd` | recipe below |
 
 ```sh
 build=$(mktemp -d)            # a fresh empty directory every time
