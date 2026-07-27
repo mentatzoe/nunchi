@@ -26,6 +26,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -124,6 +125,15 @@ _PARTICIPANT_ENV_ALLOWLIST = (
 # removes every MCP server (including any Discord plugin the operator may have
 # installed for their own interactive use), and the setting/skill flags stop
 # ambient repository or user configuration from reshaping the participant.
+#
+# ``--setting-sources ""`` and ``--safe-mode`` are deliberately *both* present.
+# Either one alone suppresses ancestor ``CLAUDE.md``/``CLAUDE.local.md``
+# discovery (measured — see `evals/v2/claude_code/participant_scenes.py`
+# scene ``ambient-instruction-isolation``), but only ``--safe-mode`` documents
+# that intent.  Keeping both means a change to how one of them treats memory
+# files cannot silently reopen the ambient-instruction path.  ``--system-prompt``
+# is NOT sufficient on its own: with it alone, an ancestor ``CLAUDE.md`` still
+# reaches the turn.
 _ISOLATION_ARGUMENTS = (
     "--print",
     "--output-format",
@@ -136,6 +146,7 @@ _ISOLATION_ARGUMENTS = (
     "--setting-sources",
     "",
     "--disable-slash-commands",
+    "--safe-mode",
     "--permission-mode",
     "manual",
 )
@@ -152,16 +163,38 @@ class ClaudeCodeParticipantError(RuntimeError):
 
 
 def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
+    """Write `payload` to `path` atomically without ever following a symlink.
+
+    The staging file is unpredictable and opened `O_EXCL | O_NOFOLLOW`, so a
+    pre-planted symlink at the staging path cannot redirect the write outside
+    the intended directory: `O_EXCL` fails on any existing name, including a
+    dangling or pointing symlink, and `O_NOFOLLOW` refuses a symlink even if
+    one is created between the name choice and the open.  `os.replace` renames
+    the staging file itself and never traverses a symlink at the destination,
+    so the destination is left as a regular file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, mode)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(
+        temporary,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+        mode,
+    )
     try:
-        if os.write(fd, payload) != len(payload):
-            raise OSError(f"short write to {path}")
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(temporary, path)
+        try:
+            if os.write(fd, payload) != len(payload):
+                raise OSError(f"short write to {path}")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, path)
+    except BaseException:
+        # Never leave a staging file behind for a later write to trip over.
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
     directory_fd = os.open(path.parent, os.O_RDONLY)
     try:
         os.fsync(directory_fd)
@@ -336,6 +369,11 @@ class ClaudeCodeParticipant:
             )
         return state["session_id"]
 
+    def _pin_session(self, session_id: str) -> None:
+        """Persist continuity, but only in persistent mode."""
+        if self.session_mode == "persistent":
+            self._save_session(session_id)
+
     def _save_session(self, session_id: str) -> None:
         _atomic_write(
             self.session_path,
@@ -498,13 +536,15 @@ class ClaudeCodeParticipant:
                 )
                 if cancelled:
                     return None
-                if reported is not None and reported != session_id:
+                # The CLI echoes back the session it ran under.  Anything else
+                # — a different session, or none at all — means continuity is
+                # unattested, so there is nothing trustworthy to pin.
+                if reported != session_id:
                     raise ClaudeCodeParticipantError(
-                        f"Claude Code answered on unexpected session {reported}; "
-                        f"expected {session_id}"
+                        "Claude Code did not attest the pinned session "
+                        f"{session_id}"
+                        + (f"; it reported {reported}" if reported else "")
                     )
-                if self.session_mode == "persistent":
-                    self._save_session(session_id)
                 # Every turn after the first continues the same session.
                 resume = True
 
@@ -513,9 +553,15 @@ class ClaudeCodeParticipant:
                         "Claude Code participant output was not one V2 action "
                         "JSON object"
                     )
+                # Only a turn that produced a well-formed outcome may become
+                # persistent continuation.  Pinning a malformed, unattested, or
+                # cap-exceeding turn would let a later opportunity resume the
+                # context of work that never produced a valid result.
                 if action == {"kind": "silence"}:
+                    self._pin_session(session_id)
                     return None
                 if action.get("kind") != "expand":
+                    self._pin_session(session_id)
                     return action
                 if expansion_number == _MAX_EXPANSION_TURNS:
                     raise ClaudeCodeParticipantError(
@@ -654,6 +700,7 @@ class ClaudeCodeRoomRuntime:
             binding=self.binding,
             state_directory=state,
         )
+        self.participant = participant
         self.output_secret = self._output_secret(config["transport"])
         transport = MCPDiscordTransport(
             client,
@@ -959,7 +1006,8 @@ class ClaudeCodeRoomRuntime:
             "participant_id": self.binding.participant_id,
             "actor_id": self.binding.actor_id,
             "room_id": self.binding.room_id,
-            "persistent_session": True,
+            "session_mode": self.participant.session_mode,
+            "persistent_session": self.participant.session_mode == "persistent",
             "shared_discord_transport": True,
             "send_time_social_judgment": False,
             "privileged_actions_enabled": self.privileged is not None,
