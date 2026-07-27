@@ -222,7 +222,34 @@ def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
         raise
 
 
-def _assert_still_rooted(handles: list[int], parts, written_stat) -> None:
+def _assert_root_identity(root_fd: int, root_path: Path) -> None:
+    """Confirm the handle we opened still *is* the configured workspace root.
+
+    Holding a directory handle proves the write stayed under that inode. It
+    does not prove the inode is still the authorized location: renaming the
+    root itself moves the whole workspace, and every ancestry check inside it
+    keeps passing because they are all relative to the moved root.
+
+    The configured path is the trust anchor, so it is re-stated here without
+    following a symlink at its final component — a symlink substituted at the
+    configured path is a different inode and is drift, not a resolution.
+    """
+    try:
+        observed = os.stat(root_path, follow_symlinks=False)
+    except OSError as exc:
+        raise ConfinedPathDrift(
+            "the configured workspace root no longer exists"
+        ) from exc
+    held = os.fstat(root_fd)
+    if (observed.st_dev, observed.st_ino) != (held.st_dev, held.st_ino):
+        raise ConfinedPathDrift(
+            "the configured workspace root no longer names the directory in use"
+        )
+
+
+def _assert_still_rooted(
+    root_path: Path, handles: list[int], parts, written_stat
+) -> None:
     """Confirm the write is still inside the root *and* at the proposed path.
 
     Two independent checks, because each catches what the other misses:
@@ -239,6 +266,9 @@ def _assert_still_rooted(handles: list[int], parts, written_stat) -> None:
       back to our inode and the check passes while the file sits outside.
     """
     root_fd, current = handles[0], handles[-1]
+    # The root itself first: every check below is relative to this handle, so
+    # a moved root would let all of them pass against the wrong location.
+    _assert_root_identity(root_fd, root_path)
     root_stat = os.fstat(root_fd)
 
     probe = os.open(".", os.O_RDONLY | os.O_DIRECTORY, dir_fd=current)
@@ -345,6 +375,7 @@ def _write_confined(root: Path, relative: str, payload: bytes) -> str:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            _assert_root_identity(handles[0], root)
             os.replace(staged, name, src_dir_fd=current, dst_dir_fd=current)
         except BaseException:
             try:
@@ -372,7 +403,7 @@ def _write_confined(root: Path, relative: str, payload: bytes) -> str:
         # path; any drift means the exact action can no longer be attested.
         written_stat = os.stat(name, dir_fd=current, follow_symlinks=False)
         try:
-            _assert_still_rooted(handles, parts, written_stat)
+            _assert_still_rooted(root, handles, parts, written_stat)
         except ConfinedPathDrift:
             # The bytes may have landed outside the root because the directory
             # we held was moved there.  Remove what we wrote before reporting;

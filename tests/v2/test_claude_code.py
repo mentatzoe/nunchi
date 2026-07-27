@@ -1040,6 +1040,65 @@ class AtomicWriteTests(unittest.TestCase):
             # An unattestable effect must not also be a lasting one.
             self.assertFalse((outside / "notes-moved" / "note.txt").exists())
 
+    def test_renaming_the_configured_root_mid_write_is_not_attested(self):
+        """Holding the root inode is not the same as holding the root path.
+
+        Rename the configured workspace root itself and every ancestry check
+        inside it still passes — they are all relative to the moved root. Only
+        re-stating the configured path can detect it.
+        """
+        from nunchi.integrations import claude_code_v2 as module
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "workspace"
+            (root / "notes").mkdir(parents=True)
+            root.chmod(0o700)
+            moved = base / "workspace-moved"
+            executor = ClaudeCodeRoomRuntime._executors(str(root))[
+                "workspace.file.write"
+            ]
+            real_replace = os.replace
+
+            def racing_replace(src, dst, **kwargs):
+                if root.is_dir() and not moved.exists():
+                    os.rename(root, moved)
+                return real_replace(src, dst, **kwargs)
+
+            with mock.patch.object(module.os, "replace", racing_replace):
+                result = executor(
+                    {"path": "notes/note.txt", "content": "PAYLOAD"}, None
+                )
+            self.assertEqual("unknown", result.delivery)
+            self.assertFalse((moved / "notes" / "note.txt").exists())
+
+    def test_a_symlink_substituted_at_the_configured_root_is_not_attested(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "workspace"
+            (root / "notes").mkdir(parents=True)
+            root.chmod(0o700)
+            elsewhere = base / "elsewhere"
+            elsewhere.mkdir(mode=0o700)
+            from nunchi.integrations import claude_code_v2 as module
+
+            executor = ClaudeCodeRoomRuntime._executors(str(root))[
+                "workspace.file.write"
+            ]
+            real_replace = os.replace
+
+            def racing_replace(src, dst, **kwargs):
+                if root.is_dir() and not root.is_symlink():
+                    os.rename(root, base / "real")
+                    os.symlink(elsewhere, root)
+                return real_replace(src, dst, **kwargs)
+
+            with mock.patch.object(module.os, "replace", racing_replace):
+                result = executor(
+                    {"path": "notes/note.txt", "content": "PAYLOAD"}, None
+                )
+            self.assertEqual("unknown", result.delivery)
+
     def test_an_undisturbed_write_still_attests_sent(self):
         """The drift check must not make ordinary writes unattestable."""
         with tempfile.TemporaryDirectory() as directory:

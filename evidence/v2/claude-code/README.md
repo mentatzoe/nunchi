@@ -19,6 +19,9 @@
 4. `06990dd` — changes requested, two findings, both confirmed and fixed; four
    areas closed. The workspace executor was escapable for the third distinct
    reason.
+5. `39c8eb1` — changes requested, two findings, both confirmed and fixed. The
+   workspace executor was escapable for the **fourth** distinct reason, and the
+   verification table in this packet carried three wrong totals.
 
 Dispositions are in [Review disposition](#review-disposition) below.
 
@@ -222,6 +225,21 @@ test written against the fix rather than against the defect will do that.
 | 2 | Rejected and cancelled turns leave unbounded staged continuation | **Confirmed** — 32 host-rejected turns left 32 staged pins | The staged store is bounded at 8 with oldest-first eviction, and a cancelled turn discards its own staged pin. Host rejection produces no receipt to discard on, so the bound — not a discard hook — is what makes this safe. |
 | 3 | Evidence still contains unresolved identity placeholders | **Confirmed** | The substitution ran with its working directory inside the extracted build tree, so it edited a temporary copy and reported success. Values are now committed and verified by reading them back from `git show`, not from the script's own output. The recipe also uses `mktemp -d` rather than a reusable directory. |
 
+### Round five — `39c8eb1`
+
+Closed: ambient isolation, continuation, the cancellation/authorization matrix,
+the installed probes, scene source attribution, and both artifact identities.
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | Renaming the **configured root itself** during the write moves the effect outside the authorized path while returning `sent` | **Confirmed** — reproduced. Every ancestry check is relative to the held root handle, so a moved root leaves all of them passing against the wrong location | `_assert_root_identity` re-states the configured path (refusing a symlink at its final component) and compares it to the held root inode, immediately before the rename and again after the write. Drift unlinks the written file and reports `unknown`. |
+| 2 | The verification table records three totals that do not reproduce | **Confirmed** — the packet said 414 / 87 / 89 where the head actually produced 415 / 90 / 90, and the PR comment said 414 / 90 / 90, so no two of the three agreed | Totals are now measured from a clean `git archive` of the committed head rather than from the working tree mid-edit, and recorded per interpreter. |
+
+The reviewer also corrected an overclaim: the `0700` root requirement does not
+"remove the principal", because rename authority comes from the parent and a
+same-user process can rename the runtime's own root. Detection is the defence
+here; that correction is stated in the security-properties section above.
+
 Round three repeats the round-two pattern exactly: two of three findings were
 incomplete repairs of round-two findings. Closing an escape is not the same as
 attesting an effect, and bounding what becomes durable is not the same as
@@ -239,11 +257,18 @@ probes.
 | 1 | An opened child directory can be renamed outside the root; the executor writes there and reports `sent` | **Confirmed** — reproduced. `os.stat(..., follow_symlinks=False)` refuses a symlink only as the *final* component, so a substituted intermediate directory resolved straight back to the written inode and the check passed | Two independent post-write checks: an **ancestry** walk (`..` from the written directory handle must reach the root handle's inode, which catches an opened directory being moved out) and a **rooted re-resolution** (re-walk the proposed path refusing symlinks at every component). Violation unlinks the written file and reports `unknown`. Separately, the workspace root must now be a directory owned by the runtime user with no group/other access — detection cannot stop a concurrent local attacker, so the principal is removed rather than raced. |
 | 2 | Scene evidence no longer attributable to the exact source candidate | **Confirmed** — `bda6869:src` and this head's `src` had diverged | Scenes are regenerated at the current source, and provenance now carries `nunchi_src_tree` alongside the commit. The source tree is what these observations depend on; it is stable across evidence-only commits, so attribution no longer degrades every time the packet is edited. |
 
-**Four rounds, three distinct escapes in one executor.** Predictable path →
-unpredictable staging name → rooted handles → rooted handles that keep their
-ancestry. Each repair addressed the reproduction rather than the class, and
-each regression test was written against the repair. The standing correction
-is to ask what the defect's class is and to test the property, not the patch.
+**Five rounds, four distinct escapes in one executor.** Predictable staging
+path → unpredictable staging name → rooted handles → rooted handles that keep
+their ancestry → a root whose inode is bound to its configured path. Each
+repair addressed the reproduction rather than the class, and each regression
+test was written against the repair, so none could find the next variant.
+
+The invariant the whole sequence has been circling, stated once: **a write is
+attestable only if, at commit time, the configured root path names the inode
+we hold, the written file is reachable from that inode, and re-resolving the
+proposed path without following any symlink lands on exactly that file.**
+Each escape violated a different clause. A test that asserts the invariant
+would have caught all four; a test asserting the latest patch caught none.
 
 ## What is NOT proven
 
@@ -299,11 +324,22 @@ Recorded so a reviewer can attack them directly:
   failure with an `unknown` participant-host outcome — never fabricated
   silence. A turn that overruns its own budget without host cancellation is
   likewise an error, not silence.
-- The single inventoried privileged effect is `workspace.file.write`, confined
-  to a configured absolute root, refusing absolute paths, `..` segments,
-  resolved escapes, symlink traversal, and writes that resolve to the root
-  itself, and confirming the written bytes. The staging file cannot be used
-  as a redirection primitive (see finding 1).
+- The single inventoried privileged effect is `workspace.file.write`. It is
+  confined by rooted directory handles (`O_NOFOLLOW|O_DIRECTORY` per
+  component, `dir_fd`-relative staging, rename, and read-back) and attested
+  by three post-write checks: the held root inode must still occupy the
+  configured root path, walking `..` from the written directory must reach
+  that root, and re-resolving the proposed path refusing symlinks at every
+  component must land on the written inode. Any drift unlinks the file and
+  reports `unknown`.
+- **Correction.** An earlier revision of this packet claimed the `0700`
+  workspace-root requirement "removes the principal rather than racing it".
+  That was wrong, as the fifth review pointed out: rename authority over a
+  directory comes from its *parent*, and another process running as the
+  runtime user can rename the runtime's own private root. The `0700`
+  requirement still keeps other users out of the workspace, but the defence
+  against a same-user racing principal is detection — the checks above — not
+  prevention. Stated plainly so a reviewer does not inherit the overclaim.
   Without a configured root the capability has no executor at all. Ordinary
   room contribution is deliberately not a privileged capability.
 
