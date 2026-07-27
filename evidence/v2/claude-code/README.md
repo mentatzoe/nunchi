@@ -13,6 +13,9 @@
    were incomplete fixes of round-one findings, which is the useful part: the
    first repair of both the workspace escape and the session pinning was
    shallower than the defect.
+3. `9c80892` — changes requested, three findings, all confirmed and fixed.
+   Again two were incomplete repairs: confinement was closed but *attestation*
+   was not, and bounding the session pin left the staged store unbounded.
 
 Dispositions are in [Review disposition](#review-disposition) below.
 
@@ -35,14 +38,14 @@ git merge-base --is-ancestor \
 
 | Claim | Command | Result |
 |---|---|---|
-| repository suite | `python3 -m unittest` | 407 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
-| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | 82 tests, OK |
+| repository suite | `python3 -m unittest` | 412 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
+| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | 87 tests, OK |
 | shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
 | dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
 | lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
 | reproducible build identity | see [Build identity](#build-identity) | order-independent wheel content digest, stable across build interpreters; the raw zip SHA-256 is **not** cross-environment reproducible and is not claimed |
 | clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
-| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 82 tests, OK, `nunchi` resolved from `site-packages` |
+| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 87 tests, OK, `nunchi` resolved from `site-packages` |
 | installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
 | real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-27.jsonl`) |
 
@@ -156,8 +159,9 @@ Two identities that do reproduce anywhere are recorded instead:
 | wheel **content** digest (order-independent) | `WHEEL_CONTENT_PENDING` | recipe below |
 
 ```sh
-git archive --format=tar HEAD | (mkdir -p /tmp/nunchi-build && tar -x -C /tmp/nunchi-build)
-cd /tmp/nunchi-build
+build=$(mktemp -d)            # a fresh empty directory every time
+git archive --format=tar HEAD | tar -x -C "$build"
+cd "$build"
 SOURCE_DATE_EPOCH=1785000000 PYTHONHASHSEED=0 uv build --wheel --out-dir dist
 python3 - <<'EOF'
 import hashlib, zipfile, glob
@@ -203,9 +207,23 @@ true.
 | 3 | Approval path never completed through this runtime | **Confirmed** | Added a test that completes a valid authenticated approval and asserts the exact effect lands, that the operator sees the exact operation, that the challenge is one-use, and that the completion and effect are journalled. |
 | 4 | Evidence neither candidate-attributable nor hash-reproducible | **Confirmed** | Scene records are regenerated at the head they attest and carry its commit. On the digest: measured that the value is stable across repeated builds and across 3.11/3.13, so the build Python is not the variable — the raw `.whl` zip is environment-dependent in ways `SOURCE_DATE_EPOCH` does not normalise. The raw digest is withdrawn as candidate identity and replaced by the packaged source tree hash and an order-independent wheel **content** digest. |
 
-Round two is the more useful of the two reviews: two of its four findings were
+Round two is more useful than round one: two of its four findings were
 incomplete round-one repairs that had passed their own regression tests. A
 test written against the fix rather than against the defect will do that.
+
+### Round three — `9c80892`
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | The confined writer attests `sent` for a path that no longer names what it wrote | **Confirmed** — reproduced: renaming the held directory and leaving a symlink at the proposed path produced `sent` while the payload landed elsewhere and the proposed path held foreign bytes | After the write, the file reached through the rooted handle is compared by `(st_dev, st_ino)` against a fresh resolution of the proposed path. Drift raises `ConfinedPathDrift`, which the executor reports as `unknown` — the bytes are confined and durable, but the named resource can no longer be attested. |
+| 2 | Rejected and cancelled turns leave unbounded staged continuation | **Confirmed** — 32 host-rejected turns left 32 staged pins | The staged store is bounded at 8 with oldest-first eviction, and a cancelled turn discards its own staged pin. Host rejection produces no receipt to discard on, so the bound — not a discard hook — is what makes this safe. |
+| 3 | Evidence still contains `SRC_TREE_PENDING` / `WHEEL_CONTENT_PENDING` | **Confirmed** | The substitution ran with its working directory inside the extracted build tree, so it edited a temporary copy and reported success. Values are now committed and verified by reading them back from `git show`, not from the script's own output. The recipe also uses `mktemp -d` rather than a reusable directory. |
+
+Round three repeats the round-two pattern exactly: two of three findings were
+incomplete repairs of round-two findings. Closing an escape is not the same as
+attesting an effect, and bounding what becomes durable is not the same as
+bounding what is staged. The third finding is worse in kind — a verification
+step that reported success for a file that was not the one under review.
 
 ## What is NOT proven
 

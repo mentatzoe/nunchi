@@ -693,6 +693,77 @@ class SessionPinIntegrityTests(unittest.TestCase):
             self.assertFalse(participant.session_path.exists())
 
 
+class StagedPinBoundTests(unittest.TestCase):
+    """Closed work must not accumulate staged continuation state."""
+
+    def _participant(self, root, documents):
+        (root / "bin").mkdir(parents=True, exist_ok=True)
+        stub = ClaudeStub.replaying(root / "bin", documents)
+        with on_path(stub.directory):
+            return ClaudeCodeParticipant(
+                profile=PROFILE,
+                config={"session_mode": "persistent"},
+                binding=BINDING,
+                state_directory=root / "state",
+            )
+
+    def test_repeated_unaccepted_turns_stay_bounded(self):
+        action = {"kind": "message", "origin_event_id": "e1", "text": "hi"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            participant = self._participant(root, [result_document(action)] * 64)
+            for index in range(32):
+                participant(
+                    wake={"request_id": f"r{index}", "events": []},
+                    expand=None,
+                    cancel=threading.Event(),
+                )
+            # Nothing accepted any of them, so nothing is durable...
+            self.assertFalse(participant.session_path.exists())
+            # ...and the staged store did not grow without bound.
+            self.assertLessEqual(participant.pending_pin_count, 8)
+
+    def test_a_cancelled_turn_discards_its_staged_pin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bin").mkdir(parents=True, exist_ok=True)
+            stub = ClaudeStub.sleeping(root / "bin", 30)
+            with on_path(stub.directory):
+                participant = ClaudeCodeParticipant(
+                    profile=PROFILE,
+                    config={"session_mode": "persistent", "timeout_seconds": 30},
+                    binding=BINDING,
+                    state_directory=root / "state",
+                )
+            cancel = threading.Event()
+            cancel.set()
+            self.assertIsNone(
+                participant(
+                    wake={"request_id": "r1", "events": []},
+                    expand=None,
+                    cancel=cancel,
+                )
+            )
+            self.assertEqual(0, participant.pending_pin_count)
+            self.assertFalse(participant.session_path.exists())
+
+    def test_a_staged_pin_is_consumed_not_left_behind_on_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            participant = self._participant(
+                root, [result_document({"kind": "silence"})]
+            )
+            participant(
+                wake={"request_id": "r1", "events": []},
+                expand=None,
+                cancel=threading.Event(),
+            )
+            self.assertEqual(1, participant.pending_pin_count)
+            participant.commit_pin("r1")
+            self.assertEqual(0, participant.pending_pin_count)
+            self.assertTrue(participant.session_path.exists())
+
+
 class SessionPinAcceptanceTests(unittest.TestCase):
     """Continuity becomes durable only once the host accepts the turn."""
 
@@ -889,6 +960,57 @@ class AtomicWriteTests(unittest.TestCase):
                 )
             self.assertNotEqual("sent", result.delivery)
             self.assertEqual("ORIGINAL", (outside / "note.txt").read_text())
+
+    def test_path_drift_during_the_write_is_unknown_not_sent(self):
+        """Confinement held, but the proposed resource changed underneath.
+
+        The held directory handle keeps the bytes inside the root, yet after a
+        rename the proposed path names something else.  A privileged effect
+        must not attest success for a resource it can no longer identify.
+        """
+        import shutil as _shutil
+
+        from nunchi.integrations import claude_code_v2 as module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "ws"
+            (workspace / "notes").mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "note.txt").write_text("OUTSIDE-ORIGINAL")
+            executor = ClaudeCodeRoomRuntime._executors(str(workspace))[
+                "workspace.file.write"
+            ]
+            real_replace = os.replace
+
+            def racing_replace(src, dst, **kwargs):
+                held = workspace / "notes"
+                if held.is_dir() and not held.is_symlink():
+                    os.rename(held, workspace / "notes-moved")
+                    os.symlink(outside, held)
+                return real_replace(src, dst, **kwargs)
+
+            with mock.patch.object(module.os, "replace", racing_replace):
+                result = executor(
+                    {"path": "notes/note.txt", "content": "PAYLOAD"}, None
+                )
+            self.assertEqual("unknown", result.delivery)
+            # Nothing outside the root was touched, and the proposed path is
+            # not claimed to hold the payload.
+            self.assertEqual("OUTSIDE-ORIGINAL", (outside / "note.txt").read_text())
+
+    def test_an_undisturbed_write_still_attests_sent(self):
+        """The drift check must not make ordinary writes unattestable."""
+        with tempfile.TemporaryDirectory() as directory:
+            executor = ClaudeCodeRoomRuntime._executors(directory)[
+                "workspace.file.write"
+            ]
+            result = executor({"path": "notes/out.md", "content": "hello"}, None)
+            self.assertEqual("sent", result.delivery)
+            self.assertEqual(
+                "hello", (Path(directory) / "notes" / "out.md").read_text()
+            )
 
     def test_a_destination_symlink_is_rejected_before_any_write(self):
         with tempfile.TemporaryDirectory() as directory:

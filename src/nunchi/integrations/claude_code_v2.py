@@ -154,6 +154,21 @@ _ISOLATION_ARGUMENTS = (
 
 _MAX_EXPANSION_TURNS = 3
 
+# One participant/room lane runs one opportunity at a time, so a staged
+# pin is normally consumed or superseded immediately.  This cap only has
+# to stop closed work from accumulating; it is deliberately small.
+_MAX_PENDING_PINS = 8
+
+
+class ConfinedPathDrift(OSError):
+    """The rooted path stopped naming the object we wrote.
+
+    The write itself stayed confined and durable, but the resource the
+    privileged proposal named changed underneath it.  A privileged effect
+    cannot report success for a resource it can no longer identify, so this
+    becomes `unknown` rather than `sent` or `failed`.
+    """
+
 
 class ClaudeCodeParticipantError(RuntimeError):
     """An operational failure of the headless participant turn.
@@ -278,6 +293,25 @@ def _write_confined(root: Path, relative: str, payload: bytes) -> str:
             os.close(verify)
         if written != payload:
             raise OSError("confined write could not be confirmed")
+        # Confinement is not attestation.  The rooted handles guarantee the
+        # bytes landed inside the root, but a directory renamed out from under
+        # us would leave the proposed path naming something else entirely.
+        # Compare what we wrote against a fresh resolution of the proposed
+        # path; any drift means the exact action can no longer be attested.
+        written_stat = os.stat(name, dir_fd=current, follow_symlinks=False)
+        try:
+            observed = os.stat(os.path.join(root, relative), follow_symlinks=False)
+        except OSError as exc:
+            raise ConfinedPathDrift(
+                "proposed workspace path no longer resolves"
+            ) from exc
+        if (observed.st_dev, observed.st_ino) != (
+            written_stat.st_dev,
+            written_stat.st_ino,
+        ):
+            raise ConfinedPathDrift(
+                "proposed workspace path no longer names the written file"
+            )
         return hashlib.sha256(written).hexdigest()
     finally:
         for handle in reversed(handles):
@@ -464,11 +498,20 @@ class ClaudeCodeParticipant:
         opportunity stale, the deadline blown, or the turn cancelled before the
         commit point.  Persisting at this point would make a rejected or
         cancelled turn resumable, so the pin waits for the host's own receipt.
+
+        A turn the host never accepts leaves its staged entry behind, because
+        rejection produces no receipt to discard it.  The store is therefore
+        bounded: it keeps only the most recent `_MAX_PENDING_PINS` entries and
+        evicts oldest-first, so repeated rejected, cancelled, or malformed
+        turns cannot accumulate closed work without limit.
         """
         if self.session_mode != "persistent" or not isinstance(request_id, str):
             return
         with self._pending_lock:
+            self._pending_pins.pop(request_id, None)
             self._pending_pins[request_id] = session_id
+            while len(self._pending_pins) > _MAX_PENDING_PINS:
+                self._pending_pins.pop(next(iter(self._pending_pins)))
 
     def commit_pin(self, request_id: str) -> None:
         """Persist a staged pin once the host has accepted the turn."""
@@ -477,9 +520,17 @@ class ClaudeCodeParticipant:
         if session_id is not None:
             self._save_session(session_id)
 
-    def discard_pin(self, request_id: str) -> None:
+    def discard_pin(self, request_id: str | None) -> None:
+        """Drop staged continuity for work that will never be accepted."""
+        if not isinstance(request_id, str):
+            return
         with self._pending_lock:
             self._pending_pins.pop(request_id, None)
+
+    @property
+    def pending_pin_count(self) -> int:
+        with self._pending_lock:
+            return len(self._pending_pins)
 
     def _save_session(self, session_id: str) -> None:
         _atomic_write(
@@ -642,6 +693,9 @@ class ClaudeCodeParticipant:
                     deadline=deadline,
                 )
                 if cancelled:
+                    # Closed work: drop any continuity staged by an earlier
+                    # expansion turn of this same pass.
+                    self.discard_pin(wake.get("request_id"))
                     return None
                 # The CLI echoes back the session it ran under.  Anything else
                 # — a different session, or none at all — means continuity is
@@ -1001,6 +1055,13 @@ class ClaudeCodeRoomRuntime:
                 )
             try:
                 digest = _write_confined(root, relative, operation["content"].encode("utf-8"))
+            except ConfinedPathDrift:
+                # The bytes are written and confined, but the named resource
+                # changed: neither a clean success nor a clean failure.
+                return TransportResult(
+                    "unknown",
+                    "privileged workspace resource changed during the write",
+                )
             except (NotADirectoryError, IsADirectoryError, FileExistsError, ValueError):
                 return TransportResult(
                     "failed", "privileged workspace path escapes the workspace"
