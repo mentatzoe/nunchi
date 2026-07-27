@@ -2,17 +2,44 @@
 
 ## Artifact installation
 
-Build and install the exact candidate into a new environment:
+Build and install the exact candidate into a new environment. The wheel digest
+is an exact-byte contract, not a decompressed-content equivalence claim. The
+normative build inputs are: a clean checkout of one exact commit, that commit's
+timestamp as `SOURCE_DATE_EPOCH`, `PYTHONHASHSEED=0`, UTC/C locale, umask
+`022`, uv `0.11.2`, an explicitly selected supported Python (`3.11`–`3.13`),
+and the isolated PEP 517 backend `setuptools==83.0.0` pinned in
+`pyproject.toml`. Build the wheel directly into a fresh output directory; do
+not reuse `build/`, `dist/`, `*.egg-info`, a source tree, or an output directory
+from another build.
 
 ```sh
-SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
-  PYTHONHASHSEED=0 uv build --offline
+test -z "$(git status --porcelain=v1 -uall)"
+test "$(uv --version | cut -d' ' -f2)" = "0.11.2"
+PYTHON=/absolute/path/to/python3.11  # or an exact supported 3.12/3.13 interpreter
+OUT=/absolute/path/to/fresh-wheel-output
+test ! -e "$OUT"
+mkdir -p "$OUT"
+umask 022
+export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+export PYTHONHASHSEED=0 TZ=UTC LC_ALL=C
+uv build --offline --no-config --no-sources --force-pep517 --wheel \
+  --clear --no-create-gitignore --python "$PYTHON" --out-dir "$OUT" .
+WHEEL="$OUT/nunchi-2.0.0-py3-none-any.whl"
+shasum -a 256 "$WHEEL"
+
 python3 -m venv /tmp/nunchi-v2-clean
 /tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
-  dist/nunchi-2.0.0-py3-none-any.whl
+  "$WHEEL"
 /tmp/nunchi-v2-clean/bin/nunchi probe
 /tmp/nunchi-v2-clean/bin/nunchi-install probe
 ```
+
+For reproducibility evidence, repeat that block from a second independent clean
+checkout of the same commit, with a distinct supported Python and fresh output
+directory. Require `cmp` success and identical outer wheel SHA-256, then compare
+`RECORD`, ZIP member order, timestamps, modes, compression metadata, and every
+decompressed member hash. Matching member contents with different wheel bytes
+does not pass.
 
 The wheel is the review subject. A source checkout on `PYTHONPATH` is not
 installed-artifact evidence.

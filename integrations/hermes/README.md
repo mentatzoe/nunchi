@@ -24,12 +24,26 @@ These are host admission settings, not Nunchi authority. Unauthorized events are
 
 ## Clean artifact installation
 
-Build once, record the digest, then install that exact wheel into the Hermes runtime environment:
+Build once with the normative exact-byte recipe in `docs/INSTALL.md`, record the
+digest, then install that exact wheel into the Hermes runtime environment. The
+build must use a clean exact-commit checkout, uv `0.11.2`, isolated
+`setuptools==83.0.0`, an explicit supported Python, umask `022`,
+`SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)`, `PYTHONHASHSEED=0`,
+`TZ=UTC`, and `LC_ALL=C`; reused build state or content-only wheel equality is
+not acceptable.
 
 ```bash
-SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
-  PYTHONHASHSEED=0 uv build --offline
-WHEEL=dist/nunchi-2.0.0-py3-none-any.whl
+test -z "$(git status --porcelain=v1 -uall)"
+test "$(uv --version | cut -d' ' -f2)" = "0.11.2"
+PYTHON=/absolute/path/to/supported-python
+OUT=/absolute/path/to/fresh-wheel-output
+test ! -e "$OUT" && mkdir -p "$OUT"
+umask 022
+export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+export PYTHONHASHSEED=0 TZ=UTC LC_ALL=C
+uv build --offline --no-config --no-sources --force-pep517 --wheel \
+  --clear --no-create-gitignore --python "$PYTHON" --out-dir "$OUT" .
+WHEEL="$OUT/nunchi-2.0.0-py3-none-any.whl"
 shasum -a 256 "$WHEEL"
 
 HERMES_PYTHON=/path/to/the/python-used-by-hermes
@@ -143,8 +157,8 @@ python3 -m unittest \
   tests.v2.test_runtime_hardening \
   tests.v2.test_hermes
 python3 -m evals.verdict_suite.runner
-SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
-  PYTHONHASHSEED=0 uv build --offline
+# Re-run the exact-byte wheel recipe from docs/INSTALL.md in two independent
+# clean checkouts and require identical outer SHA-256 plus ZIP/RECORD equality.
 ```
 
 Then install the built wheel into a fresh Hermes environment/home, verify entry-point discovery and `/nunchi-v2 probe`, restart, and run the live Discord and Telegram scenes required by `docs/platform-v2.md`. Record candidate SHA, wheel digest, Hermes version/commit, Hermes Python executable, profile/config/profile-policy digests, native event/output IDs, and exact command output. Evidence from a remediated predecessor is stale.
