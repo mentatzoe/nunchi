@@ -155,8 +155,8 @@ Two identities that do reproduce anywhere are recorded instead:
 
 | Identity | Value at this head | Reproduce with |
 |---|---|---|
-| packaged source tree | `SRC_TREE_PENDING` | `git rev-parse HEAD:src` |
-| wheel **content** digest (order-independent) | `WHEEL_CONTENT_PENDING` | recipe below |
+| packaged source tree | `9b0a973cb4c0f2fb564e56b1cd3ba875a647cea6` | `git rev-parse HEAD:src` |
+| wheel **content** digest (order-independent) | `3cfa8b7dd7006cdb344187ba3001957d8deec9484a7a19b3d4945ab4708f8943` | recipe below |
 
 ```sh
 build=$(mktemp -d)            # a fresh empty directory every time
@@ -217,7 +217,7 @@ test written against the fix rather than against the defect will do that.
 |---|---|---|---|
 | 1 | The confined writer attests `sent` for a path that no longer names what it wrote | **Confirmed** — reproduced: renaming the held directory and leaving a symlink at the proposed path produced `sent` while the payload landed elsewhere and the proposed path held foreign bytes | After the write, the file reached through the rooted handle is compared by `(st_dev, st_ino)` against a fresh resolution of the proposed path. Drift raises `ConfinedPathDrift`, which the executor reports as `unknown` — the bytes are confined and durable, but the named resource can no longer be attested. |
 | 2 | Rejected and cancelled turns leave unbounded staged continuation | **Confirmed** — 32 host-rejected turns left 32 staged pins | The staged store is bounded at 8 with oldest-first eviction, and a cancelled turn discards its own staged pin. Host rejection produces no receipt to discard on, so the bound — not a discard hook — is what makes this safe. |
-| 3 | Evidence still contains `SRC_TREE_PENDING` / `WHEEL_CONTENT_PENDING` | **Confirmed** | The substitution ran with its working directory inside the extracted build tree, so it edited a temporary copy and reported success. Values are now committed and verified by reading them back from `git show`, not from the script's own output. The recipe also uses `mktemp -d` rather than a reusable directory. |
+| 3 | Evidence still contains unresolved identity placeholders | **Confirmed** | The substitution ran with its working directory inside the extracted build tree, so it edited a temporary copy and reported success. Values are now committed and verified by reading them back from `git show`, not from the script's own output. The recipe also uses `mktemp -d` rather than a reusable directory. |
 
 Round three repeats the round-two pattern exactly: two of three findings were
 incomplete repairs of round-two findings. Closing an escape is not the same as
