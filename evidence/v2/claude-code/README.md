@@ -5,10 +5,16 @@
 
 **Status under `docs/v2-delivery.md`**: **Implemented, unverified.**
 
-**Review history**: `pc-vigil[bot]` requested changes on head `dd83a1a` in a
-read-only non-author review (PR #32). Six findings; five confirmed and fixed,
-one not reproducible but hardened anyway. Dispositions are recorded in
-[Review disposition](#review-disposition-pc-vigilbot-on-dd83a1a) below.
+**Review history** (PR #32), all by `pc-vigil[bot]`, read-only and non-author:
+
+1. `dd83a1a` — changes requested, six findings. Five confirmed and fixed; one
+   not reproducible but hardened anyway.
+2. `821a7bc` — changes requested, four findings, all confirmed and fixed. Two
+   were incomplete fixes of round-one findings, which is the useful part: the
+   first repair of both the workspace escape and the session pinning was
+   shallower than the defect.
+
+Dispositions are in [Review disposition](#review-disposition) below.
 
 Source, deterministic, real-participant, and clean-installed-artifact checks
 passed. Live real-room evidence and exact-head non-author review have **not**
@@ -29,14 +35,14 @@ git merge-base --is-ancestor \
 
 | Claim | Command | Result |
 |---|---|---|
-| repository suite | `python3 -m unittest` | 399 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
-| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | 74 tests, OK |
+| repository suite | `python3 -m unittest` | 407 tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); run twice, and the platform suite twice each on 3.11/3.12/3.13, with no intermittent failure |
+| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | 82 tests, OK |
 | shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
 | dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
 | lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
-| reproducible build | see [Build recipe](#build-recipe) | byte-identical across two clean-archive builds, SHA-256 `a5e99d3dc51ffbc0867630cc7efdbbad7d6492a127d46c7801a9f0a7997dfa95` |
+| reproducible build identity | see [Build identity](#build-identity) | order-independent wheel content digest, stable across build interpreters; the raw zip SHA-256 is **not** cross-environment reproducible and is not claimed |
 | clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
-| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 74 tests, OK, `nunchi` resolved from `site-packages` |
+| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 82 tests, OK, `nunchi` resolved from `site-packages` |
 | installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
 | real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-27.jsonl`) |
 
@@ -124,24 +130,55 @@ Participant behaviour is stochastic: 4/4 is an observed outcome, not a
 deterministic guarantee, and the trial counts are far below what a release
 proof profile requires.
 
-## Build recipe
+## Build identity
 
-The earlier record quoted a digest produced by `uv build` in a working tree,
-which is not reproducible from a clean checkout — an independent reviewer
-correctly obtained a different value. The reproducible recipe is a clean
-archive of the exact commit with the timestamp pinned:
+An earlier record quoted a wheel SHA-256 from `uv build` in a working tree. A
+reviewer correctly obtained a different value. The pinned-`SOURCE_DATE_EPOCH`
+clean-archive recipe that replaced it was still wrong: an independent reviewer
+building exact head `821a7bc` with the documented recipe got
+`7fe1bd11e2f7d16334da2e986f0074ca170bd3a985c8211d396731028218b424` while this
+environment reproducibly got
+`a5e99d3dc51ffbc0867630cc7efdbbad7d6492a127d46c7801a9f0a7997dfa95`.
+
+Measured here: that value is stable across repeated builds **and** across
+build interpreters (3.11 and 3.13 produced identical bytes), so the build
+Python is not the variable. The raw `.whl` is a zip whose member order and
+container framing depend on the building environment, which
+`SOURCE_DATE_EPOCH` does not normalise. **A raw wheel SHA-256 is therefore not
+a usable cross-environment candidate identity for this project and is not
+claimed as one here.**
+
+Two identities that do reproduce anywhere are recorded instead:
+
+| Identity | Value at this head | Reproduce with |
+|---|---|---|
+| packaged source tree | `SRC_TREE_PENDING` | `git rev-parse HEAD:src` |
+| wheel **content** digest (order-independent) | `WHEEL_CONTENT_PENDING` | recipe below |
 
 ```sh
 git archive --format=tar HEAD | (mkdir -p /tmp/nunchi-build && tar -x -C /tmp/nunchi-build)
 cd /tmp/nunchi-build
 SOURCE_DATE_EPOCH=1785000000 PYTHONHASHSEED=0 uv build --wheel --out-dir dist
-sha256sum dist/nunchi-2.0.0-py3-none-any.whl
+python3 - <<'EOF'
+import hashlib, zipfile, glob
+z = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+items = sorted((n, hashlib.sha256(z.read(n)).hexdigest()) for n in z.namelist())
+h = hashlib.sha256()
+for name, digest in items:
+    h.update(name.encode()); h.update(b"\0"); h.update(digest.encode()); h.update(b"\n")
+print(h.hexdigest())
+EOF
 ```
 
-A digest quoted without that recipe means nothing; a digest from a different
-`SOURCE_DATE_EPOCH` is expected to differ and is not evidence of drift.
+The content digest hashes the sorted `(member name, member SHA-256)` pairs, so
+it is invariant to zip ordering and container framing while still covering
+every packaged byte. Neither identity covers `evidence/` or `evals/`, which are
+not packaged — so recording a digest in this file does not change it, which is
+verified by rebuilding from the resulting head.
 
-## Review disposition (`pc-vigil[bot]` on `dd83a1a`)
+## Review disposition
+
+### Round one — `dd83a1a`
 
 | # | Finding | Verdict | Action |
 |---|---|---|---|
@@ -156,6 +193,19 @@ A digest quoted without that recipe means nothing; a digest from a different
 The reviewer's summary that green CI does not close these reproductions was
 correct: CI was green on `dd83a1a` while findings 1, 3, 4, 5, and 6 were all
 true.
+
+### Round two — `821a7bc`
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | `workspace.file.write` still escapes via a parent-directory replacement race | **Confirmed** — reproduced deterministically by swapping the validated parent for a symlink inside the staging→rename window; the outside file was overwritten and the executor returned `sent` | Replaced pathname-based confinement with `_write_confined`: every component is opened `O_NOFOLLOW\|O_DIRECTORY` relative to a handle on the root, and the staging open, rename, and read-back all use `dir_fd`. No pathname is re-resolved, so a swapped component cannot move the write. |
+| 2 | Rejected, cancelled, and uncertain turns still become persistent continuation | **Confirmed**, all three cases | The participant now only *stages* a pin. `SessionPinningReceiptJournal` commits it solely on the host's own acceptance receipts — a `participant-host` `silent`, or a `transport` record, which exists only past the commit point. Rejection, cancellation, and deadline all produce neither. `_atomic_write` also removes the file if the post-rename directory sync fails, so uncertain persistence leaves nothing loadable. |
+| 3 | Approval path never completed through this runtime | **Confirmed** | Added a test that completes a valid authenticated approval and asserts the exact effect lands, that the operator sees the exact operation, that the challenge is one-use, and that the completion and effect are journalled. |
+| 4 | Evidence neither candidate-attributable nor hash-reproducible | **Confirmed** | Scene records are regenerated at the head they attest and carry its commit. On the digest: measured that the value is stable across repeated builds and across 3.11/3.13, so the build Python is not the variable — the raw `.whl` zip is environment-dependent in ways `SOURCE_DATE_EPOCH` does not normalise. The raw digest is withdrawn as candidate identity and replaced by the packaged source tree hash and an order-independent wheel **content** digest. |
+
+Round two is the more useful of the two reviews: two of its four findings were
+incomplete round-one repairs that had passed their own regression tests. A
+test written against the fix rather than against the defect will do that.
 
 ## What is NOT proven
 

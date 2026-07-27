@@ -19,12 +19,13 @@ one output commit point.
 from __future__ import annotations
 
 import argparse
+import errno
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import secrets
 import shutil
@@ -188,18 +189,102 @@ def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
         finally:
             os.close(fd)
         os.replace(temporary, path)
-    except BaseException:
-        # Never leave a staging file behind for a later write to trip over.
+        # The rename is only durable once the directory entry is synced.  If
+        # that fails the write is uncertain, so remove it rather than leave
+        # state a later load would treat as trustworthy.
+        directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
-            os.unlink(temporary)
-        except OSError:
-            pass
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        for leftover in (temporary, path):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
         raise
-    directory_fd = os.open(path.parent, os.O_RDONLY)
+
+
+def _write_confined(root: Path, relative: str, payload: bytes) -> str:
+    """Write `payload` at `root/relative`, confined by rooted directory handles.
+
+    Pathname-based confinement is not enough.  Validating a resolved path and
+    then calling `os.open`/`os.replace` on pathnames leaves a window in which a
+    validated parent directory can be replaced by a symlink, so the write or
+    the rename resolves somewhere else entirely.
+
+    This walks the path one component at a time from an open handle on the
+    root, opening each directory `O_NOFOLLOW | O_DIRECTORY` relative to the
+    previous handle, and performs the staging open, the rename, and the
+    read-back relative to the final handle.  A component swapped for a symlink
+    fails the open; a component swapped for another directory after the handle
+    is taken cannot move the write, because the handle still refers to the
+    original inode.  There is no window in which a pathname is re-resolved.
+
+    Returns the SHA-256 of the bytes actually read back from the written file.
+    """
+    parts = PurePosixPath(relative).parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise ValueError("confined path must not be empty or traverse upward")
+    handles: list[int] = [
+        os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    ]
     try:
-        os.fsync(directory_fd)
+        current = handles[0]
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, 0o700, dir_fd=current)
+            except FileExistsError:
+                pass
+            current = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=current,
+            )
+            handles.append(current)
+        name = parts[-1]
+        staged = f".{name}.{secrets.token_hex(8)}.tmp"
+        fd = os.open(
+            staged,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=current,
+        )
+        try:
+            try:
+                if os.write(fd, payload) != len(payload):
+                    raise OSError("short confined write")
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(staged, name, src_dir_fd=current, dst_dir_fd=current)
+        except BaseException:
+            try:
+                os.unlink(staged, dir_fd=current)
+            except OSError:
+                pass
+            raise
+        os.fsync(current)
+        verify = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current)
+        try:
+            written = b""
+            while True:
+                chunk = os.read(verify, 65536)
+                if not chunk:
+                    break
+                written += chunk
+        finally:
+            os.close(verify)
+        if written != payload:
+            raise OSError("confined write could not be confirmed")
+        return hashlib.sha256(written).hexdigest()
     finally:
-        os.close(directory_fd)
+        for handle in reversed(handles):
+            try:
+                os.close(handle)
+            except OSError:
+                pass
 
 
 def _canonical_json(value: Any) -> str:
@@ -327,6 +412,8 @@ class ClaudeCodeParticipant:
             _canonical_json(behavior).encode("utf-8")
         ).hexdigest()
         self._lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._pending_pins: dict[str, str] = {}
 
     # -- session continuity -------------------------------------------------
 
@@ -369,10 +456,30 @@ class ClaudeCodeParticipant:
             )
         return state["session_id"]
 
-    def _pin_session(self, session_id: str) -> None:
-        """Persist continuity, but only in persistent mode."""
-        if self.session_mode == "persistent":
+    def stage_pin(self, request_id: str, session_id: str) -> None:
+        """Record continuity as *pending* for one attention pass.
+
+        Nothing is persisted here.  The participant cannot know whether the
+        host will accept its action: the origin may be invisible, the
+        opportunity stale, the deadline blown, or the turn cancelled before the
+        commit point.  Persisting at this point would make a rejected or
+        cancelled turn resumable, so the pin waits for the host's own receipt.
+        """
+        if self.session_mode != "persistent" or not isinstance(request_id, str):
+            return
+        with self._pending_lock:
+            self._pending_pins[request_id] = session_id
+
+    def commit_pin(self, request_id: str) -> None:
+        """Persist a staged pin once the host has accepted the turn."""
+        with self._pending_lock:
+            session_id = self._pending_pins.pop(request_id, None)
+        if session_id is not None:
             self._save_session(session_id)
+
+    def discard_pin(self, request_id: str) -> None:
+        with self._pending_lock:
+            self._pending_pins.pop(request_id, None)
 
     def _save_session(self, session_id: str) -> None:
         _atomic_write(
@@ -557,11 +664,12 @@ class ClaudeCodeParticipant:
                 # persistent continuation.  Pinning a malformed, unattested, or
                 # cap-exceeding turn would let a later opportunity resume the
                 # context of work that never produced a valid result.
+                request_id = wake.get("request_id")
                 if action == {"kind": "silence"}:
-                    self._pin_session(session_id)
+                    self.stage_pin(request_id, session_id)
                     return None
                 if action.get("kind") != "expand":
-                    self._pin_session(session_id)
+                    self.stage_pin(request_id, session_id)
                     return action
                 if expansion_number == _MAX_EXPANSION_TURNS:
                     raise ClaudeCodeParticipantError(
@@ -603,6 +711,43 @@ class ClaudeCodeParticipant:
             "admission judgment and do not attempt to reach Discord.\n\n"
             + _canonical_json(page)
         )
+
+
+class SessionPinningReceiptJournal(ReceiptJournal):
+    """The receipt journal that decides when continuity becomes durable.
+
+    The host owns acceptance, and its own receipts are the only truthful
+    signal of it:
+
+    * a ``participant-host`` record with outcome ``silent`` means the host
+      accepted the participant's decision to stay quiet;
+    * a ``transport`` record exists only after the host validated the action
+      and reached its single output-commit point.
+
+    A rejected action, a stale opportunity, a blown deadline, or a
+    cancellation ordered before the commit point produces neither, so the
+    staged pin is simply never committed and the turn leaves no resumable
+    state.  Persisting continuity is therefore strictly downstream of host
+    acceptance, not concurrent with it.
+    """
+
+    def __init__(self, path, *, participant=None, **kwargs) -> None:
+        super().__init__(path, **kwargs)
+        self.participant = participant
+
+    def append(self, record, *, writer):
+        appended = super().append(record, writer=writer)
+        participant = self.participant
+        if participant is None:
+            return appended
+        stage = appended["stage"]
+        accepted = stage == "transport" or (
+            stage == "participant-host"
+            and appended["body"].get("outcome") == "silent"
+        )
+        if accepted:
+            participant.commit_pin(appended["request_id"])
+        return appended
 
 
 class ClaudeCodeRoomRuntime:
@@ -679,7 +824,9 @@ class ClaudeCodeRoomRuntime:
         state = Path(config["state_directory"])
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-        receipts = ReceiptJournal(state / "claude-code-v2-receipts.jsonl")
+        receipts = SessionPinningReceiptJournal(
+            state / "claude-code-v2-receipts.jsonl"
+        )
         observation = ObservationProvider(
             self.binding,
             limits=limits,
@@ -701,6 +848,9 @@ class ClaudeCodeRoomRuntime:
             state_directory=state,
         )
         self.participant = participant
+        # Continuity becomes durable only when the host's own receipts
+        # attest that it accepted the turn.
+        receipts.participant = participant
         self.output_secret = self._output_secret(config["transport"])
         transport = MCPDiscordTransport(
             client,
@@ -831,62 +981,41 @@ class ClaudeCodeRoomRuntime:
                     "unavailable",
                     "privileged workspace write operation has an invalid shape",
                 )
-            try:
-                base = root.resolve(strict=True)
-            except OSError:
-                return TransportResult(
-                    "unavailable", "privileged workspace root is unavailable"
-                )
             relative = operation["path"]
+            # Cheap syntactic rejections first.  Real confinement is enforced
+            # by the rooted directory handles in `_write_confined`, not here:
+            # these checks only reject obviously bad input early.
             if (
                 not relative
                 or relative.startswith("/")
                 or "\x00" in relative
-                or Path(relative).is_absolute()
-                or ".." in Path(relative).parts
+                or PurePosixPath(relative).is_absolute()
+                or any(
+                    part in ("", ".", "..")
+                    for part in PurePosixPath(relative).parts
+                )
+                or not PurePosixPath(relative).parts
             ):
                 return TransportResult(
                     "failed", "privileged workspace path escapes the workspace"
                 )
-            target = base / relative
-            # Resolve without requiring existence, then re-check containment:
-            # a symlinked parent or target must not move the write outside the
-            # configured root.
-            resolved = target.resolve()
-            # Strictly below the root: `base` is not among its own parents, so
-            # this also rejects a path that resolves to the root directory.
-            if base not in resolved.parents:
+            try:
+                digest = _write_confined(root, relative, operation["content"].encode("utf-8"))
+            except (NotADirectoryError, IsADirectoryError, FileExistsError, ValueError):
                 return TransportResult(
                     "failed", "privileged workspace path escapes the workspace"
                 )
-            probe = resolved
-            while probe != base:
-                if probe.is_symlink():
+            except OSError as exc:
+                # ELOOP / ENOTDIR from O_NOFOLLOW mean a component was a
+                # symbolic link: refused, not retried.
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.ENOENT):
                     return TransportResult(
                         "failed",
                         "privileged workspace path traverses a symbolic link",
                     )
-                probe = probe.parent
-            payload = operation["content"].encode("utf-8")
-            try:
-                _atomic_write(resolved, payload)
-            except OSError:
-                # The atomic replace either happened or it did not; a failure
-                # raised here may have left the rename unobserved.
                 return TransportResult(
                     "unknown", "privileged workspace write was not attested"
                 )
-            try:
-                written = resolved.read_bytes()
-            except OSError:
-                return TransportResult(
-                    "unknown", "privileged workspace write could not be confirmed"
-                )
-            if written != payload:
-                return TransportResult(
-                    "unknown", "privileged workspace write content differs"
-                )
-            digest = hashlib.sha256(payload).hexdigest()
             return TransportResult("sent", f"workspace-file:{digest}")
 
         return {"workspace.file.write": workspace_file_write}

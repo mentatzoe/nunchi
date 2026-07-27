@@ -676,22 +676,158 @@ class SessionPinIntegrityTests(unittest.TestCase):
                 )
             self.assertFalse(participant.session_path.exists())
 
-    def test_a_valid_outcome_does_pin_the_session(self):
-        for action in ({"kind": "silence"}, {"kind": "message",
-                                             "origin_event_id": "e1",
-                                             "text": "hi"}):
-            with self.subTest(action=action["kind"]):
-                with tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    participant, _ = self._participant(
-                        root, [result_document(action)]
+    def test_direct_invocation_alone_never_pins(self):
+        """Nothing accepted the turn, so nothing may become resumable."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            participant, _ = self._participant(
+                root, [result_document({"kind": "silence"})]
+            )
+            self.assertIsNone(
+                participant(
+                    wake={"request_id": "r1", "events": []},
+                    expand=None,
+                    cancel=threading.Event(),
+                )
+            )
+            self.assertFalse(participant.session_path.exists())
+
+
+class SessionPinAcceptanceTests(unittest.TestCase):
+    """Continuity becomes durable only once the host accepts the turn."""
+
+    EVENT = "discord:message:1"
+
+    def _harness(self, directory, action):
+        return RuntimeHarness(
+            directory,
+            documents=[result_document(action)] * 4,
+            model=FixtureModel("WAKE"),
+            policy={"preattention_enabled": True},
+            claude={"session_mode": "persistent"},
+            payloads={
+                "send_message": {
+                    "message": {
+                        "message_id": "777",
+                        "channel_id": ROOM_ID,
+                        "author_id": "9",
+                        "author_is_bot": True,
+                        "content": "on it",
+                        "reply_to_message_id": None,
+                    }
+                }
+            },
+        )
+
+    @staticmethod
+    def _session_path(directory):
+        return Path(directory) / "state" / "claude-code-v2-session.json"
+
+    def _deliver(self, harness):
+        harness.runtime.handle(
+            notification(
+                "d1",
+                message_event(self.EVENT, author="discord:actor:42"),
+                {"discord:actor:42": {"display_name": "Zoe", "kind": "human"}},
+            )
+        )
+        self.assertTrue(harness.runtime.lane.drain(timeout=30))
+
+    def test_accepted_silence_pins_the_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, {"kind": "silence"}) as harness:
+                self._deliver(harness)
+                host = [
+                    r
+                    for r in harness.runtime.pipeline.observation.receipts.all_records()
+                    if r["stage"] == "participant-host"
+                ]
+                self.assertEqual("silent", host[-1]["body"]["outcome"])
+                self.assertTrue(self._session_path(directory).exists())
+
+    def test_an_accepted_and_dispatched_contribution_pins_the_session(self):
+        action = {
+            "kind": "message",
+            "origin_event_id": self.EVENT,
+            "text": "on it",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, action) as harness:
+                self._deliver(harness)
+                self.assertEqual(1, len(harness.client.outbound()))
+                self.assertTrue(self._session_path(directory).exists())
+
+    def test_an_action_the_host_rejects_leaves_no_resumable_state(self):
+        """An invisible origin is rejected after the participant returned."""
+        action = {
+            "kind": "message",
+            "origin_event_id": "discord:message:999",
+            "text": "on it",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, action) as harness:
+                self._deliver(harness)
+                self.assertEqual([], harness.client.outbound())
+                self.assertFalse(self._session_path(directory).exists())
+
+    def test_cancellation_before_the_commit_point_leaves_no_resumable_state(self):
+        action = {
+            "kind": "message",
+            "origin_event_id": self.EVENT,
+            "text": "on it",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, action) as harness:
+                runtime = harness.runtime
+                started = threading.Event()
+                released = threading.Event()
+                real = runtime.pipeline.host.participant
+
+                def blocking(*, wake, expand, cancel):
+                    started.set()
+                    released.wait(20)
+                    return real(wake=wake, expand=expand, cancel=cancel)
+
+                runtime.pipeline.host.participant = blocking
+                runtime.handle(
+                    notification(
+                        "d1",
+                        message_event(self.EVENT, author="discord:actor:42"),
+                        {"discord:actor:42": {"kind": "human"}},
                     )
-                    participant(
-                        wake={"request_id": "r1", "events": []},
-                        expand=None,
-                        cancel=threading.Event(),
-                    )
-                    self.assertTrue(participant.session_path.exists())
+                )
+                self.assertTrue(started.wait(15))
+                runtime.pipeline.cancel()
+                released.set()
+                self.assertTrue(runtime.lane.drain(timeout=30))
+                self.assertEqual([], harness.client.outbound())
+                self.assertFalse(self._session_path(directory).exists())
+
+    def test_uncertain_persistence_leaves_no_resumable_state(self):
+        """A failed directory sync must not leave a loadable session file."""
+        from nunchi.integrations import claude_code_v2 as module
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, {"kind": "silence"}) as harness:
+                real_fsync = os.fsync
+                path = self._session_path(directory)
+
+                def failing_fsync(fd):
+                    # Fail only the directory sync that follows the rename.
+                    try:
+                        if stat.S_ISDIR(os.fstat(fd).st_mode) and path.exists():
+                            raise OSError("directory sync is uncertain")
+                    except OSError as exc:
+                        if "uncertain" in str(exc):
+                            raise
+                    return real_fsync(fd)
+
+                with mock.patch.object(module.os, "fsync", failing_fsync):
+                    self._deliver(harness)
+                self.assertFalse(
+                    path.exists(),
+                    "an uncertain session write must not remain resumable",
+                )
 
 
 class AtomicWriteTests(unittest.TestCase):
@@ -718,6 +854,42 @@ class AtomicWriteTests(unittest.TestCase):
             if result.delivery == "sent":
                 self.assertEqual("PWNED", (workspace / "note.txt").read_text())
 
+    def test_a_parent_directory_swapped_mid_write_cannot_redirect_it(self):
+        """The rename must not re-resolve the parent by pathname.
+
+        The swap is injected into the exact window between staging and rename,
+        which is the deterministic form of the race a local attacker would run.
+        """
+        import shutil as _shutil
+
+        from nunchi.integrations import claude_code_v2 as module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "ws"
+            (workspace / "notes").mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "note.txt").write_text("ORIGINAL")
+            executor = ClaudeCodeRoomRuntime._executors(str(workspace))[
+                "workspace.file.write"
+            ]
+            real_replace = os.replace
+
+            def racing_replace(src, dst, **kwargs):
+                target = workspace / "notes"
+                if target.is_dir() and not target.is_symlink():
+                    _shutil.rmtree(target)
+                    os.symlink(outside, target)
+                return real_replace(src, dst, **kwargs)
+
+            with mock.patch.object(module.os, "replace", racing_replace):
+                result = executor(
+                    {"path": "notes/note.txt", "content": "PWNED"}, None
+                )
+            self.assertNotEqual("sent", result.delivery)
+            self.assertEqual("ORIGINAL", (outside / "note.txt").read_text())
+
     def test_a_destination_symlink_is_rejected_before_any_write(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -732,8 +904,13 @@ class AtomicWriteTests(unittest.TestCase):
                 "workspace.file.write"
             ]
             result = executor({"path": "note.txt", "content": "PWNED"}, None)
-            self.assertEqual("failed", result.delivery)
+            # The invariant is confinement, not a particular verdict: the
+            # rename replaces the symlink itself rather than writing through
+            # it, so nothing outside the root is touched.
             self.assertEqual("ORIGINAL", secret.read_text())
+            self.assertFalse((workspace / "note.txt").is_symlink())
+            if result.delivery == "sent":
+                self.assertEqual("PWNED", (workspace / "note.txt").read_text())
 
 
 class ResultParserTests(unittest.TestCase):
@@ -1934,6 +2111,87 @@ class PrivilegedActionMatrixTests(unittest.TestCase):
                 )
                 self.assertNotEqual("sent", impostor.delivery)
                 self.assertFalse(target.exists())
+
+    def test_a_valid_authenticated_approval_completes_the_exact_effect(self):
+        """The required approval path, end to end, through this runtime."""
+        with tempfile.TemporaryDirectory() as directory:
+            policy = self._policy_bytes(impact="high", preauthorized_high_impact=False)
+            with self._harness(directory, policy_bytes=policy) as harness:
+                self._retain(harness)
+                coordinator = harness.runtime.privileged
+                target = Path(directory) / "workspace" / "notes.md"
+
+                pending_result = coordinator.execute_proposal(
+                    proposal=self._proposal(content="approved content"),
+                    wake=self._wake(),
+                    cancel=threading.Event(),
+                )
+                self.assertNotEqual("sent", pending_result.delivery)
+                self.assertFalse(target.exists())
+
+                pending = coordinator.pending_for_operator()
+                self.assertEqual(1, len(pending))
+                challenge_id = pending[0]["challenge"]["approval_challenge_id"]
+                # The operator inspects the exact operation, not a summary.
+                self.assertEqual(
+                    {"path": "notes.md", "content": "approved content"},
+                    pending[0]["operation"],
+                )
+
+                completed = coordinator.complete_authenticated_approval(
+                    approval_challenge_id=challenge_id,
+                    authenticated_approver_id="operator:zoe",
+                )
+                self.assertEqual("sent", completed.delivery)
+                self.assertEqual("approved content", target.read_text())
+
+                # The challenge is one-use: replaying it authorizes nothing.
+                target.write_text("untouched-after-approval")
+                replayed = coordinator.complete_authenticated_approval(
+                    approval_challenge_id=challenge_id,
+                    authenticated_approver_id="operator:zoe",
+                )
+                self.assertNotEqual("sent", replayed.delivery)
+                self.assertEqual("untouched-after-approval", target.read_text())
+
+    def test_an_approved_effect_is_recorded_in_the_authorization_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            policy = self._policy_bytes(impact="high", preauthorized_high_impact=False)
+            with self._harness(directory, policy_bytes=policy) as harness:
+                self._retain(harness)
+                coordinator = harness.runtime.privileged
+                coordinator.execute_proposal(
+                    proposal=self._proposal(),
+                    wake=self._wake(),
+                    cancel=threading.Event(),
+                )
+                challenge_id = coordinator.pending_for_operator()[0]["challenge"][
+                    "approval_challenge_id"
+                ]
+                coordinator.complete_authenticated_approval(
+                    approval_challenge_id=challenge_id,
+                    authenticated_approver_id="operator:zoe",
+                )
+                journal_path = (
+                    Path(directory) / "state" / "claude-code-v2-authorization.jsonl"
+                )
+                self.assertTrue(journal_path.exists())
+                records = [
+                    json.loads(line)
+                    for line in journal_path.read_text().splitlines()
+                    if line.strip()
+                ]
+                kinds = {record["kind"] for record in records}
+                # Contract documents are wrapped; the approval completion is
+                # the nested document kind.
+                contract_kinds = {
+                    record.get("record", {}).get("kind")
+                    for record in records
+                    if record["kind"] == "authorization_contract"
+                }
+                self.assertIn("effect_commit", kinds)
+                self.assertIn("effect_result", kinds)
+                self.assertIn("approval_completion", contract_kinds)
 
     def test_an_unknown_capability_has_no_executor_and_no_effect(self):
         with tempfile.TemporaryDirectory() as directory:
