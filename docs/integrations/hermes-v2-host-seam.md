@@ -11,10 +11,10 @@ The wheel carries both the patch and a closed manifest under
 `nunchi_hermes_v2/host_patch_assets/`. The manifest pins:
 
 - untouched Hermes commit `243a01d5d72555061406de84890b2e9622f409cb`;
-- manifest SHA-256 `18a39dc55c040710d4d67db1a6ca6429d4baa0330b167fa3515e0fb1c2d2eb24`,
+- manifest SHA-256 `f935eaa3a1a98ce70dd410f4c6b7f396e125eb99449133be02d9ee08dfe715f9`,
   pinned independently in installed applicator code;
-- 19 declared regular-file paths;
-- patch SHA-256 `451902c81f529581e7e8639203d483e7a86c1a57fdf3bd139ad0142bc05557a0`;
+- 20 declared regular-file paths;
+- patch SHA-256 `57f3d795fff6e4032a8c40416b1404a81a66c2a521187083ca7845d958a9c72c`;
 - the closed patch operation and path set; and
 - every touched path's exact pre-apply and post-apply SHA-256 and Git mode.
 

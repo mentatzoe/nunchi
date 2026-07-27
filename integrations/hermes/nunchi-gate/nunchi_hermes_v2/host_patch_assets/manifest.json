@@ -3,7 +3,7 @@
     "gateway/message_hooks.py": {
       "operation": "create",
       "post_mode": "100644",
-      "post_sha256": "de883e808e8e4f39a6357b9a6250603a8be0c91990d6e8dfc50468567ca8c844",
+      "post_sha256": "a7cdf3661023178aeb6cd1b661cf42695b93fb98662ac9da64de6ab8ec31f13b",
       "pre_mode": null,
       "pre_sha256": null
     },
@@ -17,7 +17,7 @@
     "gateway/run.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "fa33180e6566e261b80e684a229dad13c26ae268a4b9213ab3e239f1455635ed",
+      "post_sha256": "a3abbcc801e550d3cc1b8ce10dd33b59c6571c209d56df543dde78647ea3d4ae",
       "pre_mode": "100644",
       "pre_sha256": "f588d37d23df0c3eb133723eab8d9f8bf7f672a5069c279afd494f36f4c4e601"
     },
@@ -55,6 +55,13 @@
       "post_sha256": "faed1c83b8744ee233f9a2895c462f7d014cba80470b11e24be138575c920bb0",
       "pre_mode": "100644",
       "pre_sha256": "1c3df77d728f8d8afee3eab104f72ba762eaf8de4473f517521db3e735617a23"
+    },
+    "tests/gateway/test_delivery_revocation_boundary.py": {
+      "operation": "create",
+      "post_mode": "100644",
+      "post_sha256": "67f3353b583f5362b4721acbe477e70674f2931fc2223257fe6f0cb50e47bda0",
+      "pre_mode": null,
+      "pre_sha256": null
     },
     "tests/gateway/test_discord_approval_mentions.py": {
       "operation": "modify",
@@ -135,7 +142,7 @@
     }
   },
   "patch": "0002-v2-participant-host-seam.patch",
-  "patch_sha256": "451902c81f529581e7e8639203d483e7a86c1a57fdf3bd139ad0142bc05557a0",
+  "patch_sha256": "57f3d795fff6e4032a8c40416b1404a81a66c2a521187083ca7845d958a9c72c",
   "schema_version": 2,
   "source": "Nunchi-owned compatibility seam for stock Hermes; no upstream merge dependency",
   "supported_hermes_commit": "243a01d5d72555061406de84890b2e9622f409cb"

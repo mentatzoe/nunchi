@@ -1,9 +1,9 @@
 diff --git a/gateway/message_hooks.py b/gateway/message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f65c8a880
+index 0000000000000000000000000000000000000000..d17da518325716c5c993739c1878a591152305d1
 --- /dev/null
 +++ b/gateway/message_hooks.py
-@@ -0,0 +1,553 @@
+@@ -0,0 +1,586 @@
 +"""Narrow immutable contracts for plugin handling of ordinary gateway messages."""
 +
 +from __future__ import annotations
@@ -256,6 +256,7 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +class _DeliveryChannel:
 +    queue: asyncio.Queue[_DeliveryRequest]
 +    binding: _DeliveryBinding
++    worker: Optional[asyncio.Task[None]] = None
 +    revoked: bool = False
 +    consumed: bool = False
 +
@@ -270,9 +271,14 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +
 +
 +class GatewayDelivery:
-+    """Opaque, one-shot capability bound to a host-owned delivery worker."""
++    """Opaque, one-shot capability bound to a host-owned delivery worker.
 +
-+    __slots__ = ("__weakref__",)
++    No queue waiter or shared mutable delivery state outside the channel
++    can be traversed from the public capability into a host task's
++    callback frame, so lifecycle code never awaits plugin-owned futures.
++    """
++
++    __slots__ = ("__weakref__", "_worker")
 +
 +    def __init__(
 +        self,
@@ -307,6 +313,8 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +                react_callback=react_callback,
 +            )
 +        )
++        channel.worker = worker
++        self._worker = worker
 +        worker.add_done_callback(_consume_delivery_worker_result)
 +
 +    async def send(self, content: str) -> GatewayDeliveryReceipt:
@@ -355,22 +363,32 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +    def _revoke(self) -> None:
 +        """Invalidate this capability synchronously at a host lifecycle boundary."""
 +        channel = _DELIVERY_CHANNELS.get(self)
-+        if channel is not None:
-+            channel.revoked = True
-+            if not channel.consumed:
-+                channel.consumed = True
-+                try:
-+                    future = asyncio.get_running_loop().create_future()
-+                    channel.queue.put_nowait(
-+                        _DeliveryRequest(
-+                            kind="send",
-+                            content="",
-+                            operation="",
-+                            future=future,
-+                        )
++        if channel is None:
++            return
++        channel.revoked = True
++        worker = channel.worker
++        if worker is not None and not worker.done():
++            # The cancellation races the worker's single adapter invocation:
++            # if the invocation has not started it never starts; if it is
++            # suspended the worker fences its outcome before it can commit.
++            # Cancellation can only take effect after this synchronous
++            # boundary returns, so revocation never blocks behind a hung
++            # third-party callback and cannot deadlock on the event loop.
++            worker.cancel()
++        if not channel.consumed:
++            channel.consumed = True
++            try:
++                future = asyncio.get_running_loop().create_future()
++                channel.queue.put_nowait(
++                    _DeliveryRequest(
++                        kind="send",
++                        content="",
++                        operation="",
++                        future=future,
 +                    )
-+                except (RuntimeError, asyncio.QueueFull):
-+                    pass
++                )
++            except (RuntimeError, asyncio.QueueFull):
++                pass
 +
 +
 +_DELIVERY_CHANNELS: weakref.WeakKeyDictionary[
@@ -401,10 +419,11 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +            request.future.set_result(GatewayDeliveryReceipt(status="failed"))
 +        return
 +    try:
-+        # No suspension occurs between the authoritative revocation check and
-+        # native invocation. A boundary that wins first therefore prevents the
-+        # adapter call; a boundary after invocation can only make its outcome
-+        # ambiguous, never fabricate success.
++        # Revocation and native invocation share one synchronization/commit
++        # boundary: this synchronous segment is the only point where an
++        # adapter call can start, and _revoke() cancels the worker so a
++        # boundary that lands first prevents the call; a boundary that lands
++        # during the await below fences the outcome before it can commit.
 +        if request.kind == "reply":
 +            if not callable(reply_callback):
 +                native_result = SendResult(success=False)
@@ -419,6 +438,20 @@ index 0000000000000000000000000000000000000000..1d2ceb2903d81e5e89b1e4144fbc799f
 +            native_result = send_callback(request.content)
 +        if inspect.isawaitable(native_result):
 +            native_result = await native_result
++        # A boundary that won while the native call was suspended wins the
++        # race outright: the effect must not commit after revocation returns.
++        if channel.revoked:
++            if not request.future.done():
++                request.future.set_result(GatewayDeliveryReceipt(status="failed"))
++            return
++    except asyncio.CancelledError:
++        # Revocation interrupted a suspended native invocation. Settle the
++        # requester with the truthful pre-commit state and do not re-raise:
++        # the worker has finished its one-shot job and unwinding through the
++        # half-awaited adapter callback would only risk spurious errors.
++        if not request.future.done():
++            request.future.set_result(GatewayDeliveryReceipt(status="failed"))
++        return
 +    except Exception:
 +        receipt = GatewayDeliveryReceipt(status="unknown")
 +    else:
@@ -645,7 +678,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..5d8ec503e5bb428a9e4ddc706022acc1
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..cee3ca4da4c146eaee657f993dabe48863867c5d 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..df10db4f55d8b3563273084c678dad13e227516a 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -1395,6 +1428,19 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..cee3ca4da4c146eaee657f993dabe488
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
          pinned_session_id = str(
+@@ -22938,6 +23429,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+                             _interrupt_detected.set()
+ 
+             if _inactivity_timeout:
++                # A timed-out turn is a session boundary for plugin-owned
++                # route capabilities: retained deliveries must be invalid
++                # before the timeout turn is considered returned, exactly as
++                # with an explicit stop/reset or shutdown.
++                if session_key:
++                    self._revoke_gateway_deliveries(session_key)
+                 # Build a diagnostic summary from the agent's activity tracker.
+                 _timed_out_agent = agent_holder[0]
+                 _activity = {}
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
 index 58c365ddb3e74b76096f2e7854d95d23000a6042..d1bc35492801588fdcbc8c4aa2153f21badc1a17 100644
 --- a/gateway/slash_commands.py
@@ -2339,6 +2385,358 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ad9755efe4677b95a8b75267b19a0b49
      async def on_processing_start(self, event: MessageEvent) -> None:
          """Add an in-progress reaction when message processing begins."""
          if not self._reactions_enabled():
+diff --git a/tests/gateway/test_delivery_revocation_boundary.py b/tests/gateway/test_delivery_revocation_boundary.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6b83282b37555bf98ea6c7f52101d7ced88fbae
+--- /dev/null
++++ b/tests/gateway/test_delivery_revocation_boundary.py
+@@ -0,0 +1,346 @@
++"""Barrier-controlled regression tests for the delivery revocation boundary.
++
++These tests prove that a route-bound delivery whose native invocation has
++already started can no longer complete after a revocation boundary
++(revocation, session cancellation, or shutdown) returns, and that the
++capability always settles exactly once without hanging or raising.
++"""
++
++import asyncio
++
++import pytest
++
++from gateway.message_hooks import GatewayDelivery, GatewayDeliveryReceipt
++from gateway.platforms.base import NativeDeliveryAck, SendResult
++
++
++def _runner_for_inflight():
++    """Minimal GatewayRunner double with a barrier-controlled adapter send."""
++    from types import SimpleNamespace
++    from unittest.mock import MagicMock
++
++    from gateway.config import GatewayConfig, Platform, PlatformConfig
++    from gateway.run import GatewayRunner
++
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    async def send_native(chat_id, content, reply_to=None, metadata=None):
++        entered.set()
++        await release.wait()
++        return SendResult(
++            success=True,
++            message_id="out-1",
++            native_delivery_ack=NativeDeliveryAck(
++                platform="discord",
++                room_id=str(chat_id),
++                self_actor_id="9",
++                effect_kind="reply" if reply_to is not None else "send",
++                submitted_content=content,
++                reply_to_message_id=str(reply_to) if reply_to is not None else None,
++                message_id="out-1",
++                effect_id="out-1",
++            ),
++        )
++
++    adapter = SimpleNamespace(
++        send=send_native,
++        authenticated_actor_id=MagicMock(return_value="9"),
++    )
++    runner = object.__new__(GatewayRunner)
++    runner.config = GatewayConfig(
++        platforms={Platform.DISCORD: PlatformConfig(enabled=True)}
++    )
++    runner.adapters = {Platform.DISCORD: adapter}
++    runner._gateway_deliveries_by_session = {}
++    return runner, entered, release
++
++
++def _retained_delivery(runner, session_key="session-1"):
++    from gateway.config import Platform
++    from gateway.session import SessionSource
++
++    source = SessionSource(
++        platform=Platform.DISCORD,
++        profile="work",
++        scope_id=None,
++        chat_id="room-1",
++        chat_name=None,
++        chat_type="group",
++        thread_id=None,
++        user_id="user-1",
++        user_name=None,
++    )
++    adapter = runner.adapters[Platform.DISCORD]
++    delivery = GatewayDelivery(
++        lambda content: adapter.send("room-1", content),
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="9",
++        source_message_id="source-1",
++    )
++    runner._register_gateway_delivery(session_key, delivery)
++    return delivery, source
++
++
++def _ack(effect_kind, **overrides):
++    fields = {
++        "platform": "discord",
++        "room_id": "room-1",
++        "self_actor_id": "bot-9",
++        "effect_kind": effect_kind,
++        "submitted_content": None,
++        "reply_to_message_id": None,
++        "target_message_id": None,
++        "reaction": None,
++        "reaction_operation": None,
++        "message_id": None,
++        "effect_id": None,
++    }
++    fields.update(overrides)
++    return NativeDeliveryAck(**fields)
++
++
++def _make_delivery(send_callback, *, reply_callback=None, react_callback=None):
++    return GatewayDelivery(
++        send_callback,
++        reply_callback=reply_callback,
++        react_callback=react_callback,
++        platform="discord",
++        room_id="room-1",
++        profile="work",
++        self_actor_id="bot-9",
++        source_message_id="source-1",
++    )
++
++
++async def _settle(delivery):
++    """Let the delivery worker drain before the loop closes."""
++    worker = getattr(delivery, "_worker", None)
++    if worker is None:
++        return
++    try:
++        await asyncio.wait_for(asyncio.shield(worker), timeout=1)
++    except (asyncio.TimeoutError, asyncio.CancelledError, RuntimeError):
++        worker.cancel()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("kind", ["send", "reply", "react"])
++async def test_inflight_native_effect_cannot_complete_after_revocation(kind):
++    """A suspended native invocation must not commit after revocation returns."""
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    async def native_call(*_args):
++        entered.set()
++        await release.wait()
++        if kind == "react":
++            return SendResult(
++                success=True,
++                message_id="source-1",
++                native_delivery_ack=_ack(
++                    "react",
++                    target_message_id="source-1",
++                    reaction="+1",
++                    reaction_operation="add",
++                    effect_id="discord:reaction:inflight",
++                ),
++            )
++        return SendResult(
++            success=True,
++            message_id="out-1",
++            native_delivery_ack=_ack(
++                kind,
++                submitted_content="payload",
++                reply_to_message_id="source-1" if kind == "reply" else None,
++                message_id="out-1",
++                effect_id="out-1",
++            ),
++        )
++
++    delivery = _make_delivery(
++        native_call,
++        reply_callback=native_call,
++        react_callback=native_call,
++    )
++
++    if kind == "send":
++        submit = asyncio.create_task(delivery.send("payload"))
++    elif kind == "reply":
++        submit = asyncio.create_task(delivery.reply("payload"))
++    else:
++        submit = asyncio.create_task(delivery.react("+1", operation="add"))
++
++    await asyncio.wait_for(entered.wait(), timeout=1)
++    delivery._revoke()
++    release.set()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status == "failed"
++    assert receipt.message_id is None
++
++
++@pytest.mark.asyncio
++async def test_revocation_wins_over_not_yet_started_invocation():
++    """Revocation before native invocation prevents the adapter call."""
++    native_calls = []
++
++    async def native_call(content):
++        native_calls.append(content)
++        return SendResult(success=False)
++
++    delivery = _make_delivery(native_call)
++    submit = asyncio.create_task(delivery.send("payload"))
++    # The request may already sit in the queue, but the worker has not
++    # entered the native callback yet.
++    delivery._revoke()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status == "failed"
++    assert native_calls == []
++
++
++@pytest.mark.asyncio
++async def test_delivery_settles_exactly_once_without_hang_or_raise():
++    """Concurrent revocation and invocation leave one settled outcome."""
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    async def native_call(_content):
++        entered.set()
++        await release.wait()
++        return SendResult(
++            success=True,
++            message_id="out-1",
++            native_delivery_ack=_ack(
++                "send",
++                submitted_content="payload",
++                message_id="out-1",
++                effect_id="out-1",
++            ),
++        )
++
++    delivery = _make_delivery(native_call)
++    submit = asyncio.create_task(delivery.send("payload"))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++
++    delivery._revoke()
++    # Repeated revocation is idempotent and cannot unsettle the request.
++    delivery._revoke()
++    release.set()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status in {"failed", "unknown"}
++    # The capability remains consumed: no second effect can ever start.
++    followup = await delivery.send("second")
++    assert followup == GatewayDeliveryReceipt(status="failed")
++
++
++@pytest.mark.asyncio
++async def test_cancellation_of_submit_cannot_block_revocation_or_leak_effect():
++    """A cancelled submitter still cannot leave an unbounded in-flight effect."""
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    async def native_call(_content):
++        entered.set()
++        await release.wait()
++        return SendResult(
++            success=True,
++            message_id="out-1",
++            native_delivery_ack=_ack(
++                "send",
++                submitted_content="payload",
++                message_id="out-1",
++                effect_id="out-1",
++            ),
++        )
++
++    delivery = _make_delivery(native_call)
++    submit = asyncio.create_task(delivery.send("payload"))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++
++    delivery._revoke()
++    submit.cancel()
++    release.set()
++
++    with pytest.raises(asyncio.CancelledError):
++        await submit
++    await _settle(delivery)
++
++    # After the boundary, the capability is terminally closed.
++    assert (await delivery.send("later")) == GatewayDeliveryReceipt(status="failed")
++
++
++@pytest.mark.asyncio
++async def test_session_cancel_fences_inflight_native_send(monkeypatch):
++    """An in-flight send cannot complete after session cancellation returns."""
++    runner, entered, release = _runner_for_inflight()
++    delivery, source = _retained_delivery(runner)
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", None, raising=False)
++
++    async def no_observer(*_args, **_kwargs):
++        return []
++
++    monkeypatch.setattr(
++        "hermes_cli.plugins.invoke_hook_async", no_observer, raising=False
++    )
++
++    submit = asyncio.create_task(delivery.send("payload"))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++
++    await runner._notify_gateway_session_cancel(
++        "session-1", source, reason="stop"
++    )
++    release.set()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status == "failed"
++
++
++@pytest.mark.asyncio
++async def test_shutdown_fences_inflight_native_send():
++    """An in-flight send cannot complete after shutdown revocation returns."""
++    runner, entered, release = _runner_for_inflight()
++    delivery, _source = _retained_delivery(runner)
++
++    submit = asyncio.create_task(delivery.send("payload"))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++
++    runner._revoke_all_gateway_deliveries()
++    release.set()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status == "failed"
++
++
++@pytest.mark.asyncio
++async def test_timeout_boundary_revokes_session_deliveries():
++    """The inactivity-timeout path invalidates retained route capabilities."""
++    runner, entered, release = _runner_for_inflight()
++    delivery, _source = _retained_delivery(runner)
++
++    submit = asyncio.create_task(delivery.send("payload"))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++
++    # The timeout boundary in _handle_message_with_agent revokes before the
++    # timed-out turn is considered returned.
++    runner._revoke_gateway_deliveries("session-1")
++    release.set()
++
++    receipt = await asyncio.wait_for(submit, timeout=1)
++    await _settle(delivery)
++
++    assert receipt.status == "failed"
 diff --git a/tests/gateway/test_discord_approval_mentions.py b/tests/gateway/test_discord_approval_mentions.py
 index 7696058ef511b761bb52ee92b7e2c6e8c50dbbbb..b9738ca2d13586eaa7e73992a5489fc94e3bcc48 100644
 --- a/tests/gateway/test_discord_approval_mentions.py
