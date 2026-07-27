@@ -1527,10 +1527,17 @@ def _check_action_digest(errors: _Errors, path: str, value: Any) -> None:
 
 
 def _check_authorization_scope(errors: _Errors, path: str, value: Any) -> None:
-    fields = ("platform", "room_id", "continuity_scope_id", "participant_id", "resource")
+    fields = (
+        "platform",
+        "room_id",
+        "continuity_scope_id",
+        "participant_id",
+        "resource",
+        "hermes_profile",
+    )
     if not _check_closed_object(errors, path, value, fields, fields):
         return
-    for name in fields[:-1]:
+    for name in ("platform", "room_id", "continuity_scope_id", "participant_id", "hermes_profile"):
         if name in value:
             _check_nes(errors, f"{path}.{name}", value[name])
     resource = value.get("resource")
@@ -3169,6 +3176,7 @@ _BASE_AUTHORIZATION_BINDING = {
         "continuity_scope_id": "discord:room:42#2026-07",
         "participant_id": "vigil",
         "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+        "hermes_profile": "default",
     },
     "action_digest": {
         "algorithm": "sha256",

@@ -44,14 +44,16 @@
         "room_id",
         "continuity_scope_id",
         "participant_id",
-        "resource"
+        "resource",
+        "hermes_profile"
       ],
       "properties": {
         "platform": {"$ref": "#/$defs/nonEmptyString"},
         "room_id": {"$ref": "#/$defs/nonEmptyString"},
         "continuity_scope_id": {"$ref": "#/$defs/nonEmptyString"},
         "participant_id": {"$ref": "#/$defs/nonEmptyString"},
-        "resource": {"$ref": "#/$defs/resourceScope"}
+        "resource": {"$ref": "#/$defs/resourceScope"},
+        "hermes_profile": {"$ref": "#/$defs/nonEmptyString"}
       }
     },
     "derivedRequester": {

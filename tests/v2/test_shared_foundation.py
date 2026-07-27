@@ -121,6 +121,7 @@ def foundation(
         room_id="42",
         continuity_scope_id="discord:channel:42",
         names=("Vigil", "Codex"),
+        hermes_profile="default",
     )
     receipts = ReceiptJournal()
     observation = ObservationProvider(
@@ -922,6 +923,8 @@ class AuthorizationTests(unittest.TestCase):
             participant_id="vigil",
             resource_kind="workspace-file",
             resource_id="repo:README.md",
+            continuity_scope_id="discord:channel:42",
+            hermes_profile="default",
             direct_allow=True,
             impact="low",
         )
@@ -978,6 +981,8 @@ class AuthorizationTests(unittest.TestCase):
             participant_id="vigil",
             resource_kind="workspace-file",
             resource_id="repo:README.md",
+            continuity_scope_id="discord:channel:42",
+            hermes_profile="default",
             direct_allow=False,
             impact="high",
         )

@@ -87,8 +87,8 @@ class CapabilityRule:
     participant_id: str
     resource_kind: str
     resource_id: str
-    continuity_scope_id: str | None = None
-    hermes_profile: str | None = None
+    continuity_scope_id: str
+    hermes_profile: str
     direct_allow: bool = False
     preauthorized_high_impact: bool = False
     impact: str = "high"
@@ -97,6 +97,9 @@ class CapabilityRule:
     target_idempotency: bool = False
 
     def __post_init__(self) -> None:
+        # Fail closed: an authorization rule that does not pin both the
+        # trusted continuity scope and the Hermes profile identity is
+        # rejected at load time — it is never silently wildcarded.
         for name in (
             "requester_actor_id",
             "capability",
@@ -105,13 +108,11 @@ class CapabilityRule:
             "participant_id",
             "resource_kind",
             "resource_id",
+            "continuity_scope_id",
+            "hermes_profile",
         ):
             if not isinstance(getattr(self, name), str) or not getattr(self, name):
                 raise ValueError(f"{name} must be non-empty")
-        for name in ("continuity_scope_id", "hermes_profile"):
-            value = getattr(self, name)
-            if value is not None and (not isinstance(value, str) or not value):
-                raise ValueError(f"{name} must be non-empty when bound")
         if not _CAPABILITY.fullmatch(self.capability):
             raise ValueError("capability must be a namespaced identifier")
         if self.impact not in ("low", "high"):
@@ -596,22 +597,13 @@ class AuthorizationCoordinator:
                 and rule.participant_id == scope["participant_id"]
                 and rule.resource_kind == resource["kind"]
                 and rule.resource_id == resource["id"]
+                # Exact-scope bindings are mandatory: both identities are
+                # required on the rule (enforced at construction), so a rule
+                # only matches a binding carrying the identical trusted
+                # continuity scope and Hermes profile.
+                and rule.continuity_scope_id == scope.get("continuity_scope_id")
+                and rule.hermes_profile == scope.get("hermes_profile")
             ):
-                # Optional exact-scope bindings: when a rule pins
-                # continuity_scope_id or hermes_profile, the binding must
-                # match exactly. A rule that leaves them None remains a
-                # wildcard for backwards compatibility, and a bound rule never
-                # matches a binding that lacks the pinned identity.
-                if (
-                    rule.continuity_scope_id is not None
-                    and rule.continuity_scope_id != scope.get("continuity_scope_id")
-                ):
-                    continue
-                if (
-                    rule.hermes_profile is not None
-                    and rule.hermes_profile != scope.get("hermes_profile")
-                ):
-                    continue
                 return rule
         return None
 

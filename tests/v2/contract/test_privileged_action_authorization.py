@@ -82,6 +82,26 @@ class AuthorizationShapeCases(unittest.TestCase):
         challenge = make_approval_challenge(approver_ids=["operator:zoe", "operator:zoe"])
         assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
 
+    def test_scope_requires_an_exact_hermes_profile_identity(self):
+        for mutate, label in (
+            (lambda scope: scope.pop("hermes_profile"), "missing"),
+            (lambda scope: scope.update(hermes_profile=""), "empty"),
+            (lambda scope: scope.update(hermes_profile=None), "null"),
+            (lambda scope: scope.update(hermes_profile=42), "non-string"),
+        ):
+            with self.subTest(hermes_profile=label):
+                document = make_authorization_request()
+                mutate(document["binding"]["scope"])
+                assert_schema_verdict(
+                    self, "privileged-action-authorization", document, "invalid"
+                )
+        # An unknown extra field remains closed out alongside the new member.
+        document = make_authorization_request()
+        document["binding"]["scope"]["installation_id"] = "other"
+        assert_schema_verdict(
+            self, "privileged-action-authorization", document, "invalid"
+        )
+
 
 class AuthorizationFlowCases(unittest.TestCase):
     def test_valid_direct_allow_is_bound_to_one_request(self):
