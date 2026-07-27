@@ -34,7 +34,7 @@ git merge-base --is-ancestor \
 | shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
 | dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
 | lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
-| reproducible build | see [Build recipe](#build-recipe) | byte-identical across two clean-archive builds, SHA-256 `DIGEST_PENDING` |
+| reproducible build | see [Build recipe](#build-recipe) | byte-identical across two clean-archive builds, SHA-256 `a5e99d3dc51ffbc0867630cc7efdbbad7d6492a127d46c7801a9f0a7997dfa95` |
 | clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
 | platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | 74 tests, OK, `nunchi` resolved from `site-packages` |
 | installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
