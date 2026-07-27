@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - the supported Hermes seam is POSIX-onl
 
 
 # Updated only when the reviewed bundled manifest is intentionally regenerated.
-BUNDLED_MANIFEST_SHA256 = "f935eaa3a1a98ce70dd410f4c6b7f396e125eb99449133be02d9ee08dfe715f9"
+BUNDLED_MANIFEST_SHA256 = "75cb159b25f2834ac1b6fb1076153aae8066f43b7fc01ca9fe30252fcbff39a1"
 
 
 class HostPatchError(RuntimeError):
