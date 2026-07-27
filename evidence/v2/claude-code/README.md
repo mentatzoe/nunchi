@@ -22,13 +22,24 @@
 5. `39c8eb1` — changes requested, two findings, both confirmed and fixed. The
    workspace executor was escapable for the **fourth** distinct reason, and the
    verification table in this packet carried three wrong totals.
+6. `78c4bd9` — **APPROVED**. All six tracked areas closed, including the
+   reviewer-held root-rename attack, which now returns `unknown` and removes
+   the displaced payload. The reviewer bound the approval to this exact
+   source/evidence candidate and explicitly did **not** claim the live
+   real-room proof.
 
 Dispositions are in [Review disposition](#review-disposition) below.
 
 Source, deterministic, real-participant, and clean-installed-artifact checks
-passed. Live real-room evidence and exact-head non-author review have **not**
-been performed. This surface must not be described as Verified, live,
-parity-ready, or done until both land.
+passed, and the exact-head non-author review is now **approved** at `78c4bd9`.
+
+**The status is still `Implemented, unverified`, and the approval does not
+change it.** `docs/v2-delivery.md` defines `Verified` as passing source,
+deterministic, installed-runtime *and* live checks. Three of those four have
+passed; the live one has not been attempted, and the reviewer said so in the
+approval itself. An approval closes the review gate, not the evidence gate.
+This surface must not be described as Verified, live, parity-ready, or done
+until live real-room proof exists.
 
 ## Dependency ancestry
 
@@ -286,9 +297,13 @@ would have caught all four; a test asserting the latest patch caught none.
 2. **No mixed-agent proof.** Installed Codex, Hermes, and Claude Code runtimes
    with distinct identities have not completed scenes together in an authorized
    real room.
-3. **No independent review.** No non-author reviewer from a distinct model
-   family has reviewed this exact head, and no reviewer-held challenge set
-   exists for it.
+3. **Single reviewer; no reviewer-held challenge set.** The exact-head
+   non-author review is approved, which closes the round-by-round review
+   gate. Two things it does not close: `docs/v2-completion-goal.md` requires
+   **at least two** isolated reviewers from distinct model families for a
+   frozen final candidate, and only one has reviewed here; and no reviewer-held
+   challenge set was precommitted for this surface. Both are candidate-freeze
+   obligations that remain open.
 4. **No attention-classifier live evidence.** The real-participant scenes run
    with pre-attention bypass. The classifier path is proven deterministically
    (fixture model) but not against a live provider on this surface.
@@ -301,6 +316,10 @@ would have caught all four; a test asserting the latest patch caught none.
    threat model, or reviewer-held challenge set exists for this candidate.
 8. **Hermes remains missing**, so the program-level surface inventory is
    incomplete regardless of this surface's state.
+
+With the review gate closed, **live real-room evidence is the single remaining
+blocker to a `Verified` claim for this surface**, and it is the one this
+session structurally cannot produce.
 
 Item 1 is blocked in this environment. This work was produced in a **remote
 Claude Code session that holds no Discord credentials** — no bot token, no
