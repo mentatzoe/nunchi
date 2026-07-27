@@ -1,9 +1,9 @@
 diff --git a/gateway/message_hooks.py b/gateway/message_hooks.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..8d7d7892a60ed1cfbff4f611c68ad4bd68fa1420
+index 0000000000000000000000000000000000000000..d5d54c0314e6609b911472f2b876f5cfd133933f
 --- /dev/null
 +++ b/gateway/message_hooks.py
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,665 @@
 +"""Narrow immutable contracts for plugin handling of ordinary gateway messages."""
 +
 +from __future__ import annotations
@@ -361,7 +361,7 @@ index 0000000000000000000000000000000000000000..8d7d7892a60ed1cfbff4f611c68ad4bd
 +        return await future
 +
 +    def _revoke(self) -> None:
-+        """Invalidate this capability synchronously at a host lifecycle boundary."""
++        """Begin invalidation synchronously; async boundaries must await settle."""
 +        self._begin_revocation()
 +
 +    async def _settle_revocation(self) -> None:
@@ -433,27 +433,43 @@ index 0000000000000000000000000000000000000000..8d7d7892a60ed1cfbff4f611c68ad4bd
 +
 +    ``worker`` is awaited shielded so cancellation of the lifecycle path
 +    cannot detach the settlement wait and let the boundary return while
-+    the native effect is still live. The only legitimate escape is the
-+    worker awaiting itself (host lifecycle code unwinding inside the
-+    delivery callback frame), which would otherwise self-deadlock.
++    the native effect is still live. When the awaiting lifecycle path is
++    itself cancelled mid-wait, propagation is deferred: the cancellation
++    is consumed and the shield-await is re-entered until the worker
++    settles, and only then is ``CancelledError`` re-raised so the caller
++    observes cancellation strictly after no revoked native effect remains
++    live. The only legitimate escape is the worker awaiting itself (host
++    lifecycle code unwinding inside the delivery callback frame), which
++    would otherwise self-deadlock.
 +    """
 +    if worker.done():
 +        return
 +    if owner is not None and owner is worker:
 +        return
-+    try:
-+        await asyncio.shield(worker)
-+    except asyncio.CancelledError:
-+        if worker.done():
-+            # The worker itself completed as cancelled (revocation's own
-+            # cancellation request won the race): the invocation is settled
-+            # and the boundary may proceed. Only re-raise when the awaiting
-+            # lifecycle path was cancelled while the worker is still live.
-+            waiter = asyncio.current_task()
-+            if waiter is None or not waiter.cancelling():
-+                return
-+            raise
-+        raise
++    waiter = asyncio.current_task()
++    deferred = False
++    while not worker.done():
++        try:
++            await asyncio.shield(worker)
++        except asyncio.CancelledError:
++            if worker.done():
++                # The worker itself completed as cancelled (revocation's own
++                # cancellation request won the race): the invocation is
++                # settled and the boundary may proceed. Preserve a concurrent
++                # outer cancellation rather than mistaking it for the worker's.
++                if waiter is not None and waiter.cancelling():
++                    deferred = True
++                    waiter.uncancel()
++                break
++            # The awaiting lifecycle path was cancelled while the worker is
++            # still live. Consume the cancellation so it cannot detach the
++            # settlement wait, keep shield-awaiting until the worker
++            # settles, and re-raise afterwards.
++            deferred = True
++            if waiter is not None and waiter.cancelling():
++                waiter.uncancel()
++    if deferred:
++        raise asyncio.CancelledError()
 +
 +
 +async def _delivery_worker(
@@ -741,7 +757,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..5d8ec503e5bb428a9e4ddc706022acc1
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f90770e8e 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..c84309b696507264c7c43708dd8ac9efa0111bb3 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -1099,7 +1115,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
              _agent_result = await self._handle_message_with_agent(event, source, _quick_key, _run_generation)
              # Goal continuation: after the agent returns a final response
              # for this turn, check any standing /goal — the judge will
-@@ -12835,6 +12980,459 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12835,6 +12980,464 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  pass
          return source
  
@@ -1345,12 +1361,12 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
 +                stop_when=_stop_after_terminal_result,
 +            )
 +        except asyncio.CancelledError:
-+            delivery._revoke()
++            await delivery._settle_revocation()
 +            if getattr(event, result_marker, None) == "pending":
 +                delattr(event, result_marker)
 +            raise
 +        except Exception as exc:
-+            delivery._revoke()
++            await delivery._settle_revocation()
 +            logger.warning(
 +                "gateway_message hook failed; suppressing normal dispatch (%s)",
 +                type(exc).__name__,
@@ -1359,7 +1375,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
 +
 +        for result in results:
 +            if not isinstance(result, dict):
-+                delivery._revoke()
++                await delivery._settle_revocation()
 +                logger.warning(
 +                    "gateway_message hook returned invalid terminal result type %s; "
 +                    "suppressing normal dispatch",
@@ -1371,13 +1387,13 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
 +                return _finish(True)
 +            if decision in {"continue", "pass"}:
 +                continue
-+            delivery._revoke()
++            await delivery._settle_revocation()
 +            logger.warning(
 +                "gateway_message hook returned an invalid decision; "
 +                "suppressing normal dispatch"
 +            )
 +            return _finish(True)
-+        delivery._revoke()
++        await delivery._settle_revocation()
 +        return _finish(False)
 +
 +    def _register_gateway_delivery(self, session_key: str, delivery: Any) -> None:
@@ -1436,24 +1452,29 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
 +
 +        Each worker is awaited shielded so cancellation of the boundary
 +        path itself cannot detach the settlement wait: a boundary never
-+        returns while a native effect it revoked is still live. A worker
-+        that unwinds into this wait from its own callback frame is skipped
-+        to avoid self-await deadlock.
++        returns while a native effect it revoked is still live. Cancellation
++        propagation is deferred across the whole worker collection, rather
++        than escaping after the first settled worker and abandoning later
++        effects. A worker that unwinds into this wait from its own callback
++        frame is skipped to avoid self-await deadlock.
 +        """
 +        if not workers:
 +            return
 +        from gateway.message_hooks import _await_delivery_settlement
 +
 +        owner = asyncio.current_task()
++        deferred_cancel = False
 +        for worker in workers:
 +            try:
 +                await _await_delivery_settlement(worker, owner=owner)
 +            except asyncio.CancelledError:
-+                raise
++                deferred_cancel = True
 +            except Exception:
 +                logger.debug(
 +                    "gateway delivery settlement wait failed", exc_info=True
 +                )
++        if deferred_cancel:
++            raise asyncio.CancelledError()
 +
 +    def _revoke_all_gateway_deliveries(self) -> None:
 +        deliveries = getattr(self, "_gateway_deliveries_by_session", None)
@@ -1559,7 +1580,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
      async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
          """Inner handler that runs under the _running_agents sentinel guard."""
          _msg_start_time = time.time()
-@@ -12848,22 +13446,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12848,22 +13451,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
          )
  
@@ -1584,7 +1605,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..43df692af4c646931cbb5bd6a6e52e2f
          session_entry = await self.async_session_store.get_or_create_session(source)
          session_key = session_entry.session_key
          pinned_session_id = str(
-@@ -22938,6 +23522,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -22938,6 +23527,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                              _interrupt_detected.set()
  
              if _inactivity_timeout:
@@ -2550,16 +2571,15 @@ index 55ae362bfe0436bd69e7e4d49b5ce9f4406bf0ad..ad9755efe4677b95a8b75267b19a0b49
          if not self._reactions_enabled():
 diff --git a/tests/gateway/test_delivery_revocation_boundary.py b/tests/gateway/test_delivery_revocation_boundary.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..a8cefca4f3d348d42180af850731e433c37db683
+index 0000000000000000000000000000000000000000..b81d0ea82eed007995626ca6e95a90daf897aa13
 --- /dev/null
 +++ b/tests/gateway/test_delivery_revocation_boundary.py
-@@ -0,0 +1,518 @@
+@@ -0,0 +1,673 @@
 +"""Barrier-controlled regression tests for the delivery revocation boundary.
 +
-+These tests prove that a route-bound delivery whose native invocation has
-+already started can no longer complete after a revocation boundary
-+(revocation, session cancellation, or shutdown) returns, and that the
-+capability always settles exactly once without hanging or raising.
++These tests prove that synchronous invalidation prevents new work and cancels
++cooperative callbacks, while externally observable async lifecycle boundaries
++wait for any invocation that already won to settle before returning.
 +"""
 +
 +import asyncio
@@ -2685,8 +2705,13 @@ index 0000000000000000000000000000000000000000..a8cefca4f3d348d42180af850731e433
 +
 +@pytest.mark.asyncio
 +@pytest.mark.parametrize("kind", ["send", "reply", "react"])
-+async def test_inflight_native_effect_cannot_complete_after_revocation(kind):
-+    """A suspended native invocation must not commit after revocation returns."""
++async def test_direct_revoke_cancels_cooperative_inflight_native_effect(kind):
++    """Begin-only invalidation cancels callbacks that propagate cancellation.
++
++    ``_revoke()`` is deliberately synchronous and is not itself a completed
++    lifecycle boundary. Cancellation-suppressing callbacks are covered by the
++    awaited settlement-boundary tests below.
++    """
 +    entered = asyncio.Event()
 +    release = asyncio.Event()
 +
@@ -2993,8 +3018,25 @@ index 0000000000000000000000000000000000000000..a8cefca4f3d348d42180af850731e433
 +
 +
 +@pytest.mark.asyncio
++async def test_settlement_preserves_outer_cancel_when_worker_also_cancels():
++    """A settled worker must not swallow a concurrent boundary cancellation."""
++    from gateway.message_hooks import _await_delivery_settlement
++
++    worker = asyncio.create_task(asyncio.sleep(3600))
++    boundary = asyncio.create_task(_await_delivery_settlement(worker))
++    await asyncio.sleep(0)
++
++    worker.cancel()
++    boundary.cancel()
++
++    with pytest.raises(asyncio.CancelledError):
++        await boundary
++    assert worker.done()
++
++
++@pytest.mark.asyncio
 +async def test_boundary_settlement_is_shielded_from_outer_cancellation():
-+    """Cancelling the boundary path cannot detach the settlement wait."""
++    """Cancelling the boundary defers propagation until the effect settles."""
 +    entered = asyncio.Event()
 +    release = asyncio.Event()
 +    effects = []
@@ -3024,20 +3066,154 @@ index 0000000000000000000000000000000000000000..a8cefca4f3d348d42180af850731e433
 +    await asyncio.sleep(0.05)
 +    assert not boundary.done()
 +
-+    # Cancellation of the lifecycle task must not let the boundary return
++    # Cancellation of the lifecycle task must not let the boundary complete
 +    # while the native effect is still live.
 +    boundary.cancel()
-+    with pytest.raises(asyncio.CancelledError):
-+        await boundary
++    await asyncio.sleep(0.05)
++    assert not boundary.done()
 +    assert effects == []
 +    worker = getattr(delivery, "_worker", None)
 +    assert worker is not None and not worker.done()
 +
 +    release.set()
-+    await asyncio.wait_for(asyncio.shield(worker), timeout=1)
++    with pytest.raises(asyncio.CancelledError):
++        await asyncio.wait_for(boundary, timeout=1)
++    assert worker.done()
 +    assert effects == ["send-effect-completed"]
 +
 +    receipt = await asyncio.wait_for(submit, timeout=1)
++    assert receipt.status == "failed"
++
++
++@pytest.mark.asyncio
++async def test_aggregate_settlement_defers_cancel_until_all_workers_finish():
++    """Boundary cancellation settles every retained worker before propagating."""
++    from gateway.run import GatewayRunner
++
++    entered = [asyncio.Event(), asyncio.Event()]
++    release = [asyncio.Event(), asyncio.Event()]
++    effects = []
++
++    async def cancellation_suppressing_worker(index):
++        entered[index].set()
++        try:
++            await asyncio.sleep(3600)
++        except asyncio.CancelledError:
++            pass
++        await release[index].wait()
++        effects.append(index)
++
++    workers = [
++        asyncio.create_task(cancellation_suppressing_worker(index))
++        for index in range(2)
++    ]
++    await asyncio.gather(*(event.wait() for event in entered))
++    for worker in workers:
++        worker.cancel()
++
++    runner = object.__new__(GatewayRunner)
++    boundary = asyncio.create_task(
++        runner._await_gateway_delivery_settlement(workers)
++    )
++    await asyncio.sleep(0)
++    boundary.cancel()
++    await asyncio.sleep(0)
++
++    release[0].set()
++    await asyncio.sleep(0.05)
++    assert effects == [0]
++    assert workers[0].done()
++    assert not workers[1].done()
++    assert not boundary.done()
++
++    release[1].set()
++    with pytest.raises(asyncio.CancelledError):
++        await asyncio.wait_for(boundary, timeout=1)
++    assert effects == [0, 1]
++    assert all(worker.done() for worker in workers)
++
++
++@pytest.mark.asyncio
++async def test_message_hook_fallthrough_settles_suppressing_native_effect(
++    monkeypatch,
++):
++    """Hook fallthrough cannot return while its revoked native effect is live."""
++    from types import SimpleNamespace
++
++    from gateway.config import GatewayConfig, Platform, PlatformConfig
++    from gateway.platforms.base import MessageEvent, MessageType
++    from gateway.run import GatewayRunner
++    from gateway.session import SessionSource
++
++    entered = asyncio.Event()
++    release = asyncio.Event()
++    effects = []
++
++    async def send_native(_chat_id, _content, **_kwargs):
++        entered.set()
++        try:
++            await asyncio.sleep(3600)
++        except asyncio.CancelledError:
++            pass
++        await release.wait()
++        effects.append("send-effect-completed")
++        return SendResult(success=False)
++
++    adapter = SimpleNamespace(
++        send=send_native,
++        authenticated_actor_id=lambda: "9",
++    )
++    runner = object.__new__(GatewayRunner)
++    runner.config = GatewayConfig(
++        platforms={Platform.DISCORD: PlatformConfig(enabled=True)}
++    )
++    setattr(runner, "adapters", {Platform.DISCORD: adapter})
++    runner._gateway_deliveries_by_session = {}
++    setattr(runner, "_adapter_for_source", lambda source: adapter)
++    setattr(
++        runner,
++        "_thread_metadata_for_source",
++        lambda source, reply_to_message_id=None: None,
++    )
++
++    source = SessionSource(
++        platform=Platform.DISCORD,
++        profile="work",
++        scope_id=None,
++        chat_id="room-1",
++        chat_name=None,
++        chat_type="group",
++        thread_id=None,
++        user_id="user-1",
++        user_name=None,
++    )
++    event = MessageEvent(
++        text="hello",
++        message_type=MessageType.TEXT,
++        source=source,
++        message_id="source-1",
++    )
++    submissions = []
++
++    async def hook(*_args, **kwargs):
++        submissions.append(asyncio.create_task(kwargs["delivery"].send("payload")))
++        await entered.wait()
++        return [{"decision": "pass"}]
++
++    monkeypatch.setattr("hermes_cli.plugins.invoke_hook_async", hook)
++    boundary = asyncio.create_task(
++        runner._run_gateway_message_hook(event, source, "session-1")
++    )
++    await asyncio.wait_for(entered.wait(), timeout=1)
++    await asyncio.sleep(0.05)
++
++    assert not boundary.done()
++    assert effects == []
++
++    release.set()
++    assert await asyncio.wait_for(boundary, timeout=1) is False
++    assert effects == ["send-effect-completed"]
++    receipt = await asyncio.wait_for(submissions[0], timeout=1)
 +    assert receipt.status == "failed"
 +
 +

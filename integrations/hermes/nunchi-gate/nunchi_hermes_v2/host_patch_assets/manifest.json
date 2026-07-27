@@ -3,7 +3,7 @@
     "gateway/message_hooks.py": {
       "operation": "create",
       "post_mode": "100644",
-      "post_sha256": "549dec10bf407de521fb6614b88e6c58231cd7271d26aaabb495e2ab95610267",
+      "post_sha256": "4adec2600be9563409c4f824451275b6571adcf1a856bd40d97068465abbeb1c",
       "pre_mode": null,
       "pre_sha256": null
     },
@@ -17,7 +17,7 @@
     "gateway/run.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "5f1cc94a50f28e23b080fb58a08330baeb7ad7b8edc5cbc1376f5b6edae01146",
+      "post_sha256": "d073cd552300a5f3e84f04b592ca2056f5a00d71bb1342aeb0c734a33faecb41",
       "pre_mode": "100644",
       "pre_sha256": "f588d37d23df0c3eb133723eab8d9f8bf7f672a5069c279afd494f36f4c4e601"
     },
@@ -59,7 +59,7 @@
     "tests/gateway/test_delivery_revocation_boundary.py": {
       "operation": "create",
       "post_mode": "100644",
-      "post_sha256": "6ec5fd0acb11e9abd0f7b0359a3939c095d6e4e601868a0774738b29fe9eaa37",
+      "post_sha256": "a128a41c19f73713331bb516632527ce49563c5657bd567c0d89017f2bcf88f6",
       "pre_mode": null,
       "pre_sha256": null
     },
@@ -142,7 +142,7 @@
     }
   },
   "patch": "0002-v2-participant-host-seam.patch",
-  "patch_sha256": "d7f607454e369af80198ae03c9f67d446cc8e60e9ee03fff4921413e7e5e99d8",
+  "patch_sha256": "9c7abf3b785fb39e8621e4cc68646b130f34b855a3f2ec4c4a5db8c927bf736c",
   "schema_version": 2,
   "source": "Nunchi-owned compatibility seam for stock Hermes; no upstream merge dependency",
   "supported_hermes_commit": "243a01d5d72555061406de84890b2e9622f409cb"
