@@ -7,4 +7,5 @@ description: >
 provides_hooks:
   - gateway_message
   - gateway_session_cancel
+  - gateway_shutdown
 requires_tools: []

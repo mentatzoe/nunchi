@@ -424,7 +424,9 @@ class HostPatchApplicatorTests(unittest.TestCase):
         def exchange_parent_and_keep_detached(*args, **kwargs):
             package.rename(detached)
             package.mkdir()
-            (package / "module.py").write_text("VALUE = 'stock'\n", encoding="utf-8")
+            (package / "module.py").write_text(
+                "VALUE = 'attacker-live'\n", encoding="utf-8"
+            )
             return real_write(*args, **kwargs)
 
         with mock.patch.object(
@@ -432,20 +434,24 @@ class HostPatchApplicatorTests(unittest.TestCase):
             "_write_plan",
             side_effect=exchange_parent_and_keep_detached,
         ):
-            with self.assertRaises(HostPatchError):
+            with self.assertRaisesRegex(
+                HostPatchError,
+                "pinned original restored and live checkout unmodified",
+            ):
                 apply_host_patch(self.repo, nested_bundle)
 
         # The write went to the pinned original inode (now detached), never to
-        # the attacker's live replacement. Verification re-attested the parent
-        # identity by name, detected the exchange, and failed closed rather
-        # than reporting a clean apply or a false rollback against the
-        # replacement tree.
+        # the attacker's live replacement. Rollback runs through the pinned
+        # descriptors before the failure is reported, so the detached original
+        # is restored to its exact preimage and the live replacement still
+        # carries the attacker's bytes — no patch residue and no false
+        # complete-restoration claim.
         self.assertEqual(
-            "VALUE = 'patched'\n",
+            "VALUE = 'stock'\n",
             (detached / "module.py").read_text(encoding="utf-8"),
         )
         self.assertEqual(
-            "VALUE = 'stock'\n",
+            "VALUE = 'attacker-live'\n",
             (package / "module.py").read_text(encoding="utf-8"),
         )
 

@@ -87,6 +87,8 @@ class CapabilityRule:
     participant_id: str
     resource_kind: str
     resource_id: str
+    continuity_scope_id: str | None = None
+    hermes_profile: str | None = None
     direct_allow: bool = False
     preauthorized_high_impact: bool = False
     impact: str = "high"
@@ -106,6 +108,10 @@ class CapabilityRule:
         ):
             if not isinstance(getattr(self, name), str) or not getattr(self, name):
                 raise ValueError(f"{name} must be non-empty")
+        for name in ("continuity_scope_id", "hermes_profile"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(f"{name} must be non-empty when bound")
         if not _CAPABILITY.fullmatch(self.capability):
             raise ValueError("capability must be a namespaced identifier")
         if self.impact not in ("low", "high"):
@@ -591,6 +597,21 @@ class AuthorizationCoordinator:
                 and rule.resource_kind == resource["kind"]
                 and rule.resource_id == resource["id"]
             ):
+                # Optional exact-scope bindings: when a rule pins
+                # continuity_scope_id or hermes_profile, the binding must
+                # match exactly. A rule that leaves them None remains a
+                # wildcard for backwards compatibility, and a bound rule never
+                # matches a binding that lacks the pinned identity.
+                if (
+                    rule.continuity_scope_id is not None
+                    and rule.continuity_scope_id != scope.get("continuity_scope_id")
+                ):
+                    continue
+                if (
+                    rule.hermes_profile is not None
+                    and rule.hermes_profile != scope.get("hermes_profile")
+                ):
+                    continue
                 return rule
         return None
 
@@ -634,18 +655,22 @@ class AuthorizationCoordinator:
             raise ValidationError("privileged capability must be namespaced")
         operation = deepcopy(dict(proposal["operation"]))
         digest = canonical_operation_digest(operation)
+        scope = {
+            "platform": self.observation.binding.platform,
+            "room_id": self.observation.binding.room_id,
+            "continuity_scope_id": self.observation.binding.continuity_scope_id,
+            "participant_id": self.observation.binding.participant_id,
+            "resource": deepcopy(dict(resource)),
+        }
+        _hermes_profile = getattr(self.observation.binding, "hermes_profile", None)
+        if _hermes_profile is not None:
+            scope["hermes_profile"] = _hermes_profile
         binding = {
             "action_id": f"action:{uuid4()}",
             "participant_id": self.observation.binding.participant_id,
             "origin_event_id": proposal["origin_event_id"],
             "capability": capability,
-            "scope": {
-                "platform": self.observation.binding.platform,
-                "room_id": self.observation.binding.room_id,
-                "continuity_scope_id": self.observation.binding.continuity_scope_id,
-                "participant_id": self.observation.binding.participant_id,
-                "resource": deepcopy(dict(resource)),
-            },
+            "scope": scope,
             "action_digest": digest,
             "derived_requester": {
                 "actor_id": origin["author_id"],

@@ -982,6 +982,7 @@ def _room_config(
     if not isinstance(names, list) or any(not isinstance(item, str) for item in names):
         raise ValidationError("binding names must be an array of strings")
     binding_data["names"] = tuple(names)
+    binding_data["hermes_profile"] = hermes_profile
     binding = ParticipantBinding(**binding_data)
 
     profile_ref = _closed(room["profile"], required={"path", "sha256"}, label=f"rooms[{index}].profile")

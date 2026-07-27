@@ -1180,6 +1180,123 @@ class AuthorizationTests(unittest.TestCase):
         ][:2]
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
 
+    def test_same_scope_with_matching_continuity_and_profile_is_allowed(self):
+        """Legitimate same-scope flow: rule bound to exact continuity and
+        profile must still match when the binding carries the same values."""
+        bound_rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            continuity_scope_id="discord:channel:42",
+            hermes_profile="default",
+            direct_allow=True,
+            impact="low",
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        # Patch the binding to include hermes_profile
+        self.pipeline.observation.binding = ParticipantBinding(
+            participant_id="vigil",
+            actor_id="discord:bot:9",
+            platform="discord",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+            names=("Vigil", "Codex"),
+            hermes_profile="default",
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("sent", result.delivery)
+        self.assertEqual(1, len(self.native_calls))
+
+    def test_cross_profile_binding_is_denied(self):
+        """Cross-profile denial: a rule bound to hermes_profile='default'
+        must not match a binding whose hermes_profile is 'other'."""
+        bound_rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            continuity_scope_id="discord:channel:42",
+            hermes_profile="default",
+            direct_allow=True,
+            impact="low",
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        # Same continuity, different profile
+        self.pipeline.observation.binding = ParticipantBinding(
+            participant_id="vigil",
+            actor_id="discord:bot:9",
+            platform="discord",
+            room_id="42",
+            continuity_scope_id="discord:channel:42",
+            names=("Vigil", "Codex"),
+            hermes_profile="other",
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual(0, len(self.native_calls))
+
+    def test_changed_continuity_scope_is_denied(self):
+        """Changed-continuity denial: a rule bound to continuity_scope_id
+        'discord:channel:42' must not match a binding with a different
+        continuity_scope_id even if all other fields are identical."""
+        bound_rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            continuity_scope_id="discord:channel:42",
+            hermes_profile="default",
+            direct_allow=True,
+            impact="low",
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        # Same profile, different continuity (e.g. channel recreated)
+        self.pipeline.observation.binding = ParticipantBinding(
+            participant_id="vigil",
+            actor_id="discord:bot:9",
+            platform="discord",
+            room_id="42",
+            continuity_scope_id="discord:channel:43",
+            names=("Vigil", "Codex"),
+            hermes_profile="default",
+        )
+        # Wake must match the binding or _build_binding raises earlier
+        self.wake["room"]["continuity_scope_id"] = "discord:channel:43"
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual(0, len(self.native_calls))
+
     def test_cancel_fences_native_effect_between_final_check_and_dispatch(self):
         coordinator = self.coordinator()
         entered_dispatch_boundary = threading.Event()

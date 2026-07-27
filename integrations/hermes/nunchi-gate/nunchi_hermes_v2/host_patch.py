@@ -861,6 +861,48 @@ def _verify_pinned_parents(parents: _PinnedParents) -> None:
             os.close(current)
 
 
+def _parents_attached(parents: _PinnedParents) -> bool:
+    """True when every pinned parent inode is still reachable by its name."""
+    for relative, descriptor in parents.descriptors.items():
+        try:
+            current = _open_directory(parents.root_fd, relative)
+        except OSError:
+            return False
+        try:
+            if not _same_inode(os.fstat(descriptor), os.fstat(current)):
+                return False
+        finally:
+            os.close(current)
+    return True
+
+
+def _verify_live_targets_present(
+    root_fd: int,
+    snapshots: Mapping[str, _Snapshot],
+) -> None:
+    """Attest every pre-existing live (by-name) target still exists.
+
+    The live replacement tree belongs to whoever exchanged the parent; its
+    contents were never written by this transaction and are not ours to
+    demand. The load-bearing safety property is that rollback restored the
+    pinned original (done separately through the pinned descriptors) and
+    that no live target vanished mid-transaction, which would make the
+    detached-restoration report misleading.
+    """
+    for relative in sorted(snapshots):
+        if not snapshots[relative].existed:
+            continue
+        parent_fd, leaf = _open_parent(root_fd, relative)
+        try:
+            current = _read_leaf_snapshot(parent_fd, leaf)
+        finally:
+            os.close(parent_fd)
+        if not current.existed:
+            raise HostPatchError(
+                "host patch failed; live transaction target vanished during rollback"
+            )
+
+
 @contextlib.contextmanager
 def _pin_touched_parents(
     root_fd: int,
@@ -1260,9 +1302,14 @@ def apply_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
                         pinned_root_fd=root_fd,
                     )
                 except BaseException as exc:
+                    rollback_done = False
                     try:
-                        _verify_pinned_parents(parents)
+                        # Roll back through the pinned descriptors first. They
+                        # still reference the originally pinned inodes even if
+                        # an attacker exchanged a parent directory by name, so
+                        # the pinned original never retains patch bytes.
                         _rollback_plan(parents, snapshots, plan)
+                        rollback_done = True
                         _verify_pinned_parents(parents)
                         _verify_state(
                             root,
@@ -1271,6 +1318,19 @@ def apply_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
                             pinned_root_fd=root_fd,
                         )
                     except BaseException as rollback_exc:
+                        if rollback_done and not _parents_attached(parents):
+                            # The pinned parents were detached by name after the
+                            # pinned-original rollback completed. Attest the
+                            # live replacement tree was never touched by this
+                            # transaction, then report exactly what was
+                            # restored — never a false complete-restoration
+                            # claim.
+                            _verify_live_targets_present(root_fd, snapshots)
+                            raise HostPatchError(
+                                "host patch rejected; pinned original restored "
+                                "and live checkout unmodified, but transaction "
+                                "parent remains detached"
+                            ) from exc
                         raise HostPatchError(
                             "host patch failed and rollback verification failed"
                         ) from rollback_exc
