@@ -908,7 +908,7 @@ class AtomicWriteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "ws"
-            workspace.mkdir()
+            workspace.mkdir(mode=0o700)
             outside = root / "outside"
             outside.mkdir()
             secret = outside / "secret.txt"
@@ -938,7 +938,8 @@ class AtomicWriteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "ws"
-            (workspace / "notes").mkdir(parents=True)
+            workspace.mkdir(mode=0o700, exist_ok=True)
+            (workspace / "notes").mkdir(parents=True, exist_ok=True)
             outside = root / "outside"
             outside.mkdir()
             (outside / "note.txt").write_text("ORIGINAL")
@@ -975,7 +976,8 @@ class AtomicWriteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "ws"
-            (workspace / "notes").mkdir(parents=True)
+            workspace.mkdir(mode=0o700, exist_ok=True)
+            (workspace / "notes").mkdir(parents=True, exist_ok=True)
             outside = root / "outside"
             outside.mkdir()
             (outside / "note.txt").write_text("OUTSIDE-ORIGINAL")
@@ -1000,6 +1002,44 @@ class AtomicWriteTests(unittest.TestCase):
             # not claimed to hold the payload.
             self.assertEqual("OUTSIDE-ORIGINAL", (outside / "note.txt").read_text())
 
+    def test_a_held_directory_moved_outside_the_root_is_not_attested(self):
+        """The reviewer's reproduction: rooted handles do not keep ancestry.
+
+        An opened directory that is renamed out of the workspace takes our
+        writes with it. A symlink left behind at the original name makes a
+        naive `os.stat(..., follow_symlinks=False)` resolve straight back to
+        the written inode, because that flag only refuses a symlink as the
+        *final* component.
+        """
+        from nunchi.integrations import claude_code_v2 as module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / "ws"
+            workspace.mkdir(mode=0o700)
+            (workspace / "notes").mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            executor = ClaudeCodeRoomRuntime._executors(str(workspace))[
+                "workspace.file.write"
+            ]
+            real_replace = os.replace
+
+            def racing_replace(src, dst, **kwargs):
+                held = workspace / "notes"
+                if held.is_dir() and not held.is_symlink():
+                    os.rename(held, outside / "notes-moved")
+                    os.symlink(outside / "notes-moved", held)
+                return real_replace(src, dst, **kwargs)
+
+            with mock.patch.object(module.os, "replace", racing_replace):
+                result = executor(
+                    {"path": "notes/note.txt", "content": "PAYLOAD"}, None
+                )
+            self.assertEqual("unknown", result.delivery)
+            # An unattestable effect must not also be a lasting one.
+            self.assertFalse((outside / "notes-moved" / "note.txt").exists())
+
     def test_an_undisturbed_write_still_attests_sent(self):
         """The drift check must not make ordinary writes unattestable."""
         with tempfile.TemporaryDirectory() as directory:
@@ -1016,7 +1056,7 @@ class AtomicWriteTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "ws"
-            workspace.mkdir()
+            workspace.mkdir(mode=0o700)
             outside = root / "outside"
             outside.mkdir()
             secret = outside / "secret.txt"
@@ -1927,6 +1967,38 @@ class PrivilegedActionTests(unittest.TestCase):
         # and an unconfigured workspace leaves nothing executable at all.
         self.assertEqual({}, ClaudeCodeRoomRuntime._executors(None))
 
+    def test_workspace_root_must_be_private_to_the_runtime(self):
+        """A world- or group-accessible workspace is refused outright.
+
+        Detection can only refuse to attest a raced write; it cannot stop
+        another principal from renaming directories mid-write. Requiring a
+        private root removes that principal instead of racing it.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "shared"
+            root.mkdir(mode=0o755)
+            with self.assertRaises(ValidationError):
+                ClaudeCodeRoomRuntime._executors(str(root))
+            root.chmod(0o770)
+            with self.assertRaises(ValidationError):
+                ClaudeCodeRoomRuntime._executors(str(root))
+            root.chmod(0o700)
+            self.assertEqual(
+                {"workspace.file.write"},
+                set(ClaudeCodeRoomRuntime._executors(str(root))),
+            )
+
+    def test_workspace_root_must_exist_and_be_a_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "absent"
+            with self.assertRaises(ValidationError):
+                ClaudeCodeRoomRuntime._executors(str(missing))
+            plain = Path(directory) / "file"
+            plain.write_text("x")
+            plain.chmod(0o600)
+            with self.assertRaises(ValidationError):
+                ClaudeCodeRoomRuntime._executors(str(plain))
+
     def test_workspace_root_must_be_an_absolute_configured_path(self):
         for root in ("", "relative/path", 5, True):
             with self.subTest(root=root), self.assertRaises(ValidationError):
@@ -1957,7 +2029,7 @@ class PrivilegedActionTests(unittest.TestCase):
     def test_workspace_write_cannot_escape_its_configured_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "workspace"
-            root.mkdir()
+            root.mkdir(mode=0o700)
             outside = Path(directory) / "outside"
             outside.mkdir()
             (outside / "secret.txt").write_text("original")
@@ -1981,7 +2053,7 @@ class PrivilegedActionTests(unittest.TestCase):
     def test_workspace_write_refuses_to_follow_a_symlink_out_of_the_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "workspace"
-            root.mkdir()
+            root.mkdir(mode=0o700)
             outside = Path(directory) / "outside"
             outside.mkdir()
             (outside / "secret.txt").write_text("original")
@@ -2048,7 +2120,8 @@ class PrivilegedActionMatrixTests(unittest.TestCase):
         root.mkdir(parents=True, exist_ok=True)
         policy_path.write_bytes(policy_bytes)
         workspace = root / "workspace"
-        workspace.mkdir(parents=True, exist_ok=True)
+        workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        workspace.chmod(0o700)
         return RuntimeHarness(
             directory,
             documents=[result_document(action or {"kind": "silence"})] * 4,

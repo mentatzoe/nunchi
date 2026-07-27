@@ -16,6 +16,9 @@
 3. `9c80892` — changes requested, three findings, all confirmed and fixed.
    Again two were incomplete repairs: confinement was closed but *attestation*
    was not, and bounding the session pin left the staged store unbounded.
+4. `06990dd` — changes requested, two findings, both confirmed and fixed; four
+   areas closed. The workspace executor was escapable for the third distinct
+   reason.
 
 Dispositions are in [Review disposition](#review-disposition) below.
 
@@ -224,6 +227,23 @@ incomplete repairs of round-two findings. Closing an escape is not the same as
 attesting an effect, and bounding what becomes durable is not the same as
 bounding what is staged. The third finding is worse in kind — a verification
 step that reported success for a file that was not the one under review.
+
+### Round four — `06990dd`
+
+Closed: ambient isolation, failed/cancelled/uncertain continuation, the
+cancellation and authorization matrix, and the installed fresh/persistent
+probes.
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | An opened child directory can be renamed outside the root; the executor writes there and reports `sent` | **Confirmed** — reproduced. `os.stat(..., follow_symlinks=False)` refuses a symlink only as the *final* component, so a substituted intermediate directory resolved straight back to the written inode and the check passed | Two independent post-write checks: an **ancestry** walk (`..` from the written directory handle must reach the root handle's inode, which catches an opened directory being moved out) and a **rooted re-resolution** (re-walk the proposed path refusing symlinks at every component). Violation unlinks the written file and reports `unknown`. Separately, the workspace root must now be a directory owned by the runtime user with no group/other access — detection cannot stop a concurrent local attacker, so the principal is removed rather than raced. |
+| 2 | Scene evidence no longer attributable to the exact source candidate | **Confirmed** — `bda6869:src` and this head's `src` had diverged | Scenes are regenerated at the current source, and provenance now carries `nunchi_src_tree` alongside the commit. The source tree is what these observations depend on; it is stable across evidence-only commits, so attribution no longer degrades every time the packet is edited. |
+
+**Four rounds, three distinct escapes in one executor.** Predictable path →
+unpredictable staging name → rooted handles → rooted handles that keep their
+ancestry. Each repair addressed the reproduction rather than the class, and
+each regression test was written against the repair. The standing correction
+is to ask what the defect's class is and to test the property, not the patch.
 
 ## What is NOT proven
 

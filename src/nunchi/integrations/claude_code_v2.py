@@ -29,6 +29,7 @@ from pathlib import Path, PurePosixPath
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -221,6 +222,77 @@ def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
         raise
 
 
+def _assert_still_rooted(handles: list[int], parts, written_stat) -> None:
+    """Confirm the write is still inside the root *and* at the proposed path.
+
+    Two independent checks, because each catches what the other misses:
+
+    * **Ancestry.** Walking `..` from the directory handle we wrote through
+      must arrive at the root handle's inode. A rooted handle does not keep
+      its ancestry: an opened directory that is renamed out of the workspace
+      takes our writes with it, and only walking up detects that.
+    * **Rooted re-resolution.** Re-walking the proposed path from the root,
+      refusing symlinks at every component, must land on exactly the inode we
+      wrote. A plain `os.stat(..., follow_symlinks=False)` is not enough — it
+      only refuses a symlink as the *final* component and silently follows
+      intermediate ones, so a substituted parent directory resolves straight
+      back to our inode and the check passes while the file sits outside.
+    """
+    root_fd, current = handles[0], handles[-1]
+    root_stat = os.fstat(root_fd)
+
+    probe = os.open(".", os.O_RDONLY | os.O_DIRECTORY, dir_fd=current)
+    try:
+        for _ in range(len(parts) - 1):
+            parent = os.open("..", os.O_RDONLY | os.O_DIRECTORY, dir_fd=probe)
+            os.close(probe)
+            probe = parent
+        reached = os.fstat(probe)
+    finally:
+        try:
+            os.close(probe)
+        except OSError:
+            pass
+    if (reached.st_dev, reached.st_ino) != (root_stat.st_dev, root_stat.st_ino):
+        raise ConfinedPathDrift(
+            "the written directory is no longer inside the workspace root"
+        )
+
+    walk = os.open(".", os.O_RDONLY | os.O_DIRECTORY, dir_fd=root_fd)
+    try:
+        for part in parts[:-1]:
+            try:
+                nxt = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=walk,
+                )
+            except OSError as exc:
+                raise ConfinedPathDrift(
+                    "proposed workspace path no longer resolves without symlinks"
+                ) from exc
+            os.close(walk)
+            walk = nxt
+        try:
+            observed = os.stat(parts[-1], dir_fd=walk, follow_symlinks=False)
+        except OSError as exc:
+            raise ConfinedPathDrift(
+                "proposed workspace path no longer resolves"
+            ) from exc
+    finally:
+        try:
+            os.close(walk)
+        except OSError:
+            pass
+    if (observed.st_dev, observed.st_ino) != (
+        written_stat.st_dev,
+        written_stat.st_ino,
+    ):
+        raise ConfinedPathDrift(
+            "proposed workspace path no longer names the written file"
+        )
+
+
 def _write_confined(root: Path, relative: str, payload: bytes) -> str:
     """Write `payload` at `root/relative`, confined by rooted directory handles.
 
@@ -300,18 +372,16 @@ def _write_confined(root: Path, relative: str, payload: bytes) -> str:
         # path; any drift means the exact action can no longer be attested.
         written_stat = os.stat(name, dir_fd=current, follow_symlinks=False)
         try:
-            observed = os.stat(os.path.join(root, relative), follow_symlinks=False)
-        except OSError as exc:
-            raise ConfinedPathDrift(
-                "proposed workspace path no longer resolves"
-            ) from exc
-        if (observed.st_dev, observed.st_ino) != (
-            written_stat.st_dev,
-            written_stat.st_ino,
-        ):
-            raise ConfinedPathDrift(
-                "proposed workspace path no longer names the written file"
-            )
+            _assert_still_rooted(handles, parts, written_stat)
+        except ConfinedPathDrift:
+            # The bytes may have landed outside the root because the directory
+            # we held was moved there.  Remove what we wrote before reporting;
+            # an unattestable effect should not also be a lasting one.
+            try:
+                os.unlink(name, dir_fd=current)
+            except OSError:
+                pass
+            raise
         return hashlib.sha256(written).hexdigest()
     finally:
         for handle in reversed(handles):
@@ -1022,6 +1092,30 @@ class ClaudeCodeRoomRuntime:
         if not root.is_absolute():
             raise ValidationError(
                 "Claude Code authorization workspace_root must be absolute"
+            )
+        # Detection alone cannot stop a concurrent local attacker from renaming
+        # directories inside the workspace mid-write; it can only refuse to
+        # attest the result.  Requiring the root to be private to this runtime
+        # removes that principal instead of racing it.
+        try:
+            root_stat = root.stat()
+        except OSError as exc:
+            raise ValidationError(
+                f"Claude Code authorization workspace_root is unusable: {exc}"
+            ) from exc
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise ValidationError(
+                "Claude Code authorization workspace_root must be a directory"
+            )
+        if root_stat.st_uid != os.getuid():
+            raise ValidationError(
+                "Claude Code authorization workspace_root must be owned by the "
+                "runtime user"
+            )
+        if root_stat.st_mode & 0o077:
+            raise ValidationError(
+                "Claude Code authorization workspace_root must not be writable "
+                "or readable by group or other"
             )
 
         def workspace_file_write(

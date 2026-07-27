@@ -130,12 +130,26 @@ def _provenance() -> dict[str, Any]:
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         commit = "unavailable"
+    try:
+        src_tree = subprocess.run(
+            ["git", "rev-parse", "HEAD:src"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        src_tree = "unavailable"
     return {
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "command": "python3 -m evals.v2.claude_code.participant_scenes",
         "claude_version": claude_version,
         "python_version": sys.version.split()[0],
         "nunchi_commit": commit,
+        # The commit alone is a weak attribution: evidence-only commits change
+        # it without changing the participant. The packaged source tree is what
+        # these observations actually depend on, and it is what a reviewer
+        # should compare against `git rev-parse HEAD:src` at the candidate head.
+        "nunchi_src_tree": src_tree,
     }
 
 
