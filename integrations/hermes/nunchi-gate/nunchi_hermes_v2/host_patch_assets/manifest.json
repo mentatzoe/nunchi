@@ -1,0 +1,156 @@
+{
+  "files": {
+    "gateway/message_hooks.py": {
+      "operation": "create",
+      "post_mode": "100644",
+      "post_sha256": "8cdca32db125ff08b65a5ccc99aca6c897e9f777a976e950aa740376806518b4",
+      "pre_mode": null,
+      "pre_sha256": null
+    },
+    "gateway/platforms/base.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "bc2b8dbd2a58082032596aaa0261581822c3c7c636d46aea58368121c87781a6",
+      "pre_mode": "100644",
+      "pre_sha256": "6bfdf20de31ae01fbd088457b91252d2430f9bc45d0a84ba132590be54fc909f"
+    },
+    "gateway/run.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "3a4140ae5e0541d8a65a189571324d86efae0874ed1641b51dbf5100e47b3264",
+      "pre_mode": "100644",
+      "pre_sha256": "c6e0f443772e4a8a7eac0d9ccf9a4f659de5fc5493c572a69a46e4c61a8aa966"
+    },
+    "gateway/slash_commands.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "8eb02ed5436d5f663473b3c2457c3119f9c02252c7b84901328bf2226a265d5f",
+      "pre_mode": "100644",
+      "pre_sha256": "a78f12e9199ffc9c5c0019701cd91da9005bfcdd6c09b0ab0e511c5f567ff60a"
+    },
+    "hermes_cli/plugins.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "c3b319e194a0c3fe4abdc1ebe9f5748e92c6931d53f7d9e0cb4e9a44977a39de",
+      "pre_mode": "100644",
+      "pre_sha256": "0f6c28614bebb7444392625a63c2b3186039f04238fe6ca79ad62d4849b0551c"
+    },
+    "hermes_constants.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "493e07df363958e589488cbbf2febdd2c29ae13bdf51674e4f075c466a0c41b6",
+      "pre_mode": "100644",
+      "pre_sha256": "dacf56fbaf53871057044131922ba0040ce144d10c0ac19c843e091e2f4547b5"
+    },
+    "plugins/platforms/discord/adapter.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "a8e76873aa693dfdbece2c31b8aa0b21e37f2dba23b4a743cc8fd7effa32594f",
+      "pre_mode": "100644",
+      "pre_sha256": "84b0f4912d6661ab57b102bb6d0509206b6383ba1384feae80b5894d320466d7"
+    },
+    "plugins/platforms/telegram/adapter.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "81b7458bc414bf8a5106868c9cbef99219d9b4847d4498d45bfc028c8b9e44bf",
+      "pre_mode": "100644",
+      "pre_sha256": "b4fab048d4986ab49615a1b5abb0dafeade4a25196578bf93cb065b793d67c8b"
+    },
+    "tests/gateway/test_delivery_revocation_boundary.py": {
+      "operation": "create",
+      "post_mode": "100644",
+      "post_sha256": "ef05124ebcf039f8df661fcdca3e3a5cc9ba828bdda38e965a36a4461130a395",
+      "pre_mode": null,
+      "pre_sha256": null
+    },
+    "tests/gateway/test_discord_approval_mentions.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "f92310bb71683c9cd28b6888de998d9956507bb89718805c71b2944b12a4fa7d",
+      "pre_mode": "100644",
+      "pre_sha256": "7fe9aa6ca1ae7c248aeced0bd5c493a0b8e97d268679ba3f08c905fa45a7a276"
+    },
+    "tests/gateway/test_discord_pending_text_batch_shutdown.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "3afd3555fb141a9331731073b982243a5ed9999aebec0fcff6b1effccde1b332",
+      "pre_mode": "100644",
+      "pre_sha256": "77050485b1da0b9c0d8deaa5fa4400c664e4e86ebda7287e62082165631c6612"
+    },
+    "tests/gateway/test_discord_send.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "baef0b551d257c335d4a7a1bc67a07c863ece7178ee93267c8f8e869f78ca97e",
+      "pre_mode": "100644",
+      "pre_sha256": "b501753c275b75f6e25a395327b78c2fc4fe4793d9e5a4800898fce05e9f91a4"
+    },
+    "tests/gateway/test_gateway_message_hooks.py": {
+      "operation": "create",
+      "post_mode": "100644",
+      "post_sha256": "1d59a344bb21984e96b3a1c6e172b63f358fe50902cc35914e355a0409a5ea39",
+      "pre_mode": null,
+      "pre_sha256": null
+    },
+    "tests/gateway/test_session_boundary_hooks.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "e3f8f86725586a514eb19cfd62524d928ae3296c62d3d73f278071242e801079",
+      "pre_mode": "100644",
+      "pre_sha256": "db11313f0d40cbfd1ec289ef44627c848e9eb8e1669a972d754fc02d943afd8a"
+    },
+    "tests/gateway/test_stop_thread_sibling.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "7a1f21fac364e230a96aa210cf968c241b4d34a490df69f3e99ff78cb4d6ae8b",
+      "pre_mode": "100644",
+      "pre_sha256": "a455c4fe42b6d989aff0d95fb4743e12d7f899c4c307ac380f2bb761efca50fd"
+    },
+    "tests/gateway/test_telegram_group_gating.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "de7f31fb29db4ce2dc4336dc2b783ced48fb9732b3040a08c063f5c102fcb399",
+      "pre_mode": "100644",
+      "pre_sha256": "b3bb434258cb2652e82bbdfaf2b248ccbb7154f93dc71866593183e93fdda4b8"
+    },
+    "tests/gateway/test_telegram_mention_boundaries.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "9013479e746297e10a86727dd981d6778a88be9b8917ccdabc636cf3965bba87",
+      "pre_mode": "100644",
+      "pre_sha256": "987e1573abd1e0cd2a206c9c23e961407ddfffed76e90188ed667e54a54d63a4"
+    },
+    "tests/gateway/test_telegram_text_batching.py": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "2bcd70bdca04daaafc1bbcfb3e85995c9e310accd228b4aae10c86ab3e556be0",
+      "pre_mode": "100644",
+      "pre_sha256": "bd1144e67c961ef88ce29c01b4ce3fc176a8a5f584fea660f1b2bfd0b8880105"
+    },
+    "tests/hermes_cli/test_async_plugin_hooks.py": {
+      "operation": "create",
+      "post_mode": "100644",
+      "post_sha256": "741e8c6d186835ef6cdcc31b43e79d11408152d3d155584a86db8f4495bbfd2f",
+      "pre_mode": null,
+      "pre_sha256": null
+    },
+    "website/docs/developer-guide/plugins/index.md": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "39785e684ab100c4b89229e1e59e4ddcf883ea10a11d67cbfc74a9c2ee1f2257",
+      "pre_mode": "100644",
+      "pre_sha256": "bc22cd21859dead72454b9be3b2f1def897952d3cecf5f832e851ec2036dbfb9"
+    },
+    "website/docs/user-guide/features/hooks.md": {
+      "operation": "modify",
+      "post_mode": "100644",
+      "post_sha256": "3d265ba47ac8ef77cc398cced977e3a13fef2ef3134118404d7a4b3a3dd6b80a",
+      "pre_mode": "100644",
+      "pre_sha256": "5f58750ed8f785b9d7564257a57a9cec2451c711b4204adf66afeab3d6943de8"
+    }
+  },
+  "patch": "0002-v2-participant-host-seam.patch",
+  "patch_sha256": "2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885",
+  "schema_version": 2,
+  "source": "Nunchi-owned compatibility seam for untouched Hermes v2026.7.20; no upstream or developer-checkout dependency",
+  "supported_hermes_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+}

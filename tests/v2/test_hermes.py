@@ -2,7 +2,6 @@ from __future__ import annotations
 
 # Imports below the local plugin-path bootstrap are intentional.
 # ruff: noqa: E402
-
 import asyncio
 import hashlib
 import json
@@ -16,7 +15,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-
 
 PLUGIN_ROOT = Path(__file__).parents[2] / "integrations" / "hermes" / "nunchi-gate"
 if str(PLUGIN_ROOT) not in sys.path:
@@ -422,7 +420,7 @@ class HermesV2ContractTests(unittest.TestCase):
             rebound = runtime_for("10")
             self.assertNotEqual(first.room_dir, rebound.room_dir)
 
-    def test_live_recovery_evidence_requires_current_hermes_release_identity(self):
+    def test_live_recovery_evidence_requires_current_hermes_host_seam_identity(self):
         self.require_surface()
         binding = self.binding()
         payload = {
@@ -436,7 +434,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
-            "hermes_version": "2026.7.20",
+            "hermes_host_seam_sha256": "d" * 64,
             "gateway_message_hook_api_version": 2,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
@@ -450,14 +448,14 @@ class HermesV2ContractTests(unittest.TestCase):
             "later_observed_at": "2026-07-26T00:00:02+00:00",
             "later_hearing": "verified",
         }
-        with self.assertRaisesRegex(ValidationError, "different Hermes release"):
+        with self.assertRaisesRegex(ValidationError, "different Hermes host seam"):
             hermes_module._validate_live_recovery_evidence(
                 payload,
                 binding=binding,
                 hermes_profile="default",
                 participant_profile_sha256="b" * 64,
                 nunchi_artifact_sha256="c" * 64,
-                hermes_version="2026.8.1",
+                hermes_host_seam_sha256="e" * 64,
             )
 
     def test_live_recovery_evidence_rejects_profile_or_artifact_rebinding(self):
@@ -474,7 +472,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
-            "hermes_version": "2026.8.1",
+            "hermes_host_seam_sha256": "d" * 64,
             "gateway_message_hook_api_version": 2,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
@@ -503,7 +501,7 @@ class HermesV2ContractTests(unittest.TestCase):
                         hermes_profile="default",
                         participant_profile_sha256="b" * 64,
                         nunchi_artifact_sha256="c" * 64,
-                        hermes_version="2026.8.1",
+                        hermes_host_seam_sha256="d" * 64,
                     )
 
     def test_nunchi_artifact_identity_covers_shared_and_hermes_package_bytes(self):
@@ -529,30 +527,109 @@ class HermesV2ContractTests(unittest.TestCase):
             self.assertRegex(first, r"^[0-9a-f]{64}$")
             self.assertNotEqual(first, second)
 
-    def test_current_hermes_version_uses_installed_distribution_identity(self):
+    def test_current_host_source_identity_binds_exact_verified_patch_bundle(self):
         self.require_surface()
-        with mock.patch.object(
-            hermes_module.importlib_metadata,
-            "version",
-            return_value="2026.8.1",
-        ) as version:
-            self.assertEqual("2026.8.1", hermes_module._current_hermes_version())
-        version.assert_called_once_with("hermes-agent")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "gateway" / "message_hooks.py"
+            source.parent.mkdir()
+            source.write_text("API_VERSION = 2\n", encoding="utf-8")
+            host_module = SimpleNamespace(__file__=str(source))
+            gateway_module = SimpleNamespace(message_hooks=host_module)
+            file_specs = {
+                "gateway/message_hooks.py": SimpleNamespace(
+                    operation="create",
+                    pre_mode=None,
+                    pre_sha256=None,
+                    post_mode="100644",
+                    post_sha256="3" * 64,
+                ),
+                "gateway/run.py": SimpleNamespace(
+                    operation="modify",
+                    pre_mode="100644",
+                    pre_sha256="4" * 64,
+                    post_mode="100644",
+                    post_sha256="5" * 64,
+                ),
+            }
+            bundle = SimpleNamespace(
+                supported_hermes_commit="1" * 40,
+                manifest_sha256="6" * 64,
+                patch_sha256="2" * 64,
+                files=file_specs,
+            )
+            canonical = json.dumps(
+                {
+                    "files": {
+                        path: {
+                            "operation": spec.operation,
+                            "pre_mode": spec.pre_mode,
+                            "pre_sha256": spec.pre_sha256,
+                            "post_mode": spec.post_mode,
+                            "post_sha256": spec.post_sha256,
+                        }
+                        for path, spec in file_specs.items()
+                    },
+                    "manifest_sha256": bundle.manifest_sha256,
+                    "patch_sha256": bundle.patch_sha256,
+                    "schema_version": 2,
+                    "supported_hermes_commit": bundle.supported_hermes_commit,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
 
-    def test_current_hermes_version_fails_closed_when_distribution_is_missing(self):
+            with (
+                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
+                mock.patch.object(
+                    hermes_module.HostPatchBundle,
+                    "bundled",
+                    return_value=bundle,
+                ),
+                mock.patch.object(
+                    hermes_module,
+                    "inspect_host",
+                    return_value={"status": "applied"},
+                ) as inspect,
+            ):
+                actual = hermes_module._current_hermes_hook_source_sha256()
+
+            inspect.assert_called_once_with(root.resolve(), bundle)
+            self.assertEqual(hashlib.sha256(canonical).hexdigest(), actual)
+
+    def test_current_host_source_identity_fails_closed_when_patch_state_is_unverified(self):
         self.require_surface()
-        with (
-            mock.patch.object(
-                hermes_module.importlib_metadata,
-                "version",
-                side_effect=hermes_module.importlib_metadata.PackageNotFoundError,
-            ),
-            self.assertRaisesRegex(
-                ValidationError,
-                "installed Hermes release identity is unavailable",
-            ),
-        ):
-            hermes_module._current_hermes_version()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "gateway" / "message_hooks.py"
+            source.parent.mkdir()
+            source.write_text("API_VERSION = 2\n", encoding="utf-8")
+            gateway_module = SimpleNamespace(
+                message_hooks=SimpleNamespace(__file__=str(source))
+            )
+            bundle = SimpleNamespace(
+                supported_hermes_commit="1" * 40,
+                patch_sha256="2" * 64,
+                post_apply_sha256={"gateway/message_hooks.py": "3" * 64},
+            )
+            with (
+                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
+                mock.patch.object(
+                    hermes_module.HostPatchBundle,
+                    "bundled",
+                    return_value=bundle,
+                ),
+                mock.patch.object(
+                    hermes_module,
+                    "inspect_host",
+                    side_effect=hermes_module.HostPatchError("divergent host"),
+                ),
+                self.assertRaisesRegex(
+                    ValidationError,
+                    "Hermes host seam identity is unavailable",
+                ),
+            ):
+                hermes_module._current_hermes_hook_source_sha256()
 
     def test_hermes_runtime_declares_only_delivered_event_visibility(self):
         self.require_surface()
@@ -1612,7 +1689,7 @@ class HermesV2ContractTests(unittest.TestCase):
         register(
             ctx,
             config_loader=broken,
-            hermes_version_loader=lambda: "2026.8.1",
+            host_identity_loader=lambda: "d" * 64,
         )
         result = asyncio.run(
             ctx.hooks["gateway_message"](
@@ -1641,7 +1718,7 @@ class HermesV2ContractTests(unittest.TestCase):
                 rooms=(),
                 provenance={"sha256": "c" * 64},
             ),
-            hermes_version_loader=lambda: "2026.8.1",
+            host_identity_loader=lambda: "d" * 64,
         )
 
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
@@ -1661,7 +1738,7 @@ class HermesV2ContractTests(unittest.TestCase):
                 rooms=(),
                 provenance={"sha256": "c" * 64},
             ),
-            hermes_version_loader=lambda: "2026.8.1",
+            host_identity_loader=lambda: "d" * 64,
         )
         self.assertEqual(
             {"gateway_message", "gateway_session_cancel", "gateway_shutdown"},
@@ -1673,10 +1750,16 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
-        self.assertEqual("2026.8.1", probe["hermes_version"])
-        self.assertNotIn("host_seam_sha256", probe)
-        self.assertNotIn("host_patch_sha256", probe)
-        self.assertNotIn("supported_hermes_commit", probe)
+        self.assertEqual("d" * 64, probe["host_seam_sha256"])
+        self.assertEqual(
+            "2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885",
+            probe["host_patch_sha256"],
+        )
+        self.assertEqual(
+            "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+            probe["supported_hermes_commit"],
+        )
+        self.assertNotIn("hermes_version", probe)
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])
         self.assertEqual(2, probe["participant_interface_version"])
@@ -1707,17 +1790,17 @@ class HermesV2ContractTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-    def test_register_fails_before_configuration_when_release_identity_is_unavailable(self):
+    def test_register_fails_before_configuration_when_host_seam_identity_is_unavailable(self):
         self.require_surface()
         ctx = FakeCtx()
         config_loader = mock.Mock()
 
-        with self.assertRaisesRegex(ValidationError, "release identity"):
+        with self.assertRaisesRegex(ValidationError, "host seam identity"):
             register(
                 ctx,
                 config_loader=config_loader,
-                hermes_version_loader=mock.Mock(
-                    side_effect=ValidationError("installed Hermes release identity is unavailable")
+                host_identity_loader=mock.Mock(
+                    side_effect=ValidationError("Hermes host seam identity is unavailable")
                 ),
             )
 
@@ -1741,7 +1824,7 @@ class HermesV2ContractTests(unittest.TestCase):
             plugin = register(
                 ctx,
                 config_loader=load,
-                hermes_version_loader=lambda: "2026.8.1",
+                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -1771,7 +1854,7 @@ class HermesV2ContractTests(unittest.TestCase):
             register(
                 ctx,
                 config_loader=load,
-                hermes_version_loader=lambda: "2026.8.1",
+                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -1798,7 +1881,7 @@ class HermesV2ContractTests(unittest.TestCase):
             plugin = register(
                 ctx,
                 config_loader=configs.__getitem__,
-                hermes_version_loader=lambda: "2026.8.1",
+                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -2150,8 +2233,8 @@ class HermesV2ContractTests(unittest.TestCase):
             )
             with (
                 mock.patch(
-                    "nunchi_hermes_v2._current_hermes_version",
-                    return_value="2026.8.1",
+                    "nunchi_hermes_v2._current_hermes_hook_source_sha256",
+                    return_value="a" * 64,
                 ),
                 self.assertRaisesRegex(
                     ValidationError,

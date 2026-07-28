@@ -1,9 +1,10 @@
 # V2 platform interface and conformance
 
 This is the complete downstream interface for platform adapters. The Hermes
-adapter is implemented against a proposed public gateway-message hook API, but
-remains release-blocked and cannot be commissioned until that API ships in an
-official Hermes release. Claude Code remains unimplemented and unarmed.
+adapter is delivered as a normal Nunchi wheel plugin plus a Nunchi-owned,
+exact-version compatibility seam for untouched Hermes `v2026.7.20`; it has no
+upstream NousResearch or developer-checkout dependency. Claude Code remains
+unimplemented and unarmed.
 
 ## Required owners
 

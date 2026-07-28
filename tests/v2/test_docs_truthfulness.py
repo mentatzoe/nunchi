@@ -74,8 +74,8 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
             "complete downstream interface for platform adapters",
-            "Hermes adapter is implemented against a proposed public gateway-message hook API",
-            "remains release-blocked",
+            "Nunchi-owned, exact-version compatibility seam",
+            "no upstream NousResearch or developer-checkout dependency",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",
@@ -88,18 +88,38 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
 
-    def test_hermes_guide_does_not_advertise_private_host_mutation_as_support(self) -> None:
+    def test_hermes_guide_keeps_compatibility_delivery_inside_nunchi(self) -> None:
         normalized = " ".join(HERMES_README.read_text(encoding="utf-8").split())
         for phrase in (
-            "not currently commissionable",
-            "no official Hermes release currently contains that interface",
-            "does not modify Hermes source",
-            "private branch, local patch, or source checkout is not a supported substitute",
-            "upstream API accepted and shipped in an official Hermes release",
+            "complete compatibility implementation travels in the Nunchi artifact",
+            "do not depend on an upstream NousResearch change",
+            "untouched Hermes `v2026.7.20`",
+            "closed, exact-version compatibility patch",
+            "transactional applicator",
+            "nunchi-hermes-v2-host-patch",
+            "No repository checkout or editable install counts",
         ):
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
-        self.assertNotIn("nunchi-hermes-v2-host-patch", normalized)
+
+    def test_hermes_guide_documents_the_actual_config_generator_interface(self) -> None:
+        text = HERMES_README.read_text(encoding="utf-8")
+        for flag in (
+            "--hermes-profile",
+            "--platform",
+            "--room-id",
+            "--actor-id",
+            "--participant-id",
+            "--profile-id",
+            "--instructions-file",
+            "--output-dir",
+            "--state-root",
+        ):
+            with self.subTest(required_flag=flag):
+                self.assertIn(flag, text)
+        for obsolete in ("--config", "--participant-profile", "--state-dir"):
+            with self.subTest(obsolete_flag=obsolete):
+                self.assertNotIn(obsolete, text)
 
     def test_spec_workflow_remains_retired(self) -> None:
         self.assertFalse(

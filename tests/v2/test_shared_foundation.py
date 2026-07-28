@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import contextvars
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from pathlib import Path
+import os
 import tempfile
 import threading
 import time
 import unittest
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
 
+from nunchi.adapters.runtime import ReferenceAdapterRuntime
 from nunchi.attention import (
     AttentionEngine,
     AttentionPolicy,
@@ -899,6 +902,66 @@ class AttentionAndHostTests(unittest.TestCase):
             path.write_text(json.dumps({**payload, "instructions": "swapped"}))
             with self.assertRaises(ValidationError):
                 ParticipantProfile.load(path, expected_sha256=digest)
+
+
+class ReferenceAdapterIdentityTests(unittest.TestCase):
+    def test_reference_adapter_plumbs_opaque_installation_id_into_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile_data = {
+                "profile_id": "vigil",
+                "participant_id": "vigil",
+                "actor_id": "discord:bot:9",
+                "instructions": "Contribute carefully.",
+                "provenance": "trusted:test",
+            }
+            raw = json.dumps(profile_data).encode()
+            profile_path = root / "profile.json"
+            profile_path.write_bytes(raw)
+            config = {
+                "schema_version": 2,
+                "binding": {
+                    "participant_id": "vigil",
+                    "actor_id": "discord:bot:9",
+                    "installation_id": "discord:installation:opaque-1",
+                    "platform": "discord",
+                    "room_id": "42",
+                    "continuity_scope_id": "discord:42",
+                },
+                "profile": {
+                    "path": str(profile_path),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                },
+                "attention": {
+                    "policy": {"preattention_enabled": False},
+                    "model": {},
+                },
+                "participant_model": {
+                    "model": "test-participant",
+                    "api_key_env": "TEST_NUNCHI_PARTICIPANT_API_KEY",
+                },
+                "limits": {},
+                "state_directory": str(root / "state"),
+            }
+            with mock.patch.dict(
+                os.environ,
+                {"TEST_NUNCHI_PARTICIPANT_API_KEY": "test-only"},
+                clear=False,
+            ):
+                runtime = ReferenceAdapterRuntime(
+                    surface="discord",
+                    config=config,
+                    transport=RecordingTransport(),
+                )
+
+            self.assertEqual(
+                runtime.binding.installation_id,
+                "discord:installation:opaque-1",
+            )
+            self.assertEqual(
+                runtime.pipeline.observation.binding.installation_id,
+                "discord:installation:opaque-1",
+            )
 
 
 class AuthorizationTests(unittest.TestCase):

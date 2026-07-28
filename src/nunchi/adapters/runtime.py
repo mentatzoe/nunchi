@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from copy import deepcopy
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
+from collections.abc import Mapping
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, TextIO
 
 from .. import __version__
@@ -35,7 +35,6 @@ from ..participant_model import OpenAICompatibleParticipant
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from .v2 import NORMALIZERS
-
 
 CAPABILITIES = {
     "channel": {
@@ -176,6 +175,7 @@ class ReferenceAdapterRuntime:
         allowed_binding = {
             "participant_id",
             "actor_id",
+            "installation_id",
             "platform",
             "room_id",
             "continuity_scope_id",

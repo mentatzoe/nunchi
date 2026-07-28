@@ -1,90 +1,66 @@
 # Hermes integration — Nunchi V2
 
-`nunchi-v2` is a normally installed Hermes plugin packaged in the Nunchi wheel.
-It is not an admission gate and it does not modify Hermes source.
+`nunchi-v2` is a wheel-distributed Hermes plugin. The complete compatibility
+implementation travels in the Nunchi artifact: operators do not depend on an
+upstream NousResearch change, a Nunchi-maintained Hermes fork, or a developer's
+pre-patched checkout.
 
-## Current support state
+## Supported host
 
-The adapter is **not currently commissionable**. It requires public Hermes
-gateway-message hook API version 2, and no official Hermes release currently
-contains that interface. A private branch, local patch, or source checkout is
-not a supported substitute.
+The current artifact supports untouched Hermes `v2026.7.20`, exact commit
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. Stock Hermes does not expose the
+required participant boundary, so the wheel includes a closed, exact-version
+compatibility patch and transactional applicator.
 
-When the required API ships, the plugin will:
+Check and apply it with:
 
-1. receive only host-admitted ordinary messages through an immutable terminal
-   hook;
-2. record the native event in Nunchi's shared V2 observation provider;
-3. apply the participant's delegated attention exactly once;
-4. invoke one ordinary participant turn for WAKE, DEFER, trusted bypass, or the
-   configured operational fallback;
-5. dispatch ordinary output only through a host-owned, route-bound delivery
-   capability with authenticated native acknowledgement;
-6. fence routed work through public session-cancel and gateway-shutdown hooks.
+```bash
+nunchi-hermes-v2-host-patch \
+  --hermes-source /absolute/path/to/hermes-agent \
+  --check
 
-There is no V1 classifier, normal-agent fallback, private adapter access,
-session-store access, or checkout-patching path.
+nunchi-hermes-v2-host-patch \
+  --hermes-source /absolute/path/to/hermes-agent \
+  --apply
+```
 
-## Required released Hermes API
+The first command accepts only the complete untouched stock identity. The
+second materializes the reviewed result in isolation, atomically applies the
+closed path set, verifies every post-image, and rolls back on failure. Repeated
+application is verification-only and idempotent.
 
-The installed Hermes distribution must expose:
+The canonical manifest, patch bytes, applicator, package-data declaration, and
+adversarial tests all live in this repository and wheel. See
+[`docs/integrations/hermes-v2-host-seam.md`](../../docs/integrations/hermes-v2-host-seam.md)
+for exact digests and safety semantics.
 
-- `PluginContext.gateway_message_hook_api_version == 2`;
-- `gateway_message`, `gateway_session_cancel`, and `gateway_shutdown` hooks;
-- immutable normalized event and route values;
-- isolated terminal dispatch after command, authorization, replay, startup, and
-  other host control paths;
-- route-bound `send`, `reply`, and `react` capabilities that return native,
-  adapter-authenticated acknowledgement evidence;
-- revocation settlement that does not return while a started native effect is
-  still live, including when a callback suppresses task cancellation.
+## Configure the plugin
 
-Registration fails closed if the versioned API is absent. The public probe also
-fails closed if a behavior-changing legacy pre-dispatch hook coexists.
-
-## Installation shape after a compatible release
-
-Install one exact Nunchi wheel into the same Python environment as the released
-Hermes distribution. Hermes discovers the `nunchi-v2` entry point in the
-`hermes_agent.plugins` group. No repository checkout or editable install counts
-as clean installation evidence.
-
-Generate a closed profile-bound configuration:
+After the exact seam is verified, generate one closed profile-bound config:
 
 ```bash
 nunchi-hermes-v2-config \
-  --config /absolute/path/to/nunchi-v2.json \
-  --participant-profile /absolute/path/to/participant-profile.json \
+  --hermes-profile default \
   --platform discord \
   --room-id 1234567890 \
-  --participant-id aleph \
   --actor-id discord:actor:1234 \
-  --hermes-profile default \
-  --state-dir /absolute/private/state \
+  --participant-id aleph \
+  --profile-id aleph \
+  --instructions-file /absolute/path/to/participant-instructions.md \
+  --output-dir /absolute/private/config \
+  --state-root /absolute/private/state \
   --provenance trusted:operator-config
 ```
 
-The adapter's Hermes profile maps into shared core as the opaque,
-platform-neutral `installation_id="hermes:<profile>"`. A multiplexed gateway
-loads one fail-closed Nunchi instance per immutable routed profile.
+Hermes discovers the `nunchi-v2` entry point normally. Adapter-local profile
+names map to the shared platform-neutral opaque identity
+`installation_id="hermes:<profile>"`.
 
-Suppression remains disabled unless private live-recovery evidence binds the
-exact released Hermes version, Nunchi artifact digest, profile, participant,
-actor, room, continuity scope, and a verified later-hearing scene.
+## Commissioning boundary
 
-## Verification boundary
-
-Before this integration can be described as supported, the exact same candidate
-must pass all of these independent gates:
-
-- upstream API accepted and shipped in an official Hermes release;
-- reproducible Nunchi wheel build;
-- clean installation into that released Hermes environment;
-- host entry-point discovery and versioned API registration;
-- deterministic and adversarial lifecycle/receipt suites;
-- exact-current independent review;
-- separately authorized live Discord and Telegram commissioning with native
-  ingress and acknowledgement identities.
-
-Source tests establish source behavior only. They do not establish release
-availability, clean installation, live transport parity, or commissioning.
+Source tests and successful patch application are not live commissioning. No
+repository checkout or editable install counts as clean artifact evidence.
+Before claiming a deployed room works, the exact wheel + stock commit + patch
+manifest + config must pass clean-install discovery, deterministic lifecycle
+and receipt tests, independent exact-byte review, and separately authorized
+native Discord/Telegram canaries.

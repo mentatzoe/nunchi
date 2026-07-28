@@ -5,26 +5,40 @@ source suite is not installed or live evidence.
 
 ## Current integration scope
 
-The exact local successor removes the Nunchi-owned Hermes checkout patch,
-applicator, patch assets, source-inventory admission, and patch CLI. The wheel
-retains a normal `hermes_agent.plugins` entry point for the V2 adapter, but
-released Hermes `v2026.7.20` and current main do not provide the required public
-gateway-message API. Hermes support is therefore **missing and release-blocked**:
-the candidate is not commissionable, releasable as a working Hermes integration,
-or merge-ready until that API ships in an official Hermes release and this
-adapter is retested against it. No stock Hermes checkout was modified.
+The active successor restores Nunchi's established plugin-contained compatibility
+architecture. The wheel owns the exact-version Hermes seam, transactional
+applicator, manifest, package data, CLI, plugin entry point, and tests. It does
+not depend on an upstream NousResearch change, a Nunchi-maintained Hermes fork,
+or a developer's pre-patched checkout.
 
-For local Nunchi candidate `d067eb50e9a9112ae3aadf9470e1c93c2e6c5264`
-(tree `3e2dd0b4b5f7217cfbca495968a09cbbf8f1543e`), the complete V2 source
-suite passed with 401 tests and 812 subtests. Two `SOURCE_DATE_EPOCH`-pinned
-wheel builds were byte-identical at SHA-256
-`d1e13272087675c4260a9dde1acf4b16efd67c08be03c1cded3a1905a6d9b473`.
-A clean virtualenv loaded the `nunchi-v2` entry point and its callable
-`register`; the wheel contained no host-patch assets or host-patch API. This is
-source/artifact evidence only, not installed-host or live commissioning proof.
-Independent exact-current review, an official supporting Hermes release, live
-Discord and Telegram commissioning, remote integration, and review closure all
-remain pending. Claude Code remains excluded.
+The compatibility seam was regenerated from a disposable worktree based on
+untouched Hermes release `v2026.7.20`, commit
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. That worktree is only a
+patch-generation fixture; it is not an upstream deliverable or an operator
+dependency. The exported 21-path patch SHA-256 is
+`2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885`;
+the closed manifest SHA-256 is
+`325aacfdf0cb5ca4c2f73d09a136f934d5e264b9fbd81ca09ac8db2ea1ab4936`.
+
+On the generation fixture, 171 focused and neighbouring hook, delivery,
+Discord, Telegram, batching, and shutdown tests passed. Ruff passed over every
+Python path changed from stock, and the stock-to-seam diff check was clean.
+
+A separate disposable clone whose origin is
+`https://github.com/NousResearch/hermes-agent.git` was reset and cleaned back to
+the exact stock commit. The applicator then reported, in order: `ready`;
+`applied` with `changed: true`; `applied` with `changed: false`; and a second
+idempotent apply with `changed: false`. That patched stock clone passed the same
+171 tests. After its normal virtual environment and test caches existed, a
+post-test applicator check still proved the exact applied state.
+
+The current Nunchi source candidate passed the complete V2 suite with 434 tests
+and 826 subtests. The focused Hermes adapter, applicator, documentation, and
+reference-adapter identity group passed 92 tests and 130 subtests. Narrowed Ruff
+import/context-manager checks and `git diff --check` passed. These are source
+candidate and patched-stock receipts; exact committed-wheel rebuild/install,
+independent exact-byte review, remote publication, review closure, and any
+separately authorized live Discord/Telegram commissioning remain pending.
 
 ## Historical shared-foundation candidate scope
 
