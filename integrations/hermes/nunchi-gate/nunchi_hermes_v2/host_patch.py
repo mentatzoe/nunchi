@@ -17,6 +17,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
+from importlib.util import find_spec
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
@@ -27,7 +28,7 @@ except ImportError:  # pragma: no cover - the supported Hermes seam is POSIX-onl
 
 
 # Updated only when the reviewed bundled manifest is intentionally regenerated.
-BUNDLED_MANIFEST_SHA256 = "325aacfdf0cb5ca4c2f73d09a136f934d5e264b9fbd81ca09ac8db2ea1ab4936"
+BUNDLED_MANIFEST_SHA256 = "80757486c13fa0ac2305865bdcc3af5abe337cf81e7e08d4f6f8e69011cb0d83"
 
 
 class HostPatchError(RuntimeError):
@@ -44,12 +45,21 @@ class HostPatchFile:
 
 
 @dataclass(frozen=True)
+class HostInventoryFile:
+    sha256: str
+    mode: str
+
+
+@dataclass(frozen=True)
 class HostPatchBundle:
     supported_hermes_commit: str
     manifest_sha256: str
     patch_sha256: str
     patch_bytes: bytes
     files: Mapping[str, HostPatchFile]
+    stock_inventory: Mapping[str, HostInventoryFile] | None = None
+    supported_distribution_name: str | None = None
+    supported_distribution_version: str | None = None
 
     @property
     def post_apply_sha256(self) -> Mapping[str, str]:
@@ -133,8 +143,9 @@ class HostPatchBundle:
         manifest_sha256: str,
         patch_bytes: bytes,
     ) -> HostPatchBundle:
-        if not isinstance(manifest, dict) or manifest.get("schema_version") != 2:
+        if not isinstance(manifest, dict) or manifest.get("schema_version") not in {2, 3}:
             raise HostPatchError("unsupported host-patch manifest schema")
+        schema_version = manifest["schema_version"]
         allowed_keys = {
             "schema_version",
             "patch",
@@ -142,6 +153,8 @@ class HostPatchBundle:
             "supported_hermes_commit",
             "files",
             "source",
+            "stock_inventory",
+            "supported_distribution",
         }
         if not set(manifest).issubset(allowed_keys):
             raise HostPatchError("host-patch manifest has unknown fields")
@@ -191,6 +204,52 @@ class HostPatchBundle:
                 post_sha256=post_sha,
                 post_mode=post_mode,
             )
+        stock_inventory: dict[str, HostInventoryFile] | None = None
+        distribution_name: str | None = None
+        distribution_version: str | None = None
+        if schema_version == 3:
+            raw_distribution = manifest.get("supported_distribution")
+            raw_inventory = manifest.get("stock_inventory")
+            if not isinstance(raw_distribution, dict) or set(raw_distribution) != {
+                "name",
+                "version",
+            }:
+                raise HostPatchError("host-patch manifest has an invalid distribution identity")
+            distribution_name = raw_distribution.get("name")
+            distribution_version = raw_distribution.get("version")
+            if (
+                not isinstance(distribution_name, str)
+                or not distribution_name
+                or not isinstance(distribution_version, str)
+                or not distribution_version
+            ):
+                raise HostPatchError("host-patch manifest has an invalid distribution identity")
+            if not isinstance(raw_inventory, dict) or not raw_inventory:
+                raise HostPatchError("host-patch manifest has no stock installation inventory")
+            stock_inventory = {}
+            for name, raw in raw_inventory.items():
+                if not isinstance(name, str) or not _safe_relative_path(name):
+                    raise HostPatchError("host-patch inventory contains an unsafe path")
+                if not isinstance(raw, dict) or set(raw) != {"mode", "sha256"}:
+                    raise HostPatchError("host-patch inventory contains an invalid record")
+                digest = _optional_digest(raw.get("sha256"))
+                mode = _optional_mode(raw.get("mode"))
+                if digest is None or mode is None:
+                    raise HostPatchError("host-patch inventory contains an incomplete record")
+                stock_inventory[name] = HostInventoryFile(sha256=digest, mode=mode)
+            for name, spec in files.items():
+                inventory = stock_inventory.get(name)
+                if spec.operation == "create":
+                    if inventory is not None:
+                        raise HostPatchError("manifest create path exists in stock inventory")
+                elif (
+                    inventory is None
+                    or inventory.sha256 != spec.pre_sha256
+                    or inventory.mode != spec.pre_mode
+                ):
+                    raise HostPatchError("manifest preimage does not match stock inventory")
+        elif "stock_inventory" in manifest or "supported_distribution" in manifest:
+            raise HostPatchError("legacy host-patch manifest contains installed-distribution fields")
         patch_shape = _parse_patch_shape(patch_bytes)
         if set(patch_shape) != set(files):
             raise HostPatchError("host patch and manifest closed path/mode set mismatch")
@@ -209,6 +268,9 @@ class HostPatchBundle:
             patch_sha256=expected_patch_sha,
             patch_bytes=patch_bytes,
             files=files,
+            stock_inventory=stock_inventory,
+            supported_distribution_name=distribution_name,
+            supported_distribution_version=distribution_version,
         )
 
 
@@ -372,8 +434,12 @@ def _validated_root(source: Path) -> Path:
     try:
         root_info = root.lstat()
     except OSError as exc:
-        raise HostPatchError("cannot inspect Hermes repository directory") from exc
+        raise HostPatchError("cannot inspect Hermes installation directory") from exc
     _verify_owned_directory(root_info)
+    return root
+
+
+def _validate_git_root(root: Path) -> None:
     try:
         git_info = (root / ".git").lstat()
         index_info = (root / ".git" / "index").lstat()
@@ -393,14 +459,13 @@ def _validated_root(source: Path) -> Path:
         raise HostPatchError("cannot resolve Hermes repository root") from exc
     if discovered != root:
         raise HostPatchError("Hermes source must be the repository root")
-    return root
 
 
 def _verify_owned_directory(info: os.stat_result) -> None:
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
-        raise HostPatchError("Hermes repository directory ownership mismatch")
+        raise HostPatchError("Hermes installation directory ownership mismatch")
     if stat.S_IMODE(info.st_mode) & 0o022:
-        raise HostPatchError("Hermes repository directory mode is group/other writable")
+        raise HostPatchError("Hermes installation directory mode is group/other writable")
 
 
 def _head(root: Path) -> str:
@@ -500,6 +565,7 @@ def _filesystem_entries(
     *,
     pinned_root_fd: int | None = None,
     allow_runtime_artifacts: bool = False,
+    included_top_levels: set[str] | None = None,
 ) -> tuple[dict[str, os.stat_result], dict[str, _InventoryLeaf]]:
     directories: dict[str, os.stat_result] = {}
     leaves: dict[str, _InventoryLeaf] = {}
@@ -510,6 +576,12 @@ def _filesystem_entries(
         except OSError as exc:
             raise HostPatchError("cannot inventory Hermes filesystem") from exc
         for entry in entries:
+            if (
+                not prefix
+                and included_top_levels is not None
+                and entry.name not in included_top_levels
+            ):
+                continue
             if not prefix and entry.name == ".git":
                 continue
             relative = f"{prefix}/{entry.name}" if prefix else entry.name
@@ -614,10 +686,23 @@ def _filesystem_entries(
             leaves[relative] = _InventoryLeaf(info=opened, data=data)
 
         try:
-            closing_names = {entry.name for entry in os.scandir(directory_fd)}
+            closing_names = {
+                entry.name
+                for entry in os.scandir(directory_fd)
+                if prefix
+                or included_top_levels is None
+                or entry.name in included_top_levels
+            }
         except OSError as exc:
             raise HostPatchError("cannot close Hermes filesystem inventory") from exc
-        if closing_names != {entry.name for entry in entries}:
+        opening_names = {
+            entry.name
+            for entry in entries
+            if prefix
+            or included_top_levels is None
+            or entry.name in included_top_levels
+        }
+        if closing_names != opening_names:
             raise HostPatchError("Hermes filesystem directory changed during inventory")
 
     root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -722,6 +807,44 @@ def _verify_filesystem(
             raise HostPatchError("Hermes filesystem content mismatch")
 
 
+def _verify_installed_filesystem(
+    root: Path,
+    bundle: HostPatchBundle,
+    *,
+    applied: bool,
+    pinned_root_fd: int | None = None,
+) -> None:
+    inventory = bundle.stock_inventory
+    if inventory is None:
+        raise HostPatchError("host-patch manifest has no stock installation inventory")
+    expected: dict[str, HostInventoryFile] = dict(inventory)
+    if applied:
+        for path, spec in bundle.files.items():
+            if spec.post_sha256 is None or spec.post_mode is None:
+                expected.pop(path, None)
+            else:
+                expected[path] = HostInventoryFile(
+                    sha256=spec.post_sha256,
+                    mode=spec.post_mode,
+                )
+    top_levels = {PurePosixPath(path).parts[0] for path in expected}
+    top_levels.update(PurePosixPath(path).parts[0] for path in bundle.files)
+    directories, leaves = _filesystem_entries(
+        root,
+        pinned_root_fd=pinned_root_fd,
+        allow_runtime_artifacts=True,
+        included_top_levels=top_levels,
+    )
+    if set(leaves) != set(expected) or set(directories) != _expected_directories(set(expected)):
+        raise HostPatchError("Hermes installation inventory mismatch")
+    for path, leaf in leaves.items():
+        identity = expected[path]
+        if _mode_for_info(leaf.info) != identity.mode:
+            raise HostPatchError("Hermes installation mode mismatch")
+        if hashlib.sha256(leaf.data).hexdigest() != identity.sha256:
+            raise HostPatchError("Hermes installation content mismatch")
+
+
 def _verify_root_descriptor(root: Path, root_fd: int) -> None:
     try:
         opened = os.fstat(root_fd)
@@ -742,6 +865,17 @@ def _verify_state(
 ) -> None:
     if pinned_root_fd is not None:
         _verify_root_descriptor(root, pinned_root_fd)
+    if bundle.stock_inventory is not None:
+        _verify_installed_filesystem(
+            root,
+            bundle,
+            applied=applied,
+            pinned_root_fd=pinned_root_fd,
+        )
+        if pinned_root_fd is not None:
+            _verify_root_descriptor(root, pinned_root_fd)
+        return
+    _validate_git_root(root)
     if _head(root) != bundle.supported_hermes_commit:
         raise HostPatchError("unsupported Hermes commit")
     head_tree = _tree_at(root, bundle.supported_hermes_commit)
@@ -761,6 +895,8 @@ def _verify_state(
 
 
 def _materialized_patch(root: Path, bundle: HostPatchBundle) -> dict[str, _Snapshot]:
+    if bundle.stock_inventory is not None:
+        return _materialized_installed_patch(root, bundle)
     with tempfile.TemporaryDirectory(prefix="nunchi-host-patch-") as temporary:
         clone = Path(temporary) / "repo"
         cloned = subprocess.run(
@@ -811,21 +947,150 @@ def _materialized_patch(root: Path, bundle: HostPatchBundle) -> dict[str, _Snaps
         return plan
 
 
+def _materialized_installed_patch(
+    root: Path,
+    bundle: HostPatchBundle,
+) -> dict[str, _Snapshot]:
+    with tempfile.TemporaryDirectory(prefix="nunchi-installed-host-patch-") as temporary:
+        work = Path(temporary) / "work"
+        work.mkdir()
+        _git(work, "init", "--quiet")
+        for path, spec in bundle.files.items():
+            if spec.pre_sha256 is None or spec.pre_mode is None:
+                continue
+            source = root / path
+            target = work / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                data = source.read_bytes()
+            except OSError as exc:
+                raise HostPatchError("cannot materialize installed host-patch preimage") from exc
+            if hashlib.sha256(data).hexdigest() != spec.pre_sha256:
+                raise HostPatchError("installed host-patch preimage digest mismatch")
+            target.write_bytes(data)
+            target.chmod(int(spec.pre_mode[-3:], 8))
+        _git(work, "add", "--all")
+        base_index = _index_tree(work)
+        applied = _git(
+            work,
+            "apply",
+            "--cached",
+            "--index",
+            "--whitespace=error-all",
+            "-",
+            input_bytes=bundle.patch_bytes,
+            check=False,
+        )
+        if applied.returncode != 0:
+            raise HostPatchError("host patch does not apply to installed stock preimages")
+        index = _index_tree(work)
+        plan: dict[str, _Snapshot] = {}
+        for path, spec in bundle.files.items():
+            entry = index.get(path)
+            if spec.post_sha256 is None:
+                if entry is not None:
+                    raise HostPatchError("isolated patch result retained a deleted path")
+                plan[path] = _Snapshot(False, None, None)
+                continue
+            if spec.post_mode is None or entry is None or entry.mode != spec.post_mode:
+                raise HostPatchError("isolated patch result mode mismatch")
+            data = _git(work, "cat-file", "blob", entry.oid).stdout
+            if hashlib.sha256(data).hexdigest() != spec.post_sha256:
+                raise HostPatchError("isolated patch result digest mismatch")
+            plan[path] = _Snapshot(True, data, int(spec.post_mode[-3:], 8))
+        changed = {
+            path
+            for path in set(index) | set(base_index)
+            if index.get(path) != base_index.get(path)
+        }
+        if changed != set(bundle.files):
+            raise HostPatchError("isolated patch result changed a path outside the manifest")
+        return plan
+
+
+def _materialized_installed_rollback(
+    root: Path,
+    bundle: HostPatchBundle,
+) -> dict[str, _Snapshot]:
+    with tempfile.TemporaryDirectory(prefix="nunchi-installed-host-rollback-") as temporary:
+        work = Path(temporary) / "work"
+        work.mkdir()
+        _git(work, "init", "--quiet")
+        for path, spec in bundle.files.items():
+            if spec.post_sha256 is None or spec.post_mode is None:
+                continue
+            source = root / path
+            target = work / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                data = source.read_bytes()
+            except OSError as exc:
+                raise HostPatchError("cannot materialize installed host rollback") from exc
+            if hashlib.sha256(data).hexdigest() != spec.post_sha256:
+                raise HostPatchError("installed host rollback postimage digest mismatch")
+            target.write_bytes(data)
+            target.chmod(int(spec.post_mode[-3:], 8))
+        _git(work, "add", "--all")
+        applied = _git(
+            work,
+            "apply",
+            "--cached",
+            "--index",
+            "--reverse",
+            "--whitespace=error-all",
+            "-",
+            input_bytes=bundle.patch_bytes,
+            check=False,
+        )
+        if applied.returncode != 0:
+            raise HostPatchError("host patch cannot reconstruct installed stock preimages")
+        index = _index_tree(work)
+        plan: dict[str, _Snapshot] = {}
+        for path, spec in bundle.files.items():
+            entry = index.get(path)
+            if spec.pre_sha256 is None:
+                if entry is not None:
+                    raise HostPatchError("isolated rollback retained a created path")
+                plan[path] = _Snapshot(False, None, None)
+                continue
+            if spec.pre_mode is None or entry is None or entry.mode != spec.pre_mode:
+                raise HostPatchError("isolated rollback result mode mismatch")
+            data = _git(work, "cat-file", "blob", entry.oid).stdout
+            if hashlib.sha256(data).hexdigest() != spec.pre_sha256:
+                raise HostPatchError("isolated rollback result digest mismatch")
+            plan[path] = _Snapshot(True, data, int(spec.pre_mode[-3:], 8))
+        return plan
+
+
+def _stock_plan(root: Path, bundle: HostPatchBundle) -> dict[str, _Snapshot]:
+    if bundle.stock_inventory is not None:
+        return _materialized_installed_rollback(root, bundle)
+    tree = _tree_at(root, bundle.supported_hermes_commit)
+    plan: dict[str, _Snapshot] = {}
+    for path, spec in bundle.files.items():
+        if spec.pre_sha256 is None:
+            plan[path] = _Snapshot(False, None, None)
+            continue
+        entry = tree.get(path)
+        if spec.pre_mode is None or entry is None or entry.mode != spec.pre_mode:
+            raise HostPatchError("stock rollback identity mismatch")
+        data = _git(root, "cat-file", "blob", entry.oid).stdout
+        if hashlib.sha256(data).hexdigest() != spec.pre_sha256:
+            raise HostPatchError("stock rollback digest mismatch")
+        plan[path] = _Snapshot(True, data, int(spec.pre_mode[-3:], 8))
+    return plan
+
+
 @contextlib.contextmanager
 def _transaction_lock(root: Path) -> Iterator[None]:
     if fcntl is None:
         raise HostPatchError("host patch transactions require POSIX file locking")
-    lock_path = root / ".git" / "nunchi-v2-host-patch.lock"
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
+        descriptor = os.open(root, flags)
         lock_info = os.fstat(descriptor)
-        if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != os.getuid():
-            raise OSError("unsafe host-patch lock file")
-        os.fchmod(descriptor, 0o600)
+        _verify_owned_directory(lock_info)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
     except OSError as exc:
         if descriptor is not None:
@@ -1284,8 +1549,6 @@ def _rollback_plan(
 
 def inspect_host(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
     root = _validated_root(source)
-    if _head(root) != bundle.supported_hermes_commit:
-        raise HostPatchError("unsupported Hermes commit")
     touched = _snapshot_paths(root, tuple(bundle.files))
     if _snapshot_content_matches(touched, bundle, applied=True):
         _verify_state(root, bundle, applied=True)
@@ -1373,6 +1636,65 @@ def apply_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
         return _result(root, bundle, status="applied", changed=True)
 
 
+def rollback_host_patch(source: Path, bundle: HostPatchBundle) -> dict[str, Any]:
+    root = _validated_root(source)
+    with _transaction_lock(root):
+        state = inspect_host(root, bundle)
+        if state["status"] == "ready":
+            return state
+        stock_plan = _stock_plan(root, bundle)
+        root_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            root_fd = os.open(root, root_flags)
+        except OSError as exc:
+            raise HostPatchError("cannot pin Hermes rollback root") from exc
+        try:
+            with _pin_touched_parents(root_fd, tuple(bundle.files)) as parents:
+                snapshots = _snapshot_paths(parents, tuple(bundle.files))
+                if not _snapshot_content_matches(snapshots, bundle, applied=True):
+                    raise HostPatchError("rollback snapshot does not match the applied seam")
+                _verify_state(
+                    root,
+                    bundle,
+                    applied=True,
+                    pinned_root_fd=root_fd,
+                )
+                _verify_pinned_parents(parents)
+                try:
+                    _write_plan(parents, stock_plan, snapshots)
+                    _verify_pinned_parents(parents)
+                    _verify_state(
+                        root,
+                        bundle,
+                        applied=False,
+                        pinned_root_fd=root_fd,
+                    )
+                except BaseException as exc:
+                    try:
+                        _rollback_plan(parents, snapshots, stock_plan)
+                        _verify_pinned_parents(parents)
+                        _verify_state(
+                            root,
+                            bundle,
+                            applied=True,
+                            pinned_root_fd=root_fd,
+                        )
+                    except BaseException as rollback_exc:
+                        raise HostPatchError(
+                            "host rollback failed and applied-state restoration failed"
+                        ) from rollback_exc
+                    raise HostPatchError(
+                        "host rollback verification failed; applied seam restored"
+                    ) from exc
+        finally:
+            os.close(root_fd)
+        return _result(root, bundle, status="ready", changed=True)
+
+
 def _result(
     root: Path,
     bundle: HostPatchBundle,
@@ -1380,13 +1702,18 @@ def _result(
     status: str,
     changed: bool,
 ) -> dict[str, Any]:
-    observed_commit = _head(root)
-    if observed_commit != bundle.supported_hermes_commit:
-        raise HostPatchError("unsupported Hermes commit")
+    if bundle.stock_inventory is None:
+        observed_commit = _head(root)
+        if observed_commit != bundle.supported_hermes_commit:
+            raise HostPatchError("unsupported Hermes commit")
+    else:
+        observed_commit = bundle.supported_hermes_commit
     return {
         "changed": changed,
         "hermes_commit": observed_commit,
-        "hermes_source": str(root),
+        "hermes_installation": str(root),
+        "hermes_distribution": bundle.supported_distribution_name,
+        "hermes_version": bundle.supported_distribution_version,
         "manifest_sha256": bundle.manifest_sha256,
         "patch_sha256": bundle.patch_sha256,
         "status": status,
@@ -1399,10 +1726,15 @@ def parser() -> argparse.ArgumentParser:
         prog="nunchi-hermes-v2-host-patch",
         description="Verify or transactionally apply Nunchi's exact Hermes V2 host seam.",
     )
-    command.add_argument("--hermes-source", required=True, type=Path)
+    command.add_argument(
+        "--hermes-installation",
+        type=Path,
+        help="Hermes site-packages root (default: discover the installed hermes-agent)",
+    )
     action = command.add_mutually_exclusive_group()
     action.add_argument("--check", action="store_true", help="verify readiness or exact applied state")
     action.add_argument("--apply", action="store_true", help="apply and verify the exact host seam")
+    action.add_argument("--rollback", action="store_true", help="restore and verify exact stock bytes")
     return command
 
 
@@ -1410,11 +1742,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         bundle = HostPatchBundle.bundled()
-        result = (
-            apply_host_patch(args.hermes_source, bundle)
-            if args.apply
-            else inspect_host(args.hermes_source, bundle)
-        )
+        installation = args.hermes_installation
+        if installation is None:
+            spec = find_spec("gateway")
+            locations = tuple(spec.submodule_search_locations or ()) if spec is not None else ()
+            if len(locations) != 1:
+                raise HostPatchError("installed Hermes distribution is not discoverable")
+            installation = Path(locations[0]).resolve().parent
+        if args.apply:
+            result = apply_host_patch(installation, bundle)
+        elif args.rollback:
+            result = rollback_host_patch(installation, bundle)
+        else:
+            result = inspect_host(installation, bundle)
     except HostPatchError as exc:
         print(f"nunchi-hermes-v2-host-patch: {exc}", file=sys.stderr)
         return 2

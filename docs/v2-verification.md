@@ -11,34 +11,38 @@ applicator, manifest, package data, CLI, plugin entry point, and tests. It does
 not depend on an upstream NousResearch change, a Nunchi-maintained Hermes fork,
 or a developer's pre-patched checkout.
 
-The compatibility seam was regenerated from a disposable worktree based on
-untouched Hermes release `v2026.7.20`, commit
-`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. That worktree is only a
-patch-generation fixture; it is not an upstream deliverable or an operator
-dependency. The exported 21-path patch SHA-256 is
-`2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885`;
-the closed manifest SHA-256 is
-`325aacfdf0cb5ca4c2f73d09a136f934d5e264b9fbd81ca09ac8db2ea1ab4936`.
+The compatibility seam is generated from untouched Hermes release
+`v2026.7.20`, commit
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`, and the published
+`hermes-agent==0.19.0` wheel whose SHA-256 is
+`bd0bac012aee38a60894781f4597dc29ee7bedb3448540249921f10d3bef327f`.
+The generation worktree is only a fixture; operators install the released
+Hermes wheel and need no source checkout or Git metadata. The exported 8-path
+runtime patch SHA-256 is
+`87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c`;
+the closed 935-file stock-inventory manifest SHA-256 is
+`80757486c13fa0ac2305865bdcc3af5abe337cf81e7e08d4f6f8e69011cb0d83`.
 
-On the generation fixture, 171 focused and neighbouring hook, delivery,
-Discord, Telegram, batching, and shutdown tests passed. Ruff passed over every
-Python path changed from stock, and the stock-to-seam diff check was clean.
+Independent exact-byte review rejected predecessor `b1cae0d3` for four
+blockers: checkout-dependent application, participant work outliving its
+callback-scoped delivery capability, replayed slash commands reaching control
+handlers, and unknown mention identity crashing mixed-batch reconstruction.
+The current local successor removes the checkout dependency, holds callbacks
+through participant settlement, fences replay before command/control effects,
+and preserves `None` mention identity. That predecessor review is not approval
+of this successor.
 
-A separate disposable clone whose origin is
-`https://github.com/NousResearch/hermes-agent.git` was reset and cleaned back to
-the exact stock commit. The applicator then reported, in order: `ready`;
-`applied` with `changed: true`; `applied` with `changed: false`; and a second
-idempotent apply with `changed: false`. That patched stock clone passed the same
-171 tests. After its normal virtual environment and test caches existed, a
-post-test applicator check still proved the exact applied state.
+The source successor passed 248 focused and neighbouring Hermes hook, delivery,
+Discord, Telegram, batching, replay, and shutdown tests. The same 248 tests
+passed against an isolated installation of the published Hermes wheel after the
+Nunchi wheel applied the seam; the post-test exact-state check passed, and the
+Nunchi rollback command restored and reverified the complete stock inventory.
 
-The current Nunchi source candidate passed the complete V2 suite with 434 tests
-and 826 subtests. The focused Hermes adapter, applicator, documentation, and
-reference-adapter identity group passed 92 tests and 130 subtests. Narrowed Ruff
-import/context-manager checks and `git diff --check` passed. These are source
-candidate and patched-stock receipts; exact committed-wheel rebuild/install,
-independent exact-byte review, remote publication, review closure, and any
-separately authorized live Discord/Telegram commissioning remain pending.
+The complete Nunchi V2 suite, narrowed Ruff checks, reproducible exact-commit
+wheel build, clean installed-artifact probes, and fresh independent exact-byte
+review are required again after the successor is frozen. Remote publication,
+review closure, and any separately authorized live Discord/Telegram
+commissioning remain pending.
 
 ## Historical shared-foundation candidate scope
 

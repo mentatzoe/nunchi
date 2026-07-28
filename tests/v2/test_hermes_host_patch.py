@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from nunchi_hermes_v2.host_patch import (
     HostPatchError,
     apply_host_patch,
     inspect_host,
+    rollback_host_patch,
 )
 
 
@@ -37,7 +39,9 @@ class HostPatchApplicatorTests(unittest.TestCase):
         _git(self.repo, "config", "user.name", "Nunchi test")
         _git(self.repo, "config", "user.email", "nunchi-test@example.invalid")
         (self.repo / "host.py").write_text("value = 'stock'\n", encoding="utf-8")
-        _git(self.repo, "add", "host.py")
+        (self.repo / "package").mkdir()
+        (self.repo / "package" / "marker.py").write_text("STOCK = True\n", encoding="utf-8")
+        _git(self.repo, "add", ".")
         _git(self.repo, "commit", "-q", "-m", "stock")
         self.base_commit = _git(self.repo, "rev-parse", "HEAD").strip()
         stock_digest = hashlib.sha256((self.repo / "host.py").read_bytes()).hexdigest()
@@ -78,6 +82,33 @@ class HostPatchApplicatorTests(unittest.TestCase):
         self.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         self.bundle = HostPatchBundle.from_paths(self.manifest_path, self.patch_path)
 
+    def _installed_bundle(self) -> HostPatchBundle:
+        manifest = json.loads(self.manifest_path.read_text())
+        manifest.update(
+            {
+                "schema_version": 3,
+                "supported_distribution": {
+                    "name": "hermes-agent",
+                    "version": "0.19.0",
+                },
+                "stock_inventory": {
+                    "host.py": {
+                        "mode": manifest["files"]["host.py"]["pre_mode"],
+                        "sha256": manifest["files"]["host.py"]["pre_sha256"],
+                    },
+                    "package/marker.py": {
+                        "mode": "100644",
+                        "sha256": hashlib.sha256(
+                            (self.repo / "package" / "marker.py").read_bytes()
+                        ).hexdigest(),
+                    },
+                },
+            }
+        )
+        installed_manifest = self.root / "installed-manifest.json"
+        installed_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        return HostPatchBundle.from_paths(installed_manifest, self.patch_path)
+
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
@@ -90,6 +121,40 @@ class HostPatchApplicatorTests(unittest.TestCase):
         self.assertEqual((self.repo / "host.py").read_text(), "value = 'patched'\n")
         self.assertEqual((self.repo / "new_boundary.py").read_text(), "API_VERSION = 2\n")
         self.assertEqual(inspect_host(self.repo, self.bundle)["status"], "applied")
+
+    def test_exact_installed_distribution_needs_no_git_checkout(self) -> None:
+        bundle = self._installed_bundle()
+        shutil.rmtree(self.repo / ".git")
+
+        self.assertEqual(inspect_host(self.repo, bundle)["status"], "ready")
+        result = apply_host_patch(self.repo, bundle)
+
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual((self.repo / "host.py").read_text(), "value = 'patched'\n")
+        self.assertEqual(inspect_host(self.repo, bundle)["status"], "applied")
+
+    def test_installed_distribution_rolls_back_without_git_checkout(self) -> None:
+        bundle = self._installed_bundle()
+        shutil.rmtree(self.repo / ".git")
+        apply_host_patch(self.repo, bundle)
+
+        result = rollback_host_patch(self.repo, bundle)
+
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["changed"])
+        self.assertEqual((self.repo / "host.py").read_text(), "value = 'stock'\n")
+        self.assertFalse((self.repo / "new_boundary.py").exists())
+        self.assertEqual(rollback_host_patch(self.repo, bundle)["status"], "ready")
+
+    def test_installed_distribution_rejects_unknown_runtime_source(self) -> None:
+        bundle = self._installed_bundle()
+        shutil.rmtree(self.repo / ".git")
+        (self.repo / "package" / "rogue.py").write_text(
+            "EXECUTES = True\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(HostPatchError, "inventory"):
+            inspect_host(self.repo, bundle)
 
     def test_apply_is_idempotent_only_for_the_exact_verified_result(self) -> None:
         apply_host_patch(self.repo, self.bundle)

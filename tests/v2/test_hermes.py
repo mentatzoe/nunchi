@@ -764,6 +764,64 @@ class HermesV2ContractTests(unittest.TestCase):
             self.assertEqual("nunchi-v2-attention", llm.calls[0]["purpose"])
             self.assertEqual("nunchi-v2-participant-turn", llm.calls[1]["purpose"])
 
+    def test_gateway_callback_waits_until_participant_native_delivery_settles(self):
+        self.require_surface()
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingLlm(FakeLlm):
+            def complete_structured(self, **kwargs):
+                entered.set()
+                release.wait(2)
+                return super().complete_structured(**kwargs)
+
+        attention = FakeStructuredResult(
+            {
+                "disposition": "WAKE",
+                "reasons": ["direct request"],
+                "evidence_event_ids": ["discord:message:100"],
+                "legacy_verdict_confidences": {
+                    "PASS": 0.0,
+                    "ACK": 0.0,
+                    "ASK": 0.0,
+                    "SPEAK": 1.0,
+                },
+            }
+        )
+        action = FakeStructuredResult(
+            {
+                "kind": "message",
+                "origin_event_id": "discord:message:100",
+                "text": "hello",
+            }
+        )
+        delivery = FakeDelivery([attested_receipt(submitted_content="hello")])
+        with tempfile.TemporaryDirectory() as directory:
+            plugin = NunchiHermesV2Plugin(
+                config=self.plugin_config(directory),
+                ctx=FakeCtx(BlockingLlm([attention, action])),
+            )
+            native = self.event()
+
+            async def scenario():
+                task = asyncio.create_task(
+                    plugin.gateway_message(
+                        event=native,
+                        route=native.source,
+                        delivery=delivery,
+                    )
+                )
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                await asyncio.sleep(0)
+                self.assertFalse(task.done())
+                release.set()
+                result = await asyncio.wait_for(task, 2)
+                self.assertEqual("handled", result["decision"])
+
+            asyncio.run(scenario())
+
+        self.assertEqual([{"kind": "message", "content": "hello"}], delivery.calls)
+
     def test_unconstructable_hermes_event_is_audited_and_never_scheduled(self):
         self.require_surface()
         with tempfile.TemporaryDirectory() as directory:
@@ -1752,7 +1810,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("d" * 64, probe["host_seam_sha256"])
         self.assertEqual(
-            "2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885",
+            "87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c",
             probe["host_patch_sha256"],
         )
         self.assertEqual(
@@ -2025,7 +2083,7 @@ class HermesV2ContractTests(unittest.TestCase):
                 ctx=FakeCtx(),
             )
             first_runtime = first_plugin._rooms[("discord", "42")]
-            first_runtime.pipeline = SimpleNamespace(submit=capture)
+            first_runtime.pipeline = SimpleNamespace(submit=capture, drain=lambda: True)
             first_event = self.event(message_id="100")
             first_runtime.handle(
                 first_event,
@@ -2039,7 +2097,7 @@ class HermesV2ContractTests(unittest.TestCase):
                 ctx=FakeCtx(),
             )
             restarted_runtime = restarted_plugin._rooms[("discord", "42")]
-            restarted_runtime.pipeline = SimpleNamespace(submit=capture)
+            restarted_runtime.pipeline = SimpleNamespace(submit=capture, drain=lambda: True)
             second_event = self.event(message_id="101")
             restarted_runtime.handle(
                 second_event,

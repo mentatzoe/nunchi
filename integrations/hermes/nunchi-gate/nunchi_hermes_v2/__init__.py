@@ -1262,7 +1262,12 @@ class _RoomRuntime:
         loop: asyncio.AbstractEventLoop,
     ) -> Any:
         with self._lifecycle_lock:
-            return self._handle_admitted(event, route, delivery, loop)
+            outcome = self._handle_admitted(event, route, delivery, loop)
+        # Hermes delivery capabilities are callback-scoped. Keep this callback
+        # alive until every contribution admitted through it has settled, so no
+        # participant effect can race capability revocation at callback return.
+        self.pipeline.drain()
+        return outcome
 
     def _handle_admitted(
         self,

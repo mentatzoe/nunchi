@@ -21,16 +21,19 @@ The only supported pre-apply host is release `v2026.7.20`, commit
 The wheel carries `nunchi_hermes_v2/host_patch_assets/` with:
 
 - manifest SHA-256
-  `325aacfdf0cb5ca4c2f73d09a136f934d5e264b9fbd81ca09ac8db2ea1ab4936`,
+  `80757486c13fa0ac2305865bdcc3af5abe337cf81e7e08d4f6f8e69011cb0d83`,
   pinned independently in applicator code;
 - patch SHA-256
-  `2cd45b1d8a8283d51cdb0763eb4a4964df28fb149879584a7bf29b604c5ba885`;
-- 21 declared regular-file paths; and
+  `87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c`;
+- stock wheel SHA-256
+  `bd0bac012aee38a60894781f4597dc29ee7bedb3448540249921f10d3bef327f`;
+- 935 exact stock runtime-file identities and 8 declared seam paths; and
 - each path's exact operation, Git mode, and pre/post SHA-256.
 
-A different commit, dirty or redirected Git state, undeclared filesystem entry,
+A different runtime inventory, undeclared entry inside a Hermes-owned package,
 partial seam, divergent mode/content, unsafe path, symlink, non-regular file,
-wrong ownership, or writable ancestor fails closed.
+wrong ownership, or writable ancestor fails closed. Git metadata is neither
+consulted nor required for an installed-distribution transaction.
 
 ## Install and apply
 
@@ -38,27 +41,24 @@ Install the exact Nunchi wheel into the same environment as the untouched
 Hermes release. Check without mutation:
 
 ```bash
-nunchi-hermes-v2-host-patch \
-  --hermes-source /absolute/path/to/hermes-agent \
-  --check
+nunchi-hermes-v2-host-patch --check
 ```
 
 A valid stock host reports `status: ready`. Apply transactionally:
 
 ```bash
-nunchi-hermes-v2-host-patch \
-  --hermes-source /absolute/path/to/hermes-agent \
-  --apply
+nunchi-hermes-v2-host-patch --apply
 ```
 
 Success reports `status: applied`, the exact stock commit, manifest and patch
 digests, touched-file count, and whether bytes changed. Repeating either command
 verifies the exact applied state and is idempotent.
 
-The applicator never asks Git to patch the live worktree. It first parses the
-patch into a closed path/operation/mode set, verifies the complete stock
-inventory and literal commit, and materializes the candidate in an isolated
-temporary Git repository. It then snapshots every permitted path, performs
+The applicator never asks Git to patch the installed Hermes distribution. It
+first parses the patch into a closed path/operation/mode set, verifies the
+complete installed runtime inventory against the exact stock wheel, and
+materializes the candidate in an isolated temporary repository. It then
+snapshots every permitted path, performs
 no-follow descriptor-relative atomic replacements, and verifies the complete
 post-state. Any failure restores and re-verifies the complete stock state;
 rollback failure is a distinct hard failure.
@@ -105,6 +105,8 @@ configuration or registering hooks. Public probes expose non-secret
 cryptographic provenance: stock commit, patch digest, verified seam digest,
 Nunchi integration digest, and aggregate configuration digest.
 
-To remove the seam, first disable/uninstall Nunchi, then restore Hermes from the
-exact stock commit with normal Git worktree operations. Do not hand-reverse a
-subset. A later installation starts again from untouched `v2026.7.20`.
+To remove the seam, disable Nunchi and run
+`nunchi-hermes-v2-host-patch --rollback`. The same transaction machinery
+verifies the applied state, restores every exact stock preimage, removes every
+declared creation, and verifies the complete stock runtime inventory. Do not
+hand-reverse a subset.

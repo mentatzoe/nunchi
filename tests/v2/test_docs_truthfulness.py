@@ -97,6 +97,8 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "closed, exact-version compatibility patch",
             "transactional applicator",
             "nunchi-hermes-v2-host-patch",
+            "no source checkout or Git metadata is required",
+            "--rollback",
             "No repository checkout or editable install counts",
         ):
             with self.subTest(required=phrase):

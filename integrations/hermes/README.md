@@ -15,14 +15,16 @@ compatibility patch and transactional applicator.
 Check and apply it with:
 
 ```bash
-nunchi-hermes-v2-host-patch \
-  --hermes-source /absolute/path/to/hermes-agent \
-  --check
-
-nunchi-hermes-v2-host-patch \
-  --hermes-source /absolute/path/to/hermes-agent \
-  --apply
+nunchi-hermes-v2-host-patch --check
+nunchi-hermes-v2-host-patch --apply
+nunchi-hermes-v2-host-patch --rollback  # restore exact stock bytes
 ```
+
+Run the command in the environment containing both the Nunchi and
+`hermes-agent==0.19.0` wheels. It discovers the installed Hermes distribution;
+no source checkout or Git metadata is required. An operator managing more than
+one environment may select its site-packages root explicitly with
+`--hermes-installation`.
 
 The first command accepts only the complete untouched stock identity. The
 second materializes the reviewed result in isolation, atomically applies the
@@ -60,7 +62,8 @@ names map to the shared platform-neutral opaque identity
 
 Source tests and successful patch application are not live commissioning. No
 repository checkout or editable install counts as clean artifact evidence.
-Before claiming a deployed room works, the exact wheel + stock commit + patch
+Before claiming a deployed room works, the exact Nunchi wheel + stock Hermes
+wheel + patch
 manifest + config must pass clean-install discovery, deterministic lifecycle
 and receipt tests, independent exact-byte review, and separately authorized
 native Discord/Telegram canaries.
