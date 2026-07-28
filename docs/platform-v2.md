@@ -1,9 +1,9 @@
 # V2 platform interface and conformance
 
-This is the complete downstream interface for Hermes and Claude Code originally
-established by the shared-foundation candidate. The Hermes slice now has a
-working implementation under exact-candidate review, but is not yet
-live-commissioned or delivered. Claude Code remains unimplemented and unarmed.
+This is the complete downstream interface for platform adapters. The Hermes
+adapter is implemented against a proposed public gateway-message hook API, but
+remains release-blocked and cannot be commissioned until that API ships in an
+official Hermes release. Claude Code remains unimplemented and unarmed.
 
 ## Required owners
 

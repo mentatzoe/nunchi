@@ -10,6 +10,7 @@ AGENTS = ROOT / "AGENTS.md"
 README = ROOT / "README.md"
 DELIVERY = ROOT / "docs" / "v2-delivery.md"
 PLATFORM = ROOT / "docs" / "platform-v2.md"
+HERMES_README = ROOT / "integrations" / "hermes" / "README.md"
 EXECUTION_SPINE = ROOT / "docs" / "governance" / "execution-spine.md"
 SPECS_README = ROOT / "specs" / "README.md"
 FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
@@ -72,7 +73,9 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     ) -> None:
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
-            "complete downstream interface for Hermes and Claude Code",
+            "complete downstream interface for platform adapters",
+            "Hermes adapter is implemented against a proposed public gateway-message hook API",
+            "remains release-blocked",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",
@@ -84,6 +87,19 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         for phrase in required:
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
+
+    def test_hermes_guide_does_not_advertise_private_host_mutation_as_support(self) -> None:
+        normalized = " ".join(HERMES_README.read_text(encoding="utf-8").split())
+        for phrase in (
+            "not currently commissionable",
+            "no official Hermes release currently contains that interface",
+            "does not modify Hermes source",
+            "private branch, local patch, or source checkout is not a supported substitute",
+            "upstream API accepted and shipped in an official Hermes release",
+        ):
+            with self.subTest(required=phrase):
+                self.assertIn(phrase, normalized)
+        self.assertNotIn("nunchi-hermes-v2-host-patch", normalized)
 
     def test_spec_workflow_remains_retired(self) -> None:
         self.assertFalse(
