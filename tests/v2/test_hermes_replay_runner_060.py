@@ -51,7 +51,9 @@ class HermesReplayRunner060Tests(unittest.TestCase):
     def test_replay_report_is_byte_deterministic(self):
         first = runner.run_replay(MANIFEST, require_complete=True)
         second = runner.run_replay(MANIFEST, require_complete=True)
-        encode = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"))
+        def encode(value):
+            return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
         self.assertEqual(encode(first), encode(second))
 
     def test_require_complete_names_every_missing_required_scenario(self):

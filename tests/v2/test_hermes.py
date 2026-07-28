@@ -420,7 +420,7 @@ class HermesV2ContractTests(unittest.TestCase):
             rebound = runtime_for("10")
             self.assertNotEqual(first.room_dir, rebound.room_dir)
 
-    def test_live_recovery_evidence_requires_current_hermes_host_seam_identity(self):
+    def test_live_recovery_evidence_requires_supported_gateway_hook_api_major(self):
         self.require_surface()
         binding = self.binding()
         payload = {
@@ -434,8 +434,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
-            "hermes_host_seam_sha256": "d" * 64,
-            "gateway_message_hook_api_version": 2,
+            "gateway_message_hook_api_version": 1,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
             "live_run_id": "live-run-12345678",
@@ -448,14 +447,13 @@ class HermesV2ContractTests(unittest.TestCase):
             "later_observed_at": "2026-07-26T00:00:02+00:00",
             "later_hearing": "verified",
         }
-        with self.assertRaisesRegex(ValidationError, "different Hermes host seam"):
+        with self.assertRaisesRegex(ValidationError, "does not verify this binding"):
             hermes_module._validate_live_recovery_evidence(
                 payload,
                 binding=binding,
                 hermes_profile="default",
                 participant_profile_sha256="b" * 64,
                 nunchi_artifact_sha256="c" * 64,
-                hermes_host_seam_sha256="e" * 64,
             )
 
     def test_live_recovery_evidence_rejects_profile_or_artifact_rebinding(self):
@@ -472,7 +470,6 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
-            "hermes_host_seam_sha256": "d" * 64,
             "gateway_message_hook_api_version": 2,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
@@ -501,7 +498,6 @@ class HermesV2ContractTests(unittest.TestCase):
                         hermes_profile="default",
                         participant_profile_sha256="b" * 64,
                         nunchi_artifact_sha256="c" * 64,
-                        hermes_host_seam_sha256="d" * 64,
                     )
 
     def test_nunchi_artifact_identity_covers_shared_and_hermes_package_bytes(self):
@@ -526,110 +522,6 @@ class HermesV2ContractTests(unittest.TestCase):
 
             self.assertRegex(first, r"^[0-9a-f]{64}$")
             self.assertNotEqual(first, second)
-
-    def test_current_host_source_identity_binds_exact_verified_patch_bundle(self):
-        self.require_surface()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "gateway" / "message_hooks.py"
-            source.parent.mkdir()
-            source.write_text("API_VERSION = 2\n", encoding="utf-8")
-            host_module = SimpleNamespace(__file__=str(source))
-            gateway_module = SimpleNamespace(message_hooks=host_module)
-            file_specs = {
-                "gateway/message_hooks.py": SimpleNamespace(
-                    operation="create",
-                    pre_mode=None,
-                    pre_sha256=None,
-                    post_mode="100644",
-                    post_sha256="3" * 64,
-                ),
-                "gateway/run.py": SimpleNamespace(
-                    operation="modify",
-                    pre_mode="100644",
-                    pre_sha256="4" * 64,
-                    post_mode="100644",
-                    post_sha256="5" * 64,
-                ),
-            }
-            bundle = SimpleNamespace(
-                supported_hermes_commit="1" * 40,
-                manifest_sha256="6" * 64,
-                patch_sha256="2" * 64,
-                files=file_specs,
-            )
-            canonical = json.dumps(
-                {
-                    "files": {
-                        path: {
-                            "operation": spec.operation,
-                            "pre_mode": spec.pre_mode,
-                            "pre_sha256": spec.pre_sha256,
-                            "post_mode": spec.post_mode,
-                            "post_sha256": spec.post_sha256,
-                        }
-                        for path, spec in file_specs.items()
-                    },
-                    "manifest_sha256": bundle.manifest_sha256,
-                    "patch_sha256": bundle.patch_sha256,
-                    "schema_version": 2,
-                    "supported_hermes_commit": bundle.supported_hermes_commit,
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-
-            with (
-                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
-                mock.patch.object(
-                    hermes_module.HostPatchBundle,
-                    "bundled",
-                    return_value=bundle,
-                ),
-                mock.patch.object(
-                    hermes_module,
-                    "inspect_host",
-                    return_value={"status": "applied"},
-                ) as inspect,
-            ):
-                actual = hermes_module._current_hermes_hook_source_sha256()
-
-            inspect.assert_called_once_with(root.resolve(), bundle)
-            self.assertEqual(hashlib.sha256(canonical).hexdigest(), actual)
-
-    def test_current_host_source_identity_fails_closed_when_patch_state_is_unverified(self):
-        self.require_surface()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "gateway" / "message_hooks.py"
-            source.parent.mkdir()
-            source.write_text("API_VERSION = 2\n", encoding="utf-8")
-            gateway_module = SimpleNamespace(
-                message_hooks=SimpleNamespace(__file__=str(source))
-            )
-            bundle = SimpleNamespace(
-                supported_hermes_commit="1" * 40,
-                patch_sha256="2" * 64,
-                post_apply_sha256={"gateway/message_hooks.py": "3" * 64},
-            )
-            with (
-                mock.patch.dict(sys.modules, {"gateway": gateway_module}),
-                mock.patch.object(
-                    hermes_module.HostPatchBundle,
-                    "bundled",
-                    return_value=bundle,
-                ),
-                mock.patch.object(
-                    hermes_module,
-                    "inspect_host",
-                    side_effect=hermes_module.HostPatchError("divergent host"),
-                ),
-                self.assertRaisesRegex(
-                    ValidationError,
-                    "Hermes host seam identity is unavailable",
-                ),
-            ):
-                hermes_module._current_hermes_hook_source_sha256()
 
     def test_hermes_runtime_declares_only_delivered_event_visibility(self):
         self.require_surface()
@@ -1860,30 +1752,24 @@ class HermesV2ContractTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_misconfigured_enabled_plugin_registers_profile_wide_fail_closed_hook(self):
+    def test_invalid_initial_configuration_fails_registration_without_hooks(self):
         self.require_surface()
         ctx = FakeCtx()
 
         def broken(_profile):
             raise ValueError("digest mismatch")
 
-        register(
-            ctx,
-            config_loader=broken,
-            host_identity_loader=lambda: "d" * 64,
-        )
-        result = asyncio.run(
-            ctx.hooks["gateway_message"](
-                event=self.event(),
-                route=self.event().source,
-                delivery=FakeDelivery([]),
+        with self.assertRaisesRegex(
+            ValidationError,
+            "Nunchi V2 was not activated.*configuration",
+        ):
+            register(
+                ctx,
+                config_loader=broken,
             )
-        )
-        self.assertEqual("handled", result["decision"])
-        probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
-        self.assertFalse(probe["operational"])
-        self.assertEqual("configuration-invalid", probe["failure"])
-        self.assertNotIn("digest mismatch", json.dumps(probe))
+
+        self.assertEqual({}, ctx.hooks)
+        self.assertEqual({}, ctx.commands)
 
     def test_legacy_hook_conflict_is_left_to_host_configuration_validation(self):
         self.require_surface()
@@ -1899,7 +1785,6 @@ class HermesV2ContractTests(unittest.TestCase):
                 rooms=(),
                 provenance={"sha256": "c" * 64},
             ),
-            host_identity_loader=lambda: "d" * 64,
         )
 
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
@@ -1909,7 +1794,7 @@ class HermesV2ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "mutually exclusive"):
             ctx._manager.validate_hook_configuration()
 
-    def test_register_exposes_public_post_auth_hooks_and_probe_command(self):
+    def test_register_compatible_api_v2_exposes_public_hooks_and_probe(self):
         self.require_surface()
         ctx = FakeCtx()
         register(
@@ -1919,7 +1804,6 @@ class HermesV2ContractTests(unittest.TestCase):
                 rooms=(),
                 provenance={"sha256": "c" * 64},
             ),
-            host_identity_loader=lambda: "d" * 64,
         )
         self.assertEqual(
             {"gateway_message", "gateway_session_cancel", "gateway_shutdown"},
@@ -1931,20 +1815,12 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual(2, probe["generation"])
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
-        self.assertEqual("d" * 64, probe["host_seam_sha256"])
-        self.assertEqual(
-            "19d1c96605b32534718a2a1f2c028edadc0b54020a67a7302ebf7c159c089281",
-            probe["host_patch_sha256"],
-        )
-        self.assertEqual(
-            "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
-            probe["supported_hermes_commit"],
-        )
         self.assertNotIn("hermes_version", probe)
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])
         self.assertEqual(2, probe["participant_interface_version"])
         self.assertEqual(2, probe["gateway_message_hook_api_version"])
+        self.assertEqual(2, probe["supported_gateway_message_hook_api_major"])
         self.assertRegex(probe["nunchi_version"], r"^\d+\.\d+\.\d+")
         self.assertRegex(probe["configuration_set_sha256"], r"^[0-9a-f]{64}$")
         public_blob = json.dumps(probe)
@@ -1971,21 +1847,86 @@ class HermesV2ContractTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-    def test_register_fails_before_configuration_when_host_seam_identity_is_unavailable(self):
+    def test_register_missing_gateway_hook_capability_fails_actionably_without_hooks(self):
         self.require_surface()
         ctx = FakeCtx()
+        del ctx.gateway_message_hook_api_version
         config_loader = mock.Mock()
 
-        with self.assertRaisesRegex(ValidationError, "host seam identity"):
+        with self.assertRaises(ValidationError) as raised:
             register(
                 ctx,
                 config_loader=config_loader,
-                host_identity_loader=mock.Mock(
-                    side_effect=ValidationError("Hermes host seam identity is unavailable")
-                ),
             )
 
+        diagnostic = str(raised.exception)
+        self.assertIn("Nunchi V2 was not activated", diagnostic)
+        self.assertIn("gateway_message_hook_api_version` is missing", diagnostic)
+        self.assertIn("`hermes update`", diagnostic)
+        self.assertIn("upgrade `hermes-agent`", diagnostic)
+        self.assertIn("retry", diagnostic)
         config_loader.assert_not_called()
+        self.assertEqual({}, ctx.hooks)
+        self.assertEqual({}, ctx.commands)
+
+    def test_register_incompatible_gateway_hook_major_fails_actionably_without_hooks(self):
+        self.require_surface()
+        for observed in (1, 3, "2", True):
+            with self.subTest(observed=observed):
+                ctx = FakeCtx()
+                ctx.gateway_message_hook_api_version = observed
+                config_loader = mock.Mock()
+
+                with self.assertRaises(ValidationError) as raised:
+                    register(ctx, config_loader=config_loader)
+
+                diagnostic = str(raised.exception)
+                self.assertIn("Nunchi V2 was not activated", diagnostic)
+                self.assertIn(
+                    f"gateway_message_hook_api_version` reported unsupported major {observed!r}",
+                    diagnostic,
+                )
+                self.assertIn("requires gateway message hook API major 2", diagnostic)
+                self.assertIn("`hermes update`", diagnostic)
+                self.assertIn("retry", diagnostic)
+                config_loader.assert_not_called()
+                self.assertEqual({}, ctx.hooks)
+                self.assertEqual({}, ctx.commands)
+
+    def test_registration_writes_no_hermes_files(self):
+        self.require_surface()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hermes_home = root / "hermes-home"
+            hermes_home.mkdir()
+            marker = hermes_home / "config.yaml"
+            marker.write_text("plugins: {}\n", encoding="utf-8")
+            before = {
+                path.relative_to(hermes_home): path.read_bytes()
+                for path in hermes_home.rglob("*")
+                if path.is_file()
+            }
+            ctx = FakeCtx()
+
+            with mock.patch.dict(
+                os.environ,
+                {"HERMES_HOME": str(hermes_home)},
+                clear=False,
+            ):
+                register(
+                    ctx,
+                    config_loader=lambda profile: self.plugin_config(
+                        root / "nunchi-state",
+                        profile_name=profile,
+                    ),
+                )
+
+            after = {
+                path.relative_to(hermes_home): path.read_bytes()
+                for path in hermes_home.rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(before, after)
 
     def test_register_routes_multiplexed_profiles_to_profile_owned_instances(self):
         self.require_surface()
@@ -2005,7 +1946,6 @@ class HermesV2ContractTests(unittest.TestCase):
             plugin = register(
                 ctx,
                 config_loader=load,
-                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -2022,7 +1962,7 @@ class HermesV2ContractTests(unittest.TestCase):
             self.assertEqual(["default", "work"], loaded)
             self.assertEqual(["default", "work"], plugin.probe()["loaded_profiles"])
 
-    def test_missing_multiplexed_profile_config_fails_closed_for_that_profile(self):
+    def test_missing_multiplexed_profile_config_does_not_claim_stock_message(self):
         self.require_surface()
         with tempfile.TemporaryDirectory() as directory:
             ctx = FakeCtx(profile_name="default")
@@ -2035,7 +1975,6 @@ class HermesV2ContractTests(unittest.TestCase):
             register(
                 ctx,
                 config_loader=load,
-                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -2047,8 +1986,7 @@ class HermesV2ContractTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual("handled", result["decision"])
-            self.assertEqual("nunchi-v2:configuration-invalid", result["reason"])
+            self.assertIsNone(result)
 
     def test_multiplexed_cancellation_targets_only_the_routed_profile(self):
         self.require_surface()
@@ -2062,7 +2000,6 @@ class HermesV2ContractTests(unittest.TestCase):
             plugin = register(
                 ctx,
                 config_loader=configs.__getitem__,
-                host_identity_loader=lambda: "d" * 64,
             )
             event = self.event(actor="9")
             event.source.profile = "work"
@@ -2412,15 +2349,9 @@ class HermesV2ContractTests(unittest.TestCase):
             result = create_bundle(
                 parser().parse_args(base + ["--suppression-recovery-evidence", str(evidence)])
             )
-            with (
-                mock.patch(
-                    "nunchi_hermes_v2._current_hermes_hook_source_sha256",
-                    return_value="a" * 64,
-                ),
-                self.assertRaisesRegex(
-                    ValidationError,
-                    "suppression recovery evidence",
-                ),
+            with self.assertRaisesRegex(
+                ValidationError,
+                "suppression recovery evidence",
             ):
                 load_pinned_hermes_config(
                     result["config"]["path"],

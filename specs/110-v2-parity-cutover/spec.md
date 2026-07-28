@@ -471,8 +471,7 @@ release claim against the exact integrated candidate.
   `docs/integrations/hermes-v2.md`,
   `docs/integrations/claude-code-v2.md`,
   `docs/integrations/codex-v2.md`,
-  `docs/integrations/hermes-core-patch.md`, and
-  `docs/integrations/hermes-core-patch-test-plan.md`; exact security/release
+  `docs/integrations/hermes-v2.md`; exact security/release
   files `docs/security/assurance-handoffs.md`,
   `docs/security/operational-safety.md`,
   `docs/security/runtime-provenance.md`,

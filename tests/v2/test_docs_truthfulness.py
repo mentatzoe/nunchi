@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import unittest
 from pathlib import Path
 
@@ -13,16 +11,8 @@ README = ROOT / "README.md"
 DELIVERY = ROOT / "docs" / "v2-delivery.md"
 PLATFORM = ROOT / "docs" / "platform-v2.md"
 HERMES_README = ROOT / "integrations" / "hermes" / "README.md"
-HOST_SEAM = ROOT / "docs" / "integrations" / "hermes-v2-host-seam.md"
+HERMES_GUIDE = ROOT / "docs" / "integrations" / "hermes-v2.md"
 VERIFICATION = ROOT / "docs" / "v2-verification.md"
-HOST_ASSETS = (
-    ROOT
-    / "integrations"
-    / "hermes"
-    / "nunchi-gate"
-    / "nunchi_hermes_v2"
-    / "host_patch_assets"
-)
 EXECUTION_SPINE = ROOT / "docs" / "governance" / "execution-spine.md"
 SPECS_README = ROOT / "specs" / "README.md"
 FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
@@ -86,8 +76,9 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
             "complete downstream interface for platform adapters",
-            "Nunchi-owned, exact-version compatibility seam",
-            "no upstream NousResearch or developer-checkout dependency",
+            "public gateway participant-hook API major 2",
+            "Runtime capability negotiation",
+            "must land in a Hermes release",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",
@@ -100,17 +91,17 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
 
-    def test_hermes_guide_keeps_compatibility_delivery_inside_nunchi(self) -> None:
+    def test_hermes_guide_documents_capability_negotiation_and_release_blocker(self) -> None:
         normalized = " ".join(HERMES_README.read_text(encoding="utf-8").split())
         for phrase in (
-            "complete compatibility implementation travels in the Nunchi artifact",
-            "do not depend on an upstream NousResearch change",
-            "untouched Hermes `v2026.7.20`",
-            "closed, exact-version compatibility patch",
-            "transactional applicator",
-            "nunchi-hermes-v2-host-patch",
-            "no source checkout or Git metadata is required",
-            "--rollback",
+            "versioned public gateway participant hooks",
+            "Nunchi does not modify, replace, or wrap Hermes files",
+            "`PluginContext.gateway_message_hook_api_version == 2`",
+            "must land in a Hermes release",
+            "Ordinary users cannot activate",
+            "Nunchi V2 was not activated",
+            "`hermes update`",
+            "does not claim an upstream merge, release, or acceptance",
             "No repository checkout or editable install counts",
         ):
             with self.subTest(required=phrase):
@@ -135,18 +126,37 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             with self.subTest(obsolete_flag=obsolete):
                 self.assertNotIn(obsolete, text)
 
-    def test_host_seam_documented_digests_match_bundled_artifacts(self) -> None:
-        manifest = HOST_ASSETS / "manifest.json"
-        manifest_bytes = manifest.read_bytes()
-        manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
-        patch_name = json.loads(manifest_bytes)["patch"]
-        patch_digest = hashlib.sha256((HOST_ASSETS / patch_name).read_bytes()).hexdigest()
-
-        for document in (HOST_SEAM, VERIFICATION):
+    def test_active_hermes_docs_have_no_obsolete_exact_host_patch_claims(self) -> None:
+        plugin_package = (
+            ROOT
+            / "integrations"
+            / "hermes"
+            / "nunchi-gate"
+            / "nunchi_hermes_v2"
+        )
+        self.assertFalse((plugin_package / "host_patch.py").exists())
+        self.assertFalse((plugin_package / "host_patch_assets").exists())
+        self.assertFalse(
+            (ROOT / "docs" / "integrations" / "hermes-v2-host-seam.md").exists()
+        )
+        for document in (
+            HERMES_README,
+            HERMES_GUIDE,
+            PLATFORM,
+            VERIFICATION,
+            ROOT / "docs" / "INSTALL.md",
+            ROOT / "docs" / "STABILITY.md",
+        ):
             text = document.read_text(encoding="utf-8")
             with self.subTest(document=document.relative_to(ROOT)):
-                self.assertIn(manifest_digest, text)
-                self.assertIn(patch_digest, text)
+                for obsolete in (
+                    "hermes-agent==0.19.0",
+                    "v2026.7.20",
+                    "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+                    "nunchi-hermes-v2-host-patch",
+                    "host_patch_assets",
+                ):
+                    self.assertNotIn(obsolete, text)
 
     def test_spec_workflow_remains_retired(self) -> None:
         self.assertFalse(

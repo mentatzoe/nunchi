@@ -57,13 +57,9 @@ nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-v2-config = "nunchi_hermes_v2.cli:main"
-nunchi-hermes-v2-host-patch = "nunchi_hermes_v2.host_patch:main"
 
 [project.entry-points."hermes_agent.plugins"]
 nunchi-v2 = "nunchi_hermes_v2"
 
 [tool.setuptools.packages.find]
 where = ["src", "integrations/hermes/nunchi-gate"]
-
-[tool.setuptools.package-data]
-nunchi_hermes_v2 = ["host_patch_assets/*.json", "host_patch_assets/*.patch"]

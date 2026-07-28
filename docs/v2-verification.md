@@ -5,44 +5,30 @@ source suite is not installed or live evidence.
 
 ## Current integration scope
 
-The active successor restores Nunchi's established plugin-contained compatibility
-architecture. The wheel owns the exact-version Hermes seam, transactional
-applicator, manifest, package data, CLI, plugin entry point, and tests. It does
-not depend on an upstream NousResearch change, a Nunchi-maintained Hermes fork,
-or a developer's pre-patched checkout.
+The current Hermes successor is an ordinary `hermes_agent.plugins` entry point
+that negotiates Hermes's public gateway participant-hook capability at
+registration. It supports API major 2 and registers `gateway_message`,
+`gateway_session_cancel`, and `gateway_shutdown` only when
+`PluginContext.gateway_message_hook_api_version` reports that major. Missing,
+malformed, older, or future incompatible majors fail before hook registration
+with an actionable instruction to update Hermes and retry.
 
-The compatibility seam is generated from untouched Hermes release
-`v2026.7.20`, commit
-`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`, and the published
-`hermes-agent==0.19.0` wheel whose SHA-256 is
-`bd0bac012aee38a60894781f4597dc29ee7bedb3448540249921f10d3bef327f`.
-The generation worktree is only a fixture; operators install the released
-Hermes wheel and need no source checkout or Git metadata. The exported 8-path
-runtime patch SHA-256 is
-`19d1c96605b32534718a2a1f2c028edadc0b54020a67a7302ebf7c159c089281`;
-the closed 935-file stock-inventory manifest SHA-256 is
-`f34c7b1aa8ffa7133e14f18387d58e0aac11986567fae6e8e65e0edd9c4b3a9e`.
+The Nunchi wheel contains no Hermes host-file applicator, source patch,
+manifest, wrapper, or Hermes package-version pin. Installed Hermes and Nunchi
+package identities remain required evidence about a tested subject, but
+runtime capability negotiation is the compatibility authority.
 
-Independent exact-byte review rejected predecessor `b1cae0d3` for four
-blockers: checkout-dependent application, participant work outliving its
-callback-scoped delivery capability, replayed slash commands reaching control
-handlers, and unknown mention identity crashing mixed-batch reconstruction.
-The current local successor removes the checkout dependency, holds callbacks
-through participant settlement, fences replay before command/control effects,
-and preserves `None` mention identity. That predecessor review is not approval
-of this successor.
+API major 2 is implemented in a separate Hermes candidate. It must land in a
+Hermes release before ordinary users can activate Nunchi V2. This record does
+not claim an upstream merge, release, acceptance, installed-runtime
+verification, commissioning, or integration.
 
-The source successor passed 248 focused and neighbouring Hermes hook, delivery,
-Discord, Telegram, batching, replay, and shutdown tests. The same 248 tests
-passed against an isolated installation of the published Hermes wheel after the
-Nunchi wheel applied the seam; the post-test exact-state check passed, and the
-Nunchi rollback command restored and reverified the complete stock inventory.
-
-The complete Nunchi V2 suite, narrowed Ruff checks, reproducible exact-commit
-wheel build, clean installed-artifact probes, and fresh independent exact-byte
-review are required again after the successor is frozen. Remote publication,
-review closure, and any separately authorized live Discord/Telegram
-commissioning remain pending.
+Later Nunchi settlement, callback cancellation, authorization, delivery
+receipt, profile isolation, and shutdown repairs remain in the source
+successor. The focused Nunchi suite, Ruff, wheel build and installed entry-point
+probe, full suite, independent review, and authorized native
+Discord/Telegram evidence must all pass against a released compatible Hermes
+runtime before the integration can advance beyond source implementation.
 
 ## Historical shared-foundation candidate scope
 

@@ -547,8 +547,7 @@ documentation remain separately addressable ordinary artifacts.
 | Verdict-suite evaluation | `docs/evaluations/verdict-suite.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 corpus and its claims are untouched; this slice adds `evals/v2/contract/` beside it without changing verdict-suite behavior. |
 | Verdict-suite runner | `docs/evaluations/verdict-suite-runner.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the runner, its commands, and its outputs are untouched by this slice. |
 | Governance execution spine | `docs/governance/execution-spine.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the candidate diff contains no change under `docs/governance/`, no change to `scripts/check_governance.py` or its checks, and no change to any documented governance command or gate; the rejection-R1 repair touches only the `tests/test_governance.py` fixture's synthetic baseline construction, which this doc does not document, so its claims stay verifiably true against the diff. |
-| Hermes core patch | `docs/integrations/hermes-core-patch.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the V1 Hermes integration doc remains current; its V2 migration delta is owned by the harness/adapter slices that change that surface, not by the contract slice. |
-| Hermes patch test plan | `docs/integrations/hermes-core-patch-test-plan.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: same basis as the Hermes core patch row; no Hermes surface changes in this slice. |
+| Hermes capability guide | `docs/integrations/hermes-v2.md` | `NO_IMPACT` | T017 / `v2-contract-owner` | Rationale: the Hermes public-hook capability and installation delta are owned by the harness slice, not by the contract slice. |
 
 **Inventory derivation**: the reviewed set is exhaustive over `README.md`,
 the root guidance documents (`AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`), and
