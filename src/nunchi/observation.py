@@ -64,7 +64,7 @@ class ParticipantBinding:
     room_name: str | None = None
     room_kind: Literal["group", "direct", "unknown"] = "unknown"
     provenance: str = "trusted-installation"
-    hermes_profile: str | None = None
+    installation_id: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -82,10 +82,10 @@ class ParticipantBinding:
             raise ValueError("room_kind must be group, direct, or unknown")
         if any(not isinstance(name, str) for name in self.names):
             raise ValueError("names must be strings")
-        if self.hermes_profile is not None and (
-            not isinstance(self.hermes_profile, str) or not self.hermes_profile
+        if self.installation_id is not None and (
+            not isinstance(self.installation_id, str) or not self.installation_id
         ):
-            raise ValueError("hermes_profile must be non-empty when present")
+            raise ValueError("installation_id must be non-empty when present")
 
     def self_document(self) -> dict[str, Any]:
         result: dict[str, Any] = {

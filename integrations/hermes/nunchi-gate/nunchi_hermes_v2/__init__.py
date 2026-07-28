@@ -982,7 +982,9 @@ def _room_config(
     if not isinstance(names, list) or any(not isinstance(item, str) for item in names):
         raise ValidationError("binding names must be an array of strings")
     binding_data["names"] = tuple(names)
-    binding_data["hermes_profile"] = hermes_profile
+    # The shared Nunchi binding stays host-neutral. Hermes maps its profile
+    # namespace into the opaque installation discriminator consumed by core.
+    binding_data["installation_id"] = f"hermes:{hermes_profile}"
     binding = ParticipantBinding(**binding_data)
 
     profile_ref = _closed(room["profile"], required={"path", "sha256"}, label=f"rooms[{index}].profile")

@@ -45,7 +45,7 @@
         "continuity_scope_id",
         "participant_id",
         "resource",
-        "hermes_profile"
+        "installation_id"
       ],
       "properties": {
         "platform": {"$ref": "#/$defs/nonEmptyString"},
@@ -53,7 +53,7 @@
         "continuity_scope_id": {"$ref": "#/$defs/nonEmptyString"},
         "participant_id": {"$ref": "#/$defs/nonEmptyString"},
         "resource": {"$ref": "#/$defs/resourceScope"},
-        "hermes_profile": {"$ref": "#/$defs/nonEmptyString"}
+        "installation_id": {"$ref": "#/$defs/nonEmptyString"}
       }
     },
     "derivedRequester": {

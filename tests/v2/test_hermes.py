@@ -264,7 +264,7 @@ class HermesV2ContractTests(unittest.TestCase):
             room_name="test room",
             room_kind="group",
             provenance="trusted:test-config",
-            hermes_profile="default",
+            installation_id="hermes:default",
         )
 
     def profile(self, binding=None):
@@ -1612,7 +1612,7 @@ class HermesV2ContractTests(unittest.TestCase):
                                 resource_kind="cron-target",
                                 resource_id="origin",
                                 continuity_scope_id="discord:room:42",
-                                hermes_profile="default",
+                                installation_id="hermes:default",
                                 direct_allow=True,
                                 impact="low",
                             ),

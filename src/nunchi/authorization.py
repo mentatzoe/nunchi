@@ -88,7 +88,7 @@ class CapabilityRule:
     resource_kind: str
     resource_id: str
     continuity_scope_id: str
-    hermes_profile: str
+    installation_id: str
     direct_allow: bool = False
     preauthorized_high_impact: bool = False
     impact: str = "high"
@@ -98,7 +98,7 @@ class CapabilityRule:
 
     def __post_init__(self) -> None:
         # Fail closed: an authorization rule that does not pin both the
-        # trusted continuity scope and the Hermes profile identity is
+        # trusted continuity scope and the host installation identity is
         # rejected at load time — it is never silently wildcarded.
         for name in (
             "requester_actor_id",
@@ -109,7 +109,7 @@ class CapabilityRule:
             "resource_kind",
             "resource_id",
             "continuity_scope_id",
-            "hermes_profile",
+            "installation_id",
         ):
             if not isinstance(getattr(self, name), str) or not getattr(self, name):
                 raise ValueError(f"{name} must be non-empty")
@@ -600,9 +600,9 @@ class AuthorizationCoordinator:
                 # Exact-scope bindings are mandatory: both identities are
                 # required on the rule (enforced at construction), so a rule
                 # only matches a binding carrying the identical trusted
-                # continuity scope and Hermes profile.
+                # continuity scope and host installation.
                 and rule.continuity_scope_id == scope.get("continuity_scope_id")
-                and rule.hermes_profile == scope.get("hermes_profile")
+                and rule.installation_id == scope.get("installation_id")
             ):
                 return rule
         return None
@@ -654,9 +654,9 @@ class AuthorizationCoordinator:
             "participant_id": self.observation.binding.participant_id,
             "resource": deepcopy(dict(resource)),
         }
-        _hermes_profile = getattr(self.observation.binding, "hermes_profile", None)
-        if _hermes_profile is not None:
-            scope["hermes_profile"] = _hermes_profile
+        installation_id = getattr(self.observation.binding, "installation_id", None)
+        if installation_id is not None:
+            scope["installation_id"] = installation_id
         binding = {
             "action_id": f"action:{uuid4()}",
             "participant_id": self.observation.binding.participant_id,

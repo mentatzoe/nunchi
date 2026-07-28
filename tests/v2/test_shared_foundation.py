@@ -121,7 +121,7 @@ def foundation(
         room_id="42",
         continuity_scope_id="discord:channel:42",
         names=("Vigil", "Codex"),
-        hermes_profile="default",
+        installation_id="default",
     )
     receipts = ReceiptJournal()
     observation = ObservationProvider(
@@ -924,7 +924,7 @@ class AuthorizationTests(unittest.TestCase):
             resource_kind="workspace-file",
             resource_id="repo:README.md",
             continuity_scope_id="discord:channel:42",
-            hermes_profile="default",
+            installation_id="default",
             direct_allow=True,
             impact="low",
         )
@@ -982,7 +982,7 @@ class AuthorizationTests(unittest.TestCase):
             resource_kind="workspace-file",
             resource_id="repo:README.md",
             continuity_scope_id="discord:channel:42",
-            hermes_profile="default",
+            installation_id="default",
             direct_allow=False,
             impact="high",
         )
@@ -1185,9 +1185,9 @@ class AuthorizationTests(unittest.TestCase):
         ][:2]
         self.assertEqual([], validate_privileged_action_authorization_flow(flow))
 
-    def test_same_scope_with_matching_continuity_and_profile_is_allowed(self):
+    def test_same_scope_with_matching_continuity_and_installation_is_allowed(self):
         """Legitimate same-scope flow: rule bound to exact continuity and
-        profile must still match when the binding carries the same values."""
+        installation identity must still match when the binding carries the same values."""
         bound_rule = CapabilityRule(
             requester_actor_id="human:zoe",
             capability="workspace.file.write",
@@ -1197,7 +1197,7 @@ class AuthorizationTests(unittest.TestCase):
             resource_kind="workspace-file",
             resource_id="repo:README.md",
             continuity_scope_id="discord:channel:42",
-            hermes_profile="default",
+            installation_id="default",
             direct_allow=True,
             impact="low",
         )
@@ -1205,7 +1205,7 @@ class AuthorizationTests(unittest.TestCase):
             PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
         )
         coordinator = self.coordinator(policy=policy)
-        # Patch the binding to include hermes_profile
+        # Patch the binding to include installation_id
         self.pipeline.observation.binding = ParticipantBinding(
             participant_id="vigil",
             actor_id="discord:bot:9",
@@ -1213,7 +1213,7 @@ class AuthorizationTests(unittest.TestCase):
             room_id="42",
             continuity_scope_id="discord:channel:42",
             names=("Vigil", "Codex"),
-            hermes_profile="default",
+            installation_id="default",
         )
         result = coordinator.execute_proposal(
             proposal=self.proposal(),
@@ -1223,9 +1223,9 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual("sent", result.delivery)
         self.assertEqual(1, len(self.native_calls))
 
-    def test_cross_profile_binding_is_denied(self):
-        """Cross-profile denial: a rule bound to hermes_profile='default'
-        must not match a binding whose hermes_profile is 'other'."""
+    def test_cross_installation_binding_is_denied(self):
+        """Cross-installation denial: a rule bound to installation_id='default'
+        must not match a binding whose installation_id is 'other'."""
         bound_rule = CapabilityRule(
             requester_actor_id="human:zoe",
             capability="workspace.file.write",
@@ -1235,7 +1235,7 @@ class AuthorizationTests(unittest.TestCase):
             resource_kind="workspace-file",
             resource_id="repo:README.md",
             continuity_scope_id="discord:channel:42",
-            hermes_profile="default",
+            installation_id="default",
             direct_allow=True,
             impact="low",
         )
@@ -1243,7 +1243,7 @@ class AuthorizationTests(unittest.TestCase):
             PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
         )
         coordinator = self.coordinator(policy=policy)
-        # Same continuity, different profile
+        # Same continuity, different installation
         self.pipeline.observation.binding = ParticipantBinding(
             participant_id="vigil",
             actor_id="discord:bot:9",
@@ -1251,7 +1251,7 @@ class AuthorizationTests(unittest.TestCase):
             room_id="42",
             continuity_scope_id="discord:channel:42",
             names=("Vigil", "Codex"),
-            hermes_profile="other",
+            installation_id="other",
         )
         result = coordinator.execute_proposal(
             proposal=self.proposal(),
@@ -1274,7 +1274,7 @@ class AuthorizationTests(unittest.TestCase):
             resource_kind="workspace-file",
             resource_id="repo:README.md",
             continuity_scope_id="discord:channel:42",
-            hermes_profile="default",
+            installation_id="default",
             direct_allow=True,
             impact="low",
         )
@@ -1282,7 +1282,7 @@ class AuthorizationTests(unittest.TestCase):
             PolicySnapshot("policy", "r1", (bound_rule,), ("operator:zoe",))
         )
         coordinator = self.coordinator(policy=policy)
-        # Same profile, different continuity (e.g. channel recreated)
+        # Same installation, different continuity (e.g. channel recreated)
         self.pipeline.observation.binding = ParticipantBinding(
             participant_id="vigil",
             actor_id="discord:bot:9",
@@ -1290,7 +1290,7 @@ class AuthorizationTests(unittest.TestCase):
             room_id="42",
             continuity_scope_id="discord:channel:43",
             names=("Vigil", "Codex"),
-            hermes_profile="default",
+            installation_id="default",
         )
         # Wake must match the binding or _build_binding raises earlier
         self.wake["room"]["continuity_scope_id"] = "discord:channel:43"

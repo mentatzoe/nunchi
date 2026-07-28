@@ -82,22 +82,22 @@ class AuthorizationShapeCases(unittest.TestCase):
         challenge = make_approval_challenge(approver_ids=["operator:zoe", "operator:zoe"])
         assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
 
-    def test_scope_requires_an_exact_hermes_profile_identity(self):
+    def test_scope_requires_an_exact_installation_id_identity(self):
         for mutate, label in (
-            (lambda scope: scope.pop("hermes_profile"), "missing"),
-            (lambda scope: scope.update(hermes_profile=""), "empty"),
-            (lambda scope: scope.update(hermes_profile=None), "null"),
-            (lambda scope: scope.update(hermes_profile=42), "non-string"),
+            (lambda scope: scope.pop("installation_id"), "missing"),
+            (lambda scope: scope.update(installation_id=""), "empty"),
+            (lambda scope: scope.update(installation_id=None), "null"),
+            (lambda scope: scope.update(installation_id=42), "non-string"),
         ):
-            with self.subTest(hermes_profile=label):
+            with self.subTest(installation_id=label):
                 document = make_authorization_request()
                 mutate(document["binding"]["scope"])
                 assert_schema_verdict(
                     self, "privileged-action-authorization", document, "invalid"
                 )
-        # An unknown extra field remains closed out alongside the new member.
+        # The former platform-specific field remains closed out.
         document = make_authorization_request()
-        document["binding"]["scope"]["installation_id"] = "other"
+        document["binding"]["scope"]["hermes_profile"] = "other"
         assert_schema_verdict(
             self, "privileged-action-authorization", document, "invalid"
         )
