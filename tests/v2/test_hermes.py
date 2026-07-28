@@ -218,6 +218,19 @@ class FakeGateway:
         return self.adapter
 
 
+class FakePluginManager:
+    def __init__(self):
+        self._hooks = {}
+
+    def validate_hook_configuration(self):
+        if self._hooks.get("gateway_message") and self._hooks.get(
+            "pre_gateway_dispatch"
+        ):
+            raise RuntimeError(
+                "gateway_message and pre_gateway_dispatch are mutually exclusive"
+            )
+
+
 class FakeCtx:
     def __init__(self, llm=None, *, profile_name="default", tool_results=None):
         self.llm = llm or FakeLlm([])
@@ -225,13 +238,9 @@ class FakeCtx:
         self.gateway_message_hook_api_version = 2
         self.tool_results = list(tool_results or [])
         self.hooks = {}
-        self._manager = SimpleNamespace(_hooks={})
+        self._manager = FakePluginManager()
         self.commands = {}
         self.dispatched = []
-
-    @property
-    def gateway_message_hook_isolated(self):
-        return not bool(self._manager._hooks.get("pre_gateway_dispatch"))
 
     def register_hook(self, name, callback):
         self.hooks[name] = callback
@@ -1618,9 +1627,13 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual("configuration-invalid", probe["failure"])
         self.assertNotIn("digest mismatch", json.dumps(probe))
 
-    def test_public_probe_fails_closed_when_legacy_ingress_hook_is_present(self):
+    def test_legacy_hook_conflict_is_left_to_host_configuration_validation(self):
         self.require_surface()
         ctx = FakeCtx()
+        ctx.register_hook(
+            "pre_gateway_dispatch",
+            lambda **_kwargs: {"action": "skip"},
+        )
         register(
             ctx,
             config_loader=lambda profile: SimpleNamespace(
@@ -1630,13 +1643,13 @@ class HermesV2ContractTests(unittest.TestCase):
             ),
             hermes_version_loader=lambda: "2026.8.1",
         )
-        ctx.register_hook("pre_gateway_dispatch", lambda **_kwargs: {"action": "skip"})
 
         probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
 
-        self.assertFalse(probe["operational"])
-        self.assertEqual("legacy-pre-dispatch-conflict", probe["failure"])
-        self.assertFalse(probe["v1_fallback"])
+        self.assertTrue(probe["operational"])
+        self.assertNotIn("failure", probe)
+        with self.assertRaisesRegex(RuntimeError, "mutually exclusive"):
+            ctx._manager.validate_hook_configuration()
 
     def test_register_exposes_public_post_auth_hooks_and_probe_command(self):
         self.require_surface()

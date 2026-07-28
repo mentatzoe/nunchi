@@ -1583,15 +1583,8 @@ class _ProfileMultiplexNunchiPlugin:
         """Return exact non-secret provenance without route or binding metadata."""
         with self._lock:
             probes = tuple(plugin.probe() for plugin in self._plugins.values())
-        legacy_conflict = getattr(
-            self.ctx,
-            "gateway_message_hook_isolated",
-            False,
-        ) is not True
-        operational = (
-            bool(probes)
-            and not legacy_conflict
-            and all(probe.get("operational") is True for probe in probes)
+        operational = bool(probes) and all(
+            probe.get("operational") is True for probe in probes
         )
         config_digests: list[str] = []
         if operational:
@@ -1625,11 +1618,7 @@ class _ProfileMultiplexNunchiPlugin:
                 config_identity
             ).hexdigest()
         else:
-            result["failure"] = (
-                "legacy-pre-dispatch-conflict"
-                if legacy_conflict
-                else "configuration-invalid"
-            )
+            result["failure"] = "configuration-invalid"
         return result
 
     def restart(self) -> None:
