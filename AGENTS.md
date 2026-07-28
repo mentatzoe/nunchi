@@ -31,6 +31,15 @@ Code and reproducible behavior determine implementation truth.
   bytes unchanged.
 - Implement product code, tests, evaluations, installation, and documentation
   in ordinary repository paths. Use normal commits and pull requests.
+- Once a pull request exists, push locally verified repair commits to that
+  review branch and answer the review findings there. Do not create a private
+  "safe-to-push" approval gate beside the real pull request: exact-head review
+  gates merge, not publication of reviewable repairs.
+- Review is a transition, not a terminal artifact. Blocking findings return to
+  the implementation owner for repair, push, and finding-by-finding response;
+  a passing review advances the current pull-request head toward merge. A
+  mutation-free reviewer may report findings, but the owning workflow must act
+  on them rather than stopping at the report.
 - Plans, labels, packets, reviews, documents, and evidence do not substitute
   for working behavior. Do not manufacture progress with governance work.
 - A stale assignment, previous session owner, missing process artifact, pending

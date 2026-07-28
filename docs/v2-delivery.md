@@ -82,6 +82,21 @@ not consume a side branch as a substitute. Once the ancestry check passes:
 6. Merge only after required checks and review pass. Then unblock direct
    consumers.
 
+The pull request is the review surface, not a reward granted after a hidden
+candidate is already perfect. Once a PR exists, push each locally verified
+repair to its branch and respond to the corresponding findings as “addressed,
+pending verification.” Do not hold repaired commits in a parallel local chain
+behind a private “safe to push” review. Exact-head approval and required checks
+gate **merge**; release, deployment, live cutover, and gateway mutation remain
+separate gates.
+
+A review result must cause a state transition. Blocking findings return to the
+implementation owner for repair, push, and a finding-by-finding PR response. A
+passing review advances that exact PR head to the next integration gate. A
+mutation-free reviewer is allowed to make no repository changes, but its parent
+workflow is not allowed to terminate at “review complete” while the PR remains
+stale and actionable findings remain.
+
 If an upstream change affects a consumed interface, configuration, or runtime
 behavior, block its consumers. Reuse requires an exact comparison plus
 independent review; otherwise rebuild and reverify them.
