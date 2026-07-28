@@ -822,6 +822,60 @@ class HermesV2ContractTests(unittest.TestCase):
 
         self.assertEqual([{"kind": "message", "content": "hello"}], delivery.calls)
 
+    def test_gateway_callback_cancellation_waits_for_participant_settlement(self):
+        self.require_surface()
+        assert NunchiHermesV2Plugin is not None
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingLlm(FakeLlm):
+            def complete_structured(self, **kwargs):
+                self.calls.append(kwargs)
+                entered.set()
+                release.wait(2)
+                return FakeStructuredResult(
+                    {
+                        "disposition": "SUPPRESS",
+                        "reasons": ["cancelled"],
+                        "evidence_event_ids": ["discord:message:100"],
+                        "legacy_verdict_confidences": {
+                            "PASS": 1.0,
+                            "ACK": 0.0,
+                            "ASK": 0.0,
+                            "SPEAK": 0.0,
+                        },
+                    }
+                )
+
+        async def scenario():
+            with tempfile.TemporaryDirectory() as directory:
+                plugin = NunchiHermesV2Plugin(
+                    config=self.plugin_config(directory),
+                    ctx=FakeCtx(BlockingLlm([])),
+                )
+                event = self.event()
+                task = asyncio.create_task(
+                    plugin.gateway_message(
+                        event=event,
+                        route=event.source,
+                        delivery=FakeDelivery([]),
+                    )
+                )
+                self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+                task.cancel()
+                try:
+                    await asyncio.sleep(0.05)
+                    self.assertFalse(
+                        task.done(),
+                        "callback cancellation must not return before settlement",
+                    )
+                finally:
+                    release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())
+
     def test_unconstructable_hermes_event_is_audited_and_never_scheduled(self):
         self.require_surface()
         with tempfile.TemporaryDirectory() as directory:
@@ -1810,7 +1864,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("d" * 64, probe["host_seam_sha256"])
         self.assertEqual(
-            "87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c",
+            "19d1c96605b32534718a2a1f2c028edadc0b54020a67a7302ebf7c159c089281",
             probe["host_patch_sha256"],
         )
         self.assertEqual(

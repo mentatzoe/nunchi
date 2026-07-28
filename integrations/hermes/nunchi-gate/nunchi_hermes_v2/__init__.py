@@ -1461,7 +1461,30 @@ class NunchiHermesV2Plugin:
         if runtime is None:
             return None
         loop = asyncio.get_running_loop()
-        await asyncio.to_thread(runtime.handle, event, route, delivery, loop)
+        worker = asyncio.create_task(
+            asyncio.to_thread(runtime.handle, event, route, delivery, loop)
+        )
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # Cancelling the asyncio hook must not revoke Hermes' callback-scoped
+            # delivery capability while the participant thread is still live.
+            # Signal the room generation, then keep this callback suspended until
+            # the worker has settled even if cancellation is requested repeatedly.
+            runtime.cancel()
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            if worker.done() and not worker.cancelled():
+                try:
+                    worker.exception()
+                except BaseException:
+                    pass
+            raise
         return {"decision": "handled", "reason": "nunchi-v2:retained"}
 
     async def gateway_session_cancel(self, *, route: Any, reason: str, **_: Any) -> None:

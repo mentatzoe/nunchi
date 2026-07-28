@@ -758,7 +758,7 @@ index c963f875758e2e8061cc71e3e7146ba73364d2eb..d5e44a7759599e803ba19eccaea00207
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index f59e006f6249ada5770a096b52747d72b4be9995..45aa3912ea43443f51fb4399250788bf8e99ba7a 100644
+index f59e006f6249ada5770a096b52747d72b4be9995..c4611c2ef9bb5166e1038f97d9e0a8eebd60f573 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2370,6 +2370,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -773,18 +773,18 @@ index f59e006f6249ada5770a096b52747d72b4be9995..45aa3912ea43443f51fb4399250788bf
              )
              return True  # handled (silently dropped); do not fall through
  
++        # Replay reconstructs context only. Consume it before any legacy/plugin,
++        # drain, approval, command, participant, queueing, or interrupt effect.
++        if getattr(event, "_hermes_startup_restore_replay", False) or getattr(
++            event, "_hermes_historical_replay", False
++        ):
++            return True
++
 +        # Busy ingress bypasses the cold _handle_message entry. Apply the
 +        # existing pre-dispatch policy after authorization but before drain,
 +        # approval, queue, steer, redirect, or interrupt effects. Mark it
 +        # one-shot so a later queue fallback cannot invoke it twice.
 +        if self._run_pre_gateway_dispatch(event):
-+            return True
-+
-+        # Replay reconstructs context only. Consume it before drain notices,
-+        # approvals, commands, participant hooks, queueing, or interrupts.
-+        if getattr(event, "_hermes_startup_restore_replay", False) or getattr(
-+            event, "_hermes_historical_replay", False
-+        ):
 +            return True
 +
          # --- Draining case (gateway restarting/stopping) ---
@@ -969,7 +969,19 @@ index f59e006f6249ada5770a096b52747d72b4be9995..45aa3912ea43443f51fb4399250788bf
      async def _handle_message(self, event: MessageEvent) -> Optional[str]:
          """
          Handle an incoming message from any platform.
-@@ -9980,6 +10139,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -9976,10 +10135,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         except Exception:
+             logger.debug("reset_session_vars failed at handler entry", exc_info=True)
+ 
++        # Startup/historical replay reconstructs context only. Consume it before
++        # authorization failures can generate pairing state or native replies and
++        # before any legacy/plugin/control seam can create a fresh side effect.
++        if getattr(event, "_hermes_startup_restore_replay", False) or getattr(
++            event, "_hermes_historical_replay", False
++        ):
++            return None
++
+         if (
              getattr(self, "_startup_restore_in_progress", False)
              and not getattr(event, "internal", False)
              and not getattr(event, "_hermes_startup_restore_replay", False)
@@ -977,7 +989,7 @@ index f59e006f6249ada5770a096b52747d72b4be9995..45aa3912ea43443f51fb4399250788bf
          ):
              self._queue_startup_restore_event(event)
              return None
-@@ -9996,46 +10156,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -9996,46 +10164,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          if not is_internal:
              self._scale_to_zero_note_real_inbound()
  
@@ -1028,18 +1040,10 @@ index f59e006f6249ada5770a096b52747d72b4be9995..45aa3912ea43443f51fb4399250788bf
  
          if is_internal:
              pass
-@@ -10090,6 +10214,34 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10090,6 +10222,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      # Record rate limit so subsequent messages are silently ignored
                      self.pairing_store._record_rate_limit(platform_name, source.user_id)
              return None
-+
-+        # Startup/historical replay reconstructs context only. Consume it after
-+        # authorization and before update prompts, commands, hooks, queueing, or
-+        # participant observation can create a fresh side effect.
-+        if getattr(event, "_hermes_startup_restore_replay", False) or getattr(
-+            event, "_hermes_historical_replay", False
-+        ):
-+            return None
 +
 +        # Resolve Telegram topic-mode routing before deriving the session key or
 +        # exposing the immutable post-authorization plugin route. A stale or

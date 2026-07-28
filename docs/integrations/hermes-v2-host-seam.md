@@ -30,10 +30,18 @@ The wheel carries `nunchi_hermes_v2/host_patch_assets/` with:
 - 935 exact stock runtime-file identities and 8 declared seam paths; and
 - each path's exact operation, Git mode, and pre/post SHA-256.
 
+The manifest closes both the 935-file runtime tree and the complete published
+wheel inventory: runtime files, `.dist-info`, data-scheme files, generated
+entry-point scripts, and a bounded installer-metadata allowlist. The applicator
+requires the selected root to be the active `hermes-agent` distribution, checks
+its observed name/version, validates the installed `RECORD`, and then binds every
+wheel-origin file to the exact official-wheel digest. `RECORD` remains the stock
+record after apply; the manifest separately verifies the declared Nunchi
+postimages and additions.
+
 A different runtime inventory, undeclared entry inside a Hermes-owned package,
 partial seam, divergent mode/content, unsafe path, symlink, non-regular file,
-wrong ownership, or writable ancestor fails closed. Git metadata is neither
-consulted nor required for an installed-distribution transaction.
+or wrong ownership fails closed. Git metadata is neither consulted nor required for an installed-distribution transaction.
 
 ## Install and apply
 

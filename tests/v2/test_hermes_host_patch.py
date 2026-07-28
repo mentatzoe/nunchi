@@ -146,6 +146,56 @@ class HostPatchApplicatorTests(unittest.TestCase):
         self.assertFalse((self.repo / "new_boundary.py").exists())
         self.assertEqual(rollback_host_patch(self.repo, bundle)["status"], "ready")
 
+    def test_installed_materialization_never_reads_touched_paths_by_name(self) -> None:
+        bundle = self._installed_bundle()
+        shutil.rmtree(self.repo / ".git")
+        actual_read_bytes = Path.read_bytes
+        touched = {self.repo / path for path in bundle.files}
+
+        def guarded_read_bytes(path: Path) -> bytes:
+            if path in touched:
+                raise AssertionError("touched source was read outside pinned descriptors")
+            return actual_read_bytes(path)
+
+        with mock.patch.object(Path, "read_bytes", guarded_read_bytes):
+            self.assertEqual(apply_host_patch(self.repo, bundle)["status"], "applied")
+            self.assertEqual(rollback_host_patch(self.repo, bundle)["status"], "ready")
+
+    @unittest.skipIf(os.name == "nt", "POSIX FIFO semantics required")
+    def test_installed_fifo_preimage_fails_closed_without_blocking(self) -> None:
+        bundle = self._installed_bundle()
+        shutil.rmtree(self.repo / ".git")
+        (self.repo / "host.py").unlink()
+        os.mkfifo(self.repo / "host.py", 0o600)
+
+        with self.assertRaisesRegex(HostPatchError, "regular|inventory|mode"):
+            apply_host_patch(self.repo, bundle)
+
+    def test_bundled_manifest_closes_the_published_wheel_distribution(self) -> None:
+        bundle = HostPatchBundle.bundled()
+
+        self.assertIsNotNone(bundle.distribution_inventory)
+        self.assertEqual(len(bundle.distribution_inventory or {}), 959)
+        self.assertEqual(
+            sum(
+                item.kind == "runtime"
+                for item in (bundle.distribution_inventory or {}).values()
+            ),
+            935,
+        )
+        self.assertEqual(
+            set(bundle.generated_scripts or {}),
+            {"hermes", "hermes-acp", "hermes-agent"},
+        )
+        self.assertIn(
+            "hermes_agent-0.19.0.dist-info/METADATA",
+            bundle.distribution_inventory or {},
+        )
+        self.assertIn(
+            "hermes_agent-0.19.0.data/data/locales/en.yaml",
+            bundle.distribution_inventory or {},
+        )
+
     def test_installed_distribution_rejects_unknown_runtime_source(self) -> None:
         bundle = self._installed_bundle()
         shutil.rmtree(self.repo / ".git")
