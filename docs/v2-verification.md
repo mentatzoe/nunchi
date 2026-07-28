@@ -5,12 +5,26 @@ source suite is not installed or live evidence.
 
 ## Current integration scope
 
-The working successor includes the Hermes V2 participant integration from
-slice 060. Source, wheel, clean-install, and exact-stock-host checks have been
-run locally, but no exact-current committed evidence packet or delivery PR yet
-binds them. Independent exact-current review, live Discord and Telegram
-commissioning, remote integration, and closure remain pending. Claude Code
-remains excluded.
+The exact local successor removes the Nunchi-owned Hermes checkout patch,
+applicator, patch assets, source-inventory admission, and patch CLI. The wheel
+retains a normal `hermes_agent.plugins` entry point for the V2 adapter, but
+released Hermes `v2026.7.20` and current main do not provide the required public
+gateway-message API. Hermes support is therefore **missing and release-blocked**:
+the candidate is not commissionable, releasable as a working Hermes integration,
+or merge-ready until that API ships in an official Hermes release and this
+adapter is retested against it. No stock Hermes checkout was modified.
+
+For local Nunchi candidate `d067eb50e9a9112ae3aadf9470e1c93c2e6c5264`
+(tree `3e2dd0b4b5f7217cfbca495968a09cbbf8f1543e`), the complete V2 source
+suite passed with 401 tests and 812 subtests. Two `SOURCE_DATE_EPOCH`-pinned
+wheel builds were byte-identical at SHA-256
+`d1e13272087675c4260a9dde1acf4b16efd67c08be03c1cded3a1905a6d9b473`.
+A clean virtualenv loaded the `nunchi-v2` entry point and its callable
+`register`; the wheel contained no host-patch assets or host-patch API. This is
+source/artifact evidence only, not installed-host or live commissioning proof.
+Independent exact-current review, an official supporting Hermes release, live
+Discord and Telegram commissioning, remote integration, and review closure all
+remain pending. Claude Code remains excluded.
 
 ## Historical shared-foundation candidate scope
 
