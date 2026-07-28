@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from contextvars import copy_context
-from copy import deepcopy
-from dataclasses import dataclass, field
 import json
 import math
 import queue
 import threading
 import time
+from collections.abc import Callable, Mapping
+from contextvars import copy_context
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from .errors import NunchiError, ValidationError
@@ -459,6 +459,11 @@ class ParticipantTurnHost:
         invocation_result: tuple[str, Any] | None = None
         while invocation_result is None:
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
+                # Cancellation revokes any later dispatch, but the participant
+                # callback itself is already admitted work.  Keep the owning
+                # opportunity—and therefore the outer host callback—alive until
+                # that invocation has actually returned.
+                worker.join()
                 return None
             remaining = effective_deadline - time.monotonic()
             if remaining <= 0:
@@ -476,6 +481,7 @@ class ParticipantTurnHost:
                 invocation_result = result_queue.get(timeout=min(0.05, remaining))
             except queue.Empty:
                 continue
+        worker.join()
         status, raw_action = invocation_result
         if time.monotonic() >= effective_deadline:
             if self.scheduler.is_current(token):

@@ -4856,12 +4856,18 @@
   },
   "generated_scripts": {
     "hermes": {
+      "function": "main",
+      "module": "hermes_cli.main",
       "normalized_sha256": "0e58b73056c202c5c86a99e50e6f6bb5a6f067bdd446fd3a2ee443afa06bc63b"
     },
     "hermes-acp": {
+      "function": "main",
+      "module": "acp_adapter.entry",
       "normalized_sha256": "080928bdcfe8a93fd8e3bc1a180e2df9b281aabf300c0c1df0e7e98040765a7a"
     },
     "hermes-agent": {
+      "function": "main",
+      "module": "run_agent",
       "normalized_sha256": "5a0e1458f59a88acf553fd2886ee2aa22f3979d061b4e4fbb64bb6638b2e0f43"
     }
   },

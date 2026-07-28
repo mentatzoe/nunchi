@@ -19,9 +19,9 @@ The compatibility seam is generated from untouched Hermes release
 The generation worktree is only a fixture; operators install the released
 Hermes wheel and need no source checkout or Git metadata. The exported 8-path
 runtime patch SHA-256 is
-`87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c`;
+`19d1c96605b32534718a2a1f2c028edadc0b54020a67a7302ebf7c159c089281`;
 the closed 935-file stock-inventory manifest SHA-256 is
-`80757486c13fa0ac2305865bdcc3af5abe337cf81e7e08d4f6f8e69011cb0d83`.
+`f34c7b1aa8ffa7133e14f18387d58e0aac11986567fae6e8e65e0edd9c4b3a9e`.
 
 Independent exact-byte review rejected predecessor `b1cae0d3` for four
 blockers: checkout-dependent application, participant work outliving its

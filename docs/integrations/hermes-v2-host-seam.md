@@ -21,10 +21,10 @@ The only supported pre-apply host is release `v2026.7.20`, commit
 The wheel carries `nunchi_hermes_v2/host_patch_assets/` with:
 
 - manifest SHA-256
-  `80757486c13fa0ac2305865bdcc3af5abe337cf81e7e08d4f6f8e69011cb0d83`,
+  `f34c7b1aa8ffa7133e14f18387d58e0aac11986567fae6e8e65e0edd9c4b3a9e`,
   pinned independently in applicator code;
 - patch SHA-256
-  `87c9028799fc056f0087e82715bf009511a6b3c8d9be249d312dbe657be6005c`;
+  `19d1c96605b32534718a2a1f2c028edadc0b54020a67a7302ebf7c159c089281`;
 - stock wheel SHA-256
   `bd0bac012aee38a60894781f4597dc29ee7bedb3448540249921f10d3bef327f`;
 - 935 exact stock runtime-file identities and 8 declared seam paths; and
@@ -32,7 +32,8 @@ The wheel carries `nunchi_hermes_v2/host_patch_assets/` with:
 
 The manifest closes both the 935-file runtime tree and the complete published
 wheel inventory: runtime files, `.dist-info`, data-scheme files, generated
-entry-point scripts, and a bounded installer-metadata allowlist. The applicator
+entry-point targets with bounded `pip`/`uv` launcher templates, and a bounded
+installer-metadata allowlist. The applicator
 requires the selected root to be the active `hermes-agent` distribution, checks
 its observed name/version, validates the installed `RECORD`, and then binds every
 wheel-origin file to the exact official-wheel digest. `RECORD` remains the stock

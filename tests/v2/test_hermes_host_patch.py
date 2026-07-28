@@ -196,6 +196,79 @@ class HostPatchApplicatorTests(unittest.TestCase):
             bundle.distribution_inventory or {},
         )
 
+    def test_root_module_bytecode_is_a_bounded_record_cache(self) -> None:
+        inventory = {
+            "batch_runner.py": host_patch.DistributionFile(
+                kind="runtime",
+                sha256="0" * 64,
+                size=1,
+            )
+        }
+
+        self.assertTrue(
+            host_patch._is_bounded_record_cache(
+                "__pycache__/batch_runner.cpython-313.pyc",
+                "",
+                "",
+                inventory,
+            )
+        )
+
+    def test_generated_script_accepts_bounded_pip_and_uv_launchers(self) -> None:
+        script = host_patch.GeneratedScript(
+            normalized_sha256="0" * 64,
+            module="hermes_cli.main",
+            function="main",
+        )
+        pip_launcher = b"""#!/venv/bin/python
+import sys
+from hermes_cli.main import main
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(main())
+"""
+        uv_launcher = b"""#!/venv/bin/python
+# -*- coding: utf-8 -*-
+import sys
+from hermes_cli.main import main
+if __name__ == "__main__":
+    if sys.argv[0].endswith("-script.pyw"):
+        sys.argv[0] = sys.argv[0][:-11]
+    elif sys.argv[0].endswith(".exe"):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(main())
+"""
+        setuptools_launcher = b"""#!/venv/bin/python
+# -*- coding: utf-8 -*-
+import re
+import sys
+from hermes_cli.main import main
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script.pyw|.exe)?$', '', sys.argv[0])
+    sys.exit(main())
+"""
+
+        host_patch._verify_generated_script(pip_launcher, script)
+        host_patch._verify_generated_script(uv_launcher, script)
+        host_patch._verify_generated_script(setuptools_launcher, script)
+
+    def test_generated_script_rejects_a_different_entry_point(self) -> None:
+        script = host_patch.GeneratedScript(
+            normalized_sha256="0" * 64,
+            module="hermes_cli.main",
+            function="main",
+        )
+        launcher = b"""#!/venv/bin/python
+import sys
+from attacker import main
+if __name__ == '__main__':
+    sys.exit(main())
+"""
+
+        with self.assertRaisesRegex(HostPatchError, "identity mismatch"):
+            host_patch._verify_generated_script(launcher, script)
+
     def test_installed_distribution_rejects_unknown_runtime_source(self) -> None:
         bundle = self._installed_bundle()
         shutil.rmtree(self.repo / ".git")

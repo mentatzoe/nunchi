@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,16 @@ README = ROOT / "README.md"
 DELIVERY = ROOT / "docs" / "v2-delivery.md"
 PLATFORM = ROOT / "docs" / "platform-v2.md"
 HERMES_README = ROOT / "integrations" / "hermes" / "README.md"
+HOST_SEAM = ROOT / "docs" / "integrations" / "hermes-v2-host-seam.md"
+VERIFICATION = ROOT / "docs" / "v2-verification.md"
+HOST_ASSETS = (
+    ROOT
+    / "integrations"
+    / "hermes"
+    / "nunchi-gate"
+    / "nunchi_hermes_v2"
+    / "host_patch_assets"
+)
 EXECUTION_SPINE = ROOT / "docs" / "governance" / "execution-spine.md"
 SPECS_README = ROOT / "specs" / "README.md"
 FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
@@ -122,6 +134,19 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         for obsolete in ("--config", "--participant-profile", "--state-dir"):
             with self.subTest(obsolete_flag=obsolete):
                 self.assertNotIn(obsolete, text)
+
+    def test_host_seam_documented_digests_match_bundled_artifacts(self) -> None:
+        manifest = HOST_ASSETS / "manifest.json"
+        manifest_bytes = manifest.read_bytes()
+        manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
+        patch_name = json.loads(manifest_bytes)["patch"]
+        patch_digest = hashlib.sha256((HOST_ASSETS / patch_name).read_bytes()).hexdigest()
+
+        for document in (HOST_SEAM, VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.relative_to(ROOT)):
+                self.assertIn(manifest_digest, text)
+                self.assertIn(patch_digest, text)
 
     def test_spec_workflow_remains_retired(self) -> None:
         self.assertFalse(

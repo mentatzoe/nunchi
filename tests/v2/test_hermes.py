@@ -876,6 +876,75 @@ class HermesV2ContractTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_gateway_callback_cancellation_waits_for_admitted_participant_turn(self):
+        self.require_surface()
+        assert NunchiHermesV2Plugin is not None
+        participant_entered = threading.Event()
+        participant_release = threading.Event()
+
+        class BlockingParticipantLlm(FakeLlm):
+            def complete_structured(self, **kwargs):
+                self.calls.append(kwargs)
+                if kwargs["purpose"] == "nunchi-v2-attention":
+                    return FakeStructuredResult(
+                        {
+                            "disposition": "WAKE",
+                            "reasons": ["direct request"],
+                            "evidence_event_ids": ["discord:message:100"],
+                            "legacy_verdict_confidences": {
+                                "PASS": 0.0,
+                                "ACK": 0.0,
+                                "ASK": 0.0,
+                                "SPEAK": 1.0,
+                            },
+                        }
+                    )
+                if kwargs["purpose"] != "nunchi-v2-participant-turn":
+                    raise AssertionError(kwargs["purpose"])
+                participant_entered.set()
+                participant_release.wait(2)
+                return FakeStructuredResult(
+                    {
+                        "kind": "message",
+                        "origin_event_id": "discord:message:100",
+                        "text": "must not escape cancellation",
+                    }
+                )
+
+        async def scenario():
+            with tempfile.TemporaryDirectory() as directory:
+                plugin = NunchiHermesV2Plugin(
+                    config=self.plugin_config(directory),
+                    ctx=FakeCtx(BlockingParticipantLlm([])),
+                )
+                event = self.event()
+                delivery = FakeDelivery([])
+                task = asyncio.create_task(
+                    plugin.gateway_message(
+                        event=event,
+                        route=event.source,
+                        delivery=delivery,
+                    )
+                )
+                self.assertTrue(
+                    await asyncio.to_thread(participant_entered.wait, 1),
+                    "participant turn was not admitted",
+                )
+                task.cancel()
+                try:
+                    await asyncio.sleep(0.3)
+                    self.assertFalse(
+                        task.done(),
+                        "callback cancellation returned while participant turn was live",
+                    )
+                finally:
+                    participant_release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertEqual([], delivery.calls)
+
+        asyncio.run(scenario())
+
     def test_unconstructable_hermes_event_is_audited_and_never_scheduled(self):
         self.require_surface()
         with tempfile.TemporaryDirectory() as directory:

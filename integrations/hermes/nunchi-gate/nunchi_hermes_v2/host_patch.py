@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import contextlib
 import csv
@@ -31,7 +32,7 @@ except ImportError:  # pragma: no cover - the supported Hermes seam is POSIX-onl
 
 
 # Updated only when the reviewed bundled manifest is intentionally regenerated.
-BUNDLED_MANIFEST_SHA256 = "6811fbde2a025b99bf669776eb307861075c9e62a09db60d0542a07ba9e2ced3"
+BUNDLED_MANIFEST_SHA256 = "f34c7b1aa8ffa7133e14f18387d58e0aac11986567fae6e8e65e0edd9c4b3a9e"
 
 
 class HostPatchError(RuntimeError):
@@ -63,6 +64,8 @@ class DistributionFile:
 @dataclass(frozen=True)
 class GeneratedScript:
     normalized_sha256: str
+    module: str
+    function: str
 
 
 @dataclass(frozen=True)
@@ -351,7 +354,7 @@ class HostPatchBundle:
                         not isinstance(name, str)
                         or Path(name).name != name
                         or not isinstance(raw, dict)
-                        or set(raw) != {"normalized_sha256"}
+                        or set(raw) != {"normalized_sha256", "module", "function"}
                     ):
                         raise HostPatchError(
                             "host-patch generated-script inventory is invalid"
@@ -361,8 +364,24 @@ class HostPatchBundle:
                         raise HostPatchError(
                             "host-patch generated-script identity is invalid"
                         )
+                    module = raw.get("module")
+                    function = raw.get("function")
+                    if (
+                        not isinstance(module, str)
+                        or re.fullmatch(
+                            r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", module
+                        )
+                        is None
+                        or not isinstance(function, str)
+                        or re.fullmatch(r"[A-Za-z_]\w*", function) is None
+                    ):
+                        raise HostPatchError(
+                            "host-patch generated-script entry point is invalid"
+                        )
                     generated_scripts[name] = GeneratedScript(
-                        normalized_sha256=digest
+                        normalized_sha256=digest,
+                        module=module,
+                        function=function,
                     )
                 if any(
                     not isinstance(name, str)
@@ -1058,7 +1077,7 @@ def _is_bounded_record_cache(
     if digest or size or ".." in parsed.parts or parsed.parts.count("__pycache__") != 1:
         return False
     cache_index = parsed.parts.index("__pycache__")
-    if cache_index == 0 or cache_index != len(parsed.parts) - 2:
+    if cache_index != len(parsed.parts) - 2:
         return False
     match = re.fullmatch(r"(.+)\.cpython-\d+(?:\.opt-\d+)?\.pyc", parsed.name)
     if match is None:
@@ -1066,6 +1085,56 @@ def _is_bounded_record_cache(
     source = PurePosixPath(*parsed.parts[:cache_index], f"{match.group(1)}.py").as_posix()
     item = inventory.get(source)
     return item is not None and item.kind == "runtime"
+
+
+def _generated_script_trees(script: GeneratedScript) -> set[str]:
+    module = script.module
+    function = script.function
+    templates = (
+        f"""import sys
+from {module} import {function}
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit({function}())
+""",
+        f"""import sys
+from {module} import {function}
+if __name__ == '__main__':
+    if sys.argv[0].endswith('-script.pyw'):
+        sys.argv[0] = sys.argv[0][:-11]
+    elif sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit({function}())
+""",
+        f"""import re
+import sys
+from {module} import {function}
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script.pyw|.exe)?$', '', sys.argv[0])
+    sys.exit({function}())
+""",
+    )
+    return {
+        ast.dump(ast.parse(template), include_attributes=False)
+        for template in templates
+    }
+
+
+def _verify_generated_script(data: bytes, script: GeneratedScript) -> None:
+    first, separator, rest = data.partition(b"\n")
+    if not separator or not first.startswith(b"#!"):
+        raise HostPatchError("Hermes generated script has an invalid launcher")
+    normalized = b"#!python\n" + rest
+    if hashlib.sha256(normalized).hexdigest() == script.normalized_sha256:
+        return
+    try:
+        source = rest.decode("utf-8")
+        observed = ast.dump(ast.parse(source), include_attributes=False)
+    except (UnicodeError, SyntaxError) as exc:
+        raise HostPatchError("Hermes generated script identity mismatch") from exc
+    if observed not in _generated_script_trees(script):
+        raise HostPatchError("Hermes generated script identity mismatch")
 
 
 def _verify_distribution_identity(
@@ -1204,12 +1273,7 @@ def _verify_distribution_identity(
 
     for script_name, script in scripts.items():
         data = content_by_record[script_records[script_name]]
-        first, separator, rest = data.partition(b"\n")
-        if not separator or not first.startswith(b"#!"):
-            raise HostPatchError("Hermes generated script has an invalid launcher")
-        normalized = b"#!python\n" + rest
-        if hashlib.sha256(normalized).hexdigest() != script.normalized_sha256:
-            raise HostPatchError("Hermes generated script identity mismatch")
+        _verify_generated_script(data, script)
     return observed_name, observed_version
 
 
