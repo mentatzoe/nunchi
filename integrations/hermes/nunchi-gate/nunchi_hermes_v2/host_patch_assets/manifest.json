@@ -17,7 +17,7 @@
     "gateway/run.py": {
       "operation": "modify",
       "post_mode": "100644",
-      "post_sha256": "d073cd552300a5f3e84f04b592ca2056f5a00d71bb1342aeb0c734a33faecb41",
+      "post_sha256": "bc08ced908f4d1dc780fc108aa8a93f067ce3fe8b3e929bf2ef26440efb8b5e7",
       "pre_mode": "100644",
       "pre_sha256": "f588d37d23df0c3eb133723eab8d9f8bf7f672a5069c279afd494f36f4c4e601"
     },
@@ -142,7 +142,7 @@
     }
   },
   "patch": "0002-v2-participant-host-seam.patch",
-  "patch_sha256": "9c7abf3b785fb39e8621e4cc68646b130f34b855a3f2ec4c4a5db8c927bf736c",
+  "patch_sha256": "772acfbb84afcd5072bf1ee8de399c3d0529d9250193b86b5fe2ce93b5af3dca",
   "schema_version": 2,
   "source": "Nunchi-owned compatibility seam for stock Hermes; no upstream merge dependency",
   "supported_hermes_commit": "243a01d5d72555061406de84890b2e9622f409cb"

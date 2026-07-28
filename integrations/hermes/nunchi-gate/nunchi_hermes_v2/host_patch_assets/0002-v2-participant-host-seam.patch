@@ -757,7 +757,7 @@ index 4f2c0e98fa4f8974997aab0f3cffc9c584bff814..5d8ec503e5bb428a9e4ddc706022acc1
          # On-entry self-heal: if the adapter still has an _active_sessions
          # entry for this key but the owner task has already exited (done or
 diff --git a/gateway/run.py b/gateway/run.py
-index aac6a192555f9c1684fa2bc2a03485bab7527392..c84309b696507264c7c43708dd8ac9efa0111bb3 100644
+index aac6a192555f9c1684fa2bc2a03485bab7527392..768eaf3a8e250181ee2b6bfef9cec92958bcaaa4 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -2572,6 +2572,7 @@ _INTERRUPT_REASON_STOP = "Stop requested"
@@ -1243,7 +1243,7 @@ index aac6a192555f9c1684fa2bc2a03485bab7527392..c84309b696507264c7c43708dd8ac9ef
 +        delivery_via_relay = (
 +            getattr(source, "delivered_via_upstream_relay", False) is True
 +        )
-+        delivery_profile = str(source.profile or "")
++        delivery_profile = str(getattr(source, "profile", None) or "")
 +        if not delivery_profile:
 +            from hermes_cli.profiles import get_active_profile_name
 +

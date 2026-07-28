@@ -1740,7 +1740,7 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertFalse(probe["v1_fallback"])
         self.assertEqual(1, probe["loaded_profile_count"])
         self.assertEqual("a" * 64, probe["host_seam_sha256"])
-        self.assertEqual("9c7abf3b785fb39e8621e4cc68646b130f34b855a3f2ec4c4a5db8c927bf736c", probe["host_patch_sha256"])
+        self.assertEqual("772acfbb84afcd5072bf1ee8de399c3d0529d9250193b86b5fe2ce93b5af3dca", probe["host_patch_sha256"])
         self.assertEqual("243a01d5d72555061406de84890b2e9622f409cb", probe["supported_hermes_commit"])
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])
