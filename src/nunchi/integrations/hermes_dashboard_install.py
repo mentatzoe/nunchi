@@ -21,6 +21,7 @@ _BRIDGE_NAME = "nunchi-dashboard"
 _MARKER_NAME = ".nunchi-dashboard.json"
 _LEGACY_BRIDGE_NAME = "nunchi-v2-dashboard"
 _LEGACY_MARKER_NAME = ".nunchi-v2-dashboard.json"
+_BYTECODE_DIRECTORY = Path("dashboard") / "__pycache__"
 
 
 class DashboardInstallError(RuntimeError):
@@ -108,16 +109,48 @@ def _bridge_is_owned(bridge: Path, marker_name: str) -> bool:
     allowed_files = {Path(marker_name)} | {
         Path("dashboard") / name for name in _ASSET_NAMES
     }
-    allowed_directories = {Path("dashboard")}
+    allowed_directories = {Path("dashboard"), _BYTECODE_DIRECTORY}
     for existing in bridge.rglob("*"):
         relative = existing.relative_to(bridge)
         if existing.is_symlink():
             return False
         if existing.is_dir() and relative not in allowed_directories:
             return False
-        if existing.is_file() and relative not in allowed_files:
+        if (
+            existing.is_file()
+            and relative not in allowed_files
+            and not (
+                relative.parent == _BYTECODE_DIRECTORY
+                and relative.name.startswith("plugin_api.")
+                and relative.suffix == ".pyc"
+            )
+        ):
             return False
     return True
+
+
+def _remove_generated_bytecode(bridge: Path) -> None:
+    """Remove only bytecode Hermes generated from the owned API bridge."""
+
+    cache = bridge / _BYTECODE_DIRECTORY
+    if not cache.exists():
+        return
+    if cache.is_symlink() or not cache.is_dir():
+        raise DashboardInstallError(
+            "Nunchi dashboard bytecode cache is not a regular directory"
+        )
+    for existing in cache.iterdir():
+        if (
+            existing.is_symlink()
+            or not existing.is_file()
+            or not existing.name.startswith("plugin_api.")
+            or existing.suffix != ".pyc"
+        ):
+            raise DashboardInstallError(
+                f"refusing unmanaged dashboard bytecode entry: {existing}"
+            )
+        existing.unlink()
+    cache.rmdir()
 
 
 def _migrate_legacy_bridge(*, hermes_home: Path, bridge: Path) -> None:
@@ -148,6 +181,7 @@ def install_dashboard(*, hermes_home: Path) -> dict[str, Any]:
             raise DashboardInstallError(
                 "refusing to overwrite an unmanaged Nunchi dashboard directory"
             )
+    _remove_generated_bytecode(bridge)
     _prepare_directory(dashboard, hermes_home=hermes_home)
     allowed_files = {Path(_MARKER_NAME)} | {
         Path("dashboard") / name for name in _ASSET_NAMES

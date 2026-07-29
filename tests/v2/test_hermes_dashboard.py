@@ -385,6 +385,47 @@ class HermesDashboardInstallTests(unittest.TestCase):
                 ).is_file()
             )
 
+    def test_reinstall_removes_only_generated_plugin_api_bytecode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "hermes"
+            install_dashboard(hermes_home=home)
+            cache = (
+                home
+                / "plugins"
+                / "nunchi-dashboard"
+                / "dashboard"
+                / "__pycache__"
+            )
+            cache.mkdir()
+            (cache / "plugin_api.cpython-311.pyc").write_bytes(b"generated")
+
+            result = install_dashboard(hermes_home=home)
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(cache.exists())
+
+    def test_reinstall_rejects_unmanaged_bytecode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "hermes"
+            install_dashboard(hermes_home=home)
+            cache = (
+                home
+                / "plugins"
+                / "nunchi-dashboard"
+                / "dashboard"
+                / "__pycache__"
+            )
+            cache.mkdir()
+            unexpected = cache / "other.cpython-311.pyc"
+            unexpected.write_bytes(b"unmanaged")
+
+            with self.assertRaisesRegex(
+                DashboardInstallError,
+                "unmanaged Nunchi dashboard directory",
+            ):
+                install_dashboard(hermes_home=home)
+            self.assertTrue(unexpected.is_file())
+
     def test_ui_uses_authenticated_plugin_api_and_restart(self):
         path = (
             Path("src")
