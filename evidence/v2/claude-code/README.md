@@ -63,16 +63,16 @@ git merge-base --is-ancestor \
 
 | Claim | Command | Result |
 |---|---|---|
-| repository suite | `python3 -m unittest` | **417** tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); identical on 3.11, 3.12 and 3.13 |
-| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | **92** tests, OK; identical on 3.11, 3.12 and 3.13 |
+| repository suite | `python3 -m unittest` | **421** tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); identical on 3.11, 3.12 and 3.13 |
+| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | **96** tests, OK; identical on 3.11, 3.12 and 3.13 |
 | shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
 | dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
 | lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
 | reproducible build identity | see [Build identity](#build-identity) | order-independent wheel content digest, stable across build interpreters; the raw zip SHA-256 is **not** cross-environment reproducible and is not claimed |
 | clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
-| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | **92** tests, OK, `nunchi` resolved from `site-packages` |
+| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | **96** tests, OK, `nunchi` resolved from `site-packages` |
 | installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
-| real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-27.jsonl`) |
+| real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-29.jsonl`) |
 
 ### Installed probes
 
@@ -88,6 +88,24 @@ git merge-base --is-ancestor \
  "product_version":"2.0.0","room_id":"152","send_time_social_judgment":false,
  "shared_discord_transport":true,"surface":"claude-code","v1_fallback":false}
 ```
+
+The configured probe now also carries `participant_credential`. Measured at
+this head against the clean-installed wheel and the real `claude` binary, with
+a configuration that disables privileged actions:
+
+```json
+{"actor_id":"discord:actor:9","configured":true,"generation":2,
+ "participant_credential":"authenticated","participant_id":"vigil",
+ "participant_tools_enabled":false,"persistent_session":true,
+ "privileged_actions_enabled":false,"product":"nunchi",
+ "product_version":"2.0.0","room_id":"152","send_time_social_judgment":false,
+ "shared_discord_transport":true,"surface":"claude-code","v1_fallback":false}
+```
+
+That value is what the CLI reported for the participant's own configuration
+root in this environment; it is not a claim that the field reads
+`authenticated` anywhere else. The `logged-out`, `absent`, and `unknown`
+branches are covered deterministically by the platform suite.
 
 The installed runner refused, with exit `3`, each of: a tampered config digest
 (`adapter config bytes do not match trusted sha256 pin`), a swapped participant
@@ -186,8 +204,8 @@ Two identities that do reproduce anywhere are recorded instead:
 
 | Identity | Value at this head | Reproduce with |
 |---|---|---|
-| packaged source tree | `669f52f9d9715b943c8a122c65ea5a8bf8b2cd6b` | `git rev-parse HEAD:src` |
-| wheel **content** digest (order-independent) | `030db1aa91b5beddd5f9b8d26fafebcfaf3653e9dc9c2afedcd2b7a4a1e7682d` | recipe below |
+| packaged source tree | `1771d37c355acb92beeb47d8fb6e2ec05d8ffae4` | `git rev-parse HEAD:src` |
+| wheel **content** digest (order-independent) | `9cc4167c8e452a558170d224f407f5366a6af4310009eed4880e2898e8c5e0da` | recipe below |
 
 ```sh
 build=$(mktemp -d)            # a fresh empty directory every time
