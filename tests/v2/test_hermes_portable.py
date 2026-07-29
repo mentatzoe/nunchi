@@ -860,14 +860,41 @@ class HermesPortableTests(unittest.TestCase):
                 runner = GatewayRunner()
                 result = asyncio.run(runner._handle_message(FakeEvent()))
                 self.assertEqual("stock", result)
+                result = asyncio.run(
+                    runner._handle_message(FakeEvent(text="/stop"))
+                )
+                self.assertEqual("stock", result)
                 runner.authorized = True
                 result = asyncio.run(runner._handle_message(FakeEvent(text="/status")))
                 self.assertEqual("stock", result)
-                self.assertEqual(["hello", "/status"], runner.calls)
+                self.assertEqual(["hello", "/stop", "/status"], runner.calls)
+                runtime = plugin._rooms[("discord", "42")]
+                with (
+                    mock.patch.object(
+                        runtime.lane,
+                        "drain",
+                        return_value=False,
+                    ),
+                    mock.patch.object(
+                        plugin,
+                        "gateway_session_cancel",
+                        new=mock.AsyncMock(),
+                    ) as cancel,
+                ):
+                    result = asyncio.run(
+                        runner._handle_message(FakeEvent(text="/stop"))
+                    )
+                self.assertEqual("Stopped.", result)
+                cancel.assert_awaited_once()
+                self.assertEqual(
+                    ["hello", "/stop", "/status"],
+                    runner.calls,
+                    "an active Nunchi stop must not claim no stock task exists",
+                )
                 result = asyncio.run(runner._handle_message(FakeEvent(text="claimed")))
                 self.assertIsNone(result)
                 self.assertEqual(
-                    ["hello", "/status"],
+                    ["hello", "/stop", "/status"],
                     runner.calls,
                     "a claimed Nunchi failure must not start a second stock turn",
                 )
@@ -876,13 +903,16 @@ class HermesPortableTests(unittest.TestCase):
                 runner.skip_dispatch = True
                 result = asyncio.run(runner._handle_message(FakeEvent(text="blocked")))
                 self.assertIsNone(result)
-                self.assertEqual(["hello", "/status"], runner.calls)
+                self.assertEqual(["hello", "/stop", "/status"], runner.calls)
                 self.assertEqual(2, runner.inbound_notes)
                 self.assertEqual(2, runner.pre_dispatch_calls)
                 runner._startup_restore_in_progress = True
                 result = asyncio.run(runner._handle_message(FakeEvent(text="restore")))
                 self.assertEqual("stock", result)
-                self.assertEqual(["hello", "/status", "restore"], runner.calls)
+                self.assertEqual(
+                    ["hello", "/stop", "/status", "restore"],
+                    runner.calls,
+                )
                 runner._startup_restore_in_progress = False
                 runner.skip_dispatch = False
                 plugin.handle = mock.AsyncMock(return_value=True)

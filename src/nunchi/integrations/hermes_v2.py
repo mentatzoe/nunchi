@@ -2211,11 +2211,32 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
                 else None
             )
             if command:
+                try:
+                    authorized_command = bool(
+                        self._is_user_authorized(source)
+                    )
+                except Exception:
+                    authorized_command = False
+                if not authorized_command:
+                    return await current_handle(self, event)
+                runtime = owner._runtime(source)
+                nunchi_active = (
+                    runtime is not None
+                    and not runtime.lane.drain(0)
+                )
                 if command in {"stop", "new", "reset", "restart"}:
                     await owner.gateway_session_cancel(
                         route=source,
                         reason=command,
                     )
+                if command == "stop" and nunchi_active:
+                    try:
+                        from agent.i18n import t
+                        from gateway.platforms.base import EphemeralReply
+
+                        return EphemeralReply(t("gateway.stop.stopped"))
+                    except (ImportError, ModuleNotFoundError):
+                        return "Stopped."
                 return await current_handle(self, event)
             if bool(getattr(event, "internal", False)):
                 return await current_handle(self, event)
