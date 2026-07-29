@@ -14,12 +14,15 @@ The stable public boundary is the closed V2 contract in
 - `nunchi-codex-room-runner`
 - `nunchi-conformance`
 - `nunchi-hermes-v2-config`
+- `nunchi-hermes-v2-doctor`
 
 The Hermes plugin entry point requires the public
-`PluginContext.gateway_message_hook_api_version` capability. Nunchi supports
-API major 2 and fails registration visibly before adding hooks when the
-capability is missing or incompatible. Compatibility follows the interface
-major rather than an exact `hermes-agent` package version or source identity.
+`PluginContext.participant_host_api_version` umbrella capability. Nunchi
+supports API major 2 and fails registration visibly before configuration,
+hooks, or commands when the capability is missing, unreadable, malformed, old,
+or future. The narrower gateway-message-hook version remains probe evidence but
+is not an acceptance gate. Compatibility follows the umbrella interface major
+rather than an exact `hermes-agent` package version or source identity.
 
 No V1 request, verdict, hook, responder, configuration, or exit-code contract
 is stable or executable.

@@ -139,8 +139,15 @@ class HermesPluginPackagingTests(unittest.TestCase):
                     "eps=[ep for dist in m.distributions(path=[root]) "
                     "for ep in dist.entry_points "
                     "if ep.group=='hermes_agent.plugins' and ep.name=='nunchi-v2'];"
+                    "doctors=[ep for dist in m.distributions(path=[root]) "
+                    "for ep in dist.entry_points "
+                    "if ep.group=='console_scripts' "
+                    "and ep.name=='nunchi-hermes-v2-doctor'];"
                     "module=eps[0].load() if len(eps)==1 else None;"
+                    "doctor=doctors[0].load() if len(doctors)==1 else None;"
                     "print(json.dumps({'count':len(eps),"
+                    "'doctor_count':len(doctors),"
+                    "'doctor_main':callable(doctor),"
                     "'value':eps[0].value if len(eps)==1 else None,"
                     "'register':callable(getattr(module,'register',None))}))"
                 ),
@@ -159,6 +166,8 @@ class HermesPluginPackagingTests(unittest.TestCase):
         self.assertEqual(
             {
                 "count": 1,
+                "doctor_count": 1,
+                "doctor_main": True,
                 "value": "nunchi_hermes_v2",
                 "register": True,
             },
@@ -176,7 +185,13 @@ class HermesPluginPackagingTests(unittest.TestCase):
                 for name in members
                 if name.endswith(".dist-info/entry_points.txt")
             )
+            metadata_name = next(
+                name
+                for name in members
+                if name.endswith(".dist-info/METADATA")
+            )
             entry_points = archive.read(entry_points_name).decode("utf-8")
+            metadata = archive.read(metadata_name).decode("utf-8")
 
         self.assertNotIn("nunchi-hermes-v2-host-patch", entry_points)
         self.assertFalse(
@@ -190,6 +205,12 @@ class HermesPluginPackagingTests(unittest.TestCase):
         )
         self.assertIn("[hermes_agent.plugins]", entry_points)
         self.assertIn("nunchi-v2 = nunchi_hermes_v2", entry_points)
+        self.assertIn("[console_scripts]", entry_points)
+        self.assertIn(
+            "nunchi-hermes-v2-doctor = nunchi_hermes_v2.doctor:main",
+            entry_points,
+        )
+        self.assertNotIn("Requires-Dist: hermes-agent", metadata)
 
 
 if __name__ == "__main__":  # pragma: no cover

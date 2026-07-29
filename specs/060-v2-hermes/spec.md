@@ -82,7 +82,11 @@ unchanged. New candidate and handoff attempts append without rewriting history.
   AttentionDecisionV2@2`, `I-010C ParticipantWakeV2@1`, `I-010D
   ContextContinuationV2@1`, `I-010E AttentionReceiptV2@2`, `I-020A
   ObservationProviderV2@1`, `I-030A AttentionEngineV2@1`, and `I-040A
-  ParticipantTurnHostV2@1`.
+  ParticipantTurnHostV2@1`; Hermes's
+  `PluginContext.participant_host_api_version` umbrella major 2 supplies the
+  host lifecycle, routing/session, receipt, LLM, tool, command, and
+  plugin-status surfaces. The narrower gateway-message-hook major is
+  provenance, not activation authority.
 - **Produces**: a Hermes conformance implementation and evidence packet for the
   consumed interfaces; no new cross-slice public interface.
 - **Integration handoff**: `v2-hermes-owner` hands an exact plugin commit,
@@ -222,6 +226,10 @@ then compare receipts and participant outcomes with the common program catalog.
 - **FR-014**: The slice MUST preserve the control-plane boundary. Its planning
   baseline MUST create no V2 product behavior, and implementation MUST remain
   dormant until the slice-activation requirements are satisfied.
+- **FR-015**: Registration MUST require participant-host API major 2 before
+  configuration or registration. The installed doctor MUST report stable JSON,
+  fail incompatible hosts, and optionally require `nunchi-v2` to be enabled
+  and active from `hermes plugins list --json`, without restarting Hermes.
 
 ### Key Entities
 
@@ -251,6 +259,9 @@ then compare receipts and participant outcomes with the common program catalog.
   scenes produce committed evidence or an explicit unavailable-capability record.
 - **SC-006**: Every live Hermes parity claim cites exact installed plugin and
   Nunchi provenance plus the consumed interface versions.
+- **SC-007**: Missing, unreadable, malformed, old, and future participant-host
+  majors claim zero Nunchi hooks or commands; doctor preflight and post-restart
+  activation health both pass before room admission is opened.
 
 ## Assumptions
 
@@ -267,8 +278,8 @@ then compare receipts and participant outcomes with the common program catalog.
   capability, provenance, limitation, and evidence-grade deltas to
   `v2-integrator`.
 - **Affected ordinary docs**: `UPDATE` `docs/integrations/hermes-v2.md`,
-  and `integrations/hermes/README.md`; validate installation, gateway-hook
-  capability negotiation, runtime provenance, profile isolation, restart,
+  and `integrations/hermes/README.md`; validate installation, participant-host
+  capability negotiation, activation status, runtime provenance, restart,
   links, examples, and probes. `HANDOFF` exact current-state and breaking-change deltas for
   `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/integration.md`,
   and `docs/architecture/v2-selected-design.md` to accepting `v2-integrator`.

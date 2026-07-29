@@ -137,24 +137,39 @@ the host makes zero native calls and records a failed transport stage.
 ## Hermes native plugin
 
 The same wheel exposes `nunchi-v2` in the `hermes_agent.plugins` entry-point
-group and `nunchi-hermes-v2-config` as the pinned configuration generator.
-It requires Hermes's public
-`PluginContext.gateway_message_hook_api_version == 2` capability. The
-capability exists in a Hermes implementation candidate but must land in a
-Hermes release before ordinary users can activate this integration. Until
-then, keep Nunchi disabled. No upstream merge or release is claimed here.
-
-Once a compatible release exists, run `hermes update` (or upgrade
-`hermes-agent`), install the exact Nunchi wheel into the Python environment
-used by Hermes, enable `nunchi-v2`, generate one private bundle per Hermes
-profile/participant/room binding, set the printed profile-scoped environment
-keys, and restart Hermes.
+group, `nunchi-hermes-v2-config` as the pinned configuration generator, and
+`nunchi-hermes-v2-doctor` as the machine-readable preflight. It requires
+Hermes's public `PluginContext.participant_host_api_version == 2` umbrella
+capability. The capability exists in a Hermes implementation candidate but
+must land in a Hermes release before ordinary users can activate this
+integration. Until then, keep Nunchi disabled. No upstream merge or release is
+claimed here.
 
 Registration checks the capability major before loading configuration or
-adding hooks. A missing, malformed, older, or future incompatible major leaves
-Nunchi inactive and reports `Nunchi V2 was not activated`, the observed or
-missing capability, and an instruction to update Hermes and retry. Nunchi does
-not pin an exact Hermes package release or inspect its source bytes.
+registering anything. A missing, unreadable, malformed, older, or future
+incompatible umbrella major leaves Nunchi inactive and reports `Nunchi was not
+activated`, plus an instruction to update Hermes and retry. The narrower
+`gateway_message_hook_api_version` remains redacted probe/recovery provenance
+but is not sufficient for activation. Nunchi does not pin an exact Hermes
+package release or inspect its source bytes.
+
+Once a compatible release exists, use this closed loop:
+
+1. Run `hermes update` or upgrade `hermes-agent` in the environment that runs
+   Hermes.
+2. Install or update the reviewed Nunchi wheel in that same environment.
+3. Run `nunchi-hermes-v2-config`; verify its private `0600` config/profile
+   files, SHA-256 values, exact profile/participant/actor/room/state bindings,
+   and exported profile-scoped environment keys.
+4. Run `nunchi-hermes-v2-doctor`. A nonzero exit blocks activation.
+5. Run `hermes plugins enable nunchi-v2`.
+6. Restart Hermes only through the operator's normal service controls.
+7. Run `nunchi-hermes-v2-doctor --check-activation`. This consumes
+   `hermes plugins list --json` and fails unless `nunchi-v2` is enabled and
+   active without a registration error.
+8. Run `/nunchi-v2 probe` and verify the pinned artifact/config identities.
+
+The doctor never restarts a gateway.
 
 The plugin claims only configured routes after Hermes host authorization. The
 bound Discord channel/thread or Telegram group/topic must be configured so
@@ -163,9 +178,12 @@ withheld observation before participant attention can run. Telegram topic room
 IDs use `CHAT_ID:topic:TOPIC_ID`.
 
 Keep the room mention/command-gated until a released Hermes package exposes
-API major 2, the exact Nunchi wheel is installed, configuration is pinned, the
-plugin is enabled and Hermes has restarted, and `/nunchi-v2 probe` reports
-`operational: true`, `gateway_message_hook_api_version: 2`,
+participant-host API major 2, the exact Nunchi wheel is installed,
+configuration is pinned, doctor preflight and activation health both pass, and
+`/nunchi-v2 probe` reports `operational: true`,
+`participant_host_api_version: 2`,
+`supported_participant_host_api_major: 2`,
+`gateway_message_hook_api_version: 2`,
 `supported_gateway_message_hook_api_major: 2`, and the expected Nunchi artifact
 and aggregate config digests. Separately inspect the private `0600`
 config/profile files locally and verify their exact profile, participant,
@@ -187,11 +205,11 @@ nunchi-v2 approve APPROVAL_CHALLENGE_ID
 
 `/nunchi-v2 probe` is deliberately redacted: it reports generation,
 loaded-profile count, full Nunchi package identity and version, consumed V2
-interface versions, observed/supported Hermes hook capability major, and
-aggregate configuration provenance. It does not report route bindings, profile
-names, state paths, or capability names. A valid installation reports
-generation 2 and `v1_fallback: false`. Full commands and admission settings are
-in `integrations/hermes/README.md`.
+interface versions, the observed/supported Hermes umbrella major, the narrower
+hook major, and aggregate configuration provenance. It does not report route
+bindings, profile names, state paths, or capability names. A valid installation
+reports generation 2 and `v1_fallback: false`. Full commands and admission
+settings are in `integrations/hermes/README.md`.
 
 ## Restart and recovery
 
@@ -214,9 +232,11 @@ commit is uncertain, the event cannot wake again and coverage becomes unknown.
 ## Rollback
 
 First restore mention/command-only admission for every bound room and verify
-ordinary unmentioned traffic no longer reaches the participant seam. Then stop
-Hermes and V2 processes before disabling the plugin. Nunchi has not changed
-Hermes files, so there is no host-source restoration step. Do not run V1 and V2
-participants in one room/session. Retain the V2 state directory for audit, but
-do not feed V2 journals to a V1 runtime. Never leave an observation-open room
+ordinary unmentioned traffic no longer reaches the participant seam. Run
+`hermes plugins disable nunchi-v2`, restart through operator-controlled service
+management if needed, and restore the prior reviewed Nunchi package. Retain the
+V2 state directory for audit, but do not feed V2 journals to a V1 runtime.
+Nunchi has not changed Hermes files, so there is no host-source restoration
+step. Hermes itself continues normally after failed Nunchi registration because
+that failure claims no hooks or commands. Never leave an observation-open room
 with the V2 entry point absent, disabled, or non-operational.

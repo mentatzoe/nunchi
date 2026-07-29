@@ -76,7 +76,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
             "complete downstream interface for platform adapters",
-            "public gateway participant-hook API major 2",
+            "public participant-host API major 2",
             "Runtime capability negotiation",
             "must land in a Hermes release",
             "exactly one participant-delegated social judgment",
@@ -94,13 +94,17 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     def test_hermes_guide_documents_capability_negotiation_and_release_blocker(self) -> None:
         normalized = " ".join(HERMES_README.read_text(encoding="utf-8").split())
         for phrase in (
-            "versioned public gateway participant hooks",
+            "versioned public participant-host API",
             "Nunchi does not modify, replace, or wrap Hermes files",
-            "`PluginContext.gateway_message_hook_api_version == 2`",
+            "`PluginContext.participant_host_api_version == 2`",
             "must land in a Hermes release",
             "Ordinary users cannot activate",
-            "Nunchi V2 was not activated",
+            "Nunchi was not activated",
             "`hermes update`",
+            "nunchi-hermes-v2-doctor --check-activation",
+            "`hermes plugins list --json`",
+            "restore the prior reviewed Nunchi wheel",
+            "failed registration claims no hooks or commands",
             "does not claim an upstream merge, release, or acceptance",
             "No repository checkout or editable install counts",
         ):
@@ -157,6 +161,23 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
                     "host_patch_assets",
                 ):
                     self.assertNotIn(obsolete, text)
+
+    def test_active_hermes_docs_have_no_exact_release_or_source_pin(self) -> None:
+        for document in (
+            HERMES_README,
+            HERMES_GUIDE,
+            PLATFORM,
+            ROOT / "docs" / "INSTALL.md",
+            ROOT / "docs" / "STABILITY.md",
+        ):
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.relative_to(ROOT)):
+                self.assertNotRegex(text, r"hermes-agent\s*==\s*\S+")
+                self.assertNotRegex(
+                    text,
+                    r"(?i)hermes(?:\s+source)?\s+(?:commit|sha)"
+                    r"\s+[`'\"]?[0-9a-f]{7,40}",
+                )
 
     def test_spec_workflow_remains_retired(self) -> None:
         self.assertFalse(

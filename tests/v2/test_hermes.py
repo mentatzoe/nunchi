@@ -233,6 +233,7 @@ class FakeCtx:
     def __init__(self, llm=None, *, profile_name="default", tool_results=None):
         self.llm = llm or FakeLlm([])
         self.profile_name = profile_name
+        self.participant_host_api_version = 2
         self.gateway_message_hook_api_version = 2
         self.tool_results = list(tool_results or [])
         self.hooks = {}
@@ -420,7 +421,7 @@ class HermesV2ContractTests(unittest.TestCase):
             rebound = runtime_for("10")
             self.assertNotEqual(first.room_dir, rebound.room_dir)
 
-    def test_live_recovery_evidence_requires_supported_gateway_hook_api_major(self):
+    def test_live_recovery_evidence_requires_supported_host_api_majors(self):
         self.require_surface()
         binding = self.binding()
         payload = {
@@ -434,6 +435,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
+            "participant_host_api_version": 2,
             "gateway_message_hook_api_version": 1,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
@@ -447,14 +449,25 @@ class HermesV2ContractTests(unittest.TestCase):
             "later_observed_at": "2026-07-26T00:00:02+00:00",
             "later_hearing": "verified",
         }
-        with self.assertRaisesRegex(ValidationError, "does not verify this binding"):
-            hermes_module._validate_live_recovery_evidence(
-                payload,
-                binding=binding,
-                hermes_profile="default",
-                participant_profile_sha256="b" * 64,
-                nunchi_artifact_sha256="c" * 64,
-            )
+        for field in (
+            "gateway_message_hook_api_version",
+            "participant_host_api_version",
+        ):
+            with self.subTest(field=field):
+                changed = dict(payload)
+                changed["gateway_message_hook_api_version"] = 2
+                changed[field] = 1
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "does not verify this binding",
+                ):
+                    hermes_module._validate_live_recovery_evidence(
+                        changed,
+                        binding=binding,
+                        hermes_profile="default",
+                        participant_profile_sha256="b" * 64,
+                        nunchi_artifact_sha256="c" * 64,
+                    )
 
     def test_live_recovery_evidence_rejects_profile_or_artifact_rebinding(self):
         self.require_surface()
@@ -470,6 +483,7 @@ class HermesV2ContractTests(unittest.TestCase):
             "actor_id": binding.actor_id,
             "participant_profile_sha256": "b" * 64,
             "nunchi_artifact_sha256": "c" * 64,
+            "participant_host_api_version": 2,
             "gateway_message_hook_api_version": 2,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
@@ -1819,6 +1833,8 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertRegex(probe["nunchi_artifact_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(2, probe["nunchi_contract_version"])
         self.assertEqual(2, probe["participant_interface_version"])
+        self.assertEqual(2, probe["participant_host_api_version"])
+        self.assertEqual(2, probe["supported_participant_host_api_major"])
         self.assertEqual(2, probe["gateway_message_hook_api_version"])
         self.assertEqual(2, probe["supported_gateway_message_hook_api_major"])
         self.assertRegex(probe["nunchi_version"], r"^\d+\.\d+\.\d+")
@@ -1847,10 +1863,10 @@ class HermesV2ContractTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
-    def test_register_missing_gateway_hook_capability_fails_actionably_without_hooks(self):
+    def test_register_missing_participant_host_capability_fails_before_config_or_hooks(self):
         self.require_surface()
         ctx = FakeCtx()
-        del ctx.gateway_message_hook_api_version
+        del ctx.participant_host_api_version
         config_loader = mock.Mock()
 
         with self.assertRaises(ValidationError) as raised:
@@ -1860,8 +1876,8 @@ class HermesV2ContractTests(unittest.TestCase):
             )
 
         diagnostic = str(raised.exception)
-        self.assertIn("Nunchi V2 was not activated", diagnostic)
-        self.assertIn("gateway_message_hook_api_version` is missing", diagnostic)
+        self.assertIn("Nunchi was not activated", diagnostic)
+        self.assertIn("participant_host_api_version` is missing", diagnostic)
         self.assertIn("`hermes update`", diagnostic)
         self.assertIn("upgrade `hermes-agent`", diagnostic)
         self.assertIn("retry", diagnostic)
@@ -1869,29 +1885,81 @@ class HermesV2ContractTests(unittest.TestCase):
         self.assertEqual({}, ctx.hooks)
         self.assertEqual({}, ctx.commands)
 
-    def test_register_incompatible_gateway_hook_major_fails_actionably_without_hooks(self):
+    def test_register_incompatible_participant_host_major_fails_before_config_or_hooks(self):
         self.require_surface()
-        for observed in (1, 3, "2", True):
+        for observed, detail in (
+            (1, "reported unsupported major 1"),
+            (3, "reported unsupported major 3"),
+            ("2", "is malformed"),
+            (True, "is malformed"),
+        ):
             with self.subTest(observed=observed):
                 ctx = FakeCtx()
-                ctx.gateway_message_hook_api_version = observed
+                ctx.participant_host_api_version = observed
                 config_loader = mock.Mock()
 
                 with self.assertRaises(ValidationError) as raised:
                     register(ctx, config_loader=config_loader)
 
                 diagnostic = str(raised.exception)
-                self.assertIn("Nunchi V2 was not activated", diagnostic)
+                self.assertIn("Nunchi was not activated", diagnostic)
                 self.assertIn(
-                    f"gateway_message_hook_api_version` reported unsupported major {observed!r}",
+                    f"participant_host_api_version` {detail}",
                     diagnostic,
                 )
-                self.assertIn("requires gateway message hook API major 2", diagnostic)
                 self.assertIn("`hermes update`", diagnostic)
+                self.assertIn("upgrade `hermes-agent`", diagnostic)
                 self.assertIn("retry", diagnostic)
                 config_loader.assert_not_called()
                 self.assertEqual({}, ctx.hooks)
                 self.assertEqual({}, ctx.commands)
+
+    def test_register_unreadable_participant_host_capability_fails_before_config_or_hooks(self):
+        self.require_surface()
+
+        class UnreadableCtx(FakeCtx):
+            @property
+            def participant_host_api_version(self):
+                raise RuntimeError("blocked")
+
+            @participant_host_api_version.setter
+            def participant_host_api_version(self, _value):
+                pass
+
+        ctx = UnreadableCtx()
+        config_loader = mock.Mock()
+
+        with self.assertRaises(ValidationError) as raised:
+            register(ctx, config_loader=config_loader)
+
+        diagnostic = str(raised.exception)
+        self.assertIn("Nunchi was not activated", diagnostic)
+        self.assertIn(
+            "participant_host_api_version` could not be read",
+            diagnostic,
+        )
+        config_loader.assert_not_called()
+        self.assertEqual({}, ctx.hooks)
+        self.assertEqual({}, ctx.commands)
+
+    def test_register_uses_umbrella_capability_not_narrow_gateway_version(self):
+        self.require_surface()
+        ctx = FakeCtx()
+        ctx.gateway_message_hook_api_version = 1
+
+        register(
+            ctx,
+            config_loader=lambda profile: SimpleNamespace(
+                hermes_profile=profile,
+                rooms=(),
+                provenance={"sha256": "c" * 64},
+            ),
+        )
+
+        probe = json.loads(ctx.commands["nunchi-v2"]("probe"))
+        self.assertEqual(2, probe["participant_host_api_version"])
+        self.assertEqual(1, probe["gateway_message_hook_api_version"])
+        self.assertTrue(probe["operational"])
 
     def test_registration_writes_no_hermes_files(self):
         self.require_surface()

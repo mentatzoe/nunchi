@@ -48,6 +48,8 @@ from nunchi.v2_contracts import ValidationError, validate_canonical_event
 logger = logging.getLogger(__name__)
 _PLUGIN_ID = "nunchi-v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_PARTICIPANT_HOST_CAPABILITY = "participant_host_api_version"
+_SUPPORTED_PARTICIPANT_HOST_API_MAJOR = 2
 _GATEWAY_MESSAGE_HOOK_CAPABILITY = "gateway_message_hook_api_version"
 _SUPPORTED_GATEWAY_MESSAGE_HOOK_API_MAJOR = 2
 _MISSING_CAPABILITY = object()
@@ -137,6 +139,7 @@ def _validate_live_recovery_evidence(
             "actor_id",
             "participant_profile_sha256",
             "nunchi_artifact_sha256",
+            "participant_host_api_version",
             "gateway_message_hook_api_version",
             "nunchi_contract_version",
             "participant_interface_version",
@@ -162,6 +165,9 @@ def _validate_live_recovery_evidence(
         "participant_id": binding.participant_id,
         "actor_id": binding.actor_id,
         "participant_profile_sha256": participant_profile_sha256,
+        "participant_host_api_version": (
+            _SUPPORTED_PARTICIPANT_HOST_API_MAJOR
+        ),
         "gateway_message_hook_api_version": (
             _SUPPORTED_GATEWAY_MESSAGE_HOOK_API_MAJOR
         ),
@@ -223,8 +229,42 @@ def _closed(mapping: Any, *, required: set[str], optional: set[str] = set(), lab
     return result
 
 
-def _require_gateway_message_hook_api(ctx: Any) -> int:
-    """Negotiate the public Hermes gateway participant-hook capability."""
+def _participant_host_failure(detail: str) -> str:
+    return (
+        "Nunchi was not activated: Hermes "
+        f"`PluginContext.participant_host_api_version` {detail}. "
+        "Run `hermes update` or upgrade `hermes-agent`; retry."
+    )
+
+
+def _require_participant_host_api(ctx: Any) -> int:
+    """Negotiate Hermes's umbrella participant-host capability."""
+
+    try:
+        observed = getattr(
+            ctx,
+            _PARTICIPANT_HOST_CAPABILITY,
+            _MISSING_CAPABILITY,
+        )
+    except Exception as exc:
+        raise ValidationError(
+            _participant_host_failure("could not be read")
+        ) from exc
+    if observed is _MISSING_CAPABILITY:
+        raise ValidationError(_participant_host_failure("is missing"))
+    if type(observed) is not int:
+        raise ValidationError(_participant_host_failure("is malformed"))
+    if observed != _SUPPORTED_PARTICIPANT_HOST_API_MAJOR:
+        raise ValidationError(
+            _participant_host_failure(
+                f"reported unsupported major {observed}"
+            )
+        )
+    return observed
+
+
+def _optional_gateway_message_hook_api(ctx: Any) -> int | None:
+    """Read the narrower compatibility property for redacted evidence only."""
 
     try:
         observed = getattr(
@@ -232,30 +272,9 @@ def _require_gateway_message_hook_api(ctx: Any) -> int:
             _GATEWAY_MESSAGE_HOOK_CAPABILITY,
             _MISSING_CAPABILITY,
         )
-    except Exception as exc:
-        raise ValidationError(
-            "Nunchi V2 was not activated: Hermes capability "
-            "`PluginContext.gateway_message_hook_api_version` could not be read; "
-            "Nunchi requires gateway message hook API major 2. Run `hermes update` "
-            "(or upgrade `hermes-agent`) and retry."
-        ) from exc
-    if (
-        observed is _MISSING_CAPABILITY
-        or type(observed) is not int
-        or observed != _SUPPORTED_GATEWAY_MESSAGE_HOOK_API_MAJOR
-    ):
-        detail = (
-            "is missing"
-            if observed is _MISSING_CAPABILITY
-            else f"reported unsupported major {observed!r}"
-        )
-        raise ValidationError(
-            "Nunchi V2 was not activated: Hermes capability "
-            f"`PluginContext.gateway_message_hook_api_version` {detail}; "
-            "Nunchi requires gateway message hook API major 2. Run `hermes update` "
-            "(or upgrade `hermes-agent`) and retry."
-        )
-    return observed
+    except Exception:
+        return None
+    return observed if type(observed) is int else None
 
 
 def canonical_actor_id(platform: str, native_actor_id: str) -> str:
@@ -1553,12 +1572,14 @@ class _ProfileMultiplexNunchiPlugin:
         ctx: Any,
         loader: Callable[[str], HermesPluginConfig],
         initial_profile: str,
-        gateway_message_hook_api_version: int,
+        participant_host_api_version: int,
+        gateway_message_hook_api_version: int | None,
         nunchi_artifact_sha256: str,
     ) -> None:
         self.ctx = ctx
         self.loader = loader
         self.initial_profile = initial_profile
+        self.participant_host_api_version = participant_host_api_version
         self.gateway_message_hook_api_version = gateway_message_hook_api_version
         self.nunchi_artifact_sha256 = nunchi_artifact_sha256
         self._lock = threading.RLock()
@@ -1664,6 +1685,12 @@ class _ProfileMultiplexNunchiPlugin:
             "nunchi_version": nunchi_version,
             "nunchi_contract_version": 2,
             "participant_interface_version": 2,
+            "participant_host_api_version": (
+                self.participant_host_api_version
+            ),
+            "supported_participant_host_api_major": (
+                _SUPPORTED_PARTICIPANT_HOST_API_MAJOR
+            ),
             "gateway_message_hook_api_version": (
                 self.gateway_message_hook_api_version
             ),
@@ -1701,7 +1728,8 @@ def register(
     *,
     config_loader: Callable[[str], HermesPluginConfig] | None = None,
 ) -> Any:
-    gateway_message_hook_api_version = _require_gateway_message_hook_api(ctx)
+    participant_host_api_version = _require_participant_host_api(ctx)
+    gateway_message_hook_api_version = _optional_gateway_message_hook_api(ctx)
     nunchi_artifact_sha256 = _nunchi_artifact_sha256()
     loader = config_loader or _default_config_loader
     profile = _nonempty(getattr(ctx, "profile_name", None) or "default", "Hermes profile")
@@ -1709,6 +1737,7 @@ def register(
         ctx=ctx,
         loader=loader,
         initial_profile=profile,
+        participant_host_api_version=participant_host_api_version,
         gateway_message_hook_api_version=gateway_message_hook_api_version,
         nunchi_artifact_sha256=nunchi_artifact_sha256,
     )

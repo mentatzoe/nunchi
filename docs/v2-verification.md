@@ -6,22 +6,24 @@ source suite is not installed or live evidence.
 ## Current integration scope
 
 The current Hermes successor is an ordinary `hermes_agent.plugins` entry point
-that negotiates Hermes's public gateway participant-hook capability at
-registration. It supports API major 2 and registers `gateway_message`,
-`gateway_session_cancel`, and `gateway_shutdown` only when
-`PluginContext.gateway_message_hook_api_version` reports that major. Missing,
-malformed, older, or future incompatible majors fail before hook registration
-with an actionable instruction to update Hermes and retry.
+that negotiates Hermes's public participant-host umbrella capability at
+registration. It supports API major 2 and loads configuration or registers
+hooks and commands only when `PluginContext.participant_host_api_version`
+reports that major. Missing, unreadable, malformed, older, or future
+incompatible majors fail first with an actionable instruction to update Hermes
+and retry. `PluginContext.gateway_message_hook_api_version` remains narrower
+redacted provenance and is not an acceptance gate.
 
 The Nunchi wheel contains no Hermes host-file applicator, source patch,
 manifest, wrapper, or Hermes package-version pin. Installed Hermes and Nunchi
 package identities remain required evidence about a tested subject, but
 runtime capability negotiation is the compatibility authority.
 
-API major 2 is implemented in a separate Hermes candidate. It must land in a
-Hermes release before ordinary users can activate Nunchi V2. This record does
-not claim an upstream merge, release, acceptance, installed-runtime
-verification, commissioning, or integration.
+Participant-host API major 2 and machine-readable plugin activation state are
+implemented in a separate Hermes candidate. They must land in a Hermes release
+before ordinary users can activate Nunchi V2. This record does not claim an
+upstream merge, release, acceptance, installed-runtime verification,
+commissioning, or integration.
 
 Later Nunchi settlement, callback cancellation, authorization, delivery
 receipt, profile isolation, and shutdown repairs remain in the source

@@ -64,14 +64,15 @@ This planning baseline creates no product behavior.
 
 **Language/Version**: Python 3.11+ and the supported Hermes plugin runtime
 
-**Primary Dependencies**: existing Hermes plugin APIs and the Nunchi package; no
-new mandatory product dependency planned
+**Primary Dependencies**: Hermes participant-host API major 2 and the Nunchi
+package; no exact Hermes release or source pin
 
 **Storage**: profile-bound bounded observation and existing Hermes operational
 state only; no social memory or roster
 
-**Testing**: stdlib `unittest`, sandboxed plugin fixtures, replay evaluations,
-multi-profile and installed-runtime live scenes
+**Testing**: stdlib `unittest`, sandboxed plugin fixtures, doctor capability and
+activation-status cases, replay evaluations, multi-profile and
+installed-runtime live scenes
 
 **Target Platform**: Hermes agent profiles using native shared-room transports
 
@@ -80,9 +81,10 @@ multi-profile and installed-runtime live scenes
 **Performance Goals**: one pre-attention call per candidate trigger, zero
 participant inference for effective suppression, and recorded wake/context cost
 
-**Constraints**: exact profile binding; one social judgment; direct-room-turn
-instruction; evaluation-only meta-answer scoring; no send reclassification;
-truthful surface capability
+**Constraints**: participant-host major 2 before config or registration; exact
+profile binding; one social judgment; direct-room-turn instruction;
+evaluation-only meta-answer scoring; no send reclassification; truthful
+surface capability
 
 **Scale/Scope**: one or more Hermes profiles in the same Discord room plus a
 Hermes Telegram parity scene
@@ -136,6 +138,8 @@ Shared schemas are planned under `schemas/v2/`; callable core/CLI behavior under
   immutable I-010E stage ownership without flattening the lifecycle.
 - Hermes-specific installation and capability documentation under
   `docs/integrations/hermes-v2.md`.
+- Stable installed doctor output for capability preflight and optional plugin
+  activation health, with no gateway restart.
 - Runtime/evidence handoff under `evidence/v2/hermes/`.
 
 ## Integration Strategy
@@ -166,10 +170,11 @@ shared packaging.
 | S03/S05/S15/HM-03 later hearing and restart | Hermes + native history | Earlier suppressed event remains ordinarily available within bounded honest coverage | `evidence/v2/hermes/hermes-scenes.jsonl` |
 | S02/S04/S14/HM-04 shared Discord room | n Hermes + one human | Native facts, class/referential scars, participant silence, and reactions preserve model nuance | `evidence/v2/hermes/hermes-scenes.jsonl` |
 | S02/S13/HM-05 Telegram capability | Hermes Telegram | Equivalent available facts route equivalently; missing facts are explicit | `evidence/v2/hermes/telegram-scenes.jsonl` |
-| S12/HM-06 installed provenance | Installed Hermes profiles | Exact plugin/package/model/config/interface identities accompany a V2 probe | `evidence/v2/hermes/installed-runtime.md` |
+| S12/HM-06 installed provenance | Installed Hermes profiles | Umbrella capability preflight, enabled/active plugin status, and exact plugin/package/model/config/interface identities accompany a V2 probe | `evidence/v2/hermes/installed-runtime.md` |
 
 Deterministic tests belong at `tests/v2/test_hermes.py`, fixtures at
-`tests/fixtures/v2/hermes/`, and reusable scenes at `evals/v2/hermes/`.
+`tests/fixtures/v2/hermes/`, doctor cases at
+`tests/v2/test_hermes_doctor.py`, and reusable scenes at `evals/v2/hermes/`.
 
 Every JSONL result row MUST contain canonical `scene_id` and Hermes case ID.
 `evidence/v2/hermes/verification.md` is the exact scene-to-record/command
@@ -219,7 +224,7 @@ the slice directory.
 |---|---|---|---|---|
 | Global Hermes support/evidence state | `README.md` | `HANDOFF` | T014 / `v2-hermes-owner` | Accepting owner: `v2-integrator`; replace V1/source-only claims with exact V2 lifecycle, capability, provenance, limitation, and evidence-grade wording at atomic cutover. |
 | Hermes V2 integration guide | `docs/integrations/hermes-v2.md` | `UPDATE` | T014 / `v2-hermes-owner` | Validate install/config/profile isolation, restart, links, examples, and probes against the installed candidate. |
-| Existing Hermes operator and capability docs | `integrations/hermes/README.md`, `docs/integrations/hermes-v2.md` | `UPDATE` | T014 / `v2-hermes-owner` | Validate lifecycle, configuration, public gateway-hook capability negotiation, runtime provenance, profile isolation, restart, examples, and installed probes. |
+| Existing Hermes operator and capability docs | `integrations/hermes/README.md`, `docs/integrations/hermes-v2.md` | `UPDATE` | T014 / `v2-hermes-owner` | Validate lifecycle, configuration, public participant-host capability negotiation, runtime activation status, provenance, restart, examples, and installed probes. |
 | Shared install/integration/adapter/design/change state | `CHANGELOG.md`, `docs/INSTALL.md`, `docs/adapters.md`, `docs/integration.md`, `docs/architecture/v2-selected-design.md` | `HANDOFF` | T014 / `v2-hermes-owner` | Accepting owner: `v2-integrator`; apply the exact breaking Hermes lifecycle, install/provenance, limitation, evidence-grade, and diagram delta at cutover. |
 
 Slice 060 owns the integration guide and hands only cross-surface current-state

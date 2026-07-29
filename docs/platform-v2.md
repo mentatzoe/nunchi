@@ -2,10 +2,12 @@
 
 This is the complete downstream interface for platform adapters. The Hermes
 adapter is delivered as a normal Nunchi wheel plugin and requires Hermes's
-public gateway participant-hook API major 2. Runtime capability negotiation,
-not an exact Hermes release or source identity, determines compatibility. That
-interface must land in a Hermes release before ordinary users can activate the
-plugin. Claude Code remains unimplemented and unarmed.
+public participant-host API major 2. That umbrella covers every Hermes surface
+the adapter consumes; the narrower gateway-message-hook major is evidence, not
+the compatibility authority. Runtime capability negotiation, not an exact
+Hermes release or source identity, determines compatibility. That interface
+must land in a Hermes release before ordinary users can activate the plugin.
+Claude Code remains unimplemented and unarmed.
 
 ## Required owners
 
