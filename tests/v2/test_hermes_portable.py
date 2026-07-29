@@ -1103,6 +1103,86 @@ class HermesPortableTests(unittest.TestCase):
             finally:
                 hermes_v2._SHIM_OWNER = None
 
+    def test_claimed_ingress_bypasses_only_the_stock_participant_queue(self):
+        class GatewayRunner:
+            def __init__(self):
+                self.authorized = True
+
+            def _is_user_authorized(self, source):
+                del source
+                return self.authorized
+
+        class BasePlatformAdapter:
+            def __init__(self):
+                self.gateway_runner = GatewayRunner()
+                self.stock = []
+                self.claimed = []
+
+                async def claimed_handler(event):
+                    self.claimed.append(event.message_id)
+
+                self._message_handler = claimed_handler
+
+            async def handle_message(self, event):
+                self.stock.append(event.message_id)
+
+        fake_gateway = types.ModuleType("gateway")
+        fake_platforms = types.ModuleType("gateway.platforms")
+        fake_base = types.ModuleType("gateway.platforms.base")
+        fake_base.BasePlatformAdapter = BasePlatformAdapter
+        with tempfile.TemporaryDirectory() as temporary:
+            config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
+            plugin = hermes_v2.NunchiHermesV2Plugin(
+                config=config,
+                ctx=ctx,
+                hermes_version="0.19.0",
+                mode="runtime-monkeypatch",
+            )
+            try:
+                with mock.patch.dict(
+                    sys.modules,
+                    {
+                        "gateway": fake_gateway,
+                        "gateway.platforms": fake_platforms,
+                        "gateway.platforms.base": fake_base,
+                    },
+                ):
+                    hermes_v2._install_claimed_ingress_shim(plugin)
+
+                adapter = BasePlatformAdapter()
+                first = FakeEvent(text="first")
+                first.message_id = "601"
+                second = FakeEvent(text="second")
+                second.message_id = "602"
+                asyncio.run(adapter.handle_message(first))
+                asyncio.run(adapter.handle_message(second))
+                self.assertEqual(["601", "602"], adapter.claimed)
+                self.assertEqual([], adapter.stock)
+
+                other = FakeEvent(
+                    text="other",
+                    source=FakeSource(chat_id="43"),
+                )
+                other.message_id = "603"
+                asyncio.run(adapter.handle_message(other))
+                command = FakeEvent(text="/status")
+                command.message_id = "604"
+                asyncio.run(adapter.handle_message(command))
+                internal = FakeEvent(text="internal")
+                internal.message_id = "605"
+                internal.internal = True
+                asyncio.run(adapter.handle_message(internal))
+                adapter.gateway_runner.authorized = False
+                unauthorized = FakeEvent(text="unauthorized")
+                unauthorized.message_id = "606"
+                asyncio.run(adapter.handle_message(unauthorized))
+                self.assertEqual(
+                    ["603", "604", "605", "606"],
+                    adapter.stock,
+                )
+            finally:
+                hermes_v2._SHIM_OWNER = None
+
     def test_telegram_batch_shim_retains_each_native_event(self):
         class TelegramAdapter:
             def __init__(self):

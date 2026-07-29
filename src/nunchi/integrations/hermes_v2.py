@@ -2039,6 +2039,73 @@ def _install_telegram_batch_identity_shim(
     TelegramAdapter._enqueue_text_event = enqueue_text_event
 
 
+def _install_claimed_ingress_shim(
+    plugin: NunchiHermesV2Plugin,
+) -> None:
+    """Let Nunchi own concurrency for its exact configured rooms.
+
+    Hermes's base adapter keeps one stock participant task active per session.
+    A second message is otherwise diverted into the stock runner's busy queue,
+    which cannot drain after Nunchi replaces that participant turn. Calling
+    the already-bound runner handler directly preserves every native message
+    for Nunchi's own active-plus-newest scheduler without changing unclaimed,
+    command, internal, or unauthorized traffic.
+    """
+
+    global _SHIM_OWNER
+    try:
+        from gateway.platforms.base import BasePlatformAdapter
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("base platform adapter") from exc
+
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi V2 Hermes plugin may be active")
+        current_handle = getattr(BasePlatformAdapter, "handle_message", None)
+        if getattr(current_handle, "__nunchi_v2_ingress__", False):
+            _SHIM_OWNER = plugin
+            return
+        _require_signature(
+            current_handle,
+            required=("self", "event"),
+            label="base platform ingress",
+        )
+
+        async def handle_message(self: Any, event: Any) -> Any:
+            owner = _SHIM_OWNER
+            source = getattr(event, "source", None)
+            command = (
+                event.get_command()
+                if callable(getattr(event, "get_command", None))
+                else None
+            )
+            if (
+                owner is None
+                or source is None
+                or not owner.claims(source)
+                or bool(getattr(event, "internal", False))
+                or bool(command)
+            ):
+                return await current_handle(self, event)
+
+            runner = getattr(self, "gateway_runner", None)
+            authorized = getattr(runner, "_is_user_authorized", None)
+            handler = getattr(self, "_message_handler", None)
+            if not callable(authorized) or not callable(handler):
+                return await current_handle(self, event)
+            try:
+                if not bool(authorized(source)):
+                    return await current_handle(self, event)
+            except Exception:
+                return await current_handle(self, event)
+
+            return await handler(event)
+
+        handle_message.__nunchi_v2_ingress__ = True  # type: ignore[attr-defined]
+        BasePlatformAdapter.handle_message = handle_message
+        _SHIM_OWNER = plugin
+
+
 def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
     """Monkeypatch a checked process-local adapter around Hermes's runner.
 
@@ -2381,6 +2448,7 @@ def register(
         ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)
         ctx.register_hook("gateway_shutdown", plugin.gateway_shutdown)
     else:
+        _install_claimed_ingress_shim(plugin)
         _install_compatibility_shim(plugin)
 
     def probe_command(raw_args: str) -> str:
