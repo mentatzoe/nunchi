@@ -30,8 +30,16 @@
 
 Dispositions are in [Review disposition](#review-disposition) below.
 
+**The head has moved past every approved sha and no approval currently covers
+it.** `78c4bd9` and its evidence-only successor `480c172` were both approved.
+The head then moved for reasons outside this surface — a repository-wide
+`AGENTS.md`/`CLAUDE.md` docs commit landed on both this branch and
+`integration/v2` — and this commit adds the participant credential diagnostic,
+the operator procedure in `docs/claude-code-live-run.md`, and the two
+clarifications below. The current head needs a fresh non-author review.
+
 Source, deterministic, real-participant, and clean-installed-artifact checks
-passed, and the exact-head non-author review is now **approved** at `78c4bd9`.
+passed, and the exact-head non-author review was **approved** at `78c4bd9`.
 
 **The status is still `Implemented, unverified`, and the approval does not
 change it.** `docs/v2-delivery.md` defines `Verified` as passing source,
@@ -307,6 +315,20 @@ would have caught all four; a test asserting the latest patch caught none.
 4. **No attention-classifier live evidence.** The real-participant scenes run
    with pre-attention bypass. The classifier path is proven deterministically
    (fixture model) but not against a live provider on this surface.
+
+   An operator holding only Anthropic credentials cannot close this gap today.
+   `OpenAICompatibleAttentionModel` speaks one OpenAI-compatible protocol and
+   defaults to OpenRouter; `provider` is recorded metadata, never a dispatch
+   key, so there is no Anthropic-native transport to select. With
+   `preattention_enabled: false` the only path is `PREATTENTION_BYPASS`, which
+   wakes the participant for every observation. Such an operator therefore
+   cannot reach `SUPPRESS`, classifier-`DEFER`, margin-`DEFER`, or
+   `ERROR_FALLBACK` — four of the nine live scenes in
+   `docs/claude-code-live-run.md`, and the four carrying the social judgment
+   this design exists for. **A live run without a classifier credential must
+   record which scenes were unreachable rather than reporting the remainder as
+   a pass.** Tracked as issue #35; `src/nunchi/attention.py` is shared
+   foundation, so the repair is not this surface's to make.
 5. **No upgrade or rollback exercise.** No supported V1 release upgrade with
    representative operator state, no hard-kill restart continuity run, and no
    rollback run were performed for this surface.
@@ -329,6 +351,34 @@ operator-run environment with the credentials in place. It is a real gap, not
 a limitation to be reinterpreted — under `docs/v2-completion-goal.md`, missing
 evidence is a failure, not an exemption.
 
+## What this surface delivers, and what it deliberately does not
+
+The participant is a **headless, tool-less `claude` subprocess**, spawned once
+per conversation opportunity. It is **not** the operator's interactive Claude
+Code session, and **not** the Discord plugin. `session_mode: "persistent"`
+resumes one session id across turns via `--resume`; that is continuity, not the
+operator's own session.
+
+This is stated plainly because it was not obvious enough: an operator preparing
+the first live run arrived expecting the plugin shape, which the earlier
+plugin-based approach — `PreToolUse` interception and transport patches — had
+established. That approach was dropped when this work restarted from
+`integration/v2`, and the change in what "Claude Code participates in a Nunchi
+room" means was never surfaced as a decision. It is surfaced here.
+
+The isolation is the reason, and it is load-bearing rather than incidental.
+The [ambient-instruction differential](#ambient-instruction-isolation-real-cli)
+below shows a `CLAUDE.md` one directory above the workspace **does** reach a
+bare turn. A participant running inside the operator's live plugin session
+would inherit exactly that surface, plus the plugin's tools and the operator's
+settings, so identity would stop coming solely from the digest-pinned profile.
+That property is what the contract turns on.
+
+Whether the plugin-session shape is wanted anyway is a product question for a
+separate slice, not a defect in this one.
+
+Operator procedure for the live run: `docs/claude-code-live-run.md`.
+
 ## Security properties this implementation relies on
 
 Recorded so a reviewer can attack them directly:
@@ -342,6 +392,15 @@ Recorded so a reviewer can attack them directly:
   runtime refuses to start if `output_key_env` names an allowlisted variable.
 - Identity comes from the pinned, digest-verified profile via
   `--system-prompt`; room content never enters it.
+- The participant's credential is its own. `CLAUDE_CONFIG_DIR` is a fixed,
+  private path, and `--safe-mode` leaves auth working normally, so an operator
+  can run `claude auth login` against that root and keep every Anthropic
+  credential out of the runner's environment entirely. `credential_status()`
+  asks the CLI under the participant's exact environment — not the operator's
+  shell, which routinely holds a credential the participant never inherits —
+  and reports `authenticated`, `logged-out`, `absent`, or `unknown` in the
+  probe and as a startup warning. It is a diagnostic and cannot stop the
+  runtime: every failure resolves to `unknown`.
 - Session continuity is pinned to participant, actor, room, continuity scope,
   profile digest, and an invocation-behaviour digest. Any mismatch, and any
   answer reporting a different session, is an operational failure.

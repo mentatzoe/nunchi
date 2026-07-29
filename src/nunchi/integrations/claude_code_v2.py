@@ -715,6 +715,59 @@ class ClaudeCodeParticipant:
         environment["CLAUDE_CONFIG_DIR"] = str(self.config_directory)
         return environment
 
+    def credential_status(self, *, timeout_seconds: float = 20.0) -> dict[str, Any]:
+        """Report the credential the participant turn would actually receive.
+
+        This asks the CLI, under the participant's exact environment and
+        private configuration root, rather than inferring from the operator's
+        own shell -- which routinely holds a credential the participant does
+        not inherit.  An expired participant login and an absent one look
+        identical at a glance, and an expired one is how a first live run
+        typically dies, so the two are reported separately.
+
+        The remedy is the same for both (`claude auth login` against the
+        participant's own configuration root), so misreading `logged-out` as
+        `absent` costs an operator nothing.  That matters because a
+        keychain-backed login leaves no file here to observe: the distinction
+        is diagnostic, never load-bearing.  A diagnostic must not be able to
+        stop the runtime, so every failure resolves to `unknown`.
+        """
+        state = "unknown"
+        detail: dict[str, Any] = {}
+        try:
+            completed = subprocess.run(
+                [self.binary, "auth", "status"],
+                cwd=self.working_directory,
+                env=self._environment(),
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {"state": state, "detail": detail}
+        try:
+            reported = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return {"state": state, "detail": detail}
+        if not isinstance(reported, Mapping):
+            return {"state": state, "detail": detail}
+        logged_in = reported.get("loggedIn")
+        if not isinstance(logged_in, bool):
+            return {"state": state, "detail": detail}
+        method = reported.get("authMethod")
+        if isinstance(method, str) and method:
+            detail["auth_method"] = method
+        stored = self.config_directory / ".credentials.json"
+        detail["stored_credential_present"] = stored.exists()
+        if logged_in:
+            state = "authenticated"
+        elif detail["stored_credential_present"]:
+            state = "logged-out"
+        else:
+            state = "absent"
+        return {"state": state, "detail": detail}
+
     def _command(self, *, session_id: str, resume: bool, prompt: str) -> list[str]:
         command = [self.binary, *_ISOLATION_ARGUMENTS]
         command.extend(("--system-prompt", self.system_prompt()))
@@ -1323,6 +1376,7 @@ class ClaudeCodeRoomRuntime:
             "room_id": self.binding.room_id,
             "session_mode": self.participant.session_mode,
             "persistent_session": self.participant.session_mode == "persistent",
+            "participant_credential": self.participant.credential_status()["state"],
             "shared_discord_transport": True,
             "send_time_social_judgment": False,
             "privileged_actions_enabled": self.privileged is not None,
@@ -1381,6 +1435,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe["configured"] = True
             print(_canonical_json(probe))
             return 0
+        # An expired participant login is indistinguishable from a working one
+        # until the first wake, and it is a routine way for a first live run to
+        # fail.  Say so at startup, naming the exact remedy.  This is a warning
+        # rather than a refusal: the answer comes from a third-party CLI's
+        # self-report, which is good enough to alert an operator and not good
+        # enough to justify refusing to run an otherwise healthy room.
+        credential = runtime.participant.credential_status()
+        if credential["state"] != "authenticated":
+            print(
+                "Claude Code participant credential is "
+                f"{credential['state']}; the participant turn may fail. "
+                "Authenticate it as itself with: CLAUDE_CONFIG_DIR="
+                f"{runtime.participant.config_directory} claude auth login",
+                file=sys.stderr,
+            )
         delay = 1.0
         while True:
             try:

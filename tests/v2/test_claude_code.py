@@ -89,12 +89,28 @@ def result_document(action, *, session_id=ECHO, subtype="success", is_error=Fals
 class ClaudeStub:
     """A recording stand-in for the `claude` executable on PATH."""
 
+    #: `claude auth status` is a diagnostic, not a turn.  The stub answers it
+    #: without recording an invocation so it cannot shift the replay index or
+    #: appear in a test's assertions about participant turns.
+    AUTH_DEFAULT = {
+        "loggedIn": True,
+        "authMethod": "oauth_token",
+        "apiProvider": "firstParty",
+    }
+
     def __init__(self, directory: Path, *, script: str) -> None:
         self.directory = directory
         self.binary = directory / "claude"
         self.record_path = directory / "invocations.jsonl"
+        self.auth_path = directory / "auth-status.txt"
+        self.set_auth(self.AUTH_DEFAULT)
         self.binary.write_text(script, encoding="utf-8")
         self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
+
+    def set_auth(self, payload) -> None:
+        """Set what `claude auth status` answers; a string is emitted raw."""
+        raw = payload if isinstance(payload, str) else json.dumps(payload)
+        self.auth_path.write_text(raw, encoding="utf-8")
 
     def invocations(self) -> list[dict]:
         if not self.record_path.exists():
@@ -112,6 +128,9 @@ class ClaudeStub:
         answers.write_text(json.dumps(documents), encoding="utf-8")
         script = f"""#!{os.sys.executable}
 import json, os, sys
+if sys.argv[1:2] == ["auth"]:
+    sys.stdout.write(open({json.dumps(str(directory / "auth-status.txt"))}).read())
+    sys.exit(0)
 record = {json.dumps(str(directory / "invocations.jsonl"))}
 answers = json.loads(open({json.dumps(str(answers))}).read())
 argv = sys.argv[1:]
@@ -134,6 +153,9 @@ sys.stdout.write(answer)
     def sleeping(cls, directory: Path, seconds: float) -> "ClaudeStub":
         script = f"""#!{os.sys.executable}
 import json, os, sys, time
+if sys.argv[1:2] == ["auth"]:
+    sys.stdout.write(open({json.dumps(str(directory / "auth-status.txt"))}).read())
+    sys.exit(0)
 with open({json.dumps(str(directory / "invocations.jsonl"))}, "a") as handle:
     handle.write(json.dumps({{"argv": sys.argv[1:], "env": dict(os.environ),
                              "cwd": os.getcwd()}}) + "\\n")
@@ -2649,6 +2671,63 @@ class InstalledSurfaceTests(unittest.TestCase):
         from nunchi.integrations import claude_code_v2
 
         self.assertEqual(3, claude_code_v2.main(["--config", "/nonexistent.json"]))
+
+    def test_credential_status_asks_under_the_participant_configuration_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=[result_document({"kind": "silence"})],
+            ) as harness:
+                participant = harness.runtime.participant
+                status = participant.credential_status()
+                self.assertEqual("authenticated", status["state"])
+                self.assertEqual("oauth_token", status["detail"]["auth_method"])
+                # The diagnostic must not be recorded as a participant turn,
+                # or it would shift replay indexes and pollute turn assertions.
+                self.assertEqual([], harness.stub.invocations())
+
+    def test_credential_status_separates_an_expired_login_from_an_absent_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=[result_document({"kind": "silence"})],
+            ) as harness:
+                participant = harness.runtime.participant
+                harness.stub.set_auth({"loggedIn": False})
+                self.assertEqual("absent", participant.credential_status()["state"])
+                stored = participant.config_directory / ".credentials.json"
+                stored.write_text("{}", encoding="utf-8")
+                self.assertEqual(
+                    "logged-out", participant.credential_status()["state"]
+                )
+
+    def test_credential_status_never_raises_and_reports_unknown_instead(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=[result_document({"kind": "silence"})],
+            ) as harness:
+                participant = harness.runtime.participant
+                for answer in ("", "not json", json.dumps({"loggedIn": "yes"})):
+                    with self.subTest(answer=answer):
+                        harness.stub.set_auth(answer)
+                        self.assertEqual(
+                            "unknown", participant.credential_status()["state"]
+                        )
+
+    def test_probe_reports_the_participant_credential_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=[result_document({"kind": "silence"})],
+            ) as harness:
+                self.assertEqual(
+                    "authenticated", harness.runtime.probe()["participant_credential"]
+                )
+                harness.stub.set_auth({"loggedIn": False})
+                self.assertEqual(
+                    "absent", harness.runtime.probe()["participant_credential"]
+                )
 
     def test_output_key_env_may_not_be_readable_by_the_participant(self):
         for name in _PARTICIPANT_ENV_ALLOWLIST:
