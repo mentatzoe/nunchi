@@ -9,8 +9,8 @@ Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
 reference adapters, shared Discord MCP transport, Codex, and the Hermes source,
 wheel, dashboard, installed runtime, and configured Discord evaluation.
 
-Excluded: configured Hermes Telegram evaluation; Claude Code implementation,
-installation, and live evaluation.
+Pending: configured Hermes Telegram live evaluation; Claude Code
+implementation, installation, and live evaluation.
 
 ## Required evidence
 
@@ -22,7 +22,7 @@ installation, and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source, reproducible clean wheel, dashboard, unchanged installed Hermes files, and configured no-mention Discord contribution verified at implementation `0fcaca5a7b257a66a42d67b7e134f66f9bed60e8`; Telegram and the remaining live lifecycle matrix are pending |
+| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source and reproducible wheel verified at implementation `82c7ed8f`; installed Hermes 0.19.0 and live Discord now pass no-mention routing, restart recovery, concurrent messages, SUPPRESS, cancellation, and transport; Telegram is configured and connected but live inbound proof is pending the user starting the bot chat |
 | independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
@@ -49,12 +49,13 @@ The current Hermes addition:
 - passes the shared V2 lifecycle plus Hermes-specific identity, routing,
   silence, cancellation, coalescing, restart, and delivery tests.
 
-The reproducible clean-wheel SHA-256 for implementation `0fcaca5` is
-`8caa4b01e863c084c4b33297b46abc1179ae10818b109cbce7c8bccecb303243`.
-Two builds with `SOURCE_DATE_EPOCH=1700000000` matched byte-for-byte. A clean
-Python 3.14 environment installed that wheel without dependencies, installed
-and verified the dashboard bridge, and imported only from `site-packages`.
-The source suite passed 359 tests with four optional JSON-Schema skips; all
+The current reproducible clean-wheel SHA-256 for implementation `82c7ed8f` is
+`2099ea151a2e98fa48419f9a162ef4f6a51fb2c88b8a94671d99926a59abb346`.
+Two builds with `SOURCE_DATE_EPOCH=1700000000` matched byte-for-byte. That
+wheel was installed without dependencies in the configured Hermes 0.19.0
+environment and imported from `site-packages`; the packaged dashboard bridge
+verified its three installed asset digests.
+The source suite passed 361 tests with four optional JSON-Schema skips; all
 eight lifecycle evaluations passed. The configured environment, reporting
 Hermes package version 0.19.0 from upstream checkout
 `022a175e0ad5eb71fef0892dcf1d7f558d73f8b6`, had the same 16-file
@@ -97,10 +98,29 @@ transport. Fiction Writer replied in the same channel with exact marker
 `NUNCHI-DISCORD-ROOM-SCOPE-20260729-C`, native message
 `1532021373801861162`. Hermes did not create an automatic thread.
 
-This verifies configured Discord bot admission, no-mention routing, one V2
-WAKE contribution, and transport receipts. It does not yet verify Telegram or
-the remaining live suppression, silence, cancellation, restart, and recovery
-cases.
+Successor implementation `82c7ed8f` closes the remaining Discord gates:
+
+- restart recovery retained offline carrier `1532024768356810946`; later
+  request `discord:1530259309802295316:86105da0-5442-4950-91c2-850ad28c0fdf`
+  cited it and sent response `1532030893756121138`;
+- concurrent inputs `1532032974512717834` and `1532032999091081327` were both
+  retained and produced responses `1532033132491178196` and
+  `1532033223394328627`, without a stock Hermes busy message;
+- routine input `1532033736709771295` produced request
+  `discord:1530259309802295316:e6efd8e9-740a-467a-bf2c-13e5f55fffb8`,
+  whose effective disposition was `SUPPRESS`; there was no participant or
+  transport receipt and no Discord response; and
+- `/stop` cancelled request
+  `discord:1530259309802295316:e7519903-68c5-4144-9222-bf63d71a2850`
+  during attention, produced only command confirmation
+  `1532035621550297109`, and produced no participant or transport receipt.
+
+The `fiction-writer` gateway is launchd-supervised and both Discord and
+Telegram adapters are connected. Telegram room `670011474` is configured for
+bot actor `8908653631`, but Telegram rejected the first outbound message with
+`Chat not found`: the user has not initiated `@quire_lit_bot`. No Telegram
+live result is claimed until an inbound message is observed and the same
+lifecycle checks pass there.
 
 ## Exact source/artifact evidence
 
