@@ -34,6 +34,8 @@
   var CardTitle = C.CardTitle || "h3";
   var CardContent = C.CardContent || "div";
   var API = "/api/plugins/nunchi";
+  var DEFAULT_ATTENTION_PROVIDER = "gemini";
+  var DEFAULT_ATTENTION_MODEL = "gemini-3.1-flash-lite";
 
   var styles = {
     page: { display: "flex", flexDirection: "column", gap: "16px" },
@@ -138,8 +140,8 @@
       },
       attention: {
         model: {
-          provider: "",
-          model: ""
+          provider: DEFAULT_ATTENTION_PROVIDER,
+          model: DEFAULT_ATTENTION_MODEL
         },
         policy: {
           suppression_enabled: true,
@@ -270,7 +272,7 @@
             function (value) {
               update(["attention", "model", "model"], value);
             }, {
-              help: "Required. This is separate from the participant's main model."
+              help: "Required. This is separate from the participant's main model. The default is the benchmarked low-cost attention model."
             })
         ),
         h("div", { style: styles.status },

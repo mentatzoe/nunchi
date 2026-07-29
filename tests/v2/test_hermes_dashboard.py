@@ -180,8 +180,8 @@ class HermesDashboardConfigTests(unittest.TestCase):
 
             upgraded = json.loads(json.dumps(before.document))
             upgraded["rooms"][0]["attention"]["model"] = {
-                "provider": "openrouter",
-                "model": "google/gemini-3.1-flash-lite",
+                "provider": "gemini",
+                "model": "gemini-3.1-flash-lite",
             }
             after = write_config_document(
                 "default",
@@ -193,7 +193,7 @@ class HermesDashboardConfigTests(unittest.TestCase):
             self.assertIsNotNone(after.config)
             self.assertIsNone(after.validation_error)
             self.assertEqual(
-                "google/gemini-3.1-flash-lite",
+                "gemini-3.1-flash-lite",
                 after.document["rooms"][0]["attention"]["model"]["model"],
             )
 
@@ -401,6 +401,11 @@ class HermesDashboardInstallTests(unittest.TestCase):
         self.assertIn("profile-wide bot fallback", source)
         self.assertIn("Attention provider", source)
         self.assertIn("Attention model", source)
+        self.assertIn('DEFAULT_ATTENTION_PROVIDER = "gemini"', source)
+        self.assertIn(
+            'DEFAULT_ATTENTION_MODEL = "gemini-3.1-flash-lite"',
+            source,
+        )
         self.assertIn(
             "This is separate from the participant's main model",
             source,

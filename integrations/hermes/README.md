@@ -75,8 +75,8 @@ Create a private JSON configuration and pin its SHA-256:
       },
       "attention": {
         "model": {
-          "provider": "your-provider",
-          "model": "your-low-cost-model"
+          "provider": "gemini",
+          "model": "gemini-3.1-flash-lite"
         },
         "policy": {
           "suppression_enabled": true,
@@ -99,7 +99,11 @@ is pinned by the outer config. A separate profile can instead use exact
 after an attributable live restart and later-message recovery run has passed.
 Until then, leave it `false`; Nunchi widens attempted suppression to `DEFER`.
 The attention provider and model are required and are intentionally separate
-from the participant's main model.
+from the participant's main model. The dashboard defaults new rooms to
+`gemini` / `gemini-3.1-flash-lite`: Hermes's native route to the
+`google/gemini-3.1-flash-lite` model selected by Nunchi's live classifier
+benchmark. Keep it explicit so the participant model cannot silently replace
+it.
 
 Allow only that exact route in the Hermes profile:
 
@@ -110,8 +114,8 @@ plugins:
       llm:
         allow_provider_override: true
         allow_model_override: true
-        allowed_providers: [your-provider]
-        allowed_models: [your-low-cost-model]
+        allowed_providers: [gemini]
+        allowed_models: [gemini-3.1-flash-lite]
 ```
 
 Hermes retains the credentials. Nunchi supplies the selected provider and model
