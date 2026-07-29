@@ -115,6 +115,18 @@ Successor implementation `82c7ed8f` closes the remaining Discord gates:
   during attention, produced only command confirmation
   `1532035621550297109`, and produced no participant or transport receipt.
 
+Natural group address then exposed a prompt defect. Zoe's unmentioned message
+`1532038355796365333`, “Are you both listening?”, reached Nunchi but was
+incorrectly classified `SUPPRESS`. Implementation `d349736` makes Hermes use
+the shared V2 attention prompt, which tells the participant-bound model that a
+group address can include it without a name or platform mention and that
+uncertainty must return `DEFER`. The full source suite passed 362 tests with
+four expected skips. Installed wheel
+`f6016084fb50b931bd880574a498ab1843ba0ee7c2c933af7ec7d4e8c7c4b459`
+then classified Vigil's unmentioned group-address retry
+`1532040218016878733` as `WAKE`, invoked Fiction Writer, and sent reply
+`1532040321956053073`, “Yes—listening.”
+
 Both `fiction-writer` adapters are connected. Hermes 0.19.0 reports the
 gateway process as detached after its service command, so crash supervision is
 not claimed. Telegram room `670011474` is configured for bot actor

@@ -116,6 +116,8 @@ variable safely.
 A configured Discord room is a natural shared conversation:
 
 - human and bot messages can reach Nunchi without mentioning the participant;
+- direct group addresses such as “are you both listening?” can wake an included
+  participant without naming or mentioning them;
 - Hermes does not move those messages into an automatic thread;
 - messages missed while Hermes restarts are recovered only from those rooms;
   and
