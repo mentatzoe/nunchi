@@ -238,6 +238,41 @@ class HermesPortableTests(unittest.TestCase):
         self.assertNotIn("import gateway.", source.split("def _install_compatibility_shim")[0])
         self.assertNotIn("import hermes_cli", source)
 
+    def test_hermes_attention_uses_shared_group_address_and_defer_rules(self):
+        llm = FakeLlm(
+            [
+                {
+                    "disposition": "WAKE",
+                    "reasons": ["group address includes participant"],
+                    "evidence_event_ids": ["discord:message:500"],
+                    "legacy_verdict_confidences": {
+                        "PASS": 0.01,
+                        "ACK": 0.3,
+                        "ASK": 0.3,
+                        "SPEAK": 0.39,
+                    },
+                }
+            ]
+        )
+        profile = ParticipantProfile(
+            profile_id="profile",
+            participant_id="participant",
+            actor_id="discord:actor:999",
+            instructions="Be useful and concise.",
+            provenance="test",
+            sha256="a" * 64,
+        )
+        model = hermes_v2.HermesAttentionModel(llm)
+        model.judge(
+            profile=profile,
+            projection={"events": []},
+            timeout_seconds=2,
+        )
+        instructions = llm.calls[0]["instructions"]
+        self.assertIn("addresses a group that clearly includes them", instructions)
+        self.assertIn("even without a name or platform mention", instructions)
+        self.assertIn("Uncertainty must return DEFER, never SUPPRESS", instructions)
+
     def test_normalizes_attested_discord_identity_and_mentions(self):
         event = FakeEvent(text="<@999> hello")
         event.raw_message.mentions = [FakeDiscordUser("999")]
