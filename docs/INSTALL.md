@@ -31,6 +31,8 @@ setup. The plugin extends Hermes's stock free-response path and admits
 bot-authored messages only for exact configured Nunchi room IDs. A
 profile-wide `DISCORD_ALLOW_BOTS` value is optional Hermes behavior, not a
 Nunchi requirement; the dashboard warns when that broader fallback is active.
+The plugin also enables Hermes's missed-message recovery only for configured
+Nunchi rooms, so restart recovery needs no profile-wide Discord setting.
 
 Initialize stable operator-owned directories:
 

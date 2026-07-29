@@ -262,6 +262,10 @@ class HermesDashboardConfigTests(unittest.TestCase):
             )
             self.assertEqual(["42"], status["configured_room_ids"])
             self.assertEqual("configured-rooms", status["bot_admission"])
+            self.assertEqual(
+                "configured-rooms",
+                status["missed_message_recovery"],
+            )
             self.assertTrue(status["natural_conversation"])
             self.assertFalse(status["mention_required"])
             self.assertEqual("bypassed", status["auto_threading"])

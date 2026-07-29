@@ -146,6 +146,9 @@ def discord_runtime_status(
         "configured_room_ids": room_ids,
         "natural_conversation": bool(room_ids),
         "bot_admission": "configured-rooms" if room_ids else "not-configured",
+        "missed_message_recovery": (
+            "configured-rooms" if room_ids else "not-configured"
+        ),
         "mention_required": False if room_ids else None,
         "auto_threading": "bypassed" if room_ids else "not-configured",
         "provided_by": "nunchi-runtime-shim",

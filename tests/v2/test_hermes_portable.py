@@ -886,6 +886,12 @@ class HermesPortableTests(unittest.TestCase):
             def _discord_free_response_channels(self):
                 return {"existing"}
 
+            def _missed_message_backfill_enabled(self):
+                return False
+
+            def _missed_message_backfill_channels(self):
+                return {"existing-recovery"}
+
             async def _dispatch_discord_message(self, message):
                 del message
                 return self._discord_free_response_channels()
@@ -1009,6 +1015,11 @@ class HermesPortableTests(unittest.TestCase):
                     asyncio.run(
                         adapter._dispatch_recovered_message(configured_bot)
                     ),
+                )
+                self.assertTrue(adapter._missed_message_backfill_enabled())
+                self.assertEqual(
+                    {"existing-recovery", "42"},
+                    adapter._missed_message_backfill_channels(),
                 )
 
                 configured_source = FakeSource(chat_id="42")

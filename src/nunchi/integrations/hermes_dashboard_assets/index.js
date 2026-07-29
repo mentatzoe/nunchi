@@ -347,13 +347,15 @@
             ? h("div", { style: styles.page },
                 h("div", null,
                   "Nunchi listens without mentions, admits bot messages, and " +
-                  "prevents automatic thread moves only in these configured rooms: " +
+                  "recovers messages missed during restart only in these configured " +
+                  "rooms. It also prevents automatic thread moves there: " +
                   discord.configured_room_ids.join(", ") + "."
                 ),
                 h("div", { style: styles.hint },
                   "This is supplied by Nunchi's checked runtime shim. No " +
                   "DISCORD_ALLOW_BOTS, DISCORD_FREE_RESPONSE_CHANNELS, or " +
-                  "DISCORD_NO_THREAD_CHANNELS setting is required."
+                  "DISCORD_NO_THREAD_CHANNELS setting is required, and Hermes's " +
+                  "missed-message recovery does not need separate setup."
                 ),
                 discord.profile_wide_fallback_active
                   ? h("div", { style: styles.status },

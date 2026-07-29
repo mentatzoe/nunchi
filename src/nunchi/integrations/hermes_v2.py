@@ -1576,6 +1576,11 @@ class NunchiHermesV2Plugin:
                 if any(platform == "discord" for platform, _ in self._rooms)
                 else "not-configured"
             ),
+            "discord_restart_recovery": (
+                "configured-rooms"
+                if any(platform == "discord" for platform, _ in self._rooms)
+                else "not-configured"
+            ),
             "configuration_sha256": self.config.provenance["sha256"],
             "rooms": [
                 {
@@ -1707,11 +1712,12 @@ def _install_discord_room_admission_shim(
     """Use Hermes's stock Discord path with exact Nunchi-room admission.
 
     Hermes 0.19.0 exposes only a profile-wide bot switch and a configured
-    free-response list. Nunchi narrows both decisions in memory: configured
-    Discord rooms are treated as free-response rooms, and bot-authored
-    messages bypass the two profile-wide admission gates only in those exact
-    rooms. All remaining Discord checks and all unconfigured rooms continue
-    through Hermes's original methods.
+    free-response and missed-message settings. Nunchi narrows those decisions
+    in memory: configured Discord rooms are treated as free-response rooms,
+    bot-authored messages bypass the two profile-wide admission gates only in
+    those exact rooms, and restart recovery scans only those rooms. All
+    remaining Discord checks and all unconfigured rooms continue through
+    Hermes's original methods.
     """
 
     global _SHIM_OWNER
@@ -1746,6 +1752,16 @@ def _install_discord_room_admission_shim(
             "_dispatch_recovered_message",
             None,
         )
+        current_recovery_enabled = getattr(
+            DiscordAdapter,
+            "_missed_message_backfill_enabled",
+            None,
+        )
+        current_recovery_rooms = getattr(
+            DiscordAdapter,
+            "_missed_message_backfill_channels",
+            None,
+        )
         current_authorized = getattr(
             GatewayRunner,
             "_is_user_authorized",
@@ -1758,6 +1774,16 @@ def _install_discord_room_admission_shim(
             and getattr(
                 current_recovered_dispatch,
                 "__nunchi_v2_discord_recovered_dispatch__",
+                False,
+            )
+            and getattr(
+                current_recovery_enabled,
+                "__nunchi_v2_discord_recovery_enabled__",
+                False,
+            )
+            and getattr(
+                current_recovery_rooms,
+                "__nunchi_v2_discord_recovery_rooms__",
                 False,
             )
             and getattr(current_authorized, "__nunchi_v2_discord_authz__", False)
@@ -1788,6 +1814,16 @@ def _install_discord_room_admission_shim(
                     False,
                 ),
                 getattr(
+                    current_recovery_enabled,
+                    "__nunchi_v2_discord_recovery_enabled__",
+                    False,
+                ),
+                getattr(
+                    current_recovery_rooms,
+                    "__nunchi_v2_discord_recovery_rooms__",
+                    False,
+                ),
+                getattr(
                     current_authorized,
                     "__nunchi_v2_discord_authz__",
                     False,
@@ -1814,6 +1850,16 @@ def _install_discord_room_admission_shim(
             current_recovered_dispatch,
             required=("self", "message"),
             label="Discord recovered dispatch",
+        )
+        _require_signature(
+            current_recovery_enabled,
+            required=("self",),
+            label="Discord missed-message recovery switch",
+        )
+        _require_signature(
+            current_recovery_rooms,
+            required=("self",),
+            label="Discord missed-message recovery rooms",
         )
         _require_signature(
             current_authorized,
@@ -1879,6 +1925,25 @@ def _install_discord_room_admission_shim(
             finally:
                 _DISCORD_ROOM_CONTEXT.reset(token)
 
+        def discord_recovery_enabled(self: Any) -> bool:
+            owner = _SHIM_OWNER
+            if owner is not None and any(
+                platform == "discord" for platform, _ in owner._rooms
+            ):
+                return True
+            return bool(current_recovery_enabled(self))
+
+        def discord_recovery_rooms(self: Any) -> set[Any]:
+            configured = set(current_recovery_rooms(self))
+            owner = _SHIM_OWNER
+            if owner is not None:
+                configured.update(
+                    room_id
+                    for platform, room_id in owner._rooms
+                    if platform == "discord"
+                )
+            return configured
+
         def is_user_authorized(self: Any, source: Any) -> bool:
             owner = _SHIM_OWNER
             if (
@@ -1893,6 +1958,8 @@ def _install_discord_room_admission_shim(
         discord_free_response_channels.__nunchi_v2_discord_rooms__ = True  # type: ignore[attr-defined]
         discord_dispatch.__nunchi_v2_discord_dispatch__ = True  # type: ignore[attr-defined]
         discord_recovered_dispatch.__nunchi_v2_discord_recovered_dispatch__ = True  # type: ignore[attr-defined]
+        discord_recovery_enabled.__nunchi_v2_discord_recovery_enabled__ = True  # type: ignore[attr-defined]
+        discord_recovery_rooms.__nunchi_v2_discord_recovery_rooms__ = True  # type: ignore[attr-defined]
         is_user_authorized.__nunchi_v2_discord_authz__ = True  # type: ignore[attr-defined]
         DiscordAdapter._discord_message_admission = discord_message_admission
         DiscordAdapter._discord_free_response_channels = (
@@ -1900,6 +1967,8 @@ def _install_discord_room_admission_shim(
         )
         DiscordAdapter._dispatch_discord_message = discord_dispatch
         DiscordAdapter._dispatch_recovered_message = discord_recovered_dispatch
+        DiscordAdapter._missed_message_backfill_enabled = discord_recovery_enabled
+        DiscordAdapter._missed_message_backfill_channels = discord_recovery_rooms
         GatewayRunner._is_user_authorized = is_user_authorized
         _SHIM_OWNER = plugin
 

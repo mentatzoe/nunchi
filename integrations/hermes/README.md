@@ -11,8 +11,9 @@ The integration supports Hermes 0.19.0 and newer compatible builds:
   checked runtime monkeypatch around the stock gateway runner.
 - The Discord patch extends Hermes's existing free-response set with exact
   configured Nunchi room IDs. It admits bot-authored messages through Hermes's
-  existing checks only in those rooms. Mentions and profile-wide
-  `DISCORD_ALLOW_BOTS` are not required for Nunchi rooms.
+  existing checks only in those rooms and enables missed-message recovery only
+  for those rooms. Mentions and profile-wide Discord settings are not required
+  for Nunchi rooms.
 - The Telegram patch retains each native update that Hermes combines into one
   text batch. Nunchi then processes those updates in order.
 - Discord and Telegram ingress, authorization, routing, formatting, and I/O
@@ -115,14 +116,17 @@ variable safely.
 A configured Discord room is a natural shared conversation:
 
 - human and bot messages can reach Nunchi without mentioning the participant;
-- Hermes does not move those messages into an automatic thread; and
+- Hermes does not move those messages into an automatic thread;
+- messages missed while Hermes restarts are recovered only from those rooms;
+  and
 - unconfigured rooms retain Hermes's normal admission, mention, and thread
   behavior.
 
 Nunchi supplies this by wrapping Hermes's installed admission and
-free-response methods in memory. It reuses the rest of the stock Discord
-adapter. `DISCORD_ALLOW_BOTS`, `DISCORD_FREE_RESPONSE_CHANNELS`, and
-`DISCORD_NO_THREAD_CHANNELS` are not required.
+free-response and recovery methods in memory. It reuses the rest of the stock
+Discord adapter. `DISCORD_ALLOW_BOTS`, `DISCORD_FREE_RESPONSE_CHANNELS`,
+`DISCORD_NO_THREAD_CHANNELS`, and `DISCORD_MISSED_MESSAGE_BACKFILL` are not
+required.
 
 Hermes's `DISCORD_ALLOW_BOTS=mentions` or `all` remains a profile-wide fallback.
 If set, it can admit bot messages outside Nunchi rooms under Hermes's normal
