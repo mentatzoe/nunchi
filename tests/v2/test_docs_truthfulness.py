@@ -25,7 +25,9 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "There is no executable V1 `admit` command",
             "Hermes V2 platform integration",
             "Claude Code remains outside this candidate",
-            "Configured installed runtime and live platform acceptance remain separate gates",
+            "partial live Discord paths are implemented",
+            "This candidate is not verified, integrated, or V2-complete",
+            "issue #41",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:
@@ -39,8 +41,10 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         required = (
             "Missing",
             "Implemented, unverified",
+            "Landed, unverified",
             "Verified",
             "Integrated",
+            "issues/41",
             "Select the earliest missing product behavior",
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",

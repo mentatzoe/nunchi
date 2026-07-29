@@ -9,8 +9,13 @@ Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
 reference adapters, shared Discord MCP transport, Codex, and the Hermes source,
 wheel, dashboard, installed runtime, and configured Discord evaluation.
 
-Pending: configured Hermes Telegram live evaluation; Claude Code
-implementation, installation, and live evaluation.
+Pending: the remaining Hermes live matrix in
+[issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
+implementation and proof in
+[issue #39](https://github.com/mentatzoe/nunchi/issues/39); shared ACK behavior
+in [issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
+acceptance gate in
+[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
 
 ## Required evidence
 
@@ -22,7 +27,7 @@ implementation, installation, and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` passes source, package, installed-runtime, dashboard, and live Discord checks; Telegram is configured and connected but its live acceptance remains pending |
+| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` passes source, package, installed-runtime, dashboard, and partial live Discord checks; live Discord DEFER/silence and Telegram acceptance remain open in issue #38 |
 | independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
@@ -64,7 +69,7 @@ clean. The installed dashboard assets verified as:
 - `manifest.json`: `d87e5c56a2659c58ca750992e473aed7f3b67cd0fd5da66b9cad549a631b9d63`
 - `plugin_api.py`: `56fec259232e2d6df017b2ab66fd1bde470f664ac3e7309539cf01d567091000`
 
-## Hermes live Discord acceptance
+## Hermes live Discord evidence
 
 The exact wheel above ran in profile `fiction-writer`, configured channel
 `1530259309802295316`, with Hermes main model `nous/x-ai/grok-4.5`,

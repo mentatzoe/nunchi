@@ -22,9 +22,10 @@ through the tested current upstream head. Its prompt, main model, memory,
 tools, reactions, cancellation, delivery, and platform adapters stay owned by
 Hermes. Claude Code remains outside this candidate.
 
-The Hermes source and clean-wheel path are implemented. Configured installed
-runtime and live platform acceptance remain separate gates until their
-attributable runs pass.
+The Hermes source, clean-wheel, configured installed-runtime, dashboard, and
+partial live Discord paths are implemented. Remaining Hermes live proof is
+tracked in [issue #38](https://github.com/mentatzoe/nunchi/issues/38). This
+candidate is not verified, integrated, or V2-complete.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, prompt hook, send-time social reclassifier, or fallback.
@@ -92,3 +93,5 @@ not part of the executable V2 product suite.
 Source review, clean-wheel installation, configured probes, deterministic
 tests, live provider evaluation, real-room evidence, integration, and release
 are distinct claims. The verification record states exactly which have passed.
+The final no-completion-before-verification gate is
+[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
