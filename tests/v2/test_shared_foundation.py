@@ -295,6 +295,52 @@ class ObservationTests(unittest.TestCase):
                 event["id"] for event in model.calls[0][1]["events"]
             ])
 
+    def test_late_delivery_is_retained_in_canonical_event_time_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            first, _, _, _ = foundation(persistence_path=store)
+            first.observation.observe(
+                delivery_id="d-newer",
+                event=message(
+                    "e-newer",
+                    timestamp="2026-07-29T14:00:00Z",
+                ),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            first.observation.observe(
+                delivery_id="d-older",
+                event=message(
+                    "e-older",
+                    timestamp="2026-07-29T13:00:00Z",
+                ),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in first.observation.retained_events()
+                ],
+            )
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in first.observation.build_snapshot(
+                        "e-newer"
+                    )["events"]
+                ],
+            )
+
+            restored, _, _, _ = foundation(persistence_path=store)
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in restored.observation.retained_events()
+                ],
+            )
+
 
 class AttentionAndHostTests(unittest.TestCase):
     def test_bypass_invokes_participant_without_model_or_advice(self):
