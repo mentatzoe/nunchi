@@ -180,8 +180,8 @@ class HermesDashboardConfigTests(unittest.TestCase):
 
             upgraded = json.loads(json.dumps(before.document))
             upgraded["rooms"][0]["attention"]["model"] = {
-                "provider": "gemini",
-                "model": "gemini-3.1-flash-lite",
+                "provider": "nous",
+                "model": "deepseek/deepseek-v4-flash",
             }
             after = write_config_document(
                 "default",
@@ -193,7 +193,7 @@ class HermesDashboardConfigTests(unittest.TestCase):
             self.assertIsNotNone(after.config)
             self.assertIsNone(after.validation_error)
             self.assertEqual(
-                "gemini-3.1-flash-lite",
+                "deepseek/deepseek-v4-flash",
                 after.document["rooms"][0]["attention"]["model"]["model"],
             )
 
@@ -401,9 +401,9 @@ class HermesDashboardInstallTests(unittest.TestCase):
         self.assertIn("profile-wide bot fallback", source)
         self.assertIn("Attention provider", source)
         self.assertIn("Attention model", source)
-        self.assertIn('DEFAULT_ATTENTION_PROVIDER = "gemini"', source)
+        self.assertIn('DEFAULT_ATTENTION_PROVIDER = "nous"', source)
         self.assertIn(
-            'DEFAULT_ATTENTION_MODEL = "gemini-3.1-flash-lite"',
+            'DEFAULT_ATTENTION_MODEL = "deepseek/deepseek-v4-flash"',
             source,
         )
         self.assertIn(

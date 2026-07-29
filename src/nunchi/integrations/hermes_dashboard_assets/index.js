@@ -34,8 +34,8 @@
   var CardTitle = C.CardTitle || "h3";
   var CardContent = C.CardContent || "div";
   var API = "/api/plugins/nunchi";
-  var DEFAULT_ATTENTION_PROVIDER = "gemini";
-  var DEFAULT_ATTENTION_MODEL = "gemini-3.1-flash-lite";
+  var DEFAULT_ATTENTION_PROVIDER = "nous";
+  var DEFAULT_ATTENTION_MODEL = "deepseek/deepseek-v4-flash";
 
   var styles = {
     page: { display: "flex", flexDirection: "column", gap: "16px" },
