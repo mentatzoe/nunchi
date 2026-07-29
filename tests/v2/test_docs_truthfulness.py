@@ -16,14 +16,16 @@ FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
 
 
 class V2DocumentationTruthfulnessTests(unittest.TestCase):
-    def test_readme_describes_one_v2_path_and_explicit_exclusions(self) -> None:
+    def test_readme_describes_one_v2_path_and_platform_scope(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         required = (
             "native event -> canonical observation -> participant-bound attention",
             "Conversation events are observations, not reply obligations",
             "Only the exact participant's delegated attention model",
             "There is no executable V1 `admit` command",
-            "Hermes and Claude Code are explicitly excluded",
+            "Hermes V2 platform integration",
+            "Claude Code remains outside this candidate",
+            "Configured installed runtime and live platform acceptance remain separate gates",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:

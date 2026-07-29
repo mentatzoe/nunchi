@@ -16,6 +16,13 @@ python3 -m venv /tmp/nunchi-v2-clean
 The wheel is the review subject. A source checkout on `PYTHONPATH` is not
 installed-artifact evidence.
 
+For Hermes, install the same wheel into Hermes's managed Python environment.
+Hermes discovers the `nunchi-v2` plugin from the wheel; Nunchi does not require
+Hermes as a package dependency and does not copy files into its checkout. See
+[`../integrations/hermes/README.md`](../integrations/hermes/README.md) for the
+pinned room/profile configuration, `hermes plugins enable nunchi-v2`, and the
+compatibility probe.
+
 Initialize stable operator-owned directories:
 
 ```sh

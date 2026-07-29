@@ -57,5 +57,8 @@ nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 
+[project.entry-points."hermes_agent.plugins"]
+nunchi-v2 = "nunchi.integrations.hermes_v2"
+
 [tool.setuptools.packages.find]
 where = ["src"]

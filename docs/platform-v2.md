@@ -1,7 +1,9 @@
 # V2 platform interface and conformance
 
-This is the complete downstream interface for Hermes and Claude Code. Those
-integrations are not implemented or armed by the shared-foundation candidate.
+This is the complete downstream interface for Hermes and Claude Code. The
+Hermes source integration now consumes these shared owners; installed and live
+acceptance remain separate gates. Claude Code is not implemented by this
+candidate.
 
 ## Required owners
 
