@@ -22,118 +22,94 @@ implementation, installation, and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source and reproducible wheel verified at implementation `82c7ed8f`; installed Hermes 0.19.0 and live Discord now pass no-mention routing, restart recovery, concurrent messages, SUPPRESS, cancellation, and transport; Telegram is configured and connected but live inbound proof is pending the user starting the bot chat |
+| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` passes source, package, installed-runtime, dashboard, and live Discord checks; Telegram is configured and connected but its live acceptance remains pending |
 | independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
 every row in scope to name immutable evidence.
 
-## Hermes source and package check
+## Hermes gate, package, and compatibility
 
-The current Hermes addition:
+Implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` makes Nunchi a
+pre-attention gate around the stock Hermes participant:
 
-- installs from the Nunchi wheel through `hermes_agent.plugins` without a
-  required Hermes dependency;
-- reuses stock Discord and Telegram adapters;
-- uses a checked runtime monkeypatch on Hermes 0.19.0 and on current `main`,
-  without changing Hermes files;
-- extends Hermes's stock Discord admission and free-response methods only for
-  exact configured Nunchi rooms, so bot messages and ordinary room messages do
-  not require mentions or profile-wide bot admission;
-- retains and processes each native Telegram update even when Hermes batches
-  adjacent text;
-- packages an authenticated dashboard tab for room configuration and V2
-  receipts, with validated digest-sidecar writes and explicit restart;
-- installs that tab only in Hermes's supported user-plugin directory, not its
-  source or installed package;
-- passes the shared V2 lifecycle plus Hermes-specific identity, routing,
-  silence, cancellation, coalescing, restart, and delivery tests.
+- `SUPPRESS` stops before Hermes typing, reactions, tools, or model work.
+- `WAKE`, `DEFER`, bypass, and error-wake call the original Hermes handler
+  once. Hermes keeps its prompt, main model, memory, tools, reactions,
+  cancellation, delivery, and platform adapter.
+- Nunchi uses Hermes's public pre-LLM hook only to add bounded turn facts.
+- Checked process-local wrappers cover ingress, result, lifecycle, send,
+  shutdown, configured-room Discord admission, and Telegram batch identity.
+  They change no Hermes checkout or installed package file.
+- The wheel has no Hermes dependency. It installs the Nunchi dashboard bridge
+  only in Hermes's user-plugin directory.
 
-The current reproducible clean-wheel SHA-256 for implementation `82c7ed8f` is
-`2099ea151a2e98fa48419f9a162ef4f6a51fb2c88b8a94671d99926a59abb346`.
-Two builds with `SOURCE_DATE_EPOCH=1700000000` matched byte-for-byte. That
-wheel was installed without dependencies in the configured Hermes 0.19.0
-environment and imported from `site-packages`; the packaged dashboard bridge
-verified its three installed asset digests.
-The source suite passed 361 tests with four optional JSON-Schema skips; all
-eight lifecycle evaluations passed. The configured environment, reporting
-Hermes package version 0.19.0 from upstream checkout
-`022a175e0ad5eb71fef0892dcf1d7f558d73f8b6`, had the same 16-file
-distribution digest
+The exact wheel SHA-256 is
+`dda7c634eaae399f0d62bbef8229a8548b9c03fa37a4ca8a3866dc4286611642`.
+The source suite passed 368 tests with four optional JSON-Schema skips; all
+eight lifecycle evaluations passed. Shape probes passed against released
+Hermes 0.19.0 at
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a` and the maintained checkout at
+`022a175e0ad5eb71fef0892dcf1d7f558d73f8b6`. Both probes confirmed stock
+participant execution plus the ingress, result, lifecycle, processing-hook,
+send, and shutdown wrappers.
+
+The wheel was installed without dependencies in the `fiction-writer` Hermes
+0.19.0 environment. Its 16-file Hermes distribution digest was
 `a9e341b8b3214b853b04d7ac8c17a4bac31723f83851e756edc03e56ff0779bd`
-before and after installing Nunchi. The current upstream checkout remained
-clean. Both dashboard loaders discovered the tab and imported its four API
-routes.
+before and after installation, and the maintained Hermes checkout stayed
+clean. The installed dashboard assets verified as:
 
-## Hermes configured live work
+- `index.js`: `d23fd571648a5f21aa7a8e6fb075b2b61314c21201be0a348ec979512b3ccbc0`
+- `manifest.json`: `d87e5c56a2659c58ca750992e473aed7f3b67cd0fd5da66b9cad549a631b9d63`
+- `plugin_api.py`: `56fec259232e2d6df017b2ab66fd1bde470f664ac3e7309539cf01d567091000`
 
-On 2026-07-29, the first Discord probe in channel
-`1530259309802295316` did not count as Nunchi evidence. Hermes moved Vigil
-message `1532012823708831835` into an automatic thread before Nunchi could
-claim the configured room. Fiction Writer replied in that thread with message
-`1532012861730328737`, but the stock Hermes turn produced it and Nunchi wrote
-no lifecycle receipt. This exposed two pre-runner host gates: Discord bot
-admission and mention/auto-thread routing.
+## Hermes live Discord acceptance
 
-The first room-scoped successor then missed Vigil message
-`1532018839783608471`. Nunchi had patched
-`plugins.platforms.discord.adapter`, while Hermes instantiated the same source
-under its runtime plugin name, `hermes_plugins.discord_platform.adapter`.
-There was no inbound gateway record or Nunchi receipt. The regression test now
-uses different source and runtime classes and fails unless Nunchi patches the
-registered class.
+The exact wheel above ran in profile `fiction-writer`, configured channel
+`1530259309802295316`, with Hermes main model `nous/x-ai/grok-4.5`,
+Nunchi attention model `nous/deepseek/deepseek-v4-flash`, and
+`DISCORD_ALLOW_BOTS=none`.
 
-Implementation `0fcaca5a7b257a66a42d67b7e134f66f9bed60e8` fixes that lookup.
-Its exact wheel, SHA-256
-`8caa4b01e863c084c4b33297b46abc1179ae10818b109cbce7c8bccecb303243`,
-was installed in the `fiction-writer` environment above. The gateway restarted
-with `DISCORD_ALLOW_BOTS=none`; no profile-wide bot, mention, or thread
-workaround was active.
+- Vigil `/nunchi probe` message `1532134187002236998` received response
+  `1532134191272169713`. It reported `process-local-gate`, `stock-hermes`,
+  Hermes 0.19.0, no Hermes dependency or modified files, exact configured-room
+  bot admission, and the pinned configuration digest
+  `0af0470730ed9041413f5097268d3c2f5d7a6f583f1801f1708fe1c3694846eb`.
+- Unmentioned Vigil message `1532134240865484810` produced Nunchi request
+  `discord:1530259309802295316:a1f7ac85-2410-4a1c-962d-f1dca28b13cd`.
+  Attention used `deepseek-v4-flash`; stock Hermes used `grok-4.5`, injected
+  the bounded Nunchi facts, and sent response `1532134339448410224`.
+  Participant and transport receipts both settled as `sent`.
+- Routine message `1532134584530239651` produced request
+  `discord:1530259309802295316:4cb15f86-4386-4edf-96c9-4248972fddad`
+  with effective `SUPPRESS`. It had no reaction, Hermes turn, participant
+  receipt, transport receipt, or response.
+- Long turn `1532134736003072082` showed Hermes's `👀` reaction. Vigil `/stop`
+  message `1532134842362368130` received stock confirmation
+  `1532134844266451128`; request
+  `discord:1530259309802295316:d8343b16-a704-41c5-9065-668948d3db89`
+  settled with no stale response and a cancelled delivery receipt.
+- Tool request `1532135103109665031` showed `👀`, used Hermes's terminal tool
+  once under `grok-4.5`, returned exact output in response
+  `1532135235008073738`, and finished with `✅`. Request
+  `discord:1530259309802295316:490f3b3a-d02d-499b-bc85-215c97aa41ef`
+  settled participant and transport as `sent`.
+- While the gateway was stopped, Vigil sent recovery carrier
+  `1532135404675924260`. Restart backfilled it into observations without an
+  attention decision, Hermes turn, reaction, receipt, or response. New
+  unmentioned message `1532135683374714930` then received exact stock response
+  `1532135791457865910`.
+- The installed dashboard API performed a validated idempotent save of two
+  rooms, read 24 discovered channels and recent receipts, reported
+  configured-room bot admission with no mention or profile-wide fallback, and
+  kept the same pinned digest. Hermes restarted and both Discord and Telegram
+  reconnected under launchd.
 
-Vigil then sent unmentioned bot message `1532021343703273595` directly to
-configured channel `1530259309802295316`. Nunchi request
-`discord:1530259309802295316:0aac25a8-ddee-44d1-ae00-b081473e45ca`
-recorded observation, WAKE attention, participant-host invocation, and sent
-transport. Fiction Writer replied in the same channel with exact marker
-`NUNCHI-DISCORD-ROOM-SCOPE-20260729-C`, native message
-`1532021373801861162`. Hermes did not create an automatic thread.
-
-Successor implementation `82c7ed8f` closes the remaining Discord gates:
-
-- restart recovery retained offline carrier `1532024768356810946`; later
-  request `discord:1530259309802295316:86105da0-5442-4950-91c2-850ad28c0fdf`
-  cited it and sent response `1532030893756121138`;
-- concurrent inputs `1532032974512717834` and `1532032999091081327` were both
-  retained and produced responses `1532033132491178196` and
-  `1532033223394328627`, without a stock Hermes busy message;
-- routine input `1532033736709771295` produced request
-  `discord:1530259309802295316:e6efd8e9-740a-467a-bf2c-13e5f55fffb8`,
-  whose effective disposition was `SUPPRESS`; there was no participant or
-  transport receipt and no Discord response; and
-- `/stop` cancelled request
-  `discord:1530259309802295316:e7519903-68c5-4144-9222-bf63d71a2850`
-  during attention, produced only command confirmation
-  `1532035621550297109`, and produced no participant or transport receipt.
-
-Natural group address then exposed a prompt defect. Zoe's unmentioned message
-`1532038355796365333`, “Are you both listening?”, reached Nunchi but was
-incorrectly classified `SUPPRESS`. Implementation `d349736` makes Hermes use
-the shared V2 attention prompt, which tells the participant-bound model that a
-group address can include it without a name or platform mention and that
-uncertainty must return `DEFER`. The full source suite passed 362 tests with
-four expected skips. Installed wheel
-`f6016084fb50b931bd880574a498ab1843ba0ee7c2c933af7ec7d4e8c7c4b459`
-then classified Vigil's unmentioned group-address retry
-`1532040218016878733` as `WAKE`, invoked Fiction Writer, and sent reply
-`1532040321956053073`, “Yes—listening.”
-
-Both `fiction-writer` adapters are connected. Hermes 0.19.0 reports the
-gateway process as detached after its service command, so crash supervision is
-not claimed. Telegram room `670011474` is configured for bot actor
-`8908653631`, but Telegram rejected the first outbound message with `Chat not
-found`: the user has not initiated `@quire_lit_bot`. No Telegram live result
-is claimed until an inbound message is observed and the same lifecycle checks
-pass there.
+Automated Hermes tests separately cover participant silence, failed
+processing, active-plus-newest scheduling, incompatible host shapes, and
+unconfigured rooms. Telegram room `670011474` is configured and connected,
+but no live Telegram acceptance is claimed.
 
 ## Exact source/artifact evidence
 
