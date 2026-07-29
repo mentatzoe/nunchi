@@ -19,6 +19,7 @@ from nunchi.integrations.hermes_dashboard_store import (
     DashboardConfigReadOnly,
     active_hermes_profile,
     channel_directory,
+    discord_runtime_status,
     read_config_snapshot,
     read_receipts,
     write_config_document,
@@ -49,6 +50,7 @@ def _config_response(profile: str) -> dict[str, Any]:
     snapshot = read_config_snapshot(profile)
     result = snapshot.response()
     result["channels"] = channel_directory()
+    result["discord_runtime"] = discord_runtime_status(snapshot)
     result["restart_endpoint"] = (
         f"/api/gateway/restart?profile={quote(profile, safe='')}"
     )

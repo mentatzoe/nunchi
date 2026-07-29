@@ -26,6 +26,12 @@ and `nunchi-hermes-dashboard install` repairs it when needed. See
 pinned room/profile configuration, editable digest sidecar, dashboard,
 `hermes plugins enable nunchi`, and compatibility probe.
 
+Configured Discord rooms need no mentions or separate bot/thread environment
+setup. The plugin extends Hermes's stock free-response path and admits
+bot-authored messages only for exact configured Nunchi room IDs. A
+profile-wide `DISCORD_ALLOW_BOTS` value is optional Hermes behavior, not a
+Nunchi requirement; the dashboard warns when that broader fallback is active.
+
 Initialize stable operator-owned directories:
 
 ```sh

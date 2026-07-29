@@ -310,6 +310,7 @@
   function ConfigPanel(props) {
     var snapshot = props.snapshot;
     var document = props.document;
+    var discord = snapshot.discord_runtime || {};
     var [advanced, setAdvanced] = useState(false);
     var [raw, setRaw] = useState(JSON.stringify(document, null, 2));
     var [rawError, setRawError] = useState(null);
@@ -339,6 +340,37 @@
     }
 
     return h("div", { style: styles.page },
+      h(Card, null,
+        h(CardHeader, null, h(CardTitle, null, "Discord room behavior")),
+        h(CardContent, null,
+          (discord.configured_room_ids || []).length
+            ? h("div", { style: styles.page },
+                h("div", null,
+                  "Nunchi listens without mentions, admits bot messages, and " +
+                  "prevents automatic thread moves only in these configured rooms: " +
+                  discord.configured_room_ids.join(", ") + "."
+                ),
+                h("div", { style: styles.hint },
+                  "This is supplied by Nunchi's checked runtime shim. No " +
+                  "DISCORD_ALLOW_BOTS, DISCORD_FREE_RESPONSE_CHANNELS, or " +
+                  "DISCORD_NO_THREAD_CHANNELS setting is required."
+                ),
+                discord.profile_wide_fallback_active
+                  ? h("div", { style: styles.status },
+                      "Hermes's profile-wide bot fallback is currently " +
+                      discord.profile_wide_hermes_allow_bots +
+                      ". Nunchi does not need it; Hermes may still admit bot " +
+                      "messages outside Nunchi rooms under its normal rules."
+                    )
+                  : h("div", { style: styles.hint },
+                      "Hermes's profile-wide bot fallback is off."
+                    )
+              )
+            : h("div", { style: styles.hint },
+                "Add a Discord room to enable natural room conversation."
+              )
+        )
+      ),
       h("div", { style: styles.status },
         h("strong", null, snapshot.dashboard_writable ? "Editable pinned config" : "Read-only pinned config"),
         h("div", null, snapshot.path),

@@ -9,6 +9,10 @@ The integration supports Hermes 0.19.0 and newer compatible builds:
   self identity before the attention decision.
 - From Hermes 0.19.0 through the tested current upstream head, it installs a
   checked runtime monkeypatch around the stock gateway runner.
+- The Discord patch extends Hermes's existing free-response set with exact
+  configured Nunchi room IDs. It admits bot-authored messages through Hermes's
+  existing checks only in those rooms. Mentions and profile-wide
+  `DISCORD_ALLOW_BOTS` are not required for Nunchi rooms.
 - The Telegram patch retains each native update that Hermes combines into one
   text batch. Nunchi then processes those updates in order.
 - Discord and Telegram ingress, authorization, routing, formatting, and I/O
@@ -106,11 +110,32 @@ user. A literal `NUNCHI_HERMES_V2_CONFIG_SHA256` remains supported but is
 read-only in the dashboard because the dashboard cannot update an environment
 variable safely.
 
+### Discord room behavior
+
+A configured Discord room is a natural shared conversation:
+
+- human and bot messages can reach Nunchi without mentioning the participant;
+- Hermes does not move those messages into an automatic thread; and
+- unconfigured rooms retain Hermes's normal admission, mention, and thread
+  behavior.
+
+Nunchi supplies this by wrapping Hermes's installed admission and
+free-response methods in memory. It reuses the rest of the stock Discord
+adapter. `DISCORD_ALLOW_BOTS`, `DISCORD_FREE_RESPONSE_CHANNELS`, and
+`DISCORD_NO_THREAD_CHANNELS` are not required.
+
+Hermes's `DISCORD_ALLOW_BOTS=mentions` or `all` remains a profile-wide fallback.
+If set, it can admit bot messages outside Nunchi rooms under Hermes's normal
+rules. The dashboard reports that state. Keep it `none` unless another Hermes
+workflow needs the broader behavior.
+
 ## Dashboard
 
-Open **Nunchi V2** in the Hermes dashboard to:
+Open **Nunchi** in the Hermes dashboard to:
 
 - configure Discord and Telegram rooms using Hermes's discovered channel list;
+- confirm that no-mention conversation, room-scoped bot admission, and
+  no-auto-thread behavior are active for configured Discord rooms;
 - edit exact participant identity, inline instructions, attention policy, and
   lifecycle limits;
 - use advanced JSON for the complete closed V2 configuration;
@@ -124,8 +149,22 @@ invalid edit is rejected. The running gateway is unchanged until the operator
 requests restart; Hermes then invokes Nunchi's normal drain and cancellation
 path.
 
-Hermes continues to control its existing platform credentials, allowlists,
-pairing, mention rules, and `DISCORD_ALLOW_BOTS` policy.
+Hermes continues to control platform credentials, allowlists, pairing, and all
+unconfigured rooms. Nunchi changes Discord admission only for exact configured
+room IDs.
+
+## Compatibility and repair
+
+Nunchi checks every patched Hermes method before activation. The checks cover
+Hermes 0.19.0 and the tested current upstream build. An unknown shape stops
+Nunchi with an upgrade message; it does not fall through to a stock participant
+turn.
+
+Two host gates run before Hermes's participant turn: bot admission and
+auto-thread/free-response routing. A plugin that patches only the runner will
+miss bot messages or receive a new thread ID instead of the configured room.
+The Nunchi Discord shim covers both gates. This is a required compatibility
+check when adding support for a new Hermes release.
 
 ## Verify
 

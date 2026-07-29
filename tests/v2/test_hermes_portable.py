@@ -872,6 +872,136 @@ class HermesPortableTests(unittest.TestCase):
             else:
                 sys.modules["gateway.run"] = original_run
 
+    def test_discord_shim_admits_bots_and_free_response_only_in_nunchi_rooms(self):
+        class DiscordAdapter:
+            def __init__(self):
+                self._client = types.SimpleNamespace(
+                    user=FakeDiscordUser("999", bot=True)
+                )
+                self._allowed_role_ids = {"operator"}
+
+            def _is_allowed_user(self, *_args, **_kwargs):
+                return False
+
+            def _discord_free_response_channels(self):
+                return {"existing"}
+
+            async def _dispatch_discord_message(self, message):
+                del message
+                return self._discord_free_response_channels()
+
+            async def _dispatch_recovered_message(self, message):
+                del message
+                return self._discord_free_response_channels()
+
+            def _discord_message_admission(self, message, *, claim):
+                del claim
+                if message.author == self._client.user:
+                    return False, False
+                if message.author.bot:
+                    return False, False
+                return (
+                    bool(self._is_allowed_user(str(message.author.id))),
+                    bool(self._allowed_role_ids),
+                )
+
+        class GatewayRunner:
+            def _is_user_authorized(self, source):
+                del source
+                return False
+
+        fake_gateway = types.ModuleType("gateway")
+        fake_run = types.ModuleType("gateway.run")
+        fake_run.GatewayRunner = GatewayRunner
+        fake_plugins = types.ModuleType("plugins")
+        fake_platforms = types.ModuleType("plugins.platforms")
+        fake_discord = types.ModuleType("plugins.platforms.discord")
+        fake_adapter = types.ModuleType("plugins.platforms.discord.adapter")
+        fake_adapter.DiscordAdapter = DiscordAdapter
+        with tempfile.TemporaryDirectory() as temporary:
+            config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
+            plugin = hermes_v2.NunchiHermesV2Plugin(
+                config=config,
+                ctx=ctx,
+                hermes_version="0.19.0",
+                mode="runtime-monkeypatch",
+            )
+            try:
+                with mock.patch.dict(
+                    sys.modules,
+                    {
+                        "gateway": fake_gateway,
+                        "gateway.run": fake_run,
+                        "plugins": fake_plugins,
+                        "plugins.platforms": fake_platforms,
+                        "plugins.platforms.discord": fake_discord,
+                        "plugins.platforms.discord.adapter": fake_adapter,
+                    },
+                ):
+                    hermes_v2._install_discord_room_admission_shim(plugin)
+
+                adapter = DiscordAdapter()
+                configured_bot = types.SimpleNamespace(
+                    author=FakeDiscordUser("100", bot=True),
+                    channel=types.SimpleNamespace(id=42),
+                )
+                other_bot = types.SimpleNamespace(
+                    author=FakeDiscordUser("100", bot=True),
+                    channel=types.SimpleNamespace(id=43),
+                )
+                configured_human = types.SimpleNamespace(
+                    author=FakeDiscordUser("100"),
+                    channel=types.SimpleNamespace(id=42),
+                )
+                self.assertEqual(
+                    (True, False),
+                    adapter._discord_message_admission(
+                        configured_bot,
+                        claim=True,
+                    ),
+                )
+                self.assertEqual(
+                    (False, False),
+                    adapter._discord_message_admission(other_bot, claim=True),
+                )
+                self.assertEqual(
+                    (False, True),
+                    adapter._discord_message_admission(
+                        configured_human,
+                        claim=True,
+                    ),
+                )
+                self.assertEqual(
+                    {"existing"},
+                    adapter._discord_free_response_channels(),
+                )
+                self.assertEqual(
+                    {"existing", "42"},
+                    asyncio.run(
+                        adapter._dispatch_discord_message(configured_bot)
+                    ),
+                )
+                self.assertEqual(
+                    {"existing"},
+                    asyncio.run(adapter._dispatch_discord_message(other_bot)),
+                )
+                self.assertEqual(
+                    {"existing", "42"},
+                    asyncio.run(
+                        adapter._dispatch_recovered_message(configured_bot)
+                    ),
+                )
+
+                configured_source = FakeSource(chat_id="42")
+                configured_source.is_bot = True
+                other_source = FakeSource(chat_id="43")
+                other_source.is_bot = True
+                runner = GatewayRunner()
+                self.assertTrue(runner._is_user_authorized(configured_source))
+                self.assertFalse(runner._is_user_authorized(other_source))
+            finally:
+                hermes_v2._SHIM_OWNER = None
+
     def test_telegram_batch_shim_retains_each_native_event(self):
         class TelegramAdapter:
             def __init__(self):
@@ -965,6 +1095,10 @@ class HermesPortableTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     hermes_v2, "_hermes_version", return_value="0.19.0"
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_discord_room_admission_shim",
                 ),
                 mock.patch.dict(
                     "os.environ",

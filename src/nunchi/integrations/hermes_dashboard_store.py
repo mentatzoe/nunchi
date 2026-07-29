@@ -126,6 +126,35 @@ def read_config_snapshot(
     )
 
 
+def discord_runtime_status(
+    snapshot: DashboardConfigSnapshot,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Describe the Discord behavior supplied by the installed Nunchi plugin."""
+
+    environment = os.environ if environ is None else environ
+    room_ids = sorted(
+        room.binding.room_id
+        for room in snapshot.config.rooms
+        if room.binding.platform == "discord"
+    )
+    allow_bots = environment.get("DISCORD_ALLOW_BOTS", "none").strip().lower()
+    if allow_bots not in {"none", "mentions", "all"}:
+        allow_bots = "custom"
+    return {
+        "configured_room_ids": room_ids,
+        "natural_conversation": bool(room_ids),
+        "bot_admission": "configured-rooms" if room_ids else "not-configured",
+        "mention_required": False if room_ids else None,
+        "auto_threading": "bypassed" if room_ids else "not-configured",
+        "provided_by": "nunchi-runtime-shim",
+        "profile_wide_hermes_allow_bots": allow_bots,
+        "profile_wide_fallback_active": allow_bots in {"mentions", "all"},
+        "restart_required_after_room_change": True,
+    }
+
+
 def _write_staged(path: Path, data: bytes) -> Path:
     descriptor, raw_path = tempfile.mkstemp(
         prefix=f".{path.name}.",

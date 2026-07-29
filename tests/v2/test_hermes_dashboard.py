@@ -16,6 +16,7 @@ from nunchi.integrations.hermes_dashboard_store import (
     DashboardConfigConflict,
     DashboardConfigReadOnly,
     channel_directory,
+    discord_runtime_status,
     read_config_snapshot,
     read_receipts,
     write_config_document,
@@ -250,6 +251,22 @@ class HermesDashboardConfigTests(unittest.TestCase):
                 channel_directory(environ={"HERMES_HOME": str(home)}),
             )
 
+    def test_discord_runtime_status_is_room_scoped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, _, _, environ = _write_config(root)
+            snapshot = read_config_snapshot("default", environ=environ)
+            status = discord_runtime_status(
+                snapshot,
+                environ={**environ, "DISCORD_ALLOW_BOTS": "all"},
+            )
+            self.assertEqual(["42"], status["configured_room_ids"])
+            self.assertEqual("configured-rooms", status["bot_admission"])
+            self.assertTrue(status["natural_conversation"])
+            self.assertFalse(status["mention_required"])
+            self.assertEqual("bypassed", status["auto_threading"])
+            self.assertTrue(status["profile_wide_fallback_active"])
+
 
 class HermesDashboardInstallTests(unittest.TestCase):
     def test_install_and_verify_packaged_dashboard(self):
@@ -326,6 +343,8 @@ class HermesDashboardInstallTests(unittest.TestCase):
         self.assertIn('var API = "/api/plugins/nunchi"', source)
         self.assertIn("restart_endpoint", source)
         self.assertIn("Save & restart", source)
+        self.assertIn("admits bot messages", source)
+        self.assertIn("profile-wide bot fallback", source)
         self.assertIn("React.createElement", source)
         self.assertNotIn("innerHTML", source)
 

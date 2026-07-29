@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from copy import copy, deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -56,6 +57,10 @@ _NATIVE_BATCH_DISPATCH_ATTRIBUTE = "_nunchi_v2_native_batch_dispatch"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHIM_LOCK = threading.RLock()
 _SHIM_OWNER: "NunchiHermesV2Plugin | None" = None
+_DISCORD_ROOM_CONTEXT: ContextVar[str | None] = ContextVar(
+    "nunchi_discord_room",
+    default=None,
+)
 
 
 def _nonempty(value: Any, label: str) -> str:
@@ -1451,6 +1456,18 @@ class NunchiHermesV2Plugin:
         except (AttributeError, TypeError, ValueError, ValidationError):
             return False
 
+    def claims_discord_message(self, message: Any) -> bool:
+        """Return whether a raw Discord message belongs to an exact Nunchi room."""
+
+        try:
+            channel_id = _nonempty(
+                getattr(getattr(message, "channel", None), "id", None),
+                "Discord channel id",
+            )
+        except ValidationError:
+            return False
+        return ("discord", channel_id) in self._rooms
+
     def _runtime(self, source: Any) -> _RoomRuntime | None:
         if not self.claims(source):
             return None
@@ -1554,6 +1571,11 @@ class NunchiHermesV2Plugin:
             "compatibility_mode": self.mode,
             "hermes_files_modified": False,
             "hermes_dependency_required_by_nunchi": False,
+            "discord_bot_admission": (
+                "configured-rooms"
+                if any(platform == "discord" for platform, _ in self._rooms)
+                else "not-configured"
+            ),
             "configuration_sha256": self.config.provenance["sha256"],
             "rooms": [
                 {
@@ -1617,6 +1639,246 @@ def _event_snapshot(event: Any) -> Any:
         if isinstance(value, list):
             setattr(snapshot, name, list(value))
     return snapshot
+
+
+class _DiscordAuthorAsAuthorizedHuman:
+    """Expose one admitted bot author to Hermes's stock common checks."""
+
+    def __init__(self, author: Any) -> None:
+        self._author = author
+        self.bot = False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._author, name)
+
+
+class _DiscordMessageAsAuthorizedHuman:
+    """Keep a raw Discord message intact except for its admission branch."""
+
+    def __init__(self, message: Any) -> None:
+        self._message = message
+        self.author = _DiscordAuthorAsAuthorizedHuman(message.author)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._message, name)
+
+
+class _DiscordAdmissionAdapter:
+    """Delegate stock admission while satisfying only its human allowlist step."""
+
+    _allowed_role_ids: tuple[Any, ...] = ()
+
+    def __init__(self, adapter: Any) -> None:
+        self._adapter = adapter
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._adapter, name)
+
+    def _is_allowed_user(self, *_: Any, **__: Any) -> bool:
+        return True
+
+
+def _install_discord_room_admission_shim(
+    plugin: NunchiHermesV2Plugin,
+) -> None:
+    """Use Hermes's stock Discord path with exact Nunchi-room admission.
+
+    Hermes 0.19.0 exposes only a profile-wide bot switch and a configured
+    free-response list. Nunchi narrows both decisions in memory: configured
+    Discord rooms are treated as free-response rooms, and bot-authored
+    messages bypass the two profile-wide admission gates only in those exact
+    rooms. All remaining Discord checks and all unconfigured rooms continue
+    through Hermes's original methods.
+    """
+
+    global _SHIM_OWNER
+    if not any(platform == "discord" for platform, _ in plugin._rooms):
+        return
+    try:
+        from gateway.run import GatewayRunner
+        from plugins.platforms.discord.adapter import DiscordAdapter
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("Discord adapter") from exc
+
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi V2 Hermes plugin may be active")
+        current_admission = getattr(
+            DiscordAdapter,
+            "_discord_message_admission",
+            None,
+        )
+        current_free_rooms = getattr(
+            DiscordAdapter,
+            "_discord_free_response_channels",
+            None,
+        )
+        current_dispatch = getattr(
+            DiscordAdapter,
+            "_dispatch_discord_message",
+            None,
+        )
+        current_recovered_dispatch = getattr(
+            DiscordAdapter,
+            "_dispatch_recovered_message",
+            None,
+        )
+        current_authorized = getattr(
+            GatewayRunner,
+            "_is_user_authorized",
+            None,
+        )
+        installed = (
+            getattr(current_admission, "__nunchi_v2_discord_admission__", False)
+            and getattr(current_free_rooms, "__nunchi_v2_discord_rooms__", False)
+            and getattr(current_dispatch, "__nunchi_v2_discord_dispatch__", False)
+            and getattr(
+                current_recovered_dispatch,
+                "__nunchi_v2_discord_recovered_dispatch__",
+                False,
+            )
+            and getattr(current_authorized, "__nunchi_v2_discord_authz__", False)
+        )
+        if installed:
+            _SHIM_OWNER = plugin
+            return
+        if any(
+            (
+                getattr(
+                    current_admission,
+                    "__nunchi_v2_discord_admission__",
+                    False,
+                ),
+                getattr(
+                    current_free_rooms,
+                    "__nunchi_v2_discord_rooms__",
+                    False,
+                ),
+                getattr(
+                    current_dispatch,
+                    "__nunchi_v2_discord_dispatch__",
+                    False,
+                ),
+                getattr(
+                    current_recovered_dispatch,
+                    "__nunchi_v2_discord_recovered_dispatch__",
+                    False,
+                ),
+                getattr(
+                    current_authorized,
+                    "__nunchi_v2_discord_authz__",
+                    False,
+                ),
+            )
+        ):
+            raise _shape_error("Discord admission shim")
+        _require_signature(
+            current_admission,
+            required=("self", "message", "claim"),
+            label="Discord message admission",
+        )
+        _require_signature(
+            current_free_rooms,
+            required=("self",),
+            label="Discord free-response rooms",
+        )
+        _require_signature(
+            current_dispatch,
+            required=("self", "message"),
+            label="Discord live dispatch",
+        )
+        _require_signature(
+            current_recovered_dispatch,
+            required=("self", "message"),
+            label="Discord recovered dispatch",
+        )
+        _require_signature(
+            current_authorized,
+            required=("self", "source"),
+            label="authorization check",
+        )
+
+        def discord_message_admission(
+            self: Any,
+            message: Any,
+            *,
+            claim: bool,
+        ) -> tuple[bool, bool]:
+            owner = _SHIM_OWNER
+            if (
+                owner is None
+                or not bool(getattr(getattr(message, "author", None), "bot", False))
+                or getattr(message, "author", None)
+                == getattr(getattr(self, "_client", None), "user", None)
+                or not owner.claims_discord_message(message)
+            ):
+                return current_admission(self, message, claim=claim)
+            return current_admission(
+                _DiscordAdmissionAdapter(self),
+                _DiscordMessageAsAuthorizedHuman(message),
+                claim=claim,
+            )
+
+        def discord_free_response_channels(self: Any) -> set[Any]:
+            configured = set(current_free_rooms(self))
+            owner = _SHIM_OWNER
+            room_id = _DISCORD_ROOM_CONTEXT.get()
+            if owner is not None and room_id is not None:
+                configured.add(room_id)
+            return configured
+
+        async def discord_dispatch(self: Any, message: Any) -> Any:
+            owner = _SHIM_OWNER
+            room_id = (
+                str(getattr(getattr(message, "channel", None), "id", ""))
+                if owner is not None and owner.claims_discord_message(message)
+                else None
+            )
+            token = _DISCORD_ROOM_CONTEXT.set(room_id)
+            try:
+                return await current_dispatch(self, message)
+            finally:
+                _DISCORD_ROOM_CONTEXT.reset(token)
+
+        async def discord_recovered_dispatch(
+            self: Any,
+            message: Any,
+        ) -> Any:
+            owner = _SHIM_OWNER
+            room_id = (
+                str(getattr(getattr(message, "channel", None), "id", ""))
+                if owner is not None and owner.claims_discord_message(message)
+                else None
+            )
+            token = _DISCORD_ROOM_CONTEXT.set(room_id)
+            try:
+                return await current_recovered_dispatch(self, message)
+            finally:
+                _DISCORD_ROOM_CONTEXT.reset(token)
+
+        def is_user_authorized(self: Any, source: Any) -> bool:
+            owner = _SHIM_OWNER
+            if (
+                owner is not None
+                and bool(getattr(source, "is_bot", False))
+                and owner.claims(source)
+            ):
+                return True
+            return bool(current_authorized(self, source))
+
+        discord_message_admission.__nunchi_v2_discord_admission__ = True  # type: ignore[attr-defined]
+        discord_free_response_channels.__nunchi_v2_discord_rooms__ = True  # type: ignore[attr-defined]
+        discord_dispatch.__nunchi_v2_discord_dispatch__ = True  # type: ignore[attr-defined]
+        discord_recovered_dispatch.__nunchi_v2_discord_recovered_dispatch__ = True  # type: ignore[attr-defined]
+        is_user_authorized.__nunchi_v2_discord_authz__ = True  # type: ignore[attr-defined]
+        DiscordAdapter._discord_message_admission = discord_message_admission
+        DiscordAdapter._discord_free_response_channels = (
+            discord_free_response_channels
+        )
+        DiscordAdapter._dispatch_discord_message = discord_dispatch
+        DiscordAdapter._dispatch_recovered_message = discord_recovered_dispatch
+        GatewayRunner._is_user_authorized = is_user_authorized
+        _SHIM_OWNER = plugin
 
 
 def _install_telegram_batch_identity_shim(
@@ -1688,9 +1950,9 @@ def _install_telegram_batch_identity_shim(
 def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
     """Monkeypatch a checked process-local adapter around Hermes's runner.
 
-    The shim claims only configured, already admitted rooms. Unauthorized
-    traffic, Hermes commands, internal events, and unconfigured rooms continue
-    through the stock runner unchanged.
+    The shim claims only configured rooms. Unauthorized traffic, Hermes
+    commands, internal events, and unconfigured rooms continue through the
+    stock runner unchanged.
     """
 
     global _SHIM_OWNER
@@ -1940,6 +2202,7 @@ def register(
         hermes_version=hermes_version,
         mode=mode,
     )
+    _install_discord_room_admission_shim(plugin)
     if mode == "native-v2-hooks":
         ctx.register_hook("gateway_message", plugin.gateway_message)
         ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)

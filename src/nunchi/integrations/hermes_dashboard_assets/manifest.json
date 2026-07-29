@@ -1,7 +1,7 @@
 {
   "name": "nunchi",
   "label": "Nunchi",
-  "description": "Configure Nunchi V2 rooms and inspect lifecycle receipts.",
+  "description": "Configure Nunchi rooms and inspect lifecycle receipts.",
   "icon": "message-circle",
   "version": "2.0.0",
   "tab": {

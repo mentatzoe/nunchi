@@ -22,7 +22,7 @@ Claude Code implementation, installation, and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source, clean wheel, dashboard discovery, and installed dashboard bridge verified against released 0.19.0 and upstream `main` `22492f0c46a7ea7dd567fbeded58691b921170fc`; configured gateway and live Discord/Telegram acceptance remain pending |
+| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source, clean wheel, dashboard discovery, and installed dashboard bridge verified against released 0.19.0; the room-scoped Discord successor matches released 0.19.0 and local upstream `main` `022a175e0ad5eb71fef0892dcf1d7f558d73f8b6` method shapes; its configured gateway and live Discord/Telegram acceptance remain pending |
 | independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
@@ -37,6 +37,9 @@ The current Hermes addition:
 - reuses stock Discord and Telegram adapters;
 - uses a checked runtime monkeypatch on Hermes 0.19.0 and on current `main`,
   without changing Hermes files;
+- extends Hermes's stock Discord admission and free-response methods only for
+  exact configured Nunchi rooms, so bot messages and ordinary room messages do
+  not require mentions or profile-wide bot admission;
 - retains and processes each native Telegram update even when Hermes batches
   adjacent text;
 - packages an authenticated dashboard tab for room configuration and V2
@@ -47,16 +50,32 @@ The current Hermes addition:
   silence, cancellation, coalescing, restart, and delivery tests.
 
 The reproducible clean-wheel SHA-256 for this worktree is
-`044ca63898faa44b72aebffc76d26f77a3c69dea9b13be487f5b880e5d45cba6`.
+`ecff7d2611029181c49477189e9512f5f6aee5b0df98942cb14bab1199fed5be`.
 Two builds with `SOURCE_DATE_EPOCH=1700000000` matched byte-for-byte. A clean
 Python 3.14 environment installed that wheel without dependencies, installed
 and verified the dashboard bridge, and imported only from `site-packages`.
-The source suite passed 357 tests with four optional JSON-Schema skips; all
+The source suite passed 359 tests with four optional JSON-Schema skips; all
 eight lifecycle evaluations passed. Hermes 0.19.0 verified 958 distribution
 records unchanged, and the current upstream checkout remained clean. Both
 dashboard loaders discovered the tab and imported its four API routes. This is
 source and clean-package evidence, not configured gateway or live-platform
 acceptance.
+
+## Hermes configured live work
+
+On 2026-07-29, the first Discord probe in channel
+`1530259309802295316` did not count as Nunchi evidence. Hermes moved Vigil
+message `1532012823708831835` into an automatic thread before Nunchi could
+claim the configured room. Fiction Writer replied in that thread with message
+`1532012861730328737`, but the stock Hermes turn produced it and Nunchi wrote
+no lifecycle receipt. This exposed two pre-runner host gates: Discord bot
+admission and mention/auto-thread routing.
+
+The successor patches those existing Hermes methods in memory for exact
+configured Nunchi rooms. Focused source tests prove room-scoped bot admission,
+free response, and unchanged behavior outside those rooms. This is repaired
+source behavior only until an exact successor wheel is installed and a new
+attributable no-mention room run writes Nunchi receipts.
 
 ## Exact source/artifact evidence
 

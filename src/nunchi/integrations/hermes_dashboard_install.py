@@ -217,7 +217,7 @@ def verify_dashboard(*, hermes_home: Path) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nunchi-hermes-dashboard",
-        description="Install or verify the Nunchi V2 tab in Hermes dashboard.",
+        description="Install or verify the Nunchi tab in Hermes dashboard.",
     )
     parser.add_argument("command", choices=("install", "verify"))
     parser.add_argument(
