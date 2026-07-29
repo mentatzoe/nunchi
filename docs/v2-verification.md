@@ -115,12 +115,13 @@ Successor implementation `82c7ed8f` closes the remaining Discord gates:
   during attention, produced only command confirmation
   `1532035621550297109`, and produced no participant or transport receipt.
 
-The `fiction-writer` gateway is launchd-supervised and both Discord and
-Telegram adapters are connected. Telegram room `670011474` is configured for
-bot actor `8908653631`, but Telegram rejected the first outbound message with
-`Chat not found`: the user has not initiated `@quire_lit_bot`. No Telegram
-live result is claimed until an inbound message is observed and the same
-lifecycle checks pass there.
+Both `fiction-writer` adapters are connected. Hermes 0.19.0 reports the
+gateway process as detached after its service command, so crash supervision is
+not claimed. Telegram room `670011474` is configured for bot actor
+`8908653631`, but Telegram rejected the first outbound message with `Chat not
+found`: the user has not initiated `@quire_lit_bot`. No Telegram live result
+is claimed until an inbound message is observed and the same lifecycle checks
+pass there.
 
 ## Exact source/artifact evidence
 
