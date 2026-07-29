@@ -59,7 +59,7 @@ nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
 
 [project.entry-points."hermes_agent.plugins"]
-nunchi-v2 = "nunchi.integrations.hermes_v2"
+nunchi = "nunchi.integrations.hermes_v2"
 
 [tool.setuptools.packages.find]
 where = ["src"]

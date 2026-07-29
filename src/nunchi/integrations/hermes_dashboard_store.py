@@ -19,6 +19,7 @@ import tempfile
 from typing import Any
 
 from nunchi.errors import ValidationError
+from nunchi.integrations.hermes_dashboard_install import default_hermes_home
 from nunchi.integrations.hermes_v2 import (
     HermesConfigSource,
     HermesPluginConfig,
@@ -31,7 +32,7 @@ from nunchi.integrations.hermes_v2 import (
 
 logger = logging.getLogger(__name__)
 _MAX_RECEIPT_READ_BYTES = 2 * 1024 * 1024
-_AUDIT_NAME = "nunchi-v2-dashboard-audit.jsonl"
+_AUDIT_NAME = "nunchi-dashboard-audit.jsonl"
 
 
 class DashboardConfigError(ValidationError):
@@ -298,12 +299,9 @@ def _hermes_home(environ: Mapping[str, str] | None = None) -> Path:
     configured = environment.get("HERMES_HOME", "").strip()
     if configured:
         return Path(configured).expanduser()
-    try:
-        from hermes_cli.config import get_hermes_home
-
-        return Path(get_hermes_home())
-    except Exception:
+    if environ is not None:
         return Path.home() / ".hermes"
+    return default_hermes_home()
 
 
 def channel_directory(

@@ -17,14 +17,14 @@ The wheel is the review subject. A source checkout on `PYTHONPATH` is not
 installed-artifact evidence.
 
 For Hermes, install the same wheel into Hermes's managed Python environment.
-Hermes discovers the `nunchi-v2` plugin from the wheel; Nunchi does not require
-Hermes as a package dependency and does not copy files into its checkout.
-Run `nunchi-hermes-dashboard install` once to place the wheel-owned dashboard
-bridge in Hermes's supported user-plugin directory, then
-`nunchi-hermes-dashboard verify` after Nunchi upgrades. See
+Hermes discovers the `nunchi` plugin from the wheel; Nunchi does not require
+Hermes as a package dependency and does not copy files into its checkout. The
+plugin installs its wheel-owned dashboard bridge automatically in Hermes's
+supported user-plugin directory. `nunchi-hermes-dashboard verify` checks it,
+and `nunchi-hermes-dashboard install` repairs it when needed. See
 [`../integrations/hermes/README.md`](../integrations/hermes/README.md) for the
 pinned room/profile configuration, editable digest sidecar, dashboard,
-`hermes plugins enable nunchi-v2`, and compatibility probe.
+`hermes plugins enable nunchi`, and compatibility probe.
 
 Initialize stable operator-owned directories:
 

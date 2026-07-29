@@ -954,6 +954,7 @@ class HermesPortableTests(unittest.TestCase):
                 self_actor_id: str
 
             fake_hooks.GatewayMessageRoute = GatewayMessageRoute
+            dashboard_home = Path(temporary) / "hermes-home"
             with (
                 mock.patch.dict(
                     sys.modules,
@@ -965,12 +966,29 @@ class HermesPortableTests(unittest.TestCase):
                 mock.patch.object(
                     hermes_v2, "_hermes_version", return_value="0.19.0"
                 ),
+                mock.patch.dict(
+                    "os.environ",
+                    {"HERMES_HOME": str(dashboard_home)},
+                    clear=False,
+                ),
             ):
                 plugin = hermes_v2.register(ctx, config_loader=lambda _: config)
             self.assertEqual("native-v2-hooks", plugin.mode)
             self.assertEqual(
                 {"gateway_message", "gateway_session_cancel", "gateway_shutdown"},
                 set(ctx.hooks),
+            )
+            self.assertIn("nunchi", ctx.commands)
+            manifest = (
+                dashboard_home
+                / "plugins"
+                / "nunchi-dashboard"
+                / "dashboard"
+                / "manifest.json"
+            )
+            self.assertEqual(
+                "nunchi",
+                json.loads(manifest.read_text(encoding="utf-8"))["name"],
             )
 
     def test_current_native_route_without_self_identity_uses_checked_shim(self):
@@ -1136,7 +1154,7 @@ class HermesPortableTests(unittest.TestCase):
     def test_package_has_entry_point_without_hermes_dependency(self):
         pyproject = Path("pyproject.toml").read_text()
         self.assertIn('[project.entry-points."hermes_agent.plugins"]', pyproject)
-        self.assertIn('nunchi-v2 = "nunchi.integrations.hermes_v2"', pyproject)
+        self.assertIn('nunchi = "nunchi.integrations.hermes_v2"', pyproject)
         dependencies = pyproject.split("dependencies = [", 1)[1].split("]", 1)[0]
         self.assertNotIn("hermes", dependencies.lower())
 

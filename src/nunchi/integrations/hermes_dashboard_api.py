@@ -1,7 +1,7 @@
 """Thin authenticated HTTP API for the Hermes dashboard extension.
 
 Hermes imports this module inside its dashboard process and mounts ``router``
-under ``/api/plugins/nunchi-v2``. Authentication remains owned by Hermes.
+under ``/api/plugins/nunchi``. Authentication remains owned by Hermes.
 Configuration validation and storage live in the dependency-free store module.
 """
 

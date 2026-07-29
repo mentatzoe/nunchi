@@ -1,11 +1,11 @@
 {
-  "name": "nunchi-v2",
-  "label": "Nunchi V2",
+  "name": "nunchi",
+  "label": "Nunchi",
   "description": "Configure Nunchi V2 rooms and inspect lifecycle receipts.",
   "icon": "message-circle",
   "version": "2.0.0",
   "tab": {
-    "path": "/nunchi-v2",
+    "path": "/nunchi",
     "position": "after:skills"
   },
   "entry": "index.js",

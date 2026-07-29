@@ -7,13 +7,13 @@
 (function () {
   "use strict";
 
-  if (window.__NUNCHI_V2_REGISTERED__) return;
+  if (window.__NUNCHI_REGISTERED__) return;
   var SDK = window.__HERMES_PLUGIN_SDK__;
   var PLUGINS = window.__HERMES_PLUGINS__;
   if (!SDK || !PLUGINS) {
     setTimeout(function () {
       var script = document.createElement("script");
-      script.src = "/dashboard-plugins/nunchi-v2/index.js";
+      script.src = "/dashboard-plugins/nunchi/index.js";
       document.head.appendChild(script);
     }, 500);
     return;
@@ -33,7 +33,7 @@
   var CardHeader = C.CardHeader || "header";
   var CardTitle = C.CardTitle || "h3";
   var CardContent = C.CardContent || "div";
-  var API = "/api/plugins/nunchi-v2";
+  var API = "/api/plugins/nunchi";
 
   var styles = {
     page: { display: "flex", flexDirection: "column", gap: "16px" },
@@ -435,7 +435,7 @@
     );
   }
 
-  function NunchiV2Panel() {
+  function NunchiPanel() {
     var [snapshot, setSnapshot] = useState(null);
     var [document, setDocument] = useState(null);
     var [savedDocument, setSavedDocument] = useState(null);
@@ -508,7 +508,7 @@
       JSON.stringify(document) !== JSON.stringify(savedDocument);
     return h("div", { style: styles.page },
       h("div", { style: Object.assign({}, styles.row, { alignItems: "center" }) },
-        h("h2", { style: { margin: 0, flex: "1 1 auto" } }, "Nunchi V2"),
+        h("h2", { style: { margin: 0, flex: "1 1 auto" } }, "Nunchi"),
         h(Button, { size: "sm", ghost: tab !== "config", onClick: function () {
           setTab("config");
         } }, "Configuration"),
@@ -533,6 +533,6 @@
     );
   }
 
-  window.__NUNCHI_V2_REGISTERED__ = true;
-  PLUGINS.register("nunchi-v2", NunchiV2Panel);
+  window.__NUNCHI_REGISTERED__ = true;
+  PLUGINS.register("nunchi", NunchiPanel);
 })();

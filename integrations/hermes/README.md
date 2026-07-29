@@ -24,20 +24,19 @@ checkout, package, or installed files.
 ## Install
 
 Install Nunchi into the same environment as Hermes, enable its discovered
-runtime plugin, install the dashboard tab, then restart Hermes:
+runtime plugin, then restart Hermes:
 
 ```sh
 python -m pip install nunchi
-hermes plugins enable nunchi-v2
-nunchi-hermes-dashboard install
+hermes plugins enable nunchi
 ```
 
-The wheel exposes the `nunchi-v2` entry point in the
-`hermes_agent.plugins` group. The dashboard command copies three Nunchi-owned
-web bridge files into Hermes's documented user-plugin directory because Hermes
+The wheel exposes the `nunchi` entry point in the `hermes_agent.plugins`
+group. When Hermes loads the plugin, Nunchi installs its three wheel-owned web
+bridge files into Hermes's documented user-plugin directory because Hermes
 does not scan wheel entry points for dashboard assets. It does not change the
 Hermes checkout or installed package. `nunchi-hermes-dashboard verify` checks
-the installed bridge against the current wheel.
+the bridge; `nunchi-hermes-dashboard install` repairs it.
 
 ## Configure
 
@@ -133,7 +132,7 @@ pairing, mention rules, and `DISCORD_ALLOW_BOTS` policy.
 In an authorized chat, run:
 
 ```text
-/nunchi-v2 probe
+/nunchi probe
 ```
 
 The probe reports the installed Nunchi and Hermes versions, selected

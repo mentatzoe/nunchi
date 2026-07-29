@@ -13,13 +13,14 @@ import tempfile
 from typing import Any
 
 from nunchi import __version__
-from nunchi.integrations.hermes_dashboard_store import _hermes_home
 
 
 _ASSET_PACKAGE = "nunchi.integrations.hermes_dashboard_assets"
 _ASSET_NAMES = ("manifest.json", "index.js", "plugin_api.py")
-_BRIDGE_NAME = "nunchi-v2-dashboard"
-_MARKER_NAME = ".nunchi-v2-dashboard.json"
+_BRIDGE_NAME = "nunchi-dashboard"
+_MARKER_NAME = ".nunchi-dashboard.json"
+_LEGACY_BRIDGE_NAME = "nunchi-v2-dashboard"
+_LEGACY_MARKER_NAME = ".nunchi-v2-dashboard.json"
 
 
 class DashboardInstallError(RuntimeError):
@@ -37,6 +38,18 @@ def _assets() -> dict[str, bytes]:
 
 def _target(hermes_home: Path) -> Path:
     return hermes_home / "plugins" / _BRIDGE_NAME
+
+
+def default_hermes_home() -> Path:
+    configured = os.environ.get("HERMES_HOME", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        from hermes_cli.config import get_hermes_home
+
+        return Path(get_hermes_home())
+    except Exception:
+        return Path.home() / ".hermes"
 
 
 def _assert_safe_path(path: Path, *, boundary: Path) -> None:
@@ -82,14 +95,54 @@ def _write_file(path: Path, data: bytes) -> None:
         staged.unlink(missing_ok=True)
 
 
+def _bridge_is_owned(bridge: Path, marker_name: str) -> bool:
+    marker_path = bridge / marker_name
+    if marker_path.is_symlink() or not marker_path.is_file():
+        return False
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if marker.get("format") != 1 or not isinstance(marker.get("assets"), dict):
+        return False
+    allowed_files = {Path(marker_name)} | {
+        Path("dashboard") / name for name in _ASSET_NAMES
+    }
+    allowed_directories = {Path("dashboard")}
+    for existing in bridge.rglob("*"):
+        relative = existing.relative_to(bridge)
+        if existing.is_symlink():
+            return False
+        if existing.is_dir() and relative not in allowed_directories:
+            return False
+        if existing.is_file() and relative not in allowed_files:
+            return False
+    return True
+
+
+def _migrate_legacy_bridge(*, hermes_home: Path, bridge: Path) -> None:
+    legacy = hermes_home / "plugins" / _LEGACY_BRIDGE_NAME
+    if not legacy.exists() or bridge.exists():
+        return
+    if not _bridge_is_owned(legacy, _LEGACY_MARKER_NAME):
+        raise DashboardInstallError(
+            "legacy Nunchi dashboard directory is not safely attributable"
+        )
+    os.replace(legacy, bridge)
+
+
 def install_dashboard(*, hermes_home: Path) -> dict[str, Any]:
     """Materialize wheel-owned assets where released Hermes scans for tabs."""
 
     hermes_home = hermes_home.expanduser().absolute()
     assets = _assets()
     bridge = _target(hermes_home)
+    _migrate_legacy_bridge(hermes_home=hermes_home, bridge=bridge)
     dashboard = bridge / "dashboard"
-    if bridge.exists() and not (bridge / _MARKER_NAME).is_file():
+    old_marker = bridge / _LEGACY_MARKER_NAME
+    if old_marker.is_file() and not old_marker.is_symlink():
+        old_marker.replace(bridge / _MARKER_NAME)
+    if bridge.exists() and not _bridge_is_owned(bridge, _MARKER_NAME):
         existing_files = [path for path in bridge.rglob("*") if path.is_file()]
         if existing_files:
             raise DashboardInstallError(
@@ -180,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     home = (
         arguments.hermes_home.expanduser()
         if arguments.hermes_home is not None
-        else _hermes_home()
+        else default_hermes_home()
     )
     try:
         result = (

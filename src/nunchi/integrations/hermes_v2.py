@@ -46,7 +46,7 @@ from nunchi.v2_contracts import validate_canonical_event
 
 logger = logging.getLogger(__name__)
 
-_PLUGIN_ID = "nunchi-v2"
+_PLUGIN_ID = "nunchi"
 _SUPPORTED_PLATFORMS = frozenset({"discord", "telegram"})
 _MINIMUM_HERMES = (0, 19, 0)
 _NATIVE_PARTICIPANT_API = 2
@@ -1510,7 +1510,7 @@ class NunchiHermesV2Plugin:
             self_username=None,
         )
         return (
-            {"decision": "handled", "reason": "nunchi-v2"}
+            {"decision": "handled", "reason": _PLUGIN_ID}
             if handled
             else None
         )
@@ -1905,6 +1905,7 @@ def register(
     ctx: Any,
     *,
     config_loader: Callable[[str], HermesPluginConfig] | None = None,
+    dashboard_installer: Callable[[], Any] | None = None,
 ) -> NunchiHermesV2Plugin:
     hermes_version = _hermes_version()
     if _version_tuple(hermes_version) < _MINIMUM_HERMES:
@@ -1913,6 +1914,22 @@ def register(
         getattr(ctx, "profile_name", None) or "default", "Hermes profile"
     )
     config = (config_loader or _default_config_loader)(profile)
+    if dashboard_installer is None:
+        from nunchi.integrations.hermes_dashboard_install import (
+            DashboardInstallError,
+            default_hermes_home,
+            install_dashboard,
+        )
+
+        try:
+            install_dashboard(hermes_home=default_hermes_home())
+        except (DashboardInstallError, OSError) as exc:
+            raise ValidationError(
+                "could not install the Nunchi dashboard bridge; run "
+                "`nunchi-hermes-dashboard install` to repair it"
+            ) from exc
+    else:
+        dashboard_installer()
     if _native_api_available(ctx):
         mode = "native-v2-hooks"
     else:
@@ -1932,13 +1949,13 @@ def register(
 
     def probe_command(raw_args: str) -> str:
         if (raw_args or "").strip().lower() not in {"", "probe", "status"}:
-            return json.dumps({"error": "usage: /nunchi-v2 [probe]"})
+            return json.dumps({"error": "usage: /nunchi [probe]"})
         return json.dumps(plugin.probe(), sort_keys=True, separators=(",", ":"))
 
     ctx.register_command(
-        "nunchi-v2",
+        "nunchi",
         probe_command,
-        description="Report Nunchi V2 Hermes compatibility and configuration",
+        description="Report Nunchi Hermes compatibility and configuration",
         args_hint="[probe]",
     )
     return plugin

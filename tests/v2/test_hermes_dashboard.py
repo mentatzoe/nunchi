@@ -257,17 +257,17 @@ class HermesDashboardInstallTests(unittest.TestCase):
             home = Path(temporary) / "hermes"
             installed = install_dashboard(hermes_home=home)
             dashboard = (
-                home / "plugins" / "nunchi-v2-dashboard" / "dashboard"
+                home / "plugins" / "nunchi-dashboard" / "dashboard"
             )
             self.assertTrue(installed["ok"])
             self.assertEqual(installed, verify_dashboard(hermes_home=home))
             manifest = json.loads(
                 (dashboard / "manifest.json").read_text(encoding="utf-8")
             )
-            self.assertEqual("nunchi-v2", manifest["name"])
+            self.assertEqual("nunchi", manifest["name"])
             self.assertEqual("plugin_api.py", manifest["api"])
             self.assertFalse(
-                (home / "plugins" / "nunchi-v2-dashboard" / "plugin.yaml").exists()
+                (home / "plugins" / "nunchi-dashboard" / "plugin.yaml").exists()
             )
             self.assertIn(
                 "nunchi.integrations.hermes_dashboard_api",
@@ -281,13 +281,38 @@ class HermesDashboardInstallTests(unittest.TestCase):
             path = (
                 home
                 / "plugins"
-                / "nunchi-v2-dashboard"
+                / "nunchi-dashboard"
                 / "dashboard"
                 / "index.js"
             )
             path.write_text("changed", encoding="utf-8")
             with self.assertRaisesRegex(DashboardInstallError, "changed"):
                 verify_dashboard(hermes_home=home)
+
+    def test_install_migrates_the_previous_bridge_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "hermes"
+            install_dashboard(hermes_home=home)
+            plugins = home / "plugins"
+            current = plugins / "nunchi-dashboard"
+            legacy = plugins / "nunchi-v2-dashboard"
+            (current / ".nunchi-dashboard.json").replace(
+                current / ".nunchi-v2-dashboard.json"
+            )
+            current.replace(legacy)
+
+            result = install_dashboard(hermes_home=home)
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(legacy.exists())
+            self.assertTrue(
+                (
+                    plugins
+                    / "nunchi-dashboard"
+                    / "dashboard"
+                    / "manifest.json"
+                ).is_file()
+            )
 
     def test_ui_uses_authenticated_plugin_api_and_restart(self):
         path = (
@@ -298,7 +323,7 @@ class HermesDashboardInstallTests(unittest.TestCase):
             / "index.js"
         )
         source = path.read_text(encoding="utf-8")
-        self.assertIn('var API = "/api/plugins/nunchi-v2"', source)
+        self.assertIn('var API = "/api/plugins/nunchi"', source)
         self.assertIn("restart_endpoint", source)
         self.assertIn("Save & restart", source)
         self.assertIn("React.createElement", source)
@@ -308,6 +333,7 @@ class HermesDashboardInstallTests(unittest.TestCase):
         source = Path("pyproject.toml").read_text(encoding="utf-8")
         self.assertIn("nunchi-hermes-dashboard", source)
         self.assertIn("hermes_dashboard_assets", source)
+        self.assertIn('nunchi = "nunchi.integrations.hermes_v2"', source)
 
 
 if __name__ == "__main__":
