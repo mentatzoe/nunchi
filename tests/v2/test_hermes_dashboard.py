@@ -151,6 +151,52 @@ class HermesDashboardConfigTests(unittest.TestCase):
             self.assertEqual(config_bytes, config_path.read_bytes())
             self.assertEqual(digest_bytes, digest_path.read_bytes())
 
+    def test_dashboard_can_upgrade_a_pinned_legacy_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, _, document, environ = _write_config(root)
+            legacy = json.loads(json.dumps(document))
+            del legacy["rooms"][0]["attention"]["model"]
+            config_path = Path(environ["NUNCHI_HERMES_V2_CONFIG"])
+            digest_path = Path(environ["NUNCHI_HERMES_V2_CONFIG_SHA256_FILE"])
+            config_path.write_text(
+                json.dumps(legacy, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            digest_path.write_text(
+                hashlib.sha256(config_path.read_bytes()).hexdigest() + "\n",
+                encoding="ascii",
+            )
+
+            with self.assertRaisesRegex(Exception, "missing or unexpected"):
+                read_config_snapshot("default", environ=environ)
+            before = read_config_snapshot(
+                "default",
+                environ=environ,
+                allow_invalid=True,
+            )
+            self.assertIsNone(before.config)
+            self.assertIn("missing or unexpected", before.validation_error)
+
+            upgraded = json.loads(json.dumps(before.document))
+            upgraded["rooms"][0]["attention"]["model"] = {
+                "provider": "openrouter",
+                "model": "google/gemini-3.1-flash-lite",
+            }
+            after = write_config_document(
+                "default",
+                document=upgraded,
+                expected_sha256=before.sha256,
+                environ=environ,
+            )
+
+            self.assertIsNotNone(after.config)
+            self.assertIsNone(after.validation_error)
+            self.assertEqual(
+                "google/gemini-3.1-flash-lite",
+                after.document["rooms"][0]["attention"]["model"]["model"],
+            )
+
     def test_literal_digest_is_read_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

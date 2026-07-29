@@ -52,10 +52,12 @@ class DashboardConfigSnapshot:
     profile: str
     source: HermesConfigSource
     document: dict[str, Any]
-    config: HermesPluginConfig
+    config: HermesPluginConfig | None
     sha256: str
+    validation_error: str | None = None
 
     def response(self) -> dict[str, Any]:
+        rooms = self.document.get("rooms")
         return {
             "api_version": "2",
             "profile": self.profile,
@@ -68,7 +70,9 @@ class DashboardConfigSnapshot:
             ),
             "dashboard_writable": self.source.dashboard_writable,
             "document": self.document,
-            "room_count": len(self.config.rooms),
+            "room_count": len(rooms) if isinstance(rooms, list) else 0,
+            "configuration_valid": self.config is not None,
+            "validation_error": self.validation_error,
             "restart_required_after_save": True,
         }
 
@@ -103,6 +107,7 @@ def read_config_snapshot(
     profile: str,
     *,
     environ: Mapping[str, str] | None = None,
+    allow_invalid: bool = False,
 ) -> DashboardConfigSnapshot:
     source = resolve_config_source(profile, environ=environ)
     raw = _require_private_regular_file(source.path, "Hermes V2 config")
@@ -112,17 +117,25 @@ def read_config_snapshot(
             "Hermes V2 config does not match its pinned digest"
         )
     document = _decode_config(raw)
-    config = load_pinned_config(
-        source.path,
-        expected_sha256=actual,
-        hermes_profile=profile,
-    )
+    validation_error: str | None = None
+    try:
+        config = load_pinned_config(
+            source.path,
+            expected_sha256=actual,
+            hermes_profile=profile,
+        )
+    except ValidationError as exc:
+        if not allow_invalid:
+            raise
+        config = None
+        validation_error = str(exc)
     return DashboardConfigSnapshot(
         profile=profile,
         source=source,
         document=document,
         config=config,
         sha256=actual,
+        validation_error=validation_error,
     )
 
 
@@ -134,11 +147,23 @@ def discord_runtime_status(
     """Describe the Discord behavior supplied by the installed Nunchi plugin."""
 
     environment = os.environ if environ is None else environ
-    room_ids = sorted(
-        room.binding.room_id
-        for room in snapshot.config.rooms
-        if room.binding.platform == "discord"
-    )
+    if snapshot.config is not None:
+        room_ids = sorted(
+            room.binding.room_id
+            for room in snapshot.config.rooms
+            if room.binding.platform == "discord"
+        )
+    else:
+        raw_rooms = snapshot.document.get("rooms")
+        rooms = raw_rooms if isinstance(raw_rooms, list) else []
+        room_ids = sorted(
+            str(binding.get("room_id"))
+            for room in rooms
+            if isinstance(room, Mapping)
+            and isinstance((binding := room.get("binding")), Mapping)
+            and binding.get("platform") == "discord"
+            and binding.get("room_id") is not None
+        )
     allow_bots = environment.get("DISCORD_ALLOW_BOTS", "none").strip().lower()
     if allow_bots not in {"none", "mentions", "all"}:
         allow_bots = "custom"
@@ -248,7 +273,11 @@ def write_config_document(
     and the final read-back succeed.
     """
 
-    current = read_config_snapshot(profile, environ=environ)
+    current = read_config_snapshot(
+        profile,
+        environ=environ,
+        allow_invalid=True,
+    )
     if current.sha256 != expected_sha256:
         raise DashboardConfigConflict(
             "configuration changed after this dashboard page loaded"
@@ -420,6 +449,8 @@ def read_receipts(
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
         raise DashboardConfigError("receipt limit must be within [1, 500]")
     snapshot = read_config_snapshot(profile, environ=environ)
+    if snapshot.config is None:  # Defensive: strict reads reject before this.
+        raise DashboardConfigError("Hermes V2 configuration is invalid")
     receipts: list[dict[str, Any]] = []
     for room in snapshot.config.rooms:
         directory = room_state_directory(

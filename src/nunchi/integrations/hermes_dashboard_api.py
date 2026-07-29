@@ -47,7 +47,7 @@ def _http_error(exc: Exception) -> HTTPException:
 
 
 def _config_response(profile: str) -> dict[str, Any]:
-    snapshot = read_config_snapshot(profile)
+    snapshot = read_config_snapshot(profile, allow_invalid=True)
     result = snapshot.response()
     result["channels"] = channel_directory()
     result["discord_runtime"] = discord_runtime_status(snapshot)
@@ -61,7 +61,7 @@ def _config_response(profile: str) -> dict[str, Any]:
 def get_health(profile: str | None = Query(default=None)) -> dict[str, Any]:
     selected = _profile(profile)
     try:
-        snapshot = read_config_snapshot(selected)
+        snapshot = read_config_snapshot(selected, allow_invalid=True)
     except Exception as exc:
         raise _http_error(exc) from exc
     return {
@@ -70,6 +70,8 @@ def get_health(profile: str | None = Query(default=None)) -> dict[str, Any]:
         "profile": selected,
         "config_sha256": snapshot.sha256,
         "dashboard_writable": snapshot.source.dashboard_writable,
+        "configuration_valid": snapshot.config is not None,
+        "validation_error": snapshot.validation_error,
     }
 
 
