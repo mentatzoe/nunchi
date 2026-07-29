@@ -2054,6 +2054,16 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
         if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
             raise ValidationError("only one Nunchi V2 Hermes plugin may be active")
         current_handle = GatewayRunner._handle_message
+        current_restore_drain = getattr(
+            GatewayRunner,
+            "_drain_startup_restore_queue",
+            None,
+        )
+        current_restore_run = getattr(
+            GatewayRunner,
+            "_run_startup_resume_event",
+            None,
+        )
         current_stop = GatewayRunner.stop
         if getattr(current_handle, "__nunchi_v2_shim__", False):
             _SHIM_OWNER = plugin
@@ -2067,6 +2077,16 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
             current_stop,
             required=("self", "restart"),
             label="shutdown handler",
+        )
+        _require_signature(
+            current_restore_drain,
+            required=("self",),
+            label="startup restore drain",
+        )
+        _require_signature(
+            current_restore_run,
+            required=("self", "adapter", "event", "session_key"),
+            label="startup restore runner",
         )
         _require_signature(
             GatewayRunner._is_user_authorized,
@@ -2241,6 +2261,65 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
                 logger.exception("Nunchi V2 failed closed for a claimed Hermes route")
             return None
 
+        async def drain_startup_restore_queue(self: Any) -> int:
+            """Replay claimed restored messages one at a time.
+
+            Hermes's stock drain starts an adapter background task and
+            immediately dispatches the next restored message. Its busy-input
+            queue belongs to the stock participant runner, which Nunchi
+            intentionally replaces, so that second message would never reach
+            Nunchi. Waiting for each claimed adapter task preserves every
+            native message boundary and leaves unclaimed routes unchanged.
+            """
+
+            owner = _SHIM_OWNER
+            queue = getattr(self, "_startup_restore_queue", None)
+            if (
+                owner is None
+                or not isinstance(queue, list)
+                or not any(
+                    owner.claims(getattr(event, "source", None))
+                    for event in queue
+                )
+            ):
+                return await current_restore_drain(self)
+
+            from gateway.session import build_session_key
+
+            drained = 0
+            while queue:
+                event = queue.pop(0)
+                source = getattr(event, "source", None)
+                adapter = self._adapter_for_source(source)
+                if adapter is None:
+                    continue
+                try:
+                    setattr(event, "_hermes_startup_restore_replay", True)
+                except Exception:
+                    pass
+                if source is not None and owner.claims(source):
+                    session_key = build_session_key(
+                        source,
+                        group_sessions_per_user=adapter.config.extra.get(
+                            "group_sessions_per_user",
+                            True,
+                        ),
+                        thread_sessions_per_user=adapter.config.extra.get(
+                            "thread_sessions_per_user",
+                            False,
+                        ),
+                    )
+                    await current_restore_run(
+                        self,
+                        adapter,
+                        event,
+                        session_key,
+                    )
+                else:
+                    await adapter.handle_message(event)
+                drained += 1
+            return drained
+
         async def stop(self: Any, *args: Any, **kwargs: Any) -> Any:
             owner = _SHIM_OWNER
             if owner is not None:
@@ -2248,9 +2327,11 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
             return await current_stop(self, *args, **kwargs)
 
         handle_message.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
+        drain_startup_restore_queue.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
         stop.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
         _install_telegram_batch_identity_shim(plugin)
         GatewayRunner._handle_message = handle_message
+        GatewayRunner._drain_startup_restore_queue = drain_startup_restore_queue
         GatewayRunner.stop = stop
         _SHIM_OWNER = plugin
 

@@ -761,19 +761,56 @@ class HermesPortableTests(unittest.TestCase):
             )
 
     def test_shim_passes_unauthorized_and_commands_to_stock_runner(self):
+        class RestoreAdapter(FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.config = types.SimpleNamespace(extra={})
+                self.restored = []
+
+            async def handle_message(self, event):
+                self.restored.append(
+                    (
+                        event.text,
+                        bool(
+                            getattr(
+                                event,
+                                "_hermes_startup_restore_replay",
+                                False,
+                            )
+                        ),
+                    )
+                )
+
         class GatewayRunner:
             calls = []
 
             def __init__(self):
                 self.authorized = False
-                self.adapter = FakeAdapter()
+                self.adapter = RestoreAdapter()
                 self.inbound_notes = 0
                 self.pre_dispatch_calls = 0
                 self.skip_dispatch = False
+                self._startup_restore_queue = []
+                self.restore_runs = []
 
             async def _handle_message(self, event):
                 self.calls.append(event.text)
                 return "stock"
+
+            async def _drain_startup_restore_queue(self):
+                while self._startup_restore_queue:
+                    event = self._startup_restore_queue.pop(0)
+                    await self.adapter.handle_message(event)
+                return len(self.adapter.restored)
+
+            async def _run_startup_resume_event(
+                self,
+                adapter,
+                event,
+                session_key,
+            ):
+                self.restore_runs.append((event.text, session_key))
+                await adapter.handle_message(event)
 
             async def stop(self, *, restart=False):
                 self.calls.append(f"stop:{restart}")
@@ -796,11 +833,19 @@ class HermesPortableTests(unittest.TestCase):
 
         fake_gateway = types.ModuleType("gateway")
         fake_run = types.ModuleType("gateway.run")
+        fake_session = types.ModuleType("gateway.session")
+        fake_session.build_session_key = lambda source, **kwargs: (
+            f"{source.platform.value}:{source.chat_id}:"
+            f"{kwargs['group_sessions_per_user']}:"
+            f"{kwargs['thread_sessions_per_user']}"
+        )
         fake_run.GatewayRunner = GatewayRunner
         original_gateway = sys.modules.get("gateway")
         original_run = sys.modules.get("gateway.run")
+        original_session = sys.modules.get("gateway.session")
         sys.modules["gateway"] = fake_gateway
         sys.modules["gateway.run"] = fake_run
+        sys.modules["gateway.session"] = fake_session
         try:
             llm = FakeLlm([])
             with tempfile.TemporaryDirectory() as temporary:
@@ -861,6 +906,28 @@ class HermesPortableTests(unittest.TestCase):
                         for call in plugin.handle.await_args_list
                     ],
                 )
+                restored_first = FakeEvent(text="restored-first")
+                restored_second = FakeEvent(text="restored-second")
+                runner._startup_restore_queue = [
+                    restored_first,
+                    restored_second,
+                ]
+                drained = asyncio.run(runner._drain_startup_restore_queue())
+                self.assertEqual(2, drained)
+                self.assertEqual(
+                    [
+                        ("restored-first", "discord:42:True:False"),
+                        ("restored-second", "discord:42:True:False"),
+                    ],
+                    runner.restore_runs,
+                )
+                self.assertEqual(
+                    [
+                        ("restored-first", True),
+                        ("restored-second", True),
+                    ],
+                    runner.adapter.restored,
+                )
         finally:
             hermes_v2._SHIM_OWNER = None
             if original_gateway is None:
@@ -871,6 +938,10 @@ class HermesPortableTests(unittest.TestCase):
                 sys.modules.pop("gateway.run", None)
             else:
                 sys.modules["gateway.run"] = original_run
+            if original_session is None:
+                sys.modules.pop("gateway.session", None)
+            else:
+                sys.modules["gateway.session"] = original_session
 
     def test_discord_shim_admits_bots_and_free_response_only_in_nunchi_rooms(self):
         class DiscordAdapter:
