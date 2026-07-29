@@ -50,6 +50,10 @@ def _document(root: Path) -> dict:
                     }
                 },
                 "attention": {
+                    "model": {
+                        "provider": "test-provider",
+                        "model": "test-model",
+                    },
                     "policy": {
                         "suppression_enabled": True,
                         "suppression_recovery_verified": False,
@@ -349,6 +353,13 @@ class HermesDashboardInstallTests(unittest.TestCase):
         self.assertIn("Save & restart", source)
         self.assertIn("admits bot messages", source)
         self.assertIn("profile-wide bot fallback", source)
+        self.assertIn("Attention provider", source)
+        self.assertIn("Attention model", source)
+        self.assertIn(
+            "This is separate from the participant's main model",
+            source,
+        )
+        self.assertIn("The plugin cannot grant itself that permission", source)
         self.assertIn("React.createElement", source)
         self.assertNotIn("innerHTML", source)
 

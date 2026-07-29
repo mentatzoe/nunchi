@@ -130,11 +130,100 @@ class AttentionModel(Protocol):
     def judge(
         self,
         *,
-        profile: ParticipantProfile,
+        instructions: str,
         projection: Mapping[str, Any],
         timeout_seconds: float,
     ) -> Mapping[str, Any]:
-        """Return one raw participant-shaped attention judgment."""
+        """Run the exact core-owned prompt and return one raw judgment."""
+
+
+@dataclass(frozen=True)
+class AttentionModelSelection:
+    """Trusted model routing shared by host-backed integrations."""
+
+    provider: str
+    model: str
+    name: str = "participant-attention"
+
+    @classmethod
+    def from_trusted_config(
+        cls,
+        config: Mapping[str, Any],
+    ) -> "AttentionModelSelection":
+        if not isinstance(config, Mapping) or set(config) not in (
+            {"provider", "model"},
+            {"provider", "model", "name"},
+        ):
+            raise ValidationError(
+                "attention model must contain provider and model, with optional name"
+            )
+        return cls(
+            provider=config["provider"],
+            model=config["model"],
+            name=config.get("name", "participant-attention"),
+        )
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("provider", self.provider),
+            ("model", self.model),
+            ("name", self.name),
+        ):
+            if not isinstance(value, str) or not value:
+                raise ValidationError(f"attention model {label} must be non-empty")
+
+
+ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "disposition",
+        "reasons",
+        "evidence_event_ids",
+        "legacy_verdict_confidences",
+    ],
+    "properties": {
+        "disposition": {
+            "type": "string",
+            "enum": ["SUPPRESS", "WAKE", "DEFER"],
+        },
+        "reasons": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 8,
+        },
+        "evidence_event_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": True,
+        },
+        "legacy_verdict_confidences": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["PASS", "ACK", "ASK", "SPEAK"],
+            "properties": {
+                key: {"type": "number", "minimum": 0, "maximum": 1}
+                for key in ("PASS", "ACK", "ASK", "SPEAK")
+            },
+        },
+        "attention_advice": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["note", "evidence_event_ids"],
+                "properties": {
+                    "note": {"type": "string"},
+                    "evidence_event_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "uniqueItems": True,
+                    },
+                },
+            },
+        },
+    },
+}
 
 
 def participant_attention_prompt(profile: ParticipantProfile) -> str:
@@ -220,25 +309,21 @@ class OpenAICompatibleAttentionModel:
             reasoning_effort=config.get("reasoning_effort"),
         )
 
-    @staticmethod
-    def _system_prompt(profile: ParticipantProfile) -> str:
-        return participant_attention_prompt(profile)
-
     def judge(
         self,
         *,
-        profile: ParticipantProfile,
+        instructions: str,
         projection: Mapping[str, Any],
         timeout_seconds: float,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
             "model": self.model_id,
             "messages": [
-                {"role": "system", "content": self._system_prompt(profile)},
+                {"role": "system", "content": instructions},
                 {
                     "role": "user",
                     "content": json.dumps(
-                        projection,
+                        {"observation": projection},
                         sort_keys=True,
                         separators=(",", ":"),
                         ensure_ascii=False,
@@ -289,6 +374,65 @@ class OpenAICompatibleAttentionModel:
         if not isinstance(payload, dict):
             raise AttentionError("attention judgment was not an object")
         return payload
+
+
+class HostStructuredAttentionModel:
+    """Use a host completion capability under core-owned attention semantics."""
+
+    def __init__(
+        self,
+        client: Any,
+        selection: AttentionModelSelection,
+    ) -> None:
+        complete = getattr(client, "complete_structured", None)
+        if not callable(complete):
+            raise ValidationError(
+                "host does not provide the structured completion capability"
+            )
+        self._complete = complete
+        self.name = selection.name
+        self.provider = selection.provider
+        self.model_id = selection.model
+
+    def judge(
+        self,
+        *,
+        instructions: str,
+        projection: Mapping[str, Any],
+        timeout_seconds: float,
+    ) -> Mapping[str, Any]:
+        result = self._complete(
+            instructions=instructions,
+            input=[
+                {
+                    "type": "text",
+                    "text": json.dumps(
+                        {"observation": projection},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+            json_schema=ATTENTION_JUDGMENT_SCHEMA,
+            schema_name="nunchi_v2_attention",
+            provider=self.provider,
+            model=self.model_id,
+            temperature=0,
+            max_tokens=800,
+            timeout=timeout_seconds,
+            purpose="nunchi-v2-attention",
+        )
+        actual_provider = getattr(result, "provider", None)
+        actual_model = getattr(result, "model", None)
+        if actual_provider != self.provider or actual_model != self.model_id:
+            raise ValidationError(
+                "host attention result does not attest the configured provider and model"
+            )
+        parsed = getattr(result, "parsed", None)
+        if not isinstance(parsed, Mapping):
+            raise ValidationError("host attention response is not an object")
+        return deepcopy(dict(parsed))
 
 
 def _validate_model_judgment(
@@ -432,7 +576,7 @@ class AttentionEngine:
         def invoke() -> None:
             try:
                 result = self.model.judge(
-                    profile=self.profile,
+                    instructions=participant_attention_prompt(self.profile),
                     projection=projection,
                     timeout_seconds=provider_timeout,
                 )

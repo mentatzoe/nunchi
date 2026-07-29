@@ -74,6 +74,10 @@ Create a private JSON configuration and pin its SHA-256:
         }
       },
       "attention": {
+        "model": {
+          "provider": "your-provider",
+          "model": "your-low-cost-model"
+        },
         "policy": {
           "suppression_enabled": true,
           "suppression_recovery_verified": true
@@ -94,6 +98,24 @@ is pinned by the outer config. A separate profile can instead use exact
 `path`/`sha256` fields. Set `suppression_recovery_verified` to `true` only
 after an attributable live restart and later-message recovery run has passed.
 Until then, leave it `false`; Nunchi widens attempted suppression to `DEFER`.
+The attention provider and model are required and are intentionally separate
+from the participant's main model.
+
+Allow only that exact route in the Hermes profile:
+
+```yaml
+plugins:
+  entries:
+    nunchi:
+      llm:
+        allow_provider_override: true
+        allow_model_override: true
+        allowed_providers: [your-provider]
+        allowed_models: [your-low-cost-model]
+```
+
+Hermes retains the credentials. Nunchi supplies the selected provider and model
+to Hermes's public plugin LLM API and verifies the returned attribution.
 
 For dashboard editing, put the digest in a private sidecar file:
 
@@ -142,8 +164,8 @@ Open **Nunchi** in the Hermes dashboard to:
 - configure Discord and Telegram rooms using Hermes's discovered channel list;
 - confirm that no-mention conversation, room-scoped bot admission, and
   no-auto-thread behavior are active for configured Discord rooms;
-- edit exact participant identity, inline instructions, attention policy, and
-  lifecycle limits;
+- edit exact participant identity, inline instructions, the dedicated
+  attention provider/model, attention policy, and lifecycle limits;
 - use advanced JSON for the complete closed V2 configuration;
 - inspect the newest V2 receipts for each configured room;
 - save a new pinned config and restart Hermes to activate it.

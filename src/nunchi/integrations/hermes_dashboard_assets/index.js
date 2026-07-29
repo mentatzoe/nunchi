@@ -137,6 +137,10 @@
         }
       },
       attention: {
+        model: {
+          provider: "",
+          model: ""
+        },
         policy: {
           suppression_enabled: true,
           suppression_recovery_verified: false
@@ -154,6 +158,7 @@
     var binding = room.binding || {};
     var profile = room.profile || {};
     var inline = profile.document || null;
+    var attentionModel = (room.attention || {}).model || {};
     var policy = (room.attention || {}).policy || {};
     var base = ["rooms", index];
     var channels = [{ value: "", label: "Choose a discovered room" }].concat(
@@ -254,6 +259,24 @@
           : h("div", { style: styles.status },
               "This room uses an external pinned participant profile. Edit it in Advanced JSON."
             ),
+        h("div", { style: Object.assign({}, styles.row, { marginTop: "12px" }) },
+          field("Attention provider", attentionModel.provider || "",
+            function (value) {
+              update(["attention", "model", "provider"], value);
+            }, {
+              help: "Hermes provider used only for the lower-cost attention decision."
+            }),
+          field("Attention model", attentionModel.model || "",
+            function (value) {
+              update(["attention", "model", "model"], value);
+            }, {
+              help: "Required. This is separate from the participant's main model."
+            })
+        ),
+        h("div", { style: styles.status },
+          "Hermes must allow this exact provider and model under " +
+          "plugins.entries.nunchi.llm. The plugin cannot grant itself that permission."
+        ),
         h("div", { style: Object.assign({}, styles.row, { marginTop: "12px" }) },
           h("label", { style: styles.hint },
             h("input", {

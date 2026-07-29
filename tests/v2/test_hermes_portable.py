@@ -14,9 +14,16 @@ import types
 import unittest
 from unittest import mock
 
-from nunchi.attention import AttentionPolicy, ParticipantProfile
+from nunchi.attention import (
+    AttentionModelSelection,
+    AttentionPolicy,
+    HostStructuredAttentionModel,
+    ParticipantProfile,
+    participant_attention_prompt,
+)
 from nunchi.integrations import hermes_v2
 from nunchi.observation import ObservationLimits, ParticipantBinding
+from nunchi.participant_model import participant_turn_prompt
 
 
 class FakePlatform:
@@ -216,6 +223,10 @@ def room_config(
             suppression_enabled=True,
             suppression_recovery_verified=True,
         ),
+        attention_model=AttentionModelSelection(
+            provider="test-provider",
+            model="test-model",
+        ),
         limits=ObservationLimits(),
         participant_timeout_seconds=2,
         participant_max_expansions=1,
@@ -237,6 +248,20 @@ class HermesPortableTests(unittest.TestCase):
         source = inspect.getsource(hermes_v2)
         self.assertNotIn("import gateway.", source.split("def _install_compatibility_shim")[0])
         self.assertNotIn("import hermes_cli", source)
+
+    def test_hermes_does_not_copy_core_prompts_or_model_schemas(self):
+        source = inspect.getsource(hermes_v2)
+        self.assertIn("HostStructuredAttentionModel", source)
+        self.assertIn("HostStructuredParticipant", source)
+        for copied_owner in (
+            "class HermesAttentionModel",
+            "class HermesParticipant",
+            "_ATTENTION_SCHEMA",
+            "_PARTICIPANT_SCHEMA",
+            "def participant_attention_prompt",
+            "def participant_turn_prompt",
+        ):
+            self.assertNotIn(copied_owner, source)
 
     def test_hermes_attention_uses_shared_group_address_and_defer_rules(self):
         llm = FakeLlm(
@@ -262,13 +287,21 @@ class HermesPortableTests(unittest.TestCase):
             provenance="test",
             sha256="a" * 64,
         )
-        model = hermes_v2.HermesAttentionModel(llm)
+        model = HostStructuredAttentionModel(
+            llm,
+            AttentionModelSelection(
+                provider="test-provider",
+                model="test-model",
+            ),
+        )
         model.judge(
-            profile=profile,
+            instructions=participant_attention_prompt(profile),
             projection={"events": []},
             timeout_seconds=2,
         )
         instructions = llm.calls[0]["instructions"]
+        self.assertEqual("test-provider", llm.calls[0]["provider"])
+        self.assertEqual("test-model", llm.calls[0]["model"])
         self.assertIn("addresses a group that clearly includes them", instructions)
         self.assertIn("even without a name or platform mention", instructions)
         self.assertIn("Uncertainty must return DEFER, never SUPPRESS", instructions)
@@ -415,6 +448,16 @@ class HermesPortableTests(unittest.TestCase):
 
             asyncio.run(run())
             self.assertEqual(2, len(llm.calls))
+            self.assertEqual(
+                participant_attention_prompt(config.rooms[0].profile),
+                llm.calls[0]["instructions"],
+            )
+            self.assertEqual("test-provider", llm.calls[0]["provider"])
+            self.assertEqual("test-model", llm.calls[0]["model"])
+            self.assertEqual(
+                participant_turn_prompt(config.rooms[0].profile),
+                llm.calls[1]["instructions"],
+            )
             self.assertEqual("hello back", adapter.sent[0]["content"])
             self.assertTrue(adapter.sent[0]["metadata"]["notify"])
 
@@ -1371,6 +1414,29 @@ class HermesPortableTests(unittest.TestCase):
                 json.loads(manifest.read_text(encoding="utf-8"))["name"],
             )
 
+    def test_dashboard_updates_before_an_old_config_is_rejected(self):
+        order = []
+
+        def install_dashboard():
+            order.append("dashboard")
+
+        def reject_config(_profile):
+            order.append("config")
+            raise ValueError("migration required")
+
+        with mock.patch.object(
+            hermes_v2,
+            "_hermes_version",
+            return_value="0.19.0",
+        ):
+            with self.assertRaisesRegex(ValueError, "migration required"):
+                hermes_v2.register(
+                    FakeCtx(FakeLlm([])),
+                    config_loader=reject_config,
+                    dashboard_installer=install_dashboard,
+                )
+        self.assertEqual(["dashboard", "config"], order)
+
     def test_current_native_route_without_self_identity_uses_checked_shim(self):
         llm = FakeLlm([])
         with tempfile.TemporaryDirectory() as temporary:
@@ -1484,7 +1550,13 @@ class HermesPortableTests(unittest.TestCase):
                             "path": str(profile_path),
                             "sha256": profile_sha,
                         },
-                        "attention": {"policy": {}},
+                        "attention": {
+                            "policy": {},
+                            "model": {
+                                "provider": "test-provider",
+                                "model": "test-model",
+                            },
+                        },
                         "limits": {},
                         "participant": {"timeout_seconds": 2},
                     }
@@ -1499,6 +1571,18 @@ class HermesPortableTests(unittest.TestCase):
                 hermes_profile="default",
             )
             self.assertEqual("42", loaded.rooms[0].binding.room_id)
+            missing_model = json.loads(json.dumps(config_data))
+            missing_model["rooms"][0]["attention"].pop("model")
+            config_path.write_text(json.dumps(missing_model))
+            missing_digest = hashlib.sha256(config_path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(Exception, "attention.*missing"):
+                hermes_v2.load_pinned_config(
+                    config_path,
+                    expected_sha256=missing_digest,
+                    hermes_profile="default",
+                )
+            config_path.write_text(json.dumps(config_data))
+            digest = hashlib.sha256(config_path.read_bytes()).hexdigest()
             config_path.write_text(json.dumps({**config_data, "rooms": []}))
             with self.assertRaisesRegex(Exception, "pinned digest"):
                 hermes_v2.load_pinned_config(

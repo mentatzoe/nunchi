@@ -14,6 +14,7 @@ from nunchi.attention import (
     AttentionEngine,
     AttentionPolicy,
     ParticipantProfile,
+    participant_attention_prompt,
 )
 from nunchi.authorization import (
     AuthorizationCoordinator,
@@ -73,8 +74,8 @@ class FixtureModel:
         self.calls = []
         self.started = threading.Event()
 
-    def judge(self, *, profile, projection, timeout_seconds):
-        self.calls.append((profile, deepcopy(projection)))
+    def judge(self, *, instructions, projection, timeout_seconds):
+        self.calls.append((instructions, deepcopy(projection)))
         self.started.set()
         if self.block is not None:
             self.block.wait(timeout_seconds * 2)
@@ -83,7 +84,7 @@ class FixtureModel:
         evidence = [projection["trigger_event_id"]]
         return {
             "disposition": self.disposition,
-            "reasons": [f"{profile.profile_id} judgment"],
+            "reasons": ["participant-shaped judgment"],
             "evidence_event_ids": evidence,
             "legacy_verdict_confidences": (
                 {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}
@@ -162,6 +163,18 @@ def foundation(
 
 
 class ObservationTests(unittest.TestCase):
+    def test_attention_engine_owns_the_exact_model_prompt(self):
+        pipeline, model, _, _ = foundation()
+        pipeline.handle_delivery(
+            delivery_id="d-prompt",
+            event=message("e-prompt"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual(
+            participant_attention_prompt(pipeline.attention.profile),
+            model.calls[0][0],
+        )
+
     def test_exact_self_is_context_only_but_alias_collision_is_not_self(self):
         pipeline, model, _, _ = foundation()
         self_result = pipeline.handle_delivery(

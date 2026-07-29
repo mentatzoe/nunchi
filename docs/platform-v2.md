@@ -32,6 +32,12 @@ candidate.
 
 Room payloads are never trusted configuration.
 
+The shared runtime owns the attention prompt, attention model selection,
+judgment schema, normal-turn prompt, action schema, policy, and lifecycle.
+A platform plugin supplies only its trusted model-call capability plus native
+identity, ingress, persistence, cancellation, and transport. It must not copy
+or rewrite those shared product behaviors.
+
 ## Shared Discord consumer contract
 
 A consumer of the shared Discord transport must:
