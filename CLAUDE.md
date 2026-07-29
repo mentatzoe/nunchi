@@ -4,6 +4,19 @@ Follow `AGENTS.md` and `.specify/memory/constitution.md`. The condensed rules
 below are specific to Claude Code execution; they do not change the authority
 order or product design.
 
+## Goal-first working style
+
+Start from the product outcome, not the current mechanism. Treat inherited
+design, version, installation, and process assumptions as changeable unless
+Zoe explicitly fixed them. Bugs in an implementation are bugs to repair; they
+are not proof that the approach is impossible.
+
+Reviews must state what actually breaks, whether it prevents the goal, and the
+smallest concrete fix. Documentation and status reports state the outcome
+first, then the decision-changing technical facts. Keep the language concise,
+plain, and technically exact. Avoid jargon, doublespeak, inflated severity,
+and process theatre.
+
 ## Grounding sequence
 
 1. Read the selected Aleph Vault Nunchi technical design and decisions (PR 67
