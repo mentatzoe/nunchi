@@ -119,7 +119,10 @@ plugins:
 ```
 
 Hermes retains the credentials. Nunchi supplies the selected provider and model
-to Hermes's public plugin LLM API and verifies the returned attribution.
+to Hermes's public plugin LLM API and verifies the returned attribution. A
+present credential is not proof that the route has usable quota. Provider
+failure is recorded and follows `attention.policy.error_action`; Nunchi never
+silently falls back to the participant model for attention.
 
 For dashboard editing, put the digest in a private sidecar file:
 
