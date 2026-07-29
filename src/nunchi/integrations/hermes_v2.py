@@ -1678,6 +1678,29 @@ class _DiscordAdmissionAdapter:
         return True
 
 
+def _active_discord_adapter_class() -> type[Any]:
+    """Return the Discord adapter class registered in this Hermes process."""
+
+    try:
+        from gateway.platform_registry import platform_registry
+
+        entry = platform_registry.get("discord")
+    except (ImportError, ModuleNotFoundError):
+        entry = None
+    if entry is not None:
+        factory = getattr(entry, "adapter_factory", None)
+        module = inspect.getmodule(factory) if callable(factory) else None
+        adapter_class = getattr(module, "DiscordAdapter", None)
+        if isinstance(adapter_class, type):
+            return adapter_class
+        raise _shape_error("registered Discord adapter")
+    try:
+        from plugins.platforms.discord.adapter import DiscordAdapter
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("Discord adapter") from exc
+    return DiscordAdapter
+
+
 def _install_discord_room_admission_shim(
     plugin: NunchiHermesV2Plugin,
 ) -> None:
@@ -1696,9 +1719,9 @@ def _install_discord_room_admission_shim(
         return
     try:
         from gateway.run import GatewayRunner
-        from plugins.platforms.discord.adapter import DiscordAdapter
     except (ImportError, ModuleNotFoundError) as exc:
-        raise _shape_error("Discord adapter") from exc
+        raise _shape_error("gateway runner") from exc
+    DiscordAdapter = _active_discord_adapter_class()
 
     with _SHIM_LOCK:
         if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:

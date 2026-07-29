@@ -913,11 +913,28 @@ class HermesPortableTests(unittest.TestCase):
         fake_gateway = types.ModuleType("gateway")
         fake_run = types.ModuleType("gateway.run")
         fake_run.GatewayRunner = GatewayRunner
+        fake_registry_module = types.ModuleType("gateway.platform_registry")
+        fake_runtime_adapter = types.ModuleType(
+            "hermes_plugins.discord_platform.adapter"
+        )
+        fake_runtime_adapter.DiscordAdapter = DiscordAdapter
+
+        def adapter_factory(config):
+            return DiscordAdapter(config)
+
+        adapter_factory.__module__ = fake_runtime_adapter.__name__
+        fake_registry_module.platform_registry = types.SimpleNamespace(
+            get=lambda name: (
+                types.SimpleNamespace(adapter_factory=adapter_factory)
+                if name == "discord"
+                else None
+            )
+        )
         fake_plugins = types.ModuleType("plugins")
         fake_platforms = types.ModuleType("plugins.platforms")
         fake_discord = types.ModuleType("plugins.platforms.discord")
         fake_adapter = types.ModuleType("plugins.platforms.discord.adapter")
-        fake_adapter.DiscordAdapter = DiscordAdapter
+        fake_adapter.DiscordAdapter = type("WrongDiscordAdapter", (), {})
         with tempfile.TemporaryDirectory() as temporary:
             config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
             plugin = hermes_v2.NunchiHermesV2Plugin(
@@ -932,6 +949,8 @@ class HermesPortableTests(unittest.TestCase):
                     {
                         "gateway": fake_gateway,
                         "gateway.run": fake_run,
+                        "gateway.platform_registry": fake_registry_module,
+                        fake_runtime_adapter.__name__: fake_runtime_adapter,
                         "plugins": fake_plugins,
                         "plugins.platforms": fake_platforms,
                         "plugins.platforms.discord": fake_discord,
