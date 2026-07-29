@@ -607,7 +607,7 @@ class HermesPortableTests(unittest.TestCase):
                 ["observation", "attention", "participant-host", "transport"],
                 [record["stage"] for record in records],
             )
-            self.assertEqual("unknown", records[2]["body"]["outcome"])
+            self.assertEqual("sent", records[2]["body"]["outcome"])
             self.assertEqual("sent", records[3]["body"]["delivery"])
 
     def test_stock_silence_has_no_transport_receipt(self):
@@ -813,11 +813,53 @@ class HermesPortableTests(unittest.TestCase):
             records = plugin._rooms[("discord", "42")].receipts.all_records()
             self.assertEqual("sent", records[-1]["body"]["delivery"])
 
+    def test_runner_result_shim_observes_stock_response_and_silence(self):
+        class Runner:
+            async def _handle_message(self, event):
+                return event.result
+
+        modules = {
+            "gateway": types.ModuleType("gateway"),
+            "gateway.run": types.ModuleType("gateway.run"),
+        }
+        modules["gateway.run"].GatewayRunner = Runner
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(
+                Path(temporary),
+                FakeLlm([judgment("WAKE", "discord:message:500")]),
+            )
+            event = FakeEvent()
+            event.result = ""
+
+            async def run() -> None:
+                await plugin.gate_ingress(
+                    adapter=FakeAdapter(),
+                    event=event,
+                    stock_handle=mock.AsyncMock(),
+                )
+                runtime = plugin._rooms[("discord", "42")]
+                trace = runtime.stock_trace(event)
+                token = hermes_v2._ACTIVE_STOCK_TURN.set(trace)
+                try:
+                    with mock.patch.dict(sys.modules, modules):
+                        hermes_v2._install_runner_result_shim(plugin)
+                    self.assertEqual("", await Runner()._handle_message(event))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+                self.assertTrue(trace.assistant_observed)
+                self.assertEqual("", trace.assistant_response)
+
+            asyncio.run(run())
+
     def test_register_uses_process_local_gate_and_post_llm_observer(self):
         class Runner:
             def _is_user_authorized(self, source):
                 del source
                 return True
+
+            async def _handle_message(self, event):
+                del event
+                return ""
 
             async def stop(self, *args, **kwargs):
                 del args, kwargs

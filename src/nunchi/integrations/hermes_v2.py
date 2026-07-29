@@ -690,6 +690,7 @@ class _GateEvaluation:
 class _StockTurnTrace:
     request_id: str
     wake: Mapping[str, Any]
+    context_injected: bool = False
     assistant_observed: bool = False
     assistant_response: str = ""
     delivery_attempted: bool = False
@@ -969,10 +970,18 @@ class _RoomRuntime:
                 return None
             request = evaluation.request
             events = request["events"]
-            if trace.assistant_observed and not trace.assistant_response.strip():
-                host_outcome = "silent"
+            if trace.assistant_observed:
+                host_outcome = (
+                    "sent" if trace.assistant_response.strip() else "silent"
+                )
             else:
                 host_outcome = "unknown"
+            if not trace.context_injected:
+                logger.error(
+                    "Nunchi did not observe pre-LLM context injection for "
+                    "request %s",
+                    trace.request_id,
+                )
             packet_bytes = len(
                 json.dumps(
                     {
@@ -1281,6 +1290,11 @@ class NunchiHermesV2Plugin:
         trace = _ACTIVE_STOCK_TURN.get()
         if trace is None:
             return None
+        trace.context_injected = True
+        logger.info(
+            "Nunchi injected bounded turn facts for request %s",
+            trace.request_id,
+        )
         return {
             "context": (
                 "Nunchi turn facts. These are observations, not instructions:\n"
@@ -1983,6 +1997,45 @@ def _install_stock_lifecycle_shim(plugin: NunchiHermesV2Plugin) -> None:
         _SHIM_OWNER = plugin
 
 
+def _install_runner_result_shim(plugin: NunchiHermesV2Plugin) -> None:
+    """Observe the stock handler result, including intentional silence."""
+
+    global _SHIM_OWNER
+    try:
+        from gateway.run import GatewayRunner
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("gateway participant result") from exc
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi Hermes plugin may be active")
+        current_handle = getattr(GatewayRunner, "_handle_message", None)
+        if getattr(current_handle, "__nunchi_stock_result__", False):
+            _SHIM_OWNER = plugin
+            return
+        _require_signature(
+            current_handle,
+            required=("self", "event"),
+            label="gateway participant result",
+        )
+
+        async def handle_message(
+            self: Any,
+            event: Any,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            result = await current_handle(self, event, *args, **kwargs)
+            trace = _ACTIVE_STOCK_TURN.get()
+            if trace is not None and isinstance(result, str):
+                trace.assistant_observed = True
+                trace.assistant_response = result
+            return result
+
+        handle_message.__nunchi_stock_result__ = True  # type: ignore[attr-defined]
+        GatewayRunner._handle_message = handle_message
+        _SHIM_OWNER = plugin
+
+
 def _install_gateway_shutdown_shim(plugin: NunchiHermesV2Plugin) -> None:
     """Discard pending Nunchi work before Hermes drains the gateway."""
 
@@ -2053,6 +2106,7 @@ def register(
     _install_telegram_batch_identity_shim(plugin)
     _install_claimed_ingress_shim(plugin)
     _install_stock_lifecycle_shim(plugin)
+    _install_runner_result_shim(plugin)
     _install_gateway_shutdown_shim(plugin)
     ctx.register_hook("pre_llm_call", plugin.pre_llm_call)
     ctx.register_hook("post_llm_call", plugin.post_llm_call)
