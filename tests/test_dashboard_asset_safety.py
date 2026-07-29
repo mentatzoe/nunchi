@@ -1,6 +1,7 @@
 """Enforcement: served dashboard assets must not use HTML-injection sinks.
 
-The hermes dashboard tab (integrations/hermes/nunchi-gate/dashboard/index.js)
+The Hermes dashboard tab
+(``src/nunchi/integrations/hermes_dashboard_assets/index.js``)
 renders untrusted content: receipt fields (message text, author names,
 reasons) come straight from the gate JSONL log, and channel names come from
 the hermes channel directory. A single ``innerHTML``-style sink would let a
@@ -48,7 +49,12 @@ FORBIDDEN_SINKS = (
 )
 
 _DASHBOARD_JS = (
-    _REPO_ROOT / "integrations" / "hermes" / "nunchi-gate" / "dashboard" / "index.js"
+    _REPO_ROOT
+    / "src"
+    / "nunchi"
+    / "integrations"
+    / "hermes_dashboard_assets"
+    / "index.js"
 )
 
 

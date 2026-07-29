@@ -56,6 +56,8 @@ nunchi-codex-room-runner --probe
 
 When Nunchi is installed in the same environment as Hermes, the wheel exposes
 the `nunchi-v2` Hermes plugin without adding Hermes as a Nunchi dependency.
+`nunchi-hermes-dashboard install` adds the authenticated Hermes dashboard tab
+for room configuration and V2 receipts without changing Hermes package files.
 See [`integrations/hermes/README.md`](integrations/hermes/README.md).
 
 Configured runtimes require exact SHA-256 pins for participant profiles and

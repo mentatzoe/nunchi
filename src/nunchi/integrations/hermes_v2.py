@@ -173,6 +173,17 @@ class HermesPluginConfig:
     provenance: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class HermesConfigSource:
+    path: Path
+    expected_sha256: str
+    digest_path: Path | None
+
+    @property
+    def dashboard_writable(self) -> bool:
+        return self.digest_path is not None
+
+
 def _closed(
     value: Any,
     *,
@@ -222,19 +233,52 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"Hermes room binding is invalid: {exc}") from exc
 
-    profile_ref = _closed(
-        room["profile"],
-        required={"path", "sha256"},
-        label=f"rooms[{index}].profile",
-    )
-    profile_path = Path(
-        _nonempty(profile_ref["path"], "participant profile path")
-    ).expanduser()
-    _require_private_regular_file(profile_path, "participant profile")
-    profile = ParticipantProfile.load(
-        profile_path,
-        expected_sha256=_nonempty(profile_ref["sha256"], "participant profile sha256"),
-    )
+    if not isinstance(room["profile"], Mapping):
+        raise ValidationError(f"rooms[{index}].profile must be an object")
+    profile_ref = dict(room["profile"])
+    if set(profile_ref) == {"path", "sha256"}:
+        profile_path = Path(
+            _nonempty(profile_ref["path"], "participant profile path")
+        ).expanduser()
+        _require_private_regular_file(profile_path, "participant profile")
+        profile = ParticipantProfile.load(
+            profile_path,
+            expected_sha256=_nonempty(
+                profile_ref["sha256"],
+                "participant profile sha256",
+            ),
+        )
+    elif set(profile_ref) == {"document"}:
+        document = _closed(
+            profile_ref["document"],
+            required={
+                "profile_id",
+                "participant_id",
+                "actor_id",
+                "instructions",
+                "provenance",
+            },
+            label=f"rooms[{index}].profile.document",
+        )
+        for name, field in document.items():
+            if not isinstance(field, str) or not field:
+                raise ValidationError(
+                    f"participant profile {name} must be non-empty"
+                )
+        encoded_profile = json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+        profile = ParticipantProfile(
+            **document,
+            sha256=hashlib.sha256(encoded_profile).hexdigest(),
+        )
+    else:
+        raise ValidationError(
+            "participant profile must contain either path and sha256 or document"
+        )
     if (
         profile.participant_id != binding.participant_id
         or profile.actor_id != binding.actor_id
@@ -332,21 +376,81 @@ def load_pinned_config(
     )
 
 
-def _default_config_loader(profile: str) -> HermesPluginConfig:
+def resolve_config_source(
+    profile: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> HermesConfigSource:
+    environment = os.environ if environ is None else environ
     token = re.sub(r"[^A-Za-z0-9]", "_", profile).upper()
-    path = os.getenv(f"NUNCHI_HERMES_V2_CONFIG_{token}", "").strip()
-    digest = os.getenv(f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token}", "").strip()
+    path = environment.get(f"NUNCHI_HERMES_V2_CONFIG_{token}", "").strip()
+    digest = environment.get(
+        f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token}",
+        "",
+    ).strip()
+    digest_file = environment.get(
+        f"NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_{token}",
+        "",
+    ).strip()
     if profile == "default" and not path:
-        path = os.getenv("NUNCHI_HERMES_V2_CONFIG", "").strip()
-        digest = os.getenv("NUNCHI_HERMES_V2_CONFIG_SHA256", "").strip()
-    if not path or not digest:
+        path = environment.get("NUNCHI_HERMES_V2_CONFIG", "").strip()
+        digest = environment.get(
+            "NUNCHI_HERMES_V2_CONFIG_SHA256",
+            "",
+        ).strip()
+        digest_file = environment.get(
+            "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE",
+            "",
+        ).strip()
+    if not path:
         raise ValidationError(
-            f"NUNCHI_HERMES_V2_CONFIG_{token} and "
-            f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token} are required"
+            f"NUNCHI_HERMES_V2_CONFIG_{token} is required"
         )
-    return load_pinned_config(
-        path,
+    if digest and digest_file:
+        raise ValidationError(
+            "configure either a literal Hermes V2 config digest or a digest "
+            "file, not both"
+        )
+    config_path = Path(path).expanduser()
+    digest_path: Path | None = None
+    if digest_file:
+        digest_path = Path(digest_file).expanduser()
+    elif not digest:
+        adjacent = Path(f"{config_path}.sha256")
+        if adjacent.exists():
+            digest_path = adjacent
+    if digest_path is not None:
+        raw_digest = _require_private_regular_file(
+            digest_path,
+            "Hermes V2 config digest",
+        )
+        try:
+            digest = raw_digest.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise ValidationError(
+                "Hermes V2 config digest file must contain ASCII"
+            ) from exc
+    if not digest:
+        raise ValidationError(
+            f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token} or "
+            f"NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_{token} is required"
+        )
+    if not _SHA256.fullmatch(digest):
+        raise ValidationError(
+            "Hermes V2 config sha256 must be 64 lowercase hex"
+        )
+    return HermesConfigSource(
+        path=config_path,
         expected_sha256=digest,
+        digest_path=digest_path,
+    )
+
+
+def _default_config_loader(profile: str) -> HermesPluginConfig:
+    source = resolve_config_source(profile)
+    return load_pinned_config(
+        source.path,
+        expected_sha256=source.expected_sha256,
         hermes_profile=profile,
     )
 
@@ -1126,19 +1230,11 @@ class _RoomRuntime:
     ) -> None:
         self.config = config
         self.started_at = datetime.now(timezone.utc)
-        identity = json.dumps(
-            {
-                "profile": profile,
-                "participant": config.binding.participant_id,
-                "actor": config.binding.actor_id,
-                "platform": config.binding.platform,
-                "room": config.binding.room_id,
-                "continuity": config.binding.continuity_scope_id,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        self.directory = state_directory / hashlib.sha256(identity).hexdigest()
+        self.directory = room_state_directory(
+            state_directory,
+            profile=profile,
+            binding=config.binding,
+        )
         _prepare_private_directory(
             self.directory,
             "Hermes V2 room state directory",
@@ -1301,6 +1397,27 @@ def time_ns_digest(event: Any, source: Any) -> str:
         separators=(",", ":"),
     ).encode()
     return hashlib.sha256(body).hexdigest()
+
+
+def room_state_directory(
+    state_directory: Path,
+    *,
+    profile: str,
+    binding: ParticipantBinding,
+) -> Path:
+    identity = json.dumps(
+        {
+            "profile": profile,
+            "participant": binding.participant_id,
+            "actor": binding.actor_id,
+            "platform": binding.platform,
+            "room": binding.room_id,
+            "continuity": binding.continuity_scope_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return state_directory / hashlib.sha256(identity).hexdigest()
 
 
 class NunchiHermesV2Plugin:

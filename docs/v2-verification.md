@@ -22,7 +22,7 @@ Claude Code implementation, installation, and live evaluation.
 | adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
 | real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
 | downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; unchanged Hermes hashes; V2 platform tests | implemented and verified in the current worktree against released 0.19.0 and upstream `main` `0f64557c06f3e878fd9ec5170b9bca7f20e2778e`; configured-process and live Discord/Telegram acceptance remain pending |
+| Hermes compatibility | dependency-free wheel; Hermes 0.19.0 and current-head shape checks; dashboard; unchanged Hermes hashes; V2 platform tests | source, clean wheel, dashboard discovery, and installed dashboard bridge verified against released 0.19.0 and upstream `main` `0f64557c06f3e878fd9ec5170b9bca7f20e2778e`; configured gateway and live Discord/Telegram acceptance remain pending |
 | independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
 
 Do not reinterpret `pending` as failure or success. Final acceptance requires
@@ -39,13 +39,24 @@ The current Hermes addition:
   without changing Hermes files;
 - retains and processes each native Telegram update even when Hermes batches
   adjacent text;
+- packages an authenticated dashboard tab for room configuration and V2
+  receipts, with validated digest-sidecar writes and explicit restart;
+- installs that tab only in Hermes's supported user-plugin directory, not its
+  source or installed package;
 - passes the shared V2 lifecycle plus Hermes-specific identity, routing,
   silence, cancellation, coalescing, restart, and delivery tests.
 
-The clean-wheel hash for this worktree is
-`8c1234222483d1fad9db3586d6542bc6b8289d6506e19f238355bc3de34d6e23`.
-This is source and clean-package evidence, not configured installed-runtime or
-live-platform acceptance.
+The reproducible clean-wheel SHA-256 for this worktree is
+`2d4e67a7e998a6696e2aa2a36298bea6208c32445d88d34796506078ac22868e`.
+Two builds with `SOURCE_DATE_EPOCH=1700000000` matched byte-for-byte. A clean
+Python 3.14 environment installed that wheel without dependencies, installed
+and verified the dashboard bridge, and imported only from `site-packages`.
+The source suite passed 356 tests with four optional JSON-Schema skips; all
+eight lifecycle evaluations passed. Hermes 0.19.0 verified 958 distribution
+records unchanged, and the current upstream checkout remained clean. Both
+dashboard loaders discovered the tab and imported its four API routes. This is
+source and clean-package evidence, not configured gateway or live-platform
+acceptance.
 
 ## Exact source/artifact evidence
 

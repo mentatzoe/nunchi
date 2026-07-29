@@ -24,16 +24,20 @@ checkout, package, or installed files.
 ## Install
 
 Install Nunchi into the same environment as Hermes, enable its discovered
-plugin, then restart Hermes:
+runtime plugin, install the dashboard tab, then restart Hermes:
 
 ```sh
 python -m pip install nunchi
 hermes plugins enable nunchi-v2
+nunchi-hermes-dashboard install
 ```
 
 The wheel exposes the `nunchi-v2` entry point in the
-`hermes_agent.plugins` group. No plugin files need to be copied into a Hermes
-checkout.
+`hermes_agent.plugins` group. The dashboard command copies three Nunchi-owned
+web bridge files into Hermes's documented user-plugin directory because Hermes
+does not scan wheel entry points for dashboard assets. It does not change the
+Hermes checkout or installed package. `nunchi-hermes-dashboard verify` checks
+the installed bridge against the current wheel.
 
 ## Configure
 
@@ -57,8 +61,13 @@ Create a private JSON configuration and pin its SHA-256:
         "provenance": "operator:hermes-default"
       },
       "profile": {
-        "path": "/absolute/private/path/participant-profile.json",
-        "sha256": "<64 lowercase hex>"
+        "document": {
+          "profile_id": "agent-default",
+          "participant_id": "agent",
+          "actor_id": "discord:actor:123456789",
+          "instructions": "Use the participant's role and respond concisely.",
+          "provenance": "operator:hermes-default"
+        }
       },
       "attention": {
         "policy": {
@@ -76,22 +85,45 @@ Create a private JSON configuration and pin its SHA-256:
 }
 ```
 
-The config and participant profile must be owned by the Hermes user and mode
-`0600`. Set `suppression_recovery_verified` to `true` only after an
-attributable live restart and later-message recovery run has passed. Until
-then, leave it `false`; Nunchi widens attempted suppression to `DEFER`.
+The config must be owned by the Hermes user and mode `0600`. An inline profile
+is pinned by the outer config. A separate profile can instead use exact
+`path`/`sha256` fields. Set `suppression_recovery_verified` to `true` only
+after an attributable live restart and later-message recovery run has passed.
+Until then, leave it `false`; Nunchi widens attempted suppression to `DEFER`.
 
-Set:
+For dashboard editing, put the digest in a private sidecar file:
 
 ```sh
 NUNCHI_HERMES_V2_CONFIG=/absolute/private/path/hermes-v2.json
-NUNCHI_HERMES_V2_CONFIG_SHA256=<64 lowercase hex>
+NUNCHI_HERMES_V2_CONFIG_SHA256_FILE=/absolute/private/path/hermes-v2.json.sha256
 ```
 
 For a named Hermes profile, use
 `NUNCHI_HERMES_V2_CONFIG_<PROFILE>` and
-`NUNCHI_HERMES_V2_CONFIG_SHA256_<PROFILE>`, with non-alphanumeric characters
-replaced by `_`.
+`NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_<PROFILE>`, with non-alphanumeric
+characters replaced by `_`. An adjacent `<config>.sha256` file is also found
+automatically. Both files must be private regular files owned by the Hermes
+user. A literal `NUNCHI_HERMES_V2_CONFIG_SHA256` remains supported but is
+read-only in the dashboard because the dashboard cannot update an environment
+variable safely.
+
+## Dashboard
+
+Open **Nunchi V2** in the Hermes dashboard to:
+
+- configure Discord and Telegram rooms using Hermes's discovered channel list;
+- edit exact participant identity, inline instructions, attention policy, and
+  lifecycle limits;
+- use advanced JSON for the complete closed V2 configuration;
+- inspect the newest V2 receipts for each configured room;
+- save a new pinned config and restart Hermes to activate it.
+
+Hermes authenticates the tab and its API. Saving uses the displayed config
+digest as an optimistic lock, validates the complete new config before commit,
+and updates the digest and config with private atomic replacements. A stale or
+invalid edit is rejected. The running gateway is unchanged until the operator
+requests restart; Hermes then invokes Nunchi's normal drain and cancellation
+path.
 
 Hermes continues to control its existing platform credentials, allowlists,
 pairing, mention rules, and `DISCORD_ALLOW_BOTS` policy.
