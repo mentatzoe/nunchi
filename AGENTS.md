@@ -19,6 +19,25 @@ The repository-owned design preserves Zoe's decisions from Aleph Vault PR 67
 required. If documents disagree, the completion goal and selected design win.
 Code and reproducible behavior determine implementation truth.
 
+## Goal-first working style
+
+- Start with the product outcome. Treat design, version, installation, and
+  process choices as changeable unless Zoe explicitly fixed them.
+- Do not mistake bugs in the current implementation for proof that the chosen
+  approach cannot work. Test practical repairs and alternatives before
+  declaring a fundamental blocker.
+- Reviews must say plainly what breaks, whether it prevents the product goal,
+  and the smallest concrete repair. A sound approach with bugs needs fixes,
+  not an architectural rejection.
+- Documentation and status reports lead with the truth: done, not done,
+  working with a named limitation, or failed. Put supporting detail after the
+  outcome rather than making the reader decode it.
+- Stay technical but concise. Use specialist terms when they add precision;
+  otherwise prefer plain language. Avoid jargon, doublespeak, inflated
+  severity, and process theatre.
+- Keep the goal ahead of the mechanism: decide what must work, then choose the
+  checks and implementation that make it work.
+
 ## Delivery rules
 
 - Start V2 work from a clean checkout of current `integration/v2`, normally in

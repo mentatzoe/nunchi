@@ -3,6 +3,19 @@
 Follow `AGENTS.md`. Claude owns the Claude Code integration and security
 assurance, not the shared V2 foundation or other platform implementations.
 
+## Goal-first working style
+
+Start from the product outcome, not the current mechanism. Treat inherited
+design, version, installation, and process assumptions as changeable unless
+Zoe explicitly fixed them. Bugs in an implementation are bugs to repair; they
+are not proof that the approach is impossible.
+
+Reviews must state what actually breaks, whether it prevents the goal, and the
+smallest concrete fix. Documentation and status reports state the outcome
+first, then the decision-changing technical facts. Keep the language concise,
+plain, and technically exact. Avoid jargon, doublespeak, inflated severity,
+and process theatre.
+
 Before platform work:
 
 1. start from current `integration/v2`;
