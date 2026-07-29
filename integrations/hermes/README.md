@@ -5,10 +5,15 @@ Hermes dependency and does not modify Hermes files.
 
 The integration supports Hermes 0.19.0 and newer compatible builds:
 
-- It uses Hermes's versioned participant hooks when they expose authenticated
-  self identity before the attention decision.
-- From Hermes 0.19.0 through the tested current upstream head, it installs a
-  checked runtime monkeypatch around the stock gateway runner.
+- A checked process-local wrapper runs observation and attention before
+  Hermes starts typing, reactions, or participant work.
+- Effective `SUPPRESS` returns there. `WAKE`, `DEFER`, bypass, and configured
+  error-wake call Hermes's original handler exactly once.
+- The shared core builds fresh bounded wake facts. Hermes's public
+  `pre_llm_call` hook adds those facts as context to the admitted turn without
+  changing Hermes's system prompt or main model.
+- Hermes keeps its normal prompt, model, memory, tools, reactions,
+  cancellation, delivery, and platform adapter.
 - The Discord patch extends Hermes's existing free-response set with exact
   configured Nunchi room IDs. It admits bot-authored messages through Hermes's
   existing checks only in those rooms and enables missed-message recovery only
@@ -16,14 +21,16 @@ The integration supports Hermes 0.19.0 and newer compatible builds:
   for Nunchi rooms.
 - The Telegram patch retains each native update that Hermes combines into one
   text batch. Nunchi then processes those updates in order.
-- Discord and Telegram ingress, authorization, routing, formatting, and I/O
-  remain owned by Hermes's installed adapters.
-- Nunchi owns observation, attention, scheduling, the participant turn,
-  cancellation, receipts, and the single delivery commit for configured rooms.
-- Unknown host shapes fail activation with a repair message. They never fall
-  through to a second Hermes participant turn.
+- Other Hermes platforms use the same gate when their adapter supplies stable
+  native self and mention identities. If those facts are unavailable, Nunchi
+  records the gap and runs stock Hermes without social suppression.
+- Nunchi owns observation, attention, active/newest scheduling, wake facts,
+  and lifecycle receipts. Hermes owns the admitted participant turn and its
+  output.
+- An unknown host shape disables Nunchi with a repair message. Stock Hermes
+  can continue without the gate.
 
-The monkeypatch changes process behavior. It does not rewrite the Hermes
+The wrappers change process behavior. They do not rewrite the Hermes
 checkout, package, or installed files.
 
 ## Install
@@ -69,7 +76,7 @@ Create a private JSON configuration and pin its SHA-256:
           "profile_id": "agent-default",
           "participant_id": "agent",
           "actor_id": "discord:actor:123456789",
-          "instructions": "Use the participant's role and respond concisely.",
+          "instructions": "Judge whether this participant should take the turn.",
           "provenance": "operator:hermes-default"
         }
       },
@@ -98,8 +105,10 @@ is pinned by the outer config. A separate profile can instead use exact
 `path`/`sha256` fields. Set `suppression_recovery_verified` to `true` only
 after an attributable live restart and later-message recovery run has passed.
 Until then, leave it `false`; Nunchi widens attempted suppression to `DEFER`.
-The attention provider and model are required and are intentionally separate
-from the participant's main model. The dashboard defaults new rooms to
+The profile instructions describe the participant only to Nunchi's attention
+model; they do not replace Hermes's system prompt. The attention provider and
+model are required and intentionally separate from the participant's main
+model. The dashboard defaults new rooms to
 `nous` / `deepseek/deepseek-v4-flash`, the open-weight model selected for
 Nunchi's lightweight operational attention route. Keep it explicit so the
 participant model cannot silently replace it.
@@ -167,11 +176,12 @@ workflow needs the broader behavior.
 
 Open **Nunchi** in the Hermes dashboard to:
 
-- configure Discord and Telegram rooms using Hermes's discovered channel list;
+- configure any platform present in Hermes's discovered channel list, with
+  manual platform and room IDs available when discovery is incomplete;
 - confirm that no-mention conversation, room-scoped bot admission, and
   no-auto-thread behavior are active for configured Discord rooms;
-- edit exact participant identity, inline instructions, the dedicated
-  attention provider/model, attention policy, and lifecycle limits;
+- edit exact participant identity, attention identity context, the dedicated
+  attention provider/model, attention policy, and gate deadline;
 - use advanced JSON for the complete closed V2 configuration;
 - inspect the newest V2 receipts for each configured room;
 - save a new pinned config and restart Hermes to activate it.
@@ -189,16 +199,16 @@ room IDs.
 
 ## Compatibility and repair
 
-Nunchi checks every patched Hermes method before activation. The checks cover
-Hermes 0.19.0 and the tested current upstream build. An unknown shape stops
-Nunchi with an upgrade message; it does not fall through to a stock participant
-turn.
+Nunchi checks every wrapped Hermes method before activation. The checks cover
+Hermes 0.19.0 and the tested current upstream build. An unknown shape disables
+Nunchi with an upgrade message; Hermes can continue normally without the gate.
 
-Two host gates run before Hermes's participant turn: bot admission and
+Two Discord gates run before Hermes's participant turn: bot admission and
 auto-thread/free-response routing. A plugin that patches only the runner will
 miss bot messages or receive a new thread ID instead of the configured room.
-The Nunchi Discord shim covers both gates. This is a required compatibility
-check when adding support for a new Hermes release.
+The Nunchi Discord shim covers both gates. The common gate itself is
+platform-neutral. This remains a required compatibility check when adding
+support for a new Hermes release.
 
 ## Verify
 

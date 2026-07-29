@@ -18,8 +18,11 @@ installed-artifact evidence.
 
 For Hermes, install the same wheel into Hermes's managed Python environment.
 Hermes discovers the `nunchi` plugin from the wheel; Nunchi does not require
-Hermes as a package dependency and does not copy files into its checkout. The
-plugin installs its wheel-owned dashboard bridge automatically in Hermes's
+Hermes as a package dependency and changes no Hermes file. The process-local
+gate supports Hermes 0.19.0 through the tested current head. When Nunchi admits
+a turn, the original Hermes participant pipeline runs with its normal prompt,
+main model, memory, tools, reactions, cancellation, delivery, and platform
+adapter. The plugin installs its wheel-owned dashboard bridge automatically in Hermes's
 supported user-plugin directory. `nunchi-hermes-dashboard verify` checks it,
 and `nunchi-hermes-dashboard install` repairs it when needed. See
 [`../integrations/hermes/README.md`](../integrations/hermes/README.md) for the
@@ -62,7 +65,8 @@ Trusted configuration owns:
 - bounded retention, snapshot, age, continuation-page, continuation-handle,
   and expiry limits; every byte bound includes the referenced actor IDs and
   metadata as well as events;
-- participant model or fixed Codex model/session settings;
+- participant model for Nunchi-owned hosts, or fixed Codex model/session
+  settings; Hermes keeps its own participant model and prompt;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
 

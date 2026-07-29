@@ -249,6 +249,67 @@ def _validate_action(action: Any) -> dict[str, Any]:
     return deepcopy(dict(action))
 
 
+def build_participant_wake(
+    observation: ObservationProvider,
+    request: Mapping[str, Any],
+    decision: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Build the fresh bounded facts delivered to any admitted participant."""
+
+    checked_request = validate_attention_request(request)
+    checked_decision = validate_attention_decision(
+        decision,
+        request=checked_request,
+    )
+    if checked_decision["status"] == "ok":
+        effective = checked_decision["effective_disposition"]
+        if effective == "SUPPRESS":
+            return None
+        source = "WAKE" if effective == "WAKE" else "DEFER"
+    elif checked_decision["status"] == "bypass":
+        source = "PREATTENTION_BYPASS"
+    else:
+        source = "ERROR_FALLBACK"
+
+    fresh = observation.build_snapshot(
+        checked_request["trigger_event_id"],
+        request_id=checked_request["request_id"],
+        continuation=False,
+        record_receipt=False,
+    )
+    fresh.pop("continuation", None)
+    wake: dict[str, Any] = {
+        key: deepcopy(fresh[key])
+        for key in (
+            "request_id",
+            "self",
+            "room",
+            "actors",
+            "events",
+            "trigger_event_id",
+            "coverage",
+        )
+    }
+    attention: dict[str, Any] = {"source": source}
+    if source == "WAKE":
+        event_ids = {event["id"] for event in wake["events"]}
+        raw_advice = checked_decision.get("attention_advice")
+        if raw_advice and all(
+            set(item["evidence_event_ids"]).issubset(event_ids)
+            for item in raw_advice
+        ):
+            attention["advice"] = deepcopy(raw_advice)
+            attention["evidence_event_ids"] = sorted(
+                {
+                    event_id
+                    for item in raw_advice
+                    for event_id in item["evidence_event_ids"]
+                }
+            )
+    wake["attention"] = attention
+    return validate_participant_wake(wake)
+
+
 class ParticipantTurnHost:
     """Materialize one current wake and invoke the participant once."""
 
@@ -285,58 +346,7 @@ class ParticipantTurnHost:
         request: Mapping[str, Any],
         decision: Mapping[str, Any],
     ) -> dict[str, Any] | None:
-        checked_request = validate_attention_request(request)
-        checked_decision = validate_attention_decision(decision, request=checked_request)
-        if checked_decision["status"] == "ok":
-            effective = checked_decision["effective_disposition"]
-            if effective == "SUPPRESS":
-                return None
-            source = "WAKE" if effective == "WAKE" else "DEFER"
-        elif checked_decision["status"] == "bypass":
-            source = "PREATTENTION_BYPASS"
-        else:
-            source = "ERROR_FALLBACK"
-
-        fresh = self.observation.build_snapshot(
-            checked_request["trigger_event_id"],
-            request_id=checked_request["request_id"],
-            continuation=False,
-            record_receipt=False,
-        )
-        # Continuation capability is retained only by this host.  The
-        # participant receives a mediated expand callback, never opaque
-        # handles, cursors, bindings, or expiry values.
-        fresh.pop("continuation", None)
-        wake: dict[str, Any] = {
-            key: deepcopy(fresh[key])
-            for key in (
-                "request_id",
-                "self",
-                "room",
-                "actors",
-                "events",
-                "trigger_event_id",
-                "coverage",
-            )
-        }
-        attention: dict[str, Any] = {"source": source}
-        if source == "WAKE":
-            event_ids = {event["id"] for event in wake["events"]}
-            raw_advice = checked_decision.get("attention_advice")
-            if raw_advice and all(
-                set(item["evidence_event_ids"]).issubset(event_ids)
-                for item in raw_advice
-            ):
-                attention["advice"] = deepcopy(raw_advice)
-                attention["evidence_event_ids"] = sorted(
-                    {
-                        event_id
-                        for item in raw_advice
-                        for event_id in item["evidence_event_ids"]
-                    }
-                )
-        wake["attention"] = attention
-        return validate_participant_wake(wake)
+        return build_participant_wake(self.observation, request, decision)
 
     def run(
         self,

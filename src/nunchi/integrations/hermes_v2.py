@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
-from copy import copy, deepcopy
-from dataclasses import dataclass, replace
+from copy import copy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
@@ -43,11 +43,9 @@ from nunchi.observation import (
 )
 from nunchi.participant import (
     ConversationOpportunityScheduler,
-    ParticipantTurnHost,
-    TransportResult,
+    OpportunityToken,
+    build_participant_wake,
 )
-from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
-from nunchi.participant_model import HostStructuredParticipant
 from nunchi.receipts import ReceiptJournal
 from nunchi.v2_contracts import validate_canonical_event
 
@@ -55,15 +53,13 @@ from nunchi.v2_contracts import validate_canonical_event
 logger = logging.getLogger(__name__)
 
 _PLUGIN_ID = "nunchi"
-_SUPPORTED_PLATFORMS = frozenset({"discord", "telegram"})
 _MINIMUM_HERMES = (0, 19, 0)
-_NATIVE_PARTICIPANT_API = 2
-_NATIVE_MESSAGE_API = 2
 _NATIVE_BATCH_EVENTS_ATTRIBUTE = "_nunchi_v2_native_events"
 _NATIVE_BATCH_DISPATCH_ATTRIBUTE = "_nunchi_v2_native_batch_dispatch"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHIM_LOCK = threading.RLock()
 _SHIM_OWNER: "NunchiHermesV2Plugin | None" = None
+_ORIGINAL_BASE_HANDLE: Callable[[Any, Any], Any] | None = None
 _DISCORD_ROOM_CONTEXT: ContextVar[str | None] = ContextVar(
     "nunchi_discord_room",
     default=None,
@@ -233,8 +229,6 @@ def _load_room(value: Any, *, index: int) -> HermesRoomConfig:
         label=f"rooms[{index}].binding",
     )
     platform = _nonempty(binding_raw["platform"], "binding platform")
-    if platform not in _SUPPORTED_PLATFORMS:
-        raise ValidationError("Hermes V2 supports configured Discord and Telegram rooms")
     names = binding_raw.get("names", ())
     if not isinstance(names, (list, tuple)) or any(
         not isinstance(item, str) for item in names
@@ -534,6 +528,17 @@ def _telegram_mentions(
 
 
 def _self_identity(adapter: Any, platform: str) -> tuple[str, str | None]:
+    resolver = getattr(adapter, "nunchi_self_identity", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, Mapping):
+            native_id = resolved.get("id")
+            username = resolved.get("username") or resolved.get("name")
+            return _nonempty(
+                native_id,
+                "authenticated Hermes self identity",
+            ), (str(username) if username else None)
+
     if platform == "discord":
         user = getattr(getattr(adapter, "_client", None), "user", None)
         native_id = getattr(user, "id", None)
@@ -543,7 +548,36 @@ def _self_identity(adapter: Any, platform: str) -> tuple[str, str | None]:
         native_id = getattr(bot, "id", None)
         username = getattr(bot, "username", None)
     else:
-        raise ValidationError("unsupported Hermes platform")
+        candidates = (
+            getattr(adapter, "_client", None),
+            getattr(adapter, "_bot", None),
+            getattr(adapter, "client", None),
+            getattr(adapter, "bot", None),
+            adapter,
+        )
+        identity = None
+        for candidate in candidates:
+            identity = getattr(candidate, "user", None) or getattr(
+                candidate,
+                "identity",
+                None,
+            )
+            if identity is not None:
+                break
+        identity = identity or next(
+            (
+                candidate
+                for candidate in candidates
+                if getattr(candidate, "id", None) is not None
+            ),
+            None,
+        )
+        native_id = getattr(identity, "id", None)
+        username = getattr(identity, "username", None) or getattr(
+            identity,
+            "name",
+            None,
+        )
     return _nonempty(native_id, "authenticated Hermes self identity"), (
         str(username) if username else None
     )
@@ -586,11 +620,15 @@ def normalize_message_event(
         mentions_room = native_mentions_room
     elif platform == "discord":
         mentioned_native, mentions_room = _discord_mentions(event)
-    else:
+    elif platform == "telegram":
         mentioned_native, mentions_room = _telegram_mentions(
             event,
             self_native_id=self_native_id,
             self_username=self_username,
+        )
+    else:
+        raise ValidationError(
+            "Hermes event does not expose stable native mention identities"
         )
     author_id = _canonical_actor(platform, author_native_id)
     mentioned_ids = [_canonical_actor(platform, item) for item in mentioned_native]
@@ -632,383 +670,38 @@ def normalize_message_event(
     return validate_canonical_event(canonical), actors
 
 
+@dataclass
+class _GateIngress:
+    event: Any
+    source: Any
+    adapter: Any
+    anchor_event_id: str
+
+
 @dataclass(frozen=True)
-class _DeliveryReceipt:
-    status: str
-    platform: str
-    room_id: str
-    profile: str
-    self_actor_id: str
-    effect_kind: str
-    submitted_content: str | None = None
-    reply_to_message_id: str | None = None
-    target_message_id: str | None = None
-    reaction: str | None = None
-    reaction_operation: str | None = None
-    message_id: str | None = None
-    effect_id: str | None = None
+class _GateEvaluation:
+    request: Mapping[str, Any]
+    decision: Mapping[str, Any]
+    admit: bool
+    wake: Mapping[str, Any] | None
 
 
-class Hermes019Delivery:
-    """Route-bound delivery facade over an untouched stock adapter."""
-
-    def __init__(
-        self,
-        *,
-        adapter: Any,
-        event: Any,
-        source: Any,
-        profile: str,
-        self_native_id: str,
-    ) -> None:
-        self.adapter = adapter
-        self.event = event
-        self.source = source
-        self.platform = _platform_name(source)
-        self.profile = profile
-        self.room_id = _room_id(source)
-        self.native_room_id = _native_room_id(source)
-        self.thread_id = getattr(source, "thread_id", None)
-        self.self_native_id = self_native_id
-        self.source_message_id = _nonempty(
-            getattr(event, "message_id", None), "Hermes native message id"
-        )
-
-    def _metadata(self) -> dict[str, Any]:
-        result: dict[str, Any] = {"notify": True}
-        if self.thread_id not in (None, ""):
-            result["thread_id"] = str(self.thread_id)
-        return result
-
-    def _receipt(
-        self,
-        *,
-        status: str,
-        effect_kind: str,
-        content: str | None = None,
-        reply_to: str | None = None,
-        target: str | None = None,
-        reaction: str | None = None,
-        operation: str | None = None,
-        message_id: str | None = None,
-        effect_id: str | None = None,
-    ) -> _DeliveryReceipt:
-        return _DeliveryReceipt(
-            status=status,
-            platform=self.platform,
-            room_id=self.room_id,
-            profile=self.profile,
-            self_actor_id=self.self_native_id,
-            effect_kind=effect_kind,
-            submitted_content=content,
-            reply_to_message_id=reply_to,
-            target_message_id=target,
-            reaction=reaction,
-            reaction_operation=operation,
-            message_id=message_id,
-            effect_id=effect_id,
-        )
-
-    async def _send(
-        self,
-        content: str,
-        *,
-        reply_to: str | None,
-        effect_kind: str,
-    ) -> _DeliveryReceipt:
-        try:
-            result = await self.adapter.send(
-                self.native_room_id,
-                content,
-                reply_to=reply_to,
-                metadata=self._metadata(),
-            )
-        except BaseException:
-            return self._receipt(
-                status="unknown",
-                effect_kind=effect_kind,
-                content=content,
-                reply_to=reply_to,
-            )
-        if getattr(result, "success", False):
-            message_id = getattr(result, "message_id", None)
-            if message_id in (None, ""):
-                status = "unknown"
-                message_id = None
-            else:
-                status = "sent"
-                message_id = str(message_id)
-            return self._receipt(
-                status=status,
-                effect_kind=effect_kind,
-                content=content,
-                reply_to=reply_to,
-                message_id=message_id,
-                effect_id=message_id,
-            )
-        return self._receipt(
-            status="failed",
-            effect_kind=effect_kind,
-            content=content,
-            reply_to=reply_to,
-        )
-
-    async def send(self, content: str) -> _DeliveryReceipt:
-        return await self._send(content, reply_to=None, effect_kind="send")
-
-    async def reply(self, content: str) -> _DeliveryReceipt:
-        return await self._send(
-            content,
-            reply_to=self.source_message_id,
-            effect_kind="reply",
-        )
-
-    async def react(
-        self,
-        reaction: str,
-        *,
-        operation: str = "add",
-    ) -> _DeliveryReceipt:
-        acknowledged = False
-        try:
-            if self.platform == "discord":
-                raw = getattr(self.event, "raw_message", None)
-                if raw is None:
-                    raise RuntimeError("native Discord message is unavailable")
-                if operation == "add":
-                    await raw.add_reaction(reaction)
-                else:
-                    client_user = getattr(
-                        getattr(self.adapter, "_client", None), "user", None
-                    )
-                    if client_user is None:
-                        raise RuntimeError("native Discord self is unavailable")
-                    await raw.remove_reaction(reaction, client_user)
-                acknowledged = True
-            elif operation == "add":
-                acknowledged = bool(
-                    await self.adapter._set_reaction(
-                        self.native_room_id,
-                        self.source_message_id,
-                        reaction,
-                    )
-                )
-            else:
-                acknowledged = bool(
-                    await self.adapter._clear_reactions(
-                        self.native_room_id,
-                        self.source_message_id,
-                    )
-                )
-        except BaseException:
-            return self._receipt(
-                status="unknown",
-                effect_kind="react",
-                target=self.source_message_id,
-                reaction=reaction,
-                operation=operation,
-            )
-        effect_id = (
-            f"{self.platform}:reaction:{self.source_message_id}:"
-            f"{self.self_native_id}:{reaction}:{operation}"
-        )
-        return self._receipt(
-            status="sent" if acknowledged else "failed",
-            effect_kind="react",
-            target=self.source_message_id,
-            reaction=reaction,
-            operation=operation,
-            effect_id=effect_id if acknowledged else None,
-        )
+@dataclass
+class _StockTurnTrace:
+    request_id: str
+    wake: Mapping[str, Any]
+    assistant_observed: bool = False
+    assistant_response: str = ""
+    delivery_attempted: bool = False
+    delivery_succeeded: bool = False
+    delivery_detail: str | None = None
+    processing_outcome: str | None = None
 
 
-class HermesNativeTransport:
-    """Synchronous V2 transport over native or compatibility delivery facades."""
-
-    def __init__(
-        self,
-        *,
-        binding: ParticipantBinding,
-        profile: str,
-        timeout_seconds: float = 30,
-    ) -> None:
-        self.binding = binding
-        self.profile = profile
-        self.timeout_seconds = timeout_seconds
-        self._lock = threading.RLock()
-        self._generation = 0
-        self._deliveries: dict[str, tuple[Any, asyncio.AbstractEventLoop, int]] = {}
-        self._pending: dict[Any, threading.Event] = {}
-
-    def bind(
-        self,
-        canonical_event_id: str,
-        delivery: Any,
-        loop: asyncio.AbstractEventLoop,
-    ) -> None:
-        for method in ("send", "reply", "react"):
-            if not callable(getattr(delivery, method, None)):
-                raise ValidationError(f"Hermes delivery has no {method} method")
-        with self._lock:
-            self._deliveries[canonical_event_id] = (
-                delivery,
-                loop,
-                self._generation,
-            )
-            while len(self._deliveries) > 256:
-                self._deliveries.pop(next(iter(self._deliveries)))
-
-    def cancel(self) -> None:
-        with self._lock:
-            self._generation += 1
-            self._deliveries.clear()
-            pending = tuple(self._pending)
-        for future in pending:
-            future.cancel()
-
-    def settle(self, timeout: float) -> bool:
-        expires = time.monotonic() + timeout
-        while True:
-            with self._lock:
-                for future, event in tuple(self._pending.items()):
-                    if event.is_set():
-                        self._pending.pop(future, None)
-                events = tuple(self._pending.values())
-            if not events:
-                return True
-            remaining = expires - time.monotonic()
-            if remaining <= 0:
-                return False
-            events[0].wait(min(remaining, 0.05))
-
-    def _run(
-        self,
-        coroutine: Any,
-        *,
-        loop: asyncio.AbstractEventLoop,
-        generation: int,
-    ) -> Any:
-        started = threading.Event()
-        settled = threading.Event()
-
-        async def invoke() -> Any:
-            started.set()
-            try:
-                return await coroutine
-            finally:
-                settled.set()
-
-        with self._lock:
-            if generation != self._generation or loop.is_closed():
-                coroutine.close()
-                raise RuntimeError("Hermes delivery generation is no longer current")
-            future = asyncio.run_coroutine_threadsafe(invoke(), loop)
-            self._pending[future] = settled
-            future.add_done_callback(
-                lambda completed: (
-                    settled.set()
-                    if completed.cancelled() and not started.is_set()
-                    else None
-                )
-            )
-        try:
-            return future.result(timeout=self.timeout_seconds)
-        except BaseException:
-            future.cancel()
-            raise
-        finally:
-            with self._lock:
-                if settled.is_set():
-                    self._pending.pop(future, None)
-
-    def dispatch(
-        self,
-        *,
-        action: Mapping[str, Any],
-        wake: Mapping[str, Any],
-    ) -> TransportResult:
-        if wake.get("room", {}).get("id") != self.binding.room_id:
-            return TransportResult("failed", "Hermes route no longer matches the binding")
-        kind = str(action.get("kind", ""))
-        target = (
-            action.get("target_event_id")
-            if kind in {"reply", "reaction"}
-            else action.get("origin_event_id")
-        )
-        prefix = f"{self.binding.platform}:message:"
-        if not isinstance(target, str) or not target.startswith(prefix):
-            return TransportResult("failed", "Hermes action target is outside the binding")
-        with self._lock:
-            bound = self._deliveries.get(target)
-        if bound is None:
-            return TransportResult("failed", "Hermes action target is no longer retained")
-        delivery, loop, generation = bound
-        try:
-            if kind == "message":
-                coroutine = delivery.send(str(action.get("text", "")))
-            elif kind == "reply":
-                coroutine = delivery.reply(str(action.get("text", "")))
-            elif kind == "reaction":
-                coroutine = delivery.react(
-                    str(action.get("reaction", "")),
-                    operation=str(action.get("operation", "add")),
-                )
-            else:
-                return TransportResult("unavailable", "Hermes action is unsupported")
-            receipt = self._run(
-                coroutine,
-                loop=loop,
-                generation=generation,
-            )
-        except TimeoutError:
-            return TransportResult("unknown", "Hermes acknowledgement timed out")
-        except BaseException:
-            return TransportResult("unknown", "Hermes acknowledgement was lost")
-
-        status = str(getattr(receipt, "status", "unknown"))
-        expected_kind = {
-            "message": "send",
-            "reply": "reply",
-            "reaction": "react",
-        }[kind]
-        expected_text = str(action.get("text", "")) if kind != "reaction" else None
-        expected_reply = target.removeprefix(prefix) if kind == "reply" else None
-        expected_target = target.removeprefix(prefix) if kind == "reaction" else None
-        fields_match = (
-            getattr(receipt, "platform", None) == self.binding.platform
-            and getattr(receipt, "room_id", None) == self.binding.room_id
-            and getattr(receipt, "profile", None) == self.profile
-            and _canonical_actor(
-                self.binding.platform,
-                getattr(receipt, "self_actor_id", ""),
-            )
-            == self.binding.actor_id
-            and getattr(receipt, "effect_kind", None) == expected_kind
-            and getattr(receipt, "submitted_content", None) == expected_text
-            and getattr(receipt, "reply_to_message_id", None) == expected_reply
-            and getattr(receipt, "target_message_id", None) == expected_target
-        )
-        if not fields_match:
-            return TransportResult(
-                "unknown", "Hermes acknowledgement does not match the authorized effect"
-            )
-        if status == "failed":
-            return TransportResult("failed", "Hermes platform rejected the effect")
-        if status != "sent":
-            return TransportResult("unknown", "Hermes returned no positive acknowledgement")
-        if kind == "reaction":
-            effect_id = getattr(receipt, "effect_id", None)
-            if not isinstance(effect_id, str) or not effect_id.startswith(
-                f"{self.binding.platform}:reaction:"
-            ):
-                return TransportResult("unknown", "Hermes reaction has no effect identity")
-            return TransportResult("sent", effect_id)
-        message_id = getattr(receipt, "message_id", None)
-        if message_id in (None, "", target.removeprefix(prefix)):
-            return TransportResult("unknown", "Hermes send has no new message identity")
-        return TransportResult(
-            "sent", _canonical_event(self.binding.platform, message_id)
-        )
+_ACTIVE_STOCK_TURN: ContextVar[_StockTurnTrace | None] = ContextVar(
+    "nunchi_active_stock_turn",
+    default=None,
+)
 
 
 class _RoomRuntime:
@@ -1059,34 +752,13 @@ class _RoomRuntime:
             policy=config.attention,
             receipts=receipts,
         )
-        self.transport = HermesNativeTransport(
-            binding=config.binding,
-            profile=profile,
-        )
-        scheduler = ConversationOpportunityScheduler(
+        self.scheduler = ConversationOpportunityScheduler(
             f"{config.binding.participant_id}:{config.binding.platform}:"
             f"{config.binding.room_id}:{config.binding.continuity_scope_id}"
         )
-        host = ParticipantTurnHost(
-            participant=HostStructuredParticipant(
-                client=ctx.llm,
-                profile=config.profile,
-                timeout_seconds=config.participant_timeout_seconds,
-                max_expansions=config.participant_max_expansions,
-            ),
-            observation=observation,
-            transport=self.transport,
-            scheduler=scheduler,
-            receipts=receipts,
-            participant_timeout_seconds=config.participant_timeout_seconds,
-        )
-        pipeline = NunchiV2Pipeline(
-            observation=observation,
-            attention=attention,
-            scheduler=scheduler,
-            host=host,
-        )
+        self.receipts = receipts
         self.observation = observation
+        self.attention = attention
         self.observation.mark_continuity_gap(
             delivery_id=f"hermes:startup-gap:{time.time_ns()}",
             detail=(
@@ -1094,20 +766,24 @@ class _RoomRuntime:
                 "this Nunchi process was offline"
             ),
         )
-        self.lane = AsyncDeliveryLane(pipeline)
         self._lock = threading.RLock()
+        self._ingress: dict[str, _GateIngress] = {}
+        self._pending_anchor: str | None = None
+        self._active_token: OpportunityToken | None = None
+        self._active_evaluation: _GateEvaluation | None = None
+        self._active_trace: _StockTurnTrace | None = None
+        self._cancel_requested = False
 
-    def handle(
+    def offer(
         self,
         *,
         event: Any,
         source: Any,
-        delivery: Any,
+        adapter: Any,
         self_native_id: str,
         self_username: str | None,
-        loop: asyncio.AbstractEventLoop,
         live: bool,
-    ) -> None:
+    ) -> tuple[OpportunityToken | None, bool]:
         native_message_id = getattr(event, "message_id", None)
         delivery_id = (
             f"hermes:{_canonical_event(self.config.binding.platform, native_message_id)}"
@@ -1129,7 +805,7 @@ class _RoomRuntime:
                 actors=None,
                 authorized_route=True,
             )
-            return
+            return None, live
         stamp = _timestamp(getattr(event, "timestamp", None))
         if stamp is not None:
             try:
@@ -1145,36 +821,258 @@ class _RoomRuntime:
                 actors=actors,
                 authorized_route=True,
             )
-            return
-        self.transport.bind(canonical["id"], delivery, loop)
-        self.lane.submit(
-            delivery_id=delivery_id,
-            event=canonical,
-            actors=actors,
-            authorized_route=True,
+            return None, False
+        with self._lock:
+            observed = self.observation.observe(
+                delivery_id=delivery_id,
+                event=canonical,
+                actors=actors,
+                authorized_route=True,
+            )
+            if not observed.wake_eligible or observed.audit.event_id is None:
+                return None, False
+            anchor = observed.audit.event_id
+            token = self.scheduler.offer(anchor)
+            ingress = _GateIngress(
+                event=event,
+                source=source,
+                adapter=adapter,
+                anchor_event_id=anchor,
+            )
+            if token is None:
+                if self._pending_anchor is not None:
+                    self._ingress.pop(self._pending_anchor, None)
+                self._pending_anchor = anchor
+            else:
+                self._active_token = token
+            self._ingress[anchor] = ingress
+            return token, False
+
+    def evaluate(self, token: OpportunityToken) -> _GateEvaluation | None:
+        if not self.scheduler.is_current(token):
+            return None
+        try:
+            request = self.observation.build_snapshot(token.anchor_event_id)
+        except Exception:
+            logger.exception("Nunchi could not build a Hermes attention snapshot")
+            self.scheduler.cancel()
+            return None
+        decision = self.attention.judge(
+            request,
+            cancel=token.cancel_event,
+            deadline=time.monotonic() + self.config.participant_timeout_seconds,
         )
+        if not self.scheduler.is_current(token):
+            return None
+        if decision["status"] == "ok":
+            admit = decision["effective_disposition"] != "SUPPRESS"
+        elif decision["status"] == "bypass":
+            admit = True
+        else:
+            admit = (
+                self.attention.policy.error_action == "WAKE"
+                and decision["error"]["code"] != "cancelled"
+            )
+        try:
+            wake = (
+                build_participant_wake(
+                    self.observation,
+                    request,
+                    decision,
+                )
+                if admit
+                else None
+            )
+        except Exception:
+            logger.exception("Nunchi could not build fresh Hermes wake facts")
+            self.scheduler.cancel()
+            return None
+        return _GateEvaluation(
+            request=request,
+            decision=decision,
+            admit=admit and wake is not None,
+            wake=wake,
+        )
+
+    def resolve(
+        self,
+        token: OpportunityToken,
+        evaluation: _GateEvaluation | None,
+    ) -> tuple[_GateIngress | None, OpportunityToken | None]:
+        with self._lock:
+            if evaluation is None or not self.scheduler.is_current(token):
+                self.scheduler.cancel()
+                self._ingress.clear()
+                self._pending_anchor = None
+                self._active_token = None
+                return None, None
+            ingress = self._ingress.get(token.anchor_event_id)
+            if evaluation.admit and ingress is not None:
+                self._active_token = token
+                self._active_evaluation = evaluation
+                self._active_trace = _StockTurnTrace(
+                    request_id=str(evaluation.request["request_id"]),
+                    wake=evaluation.wake or {},
+                )
+                self._cancel_requested = False
+                setattr(
+                    ingress.event,
+                    "_nunchi_v2_admitted_request_id",
+                    evaluation.request["request_id"],
+                )
+                return ingress, None
+
+            self._ingress.pop(token.anchor_event_id, None)
+            next_token = self.scheduler.complete(token)
+            self._active_token = next_token
+            if next_token is not None:
+                self._pending_anchor = None
+            return None, next_token
+
+    def stock_trace(self, event: Any) -> _StockTurnTrace | None:
+        with self._lock:
+            request_id = getattr(event, "_nunchi_v2_admitted_request_id", None)
+            if (
+                self._active_evaluation is None
+                or self._active_trace is None
+                or request_id != self._active_evaluation.request["request_id"]
+            ):
+                return None
+            return self._active_trace
+
+    @staticmethod
+    def _wake_source(decision: Mapping[str, Any]) -> str:
+        if decision["status"] == "ok":
+            return (
+                "WAKE"
+                if decision["effective_disposition"] == "WAKE"
+                else "DEFER"
+            )
+        if decision["status"] == "bypass":
+            return "PREATTENTION_BYPASS"
+        return "ERROR_FALLBACK"
+
+    def settle_stock_turn(self, event: Any) -> OpportunityToken | None:
+        with self._lock:
+            token = self._active_token
+            evaluation = self._active_evaluation
+            trace = self.stock_trace(event)
+            if (
+                token is None
+                or evaluation is None
+                or trace is None
+                or (
+                    not self.scheduler.is_current(token)
+                    and not self._cancel_requested
+                )
+            ):
+                return None
+            request = evaluation.request
+            events = request["events"]
+            if trace.assistant_observed and not trace.assistant_response.strip():
+                host_outcome = "silent"
+            else:
+                host_outcome = "unknown"
+            packet_bytes = len(
+                json.dumps(
+                    {
+                        "self": request["self"],
+                        "room": request["room"],
+                        "actors": request["actors"],
+                        "events": events,
+                        "trigger_event_id": request["trigger_event_id"],
+                        "coverage": request["coverage"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            )
+            self.receipts.append(
+                {
+                    "request_id": request["request_id"],
+                    "stage": "participant-host",
+                    "writer": "participant-host",
+                    "body": {
+                        "wake_source": self._wake_source(evaluation.decision),
+                        "packet_event_count": len(events),
+                        "packet_byte_count": packet_bytes,
+                        "delivered_event_ids": [item["id"] for item in events],
+                        "expansion_calls": 0,
+                        "invoked": True,
+                        "outcome": host_outcome,
+                    },
+                },
+                writer="participant-host",
+            )
+            if host_outcome != "silent":
+                if trace.delivery_attempted:
+                    delivery = (
+                        "sent"
+                        if trace.delivery_succeeded
+                        else "failed"
+                        if trace.processing_outcome == "FAILURE"
+                        else "unknown"
+                    )
+                    detail = trace.delivery_detail
+                elif trace.processing_outcome == "FAILURE":
+                    delivery = "failed"
+                    detail = "Hermes processing failed before an attested send"
+                elif trace.processing_outcome == "CANCELLED":
+                    delivery = "failed"
+                    detail = "Hermes processing was cancelled before settlement"
+                else:
+                    delivery = "unknown"
+                    detail = "Hermes completed without an attested transport result"
+                body: dict[str, str] = {"delivery": delivery}
+                if detail:
+                    body["detail"] = detail
+                self.receipts.append(
+                    {
+                        "request_id": request["request_id"],
+                        "stage": "transport",
+                        "writer": "transport",
+                        "body": body,
+                    },
+                    writer="transport",
+                )
+
+            self._ingress.pop(token.anchor_event_id, None)
+            next_token = (
+                None
+                if self._cancel_requested
+                else self.scheduler.complete(token)
+            )
+            self._active_token = next_token
+            self._active_evaluation = None
+            self._active_trace = None
+            self._cancel_requested = False
+            if next_token is not None:
+                self._pending_anchor = None
+            return next_token
 
     def cancel(self) -> None:
         with self._lock:
-            self.transport.cancel()
-            self.lane.cancel()
-        if not self.transport.settle(30.0):
-            logger.warning("Hermes native effect did not settle after cancellation")
+            self.scheduler.cancel()
+            self._ingress.clear()
+            self._pending_anchor = None
+            if self._active_evaluation is not None and self._active_trace is not None:
+                self._cancel_requested = True
+            else:
+                self._active_token = None
+                self._active_evaluation = None
+                self._active_trace = None
+                self._cancel_requested = False
 
     def restart(self) -> None:
         with self._lock:
-            self.transport.cancel()
-            self.lane.restart()
-        if not self.transport.settle(30.0):
-            logger.warning("Hermes native effect did not settle across restart")
+            self.cancel()
+            self.observation.restart()
 
     def shutdown(self, timeout: float) -> bool:
-        with self._lock:
-            self.transport.cancel()
-            self.lane.cancel()
-        transport_settled = self.transport.settle(timeout)
-        lane_settled = self.lane.drain(timeout)
-        return transport_settled and lane_settled
+        del timeout
+        self.cancel()
+        return True
 
 
 def time_ns_digest(event: Any, source: Any) -> str:
@@ -1262,64 +1160,138 @@ class NunchiHermesV2Plugin:
             return None
         return self._rooms[(_platform_name(source), _room_id(source))]
 
-    async def handle(
+    async def _drive(
         self,
         *,
+        runtime: _RoomRuntime,
+        token: OpportunityToken,
+        stock_handle: Callable[[Any, Any], Any],
+    ) -> None:
+        current: OpportunityToken | None = token
+        while current is not None:
+            evaluation = await asyncio.to_thread(runtime.evaluate, current)
+            ingress, current = runtime.resolve(current, evaluation)
+            if ingress is None:
+                continue
+            await stock_handle(ingress.adapter, ingress.event)
+            return
+
+    async def gate_ingress(
+        self,
+        *,
+        adapter: Any,
         event: Any,
-        source: Any,
-        delivery: Any,
-        self_native_id: str,
-        self_username: str | None,
-        live: bool = True,
+        stock_handle: Callable[[Any, Any], Any],
     ) -> bool:
+        native_events = getattr(
+            event,
+            _NATIVE_BATCH_EVENTS_ATTRIBUTE,
+            None,
+        )
+        if (
+            isinstance(native_events, tuple)
+            and native_events
+            and not bool(
+                getattr(event, _NATIVE_BATCH_DISPATCH_ATTRIBUTE, False)
+            )
+        ):
+            for native_event in native_events:
+                setattr(
+                    native_event,
+                    _NATIVE_BATCH_DISPATCH_ATTRIBUTE,
+                    True,
+                )
+                await self.gate_ingress(
+                    adapter=adapter,
+                    event=native_event,
+                    stock_handle=stock_handle,
+                )
+            return True
+        source = getattr(event, "source", None)
         runtime = self._runtime(source)
         if runtime is None:
             return False
-        loop = asyncio.get_running_loop()
-        runtime.handle(
-            event=event,
-            source=source,
-            delivery=delivery,
-            self_native_id=self_native_id,
-            self_username=self_username,
-            loop=loop,
-            live=live,
-        )
-        # The native API's delivery capability is callback-scoped. Keeping the
-        # hook alive until settlement also gives the 0.19 shim identical order.
-        await asyncio.to_thread(runtime.lane.drain)
+        try:
+            platform = _platform_name(source)
+            self_native_id, self_username = _self_identity(adapter, platform)
+            live = not bool(
+                getattr(event, "_hermes_startup_restore_replay", False)
+            )
+            token, wake_without_suppression = runtime.offer(
+                event=event,
+                source=source,
+                adapter=adapter,
+                self_native_id=self_native_id,
+                self_username=self_username,
+                live=live,
+            )
+        except (AttributeError, TypeError, ValueError, ValidationError) as exc:
+            logger.warning(
+                "Nunchi lacks complete native facts for this Hermes adapter; "
+                "running the stock Hermes turn without social suppression: %s",
+                exc,
+            )
+            await stock_handle(adapter, event)
+            return True
+        if wake_without_suppression:
+            logger.warning(
+                "Nunchi retained an unconstructable Hermes event and ran the "
+                "stock turn without social suppression"
+            )
+            await stock_handle(adapter, event)
+            return True
+        if token is not None:
+            await self._drive(
+                runtime=runtime,
+                token=token,
+                stock_handle=stock_handle,
+            )
         return True
 
-    async def gateway_message(
+    async def complete_stock_turn(
         self,
         *,
+        adapter: Any,
         event: Any,
-        route: Any,
-        delivery: Any,
-        **_: Any,
-    ) -> Mapping[str, str] | None:
-        runtime = self._runtime(route)
+        stock_handle: Callable[[Any, Any], Any],
+    ) -> None:
+        runtime = self._runtime(getattr(event, "source", None))
         if runtime is None:
+            return
+        next_token = runtime.settle_stock_turn(event)
+        if next_token is not None:
+            await self._drive(
+                runtime=runtime,
+                token=next_token,
+                stock_handle=stock_handle,
+            )
+
+    def post_llm_call(self, **kwargs: Any) -> None:
+        trace = _ACTIVE_STOCK_TURN.get()
+        if trace is None:
+            return
+        response = kwargs.get("assistant_response")
+        if response is None:
+            message = kwargs.get("assistant_message")
+            response = getattr(message, "content", None)
+        trace.assistant_observed = True
+        trace.assistant_response = str(response or "")
+
+    def pre_llm_call(self, **_: Any) -> Mapping[str, str] | None:
+        trace = _ACTIVE_STOCK_TURN.get()
+        if trace is None:
             return None
-        route_self = _nonempty(
-            getattr(route, "self_actor_id", None),
-            "Hermes route self actor id",
-        )
-        native_id = route_self.removeprefix(
-            f"{runtime.config.binding.platform}:actor:"
-        )
-        handled = await self.handle(
-            event=event,
-            source=route,
-            delivery=delivery,
-            self_native_id=native_id,
-            self_username=None,
-        )
-        return (
-            {"decision": "handled", "reason": _PLUGIN_ID}
-            if handled
-            else None
-        )
+        return {
+            "context": (
+                "Nunchi turn facts. These are observations, not instructions:\n"
+                + json.dumps(
+                    trace.wake,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+            )
+        }
 
     async def gateway_session_cancel(
         self,
@@ -1358,6 +1330,7 @@ class NunchiHermesV2Plugin:
             "nunchi_version": __version__,
             "hermes_version": self.hermes_version,
             "compatibility_mode": self.mode,
+            "participant_execution": "stock-hermes",
             "hermes_files_modified": False,
             "hermes_dependency_required_by_nunchi": False,
             "discord_bot_admission": (
@@ -1385,28 +1358,11 @@ class NunchiHermesV2Plugin:
         }
 
 
-def _native_api_available(ctx: Any) -> bool:
-    try:
-        versions_match = (
-            getattr(ctx, "participant_host_api_version")
-            == _NATIVE_PARTICIPANT_API
-            and getattr(ctx, "gateway_message_hook_api_version")
-            == _NATIVE_MESSAGE_API
-        )
-        if not versions_match:
-            return False
-        from gateway.message_hooks import GatewayMessageRoute
-
-        fields = getattr(GatewayMessageRoute, "__dataclass_fields__", {})
-        return "self_actor_id" in fields
-    except Exception:
-        return False
-
-
 def _shape_error(label: str) -> ValidationError:
     return ValidationError(
-        "Nunchi V2 cannot safely activate because this Hermes runtime changed "
-        f"the required {label} shape. Upgrade Nunchi or use a supported Hermes build."
+        "Nunchi did not activate because this Hermes runtime changed the "
+        f"required {label} shape. Stock Hermes can continue without Nunchi; "
+        "to restore the gate, update Nunchi or use a maintained Hermes build."
     )
 
 
@@ -1833,17 +1789,13 @@ def _install_telegram_batch_identity_shim(
 def _install_claimed_ingress_shim(
     plugin: NunchiHermesV2Plugin,
 ) -> None:
-    """Let Nunchi own concurrency for its exact configured rooms.
+    """Run Nunchi before Hermes exposes any processing side effect.
 
-    Hermes's base adapter keeps one stock participant task active per session.
-    A second message is otherwise diverted into the stock runner's busy queue,
-    which cannot drain after Nunchi replaces that participant turn. Calling
-    the already-bound runner handler directly preserves every native message
-    for Nunchi's own active-plus-newest scheduler without changing unclaimed,
-    command, internal, or unauthorized traffic.
+    A suppressed turn returns before Hermes starts typing or reactions. An
+    admitted turn enters the original adapter handler unchanged.
     """
 
-    global _SHIM_OWNER
+    global _ORIGINAL_BASE_HANDLE, _SHIM_OWNER
     try:
         from gateway.platforms.base import BasePlatformAdapter
     except (ImportError, ModuleNotFoundError) as exc:
@@ -1870,19 +1822,12 @@ def _install_claimed_ingress_shim(
                 if callable(getattr(event, "get_command", None))
                 else None
             )
-            if (
-                owner is None
-                or source is None
-                or not owner.claims(source)
-                or bool(getattr(event, "internal", False))
-                or bool(command)
-            ):
+            if owner is None or source is None or not owner.claims(source):
                 return await current_handle(self, event)
 
             runner = getattr(self, "gateway_runner", None)
             authorized = getattr(runner, "_is_user_authorized", None)
-            handler = getattr(self, "_message_handler", None)
-            if not callable(authorized) or not callable(handler):
+            if not callable(authorized):
                 return await current_handle(self, event)
             try:
                 if not bool(authorized(source)):
@@ -1890,314 +1835,172 @@ def _install_claimed_ingress_shim(
             except Exception:
                 return await current_handle(self, event)
 
-            return await handler(event)
-
-        handle_message.__nunchi_v2_ingress__ = True  # type: ignore[attr-defined]
-        BasePlatformAdapter.handle_message = handle_message
-        _SHIM_OWNER = plugin
-
-
-def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
-    """Monkeypatch a checked process-local adapter around Hermes's runner.
-
-    The shim claims only configured rooms. Unauthorized traffic, Hermes
-    commands, internal events, and unconfigured rooms continue through the
-    stock runner unchanged.
-    """
-
-    global _SHIM_OWNER
-    from gateway.run import GatewayRunner
-
-    with _SHIM_LOCK:
-        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
-            raise ValidationError("only one Nunchi V2 Hermes plugin may be active")
-        current_handle = GatewayRunner._handle_message
-        current_restore_drain = getattr(
-            GatewayRunner,
-            "_drain_startup_restore_queue",
-            None,
-        )
-        current_restore_run = getattr(
-            GatewayRunner,
-            "_run_startup_resume_event",
-            None,
-        )
-        current_stop = GatewayRunner.stop
-        if getattr(current_handle, "__nunchi_v2_shim__", False):
-            _SHIM_OWNER = plugin
-            return
-        _require_signature(
-            current_handle,
-            required=("self", "event"),
-            label="message handler",
-        )
-        _require_signature(
-            current_stop,
-            required=("self", "restart"),
-            label="shutdown handler",
-        )
-        _require_signature(
-            current_restore_drain,
-            required=("self",),
-            label="startup restore drain",
-        )
-        _require_signature(
-            current_restore_run,
-            required=("self", "adapter", "event", "session_key"),
-            label="startup restore runner",
-        )
-        _require_signature(
-            GatewayRunner._is_user_authorized,
-            required=("self", "source"),
-            label="authorization check",
-        )
-        _require_signature(
-            GatewayRunner._adapter_for_source,
-            required=("self", "source"),
-            label="adapter lookup",
-        )
-
-        async def handle_message(self: Any, event: Any) -> Any:
-            owner = _SHIM_OWNER
-            source = getattr(event, "source", None)
-            if owner is None or source is None or not owner.claims(source):
+            if bool(getattr(event, "internal", False)):
                 return await current_handle(self, event)
-            native_events = getattr(
-                event,
-                _NATIVE_BATCH_EVENTS_ATTRIBUTE,
-                None,
-            )
-            if (
-                isinstance(native_events, tuple)
-                and native_events
-                and not bool(
-                    getattr(event, _NATIVE_BATCH_DISPATCH_ATTRIBUTE, False)
-                )
-            ):
-                for native_event in native_events:
-                    native_source = getattr(native_event, "source", None)
-                    if native_source is None or not owner.claims(native_source):
-                        logger.error(
-                            "Nunchi V2 rejected an inconsistent Telegram text batch"
-                        )
-                        return None
-                    setattr(
-                        native_event,
-                        _NATIVE_BATCH_DISPATCH_ATTRIBUTE,
-                        True,
-                    )
-                    await handle_message(self, native_event)
-                return None
-            if (
-                getattr(self, "_startup_restore_in_progress", False)
-                and not bool(getattr(event, "internal", False))
-                and not bool(getattr(event, "_hermes_startup_restore_replay", False))
-            ):
-                # Let Hermes retain the event and replay it after restoration.
-                # The replay marker makes Nunchi retain it as context only.
-                return await current_handle(self, event)
-            command = (
-                event.get_command()
-                if callable(getattr(event, "get_command", None))
-                else None
-            )
             if command:
-                try:
-                    authorized_command = bool(
-                        self._is_user_authorized(source)
-                    )
-                except Exception:
-                    authorized_command = False
-                if not authorized_command:
-                    return await current_handle(self, event)
-                runtime = owner._runtime(source)
-                nunchi_active = (
-                    runtime is not None
-                    and not runtime.lane.drain(0)
-                )
                 if command in {"stop", "new", "reset", "restart"}:
                     await owner.gateway_session_cancel(
                         route=source,
                         reason=command,
                     )
-                if command == "stop" and nunchi_active:
-                    try:
-                        from agent.i18n import t
-                        from gateway.platforms.base import EphemeralReply
-
-                        return EphemeralReply(t("gateway.stop.stopped"))
-                    except (ImportError, ModuleNotFoundError):
-                        return "Stopped."
-                return await current_handle(self, event)
-            if bool(getattr(event, "internal", False)):
-                return await current_handle(self, event)
-            try:
-                authorized = bool(self._is_user_authorized(source))
-            except Exception:
-                authorized = False
-            if not authorized:
                 return await current_handle(self, event)
 
-            # Preserve the host-owned prologue that precedes Hermes's agent
-            # turn. These calls are process-local bookkeeping and plugin
-            # policy; Nunchi still replaces only the participant turn.
-            try:
-                from gateway.session_context import reset_session_vars
-
-                reset_session_vars()
-            except Exception:
-                logger.debug("Hermes session-context reset was unavailable", exc_info=True)
-            note_inbound = getattr(self, "_scale_to_zero_note_real_inbound", None)
-            if callable(note_inbound):
-                note_inbound()
-
-            run_pre_dispatch = getattr(self, "_run_pre_gateway_dispatch", None)
-            if callable(run_pre_dispatch):
-                if run_pre_dispatch(event):
-                    return None
-            else:
-                try:
-                    from hermes_cli.plugins import invoke_hook
-
-                    hook_results = invoke_hook(
-                        "pre_gateway_dispatch",
-                        event=event,
-                        gateway=self,
-                        session_store=getattr(self, "session_store", None),
-                    )
-                except Exception:
-                    logger.warning(
-                        "Hermes pre_gateway_dispatch invocation failed",
-                        exc_info=True,
-                    )
-                    hook_results = []
-                for result in hook_results:
-                    if not isinstance(result, Mapping):
-                        continue
-                    action = result.get("action")
-                    if action == "skip":
-                        return None
-                    if action == "rewrite":
-                        rewritten = result.get("text")
-                        if isinstance(rewritten, str):
-                            try:
-                                event = replace(event, text=rewritten)
-                            except TypeError:
-                                try:
-                                    event.text = rewritten
-                                except (AttributeError, TypeError):
-                                    logger.error(
-                                        "Hermes dispatch rewrite could not be applied"
-                                    )
-                                    return None
-                            source = getattr(event, "source", source)
-                            if (
-                                callable(getattr(event, "get_command", None))
-                                and event.get_command()
-                            ):
-                                logger.error(
-                                    "Hermes dispatch rewrite produced a command; "
-                                    "dropping it instead of bypassing command controls"
-                                )
-                                return None
-                        break
-                    if action == "allow":
-                        break
-            adapter = self._adapter_for_source(source)
-            if adapter is None:
-                logger.error("Nunchi V2 claimed route has no live Hermes adapter")
+            handled = await owner.gate_ingress(
+                adapter=self,
+                event=event,
+                stock_handle=current_handle,
+            )
+            if handled:
                 return None
+            return await current_handle(self, event)
+
+        handle_message.__nunchi_v2_ingress__ = True  # type: ignore[attr-defined]
+        BasePlatformAdapter.handle_message = handle_message
+        _ORIGINAL_BASE_HANDLE = current_handle
+        _SHIM_OWNER = plugin
+
+
+def _install_stock_lifecycle_shim(plugin: NunchiHermesV2Plugin) -> None:
+    """Observe stock Hermes settlement without replacing its participant."""
+
+    global _SHIM_OWNER
+    try:
+        from gateway.platforms.base import BasePlatformAdapter
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("base platform lifecycle") from exc
+
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi Hermes plugin may be active")
+        current_process = getattr(
+            BasePlatformAdapter,
+            "_process_message_background",
+            None,
+        )
+        current_hook = getattr(BasePlatformAdapter, "_run_processing_hook", None)
+        current_send = getattr(BasePlatformAdapter, "_send_with_retry", None)
+        if getattr(current_process, "__nunchi_stock_lifecycle__", False):
+            _SHIM_OWNER = plugin
+            return
+        _require_signature(
+            current_process,
+            required=("self", "event", "session_key"),
+            label="stock Hermes processing lifecycle",
+        )
+        _require_signature(
+            current_hook,
+            required=("self", "hook_name"),
+            label="stock Hermes processing hook",
+        )
+        if _ORIGINAL_BASE_HANDLE is None:
+            raise _shape_error("original base platform ingress")
+
+        async def process_message_background(
+            self: Any,
+            event: Any,
+            session_key: str,
+        ) -> Any:
+            owner = _SHIM_OWNER
+            source = getattr(event, "source", None)
+            runtime = owner._runtime(source) if owner is not None else None
+            trace = runtime.stock_trace(event) if runtime is not None else None
+            if trace is None:
+                return await current_process(self, event, session_key)
+            context_token = _ACTIVE_STOCK_TURN.set(trace)
             try:
-                platform = _platform_name(source)
-                self_native_id, self_username = _self_identity(adapter, platform)
-                delivery = Hermes019Delivery(
-                    adapter=adapter,
-                    event=event,
-                    source=source,
-                    profile=_profile_name(source, owner.config.hermes_profile),
-                    self_native_id=self_native_id,
-                )
-                live = not bool(
-                    getattr(event, "_hermes_startup_restore_replay", False)
-                )
-                await owner.handle(
-                    event=event,
-                    source=source,
-                    delivery=delivery,
-                    self_native_id=self_native_id,
-                    self_username=self_username,
-                    live=live,
-                )
+                return await current_process(self, event, session_key)
             except asyncio.CancelledError:
-                await owner.gateway_session_cancel(
-                    route=source,
-                    reason="cancelled",
-                )
+                trace.processing_outcome = trace.processing_outcome or "CANCELLED"
                 raise
             except Exception:
-                # A claimed route never falls through to a second, stock
-                # participant turn after Nunchi has failed.
-                logger.exception("Nunchi V2 failed closed for a claimed Hermes route")
-            return None
+                trace.processing_outcome = trace.processing_outcome or "FAILURE"
+                raise
+            finally:
+                _ACTIVE_STOCK_TURN.reset(context_token)
+                if owner is not None:
+                    try:
+                        await owner.complete_stock_turn(
+                            adapter=self,
+                            event=event,
+                            stock_handle=_ORIGINAL_BASE_HANDLE,
+                        )
+                    except Exception:
+                        if runtime is not None:
+                            runtime.cancel()
+                        logger.exception(
+                            "Nunchi could not persist stock Hermes settlement"
+                        )
 
-        async def drain_startup_restore_queue(self: Any) -> int:
-            """Replay claimed restored messages one at a time.
-
-            Hermes's stock drain starts an adapter background task and
-            immediately dispatches the next restored message. Its busy-input
-            queue belongs to the stock participant runner, which Nunchi
-            intentionally replaces, so that second message would never reach
-            Nunchi. Waiting for each claimed adapter task preserves every
-            native message boundary and leaves unclaimed routes unchanged.
-            """
-
-            owner = _SHIM_OWNER
-            queue = getattr(self, "_startup_restore_queue", None)
+        async def run_processing_hook(
+            self: Any,
+            hook_name: str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            trace = _ACTIVE_STOCK_TURN.get()
             if (
-                owner is None
-                or not isinstance(queue, list)
-                or not any(
-                    owner.claims(getattr(event, "source", None))
-                    for event in queue
-                )
+                trace is not None
+                and hook_name == "on_processing_complete"
+                and len(args) >= 2
             ):
-                return await current_restore_drain(self)
+                raw = getattr(args[1], "name", None) or getattr(
+                    args[1],
+                    "value",
+                    None,
+                )
+                trace.processing_outcome = str(raw or args[1]).upper()
+            return await current_hook(self, hook_name, *args, **kwargs)
 
-            from gateway.session import build_session_key
+        process_message_background.__nunchi_stock_lifecycle__ = True  # type: ignore[attr-defined]
+        run_processing_hook.__nunchi_stock_lifecycle__ = True  # type: ignore[attr-defined]
+        BasePlatformAdapter._process_message_background = process_message_background
+        BasePlatformAdapter._run_processing_hook = run_processing_hook
 
-            drained = 0
-            while queue:
-                event = queue.pop(0)
-                source = getattr(event, "source", None)
-                adapter = self._adapter_for_source(source)
-                if adapter is None:
-                    continue
-                try:
-                    setattr(event, "_hermes_startup_restore_replay", True)
-                except Exception:
-                    pass
-                if source is not None and owner.claims(source):
-                    session_key = build_session_key(
-                        source,
-                        group_sessions_per_user=adapter.config.extra.get(
-                            "group_sessions_per_user",
-                            True,
-                        ),
-                        thread_sessions_per_user=adapter.config.extra.get(
-                            "thread_sessions_per_user",
-                            False,
-                        ),
+        if callable(current_send):
+            async def send_with_retry(
+                self: Any,
+                *args: Any,
+                **kwargs: Any,
+            ) -> Any:
+                result = await current_send(self, *args, **kwargs)
+                trace = _ACTIVE_STOCK_TURN.get()
+                if trace is not None and result is not None:
+                    trace.delivery_attempted = True
+                    trace.delivery_succeeded = (
+                        trace.delivery_succeeded
+                        or bool(getattr(result, "success", False))
                     )
-                    await current_restore_run(
-                        self,
-                        adapter,
-                        event,
-                        session_key,
-                    )
-                else:
-                    await adapter.handle_message(event)
-                drained += 1
-            return drained
+                    message_id = getattr(result, "message_id", None)
+                    error = getattr(result, "error", None)
+                    if message_id not in (None, ""):
+                        trace.delivery_detail = str(message_id)
+                    elif error:
+                        trace.delivery_detail = str(error)
+                return result
+
+            send_with_retry.__nunchi_stock_lifecycle__ = True  # type: ignore[attr-defined]
+            BasePlatformAdapter._send_with_retry = send_with_retry
+        _SHIM_OWNER = plugin
+
+
+def _install_gateway_shutdown_shim(plugin: NunchiHermesV2Plugin) -> None:
+    """Discard pending Nunchi work before Hermes drains the gateway."""
+
+    global _SHIM_OWNER
+    try:
+        from gateway.run import GatewayRunner
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("gateway shutdown lifecycle") from exc
+    with _SHIM_LOCK:
+        current_stop = getattr(GatewayRunner, "stop", None)
+        if getattr(current_stop, "__nunchi_stock_lifecycle__", False):
+            _SHIM_OWNER = plugin
+            return
+        _require_signature(
+            current_stop,
+            required=("self",),
+            label="gateway shutdown lifecycle",
+        )
 
         async def stop(self: Any, *args: Any, **kwargs: Any) -> Any:
             owner = _SHIM_OWNER
@@ -2205,12 +2008,7 @@ def _install_compatibility_shim(plugin: NunchiHermesV2Plugin) -> None:
                 await owner.shutdown()
             return await current_stop(self, *args, **kwargs)
 
-        handle_message.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
-        drain_startup_restore_queue.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
-        stop.__nunchi_v2_shim__ = True  # type: ignore[attr-defined]
-        _install_telegram_batch_identity_shim(plugin)
-        GatewayRunner._handle_message = handle_message
-        GatewayRunner._drain_startup_restore_queue = drain_startup_restore_queue
+        stop.__nunchi_stock_lifecycle__ = True  # type: ignore[attr-defined]
         GatewayRunner.stop = stop
         _SHIM_OWNER = plugin
 
@@ -2244,10 +2042,7 @@ def register(
     else:
         dashboard_installer()
     config = (config_loader or _default_config_loader)(profile)
-    if _native_api_available(ctx):
-        mode = "native-v2-hooks"
-    else:
-        mode = "runtime-monkeypatch"
+    mode = "process-local-gate"
     plugin = NunchiHermesV2Plugin(
         config=config,
         ctx=ctx,
@@ -2255,13 +2050,12 @@ def register(
         mode=mode,
     )
     _install_discord_room_admission_shim(plugin)
-    if mode == "native-v2-hooks":
-        ctx.register_hook("gateway_message", plugin.gateway_message)
-        ctx.register_hook("gateway_session_cancel", plugin.gateway_session_cancel)
-        ctx.register_hook("gateway_shutdown", plugin.gateway_shutdown)
-    else:
-        _install_claimed_ingress_shim(plugin)
-        _install_compatibility_shim(plugin)
+    _install_telegram_batch_identity_shim(plugin)
+    _install_claimed_ingress_shim(plugin)
+    _install_stock_lifecycle_shim(plugin)
+    _install_gateway_shutdown_shim(plugin)
+    ctx.register_hook("pre_llm_call", plugin.pre_llm_call)
+    ctx.register_hook("post_llm_call", plugin.post_llm_call)
 
     def probe_command(raw_args: str) -> str:
         if (raw_args or "").strip().lower() not in {"", "probe", "status"}:
@@ -2278,8 +2072,6 @@ def register(
 
 
 __all__ = [
-    "Hermes019Delivery",
-    "HermesNativeTransport",
     "HermesPluginConfig",
     "HermesRoomConfig",
     "NunchiHermesV2Plugin",

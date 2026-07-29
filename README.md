@@ -17,9 +17,10 @@ effect commit point.
 This candidate implements the shared foundation, generic/Discord/Matrix/
 Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
 Codex room presence, and the Hermes V2 platform integration. Hermes reuses its
-installed Discord and Telegram adapters through safe native hooks or a checked
-runtime monkeypatch from 0.19.0 through the tested current upstream head.
-Claude Code remains outside this candidate.
+normal participant pipeline behind a checked process-local gate from 0.19.0
+through the tested current upstream head. Its prompt, main model, memory,
+tools, reactions, cancellation, delivery, and platform adapters stay owned by
+Hermes. Claude Code remains outside this candidate.
 
 The Hermes source and clean-wheel path are implemented. Configured installed
 runtime and live platform acceptance remain separate gates until their

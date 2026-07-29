@@ -32,11 +32,28 @@ candidate.
 
 Room payloads are never trusted configuration.
 
-The shared runtime owns the attention prompt, attention model selection,
-judgment schema, normal-turn prompt, action schema, policy, and lifecycle.
-A platform plugin supplies only its trusted model-call capability plus native
-identity, ingress, persistence, cancellation, and transport. It must not copy
-or rewrite those shared product behaviors.
+The shared runtime always owns the attention prompt, attention model selection,
+judgment schema, policy, scheduling, and wake facts. For Nunchi-owned
+participants it also owns the normal-turn prompt and action schema. A platform
+plugin must not copy or rewrite those shared product behaviors.
+
+### Host-owned participant pipelines
+
+Hermes already owns a complete participant pipeline. Its Nunchi integration
+therefore uses the shared observation, attention, scheduler, and wake builder
+as a gate around that pipeline:
+
+1. Nunchi decides before Hermes starts visible processing.
+2. `SUPPRESS` stops there.
+3. An admitted turn receives the shared bounded wake facts through Hermes's
+   context hook.
+4. Hermes runs its original prompt, main model, memory, tools, reactions,
+   cancellation, delivery, and platform adapter.
+5. Nunchi observes completion and writes only the lifecycle facts exposed by
+   Hermes.
+
+This is the normal Hermes participant implementation for the contract. The
+plugin must not recreate it with a second model call or direct send path.
 
 ## Shared Discord consumer contract
 

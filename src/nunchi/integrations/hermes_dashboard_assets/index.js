@@ -116,13 +116,14 @@
     return next;
   }
 
-  function defaultRoom(document) {
+  function defaultRoom(document, channels) {
     var suffix = String(Date.now());
+    var platform = channels && channels.length ? channels[0].platform : "discord";
     return {
       binding: {
         participant_id: "agent",
-        actor_id: "discord:actor:replace-me",
-        platform: "discord",
+        actor_id: platform + ":actor:replace-me",
+        platform: platform,
         room_id: "",
         continuity_scope_id: "room-" + suffix,
         names: ["Agent"],
@@ -133,8 +134,8 @@
         document: {
           profile_id: "profile-" + suffix,
           participant_id: "agent",
-          actor_id: "discord:actor:replace-me",
-          instructions: "Follow the participant's role and respond concisely.",
+          actor_id: platform + ":actor:replace-me",
+          instructions: "Judge whether this participant should take the turn.",
           provenance: "operator:hermes-dashboard"
         }
       },
@@ -163,6 +164,16 @@
     var attentionModel = (room.attention || {}).model || {};
     var policy = (room.attention || {}).policy || {};
     var base = ["rooms", index];
+    var platforms = Array.from(new Set(
+      [binding.platform].concat((props.channels || []).map(function (item) {
+        return item.platform;
+      })).filter(Boolean)
+    )).sort().map(function (platform) {
+      return {
+        value: platform,
+        label: platform.charAt(0).toUpperCase() + platform.slice(1)
+      };
+    });
     var channels = [{ value: "", label: "Choose a discovered room" }].concat(
       (props.channels || []).filter(function (item) {
         return item.platform === binding.platform;
@@ -180,6 +191,27 @@
       var next = setPath(doc, base.concat(["binding", name]), value);
       if (inline) {
         next = setPath(next, base.concat(["profile", "document", name]), value);
+      }
+      props.onDocument(next);
+    }
+
+    function updatePlatform(value) {
+      var previous = binding.platform || "";
+      var next = setPath(doc, base.concat(["binding", "platform"]), value);
+      var actor = binding.actor_id || "";
+      if (previous && actor.indexOf(previous + ":actor:") === 0) {
+        next = setPath(
+          next,
+          base.concat(["binding", "actor_id"]),
+          value + actor.slice(previous.length)
+        );
+        if (inline) {
+          next = setPath(
+            next,
+            base.concat(["profile", "document", "actor_id"]),
+            value + actor.slice(previous.length)
+          );
+        }
       }
       props.onDocument(next);
     }
@@ -204,11 +236,8 @@
       h(CardContent, null,
         h("div", { style: styles.row },
           selectField("Platform", binding.platform || "discord", function (value) {
-            update(["binding", "platform"], value);
-          }, [
-            { value: "discord", label: "Discord" },
-            { value: "telegram", label: "Telegram" }
-          ]),
+            updatePlatform(value);
+          }, platforms),
           selectField("Discovered room", binding.room_id || "", function (value) {
             update(["binding", "room_id"], value);
           }, channels),
@@ -233,16 +262,14 @@
               return item.trim();
             }).filter(Boolean));
           }, { help: "Comma-separated names used for exact mention evidence." }),
-          field("Participant timeout (seconds)",
+          field("Gate deadline (seconds)",
             (room.participant || {}).timeout_seconds,
             function (value) {
               update(["participant", "timeout_seconds"], Number(value));
-            }, { type: "number" }),
-          field("Maximum context expansions",
-            (room.participant || {}).max_expansions,
-            function (value) {
-              update(["participant", "max_expansions"], Number(value));
-            }, { type: "number" })
+            }, {
+              type: "number",
+              help: "Maximum time for Nunchi's attention decision. Hermes keeps its own turn timeout."
+            })
         ),
         inline
           ? h("div", null,
@@ -254,9 +281,13 @@
                   update(["profile", "document", "provenance"], value);
                 })
               ),
-              field("Participant instructions", inline.instructions, function (value) {
+              field("Attention identity context", inline.instructions, function (value) {
                 update(["profile", "document", "instructions"], value);
-              }, { multiline: true, rows: 4 })
+              }, {
+                multiline: true,
+                rows: 4,
+                help: "Used only to judge whether this participant should act. Hermes's normal prompt and model remain unchanged."
+              })
             )
           : h("div", { style: styles.status },
               "This room uses an external pinned participant profile. Edit it in Advanced JSON."
@@ -417,7 +448,7 @@
           onClick: function () {
             var next = clone(document);
             next.rooms = next.rooms || [];
-            next.rooms.push(defaultRoom(document));
+            next.rooms.push(defaultRoom(document, snapshot.channels || []));
             props.onDocument(next);
           }
         }, "Add room"),
