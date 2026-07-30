@@ -76,10 +76,37 @@ _CONFIGURED_ROUTE_CONTEXT: ContextVar[bool] = ContextVar(
     "nunchi_configured_hermes_route",
     default=False,
 )
+_STOCK_PARTICIPANT_SILENCE_MARKERS = frozenset({"<|eos|>"})
 
 
 class HermesSetupRequired(ValidationError):
     """Nunchi has no saved room configuration for this Hermes profile."""
+
+
+def _is_stock_participant_silence_marker(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and value.strip() in _STOCK_PARTICIPANT_SILENCE_MARKERS
+    )
+
+
+def _is_partial_stock_participant_silence_marker(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    candidate = value.strip()
+    return bool(candidate) and any(
+        marker.startswith(candidate)
+        for marker in _STOCK_PARTICIPANT_SILENCE_MARKERS
+    )
+
+
+def _stock_participant_response(value: Any) -> str:
+    """Map exact Hermes/model silence markers to no participant action."""
+
+    response = str(value or "")
+    if _is_stock_participant_silence_marker(response):
+        return ""
+    return response
 
 
 @dataclass
@@ -1817,7 +1844,8 @@ class _RoomRuntime:
         if not trace.host_handoff_persisted:
             host_outcome = (
                 "silent"
-                if trace.assistant_observed
+                if trace.processing_outcome == "SUCCESS"
+                and trace.assistant_observed
                 and not trace.assistant_response.strip()
                 and trace.native_effect_count == 0
                 else "unknown"
@@ -2234,7 +2262,7 @@ class NunchiHermesV2Plugin:
             message = kwargs.get("assistant_message")
             response = getattr(message, "content", None)
         trace.assistant_observed = True
-        trace.assistant_response = str(response or "")
+        trace.assistant_response = _stock_participant_response(response)
 
     def pre_tool_call(self, *, tool_name: str = "tool", **_: Any) -> Mapping[str, str] | None:
         """Disable tools until Hermes exposes a safe final-effect seam."""
@@ -4240,6 +4268,249 @@ def _install_stock_lifecycle_shim(plugin: NunchiHermesV2Plugin) -> None:
         _SHIM_OWNER = plugin
 
 
+def _install_stock_silence_filter_shim(
+    plugin: NunchiHermesV2Plugin,
+) -> None:
+    """Translate one active-turn marker before Hermes can emit text or TTS."""
+
+    global _SHIM_OWNER
+    try:
+        from gateway import response_filters
+        from gateway import stream_consumer
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("gateway participant silence filters") from exc
+
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi Hermes plugin may be active")
+        current_response = getattr(
+            response_filters,
+            "is_intentional_silence_response",
+            None,
+        )
+        current_agent_result = getattr(
+            response_filters,
+            "is_intentional_silence_agent_result",
+            None,
+        )
+        current_partial = getattr(
+            response_filters,
+            "is_partial_silence_marker",
+            None,
+        )
+        stream_response = getattr(
+            stream_consumer,
+            "_is_intentional_silence_response",
+            None,
+        )
+        stream_partial = getattr(
+            stream_consumer,
+            "_is_partial_silence_marker",
+            None,
+        )
+        _require_signature(
+            current_response,
+            required=("response",),
+            label="gateway whole-response silence filter",
+        )
+        _require_signature(
+            current_agent_result,
+            required=("agent_result", "response"),
+            label="gateway agent-result silence filter",
+        )
+        _require_signature(
+            current_partial,
+            required=("text",),
+            label="gateway streaming silence filter",
+        )
+        _require_signature(
+            stream_response,
+            required=("response",),
+            label="gateway streaming whole-response silence alias",
+        )
+        _require_signature(
+            stream_partial,
+            required=("text",),
+            label="gateway streaming partial-silence alias",
+        )
+        consumer = getattr(stream_consumer, "GatewayStreamConsumer", None)
+        run = getattr(consumer, "run", None)
+        _require_signature(
+            run,
+            required=("self",),
+            label="gateway stream consumer",
+        )
+        code = getattr(run, "__code__", None)
+        required_aliases = {
+            "_is_intentional_silence_response",
+            "_is_partial_silence_marker",
+        }
+        if (
+            not inspect.iscoroutinefunction(run)
+            or code is None
+            or not required_aliases.issubset(set(code.co_names))
+        ):
+            raise _shape_error("gateway streaming silence call sites")
+        module_response_patched = bool(
+            getattr(current_response, "__nunchi_stock_silence__", False)
+        )
+        stream_response_patched = bool(
+            getattr(stream_response, "__nunchi_stock_silence__", False)
+        )
+        stream_partial_patched = bool(
+            getattr(stream_partial, "__nunchi_stock_silence__", False)
+        )
+        patched = (
+            module_response_patched,
+            stream_response_patched,
+            stream_partial_patched,
+        )
+        if any(patched):
+            if (
+                not all(patched)
+                or stream_response is not current_response
+                or getattr(current_agent_result, "__globals__", {}).get(
+                    "is_intentional_silence_response"
+                )
+                is not current_response
+            ):
+                raise _shape_error("gateway streaming silence filter state")
+            _SHIM_OWNER = plugin
+            return
+        if (
+            getattr(current_agent_result, "__globals__", {}).get(
+                "is_intentional_silence_response"
+            )
+            is not current_response
+            or stream_response is not current_response
+            or stream_partial is not current_partial
+        ):
+            raise _shape_error("gateway participant silence filter binding")
+
+        def is_intentional_silence_response(response: Any) -> bool:
+            if (
+                _ACTIVE_STOCK_TURN.get() is not None
+                and _is_stock_participant_silence_marker(response)
+            ):
+                return True
+            return bool(current_response(response))
+
+        def is_partial_silence_marker(text: Any) -> bool:
+            if (
+                _ACTIVE_STOCK_TURN.get() is not None
+                and _is_partial_stock_participant_silence_marker(text)
+            ):
+                return True
+            return bool(current_partial(text))
+
+        for replacement in (
+            is_intentional_silence_response,
+            is_partial_silence_marker,
+        ):
+            replacement.__nunchi_stock_silence__ = True  # type: ignore[attr-defined]
+
+        _set_shim_attribute(
+            response_filters,
+            "is_intentional_silence_response",
+            is_intentional_silence_response,
+        )
+        _set_shim_attribute(
+            stream_consumer,
+            "_is_intentional_silence_response",
+            is_intentional_silence_response,
+        )
+        _set_shim_attribute(
+            stream_consumer,
+            "_is_partial_silence_marker",
+            is_partial_silence_marker,
+        )
+        _SHIM_OWNER = plugin
+
+
+def _install_stock_streaming_tts_guard(
+    plugin: NunchiHermesV2Plugin,
+) -> None:
+    """Use final whole-response TTS for configured Nunchi turns.
+
+    Hermes starts its streaming audio transport before the full model response
+    exists.  That is too early to distinguish an exact silence marker from
+    ordinary speech, so active Nunchi turns fall back to Hermes's existing
+    whole-response TTS path after the response filter has resolved the turn.
+    """
+
+    global _SHIM_OWNER
+    try:
+        from gateway.run import GatewayRunner
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _shape_error("gateway streaming TTS setup") from exc
+
+    with _SHIM_LOCK:
+        if _SHIM_OWNER is not None and _SHIM_OWNER is not plugin:
+            raise ValidationError("only one Nunchi Hermes plugin may be active")
+        run_agent = getattr(GatewayRunner, "_run_agent_inner", None)
+        _require_signature(
+            run_agent,
+            required=("self", "message", "source"),
+            label="gateway streaming TTS setup",
+        )
+        code = getattr(run_agent, "__code__", None)
+        if not inspect.iscoroutinefunction(run_agent) or code is None:
+            raise _shape_error("gateway streaming TTS call sites")
+        parameters = inspect.signature(run_agent).parameters
+        call_names = set(code.co_names)
+        has_streaming_tts = (
+            "message_type" in parameters
+            or "StreamingTTSConsumer" in call_names
+        )
+        if not has_streaming_tts:
+            # Released Hermes 0.19.0 has no streaming-TTS consumer. Its
+            # whole-response path is already covered by the silence filter.
+            _SHIM_OWNER = plugin
+            return
+        required_calls = {"StreamingTTSConsumer", "active", "start"}
+        if (
+            "message_type" not in parameters
+            or not required_calls.issubset(call_names)
+        ):
+            raise _shape_error("gateway streaming TTS call sites")
+        try:
+            from gateway.streaming_tts_consumer import StreamingTTSConsumer
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise _shape_error("gateway streaming TTS boundary") from exc
+        current_active = getattr(StreamingTTSConsumer, "active", None)
+        active_getter = (
+            current_active.fget
+            if isinstance(current_active, property)
+            else None
+        )
+        _require_signature(
+            active_getter,
+            required=("self",),
+            label="gateway streaming TTS availability",
+        )
+        if getattr(active_getter, "__nunchi_streaming_tts_guard__", False):
+            _SHIM_OWNER = plugin
+            return
+
+        def active(self: Any) -> bool:
+            if _ACTIVE_STOCK_TURN.get() is not None:
+                return False
+            return bool(active_getter(self))
+
+        active.__nunchi_streaming_tts_guard__ = True  # type: ignore[attr-defined]
+        _set_shim_attribute(
+            StreamingTTSConsumer,
+            "active",
+            property(
+                active,
+                current_active.fset,
+                current_active.fdel,
+                current_active.__doc__,
+            ),
+        )
+        _SHIM_OWNER = plugin
+
+
 def _install_runner_result_shim(plugin: NunchiHermesV2Plugin) -> None:
     """Observe the stock handler result, including intentional silence."""
 
@@ -4317,6 +4588,7 @@ def _install_runner_result_shim(plugin: NunchiHermesV2Plugin) -> None:
 
             result = await current_handle(self, event, *args, **kwargs)
             if admitted_trace and trace is not None and isinstance(result, str):
+                result = _stock_participant_response(result)
                 trace.assistant_observed = True
                 trace.assistant_response = result
             return result
@@ -4947,6 +5219,8 @@ def register(
         _install_stock_lifecycle_shim(plugin)
         _install_execution_boundary_shim(plugin)
         _install_auto_title_shim(plugin)
+        _install_stock_silence_filter_shim(plugin)
+        _install_stock_streaming_tts_guard(plugin)
         _install_runner_result_shim(plugin)
         _install_voice_transcript_guard(plugin)
         _install_handoff_route_guard(plugin)

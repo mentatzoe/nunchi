@@ -3778,6 +3778,413 @@ class HermesPortableTests(unittest.TestCase):
 
             asyncio.run(run())
 
+    def test_runner_result_shim_maps_exact_eos_marker_to_silence(self):
+        class Runner:
+            async def _handle_message(self, event):
+                return event.result
+
+        modules = {
+            "gateway": types.ModuleType("gateway"),
+            "gateway.run": types.ModuleType("gateway.run"),
+        }
+        modules["gateway.run"].GatewayRunner = Runner
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(
+                Path(temporary),
+                FakeLlm([judgment("DEFER", "discord:message:500")]),
+            )
+            event = FakeEvent()
+            event.result = "<|eos|>"
+
+            async def run() -> None:
+                await plugin.gate_ingress(
+                    adapter=FakeAdapter(),
+                    event=event,
+                    stock_handle=mock.AsyncMock(),
+                )
+                runtime = plugin._rooms[("discord", "42")]
+                trace = runtime.stock_trace(event)
+                token = hermes_v2._ACTIVE_STOCK_TURN.set(trace)
+                try:
+                    with mock.patch.dict(sys.modules, modules):
+                        hermes_v2._install_runner_result_shim(plugin)
+                    self.assertEqual("", await Runner()._handle_message(event))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+
+                trace.processing_outcome = "SUCCESS"
+                await plugin.complete_stock_turn(
+                    adapter=FakeAdapter(),
+                    event=event,
+                    stock_handle=mock.AsyncMock(),
+                )
+
+            asyncio.run(run())
+            records = plugin._rooms[
+                ("discord", "42")
+            ].receipts.all_records()
+            self.assertEqual(
+                ["observation", "attention", "participant-host"],
+                [record["stage"] for record in records],
+            )
+            self.assertEqual("silent", records[-1]["body"]["outcome"])
+
+    def test_stock_silence_marker_is_exact_not_a_substring_filter(self):
+        self.assertEqual(
+            "The token `<|eos|>` is documentation.",
+            hermes_v2._stock_participant_response(
+                "The token `<|eos|>` is documentation."
+            ),
+        )
+        self.assertEqual(
+            "",
+            hermes_v2._stock_participant_response("  <|eos|>\n"),
+        )
+
+    def test_stock_stream_silence_filter_is_active_turn_only(self):
+        response_filters = types.ModuleType("gateway.response_filters")
+        stream_consumer = types.ModuleType("gateway.stream_consumer")
+        exec(
+            """
+def is_intentional_silence_response(response):
+    return response == "NO_REPLY"
+
+def is_intentional_silence_agent_result(agent_result, response):
+    return not agent_result.get("failed") and is_intentional_silence_response(response)
+
+def is_partial_silence_marker(text):
+    return text in {"N", "NO", "NO_REPLY"}
+""",
+            response_filters.__dict__,
+        )
+        original_response = (
+            response_filters.is_intentional_silence_response
+        )
+        original_partial = response_filters.is_partial_silence_marker
+        stream_consumer._is_intentional_silence_response = original_response
+        stream_consumer._is_partial_silence_marker = original_partial
+
+        class GatewayStreamConsumer:
+            async def run(self):
+                return (
+                    stream_consumer._is_intentional_silence_response(""),
+                    stream_consumer._is_partial_silence_marker(""),
+                )
+
+        stream_consumer.GatewayStreamConsumer = GatewayStreamConsumer
+        gateway = types.ModuleType("gateway")
+        gateway.response_filters = response_filters
+        gateway.stream_consumer = stream_consumer
+        modules = {
+            "gateway": gateway,
+            "gateway.response_filters": response_filters,
+            "gateway.stream_consumer": stream_consumer,
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_silence_filter_shim(plugin)
+                    hermes_v2._install_stock_silence_filter_shim(plugin)
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+            self.assertEqual(3, len(patches))
+
+            self.assertFalse(
+                stream_consumer._is_intentional_silence_response("<|eos|>")
+            )
+            self.assertFalse(
+                stream_consumer._is_partial_silence_marker("<|e")
+            )
+            self.assertTrue(
+                stream_consumer._is_intentional_silence_response("NO_REPLY")
+            )
+
+            async def split_stream() -> list[str]:
+                native_calls: list[str] = []
+                accumulated = ""
+                for delta in ("<", "|e", "os", "|>"):
+                    accumulated += delta
+                    if not stream_consumer._is_partial_silence_marker(
+                        accumulated
+                    ):
+                        native_calls.append(accumulated)
+                if not stream_consumer._is_intentional_silence_response(
+                    accumulated
+                ):
+                    native_calls.append(accumulated)
+                return native_calls
+
+            async def inherited_context() -> list[str]:
+                token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                try:
+                    task = asyncio.create_task(split_stream())
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+                return await task
+
+            self.assertEqual([], asyncio.run(inherited_context()))
+            token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+            try:
+                self.assertTrue(
+                    response_filters.is_intentional_silence_agent_result(
+                        {"failed": False},
+                        "<|eos|>",
+                    )
+                )
+                self.assertFalse(
+                    response_filters.is_intentional_silence_agent_result(
+                        {"failed": True},
+                        "<|eos|>",
+                    )
+                )
+                tts_calls: list[str] = []
+                native_calls: list[str] = []
+                response = "<|eos|>"
+                if response_filters.is_intentional_silence_agent_result(
+                    {"failed": False},
+                    response,
+                ):
+                    response = ""
+                if response:
+                    tts_calls.append(response)
+                    native_calls.append(response)
+                self.assertEqual("", response)
+                self.assertEqual([], tts_calls)
+                self.assertEqual([], native_calls)
+                self.assertFalse(
+                    stream_consumer._is_intentional_silence_response(
+                        "The token `<|eos|>` is documentation."
+                    )
+                )
+                self.assertTrue(
+                    stream_consumer._is_intentional_silence_response(
+                        "NO_REPLY"
+                    )
+                )
+            finally:
+                hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+            hermes_v2._rollback_shim_attributes(patches)
+            self.assertIs(
+                original_response,
+                response_filters.is_intentional_silence_response,
+            )
+            self.assertIs(
+                original_response,
+                stream_consumer._is_intentional_silence_response,
+            )
+            self.assertIs(
+                original_partial,
+                stream_consumer._is_partial_silence_marker,
+            )
+            original_response.__nunchi_stock_silence__ = True
+            try:
+                with (
+                    mock.patch.dict(sys.modules, modules),
+                    self.assertRaisesRegex(
+                        ValidationError,
+                        "streaming silence filter state",
+                    ),
+                ):
+                    hermes_v2._install_stock_silence_filter_shim(plugin)
+            finally:
+                del original_response.__nunchi_stock_silence__
+
+    def test_stock_stream_silence_filter_fails_closed_on_moved_calls(self):
+        response_filters = types.ModuleType("gateway.response_filters")
+        stream_consumer = types.ModuleType("gateway.stream_consumer")
+        exec(
+            """
+def is_intentional_silence_response(response):
+    return False
+
+def is_intentional_silence_agent_result(agent_result, response):
+    return is_intentional_silence_response(response)
+
+def is_partial_silence_marker(text):
+    return False
+""",
+            response_filters.__dict__,
+        )
+        stream_consumer._is_intentional_silence_response = (
+            response_filters.is_intentional_silence_response
+        )
+        stream_consumer._is_partial_silence_marker = (
+            response_filters.is_partial_silence_marker
+        )
+
+        class GatewayStreamConsumer:
+            async def run(self):
+                return None
+
+        stream_consumer.GatewayStreamConsumer = GatewayStreamConsumer
+        gateway = types.ModuleType("gateway")
+        gateway.response_filters = response_filters
+        gateway.stream_consumer = stream_consumer
+        modules = {
+            "gateway": gateway,
+            "gateway.response_filters": response_filters,
+            "gateway.stream_consumer": stream_consumer,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            with (
+                mock.patch.dict(sys.modules, modules),
+                self.assertRaisesRegex(
+                    ValidationError,
+                    "streaming silence call sites",
+                ),
+            ):
+                hermes_v2._install_stock_silence_filter_shim(plugin)
+
+    def test_stock_streaming_tts_falls_back_before_active_turn_output(self):
+        native_calls: list[str] = []
+        tts_module = types.ModuleType("gateway.streaming_tts_consumer")
+
+        class StreamingTTSConsumer:
+            @property
+            def active(self):
+                return True
+
+            def start(self):
+                native_calls.append("streaming-tts-start")
+
+        tts_module.StreamingTTSConsumer = StreamingTTSConsumer
+        run_module = types.ModuleType("gateway.run")
+        run_module.StreamingTTSConsumer = StreamingTTSConsumer
+        exec(
+            """
+class GatewayRunner:
+    async def _run_agent_inner(self, message, source, message_type=None):
+        del self, message, source, message_type
+        consumer = StreamingTTSConsumer()
+        if consumer.active:
+            consumer.start()
+""",
+            run_module.__dict__,
+        )
+        GatewayRunner = run_module.GatewayRunner
+        gateway = types.ModuleType("gateway")
+        gateway.run = run_module
+        gateway.streaming_tts_consumer = tts_module
+        modules = {
+            "gateway": gateway,
+            "gateway.run": run_module,
+            "gateway.streaming_tts_consumer": tts_module,
+        }
+        original_active = StreamingTTSConsumer.active
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_streaming_tts_guard(plugin)
+                    hermes_v2._install_stock_streaming_tts_guard(plugin)
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+
+            consumer = StreamingTTSConsumer()
+            self.assertTrue(consumer.active)
+            consumer.start()
+            self.assertEqual(["streaming-tts-start"], native_calls)
+            native_calls.clear()
+
+            async def active_turn() -> None:
+                token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                try:
+                    await GatewayRunner()._run_agent_inner(
+                        "message",
+                        object(),
+                        "voice",
+                    )
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+
+            asyncio.run(active_turn())
+            self.assertEqual([], native_calls)
+            self.assertEqual(1, len(patches))
+            hermes_v2._rollback_shim_attributes(patches)
+            self.assertIs(original_active, StreamingTTSConsumer.active)
+
+    def test_stock_streaming_tts_guard_is_noop_for_hermes_019_shape(self):
+        run_module = types.ModuleType("gateway.run")
+        exec(
+            """
+class GatewayRunner:
+    async def _run_agent_inner(self, message, source):
+        del self, message, source
+        return {}
+""",
+            run_module.__dict__,
+        )
+        gateway = types.ModuleType("gateway")
+        gateway.run = run_module
+        modules = {
+            "gateway": gateway,
+            "gateway.run": run_module,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_streaming_tts_guard(plugin)
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+            self.assertEqual([], patches)
+
+    def test_failed_or_cancelled_eos_turn_is_not_participant_silence(self):
+        for processing_outcome in ("FAILURE", "CANCELLED"):
+            with (
+                self.subTest(processing_outcome=processing_outcome),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                plugin, _ = self.plugin(
+                    Path(temporary),
+                    FakeLlm([judgment("DEFER", "discord:message:500")]),
+                )
+                event = FakeEvent()
+
+                async def run() -> None:
+                    await plugin.gate_ingress(
+                        adapter=FakeAdapter(),
+                        event=event,
+                        stock_handle=mock.AsyncMock(),
+                    )
+                    runtime = plugin._rooms[("discord", "42")]
+                    trace = runtime.stock_trace(event)
+                    trace.assistant_observed = True
+                    trace.assistant_response = (
+                        hermes_v2._stock_participant_response("<|eos|>")
+                    )
+                    trace.processing_outcome = processing_outcome
+                    await plugin.complete_stock_turn(
+                        adapter=FakeAdapter(),
+                        event=event,
+                        stock_handle=mock.AsyncMock(),
+                    )
+
+                asyncio.run(run())
+                records = plugin._rooms[
+                    ("discord", "42")
+                ].receipts.all_records()
+                self.assertEqual(
+                    [
+                        "observation",
+                        "attention",
+                        "participant-host",
+                        "transport",
+                    ],
+                    [record["stage"] for record in records],
+                )
+                self.assertEqual("unknown", records[-2]["body"]["outcome"])
+                self.assertEqual("failed", records[-1]["body"]["delivery"])
+
     def test_runner_shim_blocks_direct_handoff_without_matching_trace(self):
         calls: list[str] = []
 
@@ -4260,6 +4667,14 @@ class HermesPortableTests(unittest.TestCase):
                 ) as auto_title_shim,
                 mock.patch.object(
                     hermes_v2,
+                    "_install_stock_silence_filter_shim",
+                ) as silence_filter_shim,
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_stock_streaming_tts_guard",
+                ) as streaming_tts_guard,
+                mock.patch.object(
+                    hermes_v2,
                     "_install_handoff_route_guard",
                 ) as handoff_route_guard,
                 mock.patch.object(
@@ -4275,6 +4690,8 @@ class HermesPortableTests(unittest.TestCase):
             restart_replay_shim.assert_called_once_with(plugin)
             execution_boundary_shim.assert_called_once_with(plugin)
             auto_title_shim.assert_called_once_with(plugin)
+            silence_filter_shim.assert_called_once_with(plugin)
+            streaming_tts_guard.assert_called_once_with(plugin)
             discord_thread_guard.assert_called_once_with(plugin)
             discord_slash_guard.assert_called_once_with(plugin)
             handoff_route_guard.assert_called_once_with(plugin)
@@ -4451,6 +4868,14 @@ class HermesPortableTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     hermes_v2,
+                    "_install_stock_silence_filter_shim",
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_stock_streaming_tts_guard",
+                ),
+                mock.patch.object(
+                    hermes_v2,
                     "_install_runner_result_shim",
                 ),
                 mock.patch.object(
@@ -4542,6 +4967,14 @@ class HermesPortableTests(unittest.TestCase):
                 mock.patch.object(
                     hermes_v2,
                     "_install_auto_title_shim",
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_stock_silence_filter_shim",
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_stock_streaming_tts_guard",
                 ),
                 mock.patch.object(
                     hermes_v2,
