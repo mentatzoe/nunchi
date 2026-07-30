@@ -16,19 +16,35 @@ effect commit point.
 
 This candidate implements the shared foundation, generic/Discord/Matrix/
 Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
-Codex room presence, and the Hermes V2 platform integration. Hermes reuses its
-normal participant pipeline behind a checked process-local gate from 0.19.0
-through the tested current upstream head. Its prompt, main model, memory,
-tools, reactions, cancellation, delivery, and platform adapters stay owned by
-Hermes. Claude Code remains outside this candidate.
+Codex room presence, and an incomplete Hermes V2 platform integration source
+successor. The Hermes source reuses Nunchi's shared observation, attention,
+scheduling, wake, and receipt behavior around the stock participant. It
+currently accepts only Hermes 0.19.0 and configured Discord or Telegram rooms.
+Other Hermes platforms remain outside Nunchi and keep stock behavior; attempts
+to add them to a Nunchi config are rejected.
 
-The Hermes source, clean-wheel, configured installed-runtime, dashboard, and
-partial live Discord paths are implemented. Remaining Hermes live proof is
-tracked in [issue #38](https://github.com/mentatzoe/nunchi/issues/38). This
-candidate is not verified, integrated, or V2-complete.
+On configured Hermes rooms, generic Hermes tools are blocked because Hermes
+0.19.0 has no final effect hook that can enforce Nunchi's authority checks.
+Hermes auto-title is also disabled there because its background work can
+outlive the turn. Native typing, voice input, `/thread`, detached participant
+commands, and handoff into configured rooms are also disabled where Hermes
+0.19.0 cannot keep them inside the admitted opportunity. Reactions after the
+participant starts remain guarded; Hermes's pre-model 👀 is blocked until the
+shared ACK path owns that signal and its receipt. These are explicit product
+gaps, not supported behavior.
+
+The current dirty source passes its focused Hermes and shared-core tests. Its
+full source, package, installed-runtime, exact-review, and live-platform gates
+must be rerun before acceptance. Earlier Hermes evidence belongs to a
+superseded implementation and is not current proof. Hermes gaps are tracked in
+[issues #38](https://github.com/mentatzoe/nunchi/issues/38) and
+[#42](https://github.com/mentatzoe/nunchi/issues/42), with supported-surface
+parity tracked in [#44](https://github.com/mentatzoe/nunchi/issues/44). Claude
+Code remains outside this candidate. This candidate is partial. This candidate
+is not verified, integrated, or V2-complete.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
-translation bridge, prompt hook, send-time social reclassifier, or fallback.
+translation bridge, V1 prompt hook, send-time social reclassifier, or fallback.
 
 ## Install and inspect
 
@@ -56,10 +72,12 @@ nunchi-telegram --probe
 nunchi-codex-room-runner --probe
 ```
 
-When Nunchi is installed in the same environment as Hermes, the wheel exposes
-the `nunchi` Hermes plugin without adding Hermes as a Nunchi dependency. The
-plugin automatically installs its authenticated dashboard tab for room
-configuration and V2 receipts without changing Hermes package files.
+The package metadata exposes a `nunchi` Hermes plugin without adding Hermes as
+a Nunchi dependency. When Hermes loads it, the plugin installs its
+authenticated dashboard tab automatically for room configuration and V2
+receipts without changing Hermes package files. First-time room setup and
+private profile-config creation happen in that tab; no separate setup command
+is required. Package and installed-runtime acceptance remain separate gates.
 See [`integrations/hermes/README.md`](integrations/hermes/README.md).
 
 Configured runtimes require exact SHA-256 pins for participant profiles and
@@ -75,10 +93,11 @@ python3 -m evals.verdict_suite.runner --list
 python3 -m evals.verdict_suite.runner
 ```
 
-The first command runs the V2 schema oracle plus adversarial runtime,
-authorization, scheduling, transport, Codex, adapter, and installed-artifact
-coverage. Historical V1 tests remain as a visible retirement ledger and are
-not part of the executable V2 product suite.
+The first command runs source-level V2 schema, runtime, authorization,
+scheduling, transport, Codex, and adapter coverage. It does not prove a built
+package or installed runtime; those require a fresh package build and isolated
+installation. Historical V1 tests remain as a visible retirement ledger and
+are not part of the executable V2 product suite.
 
 ## Product and integration documentation
 

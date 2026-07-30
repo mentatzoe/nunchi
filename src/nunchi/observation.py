@@ -169,11 +169,22 @@ def _event_refs(event: Mapping[str, Any]) -> tuple[str, ...]:
 
 def _event_timestamp(event: Mapping[str, Any]) -> datetime | None:
     raw = event.get("timestamp")
-    return (
-        datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if isinstance(raw, str) and raw
-        else None
-    )
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _retained_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    retained = deepcopy(dict(event))
+    if "timestamp" in retained and _event_timestamp(retained) is None:
+        retained.pop("timestamp")
+    return retained
 
 
 def _actor_refs(event: Mapping[str, Any]) -> set[str]:
@@ -615,7 +626,7 @@ class ObservationProvider:
         self._event_ids.add(event["id"])
         self._accepted_event_ids.add(event["id"])
         self._delivery_by_event[event["id"]] = delivery_id
-        retained = deepcopy(dict(event))
+        retained = _retained_event(event)
         retained_at = _event_timestamp(retained)
         insert_at = len(self._events)
         if retained_at is not None:

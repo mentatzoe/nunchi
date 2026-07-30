@@ -36,6 +36,7 @@
   var API = "/api/plugins/nunchi";
   var DEFAULT_ATTENTION_PROVIDER = "nous";
   var DEFAULT_ATTENTION_MODEL = "deepseek/deepseek-v4-flash";
+  var SUPPORTED_PLATFORMS = ["discord", "telegram"];
 
   var styles = {
     page: { display: "flex", flexDirection: "column", gap: "16px" },
@@ -118,14 +119,22 @@
 
   function defaultRoom(document, channels) {
     var suffix = String(Date.now());
-    var platform = channels && channels.length ? channels[0].platform : "discord";
+    var supportedChannels = (channels || []).filter(function (item) {
+      return SUPPORTED_PLATFORMS.indexOf(item.platform) !== -1;
+    });
+    var platform = supportedChannels.length
+      ? supportedChannels[0].platform
+      : "discord";
+    var roomId = supportedChannels.length ? supportedChannels[0].id : "";
     return {
       binding: {
         participant_id: "agent",
-        actor_id: platform + ":actor:replace-me",
+        actor_id: "",
         platform: platform,
-        room_id: "",
-        continuity_scope_id: "room-" + suffix,
+        room_id: roomId,
+        continuity_scope_id: roomId
+          ? platform + "-room-" + roomId
+          : "room-" + suffix,
         names: ["Agent"],
         room_kind: "group",
         provenance: "operator:hermes-dashboard"
@@ -134,7 +143,7 @@
         document: {
           profile_id: "profile-" + suffix,
           participant_id: "agent",
-          actor_id: platform + ":actor:replace-me",
+          actor_id: "",
           instructions: "Judge whether this participant should take the turn.",
           provenance: "operator:hermes-dashboard"
         }
@@ -164,11 +173,7 @@
     var attentionModel = (room.attention || {}).model || {};
     var policy = (room.attention || {}).policy || {};
     var base = ["rooms", index];
-    var platforms = Array.from(new Set(
-      [binding.platform].concat((props.channels || []).map(function (item) {
-        return item.platform;
-      })).filter(Boolean)
-    )).sort().map(function (platform) {
+    var platforms = SUPPORTED_PLATFORMS.map(function (platform) {
       return {
         value: platform,
         label: platform.charAt(0).toUpperCase() + platform.slice(1)
@@ -198,18 +203,16 @@
     function updatePlatform(value) {
       var previous = binding.platform || "";
       var next = setPath(doc, base.concat(["binding", "platform"]), value);
-      var actor = binding.actor_id || "";
-      if (previous && actor.indexOf(previous + ":actor:") === 0) {
-        next = setPath(
-          next,
-          base.concat(["binding", "actor_id"]),
-          value + actor.slice(previous.length)
-        );
+      if (previous && previous !== value) {
+        next = setPath(next, base.concat(["binding", "actor_id"]), "");
+        next = setPath(next, base.concat(["binding", "room_id"]), "");
+        next = setPath(next, base.concat(["binding", "continuity_scope_id"]), "");
+        next = setPath(next, base.concat(["binding", "room_name"]), "");
         if (inline) {
           next = setPath(
             next,
             base.concat(["profile", "document", "actor_id"]),
-            value + actor.slice(previous.length)
+            ""
           );
         }
       }
@@ -251,7 +254,9 @@
           }),
           field("Actor ID", binding.actor_id, function (value) {
             updateExactIdentity("actor_id", value);
-          }, { help: "Exact Hermes participant identity, for example discord:actor:123." }),
+          }, {
+            help: "Required exact bot identity, for example discord:actor:<bot user ID> or telegram:actor:<bot user ID>."
+          }),
           field("Continuity scope", binding.continuity_scope_id, function (value) {
             update(["binding", "continuity_scope_id"], value);
           })
@@ -268,7 +273,7 @@
               update(["participant", "timeout_seconds"], Number(value));
             }, {
               type: "number",
-              help: "Maximum time for Nunchi's attention decision. Hermes keeps its own turn timeout."
+              help: "Total deadline for observation, attention, the admitted Hermes turn, and final settlement."
             })
         ),
         inline
@@ -399,12 +404,14 @@
       h(Card, null,
         h(CardHeader, null, h(CardTitle, null, "Discord room behavior")),
         h(CardContent, null,
+          discord.configuration_loadable &&
           (discord.configured_room_ids || []).length
             ? h("div", { style: styles.page },
                 h("div", null,
-                  "Nunchi listens without mentions, admits bot messages, and " +
-                  "recovers messages missed during restart only in these configured " +
-                  "rooms. It also prevents automatic thread moves there: " +
+                  "After Hermes restarts, Nunchi will listen without mentions, " +
+                  "admit bot messages, and recover messages missed during restart " +
+                  "only in these configured rooms. It will also prevent automatic " +
+                  "thread moves there: " +
                   discord.configured_room_ids.join(", ") + "."
                 ),
                 h("div", { style: styles.hint },
@@ -425,15 +432,35 @@
                     )
               )
             : h("div", { style: styles.hint },
-                "Add a Discord room to enable natural room conversation."
+                snapshot.bootstrap_required || !snapshot.configuration_valid
+                  ? "No loadable Discord room configuration is saved. Complete or repair setup, then restart Hermes."
+                  : "Add a Discord room, save, and restart Hermes to enable natural room conversation."
               )
         )
       ),
       h("div", { style: styles.status },
-        h("strong", null, snapshot.dashboard_writable ? "Editable pinned config" : "Read-only pinned config"),
+        h("strong", null,
+          snapshot.bootstrap_required
+            ? "First-time setup"
+            : (snapshot.dashboard_writable
+                ? "Editable pinned config"
+                : "Read-only pinned config")
+        ),
         h("div", null, snapshot.path),
-        h("div", null, "SHA-256: " + snapshot.sha256),
-        snapshot.dashboard_writable
+        snapshot.sha256
+          ? h("div", null, "SHA-256: " + snapshot.sha256)
+          : h("div", null, snapshot.setup_message),
+        snapshot.bootstrap_required
+          ? h("div", null,
+              snapshot.bootstrap_recovery
+                ? "A previous first save stopped before activation. Review and save again, then restart Hermes."
+                : "Saving creates a private config and digest for this Hermes profile. Restart Hermes to activate it."
+            )
+          : snapshot.update_recovery
+          ? h("div", null,
+              "A later save stopped mid-update. Hermes is using the prior pinned revision. Review and save again to finish repair."
+            )
+          : snapshot.dashboard_writable
           ? h("div", null, "Saving updates the config and digest together. Restart Hermes to activate it.")
           : h("div", null,
               "Use a private digest sidecar to enable dashboard writes; literal digest environment values are read-only."
@@ -506,7 +533,13 @@
         ),
         h(Button, { size: "sm", ghost: true, onClick: props.onReload }, "Refresh")
       ),
-      receipts.length
+      props.message
+        ? h("div", { style: styles.status }, props.message)
+        : props.data.bootstrap_required
+        ? h("div", { style: styles.status },
+            "Complete Nunchi room setup before receipts are available."
+          )
+        : receipts.length
         ? receipts.map(function (receipt, index) {
             var room = receipt._nunchi_room || {};
             var event = receipt.event || receipt.kind || receipt.type || "receipt";
@@ -537,8 +570,15 @@
     var load = useCallback(function () {
       setMessage("Loading…");
       return fetchJSON(API + "/config").then(function (data) {
+        var loadedDocument = clone(data.document);
+        if (data.bootstrap_required &&
+            (!loadedDocument.rooms || !loadedDocument.rooms.length)) {
+          loadedDocument.rooms = [
+            defaultRoom(loadedDocument, data.channels || [])
+          ];
+        }
         setSnapshot(data);
-        setDocument(clone(data.document));
+        setDocument(loadedDocument);
         setSavedDocument(clone(data.document));
         setMessage("");
       }).catch(function (error) {
@@ -547,7 +587,11 @@
     }, []);
 
     var loadReceipts = useCallback(function () {
-      return fetchJSON(API + "/receipts?limit=100").then(setReceipts).catch(function (error) {
+      setMessage("Loading receipts…");
+      return fetchJSON(API + "/receipts?limit=100").then(function (data) {
+        setReceipts(data);
+        setMessage("");
+      }).catch(function (error) {
         setMessage("Could not load receipts: " + String(error));
       });
     }, []);
@@ -578,7 +622,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           profile: snapshot.profile,
-          expected_sha256: snapshot.sha256,
+          expected_revision: snapshot.revision,
           document: document
         })
       }).then(function (data) {
@@ -619,7 +663,11 @@
               onSave: save,
               onReload: load
             })
-          : h(ReceiptsPanel, { data: receipts, onReload: loadReceipts })
+          : h(ReceiptsPanel, {
+              data: receipts,
+              message: message,
+              onReload: loadReceipts
+            })
     );
   }
 

@@ -9,11 +9,16 @@ import time
 from typing import Any
 
 from .attention import AttentionEngine
-from .observation import ObservationProvider, ObservationResult, SnapshotUnavailable
+from .observation import (
+    ObservationProvider,
+    ObservationResult,
+    SnapshotUnavailable,
+)
 from .participant import (
     ConversationOpportunityScheduler,
     ParticipantTurnHost,
     TransportResult,
+    build_participant_wake,
 )
 
 
@@ -28,10 +33,129 @@ class OpportunityOutcome:
 
 
 @dataclass(frozen=True)
+class OpportunityPreparation:
+    """Shared attention-to-participant boundary for one current opportunity."""
+
+    anchor_event_id: str
+    request: Mapping[str, Any] | None
+    decision: Mapping[str, Any] | None
+    effective_disposition: str | None
+    wake: Mapping[str, Any] | None
+    operational_error: str | None = None
+
+
+@dataclass(frozen=True)
 class DeliveryOutcome:
     observation: ObservationResult
     opportunities: tuple[OpportunityOutcome, ...]
     coalesced: bool
+
+
+def prepare_opportunity(
+    *,
+    observation: ObservationProvider,
+    attention: AttentionEngine,
+    scheduler: ConversationOpportunityScheduler,
+    token: Any,
+    deadline: float,
+) -> OpportunityPreparation | None:
+    """Build one valid current participant opportunity or an explicit error.
+
+    Snapshot assembly gets one bounded retry from the current observation
+    seam. A recovered snapshot follows the ordinary operational-error policy
+    and never calls the attention model.
+    """
+
+    if not scheduler.is_current(token):
+        return None
+    reconstructed = False
+    try:
+        request = observation.build_snapshot(token.anchor_event_id)
+    except SnapshotUnavailable as first_error:
+        reconstructed = True
+        try:
+            request = observation.build_snapshot(token.anchor_event_id)
+        except SnapshotUnavailable as final_error:
+            detail = (
+                "attention snapshot unavailable after one reconstruction "
+                f"attempt: {final_error or first_error}"
+            )
+            return OpportunityPreparation(
+                anchor_event_id=token.anchor_event_id,
+                request=None,
+                decision=None,
+                effective_disposition=None,
+                wake=None,
+                operational_error=detail,
+            )
+    if not scheduler.is_current(token):
+        return None
+    if reconstructed:
+        decision = attention.operational_error(
+            request,
+            code="snapshot-reconstructed",
+            detail="attention snapshot required one bounded reconstruction",
+        )
+    else:
+        decision = attention.judge(
+            request,
+            cancel=token.cancel_event,
+            deadline=deadline,
+        )
+    if not scheduler.is_current(token):
+        return None
+    if decision["status"] == "ok":
+        effective = decision["effective_disposition"]
+        admit = effective != "SUPPRESS"
+    elif decision["status"] == "bypass":
+        effective = "PREATTENTION_BYPASS"
+        admit = True
+    else:
+        admit = (
+            attention.policy.error_action == "WAKE"
+            and decision["error"]["code"] != "cancelled"
+        )
+        effective = "ERROR_FALLBACK" if admit else None
+    if not admit:
+        return OpportunityPreparation(
+            anchor_event_id=token.anchor_event_id,
+            request=request,
+            decision=decision,
+            effective_disposition=effective,
+            wake=None,
+            operational_error=(
+                decision["error"]["detail"]
+                if decision["status"] == "error"
+                else None
+            ),
+        )
+    try:
+        wake = build_participant_wake(
+            observation,
+            request,
+            decision,
+        )
+    except Exception as exc:
+        return OpportunityPreparation(
+            anchor_event_id=token.anchor_event_id,
+            request=request,
+            decision=decision,
+            effective_disposition=effective,
+            wake=None,
+            operational_error=f"participant wake unavailable: {exc}",
+        )
+    return OpportunityPreparation(
+        anchor_event_id=token.anchor_event_id,
+        request=request,
+        decision=decision,
+        effective_disposition=effective,
+        wake=wake,
+        operational_error=(
+            decision["error"]["detail"]
+            if decision["status"] == "error"
+            else None
+        ),
+    )
 
 
 class NunchiV2Pipeline:
@@ -115,9 +239,18 @@ class NunchiV2Pipeline:
             if not self.scheduler.is_current(token):
                 break
             deadline = time.monotonic() + self.host.host_timeout_seconds
-            try:
-                request = self.observation.build_snapshot(token.anchor_event_id)
-            except SnapshotUnavailable as exc:
+            prepared = prepare_opportunity(
+                observation=self.observation,
+                attention=self.attention,
+                scheduler=self.scheduler,
+                token=token,
+                deadline=deadline,
+            )
+            if prepared is None:
+                break
+            request = prepared.request
+            decision = prepared.decision
+            if request is None or decision is None:
                 opportunities.append(
                     OpportunityOutcome(
                         anchor_event_id=token.anchor_event_id,
@@ -125,32 +258,20 @@ class NunchiV2Pipeline:
                         decision_status=None,
                         effective_disposition=None,
                         transport=None,
-                        operational_error=str(exc),
+                        operational_error=prepared.operational_error,
                     )
                 )
                 token = self.scheduler.complete(token)
                 continue
-            if not self.scheduler.is_current(token):
-                break
-            decision = self.attention.judge(
-                request,
-                cancel=token.cancel_event,
-                deadline=deadline,
-            )
-            transport = self.host.run(
-                request=request,
-                decision=decision,
-                token=token,
-                error_wake=self.attention.policy.error_action == "WAKE",
-                deadline=deadline,
-            )
-            effective = (
-                decision.get("effective_disposition")
-                if decision["status"] == "ok"
-                else "PREATTENTION_BYPASS"
-                if decision["status"] == "bypass"
-                else "ERROR_FALLBACK"
-                if self.attention.policy.error_action == "WAKE"
+            transport = (
+                self.host.run(
+                    request=request,
+                    decision=decision,
+                    token=token,
+                    error_wake=self.attention.policy.error_action == "WAKE",
+                    deadline=deadline,
+                )
+                if prepared.wake is not None
                 else None
             )
             opportunities.append(
@@ -158,13 +279,9 @@ class NunchiV2Pipeline:
                     anchor_event_id=token.anchor_event_id,
                     request_id=request["request_id"],
                     decision_status=decision["status"],
-                    effective_disposition=effective,
+                    effective_disposition=prepared.effective_disposition,
                     transport=transport,
-                    operational_error=(
-                        decision["error"]["detail"]
-                        if decision["status"] == "error"
-                        else None
-                    ),
+                    operational_error=prepared.operational_error,
                 )
             )
             token = self.scheduler.complete(token)

@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from nunchi.attention import (
     AttentionEngine,
@@ -30,14 +31,16 @@ from nunchi.observation import (
     ObservationLimits,
     ObservationProvider,
     ParticipantBinding,
+    SnapshotUnavailable,
 )
 from nunchi.participant import (
     ConversationOpportunityScheduler,
+    ParticipantError,
     ParticipantTurnHost,
     TransportResult,
 )
 from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
-from nunchi.receipts import ReceiptJournal
+from nunchi.receipts import PersistenceError, ReceiptJournal
 from nunchi.v2_contracts import classifier_projection, validate_receipt_stream
 from tests.v2.contract.schema_helpers import (
     validate_privileged_action_authorization_flow,
@@ -354,8 +357,164 @@ class ObservationTests(unittest.TestCase):
                 ],
             )
 
+    def test_unparseable_timestamp_is_retained_as_unknown_by_omission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            first, _, _, _ = foundation(persistence_path=store)
+
+            first.observation.observe(
+                delivery_id="d-invalid-time",
+                event=message("e-invalid-time", timestamp="not-a-timestamp"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+            retained = first.observation.retained_events()[0]
+            self.assertNotIn("timestamp", retained)
+            self.assertNotIn(
+                "timestamp",
+                first.observation.build_snapshot("e-invalid-time")["events"][0],
+            )
+
+            restored, _, _, _ = foundation(persistence_path=store)
+            self.assertNotIn(
+                "timestamp",
+                restored.observation.retained_events()[0],
+            )
+
+    def test_mixed_aware_and_naive_timestamps_do_not_raise(self):
+        pipeline, _, _, _ = foundation()
+        pipeline.observation.observe(
+            delivery_id="d-aware",
+            event=message("e-aware", timestamp="2026-07-29T14:00:00Z"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        pipeline.observation.observe(
+            delivery_id="d-naive",
+            event=message("e-naive", timestamp="2026-07-29T13:00:00"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        retained = pipeline.observation.retained_events()
+        self.assertEqual(["e-aware", "e-naive"], [event["id"] for event in retained])
+        self.assertNotIn("timestamp", retained[1])
+        snapshot = pipeline.observation.build_snapshot("e-naive")
+        self.assertEqual(
+            ["e-aware", "e-naive"],
+            [event["id"] for event in snapshot["events"]],
+        )
+
 
 class AttentionAndHostTests(unittest.TestCase):
+    def test_snapshot_reconstruction_uses_error_fallback_without_model_call(self):
+        wakes = []
+        pipeline, model, _, receipts = foundation(
+            participant=lambda **kwargs: wakes.append(kwargs["wake"]) or None,
+        )
+        original = pipeline.observation.build_snapshot
+        calls = 0
+
+        def transient_snapshot(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise SnapshotUnavailable("transient snapshot fault")
+            return original(*args, **kwargs)
+
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=transient_snapshot,
+        ):
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-reconstruct",
+                event=message("e-reconstruct"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        opportunity = outcome.opportunities[0]
+        self.assertEqual("error", opportunity.decision_status)
+        self.assertEqual("ERROR_FALLBACK", opportunity.effective_disposition)
+        self.assertEqual([], model.calls)
+        self.assertEqual("ERROR_FALLBACK", wakes[0]["attention"]["source"])
+        stream = receipts.records(opportunity.request_id)
+        self.assertEqual(
+            "snapshot-reconstructed",
+            stream[1]["body"]["error"]["code"],
+        )
+
+    def test_unrecoverable_snapshot_is_an_explicit_error_without_effect(self):
+        pipeline, model, transport, receipts = foundation()
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=SnapshotUnavailable("unrecoverable snapshot"),
+        ) as build_snapshot:
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-unrecoverable",
+                event=message("e-unrecoverable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        opportunity = outcome.opportunities[0]
+        self.assertEqual(2, build_snapshot.call_count)
+        self.assertIsNone(opportunity.request_id)
+        self.assertIn(
+            "after one reconstruction attempt",
+            opportunity.operational_error,
+        )
+        self.assertEqual([], model.calls)
+        self.assertEqual([], transport.calls)
+        self.assertEqual((), receipts.all_records())
+
+    def test_snapshot_persistence_error_is_not_retried_or_woken(self):
+        pipeline, model, transport, _ = foundation()
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=PersistenceError("receipt durability uncertain"),
+        ) as build_snapshot:
+            with self.assertRaisesRegex(
+                PersistenceError,
+                "durability uncertain",
+            ):
+                pipeline.handle_delivery(
+                    delivery_id="d-persistence",
+                    event=message("e-persistence"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+        self.assertEqual(1, build_snapshot.call_count)
+        self.assertEqual([], model.calls)
+        self.assertEqual([], transport.calls)
+
+    def test_participant_request_cannot_cross_opportunity_token_binding(self):
+        participant_calls = []
+        pipeline, _, transport, _ = foundation(
+            participant=lambda **kwargs: participant_calls.append(kwargs) or None,
+        )
+        for event_id in ("e-a", "e-b"):
+            pipeline.observation.observe(
+                delivery_id=f"d-{event_id}",
+                event=message(event_id),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        request_b = pipeline.observation.build_snapshot("e-b")
+        decision_b = pipeline.attention.judge(request_b)
+        token_a = pipeline.scheduler.offer("e-a")
+
+        with self.assertRaisesRegex(
+            ParticipantError,
+            "does not match",
+        ):
+            pipeline.host.run(
+                request=request_b,
+                decision=decision_b,
+                token=token_a,
+            )
+
+        self.assertEqual([], participant_calls)
+        self.assertEqual([], transport.calls)
+
     def test_bypass_invokes_participant_without_model_or_advice(self):
         wakes = []
         model = FixtureModel()
@@ -535,6 +694,34 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("sent", stream[3]["body"]["delivery"])
         self.assertEqual(1, len(transport.calls))
 
+    def test_host_receipt_failure_blocks_transport_dispatch(self):
+        pipeline, _, transport, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "must not dispatch",
+            }
+        )
+        original_append = receipts.append
+
+        def append(record, *, writer):
+            if record.get("stage") == "participant-host":
+                raise PersistenceError("host receipt durability uncertain")
+            return original_append(record, writer=writer)
+
+        with mock.patch.object(receipts, "append", side_effect=append):
+            with self.assertRaisesRegex(
+                PersistenceError,
+                "host receipt durability uncertain",
+            ):
+                pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+        self.assertEqual([], transport.calls)
+
     def test_cancellation_before_dispatch_prevents_stale_output(self):
         entered = threading.Event()
         release = threading.Event()
@@ -563,9 +750,58 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual([], transport.calls)
         request_id = result["outcome"].opportunities[0].request_id
-        self.assertEqual(["observation", "attention"], [
-            record["stage"] for record in receipts.records(request_id)
-        ])
+        stream = receipts.records(request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in stream],
+        )
+        self.assertTrue(stream[-1]["body"]["invoked"])
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_cancellation_during_action_validation_settles_host_without_output(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingAction(dict):
+            def __iter__(self):
+                entered.set()
+                release.wait(2)
+                return super().__iter__()
+
+        def participant(**_):
+            return BlockingAction(
+                kind="message",
+                origin_event_id="e1",
+                text="late",
+            )
+
+        pipeline, _, transport, receipts = foundation(participant=participant)
+        result = {}
+
+        def run():
+            result["outcome"] = pipeline.handle_delivery(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        pipeline.cancel()
+        release.set()
+        thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([], transport.calls)
+        request_id = result["outcome"].opportunities[0].request_id
+        stream = receipts.records(request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in stream],
+        )
+        self.assertTrue(stream[-1]["body"]["invoked"])
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
 
     def test_host_deadline_invalidates_ignoring_participant_without_output(self):
         entered = threading.Event()

@@ -555,6 +555,27 @@ class AttentionEngine:
             }
         return validate_attention_decision(result, request=request)
 
+    def operational_error(
+        self,
+        request: Mapping[str, Any],
+        *,
+        code: str,
+        detail: str,
+    ) -> dict[str, Any]:
+        """Record one host-observed operational failure without model use."""
+
+        checked = validate_attention_request(request)
+        if not isinstance(code, str) or not code:
+            raise ValidationError("attention operational error code must be non-empty")
+        if not isinstance(detail, str) or not detail:
+            raise ValidationError("attention operational error detail must be non-empty")
+        return self._error(
+            checked,
+            code,
+            detail,
+            invoked=False,
+        )
+
     def _call_model(
         self,
         projection: Mapping[str, Any],

@@ -1,8 +1,9 @@
 # V2 platform interface and conformance
 
-This is the complete downstream interface for Hermes and Claude Code. The
-Hermes source integration now consumes these shared owners; installed and live
-acceptance remain separate gates. Claude Code is not implemented by this
+This is the current downstream interface for Hermes and Claude Code. Shared
+ACK behavior may extend it and remains open in issue #40. The incomplete
+Hermes source successor consumes these shared owners; its current dirty bytes
+have source-test evidence only. Claude Code is not implemented by this
 candidate.
 
 ## Required owners
@@ -39,21 +40,36 @@ plugin must not copy or rewrite those shared product behaviors.
 
 ### Host-owned participant pipelines
 
-Hermes already owns a complete participant pipeline. Its Nunchi integration
-therefore uses the shared observation, attention, scheduler, and wake builder
-as a gate around that pipeline:
+Hermes owns the participant execution pipeline. Its Nunchi integration uses
+the shared observation, attention, opportunity preparation, scheduler, wake
+builder, and participant-receipt formation as a gate around that pipeline:
 
 1. Nunchi decides before Hermes starts visible processing.
 2. `SUPPRESS` stops there.
 3. An admitted turn receives the shared bounded wake facts through Hermes's
    context hook.
-4. Hermes runs its original prompt, main model, memory, tools, reactions,
-   cancellation, delivery, and platform adapter.
+4. Hermes runs its participant prompt, main model, memory, reactions,
+   cancellation, delivery, and platform adapter behind Nunchi's guards.
 5. Nunchi observes completion and writes only the lifecycle facts exposed by
    Hermes.
 
-This is the normal Hermes participant implementation for the contract. The
-plugin must not recreate it with a second model call or direct send path.
+For configured Nunchi rooms, Hermes tools are blocked because Hermes 0.19.0
+does not expose a safe final authority boundary after approval. Auto-title is
+also disabled because it can outlive the turn. Native typing, Discord voice
+input, `/thread`, detached participant commands, and handoff into configured
+rooms are disabled for the same lifecycle reason. Stock reactions run only
+after the participant invocation begins; the shared ACK path will own
+pre-model acknowledgement. These are open product gaps: the current Hermes
+source is not a complete V2 lifecycle.
+
+The plugin accepts exactly Hermes 0.19.0. A different version must use a
+Nunchi release that explicitly verifies it, or run stock Hermes without
+Nunchi. Method-shape similarity is not compatibility proof.
+
+This is the intended Hermes participant implementation for the contract. The
+plugin must not recreate shared Nunchi behavior with a second attention model
+call, copied prompt, copied model selection, copied opportunity lifecycle, or
+direct send path.
 
 ## Shared Discord consumer contract
 

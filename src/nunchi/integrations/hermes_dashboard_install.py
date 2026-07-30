@@ -47,10 +47,15 @@ def default_hermes_home() -> Path:
         return Path(configured).expanduser()
     try:
         from hermes_cli.config import get_hermes_home
-
-        return Path(get_hermes_home())
-    except Exception:
+    except (ImportError, ModuleNotFoundError):
         return Path.home() / ".hermes"
+    try:
+        return Path(get_hermes_home())
+    except Exception as exc:
+        raise DashboardInstallError(
+            "Hermes home could not be resolved; repair Hermes profile setup or "
+            "set HERMES_HOME explicitly"
+        ) from exc
 
 
 def _assert_safe_path(path: Path, *, boundary: Path) -> None:

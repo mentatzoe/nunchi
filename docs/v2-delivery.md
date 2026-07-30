@@ -34,6 +34,9 @@ Current deferred gates are tracked in:
 - [Hermes live-platform acceptance](https://github.com/mentatzoe/nunchi/issues/38);
 - [Claude Code live and release acceptance](https://github.com/mentatzoe/nunchi/issues/39);
 - [first-class ACK behavior](https://github.com/mentatzoe/nunchi/issues/40);
+- [Hermes source boundaries](https://github.com/mentatzoe/nunchi/issues/42);
+- [Hermes supported-surface parity](https://github.com/mentatzoe/nunchi/issues/44);
+- [Claude participant identity and supported surface](https://github.com/mentatzoe/nunchi/issues/43);
 - [combined V2 final acceptance](https://github.com/mentatzoe/nunchi/issues/41).
 
 ## Build order

@@ -25,9 +25,11 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "There is no executable V1 `admit` command",
             "Hermes V2 platform integration",
             "Claude Code remains outside this candidate",
-            "partial live Discord paths are implemented",
+            "Earlier Hermes evidence belongs to a superseded implementation",
+            "live-platform gates must be rerun",
             "This candidate is not verified, integrated, or V2-complete",
             "issue #41",
+            "issues/44",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:
@@ -45,6 +47,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "Verified",
             "Integrated",
             "issues/41",
+            "issues/44",
             "Select the earliest missing product behavior",
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",
@@ -78,7 +81,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     ) -> None:
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
-            "complete downstream interface for Hermes and Claude Code",
+            "current downstream interface for Hermes and Claude Code",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",

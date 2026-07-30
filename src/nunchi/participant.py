@@ -204,6 +204,27 @@ def _packet_bytes(
     )
 
 
+def participant_host_receipt_body(
+    wake: Mapping[str, Any],
+    *,
+    expansion_calls: int,
+    invoked: bool,
+    outcome: str,
+) -> dict[str, Any]:
+    """Build the one shared participant-host receipt body."""
+
+    events = list(wake["events"])
+    return {
+        "wake_source": wake["attention"]["source"],
+        "packet_event_count": len(events),
+        "packet_byte_count": _packet_bytes(events, wake["actors"]),
+        "delivered_event_ids": [event["id"] for event in events],
+        "expansion_calls": expansion_calls,
+        "invoked": invoked,
+        "outcome": outcome,
+    }
+
+
 def _validate_action(action: Any) -> dict[str, Any]:
     if not isinstance(action, Mapping):
         raise ParticipantError("participant action must be an object or silence")
@@ -362,10 +383,23 @@ class ParticipantTurnHost:
             if deadline is None
             else deadline
         )
-        checked_decision = validate_attention_decision(decision, request=request)
+        checked_request = validate_attention_request(request)
+        checked_decision = validate_attention_decision(
+            decision,
+            request=checked_request,
+        )
+        if token.anchor_event_id != checked_request["trigger_event_id"]:
+            raise ParticipantError(
+                "opportunity token does not match the participant request trigger"
+            )
         if (
             checked_decision["status"] == "error"
             and (not error_wake or checked_decision["error"]["code"] == "cancelled")
+        ):
+            return None
+        if (
+            checked_decision["status"] == "ok"
+            and checked_decision["effective_disposition"] == "SUPPRESS"
         ):
             return None
         if not self.scheduler.is_current(token):
@@ -373,7 +407,7 @@ class ParticipantTurnHost:
         if time.monotonic() >= effective_deadline:
             self.scheduler.cancel()
             return TransportResult("failed", "host total deadline exceeded")
-        wake = self._make_wake(request, checked_decision)
+        wake = self._make_wake(checked_request, checked_decision)
         if wake is None:
             return None
         if time.monotonic() >= effective_deadline:
@@ -461,21 +495,32 @@ class ParticipantTurnHost:
             daemon=True,
         )
         worker.start()
+        host_receipt_persisted = False
+
+        def settle_host(outcome: str) -> None:
+            nonlocal host_receipt_persisted
+            if host_receipt_persisted:
+                return
+            self._append_host_receipt(
+                wake,
+                expansion_calls=expansion_calls,
+                outcome=outcome,
+            )
+            host_receipt_persisted = True
+
         invocation_result: tuple[str, Any] | None = None
         while invocation_result is None:
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
+                settle_host("unknown")
                 return None
             remaining = effective_deadline - time.monotonic()
             if remaining <= 0:
                 if self.scheduler.is_current(token):
-                    self._append_host_receipt(
-                        wake,
-                        expansion_calls=expansion_calls,
-                        outcome="unknown",
-                    )
+                    settle_host("unknown")
                     self.scheduler.cancel()
                 else:
                     token.cancel_event.set()
+                    settle_host("unknown")
                 return TransportResult("failed", "host total deadline exceeded")
             try:
                 invocation_result = result_queue.get(timeout=min(0.05, remaining))
@@ -484,84 +529,62 @@ class ParticipantTurnHost:
         status, raw_action = invocation_result
         if time.monotonic() >= effective_deadline:
             if self.scheduler.is_current(token):
-                self._append_host_receipt(
-                    wake,
-                    expansion_calls=expansion_calls,
-                    outcome="unknown",
-                )
+                settle_host("unknown")
                 self.scheduler.cancel()
+            else:
+                settle_host("unknown")
             return TransportResult("failed", "host total deadline exceeded")
         if status == "error":
-            if self.scheduler.is_current(token):
-                self._append_host_receipt(
-                    wake,
-                    expansion_calls=expansion_calls,
-                    outcome="unknown",
-                )
+            settle_host("unknown")
             return TransportResult("failed", "participant invocation failed")
         if not self.scheduler.is_current(token):
+            settle_host("unknown")
             return None
         if raw_action is None:
-            self._append_host_receipt(
-                wake,
-                expansion_calls=expansion_calls,
-                outcome="silent",
-            )
+            settle_host("silent")
             return None
         try:
             action = _validate_action(raw_action)
         except ParticipantError:
-            self._append_host_receipt(
-                wake,
-                expansion_calls=expansion_calls,
-                outcome="unknown",
-            )
+            settle_host("unknown")
             return TransportResult("failed", "participant returned an invalid action")
+        if token.cancel_event.is_set() or not self.scheduler.is_current(token):
+            settle_host("unknown")
+            return None
 
         visible_event_ids = {event["id"] for event in wake["events"]}
         visible_event_ids.update(expanded_event_ids)
         if action["origin_event_id"] not in visible_event_ids:
-            self._append_host_receipt(
-                wake,
-                expansion_calls=expansion_calls,
-                outcome="unknown",
-            )
+            settle_host("unknown")
             return TransportResult("failed", "action origin is absent from participant facts")
         if (
             action["kind"] in ("reply", "reaction")
             and action["target_event_id"] not in visible_event_ids
         ):
-            self._append_host_receipt(
-                wake,
-                expansion_calls=expansion_calls,
-                outcome="unknown",
-            )
+            settle_host("unknown")
             return TransportResult("failed", "action target is absent from participant facts")
+        if token.cancel_event.is_set() or not self.scheduler.is_current(token):
+            settle_host("unknown")
+            return None
 
         def dispatch() -> TransportResult:
             # This append and the native call share the scheduler's commit
-            # lock.  Cancellation ordered first yields neither a host stage nor
-            # an outbound call; persistence failure also prevents dispatch.
+            # lock. Cancellation ordered first yields no outbound call; the
+            # already-invoked participant still receives a terminal ``unknown``
+            # host receipt after commit rejection. Persistence failure also
+            # prevents dispatch.
             # The host cannot truthfully claim ``sent`` before the separately
             # owned transport stage has observed the native result.  Persist
             # ``unknown`` as the action handoff state, then let transport alone
             # attest sent/failed/unknown/unavailable.
             if time.monotonic() >= effective_deadline:
-                self._append_host_receipt(
-                    wake,
-                    expansion_calls=expansion_calls,
-                    outcome="unknown",
-                )
+                settle_host("unknown")
                 self.scheduler.cancel()
                 return TransportResult(
                     "failed",
                     "host total deadline exceeded before dispatch",
                 )
-            self._append_host_receipt(
-                wake,
-                expansion_calls=expansion_calls,
-                outcome="unknown",
-            )
+            settle_host("unknown")
             if (
                 token.cancel_event.is_set()
                 or time.monotonic() >= effective_deadline
@@ -637,9 +660,12 @@ class ParticipantTurnHost:
         try:
             committed, result = self.scheduler.commit_dispatch(token, dispatch)
         except BaseException:
+            if not host_receipt_persisted:
+                raise
             committed = True
             result = TransportResult("unknown", "dispatch acknowledgement was lost")
         if not committed:
+            settle_host("unknown")
             return None
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "transport returned no attested result")
@@ -664,21 +690,17 @@ class ParticipantTurnHost:
         expansion_calls: int,
         outcome: str,
     ) -> None:
-        events = list(wake["events"])
         self.receipts.append(
             {
                 "request_id": wake["request_id"],
                 "stage": "participant-host",
                 "writer": "participant-host",
-                "body": {
-                    "wake_source": wake["attention"]["source"],
-                    "packet_event_count": len(events),
-                    "packet_byte_count": _packet_bytes(events, wake["actors"]),
-                    "delivered_event_ids": [event["id"] for event in events],
-                    "expansion_calls": expansion_calls,
-                    "invoked": True,
-                    "outcome": outcome,
-                },
+                "body": participant_host_receipt_body(
+                    wake,
+                    expansion_calls=expansion_calls,
+                    invoked=True,
+                    outcome=outcome,
+                ),
             },
             writer="participant-host",
         )
