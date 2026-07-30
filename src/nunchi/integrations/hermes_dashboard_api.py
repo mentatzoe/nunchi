@@ -7,6 +7,7 @@ Configuration validation and storage live in the dependency-free store module.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -18,7 +19,9 @@ from nunchi.integrations.hermes_dashboard_store import (
     DashboardConfigError,
     DashboardConfigReadOnly,
     active_hermes_profile,
+    canonical_dashboard_profile,
     channel_directory,
+    dashboard_profile_environment,
     discord_runtime_status,
     read_dashboard_snapshot,
     read_receipts,
@@ -34,10 +37,7 @@ def _profile(value: Any) -> str:
         value = active_hermes_profile()
     if not isinstance(value, str):
         raise DashboardConfigError("invalid Hermes profile")
-    selected = value.strip()
-    if not selected or len(selected) > 128:
-        raise DashboardConfigError("invalid Hermes profile")
-    return selected
+    return canonical_dashboard_profile(value)
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -50,11 +50,23 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail="Nunchi dashboard is unavailable")
 
 
-def _config_response(profile: str) -> dict[str, Any]:
-    snapshot = read_dashboard_snapshot(profile, allow_invalid=True)
+def _config_response(
+    profile: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    environment = dashboard_profile_environment(profile, environ=environ)
+    snapshot = read_dashboard_snapshot(
+        profile,
+        environ=environment,
+        allow_invalid=True,
+    )
     result = snapshot.response()
-    result["channels"] = channel_directory()
-    result["discord_runtime"] = discord_runtime_status(snapshot)
+    result["channels"] = channel_directory(environ=environment)
+    result["discord_runtime"] = discord_runtime_status(
+        snapshot,
+        environ=environment,
+    )
     result["restart_endpoint"] = (
         f"/api/gateway/restart?profile={quote(profile, safe='')}"
     )
@@ -65,7 +77,12 @@ def _config_response(profile: str) -> dict[str, Any]:
 def get_health(profile: str | None = Query(default=None)) -> dict[str, Any]:
     try:
         selected = _profile(profile)
-        snapshot = read_dashboard_snapshot(selected, allow_invalid=True)
+        environment = dashboard_profile_environment(selected)
+        snapshot = read_dashboard_snapshot(
+            selected,
+            environ=environment,
+            allow_invalid=True,
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
     return {
@@ -128,12 +145,14 @@ def put_config(payload: dict[str, Any]) -> dict[str, Any]:
         )
     try:
         selected = _profile(payload.get("profile"))
+        environment = dashboard_profile_environment(selected)
         write_config_document(
             selected,
             document=document,
             expected_revision=expected,
+            environ=environment,
         )
-        result = _config_response(selected)
+        result = _config_response(selected, environ=environment)
     except Exception as exc:
         raise _http_error(exc) from exc
     result["saved"] = True
@@ -147,7 +166,12 @@ def get_receipts(
 ) -> dict[str, Any]:
     try:
         selected = _profile(profile)
-        result = read_receipts(selected, limit=limit)
+        environment = dashboard_profile_environment(selected)
+        result = read_receipts(
+            selected,
+            limit=limit,
+            environ=environment,
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
     result["profile"] = selected

@@ -38,6 +38,20 @@
   var DEFAULT_ATTENTION_MODEL = "deepseek/deepseek-v4-flash";
   var SUPPORTED_PLATFORMS = ["discord", "telegram"];
 
+  function selectedHermesProfile() {
+    try {
+      return new URLSearchParams(window.location.search).get("profile") || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function profileURL(path, profile) {
+    if (!profile || path.indexOf("profile=") !== -1) return path;
+    return path + (path.indexOf("?") === -1 ? "?" : "&") +
+      "profile=" + encodeURIComponent(profile);
+  }
+
   var styles = {
     page: { display: "flex", flexDirection: "column", gap: "16px" },
     row: { display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "end" },
@@ -559,6 +573,7 @@
   }
 
   function NunchiPanel() {
+    var [selectedProfile, setSelectedProfile] = useState(selectedHermesProfile());
     var [snapshot, setSnapshot] = useState(null);
     var [document, setDocument] = useState(null);
     var [savedDocument, setSavedDocument] = useState(null);
@@ -567,9 +582,21 @@
     var [message, setMessage] = useState("");
     var [saving, setSaving] = useState(false);
 
+    useEffect(function () {
+      function refreshProfile() {
+        setSelectedProfile(selectedHermesProfile());
+      }
+      window.addEventListener("popstate", refreshProfile);
+      var timer = window.setInterval(refreshProfile, 500);
+      return function () {
+        window.removeEventListener("popstate", refreshProfile);
+        window.clearInterval(timer);
+      };
+    }, []);
+
     var load = useCallback(function () {
       setMessage("Loading…");
-      return fetchJSON(API + "/config").then(function (data) {
+      return fetchJSON(profileURL(API + "/config", selectedProfile)).then(function (data) {
         var loadedDocument = clone(data.document);
         if (data.bootstrap_required &&
             (!loadedDocument.rooms || !loadedDocument.rooms.length)) {
@@ -584,17 +611,17 @@
       }).catch(function (error) {
         setMessage("Could not load Nunchi config: " + String(error));
       });
-    }, []);
+    }, [selectedProfile]);
 
     var loadReceipts = useCallback(function () {
       setMessage("Loading receipts…");
-      return fetchJSON(API + "/receipts?limit=100").then(function (data) {
+      return fetchJSON(profileURL(API + "/receipts?limit=100", selectedProfile)).then(function (data) {
         setReceipts(data);
         setMessage("");
       }).catch(function (error) {
         setMessage("Could not load receipts: " + String(error));
       });
-    }, []);
+    }, [selectedProfile]);
 
     useEffect(function () { load(); }, [load]);
     useEffect(function () {

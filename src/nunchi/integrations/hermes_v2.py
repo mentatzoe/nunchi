@@ -78,6 +78,10 @@ _CONFIGURED_ROUTE_CONTEXT: ContextVar[bool] = ContextVar(
 )
 
 
+class HermesSetupRequired(ValidationError):
+    """Nunchi has no saved room configuration for this Hermes profile."""
+
+
 @dataclass
 class _StockControlAuthorization:
     """Revocable authority for one exact stock control event.
@@ -914,7 +918,7 @@ def resolve_config_source(
         config_exists = defaults.config.exists()
         digest_exists = defaults.digest.exists()
         if not config_exists and not digest_exists:
-            raise ValidationError(
+            raise HermesSetupRequired(
                 f"Nunchi is not configured for Hermes profile {profile!r}. "
                 "Open the Nunchi dashboard tab, save at least one room, then "
                 "restart Hermes. Stock Hermes remains available until setup "
@@ -4850,7 +4854,7 @@ def register(
     *,
     config_loader: Callable[[str], HermesPluginConfig] | None = None,
     dashboard_installer: Callable[[], Any] | None = None,
-) -> NunchiHermesV2Plugin:
+) -> NunchiHermesV2Plugin | None:
     global _ORIGINAL_BASE_HANDLE, _SHIM_OWNER
 
     hermes_version = _hermes_version()
@@ -4868,20 +4872,50 @@ def register(
     if dashboard_installer is None:
         from nunchi.integrations.hermes_dashboard_install import (
             DashboardInstallError,
-            default_hermes_home,
-            install_dashboard,
+            install_dashboard_for_profile,
         )
 
         try:
-            install_dashboard(hermes_home=default_hermes_home())
+            install_dashboard_for_profile(profile=profile)
         except (DashboardInstallError, OSError) as exc:
             raise ValidationError(
-                "could not install the Nunchi dashboard bridge; run "
-                "`nunchi-hermes-dashboard install` to repair it"
+                "could not install the Nunchi dashboard bridge: "
+                f"{str(exc).strip() or 'unknown dashboard error'}"
             ) from exc
     else:
         dashboard_installer()
-    config = (config_loader or _default_config_loader)(profile)
+    try:
+        config = (config_loader or _default_config_loader)(profile)
+    except HermesSetupRequired:
+        if config_loader is not None:
+            raise
+
+        def setup_command(raw_args: str) -> str:
+            if (raw_args or "").strip().lower() not in {"", "probe", "status"}:
+                return json.dumps({"error": "usage: /nunchi [probe]"})
+            return json.dumps(
+                {
+                    "plugin": _PLUGIN_ID,
+                    "nunchi_version": __version__,
+                    "hermes_version": hermes_version,
+                    "hermes_profile": profile,
+                    "active": False,
+                    "setup_required": True,
+                    "next": (
+                        "Open the Nunchi dashboard tab, save at least one room, "
+                        "then restart Hermes."
+                    ),
+                    "stock_hermes_available": True,
+                },
+                sort_keys=True,
+            )
+
+        ctx.register_command(
+            "nunchi",
+            setup_command,
+            description="Show Nunchi setup status",
+        )
+        return None
     mode = "process-local-gate"
     plugin = NunchiHermesV2Plugin(
         config=config,

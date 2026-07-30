@@ -253,6 +253,137 @@ def verify_dashboard(*, hermes_home: Path) -> dict[str, Any]:
     }
 
 
+def _enable_machine_dashboard(*, hermes_home: Path) -> dict[str, Any]:
+    """Enable Nunchi in the profile that owns Hermes's unified dashboard."""
+
+    try:
+        from hermes_constants import (
+            reset_hermes_home_override,
+            set_hermes_home_override,
+        )
+        from hermes_cli.config import load_config
+        from hermes_cli.plugins_cmd import dashboard_set_agent_plugin_enabled
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise DashboardInstallError(
+            "Hermes dashboard profile APIs are unavailable; update Nunchi or "
+            "run the dashboard with --isolated"
+        ) from exc
+
+    token = set_hermes_home_override(str(hermes_home))
+    try:
+        config = load_config()
+        plugins = config.get("plugins", {})
+        disabled = plugins.get("disabled", []) if isinstance(plugins, dict) else []
+        if isinstance(disabled, list) and "nunchi" in disabled:
+            return {
+                "ok": True,
+                "enabled": False,
+                "reason": "explicitly-disabled",
+            }
+        result = dashboard_set_agent_plugin_enabled("nunchi", enabled=True)
+        confirmed = load_config()
+    except Exception as exc:
+        raise DashboardInstallError(
+            "could not enable Nunchi in Hermes's dashboard profile"
+        ) from exc
+    finally:
+        reset_hermes_home_override(token)
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        detail = (
+            str(result.get("error", "")).strip()
+            if isinstance(result, dict)
+            else ""
+        )
+        raise DashboardInstallError(
+            detail or "could not enable Nunchi in Hermes's dashboard profile"
+        )
+    confirmed_plugins = (
+        confirmed.get("plugins", {}) if isinstance(confirmed, dict) else {}
+    )
+    confirmed_enabled = (
+        confirmed_plugins.get("enabled", [])
+        if isinstance(confirmed_plugins, dict)
+        else []
+    )
+    confirmed_disabled = (
+        confirmed_plugins.get("disabled", [])
+        if isinstance(confirmed_plugins, dict)
+        else []
+    )
+    if (
+        not isinstance(confirmed_enabled, list)
+        or "nunchi" not in confirmed_enabled
+        or (
+            isinstance(confirmed_disabled, list)
+            and "nunchi" in confirmed_disabled
+        )
+    ):
+        raise DashboardInstallError(
+            "Hermes did not persist Nunchi in the machine dashboard profile. "
+            "Have the Hermes administrator add `nunchi` to plugins.enabled, "
+            "or run the dashboard with --isolated for this profile."
+        )
+    return {
+        "ok": True,
+        "enabled": True,
+        "unchanged": bool(result.get("unchanged")),
+    }
+
+
+def install_dashboard_for_profile(*, profile: str) -> dict[str, Any]:
+    """Install the tab for one profile and Hermes's unified dashboard host."""
+
+    current_home = default_hermes_home().expanduser().absolute()
+    profile_home = current_home
+    machine_home = current_home
+    if profile != "custom":
+        try:
+            from hermes_cli.profiles import (
+                get_profile_dir,
+                normalize_profile_name,
+                validate_profile_name,
+            )
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise DashboardInstallError(
+                "Hermes profile APIs are unavailable; update Nunchi or run "
+                "the dashboard with --isolated"
+            ) from exc
+        try:
+            canonical = normalize_profile_name(profile)
+            validate_profile_name(canonical)
+            profile_home = Path(get_profile_dir(canonical)).expanduser().absolute()
+            machine_home = Path(get_profile_dir("default")).expanduser().absolute()
+        except Exception as exc:
+            raise DashboardInstallError(
+                f"Hermes profile {profile!r} could not be resolved"
+            ) from exc
+
+    installed: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for home in (profile_home, machine_home):
+        resolved = home.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        installed.append(install_dashboard(hermes_home=home))
+
+    machine_activation = {
+        "ok": True,
+        "enabled": True,
+        "unchanged": True,
+    }
+    if machine_home.resolve() != profile_home.resolve():
+        machine_activation = _enable_machine_dashboard(
+            hermes_home=machine_home,
+        )
+    return {
+        "ok": True,
+        "profile": profile,
+        "installed": installed,
+        "machine_dashboard": machine_activation,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nunchi-hermes-dashboard",

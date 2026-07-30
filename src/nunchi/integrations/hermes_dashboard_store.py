@@ -19,6 +19,7 @@ import re
 import stat
 import tempfile
 import threading
+from types import MappingProxyType
 from typing import Any
 
 from nunchi.errors import ValidationError
@@ -37,8 +38,10 @@ from nunchi.integrations.hermes_v2 import (
 
 logger = logging.getLogger(__name__)
 _MAX_RECEIPT_READ_BYTES = 2 * 1024 * 1024
+_MAX_PROFILE_ENV_READ_BYTES = 1024 * 1024
 _AUDIT_NAME = "nunchi-dashboard-audit.jsonl"
 _PROFILE_PREFIX = re.compile(r"[^a-z0-9]+")
+_HERMES_PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _CONFIG_WRITE_LOCK = threading.Lock()
 
 
@@ -141,6 +144,225 @@ def active_hermes_profile() -> str:
             "Hermes active profile could not be resolved"
         )
     return value.strip()
+
+
+def canonical_dashboard_profile(profile: str) -> str:
+    """Return the exact Hermes profile id accepted by dashboard operations."""
+
+    if not isinstance(profile, str):
+        raise DashboardConfigError("invalid Hermes profile")
+    selected = profile.strip()
+    if not selected:
+        raise DashboardConfigError("invalid Hermes profile")
+    try:
+        from hermes_cli.profiles import (
+            normalize_profile_name,
+            validate_profile_name,
+        )
+    except (ImportError, ModuleNotFoundError):
+        canonical = selected.lower()
+        if canonical != "default" and not _HERMES_PROFILE_ID.fullmatch(canonical):
+            raise DashboardConfigError("invalid Hermes profile")
+        return canonical
+    try:
+        canonical = normalize_profile_name(selected)
+        validate_profile_name(canonical)
+    except (TypeError, ValueError) as exc:
+        raise DashboardConfigError("invalid Hermes profile") from exc
+    return canonical
+
+
+def _source_environment_keys(profile: str) -> tuple[str, ...]:
+    token = re.sub(r"[^A-Za-z0-9]", "_", profile).upper()
+    keys = [
+        f"NUNCHI_HERMES_V2_CONFIG_{token}",
+        f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token}",
+        f"NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_{token}",
+    ]
+    if profile == "default":
+        keys.extend(
+            [
+                "NUNCHI_HERMES_V2_CONFIG",
+                "NUNCHI_HERMES_V2_CONFIG_SHA256",
+                "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE",
+            ]
+        )
+    return tuple(keys)
+
+
+def _parse_profile_env_value(raw_value: str) -> str:
+    """Parse the small value subset Hermes itself writes to profile .env."""
+
+    value = raw_value.strip()
+    if "\x00" in value:
+        raise DashboardConfigError("Hermes profile .env is invalid")
+    if value.startswith('"') or value.endswith('"'):
+        if len(value) < 2 or value[0] != value[-1]:
+            raise DashboardConfigError("Hermes profile .env is invalid")
+        quoted = value[1:-1]
+        parsed: list[str] = []
+        index = 0
+        while index < len(quoted):
+            character = quoted[index]
+            if character == "\\" and index + 1 < len(quoted):
+                following = quoted[index + 1]
+                if following in {'"', "\\"}:
+                    parsed.append(following)
+                    index += 2
+                    continue
+            parsed.append(character)
+            index += 1
+        return "".join(parsed)
+    if value.startswith("'") or value.endswith("'"):
+        if len(value) < 2 or value[0] != value[-1]:
+            raise DashboardConfigError("Hermes profile .env is invalid")
+        return value[1:-1]
+    return value
+
+
+def _profile_environment_values(
+    profile: str,
+    *,
+    profile_home: Path,
+) -> dict[str, str]:
+    """Read only Nunchi-owned settings from one exact profile .env."""
+
+    env_path = profile_home / ".env"
+    try:
+        metadata = env_path.lstat()
+    except FileNotFoundError:
+        return {}
+    except OSError as exc:
+        raise DashboardConfigError("Hermes profile .env is unavailable") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise DashboardConfigError("Hermes profile .env must be a regular file")
+    if metadata.st_size > _MAX_PROFILE_ENV_READ_BYTES:
+        raise DashboardConfigError("Hermes profile .env is too large")
+    try:
+        raw = _require_private_regular_file(env_path, "Hermes profile .env")
+    except ValidationError as exc:
+        raise DashboardConfigError(str(exc)) from exc
+    if len(raw) > _MAX_PROFILE_ENV_READ_BYTES:
+        raise DashboardConfigError("Hermes profile .env is too large")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+
+    allowed = set(_source_environment_keys(profile))
+    allowed.add("DISCORD_ALLOW_BOTS")
+    selected: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if key not in allowed:
+            continue
+        if not separator or key in selected:
+            raise DashboardConfigError(
+                f"Hermes profile .env has an invalid {key} assignment"
+            )
+        selected[key] = _parse_profile_env_value(value)
+    return selected
+
+
+def _validated_profile_home(path: Path) -> Path:
+    try:
+        profile_home = path.expanduser().resolve(strict=True)
+        metadata = profile_home.stat()
+    except (FileNotFoundError, OSError, RuntimeError) as exc:
+        raise DashboardConfigError(
+            "Hermes profile home could not be resolved"
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise DashboardConfigError("Hermes profile home must be a directory")
+    if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+        raise DashboardConfigError(
+            "Hermes profile home must be owned by the Hermes user"
+        )
+    if metadata.st_mode & 0o022:
+        raise DashboardConfigError(
+            "Hermes profile home must not be writable by group or other users"
+        )
+    return profile_home
+
+
+def dashboard_profile_environment(
+    profile: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Mapping[str, str]:
+    """Resolve one immutable, secret-minimal dashboard request environment."""
+
+    if environ is not None:
+        return environ
+
+    canonical = canonical_dashboard_profile(profile)
+    allowed = set(_source_environment_keys(canonical))
+    allowed.add("DISCORD_ALLOW_BOTS")
+    effective = {
+        key: os.environ[key]
+        for key in allowed
+        if key in os.environ
+    }
+    try:
+        from hermes_cli.profiles import resolve_profile_env
+    except (ImportError, ModuleNotFoundError):
+        try:
+            profile_home = _validated_profile_home(default_hermes_home())
+        except (DashboardConfigError, OSError) as exc:
+            raise DashboardConfigError(
+                "Hermes profile home could not be resolved"
+            ) from exc
+    else:
+        try:
+            resolved_home = resolve_profile_env(canonical)
+        except FileNotFoundError as exc:
+            use_current_custom_home = False
+            if canonical == "custom":
+                try:
+                    use_current_custom_home = (
+                        canonical_dashboard_profile(active_hermes_profile())
+                        == "custom"
+                    )
+                except DashboardConfigError:
+                    use_current_custom_home = False
+            if not use_current_custom_home:
+                raise DashboardConfigError(
+                    f"Hermes profile {canonical!r} could not be resolved"
+                ) from exc
+            try:
+                profile_home = _validated_profile_home(default_hermes_home())
+            except (DashboardConfigError, OSError) as exc:
+                raise DashboardConfigError(
+                    "Hermes profile home could not be resolved"
+                ) from exc
+        except (TypeError, ValueError) as exc:
+            raise DashboardConfigError(
+                f"Hermes profile {canonical!r} could not be resolved"
+            ) from exc
+        else:
+            try:
+                profile_home = _validated_profile_home(
+                    Path(resolved_home)
+                )
+            except (DashboardConfigError, TypeError, ValueError) as exc:
+                raise DashboardConfigError(
+                    f"Hermes profile {canonical!r} could not be resolved"
+                ) from exc
+    effective.update(
+        _profile_environment_values(
+            canonical,
+            profile_home=profile_home,
+        )
+    )
+
+    effective["HERMES_HOME"] = str(profile_home)
+    return MappingProxyType(effective)
 
 
 def _profile_storage_key(profile: str) -> str:
@@ -295,11 +517,12 @@ def read_config_snapshot(
     Dashboard setup uses :func:`read_dashboard_snapshot`.
     """
 
+    environment = dashboard_profile_environment(profile, environ=environ)
     return _read_resolved_snapshot(
         profile,
         source_factory=lambda: resolve_config_source(
             profile,
-            environ=environ,
+            environ=environment,
         ),
         allow_invalid=allow_invalid,
     )
@@ -333,21 +556,10 @@ def _source_environment_is_set(
     environ: Mapping[str, str] | None,
 ) -> bool:
     environment = os.environ if environ is None else environ
-    token = re.sub(r"[^A-Za-z0-9]", "_", profile).upper()
-    keys = [
-        f"NUNCHI_HERMES_V2_CONFIG_{token}",
-        f"NUNCHI_HERMES_V2_CONFIG_SHA256_{token}",
-        f"NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_{token}",
-    ]
-    if profile == "default":
-        keys.extend(
-            [
-                "NUNCHI_HERMES_V2_CONFIG",
-                "NUNCHI_HERMES_V2_CONFIG_SHA256",
-                "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE",
-            ]
-        )
-    return any(environment.get(key, "").strip() for key in keys)
+    return any(
+        environment.get(key, "").strip()
+        for key in _source_environment_keys(profile)
+    )
 
 
 def _path_entry_exists(path: Path) -> bool:
@@ -397,14 +609,15 @@ def read_dashboard_snapshot(
 ) -> DashboardConfigSnapshot:
     """Read configured bytes or describe a safe first-run setup."""
 
-    if _source_environment_is_set(profile, environ=environ):
+    environment = dashboard_profile_environment(profile, environ=environ)
+    if _source_environment_is_set(profile, environ=environment):
         return read_config_snapshot(
             profile,
-            environ=environ,
+            environ=environment,
             allow_invalid=allow_invalid,
         )
 
-    paths = default_config_paths(profile, environ=environ)
+    paths = default_config_paths(profile, environ=environment)
     config_exists = _path_entry_exists(paths.config)
     digest_exists = _path_entry_exists(paths.digest)
     if digest_exists and not config_exists:
@@ -476,7 +689,10 @@ def discord_runtime_status(
 ) -> dict[str, Any]:
     """Describe the Discord behavior supplied by the installed Nunchi plugin."""
 
-    environment = os.environ if environ is None else environ
+    environment = dashboard_profile_environment(
+        snapshot.profile,
+        environ=environ,
+    )
     configuration_loadable = (
         snapshot.config is not None and not snapshot.bootstrap_required
     )
@@ -762,17 +978,18 @@ def write_config_document(
             "configuration must contain only JSON values"
         ) from exc
     new_sha256 = hashlib.sha256(encoded).hexdigest()
+    environment = dashboard_profile_environment(profile, environ=environ)
 
     with _CONFIG_WRITE_LOCK:
-        if _source_environment_is_set(profile, environ=environ):
+        if _source_environment_is_set(profile, environ=environment):
             preflight = read_dashboard_snapshot(
                 profile,
-                environ=environ,
+                environ=environment,
                 allow_invalid=True,
             )
             write_directory = preflight.source.write_path.parent
         else:
-            default_paths = default_config_paths(profile, environ=environ)
+            default_paths = default_config_paths(profile, environ=environment)
             _prepare_default_directories(default_paths)
             write_directory = default_paths.config.parent
         _prepare_private_directory(
@@ -782,7 +999,7 @@ def write_config_document(
         with _cross_process_config_lock(write_directory):
             current = read_dashboard_snapshot(
                 profile,
-                environ=environ,
+                environ=environment,
                 allow_invalid=True,
             )
             if current.revision != submitted_revision:
@@ -982,7 +1199,7 @@ def write_config_document(
             finally:
                 config_staged.unlink(missing_ok=True)
 
-            updated = read_dashboard_snapshot(profile, environ=environ)
+            updated = read_dashboard_snapshot(profile, environ=environment)
             if updated.sha256 != new_sha256:
                 raise DashboardConfigError(
                     "configuration read-back did not match the committed bytes"
@@ -1094,9 +1311,10 @@ def read_receipts(
 ) -> dict[str, Any]:
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
         raise DashboardConfigError("receipt limit must be within [1, 500]")
+    environment = dashboard_profile_environment(profile, environ=environ)
     snapshot = read_dashboard_snapshot(
         profile,
-        environ=environ,
+        environ=environment,
         allow_invalid=True,
     )
     if snapshot.bootstrap_required:

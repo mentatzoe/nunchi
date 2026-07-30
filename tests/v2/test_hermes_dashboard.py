@@ -26,6 +26,7 @@ from nunchi.integrations.hermes_dashboard_store import (
     DashboardConfigError,
     DashboardConfigReadOnly,
     active_hermes_profile,
+    dashboard_profile_environment,
     channel_directory,
     default_config_paths,
     discord_runtime_status,
@@ -34,6 +35,42 @@ from nunchi.integrations.hermes_dashboard_store import (
     read_receipts,
     write_config_document,
 )
+
+
+def _hermes_profile_modules(root: Path) -> dict[str, types.ModuleType]:
+    package = types.ModuleType("hermes_cli")
+    package.__path__ = []
+    profiles = types.ModuleType("hermes_cli.profiles")
+
+    def normalize_profile_name(name: str) -> str:
+        selected = str(name).strip().lower()
+        if not selected:
+            raise ValueError("empty profile")
+        return selected
+
+    def validate_profile_name(name: str) -> None:
+        if name == "default":
+            return
+        if not hermes_dashboard_store._HERMES_PROFILE_ID.fullmatch(name):
+            raise ValueError("invalid profile")
+
+    def resolve_profile_env(name: str) -> str:
+        canonical = normalize_profile_name(name)
+        validate_profile_name(canonical)
+        profile_home = root if canonical == "default" else root / "profiles" / canonical
+        if canonical != "default" and not profile_home.is_dir():
+            raise FileNotFoundError(canonical)
+        return str(profile_home)
+
+    profiles.normalize_profile_name = normalize_profile_name
+    profiles.validate_profile_name = validate_profile_name
+    profiles.resolve_profile_env = resolve_profile_env
+    profiles.get_active_profile_name = lambda: "default"
+    package.profiles = profiles
+    return {
+        "hermes_cli": package,
+        "hermes_cli.profiles": profiles,
+    }
 
 
 def _save_dashboard_config_in_process(
@@ -123,7 +160,326 @@ def _write_config(root: Path) -> tuple[Path, Path, dict, dict[str, str]]:
     return config_path, digest_path, document, environ
 
 
+def _write_named_config(
+    root: Path,
+    profile: str,
+) -> tuple[Path, Path, dict]:
+    document = _document(root)
+    document["hermes_profile"] = profile
+    config_path = root / "nunchi.json"
+    config_path.write_text(
+        json.dumps(document, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    config_path.chmod(0o600)
+    digest_path = root / "nunchi.json.sha256"
+    digest_path.write_text(
+        hashlib.sha256(config_path.read_bytes()).hexdigest() + "\n",
+        encoding="ascii",
+    )
+    digest_path.chmod(0o600)
+    return config_path, digest_path, document
+
+
 class HermesDashboardConfigTests(unittest.TestCase):
+    def test_named_machine_dashboard_uses_only_exact_profile_settings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            machine_home = Path(temporary) / "hermes"
+            profile_home = machine_home / "profiles" / "fiction-writer"
+            profile_home.mkdir(mode=0o700, parents=True)
+            machine_home.chmod(0o700)
+            config_path, digest_path, document = _write_named_config(
+                profile_home,
+                "fiction-writer",
+            )
+            (profile_home / ".env").write_text(
+                "DISCORD_BOT_TOKEN=must-not-leave-profile-env\n"
+                f"NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER={config_path}\n"
+                "DISCORD_ALLOW_BOTS=all\n"
+                "UNRELATED_SECRET=must-not-be-imported\n"
+                "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_FICTION_WRITER="
+                f"{digest_path}\n",
+                encoding="utf-8",
+            )
+            (profile_home / ".env").chmod(0o600)
+            (profile_home / "channel_directory.json").write_text(
+                json.dumps(
+                    {
+                        "platforms": {
+                            "discord": [
+                                {
+                                    "id": "42",
+                                    "name": "Nunchi room",
+                                    "guild": "Test",
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            process_environment = {
+                "HERMES_HOME": str(machine_home),
+                "DISCORD_BOT_TOKEN": "machine-secret",
+                "UNRELATED_SECRET": "machine-unrelated",
+            }
+            with (
+                patch.dict(os.environ, process_environment, clear=True),
+                patch.dict(
+                    sys.modules,
+                    _hermes_profile_modules(machine_home),
+                ),
+            ):
+                environment = dashboard_profile_environment("fiction-writer")
+                snapshot = read_dashboard_snapshot(
+                    "fiction-writer",
+                    environ=environment,
+                )
+                status = discord_runtime_status(
+                    snapshot,
+                    environ=environment,
+                )
+                channels = channel_directory(environ=environment)
+                updated_document = json.loads(json.dumps(document))
+                updated_document["rooms"][0]["profile"]["document"][
+                    "instructions"
+                ] = "Updated through the machine dashboard."
+                updated = write_config_document(
+                    "fiction-writer",
+                    document=updated_document,
+                    expected_revision=snapshot.revision,
+                    environ=environment,
+                )
+
+                self.assertEqual(process_environment, dict(os.environ))
+
+            self.assertEqual(
+                {
+                    "DISCORD_ALLOW_BOTS",
+                    "HERMES_HOME",
+                    "NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER",
+                    "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_FICTION_WRITER",
+                },
+                set(environment),
+            )
+            self.assertEqual(
+                str(profile_home.resolve()),
+                environment["HERMES_HOME"],
+            )
+            self.assertEqual(config_path, snapshot.source.write_path)
+            self.assertEqual(1, len(snapshot.config.rooms))
+            self.assertEqual("all", status["profile_wide_hermes_allow_bots"])
+            self.assertEqual("42", channels[0]["id"])
+            self.assertEqual(config_path, updated.source.write_path)
+            self.assertEqual(
+                updated.sha256,
+                digest_path.read_text(encoding="ascii").strip(),
+            )
+            self.assertFalse(
+                default_config_paths(
+                    "fiction-writer",
+                    hermes_home=machine_home,
+                ).config.exists()
+            )
+
+    def test_named_machine_dashboard_first_save_matches_gateway_default_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            machine_home = Path(temporary) / "hermes"
+            profile_home = machine_home / "profiles" / "fiction-writer"
+            profile_home.mkdir(mode=0o700, parents=True)
+            machine_home.chmod(0o700)
+            (profile_home / ".env").write_text(
+                "DISCORD_ALLOW_BOTS=all\n",
+                encoding="utf-8",
+            )
+            (profile_home / ".env").chmod(0o600)
+            with (
+                patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(machine_home)},
+                    clear=True,
+                ),
+                patch.dict(
+                    sys.modules,
+                    _hermes_profile_modules(machine_home),
+                ),
+            ):
+                environment = dashboard_profile_environment("fiction-writer")
+                before = read_dashboard_snapshot(
+                    "fiction-writer",
+                    environ=environment,
+                )
+                document = _document(before.source.write_path.parent)
+                document["hermes_profile"] = "fiction-writer"
+                after = write_config_document(
+                    "fiction-writer",
+                    document=document,
+                    expected_revision=before.revision,
+                    environ=environment,
+                )
+
+            gateway_environment = {"HERMES_HOME": str(profile_home)}
+            source = hermes_v2.resolve_config_source(
+                "fiction-writer",
+                environ=gateway_environment,
+            )
+            loaded = hermes_v2.load_pinned_config(
+                source.path,
+                expected_sha256=source.expected_sha256,
+                hermes_profile="fiction-writer",
+            )
+            expected_paths = default_config_paths(
+                "fiction-writer",
+                hermes_home=profile_home,
+            )
+            self.assertTrue(before.bootstrap_required)
+            self.assertEqual(expected_paths.config, before.source.write_path)
+            self.assertEqual(expected_paths.config, after.source.write_path)
+            self.assertEqual(expected_paths.config, source.path)
+            self.assertEqual("fiction-writer", loaded.hermes_profile)
+            self.assertFalse(
+                default_config_paths(
+                    "fiction-writer",
+                    hermes_home=machine_home,
+                ).config.exists()
+            )
+
+    def test_explicit_environment_skips_hermes_profile_resolution(self):
+        supplied = {"HERMES_HOME": "/explicit/home"}
+        package = types.ModuleType("hermes_cli")
+        package.__path__ = []
+        profiles = types.ModuleType("hermes_cli.profiles")
+        profiles.resolve_profile_env = lambda _profile: self.fail(
+            "explicit environment must not resolve a Hermes profile"
+        )
+        package.profiles = profiles
+        with patch.dict(
+            sys.modules,
+            {
+                "hermes_cli": package,
+                "hermes_cli.profiles": profiles,
+            },
+        ):
+            resolved = dashboard_profile_environment(
+                "../../unchanged",
+                environ=supplied,
+            )
+        self.assertIs(supplied, resolved)
+
+    def test_custom_profile_uses_current_hermes_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            machine_home = Path(temporary) / "machine"
+            custom_home = Path(temporary) / "custom-home"
+            machine_home.mkdir(mode=0o700)
+            custom_home.mkdir(mode=0o700)
+            config_path, digest_path, _ = _write_named_config(
+                custom_home,
+                "custom",
+            )
+            (custom_home / ".env").write_text(
+                f"NUNCHI_HERMES_V2_CONFIG_CUSTOM={config_path}\n"
+                f"NUNCHI_HERMES_V2_CONFIG_SHA256_FILE_CUSTOM={digest_path}\n",
+                encoding="utf-8",
+            )
+            (custom_home / ".env").chmod(0o600)
+            modules = _hermes_profile_modules(machine_home)
+            profiles = modules["hermes_cli.profiles"]
+            original_resolver = profiles.resolve_profile_env
+            resolution_attempts: list[str] = []
+
+            def reject_named_custom(name: str) -> str:
+                resolution_attempts.append(name)
+                if name == "custom":
+                    raise FileNotFoundError(name)
+                return original_resolver(name)
+
+            profiles.resolve_profile_env = reject_named_custom
+            profiles.get_active_profile_name = lambda: "custom"
+            with (
+                patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(machine_home)},
+                    clear=True,
+                ),
+                patch.dict(sys.modules, modules),
+                patch.object(
+                    hermes_dashboard_store,
+                    "default_hermes_home",
+                    return_value=custom_home,
+                ),
+            ):
+                environment = dashboard_profile_environment("custom")
+                snapshot = read_dashboard_snapshot(
+                    "custom",
+                    environ=environment,
+                )
+
+            self.assertEqual(
+                str(custom_home.resolve()),
+                environment["HERMES_HOME"],
+            )
+            self.assertEqual(["custom"], resolution_attempts)
+            self.assertEqual(config_path, snapshot.source.write_path)
+            self.assertEqual("custom", snapshot.config.hermes_profile)
+
+    def test_missing_named_custom_profile_does_not_use_machine_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            machine_home = Path(temporary) / "machine"
+            machine_home.mkdir(mode=0o700)
+            modules = _hermes_profile_modules(machine_home)
+            with (
+                patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(machine_home)},
+                    clear=True,
+                ),
+                patch.dict(sys.modules, modules),
+            ):
+                with self.assertRaisesRegex(
+                    DashboardConfigError,
+                    "profile 'custom' could not be resolved",
+                ):
+                    dashboard_profile_environment("custom")
+
+    def test_named_profile_env_must_be_private_and_unambiguous(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            machine_home = Path(temporary) / "hermes"
+            profile_home = machine_home / "profiles" / "fiction-writer"
+            profile_home.mkdir(mode=0o700, parents=True)
+            machine_home.chmod(0o700)
+            profile_env = profile_home / ".env"
+            profile_env.write_text(
+                "NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER=/first\n"
+                "NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER=/second\n",
+                encoding="utf-8",
+            )
+            profile_env.chmod(0o600)
+            modules = _hermes_profile_modules(machine_home)
+            with (
+                patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": str(machine_home)},
+                    clear=True,
+                ),
+                patch.dict(sys.modules, modules),
+            ):
+                with self.assertRaisesRegex(
+                    DashboardConfigError,
+                    "invalid NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER",
+                ):
+                    dashboard_profile_environment("fiction-writer")
+
+                profile_env.write_text(
+                    "NUNCHI_HERMES_V2_CONFIG_FICTION_WRITER=/first\n",
+                    encoding="utf-8",
+                )
+                profile_env.chmod(0o644)
+                with self.assertRaisesRegex(
+                    DashboardConfigError,
+                    "must not be accessible by group or other users",
+                ):
+                    dashboard_profile_environment("fiction-writer")
+
     def test_first_run_bootstrap_creates_private_profile_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "hermes"

@@ -23,6 +23,7 @@ from nunchi.attention import (
     ParticipantProfile,
     participant_attention_prompt,
 )
+from nunchi.errors import ValidationError
 from nunchi.integrations import hermes_v2
 from nunchi.observation import (
     ObservationLimits,
@@ -4294,10 +4295,11 @@ class HermesPortableTests(unittest.TestCase):
                 plugin.probe()["tool_execution"],
             )
 
-    def test_register_installs_dashboard_before_first_run_setup(self):
+    def test_register_installs_dashboard_and_stays_dormant_before_setup(self):
         with tempfile.TemporaryDirectory() as temporary:
             installed: list[bool] = []
-            ctx = types.SimpleNamespace(profile_name="fiction-writer")
+            ctx = FakeCtx(FakeLlm([]))
+            ctx.profile_name = "fiction-writer"
             with (
                 mock.patch.dict(
                     os.environ,
@@ -4310,17 +4312,54 @@ class HermesPortableTests(unittest.TestCase):
                     return_value="0.19.0",
                 ),
             ):
-                with self.assertRaisesRegex(
-                    Exception,
-                    "Open the Nunchi dashboard tab.*Stock Hermes remains "
-                    "available",
-                ):
-                    hermes_v2.register(
-                        ctx,
-                        dashboard_installer=lambda: installed.append(True),
-                    )
+                result = hermes_v2.register(
+                    ctx,
+                    dashboard_installer=lambda: installed.append(True),
+                )
 
             self.assertEqual([True], installed)
+            self.assertIsNone(result)
+            self.assertEqual({}, ctx.hooks)
+            self.assertIn("nunchi", ctx.commands)
+            status = json.loads(ctx.commands["nunchi"]("probe"))
+            self.assertFalse(status["active"])
+            self.assertTrue(status["setup_required"])
+            self.assertTrue(status["stock_hermes_available"])
+
+    def test_register_preserves_dashboard_repair_guidance(self):
+        from nunchi.integrations import hermes_dashboard_install
+
+        ctx = FakeCtx(FakeLlm([]))
+        ctx.profile_name = "fiction-writer"
+        detail = (
+            "Hermes did not persist Nunchi in the machine dashboard profile. "
+            "Have the Hermes administrator add `nunchi` to plugins.enabled, "
+            "or run the dashboard with --isolated for this profile."
+        )
+        with (
+            mock.patch.object(
+                hermes_v2,
+                "_hermes_version",
+                return_value="0.19.0",
+            ),
+            mock.patch.object(
+                hermes_dashboard_install,
+                "install_dashboard_for_profile",
+                side_effect=hermes_dashboard_install.DashboardInstallError(
+                    detail
+                ),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ValidationError,
+                "administrator.*--isolated",
+            ) as raised:
+                hermes_v2.register(ctx)
+
+        self.assertNotIn(
+            "nunchi-hermes-dashboard install",
+            str(raised.exception),
+        )
 
     def test_versions_before_019_fail_with_a_supported_option(self):
         with tempfile.TemporaryDirectory() as temporary:

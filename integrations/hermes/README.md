@@ -70,11 +70,14 @@ hermes plugins enable nunchi
 ```
 
 The package metadata exposes the `nunchi` entry point in the
-`hermes_agent.plugins` group. The current source installs its three
-package-owned web bridge files into Hermes's documented user-plugin directory
-when Hermes loads the plugin because Hermes does not scan Python entry points
-for dashboard assets. It does not change the Hermes checkout or installed
-package. `nunchi-hermes-dashboard verify` checks the bridge;
+`hermes_agent.plugins` group. When Hermes loads it, Nunchi installs its three
+package-owned web bridge files into the selected profile and Hermes's
+machine-level dashboard profile, because Hermes does not scan Python entry
+points for dashboard assets. It also enables the entry point in that dashboard
+profile unless the operator explicitly disabled it there. This changes only
+Hermes user configuration and Nunchi-owned files; it does not change the
+Hermes checkout or installed package. `nunchi-hermes-dashboard verify` checks
+one bridge;
 `nunchi-hermes-dashboard install` repairs it. These commands are repair and
 verification tools; normal setup does not require running them.
 
@@ -82,17 +85,22 @@ verification tools; normal setup does not require running them.
 
 Enable the plugin and restart Hermes once. That first load installs the
 **Nunchi** dashboard tab but does not activate the gate without a room config;
-stock Hermes remains available. Open the tab, select or enter a room, set the
-exact authenticated bot actor ID, review the participant and attention
-settings, save, and restart Hermes again. The plugin creates a private
-profile-scoped config and digest under:
+stock Hermes remains available. If the dashboard was already running before
+that first load, restart the dashboard once so Hermes mounts the new tab and
+API. Open the tab, select or enter a room, set the exact authenticated bot
+actor ID, review the participant and attention settings, save, and restart
+Hermes again. The plugin creates a private profile-scoped config and digest
+under the selected profile's Hermes home:
 
 ```text
 $HERMES_HOME/nunchi/profiles/<profile-and-hash>/
 ```
 
-Hermes finds that saved config on restart; no separate setup command or
-environment variable is required.
+The machine dashboard passes its selected profile explicitly. Nunchi resolves
+that profile without changing process-wide environment variables, and reads
+only Nunchi's config pointers plus `DISCORD_ALLOW_BOTS` from the profile
+`.env`. Hermes finds the same saved config on restart; no separate setup
+command or environment variable is required.
 
 For managed or manual configuration, use the same closed JSON shape:
 
