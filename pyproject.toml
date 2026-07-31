@@ -56,6 +56,17 @@ nunchi-telegram = "nunchi.adapters.telegram:main"
 nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
+nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
+
+[project.entry-points."hermes_agent.plugins"]
+nunchi = "nunchi.integrations.hermes_v2"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"nunchi.integrations.hermes_dashboard_assets" = [
+  "index.js",
+  "manifest.json",
+  "plugin_api.py",
+]

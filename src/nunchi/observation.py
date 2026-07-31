@@ -167,6 +167,26 @@ def _event_refs(event: Mapping[str, Any]) -> tuple[str, ...]:
     return ()
 
 
+def _event_timestamp(event: Mapping[str, Any]) -> datetime | None:
+    raw = event.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _retained_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    retained = deepcopy(dict(event))
+    if "timestamp" in retained and _event_timestamp(retained) is None:
+        retained.pop("timestamp")
+    return retained
+
+
 def _actor_refs(event: Mapping[str, Any]) -> set[str]:
     if event["type"] == "message":
         return {event["author_id"], *event["mentioned_actor_ids"]}
@@ -606,7 +626,16 @@ class ObservationProvider:
         self._event_ids.add(event["id"])
         self._accepted_event_ids.add(event["id"])
         self._delivery_by_event[event["id"]] = delivery_id
-        self._events.append(deepcopy(dict(event)))
+        retained = _retained_event(event)
+        retained_at = _event_timestamp(retained)
+        insert_at = len(self._events)
+        if retained_at is not None:
+            for index, current in enumerate(self._events):
+                current_at = _event_timestamp(current)
+                if current_at is not None and current_at > retained_at:
+                    insert_at = index
+                    break
+        self._events.insert(insert_at, retained)
         self._actors.update(checked_actors)
         self._trim_retention()
 
@@ -776,11 +805,7 @@ class ObservationProvider:
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
         for index in sorted(selected - required):
-            raw = events[index].get("timestamp")
-            try:
-                timestamp = datetime.fromisoformat(raw.replace("Z", "+00:00")) if raw else None
-            except ValueError:
-                timestamp = None
+            timestamp = _event_timestamp(events[index])
             if timestamp is not None and timestamp < cutoff:
                 selected.remove(index)
                 truncated.add("age")

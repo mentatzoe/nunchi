@@ -1,9 +1,9 @@
 {
   "name": "nunchi",
   "label": "Nunchi",
-  "description": "Admission gate runtime config and receipt log viewer",
-  "icon": "Shield",
-  "version": "1.0.0",
+  "description": "Configure Nunchi rooms and inspect lifecycle receipts.",
+  "icon": "message-circle",
+  "version": "2.0.0",
   "tab": {
     "path": "/nunchi",
     "position": "after:skills"

@@ -6,25 +6,161 @@ source suite is not installed or live evidence.
 ## Candidate scope
 
 Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
-reference adapters, shared Discord MCP transport, and Codex.
+reference adapters, shared Discord MCP transport, Codex, and an unfrozen
+Hermes source successor.
 
-Excluded: Hermes and Claude Code implementation, repair, arming, installation,
-and live evaluation.
+This successor changes shared observation, attention, participant-host,
+opportunity, and receipt code as well as Hermes. Earlier exact foundation and
+Hermes evidence is historical input, not proof for these dirty bytes. The
+current successor has focused source-test evidence only.
 
-## Required evidence
+Pending: the remaining Hermes live matrix in
+[issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
+implementation and proof in
+[issue #39](https://github.com/mentatzoe/nunchi/issues/39); shared ACK behavior
+in [issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
+acceptance gate in
+[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
+Hermes source blockers are tracked separately in
+[issue #42](https://github.com/mentatzoe/nunchi/issues/42), Hermes supported
+surface gaps in [issue #44](https://github.com/mentatzoe/nunchi/issues/44),
+and Claude participant identity/surface blockers in
+[issue #43](https://github.com/mentatzoe/nunchi/issues/43).
 
-| Claim | Required proof | Current candidate |
+## Current successor gates
+
+| Claim | Required proof | Current status |
 |---|---|---|
-| source and contract | exact commit; clean tree; V2 full suite; eval list/run; diff check | verified at repaired implementation commit `c5f5e6c0c7e2fd6af1bf888ca9a86a7a8f4d7e63`; 319 source tests, 218 pinned dual-validator tests with zero skips, 8/8 lifecycle evaluations, clean diff check |
-| clean artifact | wheel hash; new venv; installed probes; no checkout imports; installed smoke | verified; two exact-source builds produced byte-identical wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; clean Python 3.14 install, installer init/verify, all entry-point probes, and MCP 1.28.1 construction passed |
-| deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | verified offline 8/8 against source and the installed artifact |
-| adversarial safety | identity, malformed input, route, replay, mutation, cancellation, coalescing, isolation, bounded context, gaps, restart, corrupt persistence | verified; full suite plus 101 focused cases against source and again against the installed wheel, including actor-byte, deadline, receipt-fsync, stale-approval, post-commit authority, malformed acknowledgement, lost acknowledgement, and no-duplicate-retry probes |
-| real room | attributable delivery/receipt IDs for SUPPRESS, WAKE, both DEFER paths, bypass, error, contribution, silence | verified on exact installed evidence candidate `755091b749876fa0954b42a9d5e86e2424c37b8b` and wheel SHA-256 `f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1`; see `evidence/v2/shared-foundation-live-2026-07-24.md` |
-| downstream readiness | platform interface and portable/runnable conformance suite | verified by installed conformance and interface probes |
-| independent review | fresh non-author Codex review of exact final commit with no blocker | verified; non-author reviewer `/root/foundation_final_candidate_review` (Dirac; OpenAI `gpt-5.6-sol`) approved exact evidence candidate `8296e11d6cb3018e68d2904765a7e1d61f218bd9` with no unresolved blocker; this record-only successor changes only that attribution |
+| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | **pending**; focused Hermes, dashboard, shared-foundation, and documentation tests pass on dirty source |
+| clean package | exact wheel hash; new environment; installed probes; no checkout imports | **pending** |
+| installed Hermes 0.19.0 | normal plugin discovery; automatic dashboard; first-save/restart; unchanged Hermes distribution hashes; Discord and Telegram shape checks | **pending** |
+| deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | **pending rerun**; predecessor evidence does not transfer across shared-core changes |
+| live platform | attributable Discord and Telegram delivery/receipt IDs for the required lifecycle matrix | **pending** in issue #38 |
+| independent review | fresh non-author review of the exact successor with no blocker | **pending** |
 
-Do not reinterpret `pending` as failure or success. Final acceptance requires
-every row in scope to name immutable evidence.
+The foundation predecessor at `8296e11d6cb3018e68d2904765a7e1d61f218bd9`
+had exact source, package, installed, live-room, and non-author approval. Those
+records remain below as historical evidence only. Final V2 acceptance requires
+every current row to name immutable evidence.
+
+## Current Hermes source status
+
+The unfrozen Hermes successor reuses Nunchi's shared observation, attention,
+opportunity preparation, scheduling, wake, and participant-receipt behavior.
+Stock Hermes supplies the admitted participant prompt, main model, memory,
+reactions, cancellation, delivery, and platform adapter behind checked
+process-local guards.
+
+The current source is deliberately partial:
+
+- it accepts exactly Hermes 0.19.0; no newer release is currently verified;
+- it blocks generic Hermes tools on configured rooms because Hermes 0.19.0
+  lacks a safe final effect hook after approval;
+- it disables Hermes auto-title on configured rooms because that background
+  work can outlive the turn;
+- it disables stock typing, Discord voice input, native `/thread`, detached
+  participant commands, and handoff into configured rooms; and
+- it reports `complete_v2_lifecycle: false`.
+
+The current dirty source has not yet passed a fresh package or installed
+runtime run. The exact 0.19.0 target is Hermes tag `v2026.7.20`, commit
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. Verification must compare its
+tracked and installed-distribution hashes before and after; the checkout has a
+pre-existing untracked `build/` directory and must not be described as wholly
+clean.
+
+## Superseded Hermes `b6ee0c2` evidence
+
+The following record applies only to implementation
+`b6ee0c2dbe918140fcc77f19320402bb35b44b75`. That implementation has been
+superseded. Its wheel, installation, dashboard, and Discord results must not be
+used to claim compatibility or acceptance for the current successor. In
+particular, its live tool execution is historical behavior; tools are blocked
+in configured rooms by the current source.
+
+Implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` made Nunchi a
+pre-attention gate around the stock Hermes participant:
+
+- `SUPPRESS` stops before Hermes typing, reactions, tools, or model work.
+- `WAKE`, `DEFER`, bypass, and error-wake call the original Hermes handler
+  once. Hermes keeps its prompt, main model, memory, tools, reactions,
+  cancellation, delivery, and platform adapter.
+- Nunchi uses Hermes's public pre-LLM hook only to add bounded turn facts.
+- Checked process-local wrappers cover ingress, result, lifecycle, send,
+  shutdown, configured-room Discord admission, and Telegram batch identity.
+  They change no Hermes checkout or installed package file.
+- The wheel has no Hermes dependency. It installs the Nunchi dashboard bridge
+  only in Hermes's user-plugin directory.
+
+The exact wheel SHA-256 is
+`dda7c634eaae399f0d62bbef8229a8548b9c03fa37a4ca8a3866dc4286611642`.
+The source suite passed 368 tests with four optional JSON-Schema skips; all
+eight lifecycle evaluations passed. Shape probes passed against released
+Hermes 0.19.0 at
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a` and the maintained checkout at
+`022a175e0ad5eb71fef0892dcf1d7f558d73f8b6`. Both probes confirmed stock
+participant execution plus the ingress, result, lifecycle, processing-hook,
+send, and shutdown wrappers.
+
+The wheel was installed without dependencies in the `fiction-writer` Hermes
+0.19.0 environment. Its 16-file Hermes distribution digest was
+`a9e341b8b3214b853b04d7ac8c17a4bac31723f83851e756edc03e56ff0779bd`
+before and after installation, and the maintained Hermes checkout stayed
+clean. The installed dashboard assets verified as:
+
+- `index.js`: `d23fd571648a5f21aa7a8e6fb075b2b61314c21201be0a348ec979512b3ccbc0`
+- `manifest.json`: `d87e5c56a2659c58ca750992e473aed7f3b67cd0fd5da66b9cad549a631b9d63`
+- `plugin_api.py`: `56fec259232e2d6df017b2ab66fd1bde470f664ac3e7309539cf01d567091000`
+
+## Superseded Hermes live Discord evidence
+
+This historical run used the superseded wheel above. It is not evidence for
+the current source successor.
+
+The exact wheel above ran in profile `fiction-writer`, configured channel
+`1530259309802295316`, with Hermes main model `nous/x-ai/grok-4.5`,
+Nunchi attention model `nous/deepseek/deepseek-v4-flash`, and
+`DISCORD_ALLOW_BOTS=none`.
+
+- Vigil `/nunchi probe` message `1532134187002236998` received response
+  `1532134191272169713`. It reported `process-local-gate`, `stock-hermes`,
+  Hermes 0.19.0, no Hermes dependency or modified files, exact configured-room
+  bot admission, and the pinned configuration digest
+  `0af0470730ed9041413f5097268d3c2f5d7a6f583f1801f1708fe1c3694846eb`.
+- Unmentioned Vigil message `1532134240865484810` produced Nunchi request
+  `discord:1530259309802295316:a1f7ac85-2410-4a1c-962d-f1dca28b13cd`.
+  Attention used `deepseek-v4-flash`; stock Hermes used `grok-4.5`, injected
+  the bounded Nunchi facts, and sent response `1532134339448410224`.
+  Participant and transport receipts both settled as `sent`.
+- Routine message `1532134584530239651` produced request
+  `discord:1530259309802295316:4cb15f86-4386-4edf-96c9-4248972fddad`
+  with effective `SUPPRESS`. It had no reaction, Hermes turn, participant
+  receipt, transport receipt, or response.
+- Long turn `1532134736003072082` showed Hermes's `👀` reaction. Vigil `/stop`
+  message `1532134842362368130` received stock confirmation
+  `1532134844266451128`; request
+  `discord:1530259309802295316:d8343b16-a704-41c5-9065-668948d3db89`
+  settled with no stale response and a cancelled delivery receipt.
+- Tool request `1532135103109665031` showed `👀`, used Hermes's terminal tool
+  once under `grok-4.5`, returned exact output in response
+  `1532135235008073738`, and finished with `✅`. Request
+  `discord:1530259309802295316:490f3b3a-d02d-499b-bc85-215c97aa41ef`
+  settled participant and transport as `sent`.
+- While the gateway was stopped, Vigil sent recovery carrier
+  `1532135404675924260`. Restart backfilled it into observations without an
+  attention decision, Hermes turn, reaction, receipt, or response. New
+  unmentioned message `1532135683374714930` then received exact stock response
+  `1532135791457865910`.
+- The installed dashboard API performed a validated idempotent save of two
+  rooms, read 24 discovered channels and recent receipts, reported
+  configured-room bot admission with no mention or profile-wide fallback, and
+  kept the same pinned digest. Hermes restarted and both Discord and Telegram
+  reconnected under launchd.
+
+Automated Hermes tests separately cover participant silence, failed
+processing, active-plus-newest scheduling, incompatible host shapes, and
+unconfigured rooms. Telegram room `670011474` is configured and connected,
+but no live Telegram acceptance is claimed.
 
 ## Exact source/artifact evidence
 

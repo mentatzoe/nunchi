@@ -16,14 +16,20 @@ FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
 
 
 class V2DocumentationTruthfulnessTests(unittest.TestCase):
-    def test_readme_describes_one_v2_path_and_explicit_exclusions(self) -> None:
+    def test_readme_describes_one_v2_path_and_platform_scope(self) -> None:
         normalized = " ".join(README.read_text(encoding="utf-8").split())
         required = (
             "native event -> canonical observation -> participant-bound attention",
             "Conversation events are observations, not reply obligations",
             "Only the exact participant's delegated attention model",
             "There is no executable V1 `admit` command",
-            "Hermes and Claude Code are explicitly excluded",
+            "Hermes V2 platform integration",
+            "Claude Code remains outside this candidate",
+            "Earlier Hermes evidence belongs to a superseded implementation",
+            "live-platform gates must be rerun",
+            "This candidate is not verified, integrated, or V2-complete",
+            "issue #41",
+            "issues/44",
             "Source review, clean-wheel installation, configured probes",
         )
         for phrase in required:
@@ -37,8 +43,11 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         required = (
             "Missing",
             "Implemented, unverified",
+            "Landed, unverified",
             "Verified",
             "Integrated",
+            "issues/41",
+            "issues/44",
             "Select the earliest missing product behavior",
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",
@@ -72,7 +81,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     ) -> None:
         normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
         required = (
-            "complete downstream interface for Hermes and Claude Code",
+            "current downstream interface for Hermes and Claude Code",
             "exactly one participant-delegated social judgment",
             "requester, scope, digest, approval, expiry, revocation",
             "Room payloads are never trusted configuration",

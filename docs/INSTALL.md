@@ -5,6 +5,7 @@
 Build and install the exact candidate into a new environment:
 
 ```sh
+python3 -m pip install build
 python3 -m build
 python3 -m venv /tmp/nunchi-v2-clean
 /tmp/nunchi-v2-clean/bin/python -m pip install --no-deps \
@@ -15,6 +16,48 @@ python3 -m venv /tmp/nunchi-v2-clean
 
 The wheel is the review subject. A source checkout on `PYTHONPATH` is not
 installed-artifact evidence.
+
+For Hermes, install the same wheel into Hermes's managed Python environment.
+Package metadata lets Hermes discover the `nunchi` plugin without making
+Hermes a Nunchi package dependency or changing Hermes source or installed
+distribution files. The current source allowlists exactly Hermes 0.19.0; later
+versions require a separately verified Nunchi release. The current adapter
+accepts configured Discord and Telegram rooms only. Other platforms stay
+outside Nunchi and use stock Hermes behavior.
+When Nunchi admits a configured turn, stock Hermes keeps its participant
+prompt, main model, memory, post-invocation reactions, cancellation, delivery,
+and platform adapter behind Nunchi's shared core and effect guards. Hermes's
+pre-model 👀 waits for the shared ACK implementation. Hermes tools and
+auto-title are disabled for that configured turn because Hermes 0.19.0 does
+not expose safe final boundaries for them. Stock typing, Discord voice input,
+native `/thread`, detached participant commands, and handoff into a configured
+room are also disabled. `/stop`, `/new`, `/reset`, and `/restart` remain
+available.
+
+The source installs its package-owned dashboard bridge automatically in
+Hermes's supported user-plugin directory. `nunchi-hermes-dashboard verify`
+checks it, and `nunchi-hermes-dashboard install` repairs it when needed. See
+[`../integrations/hermes/README.md`](../integrations/hermes/README.md) for the
+pinned room/profile configuration, dashboard, `hermes plugins enable nunchi`,
+and compatibility probe. First-time setup happens in the **Nunchi** dashboard
+tab. The first enable/restart installs the tab, leaves Nunchi inactive, and
+keeps stock Hermes available until setup is complete. Save a room in the tab,
+then restart again to activate Nunchi. The plugin creates and later discovers
+the private profile config itself; environment paths remain an optional
+override. The separate dashboard command is a repair/check tool, not a setup
+requirement.
+
+The current dirty source still needs a fresh package, installed-runtime, and
+exact Hermes 0.19.0 run. Do not reuse the superseded `b6ee0c2` artifact or live
+record as proof of this successor.
+
+Configured Discord rooms need no mentions or separate bot/thread environment
+setup. The plugin extends Hermes's stock free-response path and admits
+bot-authored messages only for exact configured Nunchi room IDs. A
+profile-wide `DISCORD_ALLOW_BOTS` value is optional Hermes behavior, not a
+Nunchi requirement; the dashboard warns when that broader fallback is active.
+The plugin also enables Hermes's missed-message recovery only for configured
+Nunchi rooms, so restart recovery needs no profile-wide Discord setting.
 
 Initialize stable operator-owned directories:
 
@@ -44,7 +87,9 @@ Trusted configuration owns:
 - bounded retention, snapshot, age, continuation-page, continuation-handle,
   and expiry limits; every byte bound includes the referenced actor IDs and
   metadata as well as events;
-- participant model or fixed Codex model/session settings;
+- participant model for Nunchi-owned hosts, or fixed Codex model/session
+  settings; Hermes keeps its own participant model and prompt, while Nunchi
+  keeps the shared attention prompt, model selection, and lifecycle behavior;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
 

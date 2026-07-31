@@ -14,16 +14,30 @@ It is **Integrated** only when that exact commit is reachable from the fetched
 scope; their owners consume the integrated interface but must separately
 implement and prove their platform behavior.
 
-Use four plain status terms:
+Use five plain status terms:
 
 - **Missing**: required product behavior is absent.
 - **Implemented, unverified**: code exists but required tests or runtime proof
   have not passed.
+- **Landed, unverified**: the exact code is present on `integration/v2`, but
+  named verification gaps remain open in GitHub issues.
 - **Verified**: the exact code passed its required source, deterministic,
   installed-runtime, and live checks.
 - **Integrated**: the verified code is present on `integration/v2`.
 
-Nothing else means done.
+Landing lets the product be assembled and tested as a whole. It is not
+verification, support, release readiness, or completion. Nothing except the
+completion rule below means done.
+
+Current deferred gates are tracked in:
+
+- [Hermes live-platform acceptance](https://github.com/mentatzoe/nunchi/issues/38);
+- [Claude Code live and release acceptance](https://github.com/mentatzoe/nunchi/issues/39);
+- [first-class ACK behavior](https://github.com/mentatzoe/nunchi/issues/40);
+- [Hermes source boundaries](https://github.com/mentatzoe/nunchi/issues/42);
+- [Hermes supported-surface parity](https://github.com/mentatzoe/nunchi/issues/44);
+- [Claude participant identity and supported surface](https://github.com/mentatzoe/nunchi/issues/43);
+- [combined V2 final acceptance](https://github.com/mentatzoe/nunchi/issues/41).
 
 ## Build order
 
@@ -77,10 +91,14 @@ not consume a side branch as a substitute. Once the ancestry check passes:
    changes, and affected product documentation together.
 4. Open a normal PR against `integration/v2`. Describe observable outcomes,
    exact verification, limitations, and any remaining missing behavior.
-5. Obtain an exact-head non-author review proportionate to risk. Source
+5. Obtain an exact-head non-author code review proportionate to risk. Source
    approval does not claim installed or live success.
-6. Merge only after required checks and review pass. Then unblock direct
-   consumers.
+6. Close blocking code findings and required CI. Zoe may authorize landing
+   before live, operational, or final-candidate proof is complete only when
+   every omitted gate has a named GitHub issue and the status remains
+   **Landed, unverified**.
+7. After each landing, verify the combined `integration/v2` head. Downstream
+   work consumes that combined head, not the old side branch.
 
 If an upstream change affects a consumed interface, configuration, or runtime
 behavior, block its consumers. Reuse requires an exact comparison plus

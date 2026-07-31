@@ -1,0 +1,418 @@
+"""Install and verify the Nunchi tab in Hermes's supported plugin directory."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+from importlib import resources
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+from typing import Any
+
+from nunchi import __version__
+
+
+_ASSET_PACKAGE = "nunchi.integrations.hermes_dashboard_assets"
+_ASSET_NAMES = ("manifest.json", "index.js", "plugin_api.py")
+_BRIDGE_NAME = "nunchi-dashboard"
+_MARKER_NAME = ".nunchi-dashboard.json"
+_LEGACY_BRIDGE_NAME = "nunchi-v2-dashboard"
+_LEGACY_MARKER_NAME = ".nunchi-v2-dashboard.json"
+_BYTECODE_DIRECTORY = Path("dashboard") / "__pycache__"
+
+
+class DashboardInstallError(RuntimeError):
+    """The dashboard bridge could not be safely installed or verified."""
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _assets() -> dict[str, bytes]:
+    root = resources.files(_ASSET_PACKAGE)
+    return {name: root.joinpath(name).read_bytes() for name in _ASSET_NAMES}
+
+
+def _target(hermes_home: Path) -> Path:
+    return hermes_home / "plugins" / _BRIDGE_NAME
+
+
+def default_hermes_home() -> Path:
+    configured = os.environ.get("HERMES_HOME", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        from hermes_cli.config import get_hermes_home
+    except (ImportError, ModuleNotFoundError):
+        return Path.home() / ".hermes"
+    try:
+        return Path(get_hermes_home())
+    except Exception as exc:
+        raise DashboardInstallError(
+            "Hermes home could not be resolved; repair Hermes profile setup or "
+            "set HERMES_HOME explicitly"
+        ) from exc
+
+
+def _assert_safe_path(path: Path, *, boundary: Path) -> None:
+    current = path
+    while True:
+        if current.exists() and current.is_symlink():
+            raise DashboardInstallError(
+                f"refusing symlinked dashboard path: {current}"
+            )
+        if current == boundary:
+            return
+        if current == current.parent:
+            raise DashboardInstallError(
+                "dashboard path is outside the configured Hermes home"
+            )
+        current = current.parent
+
+
+def _prepare_directory(path: Path, *, hermes_home: Path) -> None:
+    _assert_safe_path(path, boundary=hermes_home)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.is_symlink() or not path.is_dir():
+        raise DashboardInstallError(f"dashboard path is not a directory: {path}")
+    os.chmod(path, 0o700)
+
+
+def _write_file(path: Path, data: bytes) -> None:
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    staged = Path(raw_path)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(staged, path)
+        os.chmod(path, 0o600)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _bridge_is_owned(bridge: Path, marker_name: str) -> bool:
+    marker_path = bridge / marker_name
+    if marker_path.is_symlink() or not marker_path.is_file():
+        return False
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if marker.get("format") != 1 or not isinstance(marker.get("assets"), dict):
+        return False
+    allowed_files = {Path(marker_name)} | {
+        Path("dashboard") / name for name in _ASSET_NAMES
+    }
+    allowed_directories = {Path("dashboard"), _BYTECODE_DIRECTORY}
+    for existing in bridge.rglob("*"):
+        relative = existing.relative_to(bridge)
+        if existing.is_symlink():
+            return False
+        if existing.is_dir() and relative not in allowed_directories:
+            return False
+        if (
+            existing.is_file()
+            and relative not in allowed_files
+            and not (
+                relative.parent == _BYTECODE_DIRECTORY
+                and relative.name.startswith("plugin_api.")
+                and relative.suffix == ".pyc"
+            )
+        ):
+            return False
+    return True
+
+
+def _remove_generated_bytecode(bridge: Path) -> None:
+    """Remove only bytecode Hermes generated from the owned API bridge."""
+
+    cache = bridge / _BYTECODE_DIRECTORY
+    if not cache.exists():
+        return
+    if cache.is_symlink() or not cache.is_dir():
+        raise DashboardInstallError(
+            "Nunchi dashboard bytecode cache is not a regular directory"
+        )
+    for existing in cache.iterdir():
+        if (
+            existing.is_symlink()
+            or not existing.is_file()
+            or not existing.name.startswith("plugin_api.")
+            or existing.suffix != ".pyc"
+        ):
+            raise DashboardInstallError(
+                f"refusing unmanaged dashboard bytecode entry: {existing}"
+            )
+        existing.unlink()
+    cache.rmdir()
+
+
+def _migrate_legacy_bridge(*, hermes_home: Path, bridge: Path) -> None:
+    legacy = hermes_home / "plugins" / _LEGACY_BRIDGE_NAME
+    if not legacy.exists() or bridge.exists():
+        return
+    if not _bridge_is_owned(legacy, _LEGACY_MARKER_NAME):
+        raise DashboardInstallError(
+            "legacy Nunchi dashboard directory is not safely attributable"
+        )
+    os.replace(legacy, bridge)
+
+
+def install_dashboard(*, hermes_home: Path) -> dict[str, Any]:
+    """Materialize wheel-owned assets where released Hermes scans for tabs."""
+
+    hermes_home = hermes_home.expanduser().absolute()
+    assets = _assets()
+    bridge = _target(hermes_home)
+    _migrate_legacy_bridge(hermes_home=hermes_home, bridge=bridge)
+    dashboard = bridge / "dashboard"
+    old_marker = bridge / _LEGACY_MARKER_NAME
+    if old_marker.is_file() and not old_marker.is_symlink():
+        old_marker.replace(bridge / _MARKER_NAME)
+    if bridge.exists() and not _bridge_is_owned(bridge, _MARKER_NAME):
+        existing_files = [path for path in bridge.rglob("*") if path.is_file()]
+        if existing_files:
+            raise DashboardInstallError(
+                "refusing to overwrite an unmanaged Nunchi dashboard directory"
+            )
+    _remove_generated_bytecode(bridge)
+    _prepare_directory(dashboard, hermes_home=hermes_home)
+    allowed_files = {Path(_MARKER_NAME)} | {
+        Path("dashboard") / name for name in _ASSET_NAMES
+    }
+    allowed_directories = {Path("dashboard")}
+    for existing in bridge.rglob("*"):
+        relative = existing.relative_to(bridge)
+        if existing.is_symlink():
+            raise DashboardInstallError(
+                f"refusing symlinked dashboard entry: {existing}"
+            )
+        if existing.is_dir() and relative not in allowed_directories:
+            raise DashboardInstallError(
+                f"refusing unmanaged dashboard directory: {existing}"
+            )
+        if existing.is_file() and relative not in allowed_files:
+            raise DashboardInstallError(
+                f"refusing to overwrite unmanaged dashboard file: {existing}"
+            )
+
+    # The manifest is written last so Hermes never discovers a partial tab.
+    for name in ("index.js", "plugin_api.py"):
+        _write_file(dashboard / name, assets[name])
+    marker = {
+        "format": 1,
+        "nunchi_version": __version__,
+        "assets": {name: _sha256(data) for name, data in assets.items()},
+    }
+    _write_file(
+        bridge / _MARKER_NAME,
+        (json.dumps(marker, sort_keys=True, indent=2) + "\n").encode(),
+    )
+    _write_file(dashboard / "manifest.json", assets["manifest.json"])
+    return verify_dashboard(hermes_home=hermes_home)
+
+
+def verify_dashboard(*, hermes_home: Path) -> dict[str, Any]:
+    hermes_home = hermes_home.expanduser().absolute()
+    assets = _assets()
+    bridge = _target(hermes_home)
+    dashboard = bridge / "dashboard"
+    _assert_safe_path(dashboard, boundary=hermes_home)
+    marker_path = bridge / _MARKER_NAME
+    if marker_path.is_symlink():
+        raise DashboardInstallError("Nunchi dashboard marker must not be a symlink")
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DashboardInstallError("Nunchi dashboard marker is missing") from exc
+    expected = {name: _sha256(data) for name, data in assets.items()}
+    if marker.get("assets") != expected:
+        raise DashboardInstallError("Nunchi dashboard marker does not match this wheel")
+    for name, expected_sha in expected.items():
+        path = dashboard / name
+        if path.is_symlink() or not path.is_file():
+            raise DashboardInstallError(f"Nunchi dashboard asset is missing: {name}")
+        if _sha256(path.read_bytes()) != expected_sha:
+            raise DashboardInstallError(f"Nunchi dashboard asset changed: {name}")
+    return {
+        "ok": True,
+        "path": str(dashboard.resolve()),
+        "nunchi_version": __version__,
+        "assets": expected,
+    }
+
+
+def _enable_machine_dashboard(*, hermes_home: Path) -> dict[str, Any]:
+    """Enable Nunchi in the profile that owns Hermes's unified dashboard."""
+
+    try:
+        from hermes_constants import (
+            reset_hermes_home_override,
+            set_hermes_home_override,
+        )
+        from hermes_cli.config import load_config
+        from hermes_cli.plugins_cmd import dashboard_set_agent_plugin_enabled
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise DashboardInstallError(
+            "Hermes dashboard profile APIs are unavailable; update Nunchi or "
+            "run the dashboard with --isolated"
+        ) from exc
+
+    token = set_hermes_home_override(str(hermes_home))
+    try:
+        config = load_config()
+        plugins = config.get("plugins", {})
+        disabled = plugins.get("disabled", []) if isinstance(plugins, dict) else []
+        if isinstance(disabled, list) and "nunchi" in disabled:
+            return {
+                "ok": True,
+                "enabled": False,
+                "reason": "explicitly-disabled",
+            }
+        result = dashboard_set_agent_plugin_enabled("nunchi", enabled=True)
+        confirmed = load_config()
+    except Exception as exc:
+        raise DashboardInstallError(
+            "could not enable Nunchi in Hermes's dashboard profile"
+        ) from exc
+    finally:
+        reset_hermes_home_override(token)
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        detail = (
+            str(result.get("error", "")).strip()
+            if isinstance(result, dict)
+            else ""
+        )
+        raise DashboardInstallError(
+            detail or "could not enable Nunchi in Hermes's dashboard profile"
+        )
+    confirmed_plugins = (
+        confirmed.get("plugins", {}) if isinstance(confirmed, dict) else {}
+    )
+    confirmed_enabled = (
+        confirmed_plugins.get("enabled", [])
+        if isinstance(confirmed_plugins, dict)
+        else []
+    )
+    confirmed_disabled = (
+        confirmed_plugins.get("disabled", [])
+        if isinstance(confirmed_plugins, dict)
+        else []
+    )
+    if (
+        not isinstance(confirmed_enabled, list)
+        or "nunchi" not in confirmed_enabled
+        or (
+            isinstance(confirmed_disabled, list)
+            and "nunchi" in confirmed_disabled
+        )
+    ):
+        raise DashboardInstallError(
+            "Hermes did not persist Nunchi in the machine dashboard profile. "
+            "Have the Hermes administrator add `nunchi` to plugins.enabled, "
+            "or run the dashboard with --isolated for this profile."
+        )
+    return {
+        "ok": True,
+        "enabled": True,
+        "unchanged": bool(result.get("unchanged")),
+    }
+
+
+def install_dashboard_for_profile(*, profile: str) -> dict[str, Any]:
+    """Install the tab for one profile and Hermes's unified dashboard host."""
+
+    current_home = default_hermes_home().expanduser().absolute()
+    profile_home = current_home
+    machine_home = current_home
+    if profile != "custom":
+        try:
+            from hermes_cli.profiles import (
+                get_profile_dir,
+                normalize_profile_name,
+                validate_profile_name,
+            )
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise DashboardInstallError(
+                "Hermes profile APIs are unavailable; update Nunchi or run "
+                "the dashboard with --isolated"
+            ) from exc
+        try:
+            canonical = normalize_profile_name(profile)
+            validate_profile_name(canonical)
+            profile_home = Path(get_profile_dir(canonical)).expanduser().absolute()
+            machine_home = Path(get_profile_dir("default")).expanduser().absolute()
+        except Exception as exc:
+            raise DashboardInstallError(
+                f"Hermes profile {profile!r} could not be resolved"
+            ) from exc
+
+    installed: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for home in (profile_home, machine_home):
+        resolved = home.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        installed.append(install_dashboard(hermes_home=home))
+
+    machine_activation = {
+        "ok": True,
+        "enabled": True,
+        "unchanged": True,
+    }
+    if machine_home.resolve() != profile_home.resolve():
+        machine_activation = _enable_machine_dashboard(
+            hermes_home=machine_home,
+        )
+    return {
+        "ok": True,
+        "profile": profile,
+        "installed": installed,
+        "machine_dashboard": machine_activation,
+    }
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="nunchi-hermes-dashboard",
+        description="Install or verify the Nunchi tab in Hermes dashboard.",
+    )
+    parser.add_argument("command", choices=("install", "verify"))
+    parser.add_argument(
+        "--hermes-home",
+        type=Path,
+        help="Hermes home directory; defaults to HERMES_HOME or ~/.hermes",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = _parser().parse_args(argv)
+    home = (
+        arguments.hermes_home.expanduser()
+        if arguments.hermes_home is not None
+        else default_hermes_home()
+    )
+    try:
+        result = (
+            install_dashboard(hermes_home=home)
+            if arguments.command == "install"
+            else verify_dashboard(hermes_home=home)
+        )
+    except DashboardInstallError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
