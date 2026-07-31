@@ -77,6 +77,7 @@ nunchi-discord --probe
 nunchi-matrix --probe
 nunchi-telegram --probe
 nunchi-codex-room-runner --probe
+nunchi-claude-code-room-runner --probe
 ```
 
 The package metadata exposes a `nunchi` Hermes plugin without adding Hermes as

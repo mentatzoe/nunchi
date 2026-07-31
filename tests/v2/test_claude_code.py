@@ -1217,8 +1217,8 @@ class FixtureModel:
         self.calls = []
         self.started = threading.Event()
 
-    def judge(self, *, profile, projection, timeout_seconds):
-        self.calls.append((profile.profile_id, deepcopy(projection)))
+    def judge(self, *, instructions, projection, timeout_seconds):
+        self.calls.append((instructions, deepcopy(projection)))
         self.started.set()
         if self.block is not None:
             self.block.wait(timeout_seconds * 2)

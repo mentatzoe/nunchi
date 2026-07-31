@@ -47,9 +47,9 @@ the private profile config itself; environment paths remain an optional
 override. The separate dashboard command is a repair/check tool, not a setup
 requirement.
 
-The current dirty source still needs a fresh package, installed-runtime, and
-exact Hermes 0.19.0 run. Do not reuse the superseded `b6ee0c2` artifact or live
-record as proof of this successor.
+The landed Hermes source still needs exact installed-runtime and live proof.
+Do not reuse the superseded `b6ee0c2` artifact or live record as proof of the
+current code.
 
 Configured Discord rooms need no mentions or separate bot/thread environment
 setup. The plugin extends Hermes's stock free-response path and admits

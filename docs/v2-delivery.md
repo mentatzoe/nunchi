@@ -14,13 +14,14 @@ It is **Integrated** only when that exact commit is reachable from the fetched
 scope; their owners consume the integrated interface but must separately
 implement and prove their platform behavior.
 
-Per-surface status beyond the foundation:
+Per-surface status at the target `integration/v2` head after this reconciliation
+lands:
 
 | Surface | Status | What is outstanding |
 |---|---|---|
 | Codex | Verified, Integrated | — |
 | Hermes | Landed, unverified | source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
-| Claude Code | Implemented, unverified | live real-room evidence and exact-head non-author review; source, deterministic, and clean-installed-artifact checks passed (`evidence/v2/claude-code/README.md`) |
+| Claude Code | Landed, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
 
 Neither unverified platform may be described as done, live, or parity-ready
 until its open gates pass.

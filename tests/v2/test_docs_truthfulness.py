@@ -51,7 +51,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",
             "non-author review",
-            "Implemented, unverified\" is not a softer \"Verified",
+            "Neither unverified platform may be described as done",
             FOUNDATION_COMMIT,
             "git merge-base --is-ancestor",
             "docs/platform-v2.md",
