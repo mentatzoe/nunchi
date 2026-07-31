@@ -11,7 +11,7 @@ live, integrated, or released status.
 `docs/architecture/v2-selected-design.md` preserve the field inventory selected
 from Aleph Vault at `c834e8c`; the external path is provenance, not a
 contributor dependency. The program-canonical interface names and versions
-(`I-010A`, `I-010C`, `I-010D` at `@1`; `I-010B`, `I-010E` at `@2`) are this
+(`I-010A`, `I-010D` at `@1`; `I-010C` at `@2`; `I-010B`, `I-010E` at `@3`) are this
 slice's vocabulary layered over that inventory. A document the selected design
 declares valid that either validator rejects is a contract defect, never
 resolved by narrowing the corpus.
@@ -21,10 +21,10 @@ resolved by narrowing the corpus.
 | Interface | Version | Schema path |
 |---|---|---|
 | `I-010A AttentionRequestV2` | `@1` | [`schemas/v2/attention-request.schema.json`](../../schemas/v2/attention-request.schema.json) |
-| `I-010B AttentionDecisionV2` | `@2` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
-| `I-010C ParticipantWakeV2` | `@1` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
+| `I-010B AttentionDecisionV2` | `@3` | [`schemas/v2/attention-decision.schema.json`](../../schemas/v2/attention-decision.schema.json) |
+| `I-010C ParticipantWakeV2` | `@2` | [`schemas/v2/participant-wake.schema.json`](../../schemas/v2/participant-wake.schema.json) |
 | `I-010D ContextContinuationV2` | `@1` | [`schemas/v2/context-continuation.schema.json`](../../schemas/v2/context-continuation.schema.json) |
-| `I-010E AttentionReceiptV2` | `@2` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
+| `I-010E AttentionReceiptV2` | `@3` | [`schemas/v2/attention-receipt.schema.json`](../../schemas/v2/attention-receipt.schema.json) |
 | `I-010F PrivilegedActionAuthorizationV2` | `@1` | [`schemas/v2/privileged-action-authorization.schema.json`](../../schemas/v2/privileged-action-authorization.schema.json) |
 
 ### Privileged-action boundary
@@ -49,7 +49,7 @@ no V1 translation bridge (FR-011).
 ```text
 observation  ->  AttentionRequestV2   (host assembles factual events)
              ->  AttentionDecisionV2  (ok | bypass | error)
-             ->  ParticipantWakeV2    (WAKE | DEFER | ERROR_FALLBACK | PREATTENTION_BYPASS)
+             ->  ParticipantWakeV2    (ACK | WAKE | DEFER | ERROR_FALLBACK | PREATTENTION_BYPASS)
              ->  ContextContinuationV2 (optional host-mediated bounded expansion)
              ->  AttentionReceiptV2   (immutable staged telemetry, one record per stage)
 ```
@@ -161,7 +161,7 @@ A truthful attention request represents:
   to coverage plus expansion-capability booleans before that call. This is
   a runtime-adapter-only behavior, not a schema constraint.
 
-## I-010B AttentionDecisionV2@2
+## I-010B AttentionDecisionV2@3
 
 A tagged host-facing union on `status`:
 
@@ -173,12 +173,16 @@ A tagged host-facing union on `status`:
   (`{name, provider?, model?}`), the optional conditional
   `legacy_verdict_confidences` vector (FR-007, below), and optional
   WAKE-only `attention_advice` (an array of `{note, evidence_event_ids}`,
-  not a single object). Exactly four classifier/effective pairs validate,
+  not a single object), and an ACK-only authority audit. The declared
+  classifier/effective pairs validate,
   each mapped onto its applied valve (FR-006):
 
   | Transition | Applied valve | `override_cause` | `attention_advice` |
   |---|---|---|---|
   | `WAKE -> WAKE` | `none` | `none` | allowed (FR-013) |
+  | `ACK -> ACK` | `none` | `none` | forbidden |
+  | `ACK -> DEFER` | `policy-defer` | `ack-disabled` | forbidden |
+  | `ACK -> DEFER` | `capability-defer` | `ack-unsupported` | forbidden |
   | `DEFER -> DEFER` | `classifier-defer` | `none` | forbidden |
   | `SUPPRESS -> DEFER` | `margin-defer` or `policy-defer` | `margin` (margin valve); `suppression-disabled` or `recoverability-unproven` (policy valve) | forbidden |
   | `SUPPRESS -> SUPPRESS` | `none` | `none` | forbidden |
@@ -189,8 +193,9 @@ A tagged host-facing union on `status`:
   evidence never supports suppression (S09).
 - **`routing_audit` (the closed FR-005 audit set)** — a closed object
   recording the applied `valve` (`none`, `classifier-defer`,
-  `margin-defer`, or `policy-defer`), the `override_cause` (`none`,
-  `margin`, `suppression-disabled`, or `recoverability-unproven`), the
+  `margin-defer`, `policy-defer`, or `capability-defer`), the
+  `override_cause` (`none`, `margin`, `suppression-disabled`,
+  `recoverability-unproven`, `ack-disabled`, or `ack-unsupported`), the
   `margin_status` (`active` or `retired`, recorded on every ok decision),
   the `effective_margin`, and the trusted `margin_source`. The
   cross-field rules are part of the contract: a margin counts as
@@ -203,8 +208,17 @@ A tagged host-facing union on `status`:
   and the margin status must be `active` (a retired margin cannot apply);
   the trusted `margin_source` may appear only on that margin-applied
   decision (optional there); valves `none`/`classifier-defer` pair with
-  override cause `none`, and `policy-defer` pairs with
-  `suppression-disabled` or `recoverability-unproven`.
+  override cause `none`; `policy-defer` pairs with a trusted policy cause;
+  and `capability-defer` pairs only with `ack-unsupported`.
+- **`ack`** — required exactly when the delegated classifier selects ACK. It
+  records the configured reaction, trusted ACK-policy provenance, and current
+  authenticated native `permissions_revision`. ACK can remain ACK only while
+  that exact capability still permits the reaction. Disabled or unsupported
+  ACK widens to DEFER and never becomes suppression.
+
+`@3` adds the ACK disposition, the two ACK transitions, capability-defer, and
+the ACK authority audit. These are additive product outcomes but a breaking
+closed-union change: `@2` consumers must upgrade before receiving ACK.
 - **`legacy_verdict_confidences` (FR-007, conditional)** — optional on
   `status: ok` and required exactly when the classifier disposition is
   `SUPPRESS` while the routing audit reports the margin `active`; a
@@ -232,17 +246,17 @@ A tagged host-facing union on `status`:
   occur before a request ID is assignable); an optional `classifier` audit is
   present only when the error occurred after classifier invocation.
 
-## I-010C ParticipantWakeV2@1
+## I-010C ParticipantWakeV2@2
 
 The normal-turn input materializes `self`, `room`, `actors`, `events`,
 `trigger_event_id`, `coverage`, and optional `continuation` directly —
 the same field shapes as `AttentionRequestV2` — not a wrapped
 `observation` reference or classifier projection (FR-014). A separate
-`attention` object carries the explicit `source` (`WAKE`, `DEFER`,
+`attention` object carries the explicit `source` (`ACK`, `WAKE`, `DEFER`,
 `ERROR_FALLBACK`, or the non-social `PREATTENTION_BYPASS`) and, only when
 `source` is `WAKE`, optional `advice` (an array of `{note,
 evidence_event_ids}`) and optional `evidence_event_ids`. `DEFER`,
-`ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
+`ACK`, `DEFER`, `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
 no classifier advice exists for those sources (FR-008/FR-013). There is no
 separate participant "budgets" field — the wake's own `coverage` (computed
 when the packet was materialized for the participant) carries the
@@ -275,17 +289,19 @@ independently against the issuing continuation capability's exact
 does not establish correct binding or bounded authorization — see the
 runtime-adapter-only rules below.
 
-## I-010E AttentionReceiptV2@2
+## I-010E AttentionReceiptV2@3
 
 Immutable, append-only stage records correlated by `request_id`, in the
 canonical order `observation -> attention -> participant-host ->
 transport` (FR-010). Each record names its `stage`, its `writer`, and a
-stage-shaped `body` carrying the selected telemetry (FR-014):
+  stage-shaped `body` carrying the selected telemetry (FR-014). Classifier
+  receipts preserve the same exact transition, valve, and override-cause
+  matrix as `AttentionDecisionV2`:
 
 | Stage | Owning writer | Body |
 |---|---|---|
 | `observation` | `observation-provider` | `schema_version` (must be `2`), `trigger_event_id`, `continuity_scope_id`, `event_count`, `byte_count` (canonical actor-map plus event bytes), `coverage`, `included_event_ids` |
-| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`, required `policy_provenance`) or operational error (`error: {code, detail}`, both required, plus `wake_action`/`policy_provenance` present together exactly when an explicit operator override to the shared `WAKE` default applied) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
+| `attention` | `attention-engine` | classifier outcome (`classifier_disposition`, `effective_disposition`, `classifier`, `evidence_event_ids`, `routing_audit`, required `policy_provenance`, plus ACK-only `ack: {reaction, policy_provenance, permissions_revision}`) or operational error (`error: {code, detail}`, both required, plus `wake_action`/`policy_provenance` present together exactly when an explicit operator override to the shared `WAKE` default applied) or bypass (`classifier_not_invoked: true`, `cause: "preattention-disabled"`, `policy_provenance`) — three mutually exclusive shapes |
 | `participant-host` | `participant-host` | `wake_source`, `packet_event_count`, `packet_byte_count` (canonical actor-map plus event bytes), `delivered_event_ids`, `expansion_calls`, `invoked`, `outcome` (`sent`/`silent`/`unknown`) |
 | `transport` | `transport` | `delivery: sent/failed/unknown/unavailable`, optional `detail` |
 
@@ -302,6 +318,12 @@ error body's conditional `wake_action`/`policy_provenance` pair. `@1`
 consumers must migrate to `@2` before consuming attention-stage receipts;
 `margin_source` on `routing_audit` remains scoped to the margin-defer valve
 and does not serve as general policy provenance.
+
+`@3` adds ACK dispositions, ACK participant-host source, and the ACK-only
+authority audit. An ACK host record has `invoked: false`; the following
+transport record alone reports whether the one reaction was sent, failed,
+unknown, or unavailable. `@2` consumers must upgrade before receiving ACK
+receipts.
 
 The stage-to-writer binding is part of the public per-record contract
 (FR-010): each stage names its single directly observing owner per the

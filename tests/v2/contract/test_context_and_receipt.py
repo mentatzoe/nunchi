@@ -1,5 +1,5 @@
 """Contract tests for ``I-010D ContextContinuationV2@1`` and
-``I-010E AttentionReceiptV2@2`` (slice 010, T005).
+``I-010E AttentionReceiptV2@3`` (slice 010, T005).
 
 Red cases cover host-secret leakage, fetch-time binding validation
 (expired-handle rejection and cross-binding cursor reuse,
@@ -13,6 +13,7 @@ outcomes. This file also runs the ``evals/v2/contract/downstream`` corpus
 
 from __future__ import annotations
 
+from copy import deepcopy
 import unittest
 
 from tests.v2.contract import schema_helpers as helpers
@@ -327,6 +328,58 @@ class ReceiptRecordCases(unittest.TestCase):
         doc = make_receipt("attention")
         del doc["body"]["policy_provenance"]
         assert_schema_verdict(self, "attention-receipt", doc, "invalid")
+
+    def test_ack_receipt_requires_exact_reaction_policy_and_permission_audit(self):
+        body = {
+            "classifier_disposition": "ACK",
+            "effective_disposition": "ACK",
+            "classifier": {"name": "nunchi-classifier"},
+            "evidence_event_ids": ["e3"],
+            "routing_audit": {
+                "valve": "none",
+                "override_cause": "none",
+                "margin_status": "active",
+            },
+            "policy_provenance": "trusted:profiles/default@2026-07",
+            "ack": {
+                "reaction": "👂",
+                "policy_provenance": "trusted:ack-policy/default@1",
+                "permissions_revision": "discord-reactions:v1",
+            },
+        }
+        valid = make_receipt("attention", body=body)
+        assert_schema_verdict(self, "attention-receipt", valid, "valid")
+        widened = deepcopy(body)
+        widened["effective_disposition"] = "DEFER"
+        widened["routing_audit"] = {
+            "valve": "policy-defer",
+            "override_cause": "ack-disabled",
+            "margin_status": "active",
+        }
+        assert_schema_verdict(
+            self,
+            "attention-receipt",
+            make_receipt("attention", body=widened),
+            "valid",
+        )
+        wrong_ack_cause = deepcopy(widened)
+        wrong_ack_cause["routing_audit"]["override_cause"] = "suppression-disabled"
+        assert_schema_verdict(
+            self,
+            "attention-receipt",
+            make_receipt("attention", body=wrong_ack_cause),
+            "invalid",
+        )
+        for field in ("reaction", "policy_provenance", "permissions_revision"):
+            with self.subTest(field=field):
+                malformed = make_receipt("attention", body=body)
+                del malformed["body"]["ack"][field]
+                assert_schema_verdict(
+                    self,
+                    "attention-receipt",
+                    malformed,
+                    "invalid",
+                )
 
     def test_error_operator_override_requires_both_wake_action_and_provenance(self):
         # @2 amendment A1 (c834e8c: "NO_WAKE is an explicit operator

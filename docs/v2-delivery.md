@@ -14,14 +14,22 @@ It is **Integrated** only when that exact commit is reachable from the fetched
 scope; their owners consume the integrated interface but must separately
 implement and prove their platform behavior.
 
+The issues #55/#56/#40 successor is being reviewed from baseline
+`fcb1177a55892e1f642ae591315e41f54c4e8e52`. Its candidate source adds the
+versioned participant protocol, first-class ACK, and unified operator/service
+surface documented in `v2-shared-foundation.md`. Until its exact PR head is
+verified and merged, it is **implemented, unverified** and not Integrated.
+Because it changes shared interfaces, previous platform verification does not
+transfer; each platform must consume and revalidate the successor separately.
+
 Per-surface status at the target `integration/v2` head after this reconciliation
 lands:
 
 | Surface | Status | What is outstanding |
 |---|---|---|
-| Codex | Verified, Integrated | — |
-| Hermes | Landed, unverified | source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
-| Claude Code | Landed, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
+| Codex | Successor consumer implemented, unverified | platform-specific validation remains outside the foundation PR |
+| Hermes | Landed, unverified | consume ACK widening and shared operator interfaces; source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
+| Claude Code | Successor consumer implemented, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
 
 Neither unverified platform may be described as done, live, or parity-ready
 until its open gates pass.
@@ -45,7 +53,7 @@ Current deferred gates are tracked in:
 
 - [Hermes live-platform acceptance](https://github.com/mentatzoe/nunchi/issues/38);
 - [Claude Code live and release acceptance](https://github.com/mentatzoe/nunchi/issues/39);
-- [first-class ACK behavior](https://github.com/mentatzoe/nunchi/issues/40);
+- [first-class ACK integration](https://github.com/mentatzoe/nunchi/issues/40) — implemented in successor source, pending review/integration and platform proof;
 - [Hermes source boundaries](https://github.com/mentatzoe/nunchi/issues/42);
 - [Hermes supported-surface parity](https://github.com/mentatzoe/nunchi/issues/44);
 - [Claude participant identity and supported surface](https://github.com/mentatzoe/nunchi/issues/43);

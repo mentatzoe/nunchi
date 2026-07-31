@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ from collections.abc import Mapping, Sequence
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..ack import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -73,9 +75,52 @@ class DurableGatewaySequence:
 
 
 class DiscordPyTransport:
-    def __init__(self, bot, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, bot, loop: asyncio.AbstractEventLoop, room_id: str) -> None:
         self.bot = bot
         self.loop = loop
+        self.room_id = room_id
+
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply", "reaction")
+
+    def reaction_capability(self) -> ReactionCapability:
+        user = getattr(self.bot, "user", None)
+        actor = getattr(user, "id", None)
+        authenticated = actor is not None
+        try:
+            channel = self.bot.get_channel(int(self.room_id))
+        except (TypeError, ValueError):
+            channel = None
+        permissions_for = getattr(channel, "permissions_for", None)
+        permissions = (
+            permissions_for(user)
+            if callable(permissions_for) and user is not None
+            else None
+        )
+        allowed = bool(
+            permissions is not None
+            and getattr(permissions, "view_channel", False)
+            and getattr(permissions, "read_message_history", False)
+            and getattr(permissions, "add_reactions", False)
+        )
+        revision = hashlib.sha256(
+            (
+                f"discord.py-v1\0{actor if actor is not None else 'unknown'}\0"
+                f"{self.room_id}\0{int(allowed)}"
+            ).encode()
+        ).hexdigest()
+        return ReactionCapability(
+            supported=allowed,
+            authenticated=authenticated,
+            operations=("add", "remove") if allowed else (),
+            reactions=("*",) if allowed else (),
+            permissions_revision=revision,
+            detail=(
+                ""
+                if allowed
+                else "Discord room reaction permission is unavailable or unattested"
+            ),
+        )
 
     async def _dispatch(self, action, wake):
         channel_id = int(wake["room"]["id"])
@@ -194,7 +239,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_holder["runtime"] = ReferenceAdapterRuntime(
                     surface="discord",
                     config=config,
-                    transport=DiscordPyTransport(bot, asyncio.get_running_loop()),
+                    transport=DiscordPyTransport(
+                        bot,
+                        asyncio.get_running_loop(),
+                        config["binding"]["room_id"],
+                    ),
                 )
                 _declare_fresh_gateway_gap(runtime_holder["runtime"])
 

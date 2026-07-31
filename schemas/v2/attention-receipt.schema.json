@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-receipt.schema.json",
   "title": "AttentionReceiptV2",
-  "description": "I-010E AttentionReceiptV2@2 — one immutable stage record of the request-correlated receipt stream, encoding each stage's selected telemetry verbatim (FR-014, c834e8c): observation records the schema version, trigger and continuity-scope IDs, snapshot sizes, coverage, and included event IDs; attention records classifier and effective dispositions, classifier identity, evidence, transition-valve facts, and the effective policy's inspectable provenance, or the bypass fact `classifier_not_invoked` with cause and trusted policy provenance, with operational error kept separate and itself carrying an explicit operator wake-action override and its provenance when one applied; participant-host records the wake source, packet sizes, delivered event IDs, expansion calls, invocation, and the observed sent/silent/unknown outcome; transport records delivery hygiene, routing/send facts, and transport errors. The canonical order is observation -> attention -> participant-host -> transport; a prefix-partial receipt is valid-in-progress. The stage-to-writer binding is part of this public per-record contract (FR-010, rejection R3): the closed map is observation -> observation-provider, attention -> attention-engine, participant-host -> participant-host, transport -> transport, and a record attributing one stage to another stage's owner is invalid as a single document. The multi-record rules — append-only sequence, canonical order, immutability, request-ID correlation, and stream-level writer ownership — span multiple records and remain runtime-adapter-only in addition (FR-012 receipt-stage sequence class). Unknown and unavailable remain explicit. @2 (post-acceptance amendment A1, evidence/v2/attention/dependency-010-post-acceptance-blocker.md) adds the classifier-outcome body's required `policy_provenance` and the error body's conditional `wake_action`/`policy_provenance` pair: the selected design requires the effective policy and its source to be inspectable in receipts, and an operator's explicit `NO_WAKE` override to the shared `WAKE` default to be separately receipted as operational failure policy — neither was representable in @1.",
+  "description": "I-010E AttentionReceiptV2@3 — one immutable, request-correlated stage record. @3 adds ACK dispositions, ACK participant-host source, and an ACK-only attention audit containing the reaction, policy provenance, and permission revision. The canonical observation -> attention -> participant-host -> transport order, stage ownership, explicit silence/unknown/unavailable outcomes, policy provenance, and operational-error separation remain unchanged.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
+    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
     "observationBody": {
       "type": "object",
       "additionalProperties": false,
@@ -42,8 +42,38 @@
               "items": {"$ref": "#/$defs/nonEmptyString"}
             },
             "routing_audit": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/routingAudit"},
-            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"}
-          }
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+            "ack": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reaction", "policy_provenance", "permissions_revision"],
+              "properties": {
+                "reaction": {"$ref": "#/$defs/nonEmptyString"},
+                "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+                "permissions_revision": {"$ref": "#/$defs/nonEmptyString"}
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {"required": ["classifier_disposition"], "properties": {"classifier_disposition": {"const": "ACK"}}},
+              "then": {"required": ["ack"]},
+              "else": {"not": {"required": ["ack"]}}
+            },
+            {
+              "$comment": "Attention receipts preserve the exact successful transition matrix and widening cause.",
+              "oneOf": [
+                {"properties": {"classifier_disposition": {"const": "WAKE"}, "effective_disposition": {"const": "WAKE"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "ACK"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}}},
+                {"properties": {"classifier_disposition": {"const": "DEFER"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "margin-defer"}, "override_cause": {"const": "margin"}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "SUPPRESS"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}}
+              ]
+            }
+          ]
         },
         {
           "$comment": "Operational error, kept separate from any social outcome. wake_action is the closed override discriminator, exactly 'NO_WAKE' (rejection A1-R1, review-2026-07-19-v2-integrator-amendment-A1.md: WAKE is the shared default, never itself a receipted override, so it is not a permitted member); wake_action and policy_provenance are present together exactly when that explicit operator override applied (@2 amendment A1: c834e8c 'NO_WAKE is an explicit operator override... receipted as operational failure policy'); their absence means the default WAKE behavior applied with no override to receipt.",
@@ -94,7 +124,7 @@
       "additionalProperties": false,
       "required": ["wake_source", "packet_event_count", "packet_byte_count", "delivered_event_ids", "expansion_calls", "invoked", "outcome"],
       "properties": {
-        "wake_source": {"enum": ["WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]},
+        "wake_source": {"enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]},
         "packet_event_count": {"type": "integer", "minimum": 0},
         "packet_byte_count": {"type": "integer", "minimum": 0},
         "delivered_event_ids": {

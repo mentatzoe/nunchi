@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import multiprocessing
 from pathlib import Path
 import tempfile
 import threading
@@ -11,6 +12,12 @@ import time
 import unittest
 from unittest import mock
 
+from nunchi.ack import (
+    AckJournal,
+    AckPolicy,
+    ReactionCapability,
+    UNAVAILABLE_REACTION_CAPABILITY,
+)
 from nunchi.attention import (
     AttentionEngine,
     AttentionPolicy,
@@ -45,6 +52,29 @@ from nunchi.v2_contracts import classifier_projection, validate_receipt_stream
 from tests.v2.contract.schema_helpers import (
     validate_privileged_action_authorization_flow,
 )
+
+
+def _reserve_ack_in_process(path, start, results):
+    binding = {
+        "request_id": "process-request",
+        "participant_id": "vigil",
+        "actor_id": "discord:bot:9",
+        "platform": "discord",
+        "room_id": "42",
+        "continuity_scope_id": "discord:channel:42",
+        "target_event_id": "e-process",
+        "reaction": "👂",
+        "operation": "add",
+        "opportunity_generation": 1,
+        "lifecycle_id": "process-lifecycle",
+        "deadline_id": "process-deadline",
+        "permissions_revision": "process-permissions",
+    }
+    journal = AckJournal(path)
+    if not start.wait(10):
+        results.put("timeout")
+        return
+    results.put(journal.reserve(binding)[1])
 
 
 def message(
@@ -92,19 +122,25 @@ class FixtureModel:
             "legacy_verdict_confidences": (
                 {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}
                 if self.disposition == "SUPPRESS"
+                else {"PASS": 0.02, "ACK": 0.9, "ASK": 0.03, "SPEAK": 0.05}
+                if self.disposition == "ACK"
                 else {"PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9}
             ),
         }
 
 
 class RecordingTransport:
-    def __init__(self, result=None):
+    def __init__(self, result=None, *, capability=None):
         self.calls = []
         self.result = result or TransportResult("sent", "native:1")
+        self.capability = capability or UNAVAILABLE_REACTION_CAPABILITY
 
     def dispatch(self, *, action, wake):
         self.calls.append((deepcopy(action), deepcopy(wake)))
         return self.result
+
+    def reaction_capability(self):
+        return self.capability
 
 
 def foundation(
@@ -116,6 +152,8 @@ def foundation(
     limits=None,
     transport=None,
     participant_timeout_seconds=300,
+    ack_policy=None,
+    ack_journal=None,
 ):
     binding = ParticipantBinding(
         participant_id="vigil",
@@ -133,6 +171,8 @@ def foundation(
         limits=limits,
     )
     model = model or FixtureModel()
+    transport = transport or RecordingTransport()
+    ack_policy = ack_policy or AckPolicy()
     attention = AttentionEngine(
         profile=ParticipantProfile(
             profile_id="vigil-default",
@@ -145,9 +185,14 @@ def foundation(
         model=model,
         policy=policy,
         receipts=receipts,
+        ack_policy=ack_policy,
+        reaction_capability_provider=getattr(
+            transport,
+            "reaction_capability",
+            lambda: UNAVAILABLE_REACTION_CAPABILITY,
+        ),
     )
     scheduler = ConversationOpportunityScheduler("vigil:discord:channel:42")
-    transport = transport or RecordingTransport()
     host = ParticipantTurnHost(
         observation=observation,
         participant=participant or (lambda **_: None),
@@ -155,6 +200,8 @@ def foundation(
         scheduler=scheduler,
         receipts=receipts,
         participant_timeout_seconds=participant_timeout_seconds,
+        ack_policy=ack_policy,
+        ack_journal=ack_journal,
     )
     pipeline = NunchiV2Pipeline(
         observation=observation,
@@ -1667,6 +1714,283 @@ class AuthorizationTests(unittest.TestCase):
         )
         with self.assertRaises(ValidationError):
             canonical_operation_digest({"value": float("nan")})
+
+
+class AckOutcomeTests(unittest.TestCase):
+    @staticmethod
+    def capability(revision="discord-reactions:v1"):
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add", "remove"),
+            reactions=("*",),
+            permissions_revision=revision,
+        )
+
+    def test_ack_emits_one_exact_reaction_without_running_participant(self):
+        participant_calls = []
+        transport = RecordingTransport(capability=self.capability())
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-ack",
+            event=message("e-ack"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("ACK", outcome.opportunities[0].effective_disposition)
+        self.assertEqual([], participant_calls)
+        self.assertEqual(1, len(transport.calls))
+        action, wake = transport.calls[0]
+        self.assertEqual(
+            {
+                "kind": "reaction",
+                "origin_event_id": "e-ack",
+                "target_event_id": "e-ack",
+                "reaction": "👂",
+                "operation": "add",
+            },
+            action,
+        )
+        self.assertEqual("ACK", wake["attention"]["source"])
+        records = receipts.all_records()
+        validate_receipt_stream(list(records))
+        attention = next(record for record in records if record["stage"] == "attention")
+        host = next(record for record in records if record["stage"] == "participant-host")
+        self.assertEqual("ACK", attention["body"]["classifier_disposition"])
+        self.assertEqual("discord-reactions:v1", attention["body"]["ack"]["permissions_revision"])
+        self.assertFalse(host["body"]["invoked"])
+        self.assertEqual("ACK", host["body"]["wake_source"])
+
+    def test_disabled_or_unsupported_ack_widens_to_defer(self):
+        cases = (
+            (
+                AckPolicy(enabled=False),
+                self.capability(),
+                "policy-defer",
+                "ack-disabled",
+            ),
+            (
+                AckPolicy(),
+                UNAVAILABLE_REACTION_CAPABILITY,
+                "capability-defer",
+                "ack-unsupported",
+            ),
+        )
+        for ack_policy, capability, valve, cause in cases:
+            with self.subTest(cause=cause):
+                participant_calls = []
+                transport = RecordingTransport(capability=capability)
+                pipeline, _, _, receipts = foundation(
+                    model=FixtureModel("ACK"),
+                    participant=lambda **kwargs: participant_calls.append(kwargs),
+                    transport=transport,
+                    ack_policy=ack_policy,
+                )
+                outcome = pipeline.handle_delivery(
+                    delivery_id=f"d-{cause}",
+                    event=message(f"e-{cause}"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+                self.assertEqual(1, len(participant_calls))
+                self.assertEqual([], transport.calls)
+                attention = next(
+                    record
+                    for record in receipts.all_records()
+                    if record["stage"] == "attention"
+                )
+                self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
+                self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
+
+    def test_restart_replay_and_concurrency_cannot_duplicate_ack(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal_path = Path(directory) / "ack.jsonl"
+            transport = RecordingTransport(capability=self.capability())
+            first, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=AckJournal(journal_path),
+            )
+            first.handle_delivery(
+                delivery_id="d-first",
+                event=message("e-stable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            restored, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=AckJournal(journal_path),
+            )
+            replay = restored.handle_delivery(
+                delivery_id="d-replay",
+                event=message("e-stable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual(1, len(transport.calls))
+            self.assertIn("duplicate ACK", replay.opportunities[0].transport.detail)
+
+            shared_journal = AckJournal(Path(directory) / "concurrent.jsonl")
+            concurrent_transport = RecordingTransport(capability=self.capability())
+            pipelines = [
+                foundation(
+                    model=FixtureModel("ACK"),
+                    transport=concurrent_transport,
+                    ack_journal=shared_journal,
+                )[0]
+                for _ in range(2)
+            ]
+            barrier = threading.Barrier(2)
+
+            def deliver(index):
+                barrier.wait()
+                pipelines[index].handle_delivery(
+                    delivery_id=f"d-concurrent-{index}",
+                    event=message("e-concurrent"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+            workers = [threading.Thread(target=deliver, args=(index,)) for index in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(10)
+                self.assertFalse(worker.is_alive())
+            self.assertEqual(1, len(concurrent_transport.calls))
+
+    def test_separate_processes_cannot_reserve_the_same_ack_twice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context = multiprocessing.get_context("spawn")
+            start = context.Event()
+            results = context.Queue()
+            path = str(Path(directory) / "process-concurrent.jsonl")
+            workers = [
+                context.Process(
+                    target=_reserve_ack_in_process,
+                    args=(path, start, results),
+                )
+                for _ in range(2)
+            ]
+            for worker in workers:
+                worker.start()
+            start.set()
+            observed = [results.get(timeout=15) for _ in workers]
+            for worker in workers:
+                worker.join(15)
+                self.assertEqual(0, worker.exitcode)
+            self.assertEqual([False, True], sorted(observed))
+            self.assertEqual(1, len(AckJournal(path).records()))
+
+    def test_permissions_change_after_attention_blocks_ack_with_receipts(self):
+        revisions = iter((self.capability("cap:v1"), self.capability("cap:v2")))
+
+        class ChangingTransport(RecordingTransport):
+            def reaction_capability(self):
+                try:
+                    return next(revisions)
+                except StopIteration:
+                    return self.capability
+
+        transport = ChangingTransport(capability=self.capability("cap:v2"))
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            transport=transport,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-stale-capability",
+            event=message("e-stale-capability"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+        self.assertEqual([], transport.calls)
+        stages = [record["stage"] for record in receipts.all_records()]
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            stages,
+        )
+
+    def test_cancellation_before_ack_commit_reserves_and_sends_nothing(self):
+        checked = threading.Event()
+        release = threading.Event()
+
+        class BlockingCapabilityTransport(RecordingTransport):
+            def __init__(self, capability):
+                super().__init__(capability=capability)
+                self.capability_checks = 0
+
+            def reaction_capability(self):
+                self.capability_checks += 1
+                if self.capability_checks == 2:
+                    checked.set()
+                    release.wait(10)
+                return self.capability
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AckJournal(Path(directory) / "cancelled.jsonl")
+            transport = BlockingCapabilityTransport(self.capability())
+            pipeline, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=journal,
+            )
+            outcome = []
+            worker = threading.Thread(
+                target=lambda: outcome.append(
+                    pipeline.handle_delivery(
+                        delivery_id="d-cancelled-ack",
+                        event=message("e-cancelled-ack"),
+                        actors={"human:zoe": {"kind": "human"}},
+                    )
+                )
+            )
+            worker.start()
+            self.assertTrue(checked.wait(5))
+            pipeline.cancel()
+            release.set()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual([], transport.calls)
+            self.assertEqual((), journal.records())
+            self.assertFalse(pipeline.scheduler.active)
+
+    def test_permission_change_at_ack_dispatch_boundary_sends_nothing(self):
+        revisions = iter(
+            (
+                self.capability("cap:v1"),
+                self.capability("cap:v1"),
+                self.capability("cap:v1"),
+                self.capability("cap:v2"),
+            )
+        )
+
+        class LastMomentChangeTransport(RecordingTransport):
+            def reaction_capability(self):
+                return next(revisions)
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AckJournal(Path(directory) / "last-moment.jsonl")
+            transport = LastMomentChangeTransport(capability=self.capability("cap:v2"))
+            pipeline, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=journal,
+            )
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-last-moment",
+                event=message("e-last-moment"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+            self.assertEqual([], transport.calls)
+            self.assertEqual(
+                ["reserved", "settled"],
+                [record["state"] for record in journal.records()],
+            )
+            self.assertEqual("unavailable", journal.records()[-1]["delivery"])
 
 
 class ReceiptTests(unittest.TestCase):

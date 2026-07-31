@@ -39,6 +39,7 @@ from nunchi.integrations.claude_code_v2 import (
 from nunchi.integrations.discord_participant_transport import MCPDiscordTransport
 from nunchi.observation import ParticipantBinding
 from nunchi.participant import TransportResult
+from nunchi.participant_model import ParticipantTurnProtocol
 
 
 PARTICIPANT_ID = "vigil"
@@ -84,6 +85,61 @@ def result_document(action, *, session_id=ECHO, subtype="success", is_error=Fals
         document["structured_output"] = {"action_json": json.dumps(action)}
         document["result"] = json.dumps(document["structured_output"])
     return json.dumps(document)
+
+
+def test_wake(request_id="r1"):
+    """One complete core wake for direct participant-runner tests."""
+
+    return {
+        "request_id": request_id,
+        "self": {"participant_id": PARTICIPANT_ID, "actor_id": ACTOR_ID},
+        "room": {
+            "platform": "discord",
+            "id": ROOM_ID,
+            "continuity_scope_id": SCOPE_ID,
+        },
+        "actors": {
+            ACTOR_ID: {"display_name": "Vigil", "kind": "bot"},
+            "discord:actor:42": {"display_name": "Zoe", "kind": "human"},
+        },
+        "events": [
+            {
+                "id": "e1",
+                "type": "message",
+                "author_id": "discord:actor:42",
+                "text": "Can you take a look?",
+                "mentioned_actor_ids": [],
+                "mentions_room": False,
+            }
+        ],
+        "trigger_event_id": "e1",
+        "coverage": {
+            "has_more_before": False,
+            "has_more_after": False,
+            "has_gaps": False,
+            "truncated_by": [],
+            "continuity": "restart-safe",
+            "has_restart_gap": False,
+        },
+        "attention": {"source": "WAKE"},
+    }
+
+
+def direct_protocol(request_id="r1"):
+    return ParticipantTurnProtocol(
+        profile=PROFILE,
+        wake=test_wake(request_id),
+        opportunity={
+            "generation": 1,
+            "lifecycle_id": "direct-library-call",
+            "deadline_id": "direct-library-call",
+            "permissions": {
+                "revision": "direct-library-call",
+                "ordinary_actions": ["message", "reply", "reaction"],
+                "privileged_proposals": True,
+            },
+        },
+    )
 
 
 class ClaudeStub:
@@ -145,6 +201,32 @@ for flag in ("--session-id", "--resume"):
         pinned = argv[argv.index(flag) + 1]
 if pinned is not None:
     answer = answer.replace({json.dumps(ECHO)}, pinned)
+# Existing platform tests name only the inner action.  The recording model
+# fixture behaves like a conforming model: it copies the exact version and
+# binding from this invocation's core-owned request before returning it.
+try:
+    marker = "<nunchi_participant_turn_v1>"
+    prompt = argv[-1]
+    start = prompt.index(marker) + len(marker)
+    end = prompt.index("</nunchi_participant_turn_v1>", start)
+    turn = json.loads(prompt[start:end])["participant_turn"]
+    parsed = json.loads(answer)
+    output = parsed.get("structured_output")
+    if isinstance(output, dict) and set(output) == {{"action_json"}}:
+        inner = json.loads(output["action_json"])
+        if isinstance(inner, dict) and set(inner) not in (
+            {{"protocol", "binding", "action"}},
+        ):
+            envelope = {{
+                "protocol": turn["protocol"],
+                "binding": turn["binding"],
+                "action": inner,
+            }}
+            output["action_json"] = json.dumps(envelope)
+            parsed["result"] = json.dumps(output)
+            answer = json.dumps(parsed)
+except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+    pass
 sys.stdout.write(answer)
 """
         return cls(directory, script=script)
@@ -199,7 +281,7 @@ class ParticipantIsolationTests(unittest.TestCase):
             participant = self._participant(root / "state", stub)
             self.assertIsNone(
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -236,7 +318,7 @@ class ParticipantIsolationTests(unittest.TestCase):
             with mock.patch.dict(os.environ, leaked, clear=False):
                 participant = self._participant(root / "state", stub)
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -273,8 +355,8 @@ class ParticipantIsolationTests(unittest.TestCase):
             (root / "bin").mkdir()
             stub = ClaudeStub.replaying(root / "bin", ["{}"])
             participant = self._participant(root / "state", stub)
-            prompt = participant._turn_prompt({"request_id": "r1", "events": []})
-            self.assertIn("do not judge admission again", prompt)
+            prompt = participant._turn_prompt(direct_protocol())
+            self.assertIn("do not judge admission again", prompt.lower())
             self.assertIn("relevance verdict", prompt)
             self.assertIn("host owns the one output commit point", prompt)
 
@@ -345,7 +427,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             )
             self.assertIsNone(
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -361,7 +443,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             self.assertEqual(
                 action,
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 ),
@@ -384,7 +466,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
                         participant, _ = self._participant(Path(run), [document])
                         with self.assertRaises(ClaudeCodeParticipantError):
                             participant(
-                                wake={"request_id": "r1", "events": []},
+                                wake=test_wake(),
                                 expand=None,
                                 cancel=threading.Event(),
                             )
@@ -405,7 +487,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             # records `unknown` rather than fabricating participant silence.
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -414,7 +496,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             cancel.set()
             self.assertIsNone(
                 participant(
-                    wake={"request_id": "r2", "events": []},
+                    wake=test_wake("r2"),
                     expand=None,
                     cancel=cancel,
                 )
@@ -442,7 +524,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             )
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=expand,
                     cancel=threading.Event(),
                 )
@@ -463,7 +545,7 @@ class ParticipantOutcomeTests(unittest.TestCase):
             )
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=lambda **_: {},
                     cancel=threading.Event(),
                 )
@@ -497,7 +579,7 @@ class SessionContinuityTests(unittest.TestCase):
             # rejects a mismatch, so make the first turn establish it.
             participant._save_session(self.SESSION)
             participant(
-                wake={"request_id": "r1", "events": []},
+                wake=test_wake(),
                 expand=None,
                 cancel=threading.Event(),
             )
@@ -514,7 +596,7 @@ class SessionContinuityTests(unittest.TestCase):
                 session_mode="fresh",
             )
             participant(
-                wake={"request_id": "r1", "events": []},
+                wake=test_wake(),
                 expand=None,
                 cancel=threading.Event(),
             )
@@ -534,7 +616,7 @@ class SessionContinuityTests(unittest.TestCase):
             participant._save_session(self.SESSION)
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -625,7 +707,7 @@ class SessionPinIntegrityTests(unittest.TestCase):
             participant, _ = self._participant(root, documents)
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -684,6 +766,8 @@ class SessionPinIntegrityTests(unittest.TestCase):
             "kind": "expand",
             "direction": "before",
             "anchor_event_id": "e1",
+            "max_events": 5,
+            "max_bytes": 1024,
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -692,7 +776,7 @@ class SessionPinIntegrityTests(unittest.TestCase):
             )
             with self.assertRaises(ClaudeCodeParticipantError):
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=lambda **_: {"events": [], "has_next_page": False},
                     cancel=threading.Event(),
                 )
@@ -707,7 +791,7 @@ class SessionPinIntegrityTests(unittest.TestCase):
             )
             self.assertIsNone(
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -736,7 +820,7 @@ class StagedPinBoundTests(unittest.TestCase):
             participant = self._participant(root, [result_document(action)] * 64)
             for index in range(32):
                 participant(
-                    wake={"request_id": f"r{index}", "events": []},
+                    wake=test_wake(f"r{index}"),
                     expand=None,
                     cancel=threading.Event(),
                 )
@@ -761,7 +845,7 @@ class StagedPinBoundTests(unittest.TestCase):
             cancel.set()
             self.assertIsNone(
                 participant(
-                    wake={"request_id": "r1", "events": []},
+                    wake=test_wake(),
                     expand=None,
                     cancel=cancel,
                 )
@@ -776,7 +860,7 @@ class StagedPinBoundTests(unittest.TestCase):
                 root, [result_document({"kind": "silence"})]
             )
             participant(
-                wake={"request_id": "r1", "events": []},
+                wake=test_wake(),
                 expand=None,
                 cancel=threading.Event(),
             )

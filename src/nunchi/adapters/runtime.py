@@ -12,6 +12,7 @@ import sys
 from typing import Any, TextIO
 
 from .. import __version__
+from ..ack import AckJournal, AckPolicy, ReactionCapability
 from ..attention import (
     AttentionEngine,
     AttentionPolicy,
@@ -126,6 +127,18 @@ class JsonLineTransport:
         self.output = output or sys.stdout
         self.calls = 0
 
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply", "reaction")
+
+    def reaction_capability(self) -> ReactionCapability:
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add", "remove"),
+            reactions=("*",),
+            permissions_revision="generic-jsonl-v1",
+        )
+
     def dispatch(self, *, action, wake) -> TransportResult:
         self.calls += 1
         envelope = {
@@ -165,7 +178,12 @@ class ReferenceAdapterRuntime:
             "limits",
             "state_directory",
         }
-        optional = {"authorization", "transport", "participant_timeout_seconds"}
+        optional = {
+            "authorization",
+            "transport",
+            "participant_timeout_seconds",
+            "ack",
+        }
         if set(config) - (required | optional) or required - set(config):
             raise ValidationError("adapter config has a missing or unexpected field")
         if config["schema_version"] != 2:
@@ -252,6 +270,10 @@ class ReferenceAdapterRuntime:
         scheduler = ConversationOpportunityScheduler(
             f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
         )
+        try:
+            ack_policy = AckPolicy(**dict(config.get("ack", {})))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"adapter ACK policy is invalid: {exc}") from exc
         privileged = None
         authorization = config.get("authorization")
         if authorization is not None:
@@ -279,6 +301,8 @@ class ReferenceAdapterRuntime:
             scheduler=scheduler,
             receipts=receipts,
             privileged=privileged,
+            ack_policy=ack_policy,
+            ack_journal=AckJournal(state_directory / f"{stem}.acks.jsonl"),
             participant_timeout_seconds=config.get(
                 "participant_timeout_seconds",
                 300.0,
@@ -289,6 +313,8 @@ class ReferenceAdapterRuntime:
             model=model,
             policy=policy,
             receipts=receipts,
+            ack_policy=ack_policy,
+            reaction_capability_provider=host.reaction_capability,
         )
         self.surface = surface
         self.transport = transport
@@ -362,15 +388,17 @@ class ReferenceAdapterRuntime:
             "capabilities": deepcopy(CAPABILITIES[self.surface]),
             "interfaces": {
                 "I-010A": 1,
-                "I-010B": 2,
-                "I-010C": 1,
+                "I-010B": 3,
+                "I-010C": 2,
                 "I-010D": 1,
-                "I-010E": 2,
+                "I-010E": 3,
                 "I-010F": 1,
                 "I-020A": 1,
-                "I-030A": 1,
-                "I-040A": 1,
+                "I-030A": 2,
+                "I-040A": 2,
             },
+            "participant_turn_protocol_version": 1,
+            "operator_schema_version": 1,
             "v1_fallback": False,
         }
 

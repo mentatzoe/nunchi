@@ -98,10 +98,10 @@ SCHEMA_FILES = {
 
 INTERFACE_VERSIONS = {
     "attention-request": ("I-010A", "AttentionRequestV2", 1),
-    "attention-decision": ("I-010B", "AttentionDecisionV2", 1),
-    "participant-wake": ("I-010C", "ParticipantWakeV2", 1),
+    "attention-decision": ("I-010B", "AttentionDecisionV2", 3),
+    "participant-wake": ("I-010C", "ParticipantWakeV2", 2),
     "context-continuation": ("I-010D", "ContextContinuationV2", 1),
-    "attention-receipt": ("I-010E", "AttentionReceiptV2", 1),
+    "attention-receipt": ("I-010E", "AttentionReceiptV2", 3),
     "privileged-action-authorization": (
         "I-010F",
         "PrivilegedActionAuthorizationV2",
@@ -139,15 +139,23 @@ NON_FINITE_SENTINELS = {
     "-Infinity": float("-inf"),
 }
 
-DISPOSITIONS = ("SUPPRESS", "WAKE", "DEFER")
+DISPOSITIONS = ("SUPPRESS", "ACK", "WAKE", "DEFER")
 VERDICT_KEYS = ("PASS", "ACK", "ASK", "SPEAK")
-WAKE_SOURCES = ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
-ROUTING_VALVES = ("none", "classifier-defer", "margin-defer", "policy-defer")
+WAKE_SOURCES = ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS")
+ROUTING_VALVES = (
+    "none",
+    "classifier-defer",
+    "margin-defer",
+    "policy-defer",
+    "capability-defer",
+)
 OVERRIDE_CAUSES = (
     "none",
     "margin",
     "suppression-disabled",
     "recoverability-unproven",
+    "ack-disabled",
+    "ack-unsupported",
 )
 MARGIN_STATUSES = ("active", "retired")
 RECEIPT_STAGES = ("observation", "attention", "participant-host", "transport")
@@ -941,6 +949,11 @@ _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 # separately by the routing-audit rules (FR-005).
 _OK_TRANSITIONS = {
     ("WAKE", "WAKE"): {"valves": ("none",), "advice": True},
+    ("ACK", "ACK"): {"valves": ("none",), "advice": False},
+    ("ACK", "DEFER"): {
+        "valves": ("policy-defer", "capability-defer"),
+        "advice": False,
+    },
     ("DEFER", "DEFER"): {"valves": ("classifier-defer",), "advice": False},
     ("SUPPRESS", "DEFER"): {
         "valves": ("margin-defer", "policy-defer"),
@@ -976,8 +989,8 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
     margin status must be ``active`` (a retired margin cannot apply). The
     trusted margin source may appear only on that margin-applied decision.
     Valves ``none``/``classifier-defer`` pair with override cause ``none``;
-    valve ``policy-defer`` pairs with ``suppression-disabled`` or
-    ``recoverability-unproven``.
+    valve ``policy-defer`` pairs with a trusted policy cause, and
+    ``capability-defer`` pairs only with an unavailable ACK capability.
     """
     if not _check_closed_object(
         errors,
@@ -1034,11 +1047,18 @@ def _check_routing_audit(errors: _Errors, routing: Any) -> str | None:
         if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] not in (
             "suppression-disabled",
             "recoverability-unproven",
+            "ack-disabled",
         ):
             errors.add(
                 "routing_audit.override_cause",
                 "valve policy-defer requires override cause "
-                "'suppression-disabled' or 'recoverability-unproven'",
+                "a supported policy override cause",
+            )
+    elif valve == "capability-defer":
+        if routing.get("override_cause") in OVERRIDE_CAUSES and routing["override_cause"] != "ack-unsupported":
+            errors.add(
+                "routing_audit.override_cause",
+                "valve capability-defer requires override cause 'ack-unsupported'",
             )
     if valve != "margin-defer":
         if "effective_margin" in routing:
@@ -1067,7 +1087,7 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
         "evidence_event_ids",
         "classifier",
     )
-    allowed = required + ("legacy_verdict_confidences", "attention_advice")
+    allowed = required + ("legacy_verdict_confidences", "attention_advice", "ack")
     if not _check_closed_object(errors, "decision", doc, required, allowed):
         return list(errors)
     _check_nes(errors, "request_id", doc.get("request_id"))
@@ -1114,6 +1134,22 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
     if "attention_advice" in doc:
         _check_attention_advice_list(errors, "attention_advice", doc["attention_advice"])
 
+    if "ack" in doc:
+        ack = doc["ack"]
+        if _check_closed_object(
+            errors,
+            "ack",
+            ack,
+            ("reaction", "policy_provenance", "permissions_revision"),
+            ("reaction", "policy_provenance", "permissions_revision"),
+        ):
+            for name in ("reaction", "policy_provenance", "permissions_revision"):
+                _check_nes(errors, f"ack.{name}", ack.get(name))
+    if classifier == "ACK" and "ack" not in doc:
+        errors.add("ack", "required when the classifier selects ACK")
+    if classifier != "ACK" and "ack" in doc:
+        errors.add("ack", "allowed only when the classifier selects ACK")
+
     # FR-007 conditional requirement: the legacy vector is required exactly
     # when the classifier disposition is SUPPRESS while the routing audit
     # reports the margin active; it stays optional (and permitted) on WAKE,
@@ -1130,14 +1166,14 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
             "legacy verdict confidence vector (FR-007)",
         )
 
-    # Closed ok-transition matrix: only four classifier/effective pairs are
+    # Closed ok-transition matrix: only declared classifier/effective pairs are
     # successful; every other pairing must take the operational-error path.
     if classifier in DISPOSITIONS and effective in DISPOSITIONS:
         rule = _OK_TRANSITIONS.get((classifier, effective))
         if rule is None:
             errors.add(
                 "effective_disposition",
-                f"ok transition {classifier}->{effective} is not one of the four "
+                f"ok transition {classifier}->{effective} is not one of the "
                 "permitted pairs; report it on the error branch instead",
             )
         else:
@@ -1146,6 +1182,27 @@ def _validate_decision_ok(doc: dict[str, Any]) -> list[str]:
                     "routing_audit.valve",
                     f"transition {classifier}->{effective} requires the applied "
                     f"valve in {rule['valves']}",
+                )
+            cause = routing.get("override_cause") if isinstance(routing, dict) else None
+            if classifier == "ACK" and effective == "DEFER":
+                expected_cause = (
+                    "ack-disabled" if valve == "policy-defer" else "ack-unsupported"
+                )
+                if cause != expected_cause:
+                    errors.add(
+                        "routing_audit.override_cause",
+                        f"ACK widening via {valve!r} requires {expected_cause!r}",
+                    )
+            if (
+                classifier == "SUPPRESS"
+                and effective == "DEFER"
+                and valve == "policy-defer"
+                and cause not in ("suppression-disabled", "recoverability-unproven")
+            ):
+                errors.add(
+                    "routing_audit.override_cause",
+                    "SUPPRESS policy widening must name suppression-disabled "
+                    "or recoverability-unproven",
                 )
             if not rule["advice"] and "attention_advice" in doc:
                 errors.add(
@@ -1361,7 +1418,7 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
             "classifier_disposition", "effective_disposition", "classifier",
             "evidence_event_ids", "routing_audit", "policy_provenance",
         )
-        if not _check_closed_object(errors, path, value, fields, fields):
+        if not _check_closed_object(errors, path, value, fields, fields + ("ack",)):
             return
         if "classifier_disposition" in value:
             _check_enum(
@@ -1380,10 +1437,55 @@ def _check_attention_body(errors: _Errors, path: str, value: Any) -> None:
             else:
                 for index, event_id in enumerate(cited):
                     _check_nes(errors, f"{path}.evidence_event_ids[{index}]", event_id)
+        valve = None
         if "routing_audit" in value:
-            _check_routing_audit(errors, value["routing_audit"])
+            valve = _check_routing_audit(errors, value["routing_audit"])
         if "policy_provenance" in value:
             _check_nes(errors, f"{path}.policy_provenance", value["policy_provenance"])
+        if "ack" in value:
+            ack = value["ack"]
+            ack_fields = ("reaction", "policy_provenance", "permissions_revision")
+            if _check_closed_object(errors, f"{path}.ack", ack, ack_fields, ack_fields):
+                for name in ack_fields:
+                    _check_nes(errors, f"{path}.ack.{name}", ack.get(name))
+        if value.get("classifier_disposition") == "ACK" and "ack" not in value:
+            errors.add(f"{path}.ack", "required when the classifier selects ACK")
+        if value.get("classifier_disposition") != "ACK" and "ack" in value:
+            errors.add(f"{path}.ack", "allowed only when the classifier selects ACK")
+        classifier = value.get("classifier_disposition")
+        effective = value.get("effective_disposition")
+        if classifier in DISPOSITIONS and effective in DISPOSITIONS:
+            rule = _OK_TRANSITIONS.get((classifier, effective))
+            if rule is None or valve not in rule["valves"]:
+                errors.add(
+                    f"{path}.routing_audit.valve",
+                    f"receipt transition {classifier}->{effective} is invalid via {valve!r}",
+                )
+            cause = (
+                value["routing_audit"].get("override_cause")
+                if isinstance(value.get("routing_audit"), dict)
+                else None
+            )
+            if classifier == "ACK" and effective == "DEFER":
+                expected_cause = (
+                    "ack-disabled" if valve == "policy-defer" else "ack-unsupported"
+                )
+                if cause != expected_cause:
+                    errors.add(
+                        f"{path}.routing_audit.override_cause",
+                        f"ACK widening via {valve!r} requires {expected_cause!r}",
+                    )
+            if (
+                classifier == "SUPPRESS"
+                and effective == "DEFER"
+                and valve == "policy-defer"
+                and cause not in ("suppression-disabled", "recoverability-unproven")
+            ):
+                errors.add(
+                    f"{path}.routing_audit.override_cause",
+                    "SUPPRESS policy widening must name suppression-disabled "
+                    "or recoverability-unproven",
+                )
         return
     if variant == "error":
         allowed = ("error", "wake_action", "policy_provenance")
@@ -2980,8 +3082,9 @@ def make_routing(valve: str = "none", **overrides: Any) -> dict[str, Any]:
 
     ``margin-defer`` carries the margin cross-field facts (override cause
     ``margin``, margin status ``active``, the effective margin) and
-    ``policy-defer`` a policy override cause; ``none``/``classifier-defer``
-    carry override cause ``none``. The default margin status is ``active``
+    ``policy-defer`` a policy override cause, ``capability-defer`` an ACK
+    capability cause, and ``none``/``classifier-defer`` override cause
+    ``none``. The default margin status is ``active``
     because the uncertainty margin remains active at initial V2 cutover.
     """
     routing: dict[str, Any] = {
@@ -2994,6 +3097,8 @@ def make_routing(valve: str = "none", **overrides: Any) -> dict[str, Any]:
         routing["effective_margin"] = 0.12
     elif valve == "policy-defer":
         routing["override_cause"] = "suppression-disabled"
+    elif valve == "capability-defer":
+        routing["override_cause"] = "ack-unsupported"
     routing.update(overrides)
     return routing
 
@@ -3019,6 +3124,14 @@ def make_decision_ok(
         },
         "legacy_verdict_confidences": {"PASS": 0.05, "ACK": 0.1, "ASK": 0.15, "SPEAK": 0.7},
     }
+    if classifier == "ACK":
+        doc["ack"] = {
+            "reaction": "👂",
+            "policy_provenance": "trusted:ack-policy/default@1",
+            "permissions_revision": "discord-reactions:v1",
+        }
+        if valve == "policy-defer":
+            doc["routing_audit"]["override_cause"] = "ack-disabled"
     doc.update(overrides)
     return doc
 

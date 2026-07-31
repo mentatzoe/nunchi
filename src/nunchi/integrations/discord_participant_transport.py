@@ -13,10 +13,12 @@ thing on every surface.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import json
 from typing import Any
 
 from ..errors import ValidationError
+from ..ack import ReactionCapability
 from ..mcp_discord.authorization import make_tool_authorization
 from ..participant import TransportResult
 from .mcp_client import StreamableMCPClient
@@ -45,6 +47,28 @@ class MCPDiscordTransport:
         self.actor_id = actor_id
         self.native_actor_id = actor_id.removeprefix("discord:actor:")
         self.output_secret = output_secret
+        self._reaction_revision = hashlib.sha256(
+            b"nunchi-discord-reaction-v1\0"
+            + participant_id.encode()
+            + b"\0"
+            + room_id.encode()
+            + b"\0"
+            + actor_id.encode()
+            + b"\0"
+            + output_secret
+        ).hexdigest()
+
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply", "reaction")
+
+    def reaction_capability(self) -> ReactionCapability:
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add", "remove"),
+            reactions=("*",),
+            permissions_revision=self._reaction_revision,
+        )
 
     @staticmethod
     def _tool_payload(result: Any) -> tuple[Mapping[str, Any] | None, str]:

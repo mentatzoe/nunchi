@@ -3,7 +3,34 @@
 This file is updated only with attributable commands and artifacts. A green
 source suite is not installed or live evidence.
 
-## Candidate scope
+## Issues #55, #56, and #40 shared-foundation successor
+
+The successor starts from
+`fcb1177a55892e1f642ae591315e41f54c4e8e52`. It includes the one versioned
+Nunchi-owned participant protocol, first-class ACK and safe widening, the
+shared operator/dashboard schema, and persistent-service controls documented
+in `v2-shared-foundation.md`. Platform-specific gaps, live validation,
+security acceptance, release, and final V2 acceptance remain outside this
+candidate. The PR records the exact committed head; these working-tree results
+do not substitute for exact-head review or integration.
+
+Attributable local verification on 2026-07-31:
+
+| Gate | Result |
+|---|---|
+| full source | `python3 -m unittest` — **586 passed**, 4 optional-oracle skips |
+| pinned contract oracle | `jsonschema==4.26.0`, offline isolated run — **220 passed**, no skips |
+| installed lifecycle | `python3 -m evals.verdict_suite.runner` — **11/11 passed**, including ACK, disabled ACK, and unsupported ACK |
+| static source | `git diff --check` and `python3 -m compileall -q src tests evals` — passed |
+| clean wheel | Python 3.14 venv, no checkout on `PYTHONPATH`; both probes, `pip check`, guided setup, diagnostics, dashboard API/security headers, service start/restart/stop, and `site-packages` imports passed |
+
+The clean wheel is `nunchi-2.0.0-py3-none-any.whl`, SHA-256
+`22f435bc4feea1222e3486c2b5659977067ce67aaaaa1ffa74a7d210b2211d8a`.
+Its generated operator roots were mode `0700`; generated config and profile
+files were mode `0600`. This is clean-package evidence for the shared
+candidate only. It is not installed-platform or live-room acceptance.
+
+## Combined V2 candidate scope
 
 Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
 reference adapters, shared Discord MCP transport, Codex, Hermes, and Claude
@@ -13,11 +40,12 @@ Hermes is landed on `integration/v2`; Claude Code is rebased onto that exact
 result for landing. Both remain unverified. Earlier platform evidence is
 historical input and does not prove the combined head.
 
-Pending: the remaining Hermes live matrix in
+Pending beyond this shared successor: the remaining Hermes live matrix in
 [issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
 implementation and proof in
-[issue #39](https://github.com/mentatzoe/nunchi/issues/39); shared ACK behavior
-in [issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
+[issue #39](https://github.com/mentatzoe/nunchi/issues/39); platform consumption
+and live proof of shared ACK behavior in
+[issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
 acceptance gate in
 [issue #41](https://github.com/mentatzoe/nunchi/issues/41).
 Hermes source blockers are tracked separately in
@@ -26,15 +54,15 @@ surface gaps in [issue #44](https://github.com/mentatzoe/nunchi/issues/44),
 and Claude participant identity/surface blockers in
 [issue #43](https://github.com/mentatzoe/nunchi/issues/43).
 
-## Current successor gates
+## Combined successor gates
 
 | Claim | Required proof | Current status |
 |---|---|---|
-| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | **pending exact-head rerun** after reconciliation |
-| clean package | exact wheel hash; new environment; installed probes; no checkout imports | **pending** |
+| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
+| clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
 | installed Hermes 0.19.0 | normal plugin discovery; automatic dashboard; first-save/restart; unchanged Hermes distribution hashes; Discord and Telegram shape checks | **pending** |
 | installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
-| deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | **pending rerun**; predecessor evidence does not transfer across shared-core changes |
+| deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
 | live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
 | independent review | fresh non-author review of the exact successor with no blocker | **pending** |
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import urllib.request
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..ack import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -30,9 +32,25 @@ class MatrixTransport:
         self.token = os.environ.get(env_name)
         if not self.token:
             raise ValidationError(f"Matrix credential is absent from {env_name}")
+        self._reaction_revision = hashlib.sha256(
+            f"matrix-v1\0{self.homeserver}\0{env_name}\0".encode()
+            + self.token.encode()
+        ).hexdigest()
         self.sync_timeout_ms = int(config.get("sync_timeout_ms", 30_000))
         if self.sync_timeout_ms < 1 or self.sync_timeout_ms > 60_000:
             raise ValidationError("Matrix sync_timeout_ms must be within 1..60000")
+
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply", "reaction")
+
+    def reaction_capability(self) -> ReactionCapability:
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add",),
+            reactions=("*",),
+            permissions_revision=self._reaction_revision,
+        )
 
     def _request(self, method: str, path: str, payload=None):
         data = json.dumps(payload).encode() if payload is not None else None

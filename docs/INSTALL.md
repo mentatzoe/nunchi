@@ -17,6 +17,51 @@ python3 -m venv /tmp/nunchi-v2-clean
 The wheel is the review subject. A source checkout on `PYTHONPATH` is not
 installed-artifact evidence.
 
+## Unified operator setup
+
+Use the installed `nunchi` command for normal setup. It initializes private
+operator roots, validates one shared schema, writes the participant profile,
+and creates the required integrity pins; no hand-written JSON, manual digest,
+separate dashboard installation, or runner supervision is required.
+
+```sh
+/tmp/nunchi-v2-clean/bin/nunchi setup \
+  --profile vigil \
+  --participant-id vigil \
+  --actor-id discord:bot:9 \
+  --display-name Vigil \
+  --instructions 'Contribute carefully.' \
+  --platform discord \
+  --room-id 42 \
+  --room-name delivery \
+  --continuity-scope-id discord:channel:42 \
+  --attention-model provider/attention-model \
+  --participant-model provider/participant-model
+
+/tmp/nunchi-v2-clean/bin/nunchi config show --profile vigil
+/tmp/nunchi-v2-clean/bin/nunchi diagnose --profile vigil
+/tmp/nunchi-v2-clean/bin/nunchi dashboard --profile vigil
+```
+
+Configuration stores only credential environment-variable names. Set those
+credentials outside the dashboard. The dashboard and CLI expose the same
+identity, rooms, models, attention/ACK policy, capabilities, compatibility,
+health, services, and receipts. Dashboard mutations and service operations
+require the current profile revision.
+
+Declare supervised runners with repeated `--service NAME='COMMAND ...'` setup
+arguments. Then use `nunchi service start|stop|drain|restart|status|logs|reset`
+or install and activate the generated launchd/systemd user definition with
+`nunchi service install`. The worker, rather than the outer service manager,
+enforces the configured restart policy. Profile reset preserves durable ACK
+and receipt journals. `nunchi uninstall --profile NAME` stops its services,
+deactivates installed definitions, and removes only that profile; package-level
+state purge remains an explicit `nunchi-install uninstall --purge-state`
+operation.
+
+See [`v2-shared-foundation.md`](v2-shared-foundation.md) for the schema,
+service, compatibility, and authority boundaries.
+
 For Hermes, install the same wheel into Hermes's managed Python environment.
 Package metadata lets Hermes discover the `nunchi` plugin without making
 Hermes a Nunchi package dependency or changing Hermes source or installed
@@ -27,7 +72,8 @@ outside Nunchi and use stock Hermes behavior.
 When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
 and platform adapter behind Nunchi's shared core and effect guards. Hermes's
-pre-model 👀 waits for the shared ACK implementation. Hermes tools and
+current seam does not attest the shared native ACK capability, so model ACK
+widens to DEFER. Hermes tools and
 auto-title are disabled for that configured turn because Hermes 0.19.0 does
 not expose safe final boundaries for them. Stock typing, Discord voice input,
 native `/thread`, detached participant commands, and handoff into a configured

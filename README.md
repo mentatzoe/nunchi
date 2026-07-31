@@ -4,7 +4,7 @@ Nunchi is a portable pre-attention gate for turn-aware participants in shared
 conversation. V2 has one path:
 
 `native event -> canonical observation -> participant-bound attention ->
-participant wake -> contribution or silence -> host-owned transport`
+SUPPRESS, ACK, or one shared participant turn -> host-owned transport`
 
 Conversation events are observations, not reply obligations. Only the exact
 participant's delegated attention model may make the social suppression
@@ -45,10 +45,12 @@ its live real-room evidence and supported-surface closure remain open in
 [#43](https://github.com/mentatzoe/nunchi/issues/43). See
 `evidence/v2/claude-code/README.md` for exactly what is and is not proven.
 
-Shared ACK remains open in [#40](https://github.com/mentatzoe/nunchi/issues/40),
-and combined acceptance remains open in
-[#41](https://github.com/mentatzoe/nunchi/issues/41). This candidate is partial
-and is not verified, release-ready, or V2-complete.
+The shared foundation now implements first-class ACK and one versioned normal
+participant protocol in candidate source. ACK adds one exact `👂` reaction
+without running the participant; unsupported ACK widens to DEFER. This does
+not close any platform-specific or live acceptance gate. Combined acceptance
+remains open in [#41](https://github.com/mentatzoe/nunchi/issues/41). This
+candidate is partial and is not release-ready or V2-complete.
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, V1 prompt hook, send-time social reclassifier, or fallback.
@@ -60,11 +62,20 @@ python3 -m venv .venv
 .venv/bin/python -m pip install .
 .venv/bin/nunchi probe
 .venv/bin/nunchi-install probe
-.venv/bin/nunchi-install init \
-  --config-root /secure/operator/config \
-  --state-root /secure/operator/state
-.venv/bin/nunchi-install verify \
-  --config-root /secure/operator/config
+.venv/bin/nunchi setup \
+  --profile vigil \
+  --participant-id vigil \
+  --actor-id discord:bot:9 \
+  --display-name Vigil \
+  --instructions 'Contribute carefully.' \
+  --platform discord \
+  --room-id 42 \
+  --room-name delivery \
+  --continuity-scope-id discord:channel:42 \
+  --attention-model provider/attention-model \
+  --participant-model provider/participant-model
+.venv/bin/nunchi diagnose --profile vigil
+.venv/bin/nunchi dashboard --profile vigil
 ```
 
 Optional installed surfaces:
@@ -88,10 +99,11 @@ private profile-config creation happen in that tab; no separate setup command
 is required. Package and installed-runtime acceptance remain separate gates.
 See [`integrations/hermes/README.md`](integrations/hermes/README.md).
 
-Configured runtimes require exact SHA-256 pins for participant profiles and
-runtime configuration. Credentials are named only by trusted environment
-variable names in configuration; room payloads cannot redirect models,
-identity, routes, policy, receipt destinations, or output authority.
+The guided operator path creates and updates exact SHA-256 pins automatically;
+operators do not calculate hashes or hand-write JSON. Credentials are named
+only by trusted environment variable names in configuration; room payloads
+cannot redirect models, identity, routes, policy, receipt destinations, or
+output authority.
 
 ## Verify
 
@@ -112,6 +124,7 @@ are not part of the executable V2 product suite.
 - [Completion outcome](docs/v2-completion-goal.md)
 - [Selected design](docs/architecture/v2-selected-design.md)
 - [Portable V2 contract](docs/contracts/nunchi-v2.md)
+- [Shared foundation and operator handoff](docs/v2-shared-foundation.md)
 - [Install and operate](docs/INSTALL.md)
 - [Platform interface and conformance](docs/platform-v2.md)
 - [Reference adapters](docs/adapters.md)

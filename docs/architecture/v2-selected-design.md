@@ -154,10 +154,13 @@ flowchart TB
     Policy -->|"No"| Bypass["PREATTENTION_BYPASS<br/>zero model calls"]
     Policy -->|"Yes"| Proxy["Participant-bound attention proxy"]
     Proxy --> Suppress["SUPPRESS"]
+    Proxy --> Ack["ACK"]
     Proxy --> Wake["WAKE"]
     Proxy --> Defer["DEFER"]
     Proxy --> Error["Operational ERROR"]
     Wake --> Participant["Normal participant turn"]
+    Ack -->|"current native capability"| Reaction["One exact lightweight reaction<br/>no participant turn"]
+    Ack -->|"disabled or unsupported"| Participant
     Defer --> Participant
     Bypass --> Participant
     Error -->|"valid snapshot and wake policy"| Participant
@@ -172,10 +175,24 @@ Only the participant-bound proxy can make the social `SUPPRESS` judgment.
 Uncertainty widens attention through `WAKE` or `DEFER`. Trusted preattention
 bypass is a host policy branch and never fabricates a classifier result.
 
+`ACK` is a complete core outcome, not a platform heuristic. The host rechecks
+the exact configured reaction and authenticated permission revision, durably
+reserves the participant/room/message/reaction binding, and invokes no full
+participant. Disabled or unsupported ACK widens to DEFER. Replay, restart,
+cancellation, concurrency, and an uncertain native acknowledgement cannot
+produce a second reaction.
+
 The participant produces its real room action or silence in the same normal
 turn. There is no admission meta-answer and no send-time social
 reclassification. Operational send limits remain allowed because they enforce
 mechanical safety without interpreting the conversation.
+
+Every Nunchi-owned normal participant uses `nunchi.participant-turn` version 1.
+Core owns the prompt, factual request, action schema, parser, bounded expansion,
+and exact request/identity/room/generation/lifecycle/deadline/permission
+binding. Platform runners own only isolated native invocation, continuity,
+cancellation, capability attestation, and native transport. An unknown version
+or changed binding has no effect.
 
 ## Canonical data and service boundaries
 
