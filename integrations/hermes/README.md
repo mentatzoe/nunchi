@@ -5,11 +5,10 @@ Hermes dependency and edits no Hermes source or installed distribution file.
 It writes its own dashboard bridge and private configuration under Hermes's
 user-data directory.
 
-Current status: **implemented but incomplete**. The current dirty source passes
-its focused Hermes and shared-core tests. Full source, package,
-installed-runtime, exact-review, and live-platform checks remain. Earlier
-package and live evidence belongs to a superseded implementation and does not
-verify these bytes.
+Current status: **landed, unverified**. Source and focused tests exist, but
+installed-runtime and live-platform acceptance remain open. Earlier package
+and live evidence belongs to a superseded implementation and does not verify
+the landed code.
 
 The current source accepts exactly Hermes 0.19.0:
 
@@ -300,5 +299,5 @@ unchanged during installation and use.
 Source tests and a successful probe do not prove live platform behavior. Live
 acceptance still requires attributable suppress, wake, defer, silence,
 delivery, cancellation, restart, and later-message recovery runs on each
-enabled platform. The current dirty successor has no exact-commit package,
-installed-runtime review, or live-platform evidence.
+enabled platform. The landed implementation still needs exact
+installed-runtime review and live-platform evidence.

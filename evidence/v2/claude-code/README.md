@@ -1,0 +1,457 @@
+# Claude Code V2 evidence
+
+**Surface**: Claude Code (`070`) · **Owner lane**: `v2-claude-owner`
+(`evidence/governance/assignments/claude-v2-claude-owner-2026-07-24.md`)
+
+**Status under `docs/v2-delivery.md`**: **Implemented, unverified.**
+
+**Review history** (PR #32), all by `pc-vigil[bot]`, read-only and non-author:
+
+1. `dd83a1a` — changes requested, six findings. Five confirmed and fixed; one
+   not reproducible but hardened anyway.
+2. `821a7bc` — changes requested, four findings, all confirmed and fixed. Two
+   were incomplete fixes of round-one findings, which is the useful part: the
+   first repair of both the workspace escape and the session pinning was
+   shallower than the defect.
+3. `9c80892` — changes requested, three findings, all confirmed and fixed.
+   Again two were incomplete repairs: confinement was closed but *attestation*
+   was not, and bounding the session pin left the staged store unbounded.
+4. `06990dd` — changes requested, two findings, both confirmed and fixed; four
+   areas closed. The workspace executor was escapable for the third distinct
+   reason.
+5. `39c8eb1` — changes requested, two findings, both confirmed and fixed. The
+   workspace executor was escapable for the **fourth** distinct reason, and the
+   verification table in this packet carried three wrong totals.
+6. `78c4bd9` — **APPROVED**. All six tracked areas closed, including the
+   reviewer-held root-rename attack, which now returns `unknown` and removes
+   the displaced payload. The reviewer bound the approval to this exact
+   source/evidence candidate and explicitly did **not** claim the live
+   real-room proof.
+
+Dispositions are in [Review disposition](#review-disposition) below.
+
+**The head has moved past every approved sha and no approval currently covers
+it.** `78c4bd9` and its evidence-only successor `480c172` were both approved.
+The head then moved for reasons outside this surface — a repository-wide
+`AGENTS.md`/`CLAUDE.md` docs commit landed on both this branch and
+`integration/v2` — and this commit adds the participant credential diagnostic,
+the operator procedure in `docs/claude-code-live-run.md`, and the two
+clarifications below. The current head needs a fresh non-author review.
+
+Source, deterministic, real-participant, and clean-installed-artifact checks
+passed, and the exact-head non-author review was **approved** at `78c4bd9`.
+
+**The status is still `Implemented, unverified`, and the approval does not
+change it.** `docs/v2-delivery.md` defines `Verified` as passing source,
+deterministic, installed-runtime *and* live checks. Three of those four have
+passed; the live one has not been attempted, and the reviewer said so in the
+approval itself. An approval closes the review gate, not the evidence gate.
+This surface must not be described as Verified, live, parity-ready, or done
+until live real-room proof exists.
+
+## Dependency ancestry
+
+The shared foundation this work consumes is integrated:
+
+```sh
+git merge-base --is-ancestor \
+  014546d2ec685341106b177bcf2f6e52e758e0a9 \
+  origin/integration/v2      # exit 0
+```
+
+## What passed
+
+| Claim | Command | Result |
+|---|---|---|
+| repository suite | `python3 -m unittest` | **421** tests, OK, 4 skips (the documented `baseline-oracle-absence` skips); identical on 3.11, 3.12 and 3.13 |
+| platform conformance | `python3 -m unittest tests.v2.test_claude_code` | **96** tests, OK; identical on 3.11, 3.12 and 3.13 |
+| shared owners still pass | `python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces tests.v2.test_runtime_hardening` | 102 tests, OK |
+| dual-validator contract corpus | `uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'` | 218 tests, OK, zero skips (unchanged count — the corpus did not shrink) |
+| lifecycle evaluation list | `python3 -m evals.verdict_suite.runner --list` | 8 scenes listed |
+| reproducible build identity | see [Build identity](#build-identity) | order-independent wheel content digest, stable across build interpreters; the raw zip SHA-256 is **not** cross-environment reproducible and is not claimed |
+| clean install | `uv venv` + `uv pip install ./nunchi-2.0.0-py3-none-any.whl` | installed with no editable link, no repository import, no `PYTHONPATH` |
+| platform suite against the installed artifact | installed interpreter running `tests.v2.test_claude_code` | **96** tests, OK, `nunchi` resolved from `site-packages` |
+| installed probes | `nunchi-claude-code-room-runner --probe` (unconfigured and configured) | see below |
+| real-participant scenes | `python3 -m evals.v2.claude_code.participant_scenes` | 4/4 matched expectation (`participant-scenes-2026-07-29.jsonl`) |
+
+### Installed probes
+
+```json
+{"configured":false,"generation":2,"product":"nunchi","product_version":"2.0.0",
+ "surface":"claude-code","v1_fallback":false}
+```
+
+```json
+{"actor_id":"discord:actor:149","configured":true,"generation":2,
+ "participant_id":"vigil","participant_tools_enabled":false,
+ "persistent_session":true,"privileged_actions_enabled":true,"product":"nunchi",
+ "product_version":"2.0.0","room_id":"152","send_time_social_judgment":false,
+ "shared_discord_transport":true,"surface":"claude-code","v1_fallback":false}
+```
+
+The configured probe now also carries `participant_credential`. Measured at
+this head against the clean-installed wheel and the real `claude` binary, with
+a configuration that disables privileged actions:
+
+```json
+{"actor_id":"discord:actor:9","configured":true,"generation":2,
+ "participant_credential":"authenticated","participant_id":"vigil",
+ "participant_tools_enabled":false,"persistent_session":true,
+ "privileged_actions_enabled":false,"product":"nunchi",
+ "product_version":"2.0.0","room_id":"152","send_time_social_judgment":false,
+ "shared_discord_transport":true,"surface":"claude-code","v1_fallback":false}
+```
+
+That value is what the CLI reported for the participant's own configuration
+root in this environment; it is not a claim that the field reads
+`authenticated` anywhere else. The `logged-out`, `absent`, and `unknown`
+branches are covered deterministically by the platform suite.
+
+The installed runner refused, with exit `3`, each of: a tampered config digest
+(`adapter config bytes do not match trusted sha256 pin`), a swapped participant
+profile (`participant profile digest does not match trusted configuration`),
+and an output key the participant turn could read (`Claude Code transport
+output key must not be readable by the participant turn`).
+
+### Real-participant scenes
+
+`evals/v2/claude_code/participant_scenes.py` runs the **real** `claude` binary
+(2.1.220) as the participant through the real `ClaudeCodeRoomRuntime`. The
+Discord transport is a recording double, so this is **not** live-room evidence.
+It establishes what a stub cannot:
+
+- a real headless turn, with exactly the shipped flags and prompts, returned
+  exactly one valid V2 action envelope — never a relevance verdict, an
+  admission meta-answer, or prose;
+- **profile sensitivity with room facts held constant**: the identical open
+  room moment produced silence under quiet instructions and a warm
+  contribution under sociable instructions;
+- silence made zero outbound calls and ended its receipt stream at
+  `participant-host` with outcome `silent`, distinct from model suppression
+  (which ends at `attention`) and from a contribution (`participant-host`
+  `unknown`, then `transport` `sent`).
+
+### Tool-lockdown differential (real CLI)
+
+The "the participant has no tools" claim was checked against the real binary
+with a canary file, holding the prompt and the file constant and varying only
+the tool flag:
+
+| Invocation | Outcome |
+|---|---|
+| shipped isolation (`--tools ""`, `--strict-mcp-config`, empty MCP map, `--setting-sources ""`, `--permission-mode manual`) | no tool call, no `permission_denials`, canary **not** present in the result |
+| control (`--tools "Read" --permission-mode acceptEdits --add-dir /tmp`) | canary **present** in the result |
+
+The control matters: without it, "the canary did not appear" would be
+consistent with a model that simply chose not to answer. The differential shows
+the shipped flag set is what removes the capability.
+
+An earlier iteration of the profile-sensitivity pair used a room moment
+addressed to a named third party. Both profiles correctly stayed silent, so
+that pair could not distinguish a profile-sensitive participant from an
+all-mute one. It was replaced with an open, unaddressed moment. The discarded
+design and its result are recorded here rather than deleted.
+
+### Ambient-instruction isolation (real CLI)
+
+Scene `ambient-instruction-isolation` plants a `CLAUDE.md` one directory
+above the participant workspace instructing every reply to carry a canary
+token, then runs a real turn through the shipped participant while the room
+message explicitly invites the token. Measured on `claude` 2.1.220:
+
+| Invocation | Canary reached the turn? |
+|---|---|
+| no isolation flags (baseline) | **yes** |
+| `--system-prompt` alone | **yes** |
+| `--setting-sources ""` alone | no |
+| `--safe-mode` alone | no |
+| shipped flag set | no |
+
+The baseline and `--system-prompt` rows are what make this meaningful:
+ancestor memory files *are* discoverable here, and replacing the system
+prompt does **not** stop them. Suppression comes from `--setting-sources`
+and `--safe-mode`, which is why both are shipped.
+
+Participant behaviour is stochastic: 4/4 is an observed outcome, not a
+deterministic guarantee, and the trial counts are far below what a release
+proof profile requires.
+
+**How these totals were obtained.** Earlier revisions recorded counts from a
+working-tree run taken before the final edits, which is how the packet came to
+claim three totals that did not reproduce. Every figure above is now measured
+from a clean `git archive` extraction of the committed head, so the tree that
+produced them is exactly the tree under review.
+
+## Build identity
+
+An earlier record quoted a wheel SHA-256 from `uv build` in a working tree. A
+reviewer correctly obtained a different value. The pinned-`SOURCE_DATE_EPOCH`
+clean-archive recipe that replaced it was still wrong: an independent reviewer
+building exact head `821a7bc` with the documented recipe got
+`7fe1bd11e2f7d16334da2e986f0074ca170bd3a985c8211d396731028218b424` while this
+environment reproducibly got
+`a5e99d3dc51ffbc0867630cc7efdbbad7d6492a127d46c7801a9f0a7997dfa95`.
+
+Measured here: that value is stable across repeated builds **and** across
+build interpreters (3.11 and 3.13 produced identical bytes), so the build
+Python is not the variable. The raw `.whl` is a zip whose member order and
+container framing depend on the building environment, which
+`SOURCE_DATE_EPOCH` does not normalise. **A raw wheel SHA-256 is therefore not
+a usable cross-environment candidate identity for this project and is not
+claimed as one here.**
+
+Two identities that do reproduce anywhere are recorded instead:
+
+| Identity | Value at this head | Reproduce with |
+|---|---|---|
+| packaged source tree | `1771d37c355acb92beeb47d8fb6e2ec05d8ffae4` | `git rev-parse HEAD:src` |
+| wheel **content** digest (order-independent) | `9cc4167c8e452a558170d224f407f5366a6af4310009eed4880e2898e8c5e0da` | recipe below |
+
+```sh
+build=$(mktemp -d)            # a fresh empty directory every time
+git archive --format=tar HEAD | tar -x -C "$build"
+cd "$build"
+SOURCE_DATE_EPOCH=1785000000 PYTHONHASHSEED=0 uv build --wheel --out-dir dist
+python3 - <<'EOF'
+import hashlib, zipfile, glob
+z = zipfile.ZipFile(glob.glob("dist/*.whl")[0])
+items = sorted((n, hashlib.sha256(z.read(n)).hexdigest()) for n in z.namelist())
+h = hashlib.sha256()
+for name, digest in items:
+    h.update(name.encode()); h.update(b"\0"); h.update(digest.encode()); h.update(b"\n")
+print(h.hexdigest())
+EOF
+```
+
+The content digest hashes the sorted `(member name, member SHA-256)` pairs, so
+it is invariant to zip ordering and container framing while still covering
+every packaged byte. Neither identity covers `evidence/` or `evals/`, which are
+not packaged — so recording a digest in this file does not change it, which is
+verified by rebuilding from the resulting head.
+
+## Review disposition
+
+### Round one — `dd83a1a`
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | `workspace.file.write` escapes via a planted `<target>.tmp` symlink | **Confirmed** — reproduced; the outside file was overwritten and the executor still returned `sent` | `_atomic_write` now stages under an unpredictable name opened `O_CREAT\|O_EXCL\|O_WRONLY\|O_NOFOLLOW` and unlinks on failure. Regression tests plant symlinks at every predictable staging name. |
+| 2 | `--setting-sources ""` does not stop ancestor `CLAUDE.md` | **Not reproducible as stated** — measured: `--setting-sources ""` alone *does* suppress it on 2.1.220; `--system-prompt` alone does not | Hardened regardless: `--safe-mode` added as an independent second barrier, plus the measured scene above so a future CLI change is caught. |
+| 3 | Failed or unattested turns become persistent continuation | **Confirmed** | The session is pinned only after a turn yields a valid outcome, and an unreported or mismatched session is now an operational failure rather than accepted. Seven regression tests. |
+| 4 | Cancellation test passes for the wrong reason; matrix incomplete | **Confirmed** | Rewritten so cancellation is ordered while the participant genuinely blocks; an after-commit case added; the authorization matrix (allow, mutation, resource scope, expiry, revocation, approval, persistence failure, replay, unknown result, cancellation, room-text-as-authority) added through this runtime. |
+| 5 | Probe hard-codes `persistent_session: true` | **Confirmed** | The probe reports the configured `session_mode` and derives `persistent_session` from it. |
+| 6 | Evidence not reproducible as recorded | **Confirmed** | Scene output is now JSON Lines with per-record provenance (`recorded_at`, command, `claude` version, Python version, commit). The build digest is replaced by the pinned recipe above. |
+| — | Suites failed intermittently under async work outliving temp state | **Confirmed** | The test harness drains, then cancels, the async lane before its temporary directory is removed. Verified by repeated runs on 3.11/3.12/3.13. |
+
+The reviewer's summary that green CI does not close these reproductions was
+correct: CI was green on `dd83a1a` while findings 1, 3, 4, 5, and 6 were all
+true.
+
+### Round two — `821a7bc`
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | `workspace.file.write` still escapes via a parent-directory replacement race | **Confirmed** — reproduced deterministically by swapping the validated parent for a symlink inside the staging→rename window; the outside file was overwritten and the executor returned `sent` | Replaced pathname-based confinement with `_write_confined`: every component is opened `O_NOFOLLOW\|O_DIRECTORY` relative to a handle on the root, and the staging open, rename, and read-back all use `dir_fd`. No pathname is re-resolved, so a swapped component cannot move the write. |
+| 2 | Rejected, cancelled, and uncertain turns still become persistent continuation | **Confirmed**, all three cases | The participant now only *stages* a pin. `SessionPinningReceiptJournal` commits it solely on the host's own acceptance receipts — a `participant-host` `silent`, or a `transport` record, which exists only past the commit point. Rejection, cancellation, and deadline all produce neither. `_atomic_write` also removes the file if the post-rename directory sync fails, so uncertain persistence leaves nothing loadable. |
+| 3 | Approval path never completed through this runtime | **Confirmed** | Added a test that completes a valid authenticated approval and asserts the exact effect lands, that the operator sees the exact operation, that the challenge is one-use, and that the completion and effect are journalled. |
+| 4 | Evidence neither candidate-attributable nor hash-reproducible | **Confirmed** | Scene records are regenerated at the head they attest and carry its commit. On the digest: measured that the value is stable across repeated builds and across 3.11/3.13, so the build Python is not the variable — the raw `.whl` zip is environment-dependent in ways `SOURCE_DATE_EPOCH` does not normalise. The raw digest is withdrawn as candidate identity and replaced by the packaged source tree hash and an order-independent wheel **content** digest. |
+
+Round two is more useful than round one: two of its four findings were
+incomplete round-one repairs that had passed their own regression tests. A
+test written against the fix rather than against the defect will do that.
+
+### Round three — `9c80892`
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | The confined writer attests `sent` for a path that no longer names what it wrote | **Confirmed** — reproduced: renaming the held directory and leaving a symlink at the proposed path produced `sent` while the payload landed elsewhere and the proposed path held foreign bytes | After the write, the file reached through the rooted handle is compared by `(st_dev, st_ino)` against a fresh resolution of the proposed path. Drift raises `ConfinedPathDrift`, which the executor reports as `unknown` — the bytes are confined and durable, but the named resource can no longer be attested. |
+| 2 | Rejected and cancelled turns leave unbounded staged continuation | **Confirmed** — 32 host-rejected turns left 32 staged pins | The staged store is bounded at 8 with oldest-first eviction, and a cancelled turn discards its own staged pin. Host rejection produces no receipt to discard on, so the bound — not a discard hook — is what makes this safe. |
+| 3 | Evidence still contains unresolved identity placeholders | **Confirmed** | The substitution ran with its working directory inside the extracted build tree, so it edited a temporary copy and reported success. Values are now committed and verified by reading them back from `git show`, not from the script's own output. The recipe also uses `mktemp -d` rather than a reusable directory. |
+
+### Round five — `39c8eb1`
+
+Closed: ambient isolation, continuation, the cancellation/authorization matrix,
+the installed probes, scene source attribution, and both artifact identities.
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | Renaming the **configured root itself** during the write moves the effect outside the authorized path while returning `sent` | **Confirmed** — reproduced. Every ancestry check is relative to the held root handle, so a moved root leaves all of them passing against the wrong location | `_assert_root_identity` re-states the configured path (refusing a symlink at its final component) and compares it to the held root inode, immediately before the rename and again after the write. Drift unlinks the written file and reports `unknown`. |
+| 2 | The verification table records three totals that do not reproduce | **Confirmed** — the packet said 414 / 87 / 89 where the head actually produced 415 / 90 / 90, and the PR comment said 414 / 90 / 90, so no two of the three agreed | Totals are now measured from a clean `git archive` of the committed head rather than from the working tree mid-edit, and recorded per interpreter. |
+
+The reviewer also corrected an overclaim: the `0700` root requirement does not
+"remove the principal", because rename authority comes from the parent and a
+same-user process can rename the runtime's own root. Detection is the defence
+here; that correction is stated in the security-properties section above.
+
+Round three repeats the round-two pattern exactly: two of three findings were
+incomplete repairs of round-two findings. Closing an escape is not the same as
+attesting an effect, and bounding what becomes durable is not the same as
+bounding what is staged. The third finding is worse in kind — a verification
+step that reported success for a file that was not the one under review.
+
+### Round four — `06990dd`
+
+Closed: ambient isolation, failed/cancelled/uncertain continuation, the
+cancellation and authorization matrix, and the installed fresh/persistent
+probes.
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | An opened child directory can be renamed outside the root; the executor writes there and reports `sent` | **Confirmed** — reproduced. `os.stat(..., follow_symlinks=False)` refuses a symlink only as the *final* component, so a substituted intermediate directory resolved straight back to the written inode and the check passed | Two independent post-write checks: an **ancestry** walk (`..` from the written directory handle must reach the root handle's inode, which catches an opened directory being moved out) and a **rooted re-resolution** (re-walk the proposed path refusing symlinks at every component). Violation unlinks the written file and reports `unknown`. Separately, the workspace root must now be a directory owned by the runtime user with no group/other access — detection cannot stop a concurrent local attacker, so the principal is removed rather than raced. |
+| 2 | Scene evidence no longer attributable to the exact source candidate | **Confirmed** — `bda6869:src` and this head's `src` had diverged | Scenes are regenerated at the current source, and provenance now carries `nunchi_src_tree` alongside the commit. The source tree is what these observations depend on; it is stable across evidence-only commits, so attribution no longer degrades every time the packet is edited. |
+
+**Five rounds, four distinct escapes in one executor.** Predictable staging
+path → unpredictable staging name → rooted handles → rooted handles that keep
+their ancestry → a root whose inode is bound to its configured path. Each
+repair addressed the reproduction rather than the class, and each regression
+test was written against the repair, so none could find the next variant.
+
+The invariant the whole sequence has been circling, stated once: **a write is
+attestable only if, at commit time, the configured root path names the inode
+we hold, the written file is reachable from that inode, and re-resolving the
+proposed path without following any symlink lands on exactly that file.**
+Each escape violated a different clause. A test that asserts the invariant
+would have caught all four; a test asserting the latest patch caught none.
+
+## What is NOT proven
+
+1. **No live real-room evidence.** No native Discord ingress or egress was
+   exercised: no real gateway, no real bot identity, no attributable native
+   message or receipt IDs. Every transport result above came from a recording
+   double. The shared Discord consumer contract is exercised only at the
+   acknowledgement-shape level.
+2. **No mixed-agent proof.** Installed Codex, Hermes, and Claude Code runtimes
+   with distinct identities have not completed scenes together in an authorized
+   real room.
+3. **Single reviewer; no reviewer-held challenge set.** The exact-head
+   non-author review is approved, which closes the round-by-round review
+   gate. Two things it does not close: `docs/v2-completion-goal.md` requires
+   **at least two** isolated reviewers from distinct model families for a
+   frozen final candidate, and only one has reviewed here; and no reviewer-held
+   challenge set was precommitted for this surface. Both are candidate-freeze
+   obligations that remain open.
+4. **No attention-classifier live evidence.** The real-participant scenes run
+   with pre-attention bypass. The classifier path is proven deterministically
+   (fixture model) but not against a live provider on this surface.
+
+   An operator holding only Anthropic credentials cannot close this gap today.
+   `OpenAICompatibleAttentionModel` speaks one OpenAI-compatible protocol and
+   defaults to OpenRouter; `provider` is recorded metadata, never a dispatch
+   key, so there is no Anthropic-native transport to select. With
+   `preattention_enabled: false` the only path is `PREATTENTION_BYPASS`, which
+   wakes the participant for every observation. Such an operator therefore
+   cannot reach `SUPPRESS`, classifier-`DEFER`, margin-`DEFER`, or
+   `ERROR_FALLBACK` — four of the nine live scenes in
+   `docs/claude-code-live-run.md`, and the four carrying the social judgment
+   this design exists for. **A live run without a classifier credential must
+   record which scenes were unreachable rather than reporting the remainder as
+   a pass.** Tracked as issue #35; `src/nunchi/attention.py` is shared
+   foundation, so the repair is not this surface's to make.
+5. **No upgrade or rollback exercise.** No supported V1 release upgrade with
+   representative operator state, no hard-kill restart continuity run, and no
+   rollback run were performed for this surface.
+6. **No capacity, latency, or overload envelope.** Nunchi-controlled bounds
+   were not fixed or measured for this surface.
+7. **No release-proof profile.** No frozen input manifest, closure manifest,
+   threat model, or reviewer-held challenge set exists for this candidate.
+8. **Hermes remains missing**, so the program-level surface inventory is
+   incomplete regardless of this surface's state.
+
+With the review gate closed, **live real-room evidence is the single remaining
+blocker to a `Verified` claim for this surface**, and it is the one this
+session structurally cannot produce.
+
+Item 1 is blocked in this environment. This work was produced in a **remote
+Claude Code session that holds no Discord credentials** — no bot token, no
+gateway access, and no authorized room. Live real-room evidence is therefore
+not something this session can produce at any level of effort; it needs an
+operator-run environment with the credentials in place. It is a real gap, not
+a limitation to be reinterpreted — under `docs/v2-completion-goal.md`, missing
+evidence is a failure, not an exemption.
+
+## What this surface delivers, and what it deliberately does not
+
+The participant is a **headless, tool-less `claude` subprocess**, spawned once
+per conversation opportunity. It is **not** the operator's interactive Claude
+Code session, and **not** the Discord plugin. `session_mode: "persistent"`
+resumes one session id across turns via `--resume`; that is continuity, not the
+operator's own session.
+
+This is stated plainly because it was not obvious enough: an operator preparing
+the first live run arrived expecting the plugin shape, which the earlier
+plugin-based approach — `PreToolUse` interception and transport patches — had
+established. That approach was dropped when this work restarted from
+`integration/v2`, and the change in what "Claude Code participates in a Nunchi
+room" means was never surfaced as a decision. It is surfaced here.
+
+The isolation is the reason, and it is load-bearing rather than incidental.
+The [ambient-instruction differential](#ambient-instruction-isolation-real-cli)
+below shows a `CLAUDE.md` one directory above the workspace **does** reach a
+bare turn. A participant running inside the operator's live plugin session
+would inherit exactly that surface, plus the plugin's tools and the operator's
+settings, so identity would stop coming solely from the digest-pinned profile.
+That property is what the contract turns on.
+
+Whether the plugin-session shape is wanted anyway is a product question for a
+separate slice, not a defect in this one.
+
+Operator procedure for the live run: `docs/claude-code-live-run.md`.
+
+## Security properties this implementation relies on
+
+Recorded so a reviewer can attack them directly:
+
+- The participant subprocess runs with `--tools ""`, `--strict-mcp-config
+  --mcp-config '{"mcpServers":{}}'`, `--setting-sources ""`,
+  `--disable-slash-commands`, and `--permission-mode manual`. It has no path to
+  Discord; the host owns the one output commit point.
+- The participant environment is an explicit allowlist. The shared Discord
+  output-authorization key and the classifier credential are withheld, and the
+  runtime refuses to start if `output_key_env` names an allowlisted variable.
+- Identity comes from the pinned, digest-verified profile via
+  `--system-prompt`; room content never enters it.
+- The participant's credential is its own. `CLAUDE_CONFIG_DIR` is a fixed,
+  private path, and `--safe-mode` leaves auth working normally, so an operator
+  can run `claude auth login` against that root and keep every Anthropic
+  credential out of the runner's environment entirely. `credential_status()`
+  asks the CLI under the participant's exact environment — not the operator's
+  shell, which routinely holds a credential the participant never inherits —
+  and reports `authenticated`, `logged-out`, `absent`, or `unknown` in the
+  probe and as a startup warning. It is a diagnostic and cannot stop the
+  runtime: every failure resolves to `unknown`.
+- Session continuity is pinned to participant, actor, room, continuity scope,
+  profile digest, and an invocation-behaviour digest. Any mismatch, and any
+  answer reporting a different session, is an operational failure.
+- A malformed, truncated, errored, or non-envelope turn is an operational
+  failure with an `unknown` participant-host outcome — never fabricated
+  silence. A turn that overruns its own budget without host cancellation is
+  likewise an error, not silence.
+- The single inventoried privileged effect is `workspace.file.write`. It is
+  confined by rooted directory handles (`O_NOFOLLOW|O_DIRECTORY` per
+  component, `dir_fd`-relative staging, rename, and read-back) and attested
+  by three post-write checks: the held root inode must still occupy the
+  configured root path, walking `..` from the written directory must reach
+  that root, and re-resolving the proposed path refusing symlinks at every
+  component must land on the written inode. Any drift unlinks the file and
+  reports `unknown`.
+- **Correction.** An earlier revision of this packet claimed the `0700`
+  workspace-root requirement "removes the principal rather than racing it".
+  That was wrong, as the fifth review pointed out: rename authority over a
+  directory comes from its *parent*, and another process running as the
+  runtime user can rename the runtime's own private root. The `0700`
+  requirement still keeps other users out of the workspace, but the defence
+  against a same-user racing principal is detection — the checks above — not
+  prevention. Stated plainly so a reviewer does not inherit the overclaim.
+  Without a configured root the capability has no executor at all. Ordinary
+  room contribution is deliberately not a privileged capability.
+
+## Reproducing
+
+```sh
+python3 -m unittest tests.v2.test_claude_code
+uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' \
+  python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+
+# real participant; requires an authenticated `claude` on PATH
+python3 -m evals.v2.claude_code.participant_scenes
+```

@@ -6,13 +6,12 @@ source suite is not installed or live evidence.
 ## Candidate scope
 
 Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
-reference adapters, shared Discord MCP transport, Codex, and an unfrozen
-Hermes source successor.
+reference adapters, shared Discord MCP transport, Codex, Hermes, and Claude
+Code.
 
-This successor changes shared observation, attention, participant-host,
-opportunity, and receipt code as well as Hermes. Earlier exact foundation and
-Hermes evidence is historical input, not proof for these dirty bytes. The
-current successor has focused source-test evidence only.
+Hermes is landed on `integration/v2`; Claude Code is rebased onto that exact
+result for landing. Both remain unverified. Earlier platform evidence is
+historical input and does not prove the combined head.
 
 Pending: the remaining Hermes live matrix in
 [issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
@@ -31,11 +30,12 @@ and Claude participant identity/surface blockers in
 
 | Claim | Required proof | Current status |
 |---|---|---|
-| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | **pending**; focused Hermes, dashboard, shared-foundation, and documentation tests pass on dirty source |
+| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | **pending exact-head rerun** after reconciliation |
 | clean package | exact wheel hash; new environment; installed probes; no checkout imports | **pending** |
 | installed Hermes 0.19.0 | normal plugin discovery; automatic dashboard; first-save/restart; unchanged Hermes distribution hashes; Discord and Telegram shape checks | **pending** |
+| installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
 | deterministic lifecycle | SUPPRESS, WAKE contribution, WAKE silence, both DEFER paths, bypass, both error policies | **pending rerun**; predecessor evidence does not transfer across shared-core changes |
-| live platform | attributable Discord and Telegram delivery/receipt IDs for the required lifecycle matrix | **pending** in issue #38 |
+| live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
 | independent review | fresh non-author review of the exact successor with no blocker | **pending** |
 
 The foundation predecessor at `8296e11d6cb3018e68d2904765a7e1d61f218bd9`
@@ -45,7 +45,7 @@ every current row to name immutable evidence.
 
 ## Current Hermes source status
 
-The unfrozen Hermes successor reuses Nunchi's shared observation, attention,
+The landed, unverified Hermes integration reuses Nunchi's shared observation, attention,
 opportunity preparation, scheduling, wake, and participant-receipt behavior.
 Stock Hermes supplies the admitted participant prompt, main model, memory,
 reactions, cancellation, delivery, and platform adapter behind checked
@@ -62,8 +62,8 @@ The current source is deliberately partial:
   participant commands, and handoff into configured rooms; and
 - it reports `complete_v2_lifecycle: false`.
 
-The current dirty source has not yet passed a fresh package or installed
-runtime run. The exact 0.19.0 target is Hermes tag `v2026.7.20`, commit
+The current Hermes code has not yet passed its exact installed-runtime and
+live acceptance. The exact 0.19.0 target is Hermes tag `v2026.7.20`, commit
 `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. Verification must compare its
 tracked and installed-distribution hashes before and after; the checkout has a
 pre-existing untracked `build/` directory and must not be described as wholly

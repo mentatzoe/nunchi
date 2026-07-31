@@ -63,4 +63,6 @@ jobs:
           /tmp/venv/bin/nunchi-matrix --probe
           /tmp/venv/bin/nunchi-telegram --probe
           /tmp/venv/bin/nunchi-codex-room-runner --probe
+          /tmp/venv/bin/nunchi-claude-code-room-runner --probe
+          /tmp/venv/bin/nunchi-hermes-dashboard --help
           echo "packaging smoke OK"
