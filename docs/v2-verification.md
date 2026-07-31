@@ -18,7 +18,7 @@ Attributable local verification on 2026-07-31:
 
 | Gate | Result |
 |---|---|
-| full source | `python3 -m unittest` — **586 passed**, 4 optional-oracle skips |
+| full source | `python3 -m unittest` — **586 run**, OK, with 4 optional-oracle skips |
 | pinned contract oracle | `jsonschema==4.26.0`, offline isolated run — **220 passed**, no skips |
 | installed lifecycle | `python3 -m evals.verdict_suite.runner` — **11/11 passed**, including ACK, disabled ACK, and unsupported ACK |
 | static source | `git diff --check` and `python3 -m compileall -q src tests evals` — passed |
