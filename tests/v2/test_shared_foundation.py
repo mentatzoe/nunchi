@@ -312,6 +312,11 @@ class ObservationTests(unittest.TestCase):
             ])
 
     def test_late_delivery_is_retained_in_canonical_event_time_order(self):
+        reference = datetime.now(timezone.utc)
+        newer_timestamp = reference.isoformat().replace("+00:00", "Z")
+        older_timestamp = (reference - timedelta(hours=1)).isoformat().replace(
+            "+00:00", "Z"
+        )
         with tempfile.TemporaryDirectory() as directory:
             store = Path(directory) / "observations.jsonl"
             first, _, _, _ = foundation(persistence_path=store)
@@ -319,7 +324,7 @@ class ObservationTests(unittest.TestCase):
                 delivery_id="d-newer",
                 event=message(
                     "e-newer",
-                    timestamp="2026-07-29T14:00:00Z",
+                    timestamp=newer_timestamp,
                 ),
                 actors={"human:zoe": {"kind": "human"}},
             )
@@ -327,7 +332,7 @@ class ObservationTests(unittest.TestCase):
                 delivery_id="d-older",
                 event=message(
                     "e-older",
-                    timestamp="2026-07-29T13:00:00Z",
+                    timestamp=older_timestamp,
                 ),
                 actors={"human:zoe": {"kind": "human"}},
             )
@@ -382,15 +387,24 @@ class ObservationTests(unittest.TestCase):
             )
 
     def test_mixed_aware_and_naive_timestamps_do_not_raise(self):
+        reference = datetime.now(timezone.utc)
         pipeline, _, _, _ = foundation()
         pipeline.observation.observe(
             delivery_id="d-aware",
-            event=message("e-aware", timestamp="2026-07-29T14:00:00Z"),
+            event=message(
+                "e-aware",
+                timestamp=reference.isoformat().replace("+00:00", "Z"),
+            ),
             actors={"human:zoe": {"kind": "human"}},
         )
         pipeline.observation.observe(
             delivery_id="d-naive",
-            event=message("e-naive", timestamp="2026-07-29T13:00:00"),
+            event=message(
+                "e-naive",
+                timestamp=(reference - timedelta(hours=1))
+                .replace(tzinfo=None)
+                .isoformat(),
+            ),
             actors={"human:zoe": {"kind": "human"}},
         )
 
