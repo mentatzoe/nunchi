@@ -23,7 +23,13 @@ from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
 
 class MatrixTransport:
-    def __init__(self, config: Mapping[str, object]) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, object],
+        *,
+        room_id: str | None = None,
+        actor_id: str | None = None,
+    ) -> None:
         allowed = {"homeserver", "access_token_env", "sync_timeout_ms"}
         if set(config) - allowed or "homeserver" not in config:
             raise ValidationError("Matrix transport config has an invalid closed shape")
@@ -32,8 +38,24 @@ class MatrixTransport:
         self.token = os.environ.get(env_name)
         if not self.token:
             raise ValidationError(f"Matrix credential is absent from {env_name}")
-        self._reaction_revision = hashlib.sha256(
-            f"matrix-reaction-v2\0{self.homeserver}\0{env_name}".encode()
+        if room_id is not None and (not isinstance(room_id, str) or not room_id):
+            raise ValidationError("Matrix reaction room binding is invalid")
+        if actor_id is not None and (
+            not isinstance(actor_id, str)
+            or not actor_id.startswith("matrix:actor:")
+            or not actor_id.removeprefix("matrix:actor:")
+        ):
+            raise ValidationError("Matrix reaction actor binding is invalid")
+        self.room_id = room_id
+        self.actor_id = actor_id
+        self.native_actor_id = (
+            actor_id.removeprefix("matrix:actor:") if actor_id is not None else None
+        )
+        self._unavailable_reaction_revision = hashlib.sha256(
+            (
+                f"matrix-reaction-unavailable-v2\0{self.homeserver}\0{env_name}\0"
+                f"{room_id or 'unbound'}\0{actor_id or 'unbound'}"
+            ).encode()
         ).hexdigest()
         self.sync_timeout_ms = int(config.get("sync_timeout_ms", 30_000))
         if self.sync_timeout_ms < 1 or self.sync_timeout_ms > 60_000:
@@ -43,12 +65,77 @@ class MatrixTransport:
         return ("message", "reply", "reaction")
 
     def reaction_capability(self) -> ReactionCapability:
+        if self.room_id is None or self.actor_id is None or self.native_actor_id is None:
+            return self._unavailable_reaction_capability(
+                "Matrix reaction capability lacks an exact room and self binding"
+            )
+        authenticated = False
+        try:
+            if self.authenticated_actor_id() != self.actor_id:
+                return self._unavailable_reaction_capability(
+                    "Matrix authenticated account does not match exact self binding"
+                )
+            authenticated = True
+            room = quote(self.room_id, safe="")
+            payload = self._request(
+                "GET",
+                f"/_matrix/client/v3/rooms/{room}/state/m.room.power_levels",
+            )
+            if not isinstance(payload, Mapping):
+                raise ValidationError("Matrix power-level response is not an object")
+            users = payload.get("users", {})
+            events = payload.get("events", {})
+            if not isinstance(users, Mapping) or not isinstance(events, Mapping):
+                raise ValidationError("Matrix power-level maps are malformed")
+            user_level = self._power_level(
+                users.get(self.native_actor_id),
+                default=self._power_level(payload.get("users_default"), default=0),
+            )
+            required_level = self._power_level(
+                events.get("m.reaction"),
+                default=self._power_level(payload.get("events_default"), default=0),
+            )
+            allowed = user_level >= required_level
+            revision = hashlib.sha256(
+                (
+                    f"matrix-power-levels-v2\0{self.homeserver}\0{self.room_id}\0"
+                    f"{self.native_actor_id}\0{user_level}\0{required_level}\0{int(allowed)}"
+                ).encode()
+            ).hexdigest()
+            return ReactionCapability(
+                supported=allowed,
+                authenticated=True,
+                operations=("add",) if allowed else (),
+                reactions=("*",) if allowed else (),
+                permissions_revision=revision,
+                detail=(
+                    ""
+                    if allowed
+                    else "Matrix room power levels do not allow reaction events"
+                ),
+            )
+        except Exception:
+            return ReactionCapability(
+                supported=False,
+                authenticated=authenticated,
+                permissions_revision=self._unavailable_reaction_revision,
+                detail="Matrix room reaction permission is unavailable or unattested",
+            )
+
+    @staticmethod
+    def _power_level(value, *, default: int) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValidationError("Matrix power level must be an integer")
+        return value
+
+    def _unavailable_reaction_capability(self, detail: str) -> ReactionCapability:
         return ReactionCapability(
-            supported=True,
-            authenticated=True,
-            operations=("add",),
-            reactions=("*",),
-            permissions_revision=self._reaction_revision,
+            supported=False,
+            authenticated=False,
+            permissions_revision=self._unavailable_reaction_revision,
+            detail=detail,
         )
 
     def _request(self, method: str, path: str, payload=None):
@@ -189,7 +276,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         transport_raw = config.get("transport")
         if not isinstance(transport_raw, Mapping):
             raise ValidationError("Matrix config must contain transport")
-        transport = MatrixTransport(transport_raw)
+        binding_raw = config.get("binding")
+        if not isinstance(binding_raw, Mapping):
+            raise ValidationError("Matrix config must contain a binding")
+        room_id = binding_raw.get("room_id")
+        actor_id = binding_raw.get("actor_id")
+        transport = MatrixTransport(
+            transport_raw,
+            room_id=room_id if isinstance(room_id, str) else None,
+            actor_id=actor_id if isinstance(actor_id, str) else None,
+        )
         runtime = ReferenceAdapterRuntime(
             surface="matrix",
             config=config,

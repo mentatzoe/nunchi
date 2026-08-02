@@ -120,8 +120,8 @@ and an explicit state-purge boundary.
 
 | Surface | Shared behavior available | Remaining platform work |
 |---|---|---|
-| Generic channel / Discord | full shared protocol and authenticated reaction capability seam | platform-specific live validation and acceptance |
-| Matrix | shared protocol; add-reaction capability | platform-specific live validation and acceptance |
+| Generic channel / Discord | full shared protocol; Discord MCP measures exact bot, room, roles, and permission overwrites before ACK | platform-specific live validation and acceptance |
+| Matrix | shared protocol; exact `whoami` and room power-level measurement before add-reaction ACK | platform-specific live validation and acceptance |
 | Telegram | shared protocol; unsupported ACK widens to DEFER | native ACK support only if a future verified adapter supplies it |
 | Codex | shared protocol and operator schema | platform-specific live/release gates outside this foundation |
 | Claude Code | shared protocol and operator schema | issue #39 live and supported-surface proof |

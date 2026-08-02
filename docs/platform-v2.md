@@ -87,9 +87,12 @@ A consumer of the shared Discord transport must:
    `integrations/mcp-discord/README.md`;
 4. cancel active and pending work before applying a targeted continuity gap;
 5. submit ordinary live events through the asynchronous active/newest lane;
-6. invoke output/history tools only from that authenticated session with a
+6. measure current reaction permission through the authenticated
+   `reaction_capability` tool and accept only its exact native room/self
+   binding; unavailable, denied, or malformed facts widen ACK to DEFER;
+7. invoke output/history tools only from that authenticated session with a
    fresh exact-operation authorization;
-7. correlate every JSON-RPC response to the exact request and report `sent`
+8. correlate every JSON-RPC response to the exact request and report `sent`
    only after the tool payload attests the expected native room, exact
    authenticated self, submitted content, reply target or non-reply effect,
    and new message or reaction identity. Empty, stale, cross-bot,

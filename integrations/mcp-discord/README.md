@@ -48,6 +48,7 @@ uncertain. Gaps make subsequent coverage continuity `unknown`.
 - `send_message`
 - `reply_message`
 - `add_reaction`
+- `reaction_capability`
 - `remove_reaction`
 - `read_history`
 
@@ -58,6 +59,12 @@ transport checks the exact configured participant/room route, authenticated
 session route, expiry, future time, operation mutation, MAC, and replay. It
 fsyncs nonce consumption before REST dispatch and reloads the journal after
 restart.
+
+`reaction_capability` is a read-only, exact-route probe. It authenticates the
+registered bot identity, reads the configured guild channel, member roles, and
+permission overwrites, and returns only the effective add-reaction capability
+plus a non-secret permission revision. Missing, denied, malformed, or
+mismatched facts fail closed so core widens model ACK to DEFER.
 
 ## Configuration
 

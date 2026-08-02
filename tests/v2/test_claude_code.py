@@ -1344,7 +1344,11 @@ class RecordingClient:
         }
 
     def outbound(self):
-        return [call for call in self.calls if call[0] != "register_participant"]
+        return [
+            call
+            for call in self.calls
+            if call[0] not in {"register_participant", "reaction_capability"}
+        ]
 
 
 def message_event(event_id, *, author=ACTOR_ID, text="hello", **extra):

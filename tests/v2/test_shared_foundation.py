@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import multiprocessing
+import os
 from pathlib import Path
 import tempfile
 import threading
@@ -34,6 +35,8 @@ from nunchi.authorization import (
     canonical_operation_digest,
 )
 from nunchi.errors import ValidationError
+from nunchi.adapters.matrix import MatrixTransport
+from nunchi.integrations.discord_participant_transport import MCPDiscordTransport
 from nunchi.observation import (
     ObservationLimits,
     ObservationProvider,
@@ -154,8 +157,9 @@ def foundation(
     participant_timeout_seconds=300,
     ack_policy=None,
     ack_journal=None,
+    binding=None,
 ):
-    binding = ParticipantBinding(
+    binding = binding or ParticipantBinding(
         participant_id="vigil",
         actor_id="discord:bot:9",
         platform="discord",
@@ -176,8 +180,8 @@ def foundation(
     attention = AttentionEngine(
         profile=ParticipantProfile(
             profile_id="vigil-default",
-            participant_id="vigil",
-            actor_id="discord:bot:9",
+            participant_id=binding.participant_id,
+            actor_id=binding.actor_id,
             instructions="Contribute on security and implementation correctness.",
             provenance="trusted:test",
             sha256="0" * 64,
@@ -192,7 +196,9 @@ def foundation(
             lambda: UNAVAILABLE_REACTION_CAPABILITY,
         ),
     )
-    scheduler = ConversationOpportunityScheduler("vigil:discord:channel:42")
+    scheduler = ConversationOpportunityScheduler(
+        f"{binding.participant_id}:{binding.continuity_scope_id}"
+    )
     host = ParticipantTurnHost(
         observation=observation,
         participant=participant or (lambda **_: None),
@@ -1806,6 +1812,125 @@ class AckOutcomeTests(unittest.TestCase):
                 )
                 self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
                 self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
+
+    def test_measured_discord_permission_denial_reaches_defer(self):
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def call_tool(self, name, arguments):
+                self.calls.append((name, deepcopy(arguments)))
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "reaction_capability": {
+                                        "channel_id": "42",
+                                        "actor_id": "9",
+                                        "capability": {
+                                            "supported": False,
+                                            "authenticated": True,
+                                            "operations": [],
+                                            "reactions": [],
+                                            "permissions_revision": "discord-denied-v1",
+                                            "detail": "add reactions denied",
+                                        },
+                                    }
+                                }
+                            ),
+                        }
+                    ],
+                }
+
+        client = Client()
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
+        participant_calls = []
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-discord-permission-denied",
+            event=message("e-discord-permission-denied"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertTrue(client.calls)
+        self.assertEqual(
+            {"reaction_capability"},
+            {name for name, _arguments in client.calls},
+        )
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+
+    def test_measured_matrix_permission_denial_reaches_defer(self):
+        binding = ParticipantBinding(
+            participant_id="vigil",
+            actor_id="matrix:actor:@vigil:example",
+            platform="matrix",
+            room_id="!room:example",
+            continuity_scope_id="matrix:room:example",
+        )
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "secret"}, clear=False):
+            transport = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                },
+                room_id=binding.room_id,
+                actor_id=binding.actor_id,
+            )
+        native_calls = []
+
+        def request(method, path, payload=None):
+            native_calls.append((method, path, deepcopy(payload)))
+            if path.endswith("/account/whoami"):
+                return {"user_id": "@vigil:example"}
+            if path.endswith("/state/m.room.power_levels"):
+                return {
+                    "users": {"@vigil:example": 0},
+                    "events": {"m.reaction": 50},
+                }
+            raise AssertionError(f"unexpected Matrix call: {method} {path}")
+
+        transport._request = request
+        participant_calls = []
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+            binding=binding,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-matrix-permission-denied",
+            event=message("e-matrix-permission-denied"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertTrue(native_calls)
+        self.assertEqual({"GET"}, {method for method, _path, _body in native_calls})
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
 
     def test_malformed_capability_widens_ack_to_defer(self):
         participant_calls = []

@@ -310,6 +310,7 @@ class CodexParticipant:
             ]
             if self.model is not None:
                 extra.extend(("--model", self.model))
+            deadline = time.monotonic() + self.timeout_seconds
             while True:
                 prompt = self._prompt(protocol)
                 if active_thread:
@@ -353,7 +354,6 @@ class CodexParticipant:
                     stderr=subprocess.PIPE,
                     text=True,
                 )
-                deadline = time.monotonic() + self.timeout_seconds
                 while process.poll() is None:
                     if cancel.is_set() or time.monotonic() >= deadline:
                         process.terminate()
