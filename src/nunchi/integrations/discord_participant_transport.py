@@ -48,14 +48,12 @@ class MCPDiscordTransport:
         self.native_actor_id = actor_id.removeprefix("discord:actor:")
         self.output_secret = output_secret
         self._reaction_revision = hashlib.sha256(
-            b"nunchi-discord-reaction-v1\0"
+            b"nunchi-discord-reaction-v2\0"
             + participant_id.encode()
             + b"\0"
             + room_id.encode()
             + b"\0"
             + actor_id.encode()
-            + b"\0"
-            + output_secret
         ).hexdigest()
 
     def ordinary_action_capabilities(self) -> tuple[str, ...]:

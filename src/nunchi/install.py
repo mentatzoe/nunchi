@@ -129,12 +129,19 @@ def verify(config_root: Path) -> dict[str, Any]:
     if not isinstance(document, dict) or set(document) != required:
         raise InstallError("V2 install marker has an invalid closed shape")
     if (
-        document["schema_version"] != 2
+        isinstance(document["schema_version"], bool)
+        or not isinstance(document["schema_version"], int)
+        or document["schema_version"] != 2
         or document["product"] != "nunchi"
+        or not isinstance(document["product_version"], str)
         or document["product_version"] != __version__
+        or isinstance(document["generation"], bool)
+        or not isinstance(document["generation"], int)
         or document["generation"] != 2
         or document["v1_fallback"] is not False
         or document["excluded_integrations"] != []
+        or not isinstance(document["config_root"], str)
+        or not isinstance(document["state_root"], str)
         or Path(document["config_root"]).resolve() != config_root.resolve()
     ):
         raise InstallError("V2 install marker does not match this installed artifact")
@@ -205,17 +212,52 @@ def uninstall_state(config_root: Path, state_root: Path, *, purge: bool = False)
     """Remove install registration, and state only after explicit purge."""
 
     marker = config_root / MARKER_NAME
-    if marker.exists():
-        marker.unlink()
-    removed = [str(marker)]
+    try:
+        document = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallError(f"V2 install marker is absent or untrustworthy: {exc}") from exc
+    if (
+        not isinstance(document, dict)
+        or document.get("product") != "nunchi"
+        or isinstance(document.get("schema_version"), bool)
+        or not isinstance(document.get("schema_version"), int)
+        or document.get("schema_version") != MARKER_SCHEMA
+        or not isinstance(document.get("config_root"), str)
+        or not isinstance(document.get("state_root"), str)
+        or Path(str(document.get("config_root", ""))).resolve() != config_root.resolve()
+        or Path(str(document.get("state_root", ""))).resolve() != state_root.resolve()
+    ):
+        raise InstallError("V2 install marker does not bind these exact state roots")
+    removed: list[str] = []
     if purge:
+        home = Path.home().resolve()
+        broad_roots = {
+            Path("/").resolve(),
+            home,
+            (home / ".config").resolve(),
+            (home / ".local").resolve(),
+            (home / ".local" / "state").resolve(),
+        }
         for path in (config_root, state_root):
             resolved = path.resolve()
-            if len(resolved.parts) < 4 or resolved == Path.home().resolve():
+            within_home = resolved.is_relative_to(home)
+            home_depth = len(resolved.relative_to(home).parts) if within_home else None
+            if (
+                len(resolved.parts) < 4
+                or resolved in broad_roots
+                or (home_depth is not None and home_depth < 2)
+            ):
                 raise InstallError("refusing to purge a broad operator-state path")
+        # Remove state first. If it fails, the registration marker remains;
+        # if config removal succeeds, it removes the marker as its final act.
+        for path in (state_root, config_root):
             if path.exists():
                 shutil.rmtree(path)
                 removed.append(str(path))
+    else:
+        marker.unlink()
+        removed.append(str(marker))
+    marker.unlink(missing_ok=True)
     return {"status": "uninstalled", "purged": purge, "removed": removed}
 
 

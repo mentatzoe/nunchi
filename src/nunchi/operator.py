@@ -240,7 +240,11 @@ def validate_operator_config(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != required:
         raise ValidationError("operator config has a missing or unexpected field")
     result = dict(value)
-    if result["schema_version"] != OPERATOR_SCHEMA_VERSION:
+    if (
+        isinstance(result["schema_version"], bool)
+        or not isinstance(result["schema_version"], int)
+        or result["schema_version"] != OPERATOR_SCHEMA_VERSION
+    ):
         raise ValidationError(f"operator schema_version must be {OPERATOR_SCHEMA_VERSION}")
     profile_id = validate_profile_id(result["profile_id"])
     identity = result["identity"]
@@ -452,38 +456,58 @@ class OperatorStore:
         return result
 
     @contextmanager
-    def _lock(self) -> Iterator[None]:
+    def _lock(self, *, exclusive: bool = True) -> Iterator[None]:
         self.paths.config_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = self.paths.config_directory / ".config.lock"
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             if fcntl is not None:
-                fcntl.flock(fd, fcntl.LOCK_EX)
+                fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
             yield
         finally:
             if fcntl is not None:
                 fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
-    def read(self) -> tuple[dict[str, Any], str]:
+    def _read_unlocked(self) -> tuple[dict[str, Any], str]:
         try:
             raw = self.paths.config.read_bytes()
-            expected = self.paths.digest.read_text(encoding="ascii").strip()
         except OSError as exc:
             raise ValidationError(f"operator profile is not configured: {exc}") from exc
-        if len(raw) > _MAX_CONFIG_BYTES or not _SHA256.fullmatch(expected):
-            raise ValidationError("operator config or digest is untrustworthy")
-        actual = hashlib.sha256(raw).hexdigest()
-        if actual != expected:
-            raise ValidationError("operator config bytes do not match their automatic integrity pin")
+        if len(raw) > _MAX_CONFIG_BYTES:
+            raise ValidationError("operator config exceeds the bounded size")
         try:
             document = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValidationError(f"operator config is invalid JSON: {exc.msg}") from exc
-        checked = validate_operator_config(document)
+        if isinstance(document, Mapping) and set(document) == {"digest", "config"}:
+            expected = document["digest"]
+            candidate = document["config"]
+            payload = _canonical(candidate)
+        else:
+            # Read the candidate build's split form only to migrate it safely
+            # on the next write. New commits always use the atomic envelope.
+            try:
+                expected = self.paths.digest.read_text(encoding="ascii").strip()
+            except OSError as exc:
+                raise ValidationError(f"operator profile is not configured: {exc}") from exc
+            candidate = document
+            payload = raw
+        if not isinstance(expected, str) or not _SHA256.fullmatch(expected):
+            raise ValidationError("operator config or digest is untrustworthy")
+        actual = hashlib.sha256(payload).hexdigest()
+        if actual != expected:
+            raise ValidationError("operator config does not match its automatic integrity pin")
+        checked = validate_operator_config(candidate)
         if checked["profile_id"] != self.paths.profile_id:
             raise ValidationError("operator config belongs to another profile")
         return checked, actual
+
+    def read(self) -> tuple[dict[str, Any], str]:
+        if not self.paths.config_directory.exists():
+            raise ValidationError("operator profile is not configured")
+        with self._lock(exclusive=False):
+            return self._read_unlocked()
 
     def write(
         self,
@@ -498,37 +522,35 @@ class OperatorStore:
         if len(payload) > _MAX_CONFIG_BYTES:
             raise ValidationError("operator config exceeds the bounded size")
         revision = hashlib.sha256(payload).hexdigest()
-        profile = {
-            "profile_id": checked["profile_id"],
-            "participant_id": checked["identity"]["participant_id"],
-            "actor_id": checked["identity"]["actor_id"],
-            "instructions": checked["identity"]["instructions"],
-            "provenance": checked["identity"]["provenance"],
-        }
-        profile_payload = _canonical(profile)
-        profile_revision = hashlib.sha256(profile_payload).hexdigest()
+        committed_payload = _canonical({"digest": revision, "config": checked})
         self.initialize()
         with self._lock():
             current_revision = None
+            current_config = None
             if self.paths.config.exists():
-                _, current_revision = self.read()
+                current_config, current_revision = self._read_unlocked()
             if expected_revision is not None and expected_revision != current_revision:
                 raise ValidationError("operator config changed since it was read")
             if current_revision is not None:
                 revision_path = self.paths.revisions / f"{current_revision}.json"
                 if not revision_path.exists():
-                    _atomic_write(revision_path, self.paths.config.read_bytes())
-            _atomic_write(self.paths.profile, profile_payload)
-            _atomic_write(self.paths.profile_digest, (profile_revision + "\n").encode("ascii"))
-            _atomic_write(self.paths.config, payload)
-            _atomic_write(self.paths.digest, (revision + "\n").encode("ascii"))
+                    assert current_config is not None
+                    _atomic_write(revision_path, _canonical(current_config))
+            _atomic_write(self.paths.config, committed_payload)
+            for legacy_path in (
+                self.paths.digest,
+                self.paths.profile,
+                self.paths.profile_digest,
+            ):
+                try:
+                    legacy_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return {
             "status": "configured",
             "profile_id": self.paths.profile_id,
             "revision": revision,
             "config_path": str(self.paths.config),
-            "profile_path": str(self.paths.profile),
-            "profile_sha256": profile_revision,
         }
 
     def rollback(self, revision: str) -> dict[str, Any]:
@@ -628,6 +650,30 @@ class OperatorStore:
             }
             for name, model in config["models"].items()
         }
+        for name, credential in credentials.items():
+            if credential["state"] == "absent":
+                warnings.append(
+                    {
+                        "feature": "credential",
+                        "model": name,
+                        "behavior": "unavailable",
+                        "detail": f"{credential['environment']} is absent",
+                    }
+                )
+        for service in services:
+            if service["desired"] == "running" and not service["running"]:
+                warnings.append(
+                    {
+                        "feature": "service",
+                        "service": service["name"],
+                        "behavior": "not-running",
+                        "detail": (
+                            "configured always-running service has an orphaned child"
+                            if service["orphaned_child"]
+                            else "configured always-running service is stopped"
+                        ),
+                    }
+                )
         return {
             "schema_version": OPERATOR_SCHEMA_VERSION,
             "product": "nunchi",
@@ -666,16 +712,6 @@ def _pid_alive(pid: int) -> bool:
                 return True
             _LOCAL_SUPERVISORS.pop(pid, None)
             return False
-    # A long-lived Python process may start and later control the supervisor
-    # itself (dashboard and tests do this). Reap that exact child when it has
-    # exited so a zombie is never mistaken for a running service. Separate CLI
-    # invocations are not its parent and simply fall through to kill(pid, 0).
-    try:
-        waited, _ = os.waitpid(pid, os.WNOHANG)
-        if waited == pid:
-            return False
-    except ChildProcessError:
-        pass
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -706,6 +742,50 @@ class ServiceManager:
 
     def _pidfile(self, name: str) -> Path:
         return self._directory(name) / "supervisor.json"
+
+    def _persistent_environment_path(self, name: str) -> Path:
+        return self._directory(name) / "persistent-environment.json"
+
+    def _write_persistent_environment(self, name: str) -> Path:
+        definition, _ = self._definition(name)
+        values: dict[str, str] = {}
+        for source in sorted(set(definition["environment"].values())):
+            value = os.environ.get(source)
+            if value is None:
+                raise ValidationError(
+                    f"persistent service environment source {source} is absent"
+                )
+            values[source] = value
+        path = self._persistent_environment_path(name)
+        _atomic_write(path, _canonical(values), mode=0o600)
+        return path
+
+    def _supervisor_lock_held(self, name: str) -> bool:
+        """Return whether an exact live supervisor owns its durable lock."""
+
+        if fcntl is None:
+            return False
+        lock_path = self._directory(name) / "supervisor.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        finally:
+            os.close(fd)
+
+    def _runtime(self, name: str) -> dict[str, Any]:
+        try:
+            value = json.loads(
+                (self._directory(name) / "status.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return dict(value) if isinstance(value, Mapping) else {}
 
     @contextmanager
     def _control(self, name: str) -> Iterator[None]:
@@ -740,6 +820,8 @@ class ServiceManager:
         if (
             not isinstance(value, Mapping)
             or set(value) != required
+            or isinstance(value.get("schema_version"), bool)
+            or not isinstance(value.get("schema_version"), int)
             or value.get("schema_version") != 1
             or isinstance(value.get("pid"), bool)
             or not isinstance(value.get("pid"), int)
@@ -756,20 +838,22 @@ class ServiceManager:
         definition, revision = self._definition(name)
         state = self._read_pidfile(name)
         pid = state.get("pid") if isinstance(state, Mapping) else None
-        running = _pid_alive(pid)
-        status_path = self._directory(name) / "status.json"
-        runtime = {}
-        try:
-            value = json.loads(status_path.read_text(encoding="utf-8"))
-            if isinstance(value, Mapping):
-                runtime = dict(value)
-        except (OSError, json.JSONDecodeError):
-            pass
+        lock_held = self._supervisor_lock_held(name)
+        running = lock_held and _pid_alive(pid)
+        runtime = self._runtime(name)
+        child_pid = runtime.get("child_pid")
+        orphaned_child = (
+            not lock_held
+            and not isinstance(child_pid, bool)
+            and isinstance(child_pid, int)
+            and _pid_alive(child_pid)
+        )
         return {
             "name": name,
-            "desired": "running" if running else "stopped",
+            "desired": "running" if definition["restart"] == "always" else "stopped",
             "running": running,
             "pid": pid if running else None,
+            "orphaned_child": orphaned_child,
             "config_revision": revision,
             "restart_policy": definition["restart"],
             "runtime": runtime,
@@ -780,10 +864,12 @@ class ServiceManager:
         return [self.status(item["name"]) for item in config["services"]]
 
     def _start_locked(self, name: str) -> dict[str, Any]:
-        _, revision = self._definition(name)
+        self._definition(name)
         current = self.status(name)
         if current["running"]:
             return {"status": "already-running", **current}
+        if current["orphaned_child"]:
+            return {"status": "orphaned-child", **current}
         directory = self._directory(name)
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         log = directory / "service.log"
@@ -800,9 +886,18 @@ class ServiceManager:
             "--service",
             name,
         ]
+        worker_environment = os.environ.copy()
+        package_root = str(Path(__file__).resolve().parents[1])
+        inherited_pythonpath = worker_environment.get("PYTHONPATH")
+        worker_environment["PYTHONPATH"] = (
+            package_root
+            if not inherited_pythonpath
+            else package_root + os.pathsep + inherited_pythonpath
+        )
         with log.open("ab", buffering=0) as output:
             process = subprocess.Popen(
                 command,
+                env=worker_environment,
                 stdin=subprocess.DEVNULL,
                 stdout=output,
                 stderr=subprocess.STDOUT,
@@ -811,33 +906,33 @@ class ServiceManager:
             )
         with _LOCAL_SUPERVISORS_LOCK:
             _LOCAL_SUPERVISORS[process.pid] = process
-        _atomic_write(
-            self._pidfile(name),
-            _canonical(
-                {
-                    "schema_version": 1,
-                    "pid": process.pid,
-                    "profile_id": self.store.paths.profile_id,
-                    "service": name,
-                    "config_revision": revision,
-                }
-            ),
-        )
-        return {"status": "started", **self.status(name)}
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            current = self.status(name)
+            if current["running"] and current["runtime"].get("state") == "running":
+                return {"status": "started", **current}
+            if process.poll() is not None:
+                break
+            time.sleep(0.025)
+        if process.poll() is None:
+            process.terminate()
+        return {
+            "status": "start-failed",
+            **self.status(name),
+            "detail": "service supervisor did not reach running state",
+            "log_tail": self.logs(name, lines=20)["lines"],
+        }
 
     def start(self, name: str) -> dict[str, Any]:
         with self._control(name):
             return self._start_locked(name)
 
-    def _signal_locked(self, name: str, *, graceful: bool, timeout: float = 10.0) -> dict[str, Any]:
+    def _signal_locked(self, name: str, *, timeout: float = 10.0) -> dict[str, Any]:
         state = self._read_pidfile(name)
         pid = state.get("pid") if isinstance(state, Mapping) else None
-        if not _pid_alive(pid):
+        if not self._supervisor_lock_held(name) or not _pid_alive(pid):
             self._pidfile(name).unlink(missing_ok=True)
             return {"status": "already-stopped", **self.status(name)}
-        control = self._directory(name) / "control"
-        if graceful:
-            _atomic_write(control, b"drain\n")
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -848,19 +943,15 @@ class ServiceManager:
         if _pid_alive(pid):
             return {"status": "stop-timeout", **self.status(name)}
         self._pidfile(name).unlink(missing_ok=True)
-        return {"status": "drained" if graceful else "stopped", **self.status(name)}
+        return {"status": "stopped", **self.status(name)}
 
     def stop(self, name: str) -> dict[str, Any]:
         with self._control(name):
-            return self._signal_locked(name, graceful=False)
-
-    def drain(self, name: str) -> dict[str, Any]:
-        with self._control(name):
-            return self._signal_locked(name, graceful=True)
+            return self._signal_locked(name)
 
     def restart(self, name: str) -> dict[str, Any]:
         with self._control(name):
-            stopped = self._signal_locked(name, graceful=True)
+            stopped = self._signal_locked(name)
             if stopped["status"] == "stop-timeout":
                 return stopped
             return self._start_locked(name)
@@ -877,7 +968,7 @@ class ServiceManager:
 
     def reset(self, name: str) -> dict[str, Any]:
         with self._control(name):
-            stopped = self._signal_locked(name, graceful=False)
+            stopped = self._signal_locked(name)
             if stopped["status"] == "stop-timeout":
                 return {"status": "reset-timeout", "name": name, "removed": []}
             directory = self._directory(name)
@@ -906,6 +997,8 @@ class ServiceManager:
             self.store.paths.profile_id,
             "--service",
             name,
+            "--environment-file",
+            str(self._persistent_environment_path(name)),
         ]
         safe_profile = self.store.paths.profile_id
         if operating_system == "darwin":
@@ -961,6 +1054,7 @@ class ServiceManager:
             )
 
     def install_persistent(self, name: str) -> dict[str, Any]:
+        environment_path = self._write_persistent_environment(name)
         path, payload = self.render_persistent_definition(name)
         _atomic_write(path, payload, mode=0o600)
         if sys.platform == "darwin":
@@ -980,6 +1074,7 @@ class ServiceManager:
             "status": "installed",
             "name": name,
             "definition": str(path),
+            "environment": str(environment_path),
             "activated": True,
         }
 
@@ -997,12 +1092,15 @@ class ServiceManager:
                 required=False,
             )
         path.unlink(missing_ok=True)
+        environment_path = self._persistent_environment_path(name)
+        environment_path.unlink(missing_ok=True)
         if sys.platform.startswith("linux"):
             self._service_control([systemctl, "--user", "daemon-reload"])
         return {
             "status": "uninstalled",
             "name": name,
             "removed": existed,
+            "environment": str(environment_path),
             "deactivated": True,
         }
 

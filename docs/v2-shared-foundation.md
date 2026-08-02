@@ -78,10 +78,12 @@ nunchi diagnose --profile vigil
 nunchi dashboard --profile vigil
 ```
 
-Setup writes private profile/config directories, a validated operator schema,
-the participant profile, and their SHA-256 pins atomically per file. Operators
-do not hand-write JSON or calculate hashes. Configuration names credential
-environment variables; it never stores or returns credential values.
+Setup writes private profile/config directories and commits the validated
+operator schema plus its SHA-256 integrity pin as one atomic envelope. Readers
+and writers share the same profile lock, so they cannot observe a config/digest
+split. Operators do not hand-write JSON or calculate hashes. The operator
+configuration names credential environment variables; it does not contain or
+return credential values.
 
 The CLI and `/api/v1/operator` dashboard endpoint return the same validated
 schema and snapshot: identity, rooms, models, attention policy, ACK policy,
@@ -96,7 +98,7 @@ Services are declared in the same profile schema and controlled with:
 nunchi service start room --profile vigil
 nunchi service status room --profile vigil
 nunchi service logs room --profile vigil
-nunchi service drain room --profile vigil
+nunchi service stop room --profile vigil
 nunchi service restart room --profile vigil
 nunchi service reset room --profile vigil
 nunchi service install room --profile vigil
@@ -104,9 +106,12 @@ nunchi service install room --profile vigil
 
 Per-service control is serialized. The supervisor uses a private environment,
 enforces `never`, `on-failure`, or `always` restart policy, rejects duplicate
-supervisors, reports child/restart state, and installs and activates launchd or
-systemd user definitions without overriding the worker's restart policy. Reset
-removes ephemeral supervisor state only; ACK and receipt journals survive.
+supervisors, waits for worker readiness, reports child/restart state, and
+installs and activates launchd or systemd user definitions without overriding
+the worker's restart policy. Persistent install resolves declared environment
+sources into a private owner-only state file; credential values are absent from
+the generated unit and dashboard, and reinstall refreshes them after rotation.
+Reset removes ephemeral supervisor state only; ACK and receipt journals survive.
 Profile uninstall stops and deactivates its services before removing only the
 named profile. Package install metadata supports verified upgrade, rollback,
 and an explicit state-purge boundary.

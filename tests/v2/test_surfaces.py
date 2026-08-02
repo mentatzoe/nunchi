@@ -50,6 +50,37 @@ BINDING = ParticipantBinding(
 
 
 class NormalizerTests(unittest.TestCase):
+    def test_permission_revisions_do_not_derive_from_live_secrets(self):
+        first_discord = MCPDiscordTransport(
+            object(), "42", "vigil", "discord:actor:9", b"a" * 32
+        )
+        second_discord = MCPDiscordTransport(
+            object(), "42", "vigil", "discord:actor:9", b"b" * 32
+        )
+        self.assertEqual(
+            first_discord.reaction_capability().permissions_revision,
+            second_discord.reaction_capability().permissions_revision,
+        )
+
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "first-secret"}, clear=False):
+            first_matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "second-secret"}, clear=False):
+            second_matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        self.assertEqual(
+            first_matrix.reaction_capability().permissions_revision,
+            second_matrix.reaction_capability().permissions_revision,
+        )
+
     def test_discord_ack_capability_tracks_exact_room_permissions(self):
         class Permissions:
             def __init__(self, allowed):
@@ -60,8 +91,15 @@ class NormalizerTests(unittest.TestCase):
         class Channel:
             def __init__(self):
                 self.allowed = True
+                self.guild = type(
+                    "Guild",
+                    (),
+                    {"me": type("Member", (), {"_roles": ()})()},
+                )()
 
-            def permissions_for(self, _user):
+            def permissions_for(self, user):
+                if not hasattr(user, "_roles"):
+                    raise AttributeError("discord.py requires a Member or Role")
                 return Permissions(self.allowed)
 
         class User:
@@ -89,6 +127,11 @@ class NormalizerTests(unittest.TestCase):
             allowed.permissions_revision,
             denied.permissions_revision,
         )
+
+        channel.permissions_for = mock.Mock(side_effect=AttributeError("shape drift"))
+        unavailable = transport.reaction_capability()
+        self.assertFalse(unavailable.supported)
+        self.assertFalse(unavailable.allows("👂", "add"))
 
     def test_standalone_discord_occurrence_counter_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:

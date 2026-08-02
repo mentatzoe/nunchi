@@ -147,7 +147,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     service = subparsers.add_parser("service", help="control profile-scoped persistent services")
     service_commands = service.add_subparsers(dest="service_command", required=True)
-    for name in ("start", "stop", "drain", "restart", "status", "logs", "reset", "install", "uninstall"):
+    for name in ("start", "stop", "restart", "status", "logs", "reset", "install", "uninstall"):
         command = service_commands.add_parser(name)
         _operator_roots(command)
         command.add_argument("name")
@@ -258,7 +258,6 @@ def _service(args: argparse.Namespace) -> dict[str, Any]:
     operations = {
         "start": manager.start,
         "stop": manager.stop,
-        "drain": manager.drain,
         "restart": manager.restart,
         "status": manager.status,
         "logs": lambda name: manager.logs(name, lines=args.lines),

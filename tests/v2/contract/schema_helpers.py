@@ -1547,6 +1547,8 @@ def _check_participant_host_body(errors: _Errors, path: str, value: Any) -> None
                 _check_nes(errors, f"{path}.delivered_event_ids[{index}]", event_id)
     if "invoked" in value and not isinstance(value["invoked"], bool):
         errors.add(f"{path}.invoked", "must be a boolean")
+    if value.get("wake_source") == "ACK" and value.get("invoked") is not False:
+        errors.add(f"{path}.invoked", "must be false for an ACK host record")
     if "outcome" in value:
         _check_enum(errors, f"{path}.outcome", value["outcome"], ("sent", "silent", "unknown"))
 

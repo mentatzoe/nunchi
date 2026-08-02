@@ -28,7 +28,7 @@
       },
       "allOf": [
         {
-          "$comment": "FR-013: DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
+          "$comment": "FR-013: ACK, DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
           "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
           "else": {
             "not": {

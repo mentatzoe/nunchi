@@ -134,7 +134,17 @@
         "expansion_calls": {"type": "integer", "minimum": 0},
         "invoked": {"type": "boolean"},
         "outcome": {"enum": ["sent", "silent", "unknown"]}
-      }
+      },
+      "allOf": [
+        {
+          "$comment": "Core ACK bypasses the participant model; an ACK host receipt can never claim participant invocation.",
+          "if": {
+            "required": ["wake_source"],
+            "properties": {"wake_source": {"const": "ACK"}}
+          },
+          "then": {"properties": {"invoked": {"const": false}}}
+        }
+      ]
     },
     "transportBody": {
       "type": "object",

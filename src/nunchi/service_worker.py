@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -173,12 +174,37 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-root", required=True, type=Path)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--service", required=True)
+    parser.add_argument("--environment-file", type=Path)
     return parser
+
+
+def _load_environment_file(path: Path) -> None:
+    try:
+        metadata = path.stat()
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValidationError(f"persistent environment is unavailable: {exc}") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+        or not isinstance(document, dict)
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(value, str)
+            for name, value in document.items()
+        )
+    ):
+        raise ValidationError("persistent environment is untrustworthy")
+    os.environ.update(document)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.environment_file is not None:
+            _load_environment_file(args.environment_file)
         return ServiceSupervisor(
             OperatorStore(args.config_root, args.state_root, args.profile),
             args.service,

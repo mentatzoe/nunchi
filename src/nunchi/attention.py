@@ -721,7 +721,12 @@ class AttentionEngine:
             ack_audit = None
         elif disposition == "ACK":
             provider = self._reaction_capability_provider
-            capability = reaction_capability(provider() if callable(provider) else provider)
+            try:
+                capability = reaction_capability(
+                    provider() if callable(provider) else provider
+                )
+            except Exception:
+                capability = UNAVAILABLE_REACTION_CAPABILITY
             ack_audit = {
                 "reaction": self.ack_policy.reaction,
                 "policy_provenance": self.ack_policy.provenance,

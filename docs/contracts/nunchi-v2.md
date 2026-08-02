@@ -255,8 +255,8 @@ the same field shapes as `AttentionRequestV2` — not a wrapped
 `attention` object carries the explicit `source` (`ACK`, `WAKE`, `DEFER`,
 `ERROR_FALLBACK`, or the non-social `PREATTENTION_BYPASS`) and, only when
 `source` is `WAKE`, optional `advice` (an array of `{note,
-evidence_event_ids}`) and optional `evidence_event_ids`. `DEFER`,
-`ACK`, `DEFER`, `ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
+evidence_event_ids}`) and optional `evidence_event_ids`. `ACK`, `DEFER`,
+`ERROR_FALLBACK`, and `PREATTENTION_BYPASS` wakes are advice-free because
 no classifier advice exists for those sources (FR-008/FR-013). There is no
 separate participant "budgets" field — the wake's own `coverage` (computed
 when the packet was materialized for the participant) carries the

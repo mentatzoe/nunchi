@@ -33,8 +33,7 @@ class MatrixTransport:
         if not self.token:
             raise ValidationError(f"Matrix credential is absent from {env_name}")
         self._reaction_revision = hashlib.sha256(
-            f"matrix-v1\0{self.homeserver}\0{env_name}\0".encode()
-            + self.token.encode()
+            f"matrix-reaction-v2\0{self.homeserver}\0{env_name}".encode()
         ).hexdigest()
         self.sync_timeout_ms = int(config.get("sync_timeout_ms", 30_000))
         if self.sync_timeout_ms < 1 or self.sync_timeout_ms > 60_000:

@@ -20,9 +20,9 @@ installed-artifact evidence.
 ## Unified operator setup
 
 Use the installed `nunchi` command for normal setup. It initializes private
-operator roots, validates one shared schema, writes the participant profile,
-and creates the required integrity pins; no hand-written JSON, manual digest,
-separate dashboard installation, or runner supervision is required.
+operator roots and commits one validated shared-schema envelope with its
+automatic integrity pin; no hand-written JSON, manual digest, separate
+dashboard installation, or runner supervision is required.
 
 ```sh
 /tmp/nunchi-v2-clean/bin/nunchi setup \
@@ -43,14 +43,18 @@ separate dashboard installation, or runner supervision is required.
 /tmp/nunchi-v2-clean/bin/nunchi dashboard --profile vigil
 ```
 
-Configuration stores only credential environment-variable names. Set those
-credentials outside the dashboard. The dashboard and CLI expose the same
+The operator configuration stores only credential environment-variable names.
+Set those credentials outside the dashboard. A persistent-service install
+resolves its declared environment sources into a private owner-only state file;
+the generated launchd/systemd definition and dashboard never contain or return
+the values. Re-run `nunchi service install` after rotating one of those values.
+The dashboard and CLI expose the same
 identity, rooms, models, attention/ACK policy, capabilities, compatibility,
 health, services, and receipts. Dashboard mutations and service operations
 require the current profile revision.
 
 Declare supervised runners with repeated `--service NAME='COMMAND ...'` setup
-arguments. Then use `nunchi service start|stop|drain|restart|status|logs|reset`
+arguments. Then use `nunchi service start|stop|restart|status|logs|reset`
 or install and activate the generated launchd/systemd user definition with
 `nunchi service install`. The worker, rather than the outer service manager,
 enforces the configured restart policy. Profile reset preserves durable ACK

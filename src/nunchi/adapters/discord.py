@@ -87,16 +87,20 @@ class DiscordPyTransport:
         user = getattr(self.bot, "user", None)
         actor = getattr(user, "id", None)
         authenticated = actor is not None
+        permissions = None
         try:
             channel = self.bot.get_channel(int(self.room_id))
-        except (TypeError, ValueError):
-            channel = None
-        permissions_for = getattr(channel, "permissions_for", None)
-        permissions = (
-            permissions_for(user)
-            if callable(permissions_for) and user is not None
-            else None
-        )
+            guild = getattr(channel, "guild", None)
+            member = getattr(guild, "me", None) if guild is not None else None
+            subject = member if member is not None else user
+            permissions_for = getattr(channel, "permissions_for", None)
+            if callable(permissions_for) and subject is not None:
+                permissions = permissions_for(subject)
+        except Exception:
+            # Capability discovery is an untrusted platform seam. A missing
+            # cache entry or discord.py shape change must widen ACK to DEFER,
+            # never take down ACK or an ordinary participant turn.
+            permissions = None
         allowed = bool(
             permissions is not None
             and getattr(permissions, "view_channel", False)

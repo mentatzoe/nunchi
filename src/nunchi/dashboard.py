@@ -107,6 +107,8 @@ def dashboard_handler(store: OperatorStore) -> type[BaseHTTPRequestHandler]:
                 self._error(404, "unknown dashboard route")
             except (ValidationError, OSError, ValueError) as exc:
                 self._error(400, str(exc))
+            except Exception as exc:
+                self._error(500, str(exc))
 
         def do_PUT(self) -> None:  # noqa: N802
             if urlsplit(self.path).path != "/api/v1/operator/config":
@@ -123,6 +125,8 @@ def dashboard_handler(store: OperatorStore) -> type[BaseHTTPRequestHandler]:
                 self._error(status, str(exc))
             except OSError as exc:
                 self._error(500, str(exc))
+            except Exception as exc:
+                self._error(500, str(exc))
 
         def do_POST(self) -> None:  # noqa: N802
             parts = urlsplit(self.path).path.strip("/").split("/")
@@ -133,7 +137,6 @@ def dashboard_handler(store: OperatorStore) -> type[BaseHTTPRequestHandler]:
             operations = {
                 "start": services.start,
                 "stop": services.stop,
-                "drain": services.drain,
                 "restart": services.restart,
                 "reset": services.reset,
                 "install": services.install_persistent,
@@ -152,6 +155,8 @@ def dashboard_handler(store: OperatorStore) -> type[BaseHTTPRequestHandler]:
             except ValidationError as exc:
                 self._error(409 if "revision" in str(exc) else 400, str(exc))
             except OSError as exc:
+                self._error(500, str(exc))
+            except Exception as exc:
                 self._error(500, str(exc))
 
     return Handler

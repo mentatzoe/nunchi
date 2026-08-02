@@ -1807,6 +1807,61 @@ class AckOutcomeTests(unittest.TestCase):
                 self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
                 self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
 
+    def test_malformed_capability_widens_ack_to_defer(self):
+        participant_calls = []
+
+        class MalformedCapabilityTransport(RecordingTransport):
+            def reaction_capability(self):
+                return {"supported": True}
+
+        transport = MalformedCapabilityTransport()
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-malformed-capability",
+            event=message("e-malformed-capability"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertEqual([], transport.calls)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+
+    def test_ack_settlement_failure_after_dispatch_still_writes_transport_receipt(self):
+        journal = AckJournal()
+        transport = RecordingTransport(capability=self.capability())
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            transport=transport,
+            ack_journal=journal,
+        )
+        with mock.patch.object(
+            journal,
+            "settle",
+            side_effect=PersistenceError("disk full at settle time"),
+        ):
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-lost-ack-settlement",
+                event=message("e-lost-ack-settlement"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        self.assertEqual(1, len(transport.calls))
+        self.assertEqual("unknown", outcome.opportunities[0].transport.delivery)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+        self.assertEqual(
+            "unknown",
+            receipts.all_records()[-1]["body"]["delivery"],
+        )
+
     def test_restart_replay_and_concurrency_cannot_duplicate_ack(self):
         with tempfile.TemporaryDirectory() as directory:
             journal_path = Path(directory) / "ack.jsonl"

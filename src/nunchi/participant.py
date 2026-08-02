@@ -384,9 +384,12 @@ class ParticipantTurnHost:
 
     def reaction_capability(self) -> ReactionCapability:
         provider = getattr(self.transport, "reaction_capability", None)
-        return reaction_capability(
-            provider() if callable(provider) else UNAVAILABLE_REACTION_CAPABILITY
-        )
+        try:
+            return reaction_capability(
+                provider() if callable(provider) else UNAVAILABLE_REACTION_CAPABILITY
+            )
+        except Exception:
+            return UNAVAILABLE_REACTION_CAPABILITY
 
     def _protocol_opportunity(
         self,
@@ -407,13 +410,11 @@ class ParticipantTurnHost:
             for item in ("message", "reply", "reaction")
             if item in set(ordinary)
         ]
-        if not ordinary:
-            # A participant with no ordinary output capability can still make
-            # a considered silence decision.  Keep the protocol shape valid
-            # while the host rejects any returned native action.
-            ordinary = ["message"]
         current_reaction = self.reaction_capability()
-        if "reaction" in ordinary and not current_reaction.authenticated:
+        if "reaction" in ordinary and not (
+            current_reaction.allows(self.ack_policy.reaction, "add")
+            or current_reaction.allows(self.ack_policy.reaction, "remove")
+        ):
             ordinary.remove("reaction")
         permission_document = {
             "participant_id": self.observation.binding.participant_id,
@@ -523,7 +524,10 @@ class ParticipantTurnHost:
             "operation": "add",
         }
 
+        host_receipt_persisted = False
+
         def dispatch_ack() -> TransportResult:
+            nonlocal host_receipt_persisted
             ack_id, reserved = self.ack_journal.reserve(binding)
             self._append_host_receipt(
                 wake,
@@ -531,6 +535,7 @@ class ParticipantTurnHost:
                 invoked=False,
                 outcome="unknown",
             )
+            host_receipt_persisted = True
             if not reserved:
                 return TransportResult("unknown", "duplicate ACK was durably suppressed")
             try:
@@ -562,7 +567,16 @@ class ParticipantTurnHost:
             )
             return result
 
-        committed, result = self.scheduler.commit_dispatch(token, dispatch_ack)
+        try:
+            committed, result = self.scheduler.commit_dispatch(token, dispatch_ack)
+        except BaseException:
+            if not host_receipt_persisted:
+                raise
+            committed = True
+            result = TransportResult(
+                "unknown",
+                "ACK dispatch acknowledgement was lost",
+            )
         if not committed:
             return None
         if not isinstance(result, TransportResult):

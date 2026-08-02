@@ -17,11 +17,11 @@ import time
 import unittest
 from unittest import mock
 
-from nunchi import cli
+from nunchi import cli, operator as operator_module
 from nunchi.attention import ParticipantProfile
 from nunchi.dashboard import dashboard_handler, serve_dashboard
 from nunchi.errors import ValidationError
-from nunchi.install import rollback, uninstall_state, upgrade, verify
+from nunchi.install import InstallError, rollback, uninstall_state, upgrade, verify
 from nunchi.integrations.claude_code_v2 import ClaudeCodeParticipant
 from nunchi.integrations.codex_v2 import CodexParticipant
 from nunchi.operator import (
@@ -164,6 +164,11 @@ class ParticipantProtocolTests(unittest.TestCase):
                 with self.assertRaises(ParticipantModelError):
                     self.protocol.consume(stale, expand=None)
 
+        boolean_generation = self.envelope({"kind": "silence"})
+        boolean_generation["binding"]["opportunity_generation"] = True
+        with self.assertRaises(ParticipantModelError):
+            self.protocol.consume(boolean_generation, expand=None)
+
     def test_actions_are_fact_and_permission_bound_and_expansion_is_capped(self):
         invisible = self.envelope(
             {"kind": "message", "origin_event_id": "e-missing", "text": "No."}
@@ -196,6 +201,43 @@ class ParticipantProtocolTests(unittest.TestCase):
         }
         with self.assertRaises(ParticipantModelError):
             restricted.consume(reaction, expand=None)
+
+        silence_only = ParticipantTurnProtocol(
+            profile=PROFILE,
+            wake=wake(),
+            opportunity={
+                **opportunity(),
+                "permissions": {
+                    "revision": "permissions:silence-only",
+                    "ordinary_actions": [],
+                    "privileged_proposals": False,
+                },
+            },
+        )
+        self.assertEqual(
+            (True, None),
+            silence_only.consume(
+                {
+                    "protocol": deepcopy(silence_only.request["protocol"]),
+                    "binding": deepcopy(silence_only.request["binding"]),
+                    "action": {"kind": "silence"},
+                },
+                expand=None,
+            ),
+        )
+        with self.assertRaises(ParticipantModelError):
+            silence_only.consume(
+                {
+                    "protocol": deepcopy(silence_only.request["protocol"]),
+                    "binding": deepcopy(silence_only.request["binding"]),
+                    "action": {
+                        "kind": "message",
+                        "origin_event_id": "e1",
+                        "text": "not authorized",
+                    },
+                },
+                expand=None,
+            )
 
         expansion = self.envelope(
             {
@@ -384,6 +426,31 @@ class OperatorSurfaceTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 serve_dashboard(store, host="0.0.0.0", port=8765)
 
+    def test_dashboard_diagnostics_reports_install_errors_as_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config())
+            (store.paths.config_root / "install.json").unlink()
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                dashboard_handler(store),
+            )
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                connection.request("GET", "/api/v1/diagnostics")
+                response = connection.getresponse()
+                body = json.loads(response.read())
+                self.assertEqual(500, response.status)
+                self.assertIn("marker is absent", body["detail"])
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join(5)
+
     def test_dashboard_service_control_uses_current_profile_revision(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -463,8 +530,97 @@ class OperatorSurfaceTests(unittest.TestCase):
                 first.write(changed, expected_revision=initial["revision"])
             self.assertEqual("other", second.read()[0]["identity"]["participant_id"])
 
+    def test_config_and_integrity_pin_commit_as_one_recoverable_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            initial = store.write(operator_config())
+            envelope = json.loads(store.paths.config.read_text(encoding="utf-8"))
+            self.assertEqual({"config", "digest"}, set(envelope))
+            self.assertEqual(initial["revision"], envelope["digest"])
+            self.assertFalse(store.paths.digest.exists())
+            self.assertFalse(store.paths.profile.exists())
+            self.assertFalse(store.paths.profile_digest.exists())
+
+            changed = store.read()[0]
+            changed["identity"]["display_name"] = "Committed before crash"
+            original_atomic_write = operator_module._atomic_write
+
+            def crash_after_replace(path, payload, *, mode=0o600):
+                original_atomic_write(path, payload, mode=mode)
+                if path == store.paths.config:
+                    raise RuntimeError("simulated process crash after replace")
+
+            with (
+                mock.patch.object(
+                    operator_module,
+                    "_atomic_write",
+                    side_effect=crash_after_replace,
+                ),
+                self.assertRaisesRegex(RuntimeError, "simulated process crash"),
+            ):
+                store.write(changed, expected_revision=initial["revision"])
+
+            self.assertEqual(
+                "Committed before crash",
+                store.read()[0]["identity"]["display_name"],
+            )
+            rolled_back = store.rollback(initial["revision"])
+            self.assertEqual("configured", rolled_back["status"])
+            self.assertEqual("Vigil", store.read()[0]["identity"]["display_name"])
+
+    def test_config_readers_never_observe_a_torn_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config())
+            stopped = threading.Event()
+            errors = []
+
+            def read_repeatedly():
+                while not stopped.is_set():
+                    try:
+                        store.read()
+                    except Exception as exc:  # pragma: no cover - asserted empty below.
+                        errors.append(exc)
+                        stopped.set()
+
+            reader = threading.Thread(target=read_repeatedly)
+            reader.start()
+            try:
+                for index in range(40):
+                    document, revision = store.read()
+                    document["identity"]["display_name"] = f"Vigil {index}"
+                    store.write(document, expected_revision=revision)
+            finally:
+                stopped.set()
+                reader.join(5)
+            self.assertFalse(reader.is_alive())
+            self.assertEqual([], errors)
+
+    def test_operator_schema_version_requires_an_exact_integer(self):
+        for value in (True, 1.0):
+            with self.subTest(value=value):
+                config = operator_config()
+                config["schema_version"] = value
+                with self.assertRaisesRegex(ValidationError, "schema_version"):
+                    OperatorStore(
+                        Path(tempfile.gettempdir()) / "unused-config",
+                        Path(tempfile.gettempdir()) / "unused-state",
+                        "vigil",
+                    ).write(config)
+
 
 class ServiceAndInstallLifecycleTests(unittest.TestCase):
+    @staticmethod
+    def service(*, restart="never", environment=None):
+        return {
+            "name": "room",
+            "command": [sys.executable, "-c", "import time; time.sleep(120)"],
+            "restart": restart,
+            "environment": environment or {},
+        }
+
     def test_service_start_restart_concurrency_and_reset(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -517,12 +673,14 @@ class ServiceAndInstallLifecycleTests(unittest.TestCase):
             )
             self.assertTrue(launchd_path.name.endswith(".plist"))
             self.assertIn(b"nunchi.service_worker", launchd)
+            self.assertIn(b"--environment-file", launchd)
             self.assertFalse(plistlib.loads(launchd)["KeepAlive"])
             _, systemd = manager.render_persistent_definition(
                 "room",
                 platform="linux",
             )
             self.assertIn(b"Restart=no", systemd)
+            self.assertIn(b"--environment-file", systemd)
 
     def test_persistent_install_activates_and_uninstall_deactivates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -561,6 +719,42 @@ class ServiceAndInstallLifecycleTests(unittest.TestCase):
                 self.assertTrue(removed["deactivated"])
                 self.assertFalse(definition.exists())
                 self.assertIn("bootout", control.call_args_list[-1].args[0])
+
+    def test_persistent_install_materializes_private_credentials_outside_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = self.service(
+                environment={"API_KEY": "NUNCHI_TEST_PERSISTENT_SECRET"}
+            )
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config(services=[service]))
+            manager = ServiceManager(store)
+            definition = root / "LaunchAgents" / "dev.nunchi.vigil.room.plist"
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"NUNCHI_TEST_PERSISTENT_SECRET": "private-value"},
+                    clear=False,
+                ),
+                mock.patch.object(
+                    manager,
+                    "render_persistent_definition",
+                    return_value=(definition, b"unit-without-secret"),
+                ),
+                mock.patch("nunchi.operator.sys.platform", "darwin"),
+                mock.patch(
+                    "nunchi.operator.subprocess.run",
+                    return_value=mock.Mock(returncode=0, stdout=""),
+                ),
+            ):
+                installed = manager.install_persistent("room")
+            environment_path = Path(installed["environment"])
+            self.assertEqual(
+                {"NUNCHI_TEST_PERSISTENT_SECRET": "private-value"},
+                json.loads(environment_path.read_text(encoding="utf-8")),
+            )
+            self.assertEqual(0, stat.S_IMODE(environment_path.stat().st_mode) & 0o077)
+            self.assertNotIn(b"private-value", definition.read_bytes())
 
     def test_profile_uninstall_stops_its_supervisor_before_removal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -619,6 +813,78 @@ class ServiceAndInstallLifecycleTests(unittest.TestCase):
             self.assertEqual("already-stopped", result["status"])
             kill.assert_not_called()
 
+    def test_stale_valid_pidfile_cannot_signal_a_recycled_pid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config(services=[self.service()]))
+            manager = ServiceManager(store)
+            manager._directory("room").mkdir(parents=True, exist_ok=True)
+            manager._pidfile("room").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "pid": os.getpid(),
+                        "profile_id": "vigil",
+                        "service": "room",
+                        "config_revision": store.read()[1],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch("nunchi.operator.os.kill") as kill:
+                result = manager.stop("room")
+            self.assertEqual("already-stopped", result["status"])
+            kill.assert_not_called()
+            self.assertFalse(manager._pidfile("room").exists())
+
+    def test_orphaned_child_blocks_duplicate_service_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config(services=[self.service(restart="always")]))
+            manager = ServiceManager(store)
+            manager._directory("room").mkdir(parents=True, exist_ok=True)
+            (manager._directory("room") / "status.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "state": "running",
+                        "supervisor_pid": 999999,
+                        "child_pid": os.getpid(),
+                        "restart_count": 0,
+                        "config_revision": store.read()[1],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch("nunchi.operator.subprocess.Popen") as popen:
+                result = manager.start("room")
+            self.assertEqual("orphaned-child", result["status"])
+            popen.assert_not_called()
+
+    def test_start_waits_for_supervisor_readiness_and_reports_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = self.service(environment={"API_KEY": "ABSENT_TEST_API_KEY"})
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config(services=[service]))
+            result = ServiceManager(store).start("room")
+            self.assertEqual("start-failed", result["status"])
+            self.assertFalse(result["running"])
+            self.assertTrue(any("ABSENT_TEST_API_KEY" in line for line in result["log_tail"]))
+
+    def test_diagnostics_warns_for_absent_credentials_and_stopped_always_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = OperatorStore(root / "config", root / "state", "vigil")
+            store.write(operator_config(services=[self.service(restart="always")]))
+            diagnosis = store.diagnose()
+            self.assertEqual("attention", diagnosis["status"])
+            features = [item["feature"] for item in diagnosis["health"]["warnings"]]
+            self.assertIn("credential", features)
+            self.assertIn("service", features)
+
     def test_install_upgrade_rollback_and_nonpurging_uninstall(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -642,6 +908,30 @@ class ServiceAndInstallLifecycleTests(unittest.TestCase):
             self.assertFalse(removed["purged"])
             self.assertFalse(marker.exists())
             self.assertTrue(store.paths.config.exists())
+            self.assertTrue(state_root.exists())
+
+    def test_purge_rejects_broad_or_mismatched_roots_before_unregistration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_root = root / "config"
+            state_root = root / "state"
+            store = OperatorStore(config_root, state_root, "vigil")
+            store.write(operator_config())
+            marker = config_root / "install.json"
+            document = json.loads(marker.read_text(encoding="utf-8"))
+            document["state_root"] = str(root / "other-state")
+            marker.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(InstallError, "exact state roots"):
+                uninstall_state(config_root, state_root, purge=True)
+            self.assertTrue(marker.exists())
+            self.assertTrue(state_root.exists())
+
+            document["state_root"] = str(state_root)
+            document["schema_version"] = True
+            marker.write_text(json.dumps(document), encoding="utf-8")
+            with self.assertRaisesRegex(InstallError, "exact state roots"):
+                uninstall_state(config_root, state_root, purge=True)
+            self.assertTrue(marker.exists())
             self.assertTrue(state_root.exists())
 
 

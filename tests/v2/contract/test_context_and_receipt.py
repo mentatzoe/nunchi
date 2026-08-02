@@ -42,6 +42,17 @@ class DownstreamCorpusSuite(ContractCorpusMixin, unittest.TestCase):
     )
 
 
+class InterfaceVersionCases(unittest.TestCase):
+    def test_interface_versions_match_schema_descriptions(self):
+        for name, (interface, title, version) in helpers.INTERFACE_VERSIONS.items():
+            with self.subTest(schema=name):
+                self.assertTrue(
+                    helpers.load_schema(name)["description"].startswith(
+                        f"{interface} {title}@{version}"
+                    )
+                )
+
+
 class ContinuationShapeCases(unittest.TestCase):
     """FR-009: host-only fetch-request and fetch-page shapes."""
 

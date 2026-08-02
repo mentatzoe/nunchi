@@ -238,7 +238,6 @@ def build_participant_turn_request(
     allowed_actions = {"message", "reply", "reaction"}
     if (
         not isinstance(ordinary, list)
-        or not ordinary
         or len(ordinary) != len(set(ordinary))
         or any(item not in allowed_actions for item in ordinary)
     ):
@@ -439,7 +438,11 @@ def parse_participant_action(
     protocol = decoded["protocol"]
     if not isinstance(protocol, Mapping) or dict(protocol) != request["protocol"]:
         raise ParticipantModelError("participant action protocol is unknown or changed")
-    if not isinstance(decoded["binding"], Mapping) or dict(decoded["binding"]) != request["binding"]:
+    try:
+        echoed_binding = _validate_binding(decoded["binding"])
+    except ValidationError as exc:
+        raise ParticipantModelError("participant action binding is invalid") from exc
+    if echoed_binding != request["binding"]:
         raise ParticipantModelError("participant action binding does not match this opportunity")
     action = _validate_inner_action(decoded["action"])
     permissions = request["permissions"]
@@ -541,7 +544,7 @@ def _fallback_opportunity() -> dict[str, Any]:
         "permissions": {
             "revision": "direct-library-call",
             "ordinary_actions": ["message", "reply", "reaction"],
-            "privileged_proposals": True,
+            "privileged_proposals": False,
         },
     }
 

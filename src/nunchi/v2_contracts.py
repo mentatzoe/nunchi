@@ -766,6 +766,8 @@ def validate_receipt(value: Any) -> dict[str, Any]:
         _string_list(checked["delivered_event_ids"], "receipt.body.delivered_event_ids")
         if not isinstance(checked["invoked"], bool):
             _fail("receipt.body.invoked", "must be a boolean")
+        if checked["wake_source"] == "ACK" and checked["invoked"] is not False:
+            _fail("receipt.body.invoked", "must be false for an ACK host record")
         if checked["outcome"] not in ("sent", "silent", "unknown"):
             _fail("receipt.body.outcome", "has an unsupported outcome")
     else:
