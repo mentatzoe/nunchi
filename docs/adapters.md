@@ -65,3 +65,10 @@ follow the configured `WAKE` or `NO_WAKE` operational policy and remain
 response includes a stable message/event identity for the exact target room; a
 successful HTTP envelope with a missing or mismatched native acknowledgement
 remains `unknown`.
+
+ACK capability is current native authority, not configured optimism. The
+shared Discord MCP transport measures the authenticated bot's effective guild
+roles and channel overwrites. Matrix binds `whoami` to the configured actor and
+compares that user with the room's `m.reaction` power level. A denial, missing
+state, identity mismatch, or malformed response is unsupported and widens ACK
+to DEFER before any reaction dispatch.

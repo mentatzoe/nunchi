@@ -20,7 +20,7 @@ from nunchi.adapters.v2 import (
 )
 from nunchi.adapters.matrix import MatrixTransport
 from nunchi.adapters.telegram import TelegramTransport
-from nunchi.adapters.discord import DurableGatewaySequence
+from nunchi.adapters.discord import DiscordPyTransport, DurableGatewaySequence
 from nunchi.errors import ValidationError
 from nunchi.attention import ParticipantProfile
 from nunchi.integrations.codex_v2 import (
@@ -37,6 +37,7 @@ from nunchi.mcp_discord.rest import DiscordRestClient, DiscordRestError
 from nunchi.mcp_discord.tools import ToolExecutor
 from nunchi.observation import ParticipantBinding
 from nunchi.participant import TransportResult
+from nunchi.participant_model import ParticipantTurnProtocol
 
 
 BINDING = ParticipantBinding(
@@ -49,6 +50,89 @@ BINDING = ParticipantBinding(
 
 
 class NormalizerTests(unittest.TestCase):
+    def test_permission_revisions_do_not_derive_from_live_secrets(self):
+        first_discord = MCPDiscordTransport(
+            object(), "42", "vigil", "discord:actor:9", b"a" * 32
+        )
+        second_discord = MCPDiscordTransport(
+            object(), "42", "vigil", "discord:actor:9", b"b" * 32
+        )
+        self.assertEqual(
+            first_discord.reaction_capability().permissions_revision,
+            second_discord.reaction_capability().permissions_revision,
+        )
+
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "first-secret"}, clear=False):
+            first_matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "second-secret"}, clear=False):
+            second_matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                }
+            )
+        self.assertEqual(
+            first_matrix.reaction_capability().permissions_revision,
+            second_matrix.reaction_capability().permissions_revision,
+        )
+
+    def test_discord_ack_capability_tracks_exact_room_permissions(self):
+        class Permissions:
+            def __init__(self, allowed):
+                self.view_channel = allowed
+                self.read_message_history = allowed
+                self.add_reactions = allowed
+
+        class Channel:
+            def __init__(self):
+                self.allowed = True
+                self.guild = type(
+                    "Guild",
+                    (),
+                    {"me": type("Member", (), {"_roles": ()})()},
+                )()
+
+            def permissions_for(self, user):
+                if not hasattr(user, "_roles"):
+                    raise AttributeError("discord.py requires a Member or Role")
+                return Permissions(self.allowed)
+
+        class User:
+            id = 9
+
+        class Bot:
+            user = User()
+
+            def __init__(self, channel):
+                self.channel = channel
+
+            def get_channel(self, channel_id):
+                return self.channel if channel_id == 42 else None
+
+        channel = Channel()
+        transport = DiscordPyTransport(Bot(channel), None, "42")
+        allowed = transport.reaction_capability()
+        self.assertTrue(allowed.authenticated)
+        self.assertTrue(allowed.allows("👂", "add"))
+
+        channel.allowed = False
+        denied = transport.reaction_capability()
+        self.assertFalse(denied.allows("👂", "add"))
+        self.assertNotEqual(
+            allowed.permissions_revision,
+            denied.permissions_revision,
+        )
+
+        channel.permissions_for = mock.Mock(side_effect=AttributeError("shape drift"))
+        unavailable = transport.reaction_capability()
+        self.assertFalse(unavailable.supported)
+        self.assertFalse(unavailable.allows("👂", "add"))
+
     def test_standalone_discord_occurrence_counter_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sequence.json"
@@ -77,6 +161,48 @@ class NormalizerTests(unittest.TestCase):
             telegram = TelegramTransport({"bot_token_env": "TELEGRAM_TOKEN"})
         telegram._call = lambda *args, **kwargs: {"id": 123}
         self.assertEqual("telegram:actor:123", telegram.authenticated_actor_id())
+
+    def test_matrix_ack_capability_measures_exact_self_and_room_power(self):
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "secret"}, clear=False):
+            matrix = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                },
+                room_id="!room:example",
+                actor_id="matrix:actor:@vigil:example",
+            )
+
+        power_levels = {
+            "users": {"@vigil:example": 50},
+            "users_default": 0,
+            "events": {"m.reaction": 40},
+            "events_default": 0,
+        }
+
+        def request(_method, path, _payload=None):
+            if path.endswith("/account/whoami"):
+                return {"user_id": "@vigil:example"}
+            return deepcopy(power_levels)
+
+        matrix._request = mock.Mock(side_effect=request)
+        allowed = matrix.reaction_capability()
+        self.assertTrue(allowed.allows("👂", "add"))
+        self.assertTrue(allowed.authenticated)
+
+        power_levels["events"]["m.reaction"] = 60
+        denied = matrix.reaction_capability()
+        self.assertFalse(denied.allows("👂", "add"))
+        self.assertTrue(denied.authenticated)
+        self.assertNotEqual(
+            allowed.permissions_revision,
+            denied.permissions_revision,
+        )
+
+        matrix._request = mock.Mock(return_value={"user_id": "@other:example"})
+        wrong_self = matrix.reaction_capability()
+        self.assertFalse(wrong_self.supported)
+        self.assertFalse(wrong_self.authenticated)
 
     def test_discord_preserves_self_and_other_bot_messages(self):
         for actor_id in ("9", "10"):
@@ -416,6 +542,51 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.assertTrue(ok, sent)
         self.assertEqual(1, len(rest.calls))
 
+    def test_tool_executor_measures_reaction_capability_after_exact_authorization(self):
+        class Rest:
+            def __init__(self):
+                self.calls = []
+
+            def reaction_capability(self, channel_id, expected_user_id):
+                self.calls.append((channel_id, expected_user_id))
+                return {
+                    "channel_id": channel_id,
+                    "actor_id": expected_user_id,
+                    "capability": {
+                        "supported": False,
+                        "authenticated": True,
+                        "operations": [],
+                        "reactions": [],
+                        "permissions_revision": "denied-v1",
+                    },
+                }
+
+        rest = Rest()
+        executor = ToolExecutor(
+            rest,
+            SendBackstop(5, 10),
+            authorizer=self.authorizer,
+        )
+        arguments = {"channel_id": "42"}
+        payload, ok = executor.call(
+            "reaction_capability",
+            {
+                **arguments,
+                "_nunchi_authorization": self.authorization(
+                    arguments,
+                    tool="reaction_capability",
+                    request_id="reaction-capability",
+                ),
+            },
+            expected_route=("vigil", "42"),
+            expected_self_actor_id="discord:actor:9",
+        )
+        self.assertTrue(ok, payload)
+        self.assertEqual([("42", "9")], rest.calls)
+        self.assertFalse(
+            payload["reaction_capability"]["capability"]["supported"]
+        )
+
     def test_tool_executor_does_not_confirm_malformed_create_response(self):
         class Rest:
             response = {}
@@ -590,6 +761,46 @@ class ToolAuthorizationTests(unittest.TestCase):
         self.assertEqual([], client.get_messages("42"))
         self.assertEqual(2, len(calls))
 
+    def test_discord_rest_measures_effective_reaction_permissions(self):
+        required = (1 << 6) | (1 << 10) | (1 << 16)
+
+        def capability(overwrites, *, user_id="9"):
+            responses = [
+                {
+                    "id": "42",
+                    "guild_id": "1",
+                    "permission_overwrites": overwrites,
+                },
+                {"user": {"id": user_id}, "roles": ["2"]},
+                [
+                    {"id": "1", "permissions": str(required)},
+                    {"id": "2", "permissions": "0"},
+                ],
+            ]
+
+            def http(_method, _url, _headers, _body):
+                return (200, {}, json.dumps(responses.pop(0)).encode())
+
+            return DiscordRestClient(
+                "test-token",
+                http=http,
+                sleeper=lambda _seconds: None,
+            ).reaction_capability("42", "9")
+
+        allowed = capability([])["capability"]
+        denied = capability(
+            [{"id": "9", "type": 1, "allow": "0", "deny": str(1 << 6)}]
+        )["capability"]
+        self.assertTrue(allowed["supported"])
+        self.assertFalse(denied["supported"])
+        self.assertTrue(denied["authenticated"])
+        self.assertNotEqual(
+            allowed["permissions_revision"],
+            denied["permissions_revision"],
+        )
+        with self.assertRaises(DiscordRestError):
+            capability([], user_id="10")
+
     def test_tool_executor_requires_exact_message_effect_and_self(self):
         class Rest:
             response = {}
@@ -675,6 +886,45 @@ class CodexSurfaceTests(unittest.TestCase):
             ),
         )
 
+    @staticmethod
+    def _wake():
+        return {
+            "request_id": "r",
+            "self": {
+                "participant_id": "vigil",
+                "actor_id": "discord:actor:9",
+            },
+            "room": {
+                "platform": "discord",
+                "id": "42",
+                "continuity_scope_id": "discord:42",
+            },
+            "actors": {
+                "discord:actor:9": {"kind": "bot"},
+                "discord:actor:42": {"kind": "human"},
+            },
+            "events": [
+                {
+                    "id": "e1",
+                    "type": "message",
+                    "author_id": "discord:actor:42",
+                    "text": "hello",
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                }
+            ],
+            "trigger_event_id": "e1",
+            "coverage": {
+                "has_more_before": False,
+                "has_more_after": False,
+                "has_gaps": False,
+                "truncated_by": [],
+                "continuity": "restart-safe",
+                "has_restart_gap": False,
+            },
+            "attention": {"source": "WAKE"},
+        }
+
     def test_codex_participant_rejects_arbitrary_process_configuration(self):
         profile, binding = self._codex_identity()
         with tempfile.TemporaryDirectory() as directory, self._installed_codex():
@@ -714,6 +964,61 @@ class CodexSurfaceTests(unittest.TestCase):
 
     def test_codex_process_is_fixed_read_only_tool_less_and_env_bounded(self):
         profile, binding = self._codex_identity()
+        wake = {
+            "request_id": "r",
+            "self": {
+                "participant_id": "vigil",
+                "actor_id": "discord:actor:9",
+            },
+            "room": {
+                "platform": "discord",
+                "id": "42",
+                "continuity_scope_id": "discord:42",
+            },
+            "actors": {
+                "discord:actor:9": {"kind": "bot"},
+                "discord:actor:42": {"kind": "human"},
+            },
+            "events": [
+                {
+                    "id": "e1",
+                    "type": "message",
+                    "author_id": "discord:actor:42",
+                    "text": "hello",
+                    "mentioned_actor_ids": [],
+                    "mentions_room": False,
+                }
+            ],
+            "trigger_event_id": "e1",
+            "coverage": {
+                "has_more_before": False,
+                "has_more_after": False,
+                "has_gaps": False,
+                "truncated_by": [],
+                "continuity": "restart-safe",
+                "has_restart_gap": False,
+            },
+            "attention": {"source": "WAKE"},
+        }
+        protocol = ParticipantTurnProtocol(
+            profile=profile,
+            wake=wake,
+            opportunity={
+                "generation": 1,
+                "lifecycle_id": "direct-library-call",
+                "deadline_id": "direct-library-call",
+                "permissions": {
+                    "revision": "direct-library-call",
+                    "ordinary_actions": ["message", "reply", "reaction"],
+                    "privileged_proposals": True,
+                },
+            },
+        )
+        action = {
+            "protocol": protocol.request["protocol"],
+            "binding": protocol.request["binding"],
+            "action": {"kind": "silence"},
+        }
 
         class Process:
             returncode = 0
@@ -729,7 +1034,7 @@ class CodexSurfaceTests(unittest.TestCase):
                             "item": {
                                 "type": "agent_message",
                                 "text": json.dumps(
-                                    {"action_json": '{"kind":"silence"}'}
+                                    {"action_json": json.dumps(action)}
                                 ),
                             },
                         }
@@ -749,12 +1054,7 @@ class CodexSurfaceTests(unittest.TestCase):
                 return_value=Process(),
             ) as popen:
                 result = participant(
-                    wake={
-                        "request_id": "r",
-                        "self": {"participant_id": "vigil"},
-                        "room": {"id": "42"},
-                        "events": [],
-                    },
+                    wake=wake,
                     expand=lambda **_: {},
                     cancel=threading.Event(),
                 )
@@ -793,6 +1093,112 @@ class CodexSurfaceTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_codex_expansions_share_one_turn_deadline(self):
+        profile, binding = self._codex_identity()
+        wake = self._wake()
+        opportunity = {
+            "generation": 1,
+            "lifecycle_id": "lifecycle-1",
+            "deadline_id": "deadline-1",
+            "permissions": {
+                "revision": "permissions-1",
+                "ordinary_actions": ["message", "reply", "reaction"],
+                "privileged_proposals": True,
+            },
+        }
+        protocol = ParticipantTurnProtocol(
+            profile=profile,
+            wake=wake,
+            opportunity=opportunity,
+        )
+        expansion = {
+            "protocol": protocol.request["protocol"],
+            "binding": protocol.request["binding"],
+            "action": {
+                "kind": "expand",
+                "direction": "before",
+                "max_events": 1,
+                "max_bytes": 256,
+            },
+        }
+        task_id = "019f9432-9300-7dd1-8225-d7f10f921968"
+        stdout = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": task_id}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "agent_message",
+                            "text": json.dumps(
+                                {"action_json": json.dumps(expansion)}
+                            ),
+                        },
+                    }
+                ),
+            )
+        )
+
+        class CompletedProcess:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def communicate(self):
+                return stdout, ""
+
+        class BlockingProcess:
+            returncode = None
+
+            def __init__(self):
+                self.terminated = False
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout):
+                self.wait_timeout = timeout
+                return 0
+
+            def kill(self):
+                self.killed = True
+
+        blocked = BlockingProcess()
+        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
+            participant = CodexParticipant(
+                profile=profile,
+                config={"session_mode": "fresh", "timeout_seconds": 5},
+                binding=binding,
+                state_directory=directory,
+            )
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.subprocess.Popen",
+                    side_effect=[CompletedProcess(), blocked],
+                ) as popen,
+                mock.patch(
+                    "nunchi.integrations.codex_v2.time.monotonic",
+                    side_effect=[0.0, 6.0],
+                ) as monotonic,
+            ):
+                result = participant.run_protocol(
+                    wake=wake,
+                    opportunity=opportunity,
+                    expand=lambda **_: {"events": []},
+                    cancel=threading.Event(),
+                )
+
+        self.assertIsNone(result)
+        self.assertEqual(2, popen.call_count)
+        self.assertEqual(2, monotonic.call_count)
+        self.assertTrue(blocked.terminated)
+        self.assertFalse(blocked.killed)
 
     def test_codex_persistent_task_is_bound_to_profile_actor_room_and_behavior(self):
         profile, binding = self._codex_identity()
@@ -1036,6 +1442,48 @@ class CodexSurfaceTests(unittest.TestCase):
             [("send_message", {"channel_id": "42", "content": "hello"})],
             client.calls,
         )
+
+    def test_codex_mcp_transport_consumes_only_exact_measured_capability(self):
+        class Client:
+            channel_id = "42"
+            actor_id = "9"
+
+            def call_tool(self, name, _arguments):
+                self.asserted_name = name
+                payload = {
+                    "reaction_capability": {
+                        "channel_id": self.channel_id,
+                        "actor_id": self.actor_id,
+                        "capability": {
+                            "supported": True,
+                            "authenticated": True,
+                            "operations": ["add", "remove"],
+                            "reactions": ["*"],
+                            "permissions_revision": "measured-v1",
+                        },
+                    }
+                }
+                return {
+                    "isError": False,
+                    "content": [{"type": "text", "text": json.dumps(payload)}],
+                }
+
+        client = Client()
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
+        measured = transport.reaction_capability()
+        self.assertEqual("reaction_capability", client.asserted_name)
+        self.assertTrue(measured.allows("👂", "add"))
+
+        client.channel_id = "43"
+        unbound = transport.reaction_capability()
+        self.assertFalse(unbound.supported)
+        self.assertFalse(unbound.authenticated)
 
     def test_codex_mcp_transport_treats_unattested_success_as_unknown(self):
         class Client:

@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
   "title": "AttentionDecisionV2",
-  "description": "I-010B AttentionDecisionV2@2 — the tagged host-facing decision union, encoding the design's AttentionResponse union verbatim (FR-014, c834e8c). status 'ok' carries one of exactly four permitted classifier/effective pairs (SUPPRESS->SUPPRESS, SUPPRESS->DEFER, WAKE->WAKE, DEFER->DEFER) with the closed `routing_audit` (applied valve, override cause, margin status, effective margin exactly when the margin applied, trusted margin source only on a margin-applied decision), the sibling ok-branch 'reasons' audit field, evidence IDs, `classifier` audit naming the classifier with optional provider and model, the optional `legacy_verdict_confidences` vector — required exactly when the classifier disposition is SUPPRESS while the routing audit reports the margin active (FR-007) — and WAKE-only grounded `attention_advice` array (FR-013); status 'bypass' carries exactly cause 'preattention-disabled' and excludes the full FR-005 set (classifier/effective disposition, classifier audit, reasons, evidence, legacy confidence vector, routing audit, advice); status 'error' remains operational and separate, with the request ID optional on both the pre-validation and post-validation branches and an optional classifier audit present only when the error occurred after classifier invocation (FR-005, FR-014). Advice citations against the request's event IDs are a runtime-adapter-only rule (FR-013). @2 (post-acceptance amendment A2, evidence/v2/attention/dependency-010-amendment-A1-post-acceptance-zero-margin-blocker.md) widens routing_audit.effective_margin's domain from the accepted @1's wrongly exclusive (0,1] to the authority's inclusive [0,1]: a margin-defer decision with effective_margin exactly 0 is valid.",
+  "description": "I-010B AttentionDecisionV2@3 — the closed host-facing decision union. @3 adds first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Existing SUPPRESS, WAKE, DEFER, bypass, error, margin, evidence, and advice semantics remain unchanged.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
-    "disposition": {"enum": ["SUPPRESS", "WAKE", "DEFER"]},
+    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
     "confidence": {
       "$comment": "Finite [0,1]. The contradictory-bounds not-clause rejects NaN, which vacuously satisfies every numeric comparison keyword; strict JSON cannot carry non-finite literals, but sentinel-decoded corpus instances can.",
       "type": "number",
@@ -47,8 +47,8 @@
       "additionalProperties": false,
       "required": ["valve", "override_cause", "margin_status"],
       "properties": {
-        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer"]},
-        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven"]},
+        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer", "capability-defer"]},
+        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven", "ack-disabled", "ack-unsupported"]},
         "margin_status": {"enum": ["active", "retired"]},
         "effective_margin": {
           "$comment": "Finite [0, 1] (@2 amendment A2, c834e8c 'a transition margin, when active, is a finite number within [0,1]'; the accepted @1 shape wrongly used exclusiveMinimum, excluding the exact boundary the retained inclusive <= comparison relies on). The contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
@@ -84,7 +84,11 @@
         },
         {
           "if": {"required": ["valve"], "properties": {"valve": {"const": "policy-defer"}}},
-          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}
+          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven", "ack-disabled"]}}}
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "capability-defer"}}},
+          "then": {"properties": {"override_cause": {"const": "ack-unsupported"}}}
         }
       ]
     },
@@ -132,9 +136,101 @@
         "attention_advice": {
           "type": "array",
           "items": {"$ref": "#/$defs/attentionAdvice"}
+        },
+        "ack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reaction", "policy_provenance", "permissions_revision"],
+          "properties": {
+            "reaction": {"$ref": "#/$defs/nonEmptyString"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+            "permissions_revision": {"$ref": "#/$defs/nonEmptyString"}
+          }
         }
       },
+      "oneOf": [
+        {
+          "$comment": "WAKE->WAKE: valve none (no widening valve applied); the only pair that may carry advice (FR-013).",
+          "properties": {
+            "classifier_disposition": {"const": "WAKE"},
+            "effective_disposition": {"const": "WAKE"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          }
+        },
+        {
+          "$comment": "ACK->ACK: one core-selected lightweight reaction with current authenticated native capability.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "ACK"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "ACK->DEFER: disabled ACK policy conservatively wakes the participant path.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "ACK->DEFER: unavailable authenticated reaction capability conservatively wakes the participant path.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "DEFER->DEFER: the classifier-defer valve, distinct from margin-defer (S08).",
+          "properties": {
+            "classifier_disposition": {"const": "DEFER"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->DEFER: widened by the uncertainty margin with its exact audit.",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "margin-defer"}, "override_cause": {"const": "margin"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->DEFER: widened by disabled suppression or unproven recovery, never by ACK policy.",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->SUPPRESS: governed suppression with no widening valve applied (S05).",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "SUPPRESS"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        }
+      ],
       "allOf": [
+        {
+          "$comment": "The exact reaction and authority revision accompany ACK and no other classifier selection.",
+          "if": {"required": ["classifier_disposition"], "properties": {"classifier_disposition": {"const": "ACK"}}},
+          "then": {"required": ["ack"]},
+          "else": {"not": {"required": ["ack"]}}
+        },
         {
           "$comment": "FR-007 conditional requirement: a margin-active candidate SUPPRESS must carry the legacy vector.",
           "if": {
@@ -148,43 +244,6 @@
             }
           },
           "then": {"required": ["legacy_verdict_confidences"]}
-        }
-      ],
-      "oneOf": [
-        {
-          "$comment": "WAKE->WAKE: valve none (no widening valve applied); the only pair that may carry advice (FR-013).",
-          "properties": {
-            "classifier_disposition": {"const": "WAKE"},
-            "effective_disposition": {"const": "WAKE"},
-            "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          }
-        },
-        {
-          "$comment": "DEFER->DEFER: the classifier-defer valve, distinct from margin-defer (S08).",
-          "properties": {
-            "classifier_disposition": {"const": "DEFER"},
-            "effective_disposition": {"const": "DEFER"},
-            "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}
-          },
-          "not": {"required": ["attention_advice"]}
-        },
-        {
-          "$comment": "SUPPRESS->DEFER: widened by the margin or policy valve; the exact valve, override cause, and margin facts follow the routing cross-field rules.",
-          "properties": {
-            "classifier_disposition": {"const": "SUPPRESS"},
-            "effective_disposition": {"const": "DEFER"},
-            "routing_audit": {"properties": {"valve": {"enum": ["margin-defer", "policy-defer"]}}}
-          },
-          "not": {"required": ["attention_advice"]}
-        },
-        {
-          "$comment": "SUPPRESS->SUPPRESS: governed suppression with no widening valve applied (S05).",
-          "properties": {
-            "classifier_disposition": {"const": "SUPPRESS"},
-            "effective_disposition": {"const": "SUPPRESS"},
-            "routing_audit": {"properties": {"valve": {"const": "none"}}}
-          },
-          "not": {"required": ["attention_advice"]}
         }
       ]
     },

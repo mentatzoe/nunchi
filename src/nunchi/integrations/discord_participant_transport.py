@@ -13,10 +13,13 @@ thing on every surface.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 import json
+import secrets
 from typing import Any
 
 from ..errors import ValidationError
+from ..ack import ReactionCapability, reaction_capability
 from ..mcp_discord.authorization import make_tool_authorization
 from ..participant import TransportResult
 from .mcp_client import StreamableMCPClient
@@ -45,6 +48,48 @@ class MCPDiscordTransport:
         self.actor_id = actor_id
         self.native_actor_id = actor_id.removeprefix("discord:actor:")
         self.output_secret = output_secret
+        self._unavailable_reaction_revision = hashlib.sha256(
+            b"nunchi-discord-reaction-unavailable-v2\0"
+            + participant_id.encode()
+            + b"\0"
+            + room_id.encode()
+            + b"\0"
+            + actor_id.encode()
+        ).hexdigest()
+
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply", "reaction")
+
+    def reaction_capability(self) -> ReactionCapability:
+        arguments = {"channel_id": self.room_id}
+        arguments["_nunchi_authorization"] = make_tool_authorization(
+            secret=self.output_secret,
+            request_id=f"reaction-capability-{secrets.token_urlsafe(18)}",
+            participant_id=self.participant_id,
+            room_id=self.room_id,
+            tool="reaction_capability",
+            arguments=arguments,
+        )
+        try:
+            result = self.client.call_tool("reaction_capability", arguments)
+            payload, status = self._tool_payload(result)
+            measured = payload.get("reaction_capability") if payload is not None else None
+            if (
+                status != "ok"
+                or not isinstance(measured, Mapping)
+                or set(measured) != {"channel_id", "actor_id", "capability"}
+                or measured.get("channel_id") != self.room_id
+                or measured.get("actor_id") != self.native_actor_id
+            ):
+                raise ValidationError("Discord reaction capability is not exactly bound")
+            return reaction_capability(measured.get("capability"))
+        except Exception:
+            return ReactionCapability(
+                supported=False,
+                authenticated=False,
+                permissions_revision=self._unavailable_reaction_revision,
+                detail="Discord room reaction permission is unavailable or unattested",
+            )
 
     @staticmethod
     def _tool_payload(result: Any) -> tuple[Mapping[str, Any] | None, str]:

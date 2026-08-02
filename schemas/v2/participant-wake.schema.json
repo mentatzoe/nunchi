@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
   "title": "ParticipantWakeV2",
-  "description": "I-010C ParticipantWakeV2@1 — the normal participant turn input, materializing self, room, actors, events, trigger, coverage, and optional host-only continuation authority directly (not a wrapped classifier projection), with a separate `attention` object carrying the explicit source (WAKE, DEFER, ERROR_FALLBACK, or non-social PREATTENTION_BYPASS) and optional grounded advice that appears only on source WAKE (FR-013, FR-014, c834e8c). No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "description": "I-010C ParticipantWakeV2@2 — the materialized normal-turn or ACK effect facts. @2 adds ACK as an explicit advice-free source; WAKE, DEFER, ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or social ledger is part of the contract.",
   "$defs": {
     "nonEmptyString": {
       "type": "string",
@@ -15,7 +15,7 @@
       "properties": {
         "source": {
           "$comment": "PREATTENTION_BYPASS is a lifecycle fact, not a social judgment.",
-          "enum": ["WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
+          "enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
         },
         "advice": {
           "type": "array",
@@ -28,7 +28,7 @@
       },
       "allOf": [
         {
-          "$comment": "FR-013: DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
+          "$comment": "FR-013: ACK, DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
           "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
           "else": {
             "not": {

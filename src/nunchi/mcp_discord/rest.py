@@ -16,6 +16,7 @@ Error messages never include the token or request headers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -31,6 +32,11 @@ logger = logging.getLogger("nunchi.mcp_discord.rest")
 API_BASE_URL = "https://discord.com/api/v10"
 _USER_AGENT = "DiscordBot (https://github.com/mentatzoe/nunchi, 2.0.0)"
 _TIMEOUT_SECONDS = 15.0
+
+_ADMINISTRATOR = 1 << 3
+_ADD_REACTIONS = 1 << 6
+_VIEW_CHANNEL = 1 << 10
+_READ_MESSAGE_HISTORY = 1 << 16
 
 # method, url, headers, body -> (status, lower-cased headers, body)
 HttpCall = Callable[[str, str, Mapping[str, str], "bytes | None"], "tuple[int, dict[str, str], bytes]"]
@@ -69,6 +75,17 @@ def _error_detail(body: bytes) -> str:
         return ""
     message = payload.get("message") if isinstance(payload, dict) else None
     return str(message)[:200] if message else ""
+
+
+def _permission_bits(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise DiscordRestError(None, f"Discord {label} permissions are malformed")
+    if isinstance(value, str) and not value.isdigit():
+        raise DiscordRestError(None, f"Discord {label} permissions are malformed")
+    bits = int(value)
+    if bits < 0:
+        raise DiscordRestError(None, f"Discord {label} permissions are malformed")
+    return bits
 
 
 class DiscordRestClient:
@@ -130,6 +147,111 @@ class DiscordRestClient:
             "DELETE",
             f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
         )
+
+    def reaction_capability(self, channel_id: str, expected_user_id: str) -> dict:
+        """Measure this bot's effective reaction permissions in one guild channel."""
+        channel = self._request("GET", f"/channels/{channel_id}")
+        if not isinstance(channel, Mapping) or str(channel.get("id", "")) != channel_id:
+            raise DiscordRestError(None, "Discord channel capability response is malformed")
+        guild_id = str(channel.get("guild_id", ""))
+        overwrites = channel.get("permission_overwrites")
+        if not guild_id.isdigit() or not isinstance(overwrites, list):
+            raise DiscordRestError(
+                None,
+                "Discord channel capability lacks guild permission facts",
+            )
+
+        member = self._request(
+            "GET",
+            f"/guilds/{guild_id}/members/{expected_user_id}",
+        )
+        roles = self._request("GET", f"/guilds/{guild_id}/roles")
+        if not isinstance(member, Mapping) or not isinstance(roles, list):
+            raise DiscordRestError(None, "Discord member capability response is malformed")
+        user = member.get("user")
+        user_id = str(user.get("id", "")) if isinstance(user, Mapping) else ""
+        member_roles = member.get("roles")
+        if user_id != expected_user_id or not isinstance(member_roles, list):
+            raise DiscordRestError(None, "Discord capability self identity is untrustworthy")
+        role_ids = {str(item) for item in member_roles if str(item).isdigit()}
+        if len(role_ids) != len(member_roles):
+            raise DiscordRestError(None, "Discord member roles are malformed")
+        role_ids.add(guild_id)
+
+        base = 0
+        found_everyone = False
+        for role in roles:
+            if not isinstance(role, Mapping):
+                raise DiscordRestError(None, "Discord guild roles are malformed")
+            role_id = str(role.get("id", ""))
+            permissions = _permission_bits(role.get("permissions"), "guild role")
+            if not role_id.isdigit():
+                raise DiscordRestError(None, "Discord guild role permissions are malformed")
+            if role_id in role_ids:
+                base |= permissions
+            if role_id == guild_id:
+                found_everyone = True
+        if not found_everyone:
+            raise DiscordRestError(None, "Discord guild everyone role is unavailable")
+
+        if base & _ADMINISTRATOR:
+            effective = base
+            allowed = True
+        else:
+            everyone_allow = everyone_deny = 0
+            roles_allow = roles_deny = 0
+            member_allow = member_deny = 0
+            for overwrite in overwrites:
+                if not isinstance(overwrite, Mapping):
+                    raise DiscordRestError(None, "Discord permission overwrites are malformed")
+                overwrite_id = str(overwrite.get("id", ""))
+                overwrite_type = overwrite.get("type")
+                allow = _permission_bits(overwrite.get("allow"), "overwrite allow")
+                deny = _permission_bits(overwrite.get("deny"), "overwrite deny")
+                if (
+                    not overwrite_id.isdigit()
+                    or overwrite_type not in (0, 1)
+                ):
+                    raise DiscordRestError(None, "Discord permission overwrites are malformed")
+                if overwrite_type == 0 and overwrite_id == guild_id:
+                    everyone_allow, everyone_deny = allow, deny
+                elif overwrite_type == 0 and overwrite_id in role_ids:
+                    roles_allow |= allow
+                    roles_deny |= deny
+                elif overwrite_type == 1 and overwrite_id == user_id:
+                    member_allow, member_deny = allow, deny
+            effective = (base & ~everyone_deny) | everyone_allow
+            effective = (effective & ~roles_deny) | roles_allow
+            effective = (effective & ~member_deny) | member_allow
+            required = _VIEW_CHANNEL | _READ_MESSAGE_HISTORY | _ADD_REACTIONS
+            allowed = effective & required == required
+
+        revision = hashlib.sha256(
+            (
+                f"discord-rest-v2\0{guild_id}\0{channel_id}\0{user_id}\0"
+                f"{effective}\0{int(allowed)}"
+            ).encode()
+        ).hexdigest()
+        return {
+            "channel_id": channel_id,
+            "actor_id": user_id,
+            "capability": {
+                "supported": allowed,
+                "authenticated": True,
+                "operations": ["add", "remove"] if allowed else [],
+                "reactions": ["*"] if allowed else [],
+                "permissions_revision": revision,
+                **(
+                    {}
+                    if allowed
+                    else {
+                        "detail": (
+                            "Discord room does not grant view, history, and add-reaction permissions"
+                        )
+                    }
+                ),
+            },
+        }
 
     # ------------------------------------------------------------------ #
     # Request core

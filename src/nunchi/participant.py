@@ -5,14 +5,23 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
+import hashlib
 import json
 import math
 import queue
 import threading
 import time
 from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 from .errors import NunchiError, ValidationError
+from .ack import (
+    AckJournal,
+    AckPolicy,
+    ReactionCapability,
+    UNAVAILABLE_REACTION_CAPABILITY,
+    reaction_capability,
+)
 from .observation import ObservationProvider
 from .receipts import ReceiptJournal
 from .v2_contracts import (
@@ -48,6 +57,7 @@ class ConversationOpportunityScheduler:
         self._active = False
         self._pending_anchor: str | None = None
         self._generation = 0
+        self._lifecycle_id = str(uuid4())
         self._cancel_event: threading.Event | None = None
         self._dispatch_committed = False
         self._lock = threading.RLock()
@@ -102,6 +112,7 @@ class ConversationOpportunityScheduler:
             self._active = False
             self._dispatch_committed = False
             self._generation += 1
+            self._lifecycle_id = str(uuid4())
 
     restart = cancel
 
@@ -144,6 +155,11 @@ class ConversationOpportunityScheduler:
     def pending_anchor(self) -> str | None:
         with self._lock:
             return self._pending_anchor
+
+    @property
+    def lifecycle_id(self) -> str:
+        with self._lock:
+            return self._lifecycle_id
 
 
 @dataclass(frozen=True)
@@ -286,7 +302,7 @@ def build_participant_wake(
         effective = checked_decision["effective_disposition"]
         if effective == "SUPPRESS":
             return None
-        source = "WAKE" if effective == "WAKE" else "DEFER"
+        source = effective if effective in ("ACK", "WAKE") else "DEFER"
     elif checked_decision["status"] == "bypass":
         source = "PREATTENTION_BYPASS"
     else:
@@ -344,6 +360,8 @@ class ParticipantTurnHost:
         receipts: ReceiptJournal | None = None,
         privileged: PrivilegedCoordinator | None = None,
         participant_timeout_seconds: float = 300.0,
+        ack_policy: AckPolicy | None = None,
+        ack_journal: AckJournal | None = None,
     ) -> None:
         if (
             isinstance(participant_timeout_seconds, bool)
@@ -358,9 +376,213 @@ class ParticipantTurnHost:
         self.scheduler = scheduler
         self.receipts = receipts or observation.receipts
         self.privileged = privileged
+        self.ack_policy = ack_policy or AckPolicy()
+        self.ack_journal = ack_journal or AckJournal()
         self.participant_timeout_seconds = float(participant_timeout_seconds)
         self.host_timeout_seconds = self.participant_timeout_seconds
         self.invocation_count = 0
+
+    def reaction_capability(self) -> ReactionCapability:
+        provider = getattr(self.transport, "reaction_capability", None)
+        try:
+            return reaction_capability(
+                provider() if callable(provider) else UNAVAILABLE_REACTION_CAPABILITY
+            )
+        except Exception:
+            return UNAVAILABLE_REACTION_CAPABILITY
+
+    def _protocol_opportunity(
+        self,
+        token: OpportunityToken,
+        *,
+        deadline: float,
+    ) -> dict[str, Any]:
+        """Bind an owned participant action to current host authority."""
+
+        capabilities = getattr(self.transport, "ordinary_action_capabilities", None)
+        ordinary = (
+            list(capabilities())
+            if callable(capabilities)
+            else ["message", "reply", "reaction"]
+        )
+        ordinary = [
+            item
+            for item in ("message", "reply", "reaction")
+            if item in set(ordinary)
+        ]
+        current_reaction = self.reaction_capability()
+        if "reaction" in ordinary and not (
+            current_reaction.allows(self.ack_policy.reaction, "add")
+            or current_reaction.allows(self.ack_policy.reaction, "remove")
+        ):
+            ordinary.remove("reaction")
+        permission_document = {
+            "participant_id": self.observation.binding.participant_id,
+            "actor_id": self.observation.binding.actor_id,
+            "room_id": self.observation.binding.room_id,
+            "continuity_scope_id": self.observation.binding.continuity_scope_id,
+            "ordinary_actions": ordinary,
+            "privileged_proposals": self.privileged is not None,
+            "reaction_capability": current_reaction.document(),
+        }
+        revision = hashlib.sha256(
+            json.dumps(
+                permission_document,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        deadline_id = hashlib.sha256(
+            (
+                f"{self.scheduler.lifecycle_id}\0{token.generation}\0"
+                f"{deadline:.9f}\0{revision}"
+            ).encode("utf-8")
+        ).hexdigest()
+        return {
+            "generation": token.generation,
+            "lifecycle_id": self.scheduler.lifecycle_id,
+            "deadline_id": deadline_id,
+            "permissions": {
+                "revision": revision,
+                "ordinary_actions": ordinary,
+                "privileged_proposals": self.privileged is not None,
+            },
+        }
+
+    def acknowledge(
+        self,
+        *,
+        request: Mapping[str, Any],
+        decision: Mapping[str, Any],
+        token: OpportunityToken,
+        deadline: float,
+    ) -> TransportResult | None:
+        """Commit one durable core ACK without invoking the participant."""
+
+        checked_request = validate_attention_request(request)
+        checked_decision = validate_attention_decision(decision, request=checked_request)
+        if (
+            checked_decision.get("status") != "ok"
+            or checked_decision.get("effective_disposition") != "ACK"
+        ):
+            raise ParticipantError("ACK host received a non-ACK decision")
+        if token.anchor_event_id != checked_request["trigger_event_id"]:
+            raise ParticipantError("ACK token does not match the exact trigger")
+        if not self.scheduler.is_current(token) or time.monotonic() >= deadline:
+            return None
+        ack = checked_decision["ack"]
+        capability = self.reaction_capability()
+        if (
+            not self.ack_policy.enabled
+            or ack["reaction"] != self.ack_policy.reaction
+            or ack["policy_provenance"] != self.ack_policy.provenance
+            or ack["permissions_revision"] != capability.permissions_revision
+            or not capability.allows(self.ack_policy.reaction, "add")
+        ):
+            # Capability widening normally happens inside AttentionEngine.
+            # A mismatch here means authority changed after that decision; it
+            # is stale and therefore cannot produce a native effect.
+            wake = self._make_wake(checked_request, checked_decision)
+            if wake is None:
+                raise ParticipantError("ACK decision did not materialize current facts")
+            result = TransportResult(
+                "unavailable",
+                "ACK authority changed before dispatch",
+            )
+            self._append_host_receipt(
+                wake,
+                expansion_calls=0,
+                invoked=False,
+                outcome="unknown",
+            )
+            self._append_transport_receipt(wake["request_id"], result)
+            return result
+        wake = self._make_wake(checked_request, checked_decision)
+        if wake is None:
+            raise ParticipantError("ACK decision did not materialize current facts")
+        opportunity = self._protocol_opportunity(token, deadline=deadline)
+        binding = {
+            "request_id": checked_request["request_id"],
+            "participant_id": wake["self"]["participant_id"],
+            "actor_id": wake["self"]["actor_id"],
+            "platform": wake["room"]["platform"],
+            "room_id": wake["room"]["id"],
+            "continuity_scope_id": wake["room"]["continuity_scope_id"],
+            "target_event_id": wake["trigger_event_id"],
+            "reaction": ack["reaction"],
+            "operation": "add",
+            "opportunity_generation": token.generation,
+            "lifecycle_id": opportunity["lifecycle_id"],
+            "deadline_id": opportunity["deadline_id"],
+            "permissions_revision": capability.permissions_revision,
+        }
+        action = {
+            "kind": "reaction",
+            "origin_event_id": wake["trigger_event_id"],
+            "target_event_id": wake["trigger_event_id"],
+            "reaction": ack["reaction"],
+            "operation": "add",
+        }
+
+        host_receipt_persisted = False
+
+        def dispatch_ack() -> TransportResult:
+            nonlocal host_receipt_persisted
+            ack_id, reserved = self.ack_journal.reserve(binding)
+            self._append_host_receipt(
+                wake,
+                expansion_calls=0,
+                invoked=False,
+                outcome="unknown",
+            )
+            host_receipt_persisted = True
+            if not reserved:
+                return TransportResult("unknown", "duplicate ACK was durably suppressed")
+            try:
+                current_capability = self.reaction_capability()
+            except Exception:
+                current_capability = UNAVAILABLE_REACTION_CAPABILITY
+            if (
+                current_capability.permissions_revision
+                != binding["permissions_revision"]
+                or not current_capability.allows(binding["reaction"], "add")
+            ):
+                result = TransportResult(
+                    "unavailable",
+                    "ACK authority changed at the native dispatch boundary",
+                )
+            elif token.cancel_event.is_set() or time.monotonic() >= deadline:
+                result = TransportResult("failed", "ACK cancelled before native dispatch")
+            else:
+                try:
+                    result = self.transport.dispatch(action=action, wake=wake)
+                except BaseException:
+                    result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
+                if not isinstance(result, TransportResult):
+                    result = TransportResult("unknown", "ACK transport result was unattested")
+            self.ack_journal.settle(
+                ack_id,
+                delivery=result.delivery,
+                detail=result.detail,
+            )
+            return result
+
+        try:
+            committed, result = self.scheduler.commit_dispatch(token, dispatch_ack)
+        except BaseException:
+            if not host_receipt_persisted:
+                raise
+            committed = True
+            result = TransportResult(
+                "unknown",
+                "ACK dispatch acknowledgement was lost",
+            )
+        if not committed:
+            return None
+        if not isinstance(result, TransportResult):
+            result = TransportResult("unknown", "ACK commit result was unattested")
+        self._append_transport_receipt(wake["request_id"], result)
+        return result
 
     def _make_wake(
         self,
@@ -475,14 +697,27 @@ class ParticipantTurnHost:
 
         def invoke() -> None:
             try:
+                core_run = getattr(self.participant, "run_protocol", None)
+                if callable(core_run):
+                    action = core_run(
+                        wake=deepcopy(wake),
+                        opportunity=self._protocol_opportunity(
+                            token,
+                            deadline=effective_deadline,
+                        ),
+                        expand=expand,
+                        cancel=token.cancel_event,
+                    )
+                else:
+                    action = self.participant(
+                        wake=deepcopy(wake),
+                        expand=expand,
+                        cancel=token.cancel_event,
+                    )
                 result_queue.put_nowait(
                     (
                         "ok",
-                        self.participant(
-                            wake=deepcopy(wake),
-                            expand=expand,
-                            cancel=token.cancel_event,
-                        ),
+                        action,
                     )
                 )
             except BaseException:
@@ -669,9 +904,17 @@ class ParticipantTurnHost:
             return None
         if not isinstance(result, TransportResult):
             result = TransportResult("unknown", "transport returned no attested result")
+        self._append_transport_receipt(wake["request_id"], result)
+        return result
+
+    def _append_transport_receipt(
+        self,
+        request_id: str,
+        result: TransportResult,
+    ) -> None:
         self.receipts.append(
             {
-                "request_id": wake["request_id"],
+                "request_id": request_id,
                 "stage": "transport",
                 "writer": "transport",
                 "body": {
@@ -681,13 +924,13 @@ class ParticipantTurnHost:
             },
             writer="transport",
         )
-        return result
 
     def _append_host_receipt(
         self,
         wake: Mapping[str, Any],
         *,
         expansion_calls: int,
+        invoked: bool = True,
         outcome: str,
     ) -> None:
         self.receipts.append(
@@ -698,7 +941,7 @@ class ParticipantTurnHost:
                 "body": participant_host_receipt_body(
                     wake,
                     expansion_calls=expansion_calls,
-                    invoked=True,
+                    invoked=invoked,
                     outcome=outcome,
                 ),
             },

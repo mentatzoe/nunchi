@@ -1,4 +1,4 @@
-"""Contract tests for ``I-010C ParticipantWakeV2@1`` (slice 010, T004).
+"""Contract tests for ``I-010C ParticipantWakeV2@2`` (slice 010, T004).
 
 Red cases cover the wake sources, advice-free ``PREATTENTION_BYPASS``
 (010-Preattention-bypass), the FR-013 advice-source violations (advice on
@@ -23,7 +23,7 @@ class WakeSourceCases(unittest.TestCase):
     """FR-008: explicit sources, no admission meta-answer, facts separate."""
 
     def test_every_source_validates_without_advice(self):
-        for source in ("WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"):
+        for source in ("ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"):
             with self.subTest(source=source):
                 assert_schema_verdict(self, "participant-wake", make_wake(source), "valid")
 

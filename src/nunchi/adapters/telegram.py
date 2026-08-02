@@ -15,6 +15,7 @@ import urllib.request
 
 from .. import __version__
 from ..errors import NunchiError, ValidationError
+from ..ack import ReactionCapability
 from ..participant import TransportResult
 from .runtime import CAPABILITIES, ReferenceAdapterRuntime, load_pinned_config
 
@@ -33,6 +34,17 @@ class TelegramTransport:
         self.poll_timeout = int(config.get("poll_timeout_seconds", 30))
         if self.poll_timeout < 1 or self.poll_timeout > 50:
             raise ValidationError("Telegram poll timeout must be within 1..50 seconds")
+
+    def ordinary_action_capabilities(self) -> tuple[str, ...]:
+        return ("message", "reply")
+
+    def reaction_capability(self) -> ReactionCapability:
+        return ReactionCapability(
+            supported=False,
+            authenticated=True,
+            permissions_revision="telegram-reference-v1:no-reactions",
+            detail="Telegram reference adapter does not expose native reactions",
+        )
 
     def _call(self, method: str, payload: Mapping[str, object]):
         request = urllib.request.Request(

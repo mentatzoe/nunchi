@@ -105,6 +105,22 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "reaction_capability",
+        "description": (
+            "Measure this authenticated bot's effective reaction permissions "
+            "for its exact registered Discord channel."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "channel_id": {"type": "string"},
+                "_nunchi_authorization": {"type": "object"},
+            },
+            "required": ["channel_id", "_nunchi_authorization"],
+        },
+    },
+    {
         "name": "remove_reaction",
         "description": "Remove this bot's own reaction through a one-use V2 host authorization.",
         "inputSchema": {
@@ -165,6 +181,8 @@ class RestLike(Protocol):
     def add_reaction(self, channel_id: str, message_id: str, reaction: str) -> None: ...
 
     def remove_reaction(self, channel_id: str, message_id: str, reaction: str) -> None: ...
+
+    def reaction_capability(self, channel_id: str, expected_user_id: str) -> dict: ...
 
 
 def shape_message(msg: object) -> dict:
@@ -281,6 +299,7 @@ class ToolExecutor:
                 "reply_message",
                 "add_reaction",
                 "remove_reaction",
+                "reaction_capability",
             } and expected_author_id is None:
                 return (
                     {"error": "authenticated Discord self identity is unavailable"},
@@ -318,11 +337,28 @@ class ToolExecutor:
                 return self._reaction(arguments, remove=False)
             if name == "remove_reaction":
                 return self._reaction(arguments, remove=True)
+            if name == "reaction_capability":
+                return self._reaction_capability(
+                    arguments,
+                    expected_author_id=expected_author_id,
+                )
             if name == "read_history":
                 return self._history(arguments)
             return ({"error": f"unknown tool: {name}"}, False)
         except DiscordRestError as exc:
             return ({"error": str(exc)}, False)
+
+    def _reaction_capability(
+        self,
+        arguments: dict,
+        *,
+        expected_author_id: str,
+    ) -> tuple[dict, bool]:
+        channel_id = _snowflake(arguments.get("channel_id"))
+        if channel_id is None:
+            return ({"error": "channel_id must be a numeric snowflake string"}, False)
+        capability = self._rest.reaction_capability(channel_id, expected_author_id)
+        return ({"reaction_capability": capability}, True)
 
     def _reaction(self, arguments: dict, *, remove: bool) -> tuple[dict, bool]:
         channel_id = _snowflake(arguments.get("channel_id"))

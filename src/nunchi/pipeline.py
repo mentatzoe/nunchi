@@ -41,6 +41,7 @@ class OpportunityPreparation:
     decision: Mapping[str, Any] | None
     effective_disposition: str | None
     wake: Mapping[str, Any] | None
+    acknowledge: bool = False
     operational_error: str | None = None
 
 
@@ -86,6 +87,7 @@ def prepare_opportunity(
                 decision=None,
                 effective_disposition=None,
                 wake=None,
+                acknowledge=False,
                 operational_error=detail,
             )
     if not scheduler.is_current(token):
@@ -107,15 +109,18 @@ def prepare_opportunity(
     if decision["status"] == "ok":
         effective = decision["effective_disposition"]
         admit = effective != "SUPPRESS"
+        acknowledge = effective == "ACK"
     elif decision["status"] == "bypass":
         effective = "PREATTENTION_BYPASS"
         admit = True
+        acknowledge = False
     else:
         admit = (
             attention.policy.error_action == "WAKE"
             and decision["error"]["code"] != "cancelled"
         )
         effective = "ERROR_FALLBACK" if admit else None
+        acknowledge = False
     if not admit:
         return OpportunityPreparation(
             anchor_event_id=token.anchor_event_id,
@@ -123,6 +128,7 @@ def prepare_opportunity(
             decision=decision,
             effective_disposition=effective,
             wake=None,
+            acknowledge=False,
             operational_error=(
                 decision["error"]["detail"]
                 if decision["status"] == "error"
@@ -142,6 +148,7 @@ def prepare_opportunity(
             decision=decision,
             effective_disposition=effective,
             wake=None,
+            acknowledge=False,
             operational_error=f"participant wake unavailable: {exc}",
         )
     return OpportunityPreparation(
@@ -150,6 +157,7 @@ def prepare_opportunity(
         decision=decision,
         effective_disposition=effective,
         wake=wake,
+        acknowledge=acknowledge,
         operational_error=(
             decision["error"]["detail"]
             if decision["status"] == "error"
@@ -264,7 +272,14 @@ class NunchiV2Pipeline:
                 token = self.scheduler.complete(token)
                 continue
             transport = (
-                self.host.run(
+                self.host.acknowledge(
+                    request=request,
+                    decision=decision,
+                    token=token,
+                    deadline=deadline,
+                )
+                if prepared.acknowledge
+                else self.host.run(
                     request=request,
                     decision=decision,
                     token=token,

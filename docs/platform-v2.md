@@ -1,9 +1,10 @@
 # V2 platform interface and conformance
 
-This is the current downstream interface for Hermes and Claude Code. Both
-platform implementations consume the shared owners, but neither has completed
-its installed and live acceptance. Shared ACK behavior may extend this
-interface and remains open in issue #40.
+This is the current downstream interface for Hermes and Claude Code, and for
+reference platform integrations. Both platform implementations consume the
+shared owners but have not completed installed and live acceptance.
+First-class ACK and the normal participant-turn protocol are now shared
+interfaces; platform code does not redefine them.
 
 ## Required owners
 
@@ -12,6 +13,7 @@ interface and remains open in issue #40.
 | Transport | native delivery | canonical event or explicit gap/error | native identity, route, ordering, delivery semantics |
 | Observation provider | canonical deliveries | bounded attention request and host-only continuation | exact self, actor closure, coverage truth, retention |
 | Attention engine | request plus pinned participant profile | decision | exactly one participant-delegated social judgment |
+| ACK coordinator | ACK decision plus current authenticated reaction capability | one exact reaction or no effect | policy/capability widening, exact binding, durable replay suppression |
 | Scheduler | wake-eligible event anchors | active/newest-pending opportunity | cancellation, coalescing, restart invalidation |
 | Participant host | current decision plus fresh snapshot | normal participant invocation | wake/silence, origin validation, single commit point |
 | Authorization coordinator | privileged proposal plus trusted policy | deny, approval challenge, or exact effect | requester, scope, digest, approval, expiry, revocation, persistence, replay |
@@ -23,9 +25,12 @@ interface and remains open in issue #40.
    platform, room, continuity scope, and optional descriptive metadata.
 2. A pinned JSON `ParticipantProfile` with matching participant and actor IDs.
 3. One delegated attention provider returning the closed judgment shape.
-4. One normal participant implementation accepting `wake`, mediated `expand`,
-   and cancellation.
-5. One native transport returning `TransportResult`.
+4. For a Nunchi-owned participant, one isolated native model invocation that
+   receives the core prompt/request/schema and returns the model result without
+   interpreting it. Native-host integrations instead expose their admitted
+   normal participant hook.
+5. One native transport returning `TransportResult`, plus current
+   authenticated reaction capability facts.
 6. Stable private state paths for observations and receipts.
 7. Optional pinned privileged-action policy and host-authenticated approval
    seam.
@@ -57,9 +62,10 @@ does not expose a safe final authority boundary after approval. Auto-title is
 also disabled because it can outlive the turn. Native typing, Discord voice
 input, `/thread`, detached participant commands, and handoff into configured
 rooms are disabled for the same lifecycle reason. Stock reactions run only
-after the participant invocation begins; the shared ACK path will own
-pre-model acknowledgement. These are open product gaps: the current Hermes
-source is not a complete V2 lifecycle.
+after the participant invocation begins. Because the current Hermes seam does
+not attest the shared native ACK capability, a model ACK widens to DEFER and
+runs the normal participant path. These are open product gaps: the current
+Hermes source is not a complete V2 lifecycle.
 
 The plugin accepts exactly Hermes 0.19.0. A different version must use a
 Nunchi release that explicitly verifies it, or run stock Hermes without
@@ -81,9 +87,12 @@ A consumer of the shared Discord transport must:
    `integrations/mcp-discord/README.md`;
 4. cancel active and pending work before applying a targeted continuity gap;
 5. submit ordinary live events through the asynchronous active/newest lane;
-6. invoke output/history tools only from that authenticated session with a
+6. measure current reaction permission through the authenticated
+   `reaction_capability` tool and accept only its exact native room/self
+   binding; unavailable, denied, or malformed facts widen ACK to DEFER;
+7. invoke output/history tools only from that authenticated session with a
    fresh exact-operation authorization;
-7. correlate every JSON-RPC response to the exact request and report `sent`
+8. correlate every JSON-RPC response to the exact request and report `sent`
    only after the tool payload attests the expected native room, exact
    authenticated self, submitted content, reply target or non-reply effect,
    and new message or reaction identity. Empty, stale, cross-bot,
@@ -112,23 +121,40 @@ another consumer's success.
 ```
 
 The confidence vector is margin evidence, not a V1 lifecycle verdict.
-Uncertainty returns `DEFER`. Only WAKE may include evidence-bound
-`attention_advice`.
+Uncertainty returns `DEFER`. `ACK` selects the core-configured lightweight
+reaction. Only WAKE may include evidence-bound `attention_advice`.
 
 ## Normal participant result
 
-Return `None` for silence, or exactly one:
+Every Nunchi-owned participant receives `nunchi.participant-turn` version 1.
+The model returns one closed envelope, copying the request's exact `protocol`
+and `binding` objects:
 
 ```json
-{"kind":"message","origin_event_id":"discord:message:123","text":"..."}
-{"kind":"reply","origin_event_id":"discord:message:123","target_event_id":"discord:message:120","text":"..."}
-{"kind":"reaction","origin_event_id":"discord:message:123","target_event_id":"discord:message:120","reaction":"✅","operation":"add"}
-{"kind":"privileged","origin_event_id":"discord:message:123","capability":"workspace.file.write","resource":{"kind":"workspace-file","id":"repo:README.md"},"operation":{"path":"README.md","content":"..."}}
+{
+  "protocol": {"name": "nunchi.participant-turn", "version": 1},
+  "binding": {
+    "request_id": "...",
+    "participant_id": "...",
+    "actor_id": "...",
+    "platform": "...",
+    "room_id": "...",
+    "continuity_scope_id": "...",
+    "trigger_event_id": "...",
+    "opportunity_generation": 7,
+    "lifecycle_id": "...",
+    "deadline_id": "...",
+    "permissions_revision": "..."
+  },
+  "action": {"kind":"message","origin_event_id":"discord:message:123","text":"..."}
+}
 ```
 
-The host rejects invisible origins or targets, malformed actions, stale
-opportunities, deadline overruns, and unavailable native capabilities. The
-participant cannot send directly.
+The `action` is exactly one `silence`, bounded `expand`, `message`, `reply`,
+`reaction`, or privileged proposal shape allowed by the supplied schema. The
+host rejects unknown versions, changed bindings, invisible origins or targets,
+malformed actions, stale opportunities, deadline overruns, and unavailable
+native capabilities. The participant cannot send directly.
 
 ## Continuation
 
@@ -196,8 +222,11 @@ add:
 
 - authenticated native self and wrong-route cases;
 - native message, reaction, membership, reply, and explicit absence mapping;
-- SUPPRESS, WAKE contribution, WAKE silence, classifier DEFER, margin DEFER,
-  bypass, error fallback, and explicit NO_WAKE error;
+- SUPPRESS, supported ACK with no participant, disabled/unsupported ACK
+  widening to DEFER, WAKE contribution, WAKE silence, classifier DEFER, margin
+  DEFER, bypass, error fallback, and explicit NO_WAKE error;
+- ACK exact binding, restart replay, cancellation, permission change, and
+  concurrent duplicate suppression;
 - active-plus-newest-pending coalescing under real concurrency;
 - cancellation ordered before and after the output commit point;
 - restart/backfill without revived work or approval;
@@ -206,3 +235,6 @@ add:
 - clean installed-artifact probes and attributable real-platform evidence.
 
 Passing schemas alone does not establish installed or live behavior.
+
+See `docs/v2-shared-foundation.md` for exact interface versions, operator flow,
+compatibility, and remaining platform work.

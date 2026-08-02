@@ -12,6 +12,8 @@ from collections.abc import Sequence
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import sys
 from typing import Any
 
@@ -66,6 +68,17 @@ def _write_exclusive(path: Path, payload: bytes, mode: int = 0o600) -> None:
         os.close(fd)
 
 
+def _atomic_replace(path: Path, payload: bytes, mode: int = 0o600) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    _write_exclusive(temporary, payload, mode)
+    os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def initialize(config_root: Path, state_root: Path) -> dict[str, Any]:
     for path in (config_root, state_root):
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -116,12 +129,19 @@ def verify(config_root: Path) -> dict[str, Any]:
     if not isinstance(document, dict) or set(document) != required:
         raise InstallError("V2 install marker has an invalid closed shape")
     if (
-        document["schema_version"] != 2
+        isinstance(document["schema_version"], bool)
+        or not isinstance(document["schema_version"], int)
+        or document["schema_version"] != 2
         or document["product"] != "nunchi"
+        or not isinstance(document["product_version"], str)
         or document["product_version"] != __version__
+        or isinstance(document["generation"], bool)
+        or not isinstance(document["generation"], int)
         or document["generation"] != 2
         or document["v1_fallback"] is not False
         or document["excluded_integrations"] != []
+        or not isinstance(document["config_root"], str)
+        or not isinstance(document["state_root"], str)
         or Path(document["config_root"]).resolve() != config_root.resolve()
     ):
         raise InstallError("V2 install marker does not match this installed artifact")
@@ -134,14 +154,128 @@ def verify(config_root: Path) -> dict[str, Any]:
     return {"status": "verified", **document}
 
 
+def upgrade(config_root: Path, state_root: Path) -> dict[str, Any]:
+    """Upgrade only shared install metadata; profile bytes remain untouched."""
+
+    marker = config_root / MARKER_NAME
+    try:
+        existing = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallError(f"existing V2 marker is untrustworthy: {exc}") from exc
+    if not isinstance(existing, dict):
+        raise InstallError("existing V2 marker has an invalid shape")
+    expected = _manifest(config_root, state_root)
+    invariant_fields = {
+        "schema_version",
+        "product",
+        "generation",
+        "config_root",
+        "state_root",
+        "v1_fallback",
+        "excluded_integrations",
+    }
+    if any(existing.get(name) != expected[name] for name in invariant_fields):
+        raise InstallError("existing install cannot be upgraded in place safely")
+    old_version = existing.get("product_version")
+    if not isinstance(old_version, str) or not old_version:
+        raise InstallError("existing install version is absent")
+    if old_version == __version__:
+        return {"status": "already-current", **expected}
+    safe_version = re.sub(r"[^A-Za-z0-9._-]", "_", old_version)
+    backup = config_root / f".{MARKER_NAME}.{safe_version}.rollback"
+    if not backup.exists():
+        _write_exclusive(backup, (json.dumps(existing, sort_keys=True) + "\n").encode())
+    _atomic_replace(
+        marker,
+        (json.dumps(expected, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(),
+    )
+    return {"status": "upgraded", "from_version": old_version, **expected}
+
+
+def rollback(config_root: Path, version: str) -> dict[str, Any]:
+    safe_version = re.sub(r"[^A-Za-z0-9._-]", "_", version)
+    if not version or safe_version != version:
+        raise InstallError("rollback version is invalid")
+    backup = config_root / f".{MARKER_NAME}.{safe_version}.rollback"
+    try:
+        payload = backup.read_bytes()
+        document = json.loads(payload)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallError(f"rollback metadata for {version!r} is unavailable: {exc}") from exc
+    if not isinstance(document, dict) or document.get("product_version") != version:
+        raise InstallError("rollback metadata is untrustworthy")
+    _atomic_replace(config_root / MARKER_NAME, payload)
+    return {"status": "rolled-back", **document}
+
+
+def uninstall_state(config_root: Path, state_root: Path, *, purge: bool = False) -> dict[str, Any]:
+    """Remove install registration, and state only after explicit purge."""
+
+    marker = config_root / MARKER_NAME
+    try:
+        document = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallError(f"V2 install marker is absent or untrustworthy: {exc}") from exc
+    if (
+        not isinstance(document, dict)
+        or document.get("product") != "nunchi"
+        or isinstance(document.get("schema_version"), bool)
+        or not isinstance(document.get("schema_version"), int)
+        or document.get("schema_version") != MARKER_SCHEMA
+        or not isinstance(document.get("config_root"), str)
+        or not isinstance(document.get("state_root"), str)
+        or Path(str(document.get("config_root", ""))).resolve() != config_root.resolve()
+        or Path(str(document.get("state_root", ""))).resolve() != state_root.resolve()
+    ):
+        raise InstallError("V2 install marker does not bind these exact state roots")
+    removed: list[str] = []
+    if purge:
+        home = Path.home().resolve()
+        broad_roots = {
+            Path("/").resolve(),
+            home,
+            (home / ".config").resolve(),
+            (home / ".local").resolve(),
+            (home / ".local" / "state").resolve(),
+        }
+        for path in (config_root, state_root):
+            resolved = path.resolve()
+            within_home = resolved.is_relative_to(home)
+            home_depth = len(resolved.relative_to(home).parts) if within_home else None
+            if (
+                len(resolved.parts) < 4
+                or resolved in broad_roots
+                or (home_depth is not None and home_depth < 2)
+            ):
+                raise InstallError("refusing to purge a broad operator-state path")
+        # Remove state first. If it fails, the registration marker remains;
+        # if config removal succeeds, it removes the marker as its final act.
+        for path in (state_root, config_root):
+            if path.exists():
+                shutil.rmtree(path)
+                removed.append(str(path))
+    else:
+        marker.unlink()
+        removed.append(str(marker))
+    marker.unlink(missing_ok=True)
+    return {"status": "uninstalled", "purged": purge, "removed": removed}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nunchi-install")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "verify"):
+    for name in ("init", "verify", "upgrade"):
         command = commands.add_parser(name)
         command.add_argument("--config-root", type=Path, default=_default_config_root())
-        if name == "init":
+        if name in ("init", "upgrade"):
             command.add_argument("--state-root", type=Path, default=_default_state_root())
+    rollback_command = commands.add_parser("rollback")
+    rollback_command.add_argument("--config-root", type=Path, default=_default_config_root())
+    rollback_command.add_argument("--version", required=True)
+    uninstall_command = commands.add_parser("uninstall")
+    uninstall_command.add_argument("--config-root", type=Path, default=_default_config_root())
+    uninstall_command.add_argument("--state-root", type=Path, default=_default_state_root())
+    uninstall_command.add_argument("--purge-state", action="store_true")
     commands.add_parser("probe")
     return parser
 
@@ -153,6 +287,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = initialize(args.config_root, args.state_root)
         elif args.command == "verify":
             result = verify(args.config_root)
+        elif args.command == "upgrade":
+            result = upgrade(args.config_root, args.state_root)
+        elif args.command == "rollback":
+            result = rollback(args.config_root, args.version)
+        elif args.command == "uninstall":
+            result = uninstall_state(
+                args.config_root,
+                args.state_root,
+                purge=args.purge_state,
+            )
         else:
             result = {
                 "product": "nunchi",

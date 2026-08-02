@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 
+from .ack import AckJournal, AckPolicy, ReactionCapability
 from .attention import AttentionEngine, AttentionPolicy, ParticipantProfile
 from .observation import ObservationProvider, ParticipantBinding
 from .participant import (
@@ -20,6 +21,9 @@ from .receipts import ReceiptJournal
 
 SCENARIOS = {
     "suppress": "participant-bound classifier SUPPRESS with active recovery",
+    "ack": "ACK adds one exact reaction without invoking the participant",
+    "ack-disabled": "disabled ACK widens safely to the participant DEFER path",
+    "ack-unsupported": "unsupported ACK widens safely to the participant DEFER path",
     "wake-contribution": "WAKE followed by one host-owned contribution",
     "wake-silence": "WAKE followed by participant silence",
     "classifier-defer": "direct model DEFER wakes advice-free",
@@ -47,6 +51,9 @@ class _Model:
             "suppress": "SUPPRESS",
             "margin-defer": "SUPPRESS",
             "classifier-defer": "DEFER",
+            "ack": "ACK",
+            "ack-disabled": "ACK",
+            "ack-unsupported": "ACK",
         }.get(self.scenario, "WAKE")
         vector = (
             {"PASS": 0.52, "ACK": 0.1, "ASK": 0.18, "SPEAK": 0.48}
@@ -64,11 +71,23 @@ class _Model:
 
 
 class _Transport:
-    def __init__(self) -> None:
+    def __init__(self, *, reactions_supported: bool) -> None:
         self.calls = 0
+        self.actions: list[dict] = []
+        self._reactions_supported = reactions_supported
 
-    def dispatch(self, **_):
+    def reaction_capability(self) -> ReactionCapability:
+        return ReactionCapability(
+            supported=self._reactions_supported,
+            authenticated=True,
+            operations=("add",) if self._reactions_supported else (),
+            reactions=("👂",) if self._reactions_supported else (),
+            permissions_revision="offline-fixture:permissions:v1",
+        )
+
+    def dispatch(self, *, action, **_):
         self.calls += 1
+        self.actions.append(dict(action))
         return TransportResult("sent", "offline-conformance")
 
 
@@ -95,11 +114,12 @@ def run_scenario(scenario: str) -> dict:
         preattention_enabled=scenario != "bypass",
         error_action="NO_WAKE" if scenario == "error-no-wake" else "WAKE",
     )
+    ack_policy = AckPolicy(enabled=scenario != "ack-disabled")
     with tempfile.TemporaryDirectory(prefix="nunchi-v2-conformance-") as directory:
         receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
         observation = ObservationProvider(binding, receipts=receipts)
         scheduler = ConversationOpportunityScheduler("conformance:42")
-        transport = _Transport()
+        transport = _Transport(reactions_supported=scenario != "ack-unsupported")
 
         def participant(**_):
             if scenario == "wake-silence":
@@ -116,6 +136,8 @@ def run_scenario(scenario: str) -> dict:
             transport=transport,
             scheduler=scheduler,
             receipts=receipts,
+            ack_policy=ack_policy,
+            ack_journal=AckJournal(Path(directory) / "ack.jsonl"),
         )
         pipeline = NunchiV2Pipeline(
             observation=observation,
@@ -124,6 +146,8 @@ def run_scenario(scenario: str) -> dict:
                 model=None if scenario == "bypass" else model,
                 policy=policy,
                 receipts=receipts,
+                ack_policy=ack_policy,
+                reaction_capability_provider=transport.reaction_capability,
             ),
             host=host,
             scheduler=scheduler,
@@ -147,6 +171,24 @@ def run_scenario(scenario: str) -> dict:
         ]
         expected = {
             "suppress": ("SUPPRESS", 0, 0, ["observation", "attention"]),
+            "ack": (
+                "ACK",
+                0,
+                1,
+                ["observation", "attention", "participant-host", "transport"],
+            ),
+            "ack-disabled": (
+                "DEFER",
+                1,
+                1,
+                ["observation", "attention", "participant-host", "transport"],
+            ),
+            "ack-unsupported": (
+                "DEFER",
+                1,
+                1,
+                ["observation", "attention", "participant-host", "transport"],
+            ),
             "wake-contribution": (
                 "WAKE",
                 1,
@@ -196,15 +238,27 @@ def run_scenario(scenario: str) -> dict:
             transport.calls,
             stages,
         )
+        ack_native_ok = scenario != "ack" or transport.actions == [
+            {
+                "kind": "reaction",
+                "origin_event_id": "discord:message:100",
+                "target_event_id": "discord:message:100",
+                "reaction": "👂",
+                "operation": "add",
+            }
+        ]
         return {
             "schema_version": 2,
             "scenario": scenario,
-            "status": "pass" if observed == expected else "fail",
+            "status": "pass" if observed == expected and ack_native_ok else "fail",
             "observed": {
                 "effective_disposition": opportunity.effective_disposition,
                 "classifier_calls": model.calls,
                 "participant_invocations": host.invocation_count,
                 "transport_calls": transport.calls,
+                "transport_action_kinds": [
+                    action["kind"] for action in transport.actions
+                ],
                 "receipt_stages": stages,
             },
             "expected": {
