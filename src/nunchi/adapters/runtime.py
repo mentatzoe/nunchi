@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -120,6 +121,74 @@ def _policy(raw: Any) -> AttentionPolicy:
         raise ValidationError(f"adapter attention policy is invalid: {exc}") from exc
 
 
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+class ChannelIngressAuthenticator:
+    """Authenticate one generic native delivery before normalization."""
+
+    def __init__(self, raw: Any) -> None:
+        if not isinstance(raw, Mapping) or set(raw) != {"source_id", "hmac_key_env"}:
+            raise ValidationError("generic channel ingress_auth has an invalid closed shape")
+        source_id = raw["source_id"]
+        key_env = raw["hmac_key_env"]
+        if not isinstance(source_id, str) or not source_id:
+            raise ValidationError("generic channel ingress source_id must be non-empty")
+        if not isinstance(key_env, str) or not key_env:
+            raise ValidationError("generic channel ingress hmac_key_env must be non-empty")
+        key = os.environ.get(key_env)
+        if key is None or len(key.encode("utf-8")) < 32:
+            raise ValidationError(
+                f"generic channel ingress key is absent or shorter than 32 bytes in {key_env}"
+            )
+        self.source_id = source_id
+        self._key = key.encode("utf-8")
+
+    def unwrap(self, envelope: Any) -> Mapping[str, Any]:
+        if not isinstance(envelope, Mapping) or set(envelope) != {
+            "payload",
+            "authorization",
+        }:
+            raise ValidationError(
+                "generic channel ingress requires one authenticated payload envelope"
+            )
+        payload = envelope["payload"]
+        authorization = envelope["authorization"]
+        if not isinstance(payload, Mapping):
+            raise ValidationError("generic channel ingress payload must be an object")
+        if not isinstance(authorization, Mapping) or set(authorization) != {
+            "schema_version",
+            "source_id",
+            "payload_sha256",
+            "mac",
+        }:
+            raise ValidationError("generic channel ingress authorization is malformed")
+        if authorization["schema_version"] != 1:
+            raise ValidationError("generic channel ingress authorization version is unsupported")
+        if authorization["source_id"] != self.source_id:
+            raise ValidationError("generic channel ingress source differs from trusted binding")
+        payload_sha256 = hashlib.sha256(_canonical_json(payload)).hexdigest()
+        if authorization["payload_sha256"] != payload_sha256:
+            raise ValidationError("generic channel ingress payload digest differs")
+        material = (
+            b"nunchi.channel.ingress.v1\0"
+            + self.source_id.encode("utf-8")
+            + b"\0"
+            + payload_sha256.encode("ascii")
+        )
+        expected = hmac.new(self._key, material, hashlib.sha256).hexdigest()
+        supplied = authorization["mac"]
+        if not isinstance(supplied, str) or not hmac.compare_digest(supplied, expected):
+            raise ValidationError("generic channel ingress authentication failed")
+        return payload
+
+
 class JsonLineTransport:
     """Host-attested generic outbound seam used by ``nunchi-channel``."""
 
@@ -174,7 +243,6 @@ class ReferenceAdapterRuntime:
             "binding",
             "profile",
             "attention",
-            "participant_model",
             "limits",
             "state_directory",
         }
@@ -183,8 +251,14 @@ class ReferenceAdapterRuntime:
             "transport",
             "participant_timeout_seconds",
             "ack",
+            "ingress_auth",
         }
-        if set(config) - (required | optional) or required - set(config):
+        participant_backends = set(config) & {"participant_model", "codex"}
+        if (
+            set(config) - (required | optional | {"participant_model", "codex"})
+            or required - set(config)
+            or len(participant_backends) != 1
+        ):
             raise ValidationError("adapter config has a missing or unexpected field")
         if config["schema_version"] != 2:
             raise ValidationError("adapter config schema_version must be 2")
@@ -219,6 +293,18 @@ class ReferenceAdapterRuntime:
             surface == "channel" and self.binding.platform
         ):
             raise ValidationError("adapter surface and trusted platform binding differ")
+        ingress_auth_raw = config.get("ingress_auth")
+        if surface == "channel":
+            if ingress_auth_raw is None:
+                raise ValidationError(
+                    "generic channel requires ingress_auth; use a native adapter when "
+                    "the upstream source cannot sign canonical deliveries"
+                )
+            self.ingress_auth = ChannelIngressAuthenticator(ingress_auth_raw)
+        else:
+            if ingress_auth_raw is not None:
+                raise ValidationError("native adapters do not accept generic ingress_auth")
+            self.ingress_auth = None
 
         profile_raw = config["profile"]
         if not isinstance(profile_raw, Mapping) or set(profile_raw) != {"path", "sha256"}:
@@ -242,14 +328,6 @@ class ReferenceAdapterRuntime:
             if policy.preattention_enabled
             else None
         )
-        participant_raw = config["participant_model"]
-        if not isinstance(participant_raw, Mapping):
-            raise ValidationError("adapter participant_model must be an object")
-        participant = OpenAICompatibleParticipant.from_trusted_config(
-            profile=profile,
-            config=participant_raw,
-            environment=os.environ,
-        )
         try:
             limits = ObservationLimits(**config["limits"])
         except (TypeError, ValueError) as exc:
@@ -259,7 +337,39 @@ class ReferenceAdapterRuntime:
         stem = hashlib.sha256(
             f"{surface}\0{self.binding.participant_id}\0{self.binding.continuity_scope_id}".encode()
         ).hexdigest()[:24]
-        receipts = ReceiptJournal(state_directory / f"{stem}.receipts.jsonl")
+        if "participant_model" in participant_backends:
+            participant_raw = config["participant_model"]
+            if not isinstance(participant_raw, Mapping):
+                raise ValidationError("adapter participant_model must be an object")
+            participant = OpenAICompatibleParticipant.from_trusted_config(
+                profile=profile,
+                config=participant_raw,
+                environment=os.environ,
+            )
+            receipts = ReceiptJournal(state_directory / f"{stem}.receipts.jsonl")
+            self.participant_backend = "openai-compatible"
+        else:
+            codex_raw = config["codex"]
+            if not isinstance(codex_raw, Mapping):
+                raise ValidationError("adapter codex config must be an object")
+            # This local import avoids making the shared adapter layer depend on
+            # a platform participant at module-import time.
+            from ..integrations.codex_v2 import (  # noqa: PLC0415
+                CodexParticipant,
+                CodexTaskReceiptJournal,
+            )
+
+            participant = CodexParticipant(
+                profile=profile,
+                config=codex_raw,
+                binding=self.binding,
+                state_directory=state_directory / f"{stem}.codex",
+            )
+            receipts = CodexTaskReceiptJournal(
+                state_directory / f"{stem}.receipts.jsonl",
+                participant=participant,
+            )
+            self.participant_backend = "codex"
         observation = ObservationProvider(
             self.binding,
             limits=limits,
@@ -318,6 +428,7 @@ class ReferenceAdapterRuntime:
         )
         self.surface = surface
         self.transport = transport
+        self.participant = participant
         self.pipeline = NunchiV2Pipeline(
             observation=observation,
             attention=attention,
@@ -332,7 +443,7 @@ class ReferenceAdapterRuntime:
         *,
         live: bool = True,
     ) -> DeliveryOutcome:
-        delivery = NORMALIZERS[self.surface](payload, self.binding)
+        delivery = self._normalize(payload)
         if not live:
             observed = self.pipeline.observation.observe(
                 delivery_id=delivery.delivery_id,
@@ -355,7 +466,7 @@ class ReferenceAdapterRuntime:
         live: bool = True,
     ) -> DeliveryOutcome:
         """Retain native ingress promptly and schedule work off the callback."""
-        delivery = NORMALIZERS[self.surface](payload, self.binding)
+        delivery = self._normalize(payload)
         if not live:
             observed = self.pipeline.observation.observe(
                 delivery_id=delivery.delivery_id,
@@ -374,8 +485,13 @@ class ReferenceAdapterRuntime:
     def drain(self, timeout: float | None = None) -> bool:
         return self.lane.drain(timeout)
 
+    def _normalize(self, payload: Mapping[str, Any]):
+        if self.ingress_auth is not None:
+            payload = self.ingress_auth.unwrap(payload)
+        return NORMALIZERS[self.surface](payload, self.binding)
+
     def probe(self) -> dict[str, Any]:
-        return {
+        result = {
             "product": "nunchi",
             "product_version": __version__,
             "generation": 2,
@@ -385,6 +501,15 @@ class ReferenceAdapterRuntime:
             "actor_id": self.binding.actor_id,
             "room_id": self.binding.room_id,
             "continuity_scope_id": self.binding.continuity_scope_id,
+            "participant_backend": self.participant_backend,
+            "ingress_authentication": (
+                {
+                    "mode": "hmac-sha256",
+                    "source_id": self.ingress_auth.source_id,
+                }
+                if self.ingress_auth is not None
+                else {"mode": "native-adapter"}
+            ),
             "capabilities": deepcopy(CAPABILITIES[self.surface]),
             "interfaces": {
                 "I-010A": 1,
@@ -401,6 +526,15 @@ class ReferenceAdapterRuntime:
             "operator_schema_version": 1,
             "v1_fallback": False,
         }
+        if self.participant_backend == "codex":
+            result["codex"] = {
+                "session_mode": self.participant.session_mode,
+                "persistent_session": self.participant.session_mode == "persistent",
+                "task_state": self.participant.session_status(),
+                "runtime_identity": self.participant.runtime_status(),
+                "capability_mode": self.participant.capability_mode,
+            }
+        return result
 
     def restart(self) -> None:
         self.lane.restart()

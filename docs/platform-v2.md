@@ -37,6 +37,14 @@ interfaces; platform code does not redefine them.
 
 Room payloads are never trusted configuration.
 
+The shared reference-adapter runtime can host either the pinned
+OpenAI-compatible participant model or the Codex participant backend. Discord,
+Matrix, and Telegram continue to own and authenticate their native ingress and
+output. Generic JSONL ingress requires an exact HMAC-authenticated source and
+payload envelope; raw channel-shaped prompt text is not an event. Both
+backends use the same observation, attention, ACK, scheduling,
+participant-host, authorization, transport, and receipt owners.
+
 The shared runtime always owns the attention prompt, attention model selection,
 judgment schema, policy, scheduling, and wake facts. For Nunchi-owned
 participants it also owns the normal-turn prompt and action schema. A platform
