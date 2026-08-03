@@ -58,6 +58,8 @@ nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
 nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
+nunchi-claude-code-session-gate = "nunchi.integrations.claude_code_session:main"
+nunchi-claude-code-hook = "nunchi.integrations.claude_code_hook:main"
 nunchi-service-worker = "nunchi.service_worker:main"
 
 [project.entry-points."hermes_agent.plugins"]

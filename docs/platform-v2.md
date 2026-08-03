@@ -71,6 +71,29 @@ The plugin accepts exactly Hermes 0.19.0. A different version must use a
 Nunchi release that explicitly verifies it, or run stock Hermes without
 Nunchi. Method-shape similarity is not compatibility proof.
 
+Claude Code has the same shape in its supported `native-session` mode. The
+session that a channel plugin already serves owns the participant pipeline;
+Nunchi gates it through Claude Code's own hook events:
+
+1. `UserPromptSubmit` decides before any model request is built, so `SUPPRESS`
+   makes zero model calls and zero native calls from the session.
+2. An admitted turn receives the shared bounded wake facts as appended
+   context; its model, prompt, memory, tools, MCP servers, plugins, commands,
+   and delivery path are untouched.
+3. `PreToolUse` parks a room-effect call so the host's `commit_dispatch` is
+   the real commit point, `PostToolUse` attests the native result, and `Stop`
+   settles receipts and promotes one coalesced successor.
+
+Supported channel-plugin builds are an exact allowlist, and each build records
+what it does *before* the gate can see an event. `claude-plugins-official`
+discord 0.0.4 emits a typing indicator and an optional ack reaction ahead of
+its notification and drops bot-authored messages, so that build cannot carry
+silence-completeness or mixed-agent operation; the surface reports both as
+shortfalls rather than assuming them away. Installation of the hook entries is
+issue #58, ingress beyond Discord is #57, and installed/live proof is #39.
+Claude Code's isolated headless participant remains available as an explicitly
+selected restricted fallback with its lost capabilities stated.
+
 This is the intended Hermes participant implementation for the contract. The
 plugin must not recreate shared Nunchi behavior with a second attention model
 call, copied prompt, copied model selection, copied opportunity lifecycle, or

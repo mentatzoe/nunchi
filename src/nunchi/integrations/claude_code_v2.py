@@ -75,6 +75,39 @@ from .mcp_client import StreamableMCPClient
 NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 SURFACE = "claude-code"
 
+#: What this runner is.  It is a *restricted fallback*, not the supported way
+#: to give a Claude Code agent room presence: it answers the room with a
+#: separate, deliberately stripped `claude` process rather than with the agent
+#: the operator configured.  The supported path is the native session seam in
+#: `claude_code_session`, which gates the plugin-owned session itself.
+MODE = "restricted-headless"
+
+#: Exactly what an operator gives up by selecting this mode.  Stated here, in
+#: `probe()`, and in the integration README, because a fallback whose costs are
+#: not visible is indistinguishable from the real thing until it matters.
+LOST_CAPABILITIES = (
+    'no built-in tools (--tools "")',
+    "no MCP servers, including the channel plugin serving the room "
+    "(--strict-mcp-config --mcp-config {})",
+    'no user, project, or local settings (--setting-sources "")',
+    "no skills or slash commands (--disable-slash-commands)",
+    "no CLAUDE.md or other ambient instructions",
+    "no conversation memory beyond the pinned participant session",
+    "not the session that serves the channel: a separate process with a "
+    "private CLAUDE_CONFIG_DIR and its own credential",
+    "delivery goes through Nunchi's own Discord transport, not the channel "
+    "plugin's own send path",
+)
+
+#: What the isolation buys, so the trade is legible in both directions.
+GAINED_PROPERTIES = (
+    "identity comes solely from the digest-pinned profile",
+    "the participant turn cannot reach any native effect except the "
+    "inventoried privileged capabilities",
+    "the transport authorization key and classifier credential are withheld "
+    "from the participant environment",
+)
+
 _SESSION_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -1326,6 +1359,8 @@ class ClaudeCodeRoomRuntime:
             "product_version": __version__,
             "generation": 2,
             "surface": SURFACE,
+            "mode": MODE,
+            "lost_capabilities": list(LOST_CAPABILITIES),
             "participant_id": self.binding.participant_id,
             "actor_id": self.binding.actor_id,
             "room_id": self.binding.room_id,
@@ -1348,6 +1383,18 @@ def _parser() -> argparse.ArgumentParser:
         default=os.environ.get("NUNCHI_CLAUDE_CODE_CONFIG_SHA256"),
     )
     parser.add_argument("--probe", action="store_true")
+    # Selecting the restricted fallback is a decision, so it has to be made.
+    # Silently rerouting a room to a stripped substitute agent is exactly the
+    # substitution this surface must never make on an operator's behalf.
+    parser.add_argument(
+        "--mode",
+        choices=(MODE,),
+        help=(
+            "run the restricted headless participant. This is a fallback: it "
+            "answers the room with a separate stripped `claude` process, not "
+            "with the agent your channel plugin already runs."
+        ),
+    )
     return parser
 
 
@@ -1363,6 +1410,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "product_version": __version__,
                             "generation": 2,
                             "surface": SURFACE,
+                            "mode": MODE,
+                            "lost_capabilities": list(LOST_CAPABILITIES),
                             "configured": False,
                             "v1_fallback": False,
                         }
@@ -1372,6 +1421,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValidationError("--config is required")
         if not args.config_sha256:
             raise ValidationError("--config-sha256 is required")
+        if not args.probe and args.mode != MODE:
+            raise ValidationError(
+                "the headless Claude Code participant is a restricted "
+                f"fallback and must be selected explicitly with --mode {MODE}. "
+                "It answers the room with a separate stripped `claude` process "
+                "instead of the agent your channel plugin already runs, losing: "
+                + "; ".join(LOST_CAPABILITIES)
+                + ". To gate that agent instead, run "
+                "nunchi-claude-code-session-gate."
+            )
         config = load_pinned_config(args.config, args.config_sha256)
         transport = config.get("transport")
         if not isinstance(transport, Mapping) or set(transport) != {

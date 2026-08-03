@@ -1,21 +1,83 @@
 # Nunchi V2 for Claude Code
 
 This integration gives one Claude Code participant presence in a live shared
-Discord room: it observes conversation, spends attention through its **own**
-delegated model, contributes or stays silent, and proposes privileged actions
-that the host authorizes before any effect.
+room: it observes conversation, spends attention through its **own** delegated
+model, contributes or stays silent, and proposes privileged actions that the
+host authorizes before any effect.
 
 It is a platform wrapper, not a second Nunchi. Observation, attention,
-scheduling, the participant host, the privileged-action coordinator, and the
-Discord consumer transport all come from the shared V2 owners described in
+scheduling, the participant host, and the privileged-action coordinator all
+come from the shared V2 owners described in
 [`docs/platform-v2.md`](../../docs/platform-v2.md). This directory owns only
-the Claude Code specifics: native identity, the headless participant, session
-continuity, private state, and the operator surface.
+the Claude Code specifics: native identity, session continuity, private state,
+and the operator surface. There is no V1 verdict path.
 
-There is no prompt gate, no `UserPromptSubmit` hook, and no V1 verdict path.
-Nunchi V2 does not sit in front of your interactive Claude Code session.
+## Two modes, and why the default matters
 
-## How a turn actually runs
+| Mode | What answers the room | Status |
+|---|---|---|
+| **`native-session`** (supported) | the Claude Code agent your channel plugin already runs, with its own model, memory, tools, MCP servers, plugins, skills, and delivery path | seam implemented; not yet installed- or live-proven ([#39](https://github.com/mentatzoe/nunchi/issues/39)) |
+| **`restricted-headless`** (fallback) | a separate, deliberately stripped `claude` process | implemented; must be selected explicitly |
+
+The native session mode is the product. Nunchi sits *in front of* your existing
+agent and decides whether it wakes; it does not replace it. The restricted
+fallback exists for operators who want the isolation instead, and it must be
+asked for by name — a room is never silently rerouted to a substitute agent.
+
+## How a native-session turn runs
+
+```text
+channel plugin -> <channel …> prompt -> UserPromptSubmit hook -> gate
+    -> observation -> attention (your model)
+    -> SUPPRESS: prompt blocked, no model request, no native call
+    -> WAKE: bounded room facts appended, your own session takes its turn
+             -> PreToolUse parks the send at the host commit point
+             -> PostToolUse attests what the plugin actually did
+             -> Stop settles receipts and promotes one coalesced successor
+```
+
+Two processes are involved. `nunchi-claude-code-session-gate` is one long-lived
+gate per bound room that owns the shared core; `nunchi-claude-code-hook` is a
+stdlib-only client that Claude Code runs once per hook event and that talks to
+the gate over a private `AF_UNIX` socket. The core keeps its state in one
+process because its observation, receipt, and scheduling state is guarded by
+in-process locks — a gate living inside a per-invocation hook would fork
+observation and tear its own journals.
+
+Fail direction is per event and is enforced at the process boundary:
+`UserPromptSubmit` and `PreToolUse` fail **closed**, so a gate that cannot run
+blocks the room event and denies the send rather than letting either through.
+`Stop`, `PostToolUse`, and the session-lifecycle events fail **open**, because
+none of them can admit anything and a broken one must not deafen the
+participant.
+
+### What this mode does not yet guarantee
+
+Stated plainly, because a gate in front of the session cannot undo what the
+channel transport already did:
+
+- **Suppression is not natively silent with the official Discord plugin.**
+  `claude-plugins-official` discord `0.0.4` calls `sendTyping()` and, when an
+  ack reaction is configured, `msg.react(...)` *before* it emits the
+  notification Nunchi gates. Typing is named in end condition 6, so this
+  surface reports `silence_complete: false` until a conforming channel plugin
+  build exists.
+- **Peer agents are invisible through that plugin.** It returns early for every
+  bot-authored message, so mixed-agent room operation cannot be observed
+  through it.
+- **Native facts are envelope-only.** The gate binds the author from the
+  delivery metadata the plugin renders into the prompt. It reports
+  `native_fact_trust: "envelope-only"` and never invents a mention or reply
+  relation it did not observe.
+- **The gate cannot assert that it ran.** Claude Code offers no way for an
+  extension to declare itself mandatory, so a settings change that removes the
+  hook entries silently ungates the room.
+
+`nunchi-claude-code-session-gate --probe --config …` reports each of these as
+structured fields rather than prose, and the supported channel-plugin list is
+an exact allowlist: an unverified build is refused, not assumed compatible.
+
+## The restricted headless fallback
 
 ```text
 Discord  ->  shared MCP transport  ->  observation  ->  attention (your model)
@@ -152,8 +214,32 @@ The runtime pins its own configuration by digest:
 
 ```sh
 export NUNCHI_CLAUDE_CODE_CONFIG_SHA256="$(sha256sum claude-code-room.json | cut -d' ' -f1)"
-nunchi-claude-code-room-runner --config claude-code-room.json
+nunchi-claude-code-room-runner --config claude-code-room.json --mode restricted-headless
 ```
+
+`--mode restricted-headless` is required. Without it the runner refuses and
+names what the fallback gives up, so a room is never quietly answered by a
+substitute agent.
+
+## Run the native session gate
+
+The gate needs no channel credential at all — your session's own plugin holds
+it. That is why its configuration has no `transport` block, and instead names
+the channel plugin build it is gating:
+
+```json
+"channel": {"source": "discord", "plugin": "discord", "plugin_version": "0.0.4"}
+```
+
+```sh
+export NUNCHI_CLAUDE_CODE_SESSION_CONFIG_SHA256="$(sha256sum claude-code-session.json | cut -d' ' -f1)"
+nunchi-claude-code-session-gate --config claude-code-session.json
+```
+
+It prints the socket path to use for the hook client. Registering the hook
+entries in your Claude Code settings, and supervising the gate as a service,
+are [#58](https://github.com/mentatzoe/nunchi/issues/58); until that lands both
+are manual.
 
 ## Diagnostics
 

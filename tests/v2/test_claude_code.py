@@ -2844,7 +2844,17 @@ class InstalledSurfaceTests(unittest.TestCase):
             ),
         )
         text = (integration / "README.md").read_text(encoding="utf-8")
-        for retired in ("PASS", "SPEAK", "nunchi admit", "UserPromptSubmit hook."):
+        # The V1 gate's vocabulary and its executable, not the word "hook".
+        # V2 legitimately gates the plugin-owned session through Claude Code's
+        # own UserPromptSubmit event (see `claude_code_session`), so forbidding
+        # that name would guard a phrasing rather than the retired path.
+        for retired in (
+            "PASS",
+            "SPEAK",
+            "nunchi admit",
+            "nunchi_prompt_gate",
+            "nunchi-gate.env",
+        ):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, text)
         self.assertIn("no V1 verdict path", text)
