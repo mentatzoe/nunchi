@@ -12,7 +12,10 @@ The interception points are Claude Code's own hook events.  A channel plugin
 delivers a room message as an ordinary session prompt wrapped in a
 ``<channel …>`` envelope; ``UserPromptSubmit`` sees that prompt before any
 model request is built, so a suppressed room event costs zero model calls and
-zero native calls.  An admitted event is answered by the operator's real
+zero native calls *from the session*.  What the channel transport already did
+before handing the event over is a property of that plugin build, recorded in
+``SUPPORTED_CHANNEL_PLUGINS`` and reported rather than assumed away.  An
+admitted event is answered by the operator's real
 session, with its real model, prompt, memory, tools, MCP servers, plugins,
 commands, and delivery path intact.
 
@@ -99,10 +102,13 @@ class ChannelEnvelope:
 
     This is an *envelope*, not authority.  The attribute values arrive as text
     inside a session prompt, so they establish which delivery the hook is
-    talking about and nothing more.  Actor identity, mentions, and reply
-    structure are resolved from the channel transport's own facts before any
-    canonical event is constructed; ordinary room content is never proof of
-    who sent it.
+    talking about and nothing more.
+
+    Today the author id is taken from this envelope and nothing else, which is
+    why the surface reports ``native_fact_trust: "envelope-only"``: mentions
+    and reply relations are absent rather than guessed, and no stronger claim
+    is made about who sent what.  A channel transport that publishes attested
+    facts out of band can supply a stronger resolver; issue #57 owns that seam.
     """
 
     source: str
@@ -245,9 +251,10 @@ SUPPORTED_CHANNEL_PLUGINS: dict[tuple[str, str], ChannelPluginConformance] = {
         delivers_peer_agents=False,
         detail=(
             "claude-plugins-official discord 0.0.4: handleInbound calls "
-            "sendTyping() and the configured ack reaction before emitting "
-            "notifications/claude/channel, and returns early for every "
-            "bot-authored message"
+            "sendTyping() (server.ts:950-951) and the configured ack reaction "
+            "(:956-957) before emitting notifications/claude/channel (:988); "
+            "separately, the messageCreate listener returns early for every "
+            "bot-authored message (:908) before handleInbound is reached"
         ),
     ),
 }
@@ -264,8 +271,10 @@ def channel_plugin_conformance(
     except KeyError:
         raise SessionBindingError(
             f"channel plugin {plugin} {version} has not been verified against "
-            "this Nunchi release; run the supported build, or accept the new "
-            "build explicitly with the gate's `update` command"
+            "this Nunchi release. Run a verified build, or add this one to "
+            "SUPPORTED_CHANNEL_PLUGINS with a measured conformance record; "
+            "there is no way to accept an unmeasured build at runtime, because "
+            "the record is what makes the surface's claims truthful."
         ) from None
 
 
@@ -422,20 +431,29 @@ def drift_report(
     lines.extend(
         [
             "Choose one:",
-            "  nunchi-claude-code-session-gate rebind    "
-            "keep history, bind the new session",
-            "  nunchi-claude-code-session-gate update    "
-            "accept the new runtime, keep continuity",
-            "  nunchi-claude-code-session-gate reset     "
-            "drop continuity and start clean (records a gap)",
-            "  nunchi-claude-code-session-gate fallback  "
-            "run the restricted headless participant instead",
+            "  nunchi-claude-code-session-gate --config … --accept rebind",
+            "      keep observation history, bind the new session",
+            "  nunchi-claude-code-session-gate --config … --accept update",
+            "      accept the new runtime, keep continuity",
+            "  nunchi-claude-code-session-gate --config … --accept reset",
+            "      drop continuity and start clean (records a gap)",
+            "  nunchi-claude-code-room-runner --config … "
+            "--mode restricted-headless",
+            "      run the restricted headless participant instead, with the "
+            "capabilities it loses",
             "",
             "Until then this room is not gated and Claude Code will not answer "
             "it. The rest of your Claude Code session is unaffected.",
         ]
     )
     return "\n".join(lines)
+
+
+#: The recovery verbs `drift_report` offers, and what each one does to the
+#: committed binding. `fallback` is deliberately absent: it is not a gate
+#: action, it is running the other runner, so the menu names that command
+#: directly rather than implying the gate can become it.
+ACCEPT_VERBS = ("rebind", "update", "reset")
 
 
 # ---------------------------------------------------------------------------
@@ -639,6 +657,20 @@ def wake_prompt(context: str, *diagnostics: str) -> HookDecision:
     )
 
 
+def continue_after_stop(context: str, *diagnostics: str) -> HookDecision:
+    """Hand the session one more turn for a coalesced successor.
+
+    A blocked ``Stop`` returns the session to work with ``reason`` as its
+    context, which is the only way a successor promoted after the previous
+    turn finished can become work without waiting for another room delivery.
+    """
+
+    return HookDecision(
+        output={"decision": "block", "reason": context},
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def allow_tool(*diagnostics: str) -> HookDecision:
     """Let a tool call through untouched.
 
@@ -720,11 +752,18 @@ class _TurnTrace:
         session_id: str,
         anchor_event_id: str,
         deadline: float,
+        token: Any = None,
+        request_id: str = "",
     ) -> None:
         self.prompt_id = prompt_id
         self.session_id = session_id
         self.anchor_event_id = anchor_event_id
         self.deadline = deadline
+        # The scheduler token this turn holds. `Stop` completes it, which is
+        # what promotes one coalesced successor; without that the lane stays
+        # active forever and every later room event is silently coalesced.
+        self.token = token
+        self.request_id = request_id
         self.created_at = time.monotonic()
 
         self._lock = threading.Lock()
@@ -946,12 +985,15 @@ class _TraceRegistry:
         session_id: str,
         anchor_event_id: str,
         deadline: float,
+        token: Any = None,
     ) -> _TurnTrace:
         trace = _TurnTrace(
             prompt_id=prompt_id,
             session_id=session_id,
             anchor_event_id=anchor_event_id,
             deadline=deadline,
+            token=token,
+            request_id=request_id,
         )
         with self._lock:
             self._by_prompt[prompt_id] = trace
@@ -1160,6 +1202,29 @@ class ClaudeCodeSessionRuntime:
             claude_entrypoint=str(environment.get("CLAUDE_CODE_ENTRYPOINT") or ""),
         )
 
+    def accept_drift(self, verb: str) -> None:
+        """Resolve identity drift so the next observed session can bind.
+
+        All three verbs clear the committed pin; they differ in what they do
+        to the observation history that pin was guarding:
+
+        ``rebind``  same identity, new session — history stays.
+        ``update``  the runtime changed under a committed binding — history stays.
+        ``reset``   start clean, and record the gap that creates, so coverage
+                    never implies continuity it does not have.
+        """
+
+        if verb not in ACCEPT_VERBS:
+            raise ValidationError(f"unsupported drift resolution {verb!r}")
+        self.identity_store.discard()
+        try:
+            self.identity_store.path.unlink()
+        except FileNotFoundError:
+            pass
+        self.committed_identity = None
+        if verb == "reset":
+            self.cancel("operator reset the Claude Code session binding")
+
     def check_identity(self, payload: Mapping[str, Any]) -> str | None:
         """Return a drift notice that must block, or ``None`` to proceed.
 
@@ -1265,7 +1330,9 @@ class ClaudeCodeSessionRuntime:
                 f"no opportunity: {observed.audit.outcome} "
                 f"({observed.audit.detail})",
             )
-        return self._drive(token, prompt_id=prompt_id, session_id=session_id)
+        return self._drive(
+            token, prompt_id=prompt_id, session_id=session_id, payload=payload
+        )
 
     def _observe_and_offer(self, *, delivery_id, event, actors):
         observed = self.observation.observe(
@@ -1284,6 +1351,8 @@ class ClaudeCodeSessionRuntime:
         *,
         prompt_id: str,
         session_id: str,
+        payload: Mapping[str, Any] | None = None,
+        at_stop: bool = False,
     ) -> HookDecision:
         """Run attention until one opportunity admits the session, or none do.
 
@@ -1342,8 +1411,14 @@ class ClaudeCodeSessionRuntime:
                 deadline=deadline,
                 prompt_id=prompt_id,
                 session_id=session_id,
+                payload=payload or {},
                 diagnostics=diagnostics,
+                at_stop=at_stop,
             )
+        if at_stop:
+            # Nothing admitted. The session's turn simply ends; there is no
+            # room event left waiting on it.
+            return HookDecision(diagnostics=tuple(diagnostics))
         return block_prompt("", *diagnostics)
 
     def _admit(
@@ -1356,7 +1431,9 @@ class ClaudeCodeSessionRuntime:
         deadline,
         prompt_id,
         session_id,
+        payload,
         diagnostics,
+        at_stop=False,
     ) -> HookDecision:
         trace = self.traces.open(
             request_id=request["request_id"],
@@ -1364,7 +1441,12 @@ class ClaudeCodeSessionRuntime:
             session_id=session_id,
             anchor_event_id=token.anchor_event_id,
             deadline=deadline,
+            token=token,
         )
+        # Stage the identity this turn is running under. It becomes durable
+        # only if the host's own receipts attest that it accepted the turn, so
+        # a rejected, cancelled, expired, or malformed turn commits nothing.
+        self.identity_store.stage(self.observed_identity(payload))
         error_wake = self.attention.policy.error_action == "WAKE"
 
         def run_host() -> None:
@@ -1379,11 +1461,12 @@ class ClaudeCodeSessionRuntime:
             finally:
                 # A host that returned without dispatching must release the
                 # parked tool, or the session would wait for a commit point
-                # that is never coming.
+                # that is never coming. The scheduler token is deliberately
+                # *not* completed here: `Stop` owns that, because the session's
+                # turn is still running when the host's own call returns.
                 trace.refuse_dispatch(
                     "Nunchi did not admit this action for the current turn."
                 )
-                self.traces.close(trace)
 
         worker = threading.Thread(
             target=run_host,
@@ -1391,13 +1474,20 @@ class ClaudeCodeSessionRuntime:
             daemon=True,
         )
         with self._lock:
+            self._workers = [item for item in self._workers if item.is_alive()]
             self._workers.append(worker)
         worker.start()
-        return wake_prompt(
-            render_wake_context(wake),
+        notes = (
             *diagnostics,
             f"{wake['attention']['source']} anchor={token.anchor_event_id}",
         )
+        context = render_wake_context(wake)
+        if at_stop:
+            # A successor promoted after the previous turn finished. Blocking
+            # the stop hands the session another turn with these facts, which
+            # is how one coalesced successor becomes work.
+            return continue_after_stop(context, *notes)
+        return wake_prompt(context, *notes)
 
     # -- hook: pre tool ----------------------------------------------------
 
@@ -1518,42 +1608,128 @@ class ClaudeCodeSessionRuntime:
         prompt_id = payload.get("prompt_id")
         session_id = str(payload.get("session_id") or "")
         trace = self.traces.for_prompt(prompt_id)
-        diagnostics: list[str] = []
-        if trace is not None and trace.session_id == session_id:
-            # No room action arrived: the session took its turn and chose not
-            # to act. That is valid participant silence, not an error.
-            trace.offer_silence()
-            self._join_workers(timeout=max(0.0, trace.deadline - time.monotonic()))
-            diagnostics.append(f"turn settled for prompt {trace.prompt_id}")
-        self.identity_store.discard()
-        return HookDecision(diagnostics=tuple(diagnostics))
+        if trace is None or trace.session_id != session_id:
+            return HookDecision()
+
+        # No room action arrived: the session took its turn and chose not to
+        # act. That is valid participant silence, not an error.
+        trace.offer_silence()
+        self._join_workers(timeout=max(0.0, trace.deadline - time.monotonic()))
+        diagnostics = [f"turn settled for prompt {trace.prompt_id}"]
+
+        # Continuity becomes durable only now, and only if the host's own
+        # receipts attest that it accepted the turn.
+        if self._turn_was_accepted(trace.request_id):
+            committed = self.identity_store.commit()
+            if committed is not None:
+                # Hold it in the running gate too, or drift would only be
+                # checked against what happened to be on disk at startup.
+                self.committed_identity = committed
+        else:
+            self.identity_store.discard()
+            diagnostics.append("turn not accepted; continuity not committed")
+
+        token, trace.token = trace.token, None
+        self.traces.close(trace)
+        if token is None:
+            return HookDecision(diagnostics=tuple(diagnostics))
+        # Completing the token is what releases the lane and promotes at most
+        # one coalesced successor. Without it the lane stays active and every
+        # later room event is silently coalesced into a pending anchor that
+        # never becomes work.
+        successor = self.scheduler.complete(token)
+        if successor is None:
+            return HookDecision(diagnostics=tuple(diagnostics))
+        decision = self._drive(
+            successor,
+            prompt_id=str(prompt_id),
+            session_id=session_id,
+            payload=payload,
+            at_stop=True,
+        )
+        return decision.with_diagnostics(*diagnostics)
+
+    def _turn_was_accepted(self, request_id: str) -> bool:
+        """Whether the host's own receipts attest that it accepted this turn.
+
+        The same rule the headless surface uses: a ``transport`` record exists
+        only past the single output-commit point, and a ``participant-host``
+        record with outcome ``silent`` means the host accepted the decision to
+        stay quiet. A rejected action, a stale opportunity, a blown deadline,
+        or a cancellation ordered before the commit point produces neither.
+        """
+
+        if not request_id:
+            return False
+        for record in self.host.receipts.records(request_id):
+            if record["stage"] == "transport":
+                return True
+            if (
+                record["stage"] == "participant-host"
+                and record["body"].get("outcome") == "silent"
+            ):
+                return True
+        return False
+
+
+def _acknowledgement_text(response: Any) -> str:
+    """Flatten an MCP tool result into the text the plugin actually returned.
+
+    The channel plugin answers with the ordinary MCP shape,
+    ``{"content": [{"type": "text", "text": "sent (id: 123)"}]}``. Reading only
+    a bare string or a string-valued ``text`` field would miss every real
+    acknowledgement and report confirmed sends as ``unknown``.
+    """
+
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, Mapping):
+        return ""
+    content = response.get("content")
+    if isinstance(content, (list, tuple)):
+        parts = [
+            item["text"]
+            for item in content
+            if isinstance(item, Mapping) and isinstance(item.get("text"), str)
+        ]
+        if parts:
+            return "\n".join(parts)
+    for key in ("text", "result", "content"):
+        value = response.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
 
 
 def _native_result(response: Any, source: str) -> dict[str, Any]:
     """Read a channel-plugin acknowledgement without inventing success.
 
-    Only an acknowledgement that names a new native event is ``sent``. A
-    partial send, an error, an unrecognized wording, or a missing report is
-    reported as what it is, and the transport turns that into ``unknown`` —
-    which is the honest state for an effect that may or may not have landed.
+    A target-attested acknowledgement that names the new native event is
+    ``sent``; that includes a chunked send, which names every id it created.
+    An error, an acknowledgement that attests no id, an unrecognized wording,
+    or a missing report is reported as what it is, and the transport turns
+    that into ``unknown`` — the honest state for an effect that may or may not
+    have landed.
     """
 
     if isinstance(response, Mapping) and (
         response.get("isError") or response.get("error")
     ):
-        return {"failed": True, "detail": str(response.get("error") or "tool error")}
-    text = ""
-    if isinstance(response, str):
-        text = response
-    elif isinstance(response, Mapping):
-        for key in ("text", "result", "content"):
-            value = response.get(key)
-            if isinstance(value, str):
-                text = value
-                break
-    match = re.search(r"\bsent \(id:\s*(\d+)\)", text)
-    if match:
-        return {"event_id": f"{source}:message:{match.group(1)}"}
+        detail = _acknowledgement_text(response) or str(
+            response.get("error") or "tool error"
+        )
+        return {"failed": True, "detail": detail[:400]}
+    text = _acknowledgement_text(response)
+    single = re.search(r"\bsent \(id:\s*(\d+)\)", text)
+    if single:
+        return {"event_id": f"{source}:message:{single.group(1)}"}
+    # A chunked send is still a confirmed delivery: it attests every id it
+    # created. The first is the event the room sees as this turn's message.
+    chunked = re.search(r"\bsent \d+ parts \(ids:\s*([0-9,\s]+)\)", text)
+    if chunked:
+        ids = [item.strip() for item in chunked.group(1).split(",") if item.strip()]
+        if ids:
+            return {"event_id": f"{source}:message:{ids[0]}", "parts": len(ids)}
     return {"detail": text[:400] or "no native acknowledgement"}
 
 
@@ -1662,6 +1838,10 @@ class GateServer:
             worker = threading.Thread(
                 target=self._serve_one, args=(connection,), daemon=True
             )
+            # The gate is long-lived and sees one connection per hook event,
+            # including every tool call the session makes. Retaining finished
+            # threads would grow without bound against the operating envelope.
+            self._threads = [item for item in self._threads if item.is_alive()]
             self._threads.append(worker)
             worker.start()
 
@@ -1774,11 +1954,6 @@ def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, 
         OpenAICompatibleAttentionModel,
         ParticipantProfile,
     )
-    from ..authorization import (
-        AuthorizationCoordinator,
-        AuthorizationJournal,
-        PinnedFilePolicySource,
-    )
     from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
     from ..participant import ConversationOpportunityScheduler, ParticipantTurnHost
     from ..receipts import ReceiptJournal
@@ -1871,27 +2046,20 @@ def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, 
     participant = NativeSessionParticipant(traces=traces)
     transport = NativeSessionTransport(traces=traces)
 
-    privileged = None
-    authorization = config.get("authorization")
-    if authorization is not None:
-        if not isinstance(authorization, Mapping) or not {
-            "policy_path",
-            "policy_sha256",
-        } <= set(authorization):
-            raise ValidationError(
-                "Claude Code session authorization config has an invalid shape"
-            )
-        privileged = AuthorizationCoordinator(
-            observation=observation,
-            policy_source=PinnedFilePolicySource(
-                authorization["policy_path"],
-                expected_sha256=authorization["policy_sha256"],
-            ),
-            journal=AuthorizationJournal(
-                state / "claude-code-session-authorization.jsonl"
-            ),
-            executors={},
+    # Privileged proposals are not offered on this surface yet. `_action_from_tool`
+    # can only produce message/reply/reaction, so no `privileged` action can reach
+    # the host; wiring a coordinator with no executors would deny every capability
+    # with reason "policy-deny", blaming the operator's policy for a missing
+    # executor. An `authorization` block is therefore refused rather than accepted
+    # and quietly ignored. The parked-PreToolUse executor design that would make
+    # this real is future work.
+    if config.get("authorization") is not None:
+        raise ValidationError(
+            "Claude Code session gate does not support privileged actions yet; "
+            "remove the authorization block. Run the restricted headless "
+            "participant if you need the inventoried workspace capability."
         )
+    privileged = None
 
     try:
         ack_policy = AckPolicy(**dict(config.get("ack", {})))
@@ -1963,7 +2131,8 @@ def probe_document(
             "native_fact_trust": runtime.resolver.trust,
             "send_time_social_judgment": False,
             "participant_capabilities_preserved": True,
-            "privileged_actions_enabled": runtime.host.privileged is not None,
+            "privileged_actions_enabled": False,
+            "privileged_proposals_supported": False,
             # The honest headline: this surface does not carry a complete V2
             # lifecycle yet, and these are the reasons.
             "complete_v2_lifecycle": conformance.lifecycle_complete,
@@ -1988,6 +2157,14 @@ def main(argv: Any = None) -> int:
         default=os.environ.get("NUNCHI_CLAUDE_CODE_SESSION_CONFIG_SHA256"),
     )
     parser.add_argument("--probe", action="store_true")
+    parser.add_argument(
+        "--accept",
+        choices=ACCEPT_VERBS,
+        help=(
+            "resolve identity drift: rebind to the current session, update to "
+            "the current runtime, or reset continuity and start clean"
+        ),
+    )
     arguments = parser.parse_args(argv)
 
     try:
@@ -2002,6 +2179,14 @@ def main(argv: Any = None) -> int:
         runtime, socket_path = build_runtime(config)
         if arguments.probe:
             print(json.dumps(probe_document(runtime), sort_keys=True))
+            return 0
+        if arguments.accept:
+            runtime.accept_drift(arguments.accept)
+            print(
+                f"nunchi-claude-code-gate: {arguments.accept} accepted; the "
+                "next observed session will be bound.",
+                file=sys.stderr,
+            )
             return 0
         for note in runtime.conformance.shortfalls():
             print(f"nunchi-claude-code-gate: {note}", file=sys.stderr)

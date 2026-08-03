@@ -18,8 +18,12 @@ it is not, this integration is inert and every event passes through.
     Operator-typed prompts are not room deliveries and always pass.
 
 ``pre-tool``
-    fails **closed**.  A room-effect guard that cannot run must deny, not wave
-    a native send through.
+    fails **closed for a room-effect call only**.  A guard that cannot run
+    must deny a native send rather than wave it through, but a dead gate must
+    not take the operator's own session offline by denying ``Bash``, ``Read``,
+    or ``Edit`` — none of which can reach the room.  Classifying that without
+    the gate is why this module carries its own deliberately wide room-effect
+    matcher.
 
 ``post-tool``, ``stop``, ``session-start``, ``session-end``
     fail **open**.  None of them can admit anything on their own, and a broken
@@ -38,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import sys
 from typing import Any
@@ -152,6 +157,26 @@ def denied_tool(reason: str) -> dict[str, Any]:
     }
 
 
+#: A conservative room-effect matcher, duplicated from the gate on purpose.
+#: When the gate is unreachable it is the only thing that can tell a send into
+#: the room from an ordinary tool call. Keeping it here means a dead gate
+#: denies exactly the calls that could reach the room, instead of disabling the
+#: operator's entire session. It is deliberately *wider* than the gate's
+#: matcher — matching anything that looks like a channel send — because over-
+#: denying while the gate is down is safe and under-denying is not.
+_ROOM_EFFECT_TOOL = re.compile(
+    r"^mcp__[A-Za-z0-9_]*(?:discord|telegram|slack|matrix|channel)[A-Za-z0-9_]*"
+    r"__(?:reply|react|edit_message|send|post)$"
+)
+
+
+def looks_like_room_effect(payload: Any) -> bool:
+    """Whether this tool call could reach the room, judged without the gate."""
+
+    name = payload.get("tool_name") if isinstance(payload, dict) else None
+    return isinstance(name, str) and _ROOM_EFFECT_TOOL.match(name) is not None
+
+
 def looks_like_room_delivery(payload: Any) -> bool:
     """Whether this prompt is a channel delivery rather than operator text.
 
@@ -208,6 +233,11 @@ def run(event: str, payload: dict[str, Any], environ: dict[str, str]) -> tuple[i
         # An operator-typed prompt is not a room delivery. It passes whether or
         # not the gate is reachable, because there is nothing to gate.
         fail_closed = fail_closed and looks_like_room_delivery(payload)
+    elif event == "pre-tool":
+        # Only a call that could reach the room needs the gate. Denying every
+        # tool because the gate is down would take the operator's own session
+        # offline to protect a room the call was never going to touch.
+        fail_closed = fail_closed and looks_like_room_effect(payload)
     if not configured:
         return 0, ""
 
@@ -259,7 +289,11 @@ def _unavailable(event: str, fail_closed: bool, reason: str) -> tuple[int, str]:
             )
         )
     return 0, json.dumps(
-        denied_tool("The Nunchi room-effect guard is unavailable; denying.")
+        denied_tool(
+            "The Nunchi gate for this room is unavailable, so this send "
+            "cannot be attributed to an admitted turn; denying. Other tools "
+            "are unaffected."
+        )
     )
 
 

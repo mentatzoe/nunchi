@@ -121,10 +121,12 @@ class ChannelPluginConformanceTests(unittest.TestCase):
 
     def test_official_discord_build_is_recorded_with_its_shortfalls(self) -> None:
         # Pinned findings against claude-plugins-official discord 0.0.4:
-        # handleInbound calls sendTyping() and the configured ack reaction
-        # before emitting notifications/claude/channel, and returns early for
-        # every bot-authored message. A gate in front of the session cannot
-        # undo either, so neither may be silently assumed away.
+        # handleInbound calls sendTyping() (server.ts:950-951) and the
+        # configured ack reaction (:956-957) before emitting
+        # notifications/claude/channel (:988). Separately, the messageCreate
+        # listener returns early for every bot-authored message (:908), before
+        # handleInbound is reached. A gate in front of the session cannot undo
+        # either, so neither may be silently assumed away.
         record = channel_plugin_conformance("discord", "0.0.4")
         self.assertEqual(record.key, ("discord", "0.0.4"))
         self.assertTrue(record.emits_before_gate)
@@ -135,6 +137,11 @@ class ChannelPluginConformanceTests(unittest.TestCase):
         self.assertEqual(len(shortfalls), 2)
         self.assertTrue(any("before Nunchi observes" in note for note in shortfalls))
         self.assertTrue(any("other agents" in note for note in shortfalls))
+        # The pinned detail is a measured statement, so it must locate each
+        # finding where a reviewer will actually find it.
+        self.assertIn("950-951", record.detail)
+        self.assertIn("messageCreate", record.detail)
+        self.assertIn(":908", record.detail)
 
     def test_every_pinned_record_is_self_consistent(self) -> None:
         for key, record in SUPPORTED_CHANNEL_PLUGINS.items():
@@ -249,16 +256,38 @@ class SessionIdentityTests(unittest.TestCase):
 
 
 class DriftReportTests(unittest.TestCase):
-    def test_non_fatal_report_offers_all_four_recovery_paths(self) -> None:
+    def test_non_fatal_report_offers_recovery_commands_that_exist(self) -> None:
+        from nunchi.integrations.claude_code_session import ACCEPT_VERBS
+
         committed = _identity()
         observed = _identity(claude_version="2.1.219")
         report = drift_report(committed, observed, committed.drift(observed))
-        for verb in ("rebind", "update", "reset", "fallback"):
-            self.assertIn(verb, report)
         self.assertIn("2.1.216", report)
         self.assertIn("2.1.219", report)
         self.assertIn("claude_version", report)
         self.assertIn("will not answer it", report)
+        # Every command the menu prints has to be one the operator can
+        # actually run: printing four words is not offering four paths.
+        for verb in ACCEPT_VERBS:
+            with self.subTest(verb=verb):
+                self.assertIn(f"--accept {verb}", report)
+        self.assertIn("--mode restricted-headless", report)
+
+    def test_every_offered_accept_verb_is_accepted_by_the_parser(self) -> None:
+        import contextlib
+        import io
+
+        from nunchi.integrations.claude_code_session import ACCEPT_VERBS, main
+
+        for verb in ACCEPT_VERBS:
+            with self.subTest(verb=verb):
+                buffer = io.StringIO()
+                with contextlib.redirect_stderr(buffer):
+                    code = main(["--accept", verb])
+                # It fails on the missing --config, never on the verb itself.
+                self.assertNotEqual(code, 0)
+                self.assertNotIn("unrecognized", buffer.getvalue())
+                self.assertNotIn("invalid choice", buffer.getvalue())
 
     def test_fatal_report_refuses_and_offers_no_recovery_verb(self) -> None:
         committed = _identity()
@@ -629,7 +658,8 @@ class NativeDeliveryTests(_GateTestCase):
                 {"chat_id": "152", "text": "on it"},
             )
             harness.post_tool(
-                "mcp__plugin_discord_discord__reply", "sent (id: 1234)"
+                "mcp__plugin_discord_discord__reply",
+                {"content": [{"type": "text", "text": "sent (id: 1234)"}]},
             )
 
         worker = threading.Thread(target=send)
@@ -647,7 +677,7 @@ class NativeDeliveryTests(_GateTestCase):
         self.assertIn("participant-host", stages)
         self.assertIn("transport", stages)
 
-    def test_lost_acknowledgement_is_unknown_never_synthetic_success(self) -> None:
+    def test_unattested_acknowledgement_is_unknown_never_synthetic_success(self) -> None:
         harness = self.harness()
         harness.deliver()
 
@@ -656,8 +686,11 @@ class NativeDeliveryTests(_GateTestCase):
                 "mcp__plugin_discord_discord__reply",
                 {"chat_id": "152", "text": "on it"},
             )
+            # An acknowledgement that names no native event: the send may or
+            # may not have landed, which is exactly what `unknown` means.
             harness.post_tool(
-                "mcp__plugin_discord_discord__reply", "sent 2 parts"
+                "mcp__plugin_discord_discord__reply",
+                {"content": [{"type": "text", "text": "queued for delivery"}]},
             )
 
         worker = threading.Thread(target=send)
@@ -683,7 +716,8 @@ class NativeDeliveryTests(_GateTestCase):
                 {"chat_id": "152", "text": "first"},
             )
             harness.post_tool(
-                "mcp__plugin_discord_discord__reply", "sent (id: 1)"
+                "mcp__plugin_discord_discord__reply",
+                {"content": [{"type": "text", "text": "sent (id: 1)"}]},
             )
 
         worker = threading.Thread(target=send)
@@ -736,6 +770,202 @@ class SilenceTests(_GateTestCase):
         self.assertEqual(host[-1]["body"]["outcome"], "silent")
         self.assertEqual(harness.transport.dispatch_count, 0)
         self.assertNotIn("transport", harness.stages())
+
+
+class ConsecutiveTurnTests(_GateTestCase):
+    """The lane must be released, or the room goes silent after one turn."""
+
+    def _complete_turn(self, harness, message_id, prompt_id):
+        decision = harness.deliver(message_id=message_id, prompt_id=prompt_id)
+        admitted = not (decision.output or {}).get("decision")
+        harness.stop(prompt_id=prompt_id)
+        return admitted
+
+    def test_every_delivery_is_judged_not_just_the_first(self) -> None:
+        # Regression: the admitting branch used to return without completing
+        # its scheduler token, so the lane stayed active forever and every
+        # later room event was coalesced into a pending anchor that never
+        # became work. That is permanent false suppression.
+        harness = self.harness()
+        for index, message_id in enumerate(("900", "901", "902")):
+            with self.subTest(message_id=message_id):
+                self.assertTrue(
+                    self._complete_turn(harness, message_id, f"p{index}")
+                )
+        self.assertEqual(len(harness.model.calls), 3)
+        self.assertEqual(harness.participant.invocation_count, 3)
+
+    def test_the_lane_is_idle_between_turns(self) -> None:
+        harness = self.harness()
+        self._complete_turn(harness, "900", "p1")
+        self.assertFalse(harness.scheduler.active)
+        self.assertIsNone(harness.scheduler.pending_anchor)
+
+    def test_a_silent_turn_also_releases_the_lane(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1")
+        harness.stop(prompt_id="p1")
+        self.assertFalse(harness.scheduler.active)
+        self.assertTrue(self._complete_turn(harness, "901", "p2"))
+
+    def test_a_suppressed_delivery_does_not_wedge_the_lane(self) -> None:
+        harness = self.harness(disposition="SUPPRESS")
+        for index, message_id in enumerate(("900", "901", "902")):
+            harness.deliver(message_id=message_id, prompt_id=f"p{index}")
+        self.assertEqual(len(harness.model.calls), 3)
+
+    def test_a_coalesced_delivery_is_promoted_by_stop(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1")
+        coalesced = harness.deliver(message_id="901", prompt_id="p1")
+        # While a turn is active the newest anchor replaces the pending slot.
+        self.assertEqual(coalesced.output["decision"], "block")
+        self.assertEqual(harness.scheduler.pending_anchor, "discord:message:901")
+
+        stop = harness.stop(prompt_id="p1")
+        # Stop hands the session another turn carrying the successor's facts,
+        # which is how "one replaceable newest event" becomes work.
+        self.assertEqual(stop.output["decision"], "block")
+        self.assertIn("[nunchi-v2 participant wake]", stop.output["reason"])
+        self.assertIn("discord:message:901", stop.output["reason"])
+        self.assertEqual(len(harness.model.calls), 2)
+
+    def test_stop_with_nothing_pending_ends_the_turn(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1")
+        self.assertIsNone(harness.stop(prompt_id="p1").output)
+
+    def test_finished_workers_do_not_accumulate(self) -> None:
+        harness = self.harness()
+        for index in range(4):
+            self._complete_turn(harness, str(900 + index), f"p{index}")
+        self.assertLessEqual(len(harness.runtime._workers), 1)
+
+
+class IdentityCommitmentTests(_GateTestCase):
+    """Continuity is durable only once the host attests it accepted the turn."""
+
+    def test_an_accepted_silent_turn_commits_the_binding(self) -> None:
+        harness = self.harness()
+        self.assertIsNone(harness.identity_store.load())
+        harness.deliver(message_id="900", prompt_id="p1")
+        harness.stop(prompt_id="p1")
+        committed = harness.identity_store.load()
+        self.assertIsNotNone(committed)
+        self.assertEqual(committed.room_id, "152")
+        self.assertEqual(committed.claude_session_id, "s1")
+
+    def test_an_accepted_sending_turn_commits_the_binding(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1")
+
+        def send() -> None:
+            harness.pre_tool(
+                "mcp__plugin_discord_discord__reply",
+                {"chat_id": "152", "text": "on it"},
+            )
+            harness.post_tool(
+                "mcp__plugin_discord_discord__reply",
+                {"content": [{"type": "text", "text": "sent (id: 1234)"}]},
+            )
+
+        worker = threading.Thread(target=send)
+        worker.start()
+        worker.join(timeout=15)
+        harness.stop(prompt_id="p1")
+        self.assertIsNotNone(harness.identity_store.load())
+
+    def test_a_suppressed_delivery_commits_nothing(self) -> None:
+        harness = self.harness(disposition="SUPPRESS")
+        harness.deliver(message_id="900", prompt_id="p1")
+        harness.stop(prompt_id="p1")
+        self.assertIsNone(harness.identity_store.load())
+
+    def test_a_committed_binding_makes_the_drift_gate_live(self) -> None:
+        # The whole point of committing: the *next* session is checked against
+        # it without a test reaching in and writing the pin by hand.
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1", session="s1")
+        harness.stop(prompt_id="p1", session="s1")
+        # No test fixture reaches in: the running gate holds what it committed.
+        self.assertIsNotNone(harness.runtime.committed_identity)
+
+        drifted = harness.runtime.user_prompt_submit(
+            {
+                "prompt": _envelope_prompt(message_id="901"),
+                "prompt_id": "p2",
+                "session_id": "a-different-session",
+            }
+        )
+        self.assertEqual(drifted.output["decision"], "block")
+        self.assertIn("claude_session_id", drifted.output["reason"])
+        self.assertIn("--accept rebind", drifted.output["reason"])
+
+    def test_accepting_drift_clears_the_binding(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1")
+        harness.stop(prompt_id="p1")
+        self.assertIsNotNone(harness.runtime.committed_identity)
+
+        harness.runtime.accept_drift("rebind")
+        self.assertIsNone(harness.runtime.committed_identity)
+        self.assertIsNone(harness.identity_store.load())
+
+    def test_unsupported_drift_verbs_are_refused(self) -> None:
+        harness = self.harness()
+        with self.assertRaises(ValidationError):
+            harness.runtime.accept_drift("fallback")
+
+
+class AcknowledgementParsingTests(unittest.TestCase):
+    """What the channel plugin actually returns must read as what it means."""
+
+    def setUp(self) -> None:
+        from nunchi.integrations.claude_code_session import _native_result
+
+        self.parse = _native_result
+
+    def test_the_plugins_real_mcp_shape_is_a_confirmed_send(self) -> None:
+        # server.ts returns {content: [{type: 'text', text: 'sent (id: N)'}]}.
+        # Reading only bare strings reported every real send as `unknown`.
+        result = self.parse(
+            {"content": [{"type": "text", "text": "sent (id: 1234)"}]}, "discord"
+        )
+        self.assertEqual(result, {"event_id": "discord:message:1234"})
+
+    def test_a_chunked_send_is_confirmed_by_the_ids_it_attests(self) -> None:
+        result = self.parse(
+            {"content": [{"type": "text", "text": "sent 3 parts (ids: 11, 12, 13)"}]},
+            "discord",
+        )
+        self.assertEqual(result["event_id"], "discord:message:11")
+        self.assertEqual(result["parts"], 3)
+
+    def test_a_bare_string_acknowledgement_still_works(self) -> None:
+        self.assertEqual(
+            self.parse("sent (id: 7)", "discord"),
+            {"event_id": "discord:message:7"},
+        )
+
+    def test_an_acknowledgement_attesting_no_id_is_not_a_send(self) -> None:
+        for response in (
+            "sent 2 parts",
+            "reacted",
+            "",
+            {"content": [{"type": "text", "text": "queued"}]},
+            {},
+            None,
+        ):
+            with self.subTest(response=response):
+                self.assertNotIn("event_id", self.parse(response, "discord"))
+
+    def test_an_error_result_is_a_failure_not_an_unknown(self) -> None:
+        result = self.parse(
+            {"isError": True, "content": [{"type": "text", "text": "reply failed"}]},
+            "discord",
+        )
+        self.assertTrue(result["failed"])
+        self.assertIn("reply failed", result["detail"])
 
 
 class SessionLifecycleTests(_GateTestCase):
@@ -817,8 +1047,8 @@ class IdentityDriftGateTests(_GateTestCase):
             }
         )
         self.assertEqual(decision.output["decision"], "block")
-        self.assertIn("rebind", decision.output["reason"])
-        self.assertIn("fallback", decision.output["reason"])
+        self.assertIn("--accept rebind", decision.output["reason"])
+        self.assertIn("--mode restricted-headless", decision.output["reason"])
         self.assertEqual(harness.model.calls, [])
 
     def test_warn_class_drift_does_not_block(self) -> None:
@@ -935,13 +1165,33 @@ class HookClientTests(unittest.TestCase):
         )
         self.assertEqual((code, out), (0, ""))
 
-    def test_unreachable_gate_denies_a_tool_call(self) -> None:
-        code, out = self._run("pre-tool", {"tool_name": "x"}, socket_path=self.missing)
-        self.assertEqual(code, 0)
-        answer = json.loads(out)
-        self.assertEqual(
-            answer["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
+    def test_unreachable_gate_denies_a_room_effect_call(self) -> None:
+        for tool in (
+            "mcp__plugin_discord_discord__reply",
+            "mcp__plugin_discord_discord__react",
+            "mcp__plugin_telegram_telegram__send",
+        ):
+            with self.subTest(tool=tool):
+                code, out = self._run(
+                    "pre-tool", {"tool_name": tool}, socket_path=self.missing
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(
+                    json.loads(out)["hookSpecificOutput"]["permissionDecision"],
+                    "deny",
+                )
+
+    def test_unreachable_gate_does_not_disable_the_whole_session(self) -> None:
+        # A dead gate must not take Bash, Read, and Edit offline: none of them
+        # can reach the room, so denying them protects nothing and traps the
+        # operator inside their own session.
+        for tool in ("Bash", "Read", "Edit", "Task",
+                     "mcp__plugin_discord_discord__fetch_messages"):
+            with self.subTest(tool=tool):
+                code, out = self._run(
+                    "pre-tool", {"tool_name": tool}, socket_path=self.missing
+                )
+                self.assertEqual((code, out), (0, ""))
 
     def test_unreachable_gate_fails_open_for_reporting_events(self) -> None:
         for event in ("post-tool", "stop", "session-start", "session-end"):
@@ -1097,7 +1347,9 @@ class HookClientOverSocketTests(unittest.TestCase):
             ' "permissionDecision": "deny", "permissionDecision": "allow",'
             ' "permissionDecisionReason": ""}}}'
         )
-        code, out = self._run("pre-tool", {"tool_name": "x"})
+        code, out = self._run(
+            "pre-tool", {"tool_name": "mcp__plugin_discord_discord__reply"}
+        )
         self.assertEqual(
             json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny"
         )
@@ -1117,7 +1369,9 @@ class HookClientOverSocketTests(unittest.TestCase):
                 }
             )
         )
-        code, out = self._run("pre-tool", {"tool_name": "x"})
+        code, out = self._run(
+            "pre-tool", {"tool_name": "mcp__plugin_discord_discord__reply"}
+        )
         self.assertEqual(
             json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny"
         )
@@ -1303,6 +1557,23 @@ class BuildAndProbeTests(_GateTestCase):
         self.assertFalse(probe["silence_complete"])
         self.assertEqual(len(probe["shortfalls"]), 2)
         self.assertEqual(probe["native_fact_trust"], "envelope-only")
+        # No privileged proposal can be constructed on this surface, so the
+        # probe must not assert a capability the code cannot deliver.
+        self.assertFalse(probe["privileged_actions_enabled"])
+        self.assertFalse(probe["privileged_proposals_supported"])
+
+    def test_an_authorization_block_is_refused_rather_than_ignored(self) -> None:
+        from nunchi.integrations.claude_code_session import build_runtime
+
+        with self.assertRaises(ValidationError):
+            build_runtime(
+                self._config(
+                    authorization={
+                        "policy_path": "/etc/nunchi/policy.json",
+                        "policy_sha256": "d" * 64,
+                    }
+                )
+            )
 
     def test_unconfigured_probe_is_honest_about_being_unconfigured(self) -> None:
         from nunchi.integrations.claude_code_session import probe_document

@@ -2,12 +2,11 @@
 
 This integration gives one Claude Code participant presence in a live shared
 room: it observes conversation, spends attention through its **own** delegated
-model, contributes or stays silent, and proposes privileged actions that the
-host authorizes before any effect.
+model, and contributes or stays silent.
 
 It is a platform wrapper, not a second Nunchi. Observation, attention,
-scheduling, the participant host, and the privileged-action coordinator all
-come from the shared V2 owners described in
+scheduling, the participant host, and (in the restricted fallback) the
+privileged-action coordinator all come from the shared V2 owners described in
 [`docs/platform-v2.md`](../../docs/platform-v2.md). This directory owns only
 the Claude Code specifics: native identity, session continuity, private state,
 and the operator surface. There is no V1 verdict path.
@@ -44,12 +43,13 @@ process because its observation, receipt, and scheduling state is guarded by
 in-process locks — a gate living inside a per-invocation hook would fork
 observation and tear its own journals.
 
-Fail direction is per event and is enforced at the process boundary:
-`UserPromptSubmit` and `PreToolUse` fail **closed**, so a gate that cannot run
-blocks the room event and denies the send rather than letting either through.
-`Stop`, `PostToolUse`, and the session-lifecycle events fail **open**, because
-none of them can admit anything and a broken one must not deafen the
-participant.
+Fail direction is per event and is enforced at the process boundary. A room
+delivery on `UserPromptSubmit`, and a room-effect call on `PreToolUse`, fail
+**closed**: a gate that cannot run blocks the event and denies the send.
+Everything else fails **open** — operator-typed prompts, ordinary tool calls
+like `Bash` and `Edit`, and the reporting events. A dead gate must not take
+your whole session offline to protect a room the call was never going to
+touch, and none of the reporting events can admit anything on their own.
 
 ### What this mode does not yet guarantee
 
@@ -69,6 +69,11 @@ channel transport already did:
   delivery metadata the plugin renders into the prompt. It reports
   `native_fact_trust: "envelope-only"` and never invents a mention or reply
   relation it did not observe.
+- **Privileged actions are not offered in this mode.** The session's own tools
+  run under Claude Code's permission system; Nunchi neither widens nor narrows
+  them, and it constructs no `privileged` proposal. An `authorization` block is
+  refused rather than accepted and quietly ignored. The restricted fallback
+  keeps its one inventoried `workspace.file.write` capability.
 - **The gate cannot assert that it ran.** Claude Code offers no way for an
   extension to declare itself mandatory, so a settings change that removes the
   hook entries silently ungates the room.
