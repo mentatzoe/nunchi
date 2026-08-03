@@ -51,6 +51,25 @@ like `Bash` and `Edit`, and the reporting events. A dead gate must not take
 your whole session offline to protect a room the call was never going to
 touch, and none of the reporting events can admit anything on their own.
 
+Claude Code aborts a `UserPromptSubmit` hook after 30 seconds and **discards
+its output**, so an answer produced after that is no answer at all. The client
+therefore answers the prompt path inside its own shorter budget and blocks on
+expiry, rather than waiting for a verdict nobody will read.
+
+The gate's authority stops at the room it gates. A send to any other channel
+passes through untouched: one bound room must not make every other Discord or
+Telegram channel in your session unusable. Inside the bound room, a send with
+no admitted opportunity behind it is denied, and an admitted turn may act only
+in the room whose event admitted it.
+
+Releasing an admitted send is **not** an auto-approval. The call is parked by
+the hook blocking, not by a permission verdict, so your own permission rules
+still apply to the one tool that reaches the room. Nunchi only ever denies or
+gets out of the way; it never widens what the session may do. For the same
+reason a room-effect call carrying arguments the action shape does not cover —
+`files` on the pinned Discord build — is denied rather than authorized under a
+digest that does not describe it.
+
 ### What this mode does not yet guarantee
 
 Stated plainly, because a gate in front of the session cannot undo what the

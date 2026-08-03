@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from nunchi.errors import ValidationError
 from nunchi.integrations.claude_code_session import (
@@ -667,10 +668,10 @@ class NativeDeliveryTests(_GateTestCase):
         worker.join(timeout=15)
         harness.stop()
 
-        self.assertEqual(
-            released["decision"].output["hookSpecificOutput"]["permissionDecision"],
-            "allow",
-        )
+        # Released, not auto-approved: the parked hook returning is what lets
+        # the call proceed, and the operator's own permission rules still apply
+        # to the one tool that reaches the room.
+        self.assertIsNone(released["decision"].output)
         self.assertEqual(harness.participant.invocation_count, 1)
         self.assertEqual(harness.transport.dispatch_count, 1)
         stages = harness.stages()
@@ -743,6 +744,35 @@ class NativeDeliveryTests(_GateTestCase):
         self.assertEqual(
             decision.output["hookSpecificOutput"]["permissionDecision"], "deny"
         )
+        self.assertEqual(harness.transport.dispatch_count, 0)
+
+    def test_a_send_to_an_unbound_room_is_none_of_this_gates_business(self) -> None:
+        # One bound room must not disable every other channel in the
+        # operator's own session: Nunchi has no authority over rooms it does
+        # not gate, so it has no opinion about them either.
+        harness = self.harness()
+        for tool, args in (
+            ("mcp__plugin_discord_discord__reply", {"chat_id": "999", "text": "hi"}),
+            ("mcp__plugin_discord_discord__react",
+             {"chat_id": "777", "message_id": "1", "emoji": "\U0001f440"}),
+        ):
+            with self.subTest(tool=tool):
+                self.assertIsNone(harness.pre_tool(tool, args).output)
+
+    def test_an_input_key_the_action_cannot_attest_is_denied(self) -> None:
+        # The pinned Discord build's `reply` also accepts `files`, which the
+        # action shape does not cover. Authorizing it would post local files
+        # under a digest that says "a text message", named in no receipt.
+        harness = self.harness()
+        harness.deliver()
+        decision = harness.pre_tool(
+            "mcp__plugin_discord_discord__reply",
+            {"chat_id": "152", "text": "here you go", "files": ["/etc/passwd"]},
+        )
+        self.assertEqual(
+            decision.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+        self.assertIn("files", decision.output["hookSpecificOutput"]["permissionDecisionReason"])
         self.assertEqual(harness.transport.dispatch_count, 0)
 
     def test_unreadable_room_call_is_denied(self) -> None:
@@ -917,6 +947,133 @@ class IdentityCommitmentTests(_GateTestCase):
             harness.runtime.accept_drift("fallback")
 
 
+class DriftRecoveryTests(_GateTestCase):
+    """Recovery has to work against the gate that is actually running."""
+
+    def _bind(self, harness):
+        harness.deliver(message_id="900", prompt_id="p1", session="s1")
+        harness.stop(prompt_id="p1", session="s1")
+        self.assertIsNotNone(harness.identity_store.load())
+
+    def test_a_running_gate_sees_a_pin_cleared_by_another_process(self) -> None:
+        # `--accept` runs as a separate one-shot process. A gate that only read
+        # the pin at startup would keep blocking a room the operator has
+        # already unblocked, with no way back short of restarting it.
+        harness = self.harness()
+        self._bind(harness)
+        blocked = harness.deliver(message_id="901", prompt_id="p2", session="s2")
+        self.assertEqual(blocked.output["decision"], "block")
+
+        # Another process clears the pin, exactly as `--accept rebind` does.
+        harness.identity_store.path.unlink()
+
+        admitted = harness.deliver(message_id="902", prompt_id="p3", session="s2")
+        self.assertNotIn("decision", admitted.output)
+
+    def test_a_pin_written_by_another_process_starts_blocking(self) -> None:
+        harness = self.harness()
+        self._bind(harness)
+        harness.runtime.committed_identity = None
+        blocked = harness.deliver(message_id="901", prompt_id="p2", session="s9")
+        self.assertEqual(blocked.output["decision"], "block")
+
+
+class StaleLaneTests(_GateTestCase):
+    """A lane held by a session that is gone must be reclaimable."""
+
+    def test_a_new_session_reclaims_a_lane_the_old_one_still_holds(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1", session="s1")
+        self.assertTrue(harness.scheduler.active)
+
+        # The session is hard-killed: its Stop never reaches the gate. A brand
+        # new session starts and must not find the room wedged.
+        harness.runtime.session_start({"source": "startup", "session_id": "s2"})
+        self.assertFalse(harness.scheduler.active)
+
+        admitted = harness.deliver(message_id="901", prompt_id="p2", session="s2")
+        self.assertNotIn("decision", admitted.output)
+
+    def test_the_same_session_restarting_does_not_reclaim_its_own_turn(self) -> None:
+        harness = self.harness()
+        harness.deliver(message_id="900", prompt_id="p1", session="s1")
+        harness.runtime.session_start({"source": "startup", "session_id": "s1"})
+        self.assertTrue(harness.scheduler.active)
+
+    def test_startup_with_no_open_turn_is_not_a_gap(self) -> None:
+        harness = self.harness()
+        harness.runtime.session_start({"source": "startup", "session_id": "s1"})
+        admitted = harness.deliver(message_id="900", prompt_id="p1", session="s1")
+        self.assertNotIn("decision", admitted.output)
+
+
+class PinnedDigestTests(_GateTestCase):
+    """Fatal-class facts come from what the gate pinned, not the hook payload."""
+
+    def test_the_pin_carries_the_profile_and_config_digests(self) -> None:
+        # Claude Code's hook input carries none of these, so sourcing them from
+        # the payload left three fatal fields permanently empty — unable to
+        # detect the very changes their own table calls fatal.
+        harness = self.harness()
+        harness.runtime.pinned_digests = {
+            "profile_sha256": "a" * 64,
+            "config_sha256": "b" * 64,
+            "settings_sha256": "c" * 64,
+        }
+        observed = harness.runtime.observed_identity({"session_id": "s1"})
+        self.assertEqual(observed.profile_sha256, "a" * 64)
+        self.assertEqual(observed.config_sha256, "b" * 64)
+        self.assertEqual(observed.settings_sha256, "c" * 64)
+
+    def test_a_swapped_profile_is_fatal_drift(self) -> None:
+        harness = self.harness()
+        harness.runtime.pinned_digests = {"profile_sha256": "a" * 64}
+        committed = harness.runtime.observed_identity({"session_id": "s1"})
+        harness.identity_store.write(committed)
+
+        harness.runtime.pinned_digests = {"profile_sha256": "z" * 64}
+        decision = harness.runtime.user_prompt_submit(
+            {"prompt": _envelope_prompt(), "prompt_id": "p1", "session_id": "s1"}
+        )
+        self.assertEqual(decision.output["decision"], "block")
+        self.assertIn("profile_sha256", decision.output["reason"])
+        self.assertIn("different participant", decision.output["reason"])
+        self.assertEqual(harness.model.calls, [])
+
+    def test_build_runtime_pins_the_digests_it_was_given(self) -> None:
+        from nunchi.integrations.claude_code_session import build_runtime
+
+        profile = self.root / "p.json"
+        payload = json.dumps(GateHarness.PROFILE).encode("utf-8")
+        profile.write_bytes(payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        runtime, _ = build_runtime(
+            {
+                "schema_version": 2,
+                "binding": {
+                    "participant_id": "vigil",
+                    "actor_id": "discord:user:149",
+                    "platform": "discord",
+                    "room_id": "152",
+                    "continuity_scope_id": "discord:channel:152",
+                },
+                "profile": {"path": str(profile), "sha256": digest},
+                "attention": {"policy": {"preattention_enabled": False}, "model": {}},
+                "limits": {},
+                "state_directory": str(self.root / "pinned-state"),
+                "channel": {
+                    "source": "discord",
+                    "plugin": "discord",
+                    "plugin_version": "0.0.4",
+                },
+            },
+            config_digest="f" * 64,
+        )
+        self.addCleanup(runtime.cancel, "test teardown")
+        self.assertEqual(runtime.pinned_digests["profile_sha256"], digest)
+        self.assertEqual(runtime.pinned_digests["config_sha256"], "f" * 64)
+
+
 class AcknowledgementParsingTests(unittest.TestCase):
     """What the channel plugin actually returns must read as what it means."""
 
@@ -958,6 +1115,22 @@ class AcknowledgementParsingTests(unittest.TestCase):
         ):
             with self.subTest(response=response):
                 self.assertNotIn("event_id", self.parse(response, "discord"))
+
+    def test_a_reaction_is_attested_by_name_not_by_id(self) -> None:
+        # A reaction creates no new event, so the plugin answers "reacted".
+        # Recording that as `unknown` would put every later reaction on the
+        # anchor under the contract's retry-of-an-unknown-effect rule.
+        result = self.parse(
+            {"content": [{"type": "text", "text": "reacted"}]},
+            "discord",
+            effect="react",
+        )
+        self.assertEqual(result["event_id"], "discord:reaction:reacted")
+
+    def test_reacted_is_not_a_send_acknowledgement(self) -> None:
+        self.assertNotIn(
+            "event_id", self.parse("reacted", "discord", effect="reply")
+        )
 
     def test_an_error_result_is_a_failure_not_an_unknown(self) -> None:
         result = self.parse(
@@ -1250,6 +1423,127 @@ class HookClientTests(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 self.assertFalse(self.hook._is_tool_answer(bad))
+
+
+class HookBudgetTests(unittest.TestCase):
+    """The client must answer inside the platform's own hook budget."""
+
+    def setUp(self) -> None:
+        from nunchi.integrations import claude_code_hook
+
+        self.hook = claude_code_hook
+
+    def test_the_prompt_path_answers_well_inside_the_platform_budget(self) -> None:
+        # Claude Code aborts a UserPromptSubmit hook at 30 s and discards its
+        # output, so an answer produced after that is no answer at all: the
+        # room delivery would reach the model ungated.
+        self.assertLess(self.hook._PROMPT_EXCHANGE_SECONDS, 30.0)
+        self.assertEqual(
+            self.hook._exchange_budget("user-prompt-submit"),
+            self.hook._PROMPT_EXCHANGE_SECONDS,
+        )
+
+    def test_other_events_keep_the_longer_budget(self) -> None:
+        for event in ("pre-tool", "post-tool", "stop"):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    self.hook._exchange_budget(event),
+                    self.hook._EXCHANGE_SECONDS,
+                )
+
+    def test_a_silent_gate_blocks_before_the_platform_gives_up(self) -> None:
+        import socket as socket_module
+        import tempfile
+        import threading
+        import time
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = str(Path(tmp.name) / "silent.sock")
+        server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        server.bind(path)
+        server.listen(2)
+        self.addCleanup(server.close)
+
+        def accept_and_stall() -> None:
+            try:
+                connection, _ = server.accept()
+            except OSError:
+                return
+            # Never answer: the gate is alive but wedged.
+            time.sleep(5)
+            connection.close()
+
+        threading.Thread(target=accept_and_stall, daemon=True).start()
+        original = self.hook._PROMPT_EXCHANGE_SECONDS
+        self.hook._PROMPT_EXCHANGE_SECONDS = 0.5
+        self.addCleanup(setattr, self.hook, "_PROMPT_EXCHANGE_SECONDS", original)
+
+        started = time.monotonic()
+        code, out = self.hook.run(
+            "user-prompt-submit",
+            {"prompt": _envelope_prompt(), "prompt_id": "p1"},
+            {self.hook.SOCKET_ENVIRONMENT_VARIABLE: path},
+        )
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 4.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["decision"], "block")
+
+
+class HookPayloadTests(unittest.TestCase):
+    """A payload the client cannot read is not an empty payload."""
+
+    def setUp(self) -> None:
+        from nunchi.integrations import claude_code_hook
+
+        self.hook = claude_code_hook
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.missing = str(Path(self._tmp.name) / "absent.sock")
+
+    def _main(self, event, stdin_text, configured=True):
+        import contextlib
+        import io
+
+        environ = {}
+        if configured:
+            environ[self.hook.SOCKET_ENVIRONMENT_VARIABLE] = self.missing
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, environ, clear=True):
+            with mock.patch("sys.stdin", io.StringIO(stdin_text)):
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = self.hook.main([event])
+        return code, out.getvalue()
+
+    def test_a_truncated_payload_blocks_a_prompt_rather_than_admitting_it(self) -> None:
+        # Treating it as `{}` would leave no prompt to recognise, switching the
+        # fail-closed direction off and admitting a delivery with no
+        # observation, no attention call, and no record it existed.
+        code, out = self._main("user-prompt-submit", '{"prompt": "<channel sou')
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["decision"], "block")
+
+    def test_a_truncated_payload_denies_a_tool_call(self) -> None:
+        code, out = self._main("pre-tool", '{"tool_name": "mcp__x')
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+
+    def test_a_non_object_payload_is_also_unreadable(self) -> None:
+        code, out = self._main("user-prompt-submit", "[1, 2, 3]")
+        self.assertEqual(json.loads(out)["decision"], "block")
+
+    def test_reporting_events_still_fail_open_on_a_bad_payload(self) -> None:
+        for event in ("post-tool", "stop", "session-start", "session-end"):
+            with self.subTest(event=event):
+                self.assertEqual(self._main(event, "{not json"), (0, ""))
+
+    def test_an_unconfigured_client_stays_inert(self) -> None:
+        self.assertEqual(
+            self._main("user-prompt-submit", "{not json", configured=False), (0, "")
+        )
 
 
 class HookClientOverSocketTests(unittest.TestCase):

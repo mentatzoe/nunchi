@@ -870,6 +870,13 @@ _ROOM_EFFECT_TOOL = re.compile(
 )
 
 
+#: Exactly the room-effect tool arguments the action shapes cover. Anything
+#: else means the commit point would be authorizing a payload it never read.
+_READ_TOOL_INPUT_KEYS = frozenset(
+    {"chat_id", "text", "message", "content", "reply_to", "message_id", "emoji"}
+)
+
+
 def room_effect_tool(tool_name: Any) -> str | None:
     """Return the room effect a tool performs, or ``None`` for anything else."""
 
@@ -1020,6 +1027,15 @@ class _TraceRegistry:
                 if value is trace:
                     self._by_request.pop(key, None)
 
+    def held_by_other_session(self, session_id: str) -> str | None:
+        """The session id of an open turn that is not ``session_id``, if any."""
+
+        with self._lock:
+            for trace in self._by_prompt.values():
+                if trace.session_id and trace.session_id != session_id:
+                    return trace.session_id
+        return None
+
     def close_all(self) -> tuple[_TurnTrace, ...]:
         with self._lock:
             traces = tuple(set(self._by_prompt.values()) | set(self._by_request.values()))
@@ -1157,6 +1173,7 @@ class ClaudeCodeSessionRuntime:
         binding,
         conformance: ChannelPluginConformance,
         resolver: EnvelopeFactResolver,
+        pinned_digests: Mapping[str, str] | None = None,
     ) -> None:
         self.observation = observation
         self.attention = attention
@@ -1168,6 +1185,12 @@ class ClaudeCodeSessionRuntime:
         self.binding = binding
         self.conformance = conformance
         self.resolver = resolver
+        # The digests the gate itself pinned. They are fatal-class facts, so
+        # they cannot be sourced from the hook payload: Claude Code's hook
+        # input carries none of them, which would leave three fatal fields
+        # permanently empty and unable to detect the changes their own table
+        # calls fatal.
+        self.pinned_digests = dict(pinned_digests or {})
         self.committed_identity = identity_store.load()
         self._workers: list[threading.Thread] = []
         self._lock = threading.RLock()
@@ -1185,8 +1208,12 @@ class ClaudeCodeSessionRuntime:
             platform=self.binding.platform,
             room_id=self.binding.room_id,
             continuity_scope_id=self.binding.continuity_scope_id,
-            profile_sha256=str(payload.get("profile_sha256") or ""),
-            config_sha256=str(payload.get("config_sha256") or ""),
+            profile_sha256=self.pinned_digests.get(
+                "profile_sha256", str(payload.get("profile_sha256") or "")
+            ),
+            config_sha256=self.pinned_digests.get(
+                "config_sha256", str(payload.get("config_sha256") or "")
+            ),
             channel_source=self.resolver.expected_source,
             claude_session_id=str(payload.get("session_id") or ""),
             cwd=str(payload.get("cwd") or ""),
@@ -1194,7 +1221,9 @@ class ClaudeCodeSessionRuntime:
             claude_executable_path=str(environment.get("CLAUDE_CODE_EXECPATH") or ""),
             channel_plugin=self.conformance.plugin,
             channel_plugin_version=self.conformance.version,
-            settings_sha256=str(payload.get("settings_sha256") or ""),
+            settings_sha256=self.pinned_digests.get(
+                "settings_sha256", str(payload.get("settings_sha256") or "")
+            ),
             account_identity=str(payload.get("account_identity") or ""),
             model=str(payload.get("model") or ""),
             effort=str(payload.get("effort") or ""),
@@ -1235,6 +1264,16 @@ class ClaudeCodeSessionRuntime:
         exact failure this seam exists to prevent.
         """
 
+        # Re-read rather than trusting what was on disk at startup: `--accept`
+        # runs as a separate one-shot process, so a gate that never re-reads
+        # keeps blocking a room the operator has already unblocked.
+        try:
+            self.committed_identity = self.identity_store.load()
+        except SessionBindingError:
+            # An unreadable pin is drift of the worst kind, but it is also not
+            # something a room delivery can resolve. Keep whatever the gate
+            # already held rather than silently binding to anything.
+            pass
         committed = self.committed_identity
         if committed is None:
             return None
@@ -1274,6 +1313,24 @@ class ClaudeCodeSessionRuntime:
 
     def session_start(self, payload: Mapping[str, Any]) -> HookDecision:
         source = str(payload.get("source") or "")
+        session_id = str(payload.get("session_id") or "")
+        held = self.traces.held_by_other_session(session_id)
+        if held:
+            # A turn from a session that is no longer here. Its `Stop` will
+            # never arrive, so the lane it holds would block every later room
+            # event until the host deadline expired — and `cancel()` discards
+            # the newest waiting anchor rather than promoting it. Reclaim it
+            # now and record the gap that creates.
+            self.cancel(
+                "a previous Claude Code session ended with an admitted turn "
+                "still open"
+            )
+            return HookDecision(
+                diagnostics=(
+                    f"session {source or 'startup'}: reclaimed a lane held by "
+                    f"{held}",
+                )
+            )
         if source in ("resume", "clear", "compact", "fork"):
             # A resumed, cleared, compacted, or forked session did not observe
             # what the previous one did. Queued room prompts in it are a gap,
@@ -1295,8 +1352,13 @@ class ClaudeCodeSessionRuntime:
         try:
             envelope = parse_channel_envelope(payload.get("prompt"))
         except ChannelEnvelopeError as exc:
+            # An empty reason is right for suppression, which already has an
+            # off-surface receipt. This is a parse failure on text the operator
+            # may simply have typed, so it says what happened.
             return block_prompt(
-                "",
+                "Nunchi could not read this as one channel delivery, so it was "
+                f"not judged ({exc}). If you typed this yourself, rephrase it "
+                "without a <channel …> opener.",
                 f"malformed channel envelope ({exc}); room delivery blocked",
             )
         if envelope is None:
@@ -1501,28 +1563,52 @@ class ClaudeCodeSessionRuntime:
             # narrows what the session may otherwise do.
             return allow_tool()
 
-        trace = self.traces.for_prompt(payload.get("prompt_id"))
-        session_id = str(payload.get("session_id") or "")
-        if trace is None or trace.session_id != session_id:
-            # No admitted opportunity for this turn. This catches operator
-            # turns that decide to post into the bound room, subagents, and
-            # any path where the prompt gate did not run.
-            return deny_tool(
-                "Nunchi has no current opportunity for this room.",
-                f"room effect {effect} denied: no admitted turn",
-            )
-
         tool_input = payload.get("tool_input")
         tool_input = tool_input if isinstance(tool_input, Mapping) else {}
         target_room = str(tool_input.get("chat_id") or "")
+        trace = self.traces.for_prompt(payload.get("prompt_id"))
+        session_id = str(payload.get("session_id") or "")
+        admitted = trace is not None and trace.session_id == session_id
+
         if target_room != self.binding.room_id:
-            # Send safety, not a social gate: an admitted turn acts only in the
-            # room whose event admitted it.
+            # A send into a room this gate does not gate. Nunchi has no
+            # authority there and no opinion about it: denying would make one
+            # bound room disable every other channel in the operator's own
+            # session. The exception is an admitted turn, which may act only in
+            # the room whose event admitted it.
+            if not admitted:
+                return allow_tool(
+                    f"{effect} to unbound room {target_room or '<none>'} "
+                    "is outside this gate"
+                )
             return deny_tool(
                 "Nunchi admitted this turn for room "
                 f"{self.binding.room_id}; this call targets "
                 f"{target_room or '<none>'}.",
                 f"cross-room {effect} denied",
+            )
+
+        if not admitted:
+            # A send into the bound room with no admitted opportunity behind
+            # it. This catches operator turns, subagents, and any path where
+            # the prompt gate did not run.
+            return deny_tool(
+                "Nunchi has no current opportunity for this room.",
+                f"room effect {effect} denied: no admitted turn",
+            )
+
+        unread = set(tool_input) - _READ_TOOL_INPUT_KEYS
+        if unread:
+            # The commit point may only authorize what it actually read. A key
+            # the action shape does not cover — `files` on the pinned Discord
+            # build attaches local paths to the message — would ride along
+            # under a digest that says "a text message" and appear in no
+            # receipt.
+            return deny_tool(
+                "Nunchi cannot authorize this call: it carries "
+                + ", ".join(sorted(unread))
+                + ", which is not part of any action it can attest.",
+                f"{effect} with unattestable input denied: {sorted(unread)}",
             )
 
         action = self._action_from_tool(effect, trace, tool_input)
@@ -1540,7 +1626,11 @@ class ClaudeCodeSessionRuntime:
             max(0.0, trace.deadline - time.monotonic())
         )
         if allowed:
-            return release_tool(reason)
+            # Deliberately not `permissionDecision: "allow"`: that would skip
+            # the operator's own permission rules for the one tool that reaches
+            # the room. The call was parked by this hook blocking in
+            # `await_dispatch`, so simply returning releases it.
+            return allow_tool(reason)
         return deny_tool(reason or "Nunchi did not admit this action.")
 
     def _action_from_tool(
@@ -1597,7 +1687,13 @@ class ClaudeCodeSessionRuntime:
         if trace is None:
             return HookDecision()
         response = payload.get("tool_response")
-        trace.report_native(_native_result(response, self.resolver.expected_source))
+        trace.report_native(
+            _native_result(
+                response,
+                self.resolver.expected_source,
+                effect=room_effect_tool(payload.get("tool_name")),
+            )
+        )
         return HookDecision()
 
     # -- hook: stop --------------------------------------------------------
@@ -1701,7 +1797,12 @@ def _acknowledgement_text(response: Any) -> str:
     return ""
 
 
-def _native_result(response: Any, source: str) -> dict[str, Any]:
+def _native_result(
+    response: Any,
+    source: str,
+    *,
+    effect: str | None = None,
+) -> dict[str, Any]:
     """Read a channel-plugin acknowledgement without inventing success.
 
     A target-attested acknowledgement that names the new native event is
@@ -1720,6 +1821,12 @@ def _native_result(response: Any, source: str) -> dict[str, Any]:
         )
         return {"failed": True, "detail": detail[:400]}
     text = _acknowledgement_text(response)
+    if effect == "react" and text.strip() == "reacted":
+        # A reaction creates no new event, so the plugin attests it by name
+        # rather than by id. That is still a target-attested success, and
+        # recording it as `unknown` would put every later reaction on the
+        # anchor under the contract's retry-of-an-unknown-effect rule.
+        return {"event_id": f"{source}:reaction:{text.strip()}"}
     single = re.search(r"\bsent \(id:\s*(\d+)\)", text)
     if single:
         return {"event_id": f"{source}:message:{single.group(1)}"}
@@ -1937,7 +2044,11 @@ _REQUIRED_CONFIG = {
 _OPTIONAL_CONFIG = {"ack", "authorization", "session"}
 
 
-def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, Path]:
+def build_runtime(
+    config: Mapping[str, Any],
+    *,
+    config_digest: str = "",
+) -> tuple[ClaudeCodeSessionRuntime, Path]:
     """Assemble the shared core for one bound room, plus its socket path.
 
     This is deliberately the same construction ``ClaudeCodeRoomRuntime`` uses,
@@ -2019,7 +2130,8 @@ def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, 
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     session_config = config.get("session") or {}
     if not isinstance(session_config, Mapping) or set(session_config) - {
-        "turn_timeout_seconds"
+        "turn_timeout_seconds",
+        "settings_path",
     }:
         raise ValidationError("Claude Code session options are invalid")
     turn_timeout = float(session_config.get("turn_timeout_seconds", 300))
@@ -2085,6 +2197,17 @@ def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, 
         ack_policy=ack_policy,
         reaction_capability_provider=host.reaction_capability,
     )
+    settings_digest = ""
+    settings_path = session_config.get("settings_path") if isinstance(
+        session_config, Mapping
+    ) else None
+    if isinstance(settings_path, str) and settings_path:
+        try:
+            settings_digest = hashlib.sha256(
+                Path(settings_path).read_bytes()
+            ).hexdigest()
+        except OSError:
+            settings_digest = ""
     runtime = ClaudeCodeSessionRuntime(
         observation=observation,
         attention=attention,
@@ -2098,6 +2221,11 @@ def build_runtime(config: Mapping[str, Any]) -> tuple[ClaudeCodeSessionRuntime, 
         resolver=EnvelopeFactResolver(
             expected_source=str(channel["source"]), room_id=binding.room_id
         ),
+        pinned_digests={
+            "profile_sha256": str(profile_raw["sha256"]),
+            "config_sha256": config_digest,
+            "settings_sha256": settings_digest,
+        },
     )
     return runtime, state / "sockets" / "gate.sock"
 
@@ -2176,7 +2304,9 @@ def main(argv: Any = None) -> int:
         if not arguments.config_sha256:
             raise ValidationError("--config-sha256 is required")
         config = load_pinned_config(arguments.config, arguments.config_sha256)
-        runtime, socket_path = build_runtime(config)
+        runtime, socket_path = build_runtime(
+            config, config_digest=str(arguments.config_sha256)
+        )
         if arguments.probe:
             print(json.dumps(probe_document(runtime), sort_keys=True))
             return 0

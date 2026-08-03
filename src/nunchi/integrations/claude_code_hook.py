@@ -69,7 +69,22 @@ _FORWARDED_ENVIRONMENT = (
 )
 
 _CONNECT_SECONDS = 5.0
+
+#: Claude Code aborts a UserPromptSubmit hook after 30 s by default and
+#: **discards its output** — an aborted hook yields `outcome: "cancelled"`, not
+#: a `blockingError`, so the prompt proceeds. The whole fail-closed guarantee
+#: for a room delivery is this process emitting its block document, which it
+#: can only do while it is still alive. So the prompt path gets its own budget
+#: comfortably under that ceiling and blocks on expiry rather than waiting for
+#: an answer nobody will read.
+_PROMPT_EXCHANGE_SECONDS = 20.0
+
+#: Everything else runs under the ordinary 600 s hook budget.
 _EXCHANGE_SECONDS = 300.0
+
+
+def _exchange_budget(event: str) -> float:
+    return _PROMPT_EXCHANGE_SECONDS if event == "user-prompt-submit" else _EXCHANGE_SECONDS
 
 
 def _strict_json(raw: str) -> Any:
@@ -190,14 +205,19 @@ def looks_like_room_delivery(payload: Any) -> bool:
     return isinstance(prompt, str) and "<channel" in prompt
 
 
-def exchange(socket_path: str, request: dict[str, Any]) -> dict[str, Any]:
+def exchange(
+    socket_path: str,
+    request: dict[str, Any],
+    *,
+    budget: float = _EXCHANGE_SECONDS,
+) -> dict[str, Any]:
     """Send one request to the gate and read exactly one answer."""
 
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(_CONNECT_SECONDS)
     try:
         connection.connect(socket_path)
-        connection.settimeout(_EXCHANGE_SECONDS)
+        connection.settimeout(budget)
         connection.sendall(
             json.dumps(request, ensure_ascii=False).encode("utf-8") + b"\n"
         )
@@ -244,7 +264,8 @@ def run(event: str, payload: dict[str, Any], environ: dict[str, str]) -> tuple[i
     try:
         answer = exchange(
             socket_path,
-            {
+            budget=_exchange_budget(event),
+            request={
                 "schema_version": 1,
                 "event": event,
                 "payload": payload,
@@ -301,13 +322,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nunchi-claude-code-hook")
     parser.add_argument("event", choices=HOOK_EVENTS)
     arguments = parser.parse_args(argv)
+    environ = dict(os.environ)
     try:
-        payload = json.loads(sys.stdin.read() or "{}")
-    except ValueError:
-        payload = {}
+        raw = sys.stdin.read() or "{}"
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        # A payload this process could not read is not an empty payload. An
+        # empty one has no prompt and no tool name, which would switch the
+        # fail-closed direction off and admit a delivery with no observation,
+        # no attention call, and no record that it existed.
+        return _unreadable_payload(arguments.event, environ)
     if not isinstance(payload, dict):
-        payload = {}
-    exit_code, stdout = run(arguments.event, payload, dict(os.environ))
+        return _unreadable_payload(arguments.event, environ)
+    exit_code, stdout = run(arguments.event, payload, environ)
+    if stdout:
+        sys.stdout.write(stdout)
+    return exit_code
+
+
+def _unreadable_payload(event: str, environ: dict[str, str]) -> int:
+    """Fail closed for the gating events when the payload cannot be read."""
+
+    if not (environ.get(SOCKET_ENVIRONMENT_VARIABLE) or "").strip():
+        return 0
+    exit_code, stdout = _unavailable(event, event in FAIL_CLOSED, "unreadable payload")
     if stdout:
         sys.stdout.write(stdout)
     return exit_code
