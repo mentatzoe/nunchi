@@ -19,7 +19,8 @@ Telegram reference adapters, shared Discord MCP transport, CLI, packaging,
 Codex room presence, and incomplete Hermes and Claude Code V2 platform
 integrations. The Hermes source reuses Nunchi's shared observation, attention,
 scheduling, wake, and receipt behavior around the stock participant. It
-currently accepts only Hermes 0.19.0 and configured Discord or Telegram rooms.
+supports Hermes 0.19.0 or newer when its checked host capability contract
+passes, for configured Discord or Telegram rooms.
 Other Hermes platforms remain outside Nunchi and keep stock behavior; attempts
 to add them to a Nunchi config are rejected.
 

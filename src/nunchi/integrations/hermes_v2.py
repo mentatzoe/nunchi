@@ -1,15 +1,15 @@
 """Portable Hermes platform integration for the Nunchi V2 runtime.
 
-Hermes 0.19.0 has the platform I/O and host-owned LLM access Nunchi needs, but
-not the later participant lifecycle hooks. This module uses safe versioned
-hooks when present and otherwise installs a narrowly scoped runtime
-monkeypatch. It changes process behavior, never Hermes files on disk.
+Hermes 0.19.0 is the minimum host with the platform I/O and host-owned LLM
+access Nunchi needs. This module checks a versioned host capability contract,
+uses host hooks when present, and otherwise installs a narrowly scoped runtime
+shim. It changes process behavior, never Hermes files on disk.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from copy import copy
 from dataclasses import dataclass, field
@@ -55,7 +55,8 @@ logger = logging.getLogger(__name__)
 
 _PLUGIN_ID = "nunchi"
 _MINIMUM_HERMES = (0, 19, 0)
-_SUPPORTED_HERMES_RELEASES = frozenset({"0.19.0"})
+_MINIMUM_HERMES_VERSION = ".".join(str(part) for part in _MINIMUM_HERMES)
+_HERMES_HOST_CONTRACT_VERSION = 1
 _SUPPORTED_HERMES_PLATFORMS = frozenset({"discord", "telegram"})
 _NATIVE_BATCH_EVENTS_ATTRIBUTE = "_nunchi_v2_native_events"
 _NATIVE_BATCH_DISPATCH_ATTRIBUTE = "_nunchi_v2_native_batch_dispatch"
@@ -347,7 +348,7 @@ _STOCK_RAW_DELIVERY_HELPERS = frozenset(
         "_send_with_dm_topic_reply_anchor_retry",
     }
 )
-_HERMES_019_BASE_EFFECTS = frozenset(
+_HOST_CONTRACT_V1_BASE_EFFECTS = frozenset(
     {
         "_send_with_retry",
         "_stop_typing_with_metadata",
@@ -371,7 +372,7 @@ _HERMES_019_BASE_EFFECTS = frozenset(
         "stop_typing",
     }
 )
-_HERMES_019_PLATFORM_EFFECTS = {
+_HOST_CONTRACT_V1_PLATFORM_EFFECTS = {
     "discord": frozenset(
         {
             "_add_reaction",
@@ -471,10 +472,12 @@ def _rollback_shim_attributes(
 
 def _snapshot_context_registries(
     ctx: Any,
-) -> list[tuple[dict[Any, Any], dict[Any, Any]]]:
+) -> list[tuple[dict[Any, Any], dict[Any, Any], dict[Any, list[Any]]]]:
     """Capture the registries Nunchi mutates during Hermes registration."""
 
-    snapshots: list[tuple[dict[Any, Any], dict[Any, Any]]] = []
+    snapshots: list[
+        tuple[dict[Any, Any], dict[Any, Any], dict[Any, list[Any]]]
+    ] = []
     manager = getattr(ctx, "_manager", None)
     candidates = (
         getattr(manager, "_hooks", None),
@@ -487,18 +490,26 @@ def _snapshot_context_registries(
         if not isinstance(candidate, dict) or id(candidate) in seen:
             continue
         seen.add(id(candidate))
-        snapshot = {
-            key: list(value) if isinstance(value, list) else value
+        snapshot = dict(candidate)
+        list_contents = {
+            key: list(value)
             for key, value in candidate.items()
+            if isinstance(value, list)
         }
-        snapshots.append((candidate, snapshot))
+        snapshots.append((candidate, snapshot, list_contents))
     return snapshots
 
 
 def _restore_context_registries(
-    snapshots: Sequence[tuple[dict[Any, Any], dict[Any, Any]]],
+    snapshots: Sequence[
+        tuple[dict[Any, Any], dict[Any, Any], dict[Any, list[Any]]]
+    ],
 ) -> None:
-    for registry, snapshot in snapshots:
+    for registry, snapshot, list_contents in snapshots:
+        for key, contents in list_contents.items():
+            original = snapshot[key]
+            if isinstance(original, list):
+                original[:] = contents
         registry.clear()
         registry.update(snapshot)
 
@@ -564,11 +575,32 @@ def _timestamp(value: Any) -> str | None:
     return None
 
 
-def _version_tuple(raw: str) -> tuple[int, int, int]:
-    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", raw)
+def _parse_hermes_version(raw: str) -> tuple[tuple[int, int, int], bool]:
+    match = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)"
+        r"(?:(a|b|rc)(\d+))?"
+        r"(?:\.post(\d+))?"
+        r"(?:\.dev(\d+))?"
+        r"(?:\+[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)?",
+        raw,
+    )
     if match is None:
         raise ValidationError(f"Hermes version {raw!r} is not understood")
-    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+    release = tuple(int(part) for part in match.groups()[:3])
+    is_final_or_post = match.group(4) is None and match.group(7) is None
+    return release, is_final_or_post  # type: ignore[return-value]
+
+
+def _version_tuple(raw: str) -> tuple[int, int, int]:
+    release, _ = _parse_hermes_version(raw)
+    return release
+
+
+def _meets_minimum_hermes_version(raw: str) -> bool:
+    """Accept final/post releases at or above the released 0.19.0 floor."""
+
+    release, is_final_or_post = _parse_hermes_version(raw)
+    return is_final_or_post and release >= _MINIMUM_HERMES
 
 
 def _hermes_version() -> str:
@@ -2369,7 +2401,10 @@ class NunchiHermesV2Plugin:
             "v1_fallback": False,
             "nunchi_version": __version__,
             "hermes_version": self.hermes_version,
-            "verified_hermes_releases": sorted(_SUPPORTED_HERMES_RELEASES),
+            "minimum_hermes_version": _MINIMUM_HERMES_VERSION,
+            "compatibility_policy": "minimum-plus-host-contract",
+            "host_contract_version": _HERMES_HOST_CONTRACT_VERSION,
+            "host_contract_status": "checked",
             "supported_platforms": sorted(_SUPPORTED_HERMES_PLATFORMS),
             "compatibility_mode": self.mode,
             "participant_execution": "stock-hermes-with-nunchi-guards",
@@ -2423,8 +2458,9 @@ class NunchiHermesV2Plugin:
 
 def _shape_error(label: str) -> ValidationError:
     return ValidationError(
-        "Nunchi did not activate because this Hermes runtime changed the "
-        f"required {label} shape. Stock Hermes can continue without Nunchi; "
+        f"Nunchi did not activate because Hermes host contract V1 no longer "
+        f"provides the required {label} shape. "
+        "Stock Hermes can continue without Nunchi; "
         "to restore the gate, update Nunchi or use a maintained Hermes build."
     )
 
@@ -3884,7 +3920,7 @@ def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
 def _require_effect_surface(
     target_class: type[Any],
     *,
-    required: Sequence[str],
+    required: Iterable[str],
     label: str,
 ) -> None:
     for name in required:
@@ -3904,11 +3940,11 @@ def _install_stock_effect_shims(
     plugin: NunchiHermesV2Plugin,
     BasePlatformAdapter: type[Any],
 ) -> None:
-    """Guard the frozen Hermes 0.19 Discord/Telegram output surface."""
+    """Guard the host-contract V1 Discord/Telegram output surface."""
 
     platform_classes: dict[str, type[Any]] = {}
     for platform, _ in plugin._rooms:
-        if platform not in _HERMES_019_PLATFORM_EFFECTS:
+        if platform not in _HOST_CONTRACT_V1_PLATFORM_EFFECTS:
             raise _shape_error(f"supported Hermes platform {platform}")
         try:
             if platform == "discord":
@@ -3928,7 +3964,7 @@ def _install_stock_effect_shims(
     if BasePlatformAdapter.__module__ == "gateway.platforms.base":
         _require_effect_surface(
             BasePlatformAdapter,
-            required=_HERMES_019_BASE_EFFECTS,
+            required=_HOST_CONTRACT_V1_BASE_EFFECTS,
             label="base Hermes",
         )
     for target_class in set(platform_classes.values()):
@@ -3937,7 +3973,7 @@ def _install_stock_effect_shims(
         if target_class.__module__.startswith("plugins.platforms."):
             _require_effect_surface(
                 target_class,
-                required=_HERMES_019_PLATFORM_EFFECTS[platform],
+                required=_HOST_CONTRACT_V1_PLATFORM_EFFECTS[platform],
                 label=f"{platform} Hermes",
             )
 
@@ -5121,6 +5157,26 @@ def _install_gateway_shutdown_shim(plugin: NunchiHermesV2Plugin) -> None:
         _SHIM_OWNER = plugin
 
 
+def _install_host_contract_v1(plugin: NunchiHermesV2Plugin) -> None:
+    """Verify and install every process-local shim required by contract V1."""
+
+    _install_discord_room_admission_shim(plugin)
+    _install_discord_thread_guard(plugin)
+    _install_discord_slash_guard(plugin)
+    _install_telegram_batch_identity_shim(plugin)
+    _install_claimed_ingress_shim(plugin)
+    _install_stock_lifecycle_shim(plugin)
+    _install_execution_boundary_shim(plugin)
+    _install_auto_title_shim(plugin)
+    _install_stock_silence_filter_shim(plugin)
+    _install_stock_streaming_tts_guard(plugin)
+    _install_runner_result_shim(plugin)
+    _install_voice_transcript_guard(plugin)
+    _install_handoff_route_guard(plugin)
+    _install_restart_replay_shim(plugin)
+    _install_gateway_shutdown_shim(plugin)
+
+
 def register(
     ctx: Any,
     *,
@@ -5130,13 +5186,9 @@ def register(
     global _ORIGINAL_BASE_HANDLE, _SHIM_OWNER
 
     hermes_version = _hermes_version()
-    if _version_tuple(hermes_version) < _MINIMUM_HERMES:
-        raise ValidationError("Nunchi V2 requires hermes-agent 0.19.0 or newer")
-    if hermes_version not in _SUPPORTED_HERMES_RELEASES:
+    if not _meets_minimum_hermes_version(hermes_version):
         raise ValidationError(
-            f"Nunchi {__version__} has not verified Hermes {hermes_version}. "
-            "Stock Hermes can continue without Nunchi; update Nunchi for this "
-            "Hermes release or use Hermes 0.19.0."
+            f"Nunchi V2 requires hermes-agent {_MINIMUM_HERMES_VERSION} or newer"
         )
     profile = _nonempty(
         getattr(ctx, "profile_name", None) or "default", "Hermes profile"
@@ -5182,11 +5234,18 @@ def register(
                 sort_keys=True,
             )
 
-        ctx.register_command(
-            "nunchi",
-            setup_command,
-            description="Show Nunchi setup status",
-        )
+        if not callable(getattr(ctx, "register_command", None)):
+            raise _shape_error("Hermes plugin command registration context")
+        context_registries = _snapshot_context_registries(ctx)
+        try:
+            ctx.register_command(
+                "nunchi",
+                setup_command,
+                description="Show Nunchi setup status",
+            )
+        except BaseException:
+            _restore_context_registries(context_registries)
+            raise
         return None
     mode = "process-local-gate"
     plugin = NunchiHermesV2Plugin(
@@ -5211,21 +5270,7 @@ def register(
     previous_base_handle = _ORIGINAL_BASE_HANDLE
     transaction_token = _PATCH_TRANSACTION.set(patches)
     try:
-        _install_discord_room_admission_shim(plugin)
-        _install_discord_thread_guard(plugin)
-        _install_discord_slash_guard(plugin)
-        _install_telegram_batch_identity_shim(plugin)
-        _install_claimed_ingress_shim(plugin)
-        _install_stock_lifecycle_shim(plugin)
-        _install_execution_boundary_shim(plugin)
-        _install_auto_title_shim(plugin)
-        _install_stock_silence_filter_shim(plugin)
-        _install_stock_streaming_tts_guard(plugin)
-        _install_runner_result_shim(plugin)
-        _install_voice_transcript_guard(plugin)
-        _install_handoff_route_guard(plugin)
-        _install_restart_replay_shim(plugin)
-        _install_gateway_shutdown_shim(plugin)
+        _install_host_contract_v1(plugin)
         ctx.register_hook("pre_tool_call", plugin.pre_tool_call)
         ctx.register_hook("pre_llm_call", plugin.pre_llm_call)
         ctx.register_hook("post_llm_call", plugin.post_llm_call)

@@ -1,0 +1,123 @@
+name: Hermes host contract
+
+on:
+  pull_request:
+    branches: [integration/v2]
+  push:
+    branches: [integration/v2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-host-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-host-contract:
+    name: Hermes ${{ matrix.hermes_label }} / ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - hermes_label: minimum-0.19.0-release
+            hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            platform: discord
+          - hermes_label: minimum-0.19.0-release
+            hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            platform: telegram
+          - hermes_label: current-main
+            hermes_ref: main
+            platform: discord
+          - hermes_label: current-main
+            hermes_ref: main
+            platform: telegram
+
+    steps:
+      - name: Check out Nunchi
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check out Hermes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.hermes_ref }}
+          path: hermes-agent
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Nunchi and Hermes candidate
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+          python -m pip install -e "./hermes-agent[messaging]"
+
+      - name: Verify installed host contract and Hermes integrity
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-home
+          NUNCHI_REQUIRE_HERMES_CONTRACT: "1"
+          NUNCHI_HERMES_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fingerprint_candidate() {
+            python - <<'PY'
+          import hashlib
+          import importlib.metadata
+          import json
+          from pathlib import Path
+          import subprocess
+
+          root = Path("hermes-agent")
+          commit = subprocess.check_output(
+              ["git", "-C", str(root), "rev-parse", "HEAD"],
+              text=True,
+          ).strip()
+          tracked = subprocess.check_output(
+              ["git", "-C", str(root), "ls-files", "-z"]
+          ).split(b"\0")
+          source_hash = hashlib.sha256()
+          for raw_name in sorted(name for name in tracked if name):
+              relative = raw_name.decode("utf-8", "surrogateescape")
+              source_hash.update(raw_name)
+              source_hash.update(b"\0")
+              source_hash.update((root / relative).read_bytes())
+              source_hash.update(b"\0")
+
+          distribution = importlib.metadata.distribution("hermes-agent")
+          distribution_hash = hashlib.sha256()
+          for relative in sorted(distribution.files or (), key=str):
+              path = distribution.locate_file(relative)
+              if not path.is_file():
+                  continue
+              distribution_hash.update(str(relative).encode("utf-8"))
+              distribution_hash.update(b"\0")
+              distribution_hash.update(path.read_bytes())
+              distribution_hash.update(b"\0")
+
+          print(json.dumps({
+              "commit": commit,
+              "source_sha256": source_hash.hexdigest(),
+              "distribution_sha256": distribution_hash.hexdigest(),
+          }, sort_keys=True))
+          PY
+          }
+
+          before="$(fingerprint_candidate)"
+          python -m unittest tests.v2.test_hermes_installed_contract
+          after="$(fingerprint_candidate)"
+
+          test "$before" = "$after"
+          git -C hermes-agent diff --exit-code
+          git -C hermes-agent diff --cached --exit-code
+          printf '### Hermes %s / %s\n\n`%s`\n' \
+            '${{ matrix.hermes_label }}' \
+            '${{ matrix.platform }}' \
+            "$after" >> "$GITHUB_STEP_SUMMARY"

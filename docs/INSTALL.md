@@ -69,10 +69,11 @@ service, compatibility, and authority boundaries.
 For Hermes, install the same wheel into Hermes's managed Python environment.
 Package metadata lets Hermes discover the `nunchi` plugin without making
 Hermes a Nunchi package dependency or changing Hermes source or installed
-distribution files. The current source allowlists exactly Hermes 0.19.0; later
-versions require a separately verified Nunchi release. The current adapter
-accepts configured Discord and Telegram rooms only. Other platforms stay
-outside Nunchi and use stock Hermes behavior.
+distribution files. The current source requires Hermes 0.19.0 or newer and
+activates when its checked host capability contract passes. A changed required
+interface fails closed until Nunchi evolves its package-owned compatibility
+shim. The current adapter accepts configured Discord and Telegram rooms only.
+Other platforms stay outside Nunchi and use stock Hermes behavior.
 When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
 and platform adapter behind Nunchi's shared core and effect guards. Hermes's
@@ -97,9 +98,10 @@ the private profile config itself; environment paths remain an optional
 override. The separate dashboard command is a repair/check tool, not a setup
 requirement.
 
-The landed Hermes source still needs exact installed-runtime and live proof.
-Do not reuse the superseded `b6ee0c2` artifact or live record as proof of the
-current code.
+The installed-host lane checks the released minimum and current Hermes source
+on Discord and Telegram without permitting source or distribution changes.
+Live first-save/restart proof remains pending. Do not reuse the superseded
+`b6ee0c2` artifact or live record as proof of the current code.
 
 Configured Discord rooms need no mentions or separate bot/thread environment
 setup. The plugin extends Hermes's stock free-response path and admits

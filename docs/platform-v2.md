@@ -67,9 +67,10 @@ not attest the shared native ACK capability, a model ACK widens to DEFER and
 runs the normal participant path. These are open product gaps: the current
 Hermes source is not a complete V2 lifecycle.
 
-The plugin accepts exactly Hermes 0.19.0. A different version must use a
-Nunchi release that explicitly verifies it, or run stock Hermes without
-Nunchi. Method-shape similarity is not compatibility proof.
+The plugin requires Hermes 0.19.0 or newer. It checks the host capability
+contract and installs its compatibility shim transactionally on every
+activation. A changed required interface fails closed until Nunchi evolves its
+shim; a new package version alone is not an incompatibility.
 
 This is the intended Hermes participant implementation for the contract. The
 plugin must not recreate shared Nunchi behavior with a second attention model
