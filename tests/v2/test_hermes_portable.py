@@ -3740,6 +3740,46 @@ class HermesPortableTests(unittest.TestCase):
                 hermes_v2._ACTIVE_STOCK_TURN.reset(trace_token)
         self.assertEqual(["stock"], calls)
 
+    def test_auto_title_current_prologue_shape_is_disabled_only_for_configured_turns(self):
+        calls: list[str] = []
+        title_generator = types.ModuleType("agent.title_generator")
+
+        def maybe_auto_title(
+            session_db,
+            session_id,
+            user_message,
+            conversation_history=None,
+            **kwargs,
+        ):
+            del session_db, user_message, conversation_history, kwargs
+            calls.append(session_id)
+
+        title_generator.maybe_auto_title = maybe_auto_title
+        agent = types.ModuleType("agent")
+        agent.title_generator = title_generator
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "agent": agent,
+                    "agent.title_generator": title_generator,
+                },
+            ):
+                hermes_v2._install_auto_title_shim(plugin)
+            title_generator.maybe_auto_title(None, "stock", "u", [])
+            trace_token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+            try:
+                title_generator.maybe_auto_title(
+                    None,
+                    "configured",
+                    "u",
+                    [],
+                )
+            finally:
+                hermes_v2._ACTIVE_STOCK_TURN.reset(trace_token)
+        self.assertEqual(["stock"], calls)
+
     def test_runner_result_shim_observes_stock_response_and_silence(self):
         class Runner:
             async def _handle_message(self, event):
