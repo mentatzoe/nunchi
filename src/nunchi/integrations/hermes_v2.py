@@ -4121,7 +4121,6 @@ def _install_auto_title_shim(plugin: NunchiHermesV2Plugin) -> None:
                 "session_db",
                 "session_id",
                 "user_message",
-                "assistant_response",
                 "conversation_history",
             ),
             label="Hermes auto-title lifecycle",
