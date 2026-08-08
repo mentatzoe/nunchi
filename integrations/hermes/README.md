@@ -10,7 +10,8 @@ installed-runtime and live-platform acceptance remain open. Earlier package
 and live evidence belongs to a superseded implementation and does not verify
 the landed code.
 
-The current source accepts exactly Hermes 0.19.0:
+The current source accepts Hermes 0.19.0 or newer when its checked host
+capability contract passes:
 
 - A checked process-local wrapper runs observation and attention before
   Hermes starts typing, reactions, or participant work.
@@ -50,10 +51,10 @@ The current source accepts exactly Hermes 0.19.0:
 - Nunchi owns observation, attention, active/newest scheduling, wake facts,
   and lifecycle receipts. Hermes owns the admitted participant turn and its
   output.
-- A Hermes version other than 0.19.0, or an unknown 0.19.0 host shape, refuses
-  Nunchi activation with a repair message. The operator can update Nunchi or
-  run stock Hermes without the gate; for the current build, Hermes 0.19.0 is
-  the maintained alternative.
+- A Hermes version older than 0.19.0, or a runtime that does not satisfy the
+  required host contract, refuses Nunchi activation with a repair message.
+  The operator can update Nunchi's compatibility shim or run stock Hermes
+  without the gate.
 
 The wrappers change process behavior. They do not rewrite Hermes source,
 checkout files, or installed distribution files.
@@ -262,11 +263,12 @@ until their identity, routing, and output seams are guarded and verified.
 
 ## Compatibility and repair
 
-Nunchi checks every wrapped Hermes method before activation. The exact release
-allowlist currently contains only `0.19.0`. A later version does not activate
-Nunchi merely because its methods look similar. The error offers two paths:
-install a Nunchi release that verifies that Hermes version, or use maintained
-Hermes 0.19.0. Stock Hermes can run without the gate.
+Nunchi requires Hermes 0.19.0 or newer and checks every wrapped host seam before
+activation. Package versions are diagnostic evidence, not the compatibility
+contract: a later Hermes release activates when host-contract V1 passes. An
+actual interface mismatch fails closed, rolls back every process-local shim,
+and names the incompatible seam. Update Nunchi's shim for the changed contract,
+or run stock Hermes without the gate.
 
 Two Discord gates run before Hermes's participant turn: bot admission and
 auto-thread/free-response routing. A plugin that patches only the runner will

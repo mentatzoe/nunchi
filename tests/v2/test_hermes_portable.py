@@ -4743,6 +4743,43 @@ class GatewayRunner:
             self.assertTrue(status["setup_required"])
             self.assertTrue(status["stock_hermes_available"])
 
+    def test_setup_command_failure_restores_command_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = FakeCtx(FakeLlm([]))
+
+            def sentinel_handler(raw_args):
+                return raw_args
+
+            command_registry = ctx.commands
+            command_registry["existing"] = sentinel_handler
+            original_register_command = ctx.register_command
+
+            def fail_after_registration(name, callback, **kwargs):
+                original_register_command(name, callback, **kwargs)
+                raise RuntimeError("setup command registry failed")
+
+            ctx.register_command = fail_after_registration
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"HERMES_HOME": temporary},
+                    clear=True,
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_hermes_version",
+                    return_value="0.19.0",
+                ),
+                self.assertRaisesRegex(Exception, "setup command registry failed"),
+            ):
+                hermes_v2.register(
+                    ctx,
+                    dashboard_installer=lambda: None,
+                )
+
+            self.assertIs(ctx.commands, command_registry)
+            self.assertEqual({"existing": sentinel_handler}, command_registry)
+
     def test_register_preserves_dashboard_repair_guidance(self):
         from nunchi.integrations import hermes_dashboard_install
 
@@ -4778,32 +4815,25 @@ class GatewayRunner:
             str(raised.exception),
         )
 
-    def test_versions_before_019_fail_with_a_supported_option(self):
+    def test_versions_before_019_final_fail_with_a_supported_option(self):
         with tempfile.TemporaryDirectory() as temporary:
             config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
-            with mock.patch.object(
-                hermes_v2,
-                "_hermes_version",
-                return_value="0.18.9",
+            for version in (
+                "0.18.9",
+                "0.19.0rc1",
+                "0.19.0.dev1",
+                "0.19.0.post0.dev1",
+                "0.20.0rc1",
+                "0.20.0.dev1",
             ):
-                with self.assertRaisesRegex(Exception, "0.19.0 or newer"):
-                    hermes_v2.register(
-                        ctx,
-                        config_loader=lambda _: config,
-                        dashboard_installer=lambda: None,
-                    )
-
-    def test_unverified_future_release_fails_with_supported_alternatives(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
-            with mock.patch.object(
-                hermes_v2,
-                "_hermes_version",
-                return_value="0.20.0",
-            ):
-                with self.assertRaisesRegex(
-                    Exception,
-                    "update Nunchi.*or use Hermes 0.19.0",
+                with (
+                    self.subTest(version=version),
+                    mock.patch.object(
+                        hermes_v2,
+                        "_hermes_version",
+                        return_value=version,
+                    ),
+                    self.assertRaisesRegex(Exception, "0.19.0 or newer"),
                 ):
                     hermes_v2.register(
                         ctx,
@@ -4811,7 +4841,69 @@ class GatewayRunner:
                         dashboard_installer=lambda: None,
                     )
 
-    def test_register_rolls_back_process_patches_when_a_shape_fails(self):
+    def test_malformed_versions_fail_before_host_contract_activation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
+            for version in ("0.20.0garbage", "0.19.0.postgarbage"):
+                with (
+                    self.subTest(version=version),
+                    mock.patch.object(
+                        hermes_v2,
+                        "_hermes_version",
+                        return_value=version,
+                    ),
+                    self.assertRaisesRegex(Exception, "is not understood"),
+                ):
+                    hermes_v2.register(
+                        ctx,
+                        config_loader=lambda _: config,
+                        dashboard_installer=lambda: None,
+                    )
+
+    def test_final_post_and_local_versions_satisfy_release_floor(self):
+        for version in (
+            "0.19.0",
+            "0.19.0.post1",
+            "0.19.0+local.1",
+            "0.20.0",
+        ):
+            with self.subTest(version=version):
+                self.assertTrue(hermes_v2._meets_minimum_hermes_version(version))
+
+    def test_compatible_future_release_uses_checked_host_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
+            with (
+                mock.patch.object(
+                    hermes_v2,
+                    "_hermes_version",
+                    return_value="0.20.0",
+                ),
+                mock.patch.object(
+                    hermes_v2,
+                    "_install_host_contract_v1",
+                ) as host_contract,
+            ):
+                plugin = hermes_v2.register(
+                    ctx,
+                    config_loader=lambda _: config,
+                    dashboard_installer=lambda: None,
+                )
+
+            host_contract.assert_called_once_with(plugin)
+
+            self.assertEqual(
+                {"pre_llm_call", "post_llm_call", "pre_tool_call"},
+                set(ctx.hooks),
+            )
+            self.assertIn("nunchi", ctx.commands)
+            status = json.loads(ctx.commands["nunchi"]("probe"))
+            self.assertEqual("0.20.0", status["hermes_version"])
+            self.assertEqual("minimum-plus-host-contract", status["compatibility_policy"])
+            self.assertEqual("checked", status["host_contract_status"])
+            self.assertNotIn("verified_hermes_releases", status)
+
+    def test_future_release_rolls_back_process_patches_when_contract_fails(self):
         class Target:
             value = "stock"
 
@@ -4831,7 +4923,7 @@ class GatewayRunner:
                 mock.patch.object(
                     hermes_v2,
                     "_hermes_version",
-                    return_value="0.19.0",
+                    return_value="0.21.0",
                 ),
                 mock.patch.object(
                     hermes_v2,
@@ -4922,13 +5014,38 @@ class GatewayRunner:
 
         with tempfile.TemporaryDirectory() as temporary:
             config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
-            original_register_hook = ctx.register_hook
+            def sentinel_hook():
+                return None
 
-            def fail_after_registration(name, callback):
-                original_register_hook(name, callback)
-                raise RuntimeError("hook registry failed")
+            def sentinel_handler():
+                return None
 
-            ctx.register_hook = fail_after_registration
+            sentinel_command = {
+                "handler": sentinel_handler,
+                "plugin": "existing",
+            }
+            original_hook_list = [sentinel_hook]
+            hook_registry = {"pre_tool_call": original_hook_list}
+            command_registry = {"existing": sentinel_command}
+            manager = types.SimpleNamespace(
+                _hooks=hook_registry,
+                _plugin_commands=command_registry,
+            )
+            setattr(ctx, "_manager", manager)
+
+            def register_hook(name, callback):
+                hook_registry.setdefault(name, []).append(callback)
+
+            def fail_after_registration(name, callback, **kwargs):
+                command_registry[name] = {
+                    "handler": callback,
+                    "plugin": "nunchi",
+                    **kwargs,
+                }
+                raise RuntimeError("command registry failed")
+
+            ctx.register_hook = register_hook
+            ctx.register_command = fail_after_registration
             with (
                 mock.patch.object(
                     hermes_v2,
@@ -4997,7 +5114,7 @@ class GatewayRunner:
                     "_install_gateway_shutdown_shim",
                 ),
             ):
-                with self.assertRaisesRegex(Exception, "hook registry failed"):
+                with self.assertRaisesRegex(Exception, "command registry failed"):
                     hermes_v2.register(
                         ctx,
                         config_loader=lambda _: config,
@@ -5005,13 +5122,19 @@ class GatewayRunner:
                     )
             self.assertEqual("stock", Target.value)
             self.assertIsNone(hermes_v2._SHIM_OWNER)
+            self.assertIs(manager._hooks, hook_registry)
+            self.assertIs(manager._plugin_commands, command_registry)
+            self.assertIs(hook_registry["pre_tool_call"], original_hook_list)
+            self.assertEqual([sentinel_hook], original_hook_list)
+            self.assertEqual({"pre_tool_call": original_hook_list}, hook_registry)
+            self.assertEqual({"existing": sentinel_command}, command_registry)
             self.assertEqual({}, ctx.hooks)
             self.assertEqual({}, ctx.commands)
 
-    def test_unknown_runtime_shape_names_upgrade_or_supported_build(self):
+    def test_unknown_runtime_shape_names_host_contract_and_repair(self):
         with self.assertRaisesRegex(
             Exception,
-            "Stock Hermes can continue without Nunchi",
+            "host contract V1.*Stock Hermes can continue without Nunchi",
         ):
             hermes_v2._require_signature(
                 lambda other: None,

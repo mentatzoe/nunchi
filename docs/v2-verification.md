@@ -60,7 +60,7 @@ and Claude participant identity/surface blockers in
 |---|---|---|
 | source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
 | clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
-| installed Hermes 0.19.0 | normal plugin discovery; automatic dashboard; first-save/restart; unchanged Hermes distribution hashes; Discord and Telegram shape checks | **pending** |
+| installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | automated matrix records each resolved candidate commit and exact before/after hashes; first-save/restart and live-platform acceptance remain **pending** |
 | installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
 | deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
 | live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
@@ -81,7 +81,8 @@ process-local guards.
 
 The current source is deliberately partial:
 
-- it accepts exactly Hermes 0.19.0; no newer release is currently verified;
+- it requires Hermes 0.19.0 or newer and accepts current Hermes when the
+  checked host capability contract passes;
 - it blocks generic Hermes tools on configured rooms because Hermes 0.19.0
   lacks a safe final effect hook after approval;
 - it disables Hermes auto-title on configured rooms because that background
@@ -90,12 +91,11 @@ The current source is deliberately partial:
   participant commands, and handoff into configured rooms; and
 - it reports `complete_v2_lifecycle: false`.
 
-The current Hermes code has not yet passed its exact installed-runtime and
-live acceptance. The exact 0.19.0 target is Hermes tag `v2026.7.20`, commit
-`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`. Verification must compare its
-tracked and installed-distribution hashes before and after; the checkout has a
-pre-existing untracked `build/` directory and must not be described as wholly
-clean.
+The installed-host lane pins the exact Hermes 0.19.0 target at tag
+`v2026.7.20`, commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`, and
+resolves the current `main` candidate on every run. It records tracked-source
+and installed-distribution hashes before and after Nunchi activation. Live
+first-save/restart acceptance remains pending.
 
 ## Superseded Hermes `b6ee0c2` evidence
 
