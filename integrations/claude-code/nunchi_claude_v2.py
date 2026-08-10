@@ -255,7 +255,11 @@ def parse_channel_tag(text: str) -> dict[str, str] | None:
     if duplicated:
         # Two chat_ids or message_ids is envelope ambiguity, not data.
         return None
-    if (attrs.get("source") or "").strip() != "discord":
+    # Claude Code 2.1.215 renders channel-plugin input with the fully
+    # qualified source identity.  Do not accept a friendly shorthand here:
+    # an unexpected channel source is a configured room-boundary failure,
+    # not an operator prompt.
+    if (attrs.get("source") or "").strip() != "plugin:discord:discord":
         return None
     return {
         "chat_id": (attrs.get("chat_id") or "").strip(),
@@ -1206,9 +1210,21 @@ def handle_user_prompt_submit(
     *,
     classifier_transport: Callable[..., Any] | None = None,
 ) -> HookDecision:
-    tag = parse_channel_tag(str(payload.get("prompt") or ""))
+    prompt = str(payload.get("prompt") or "")
+    channel_envelope = _CHANNEL_TAG_RE.search(prompt) is not None
+    tag = parse_channel_tag(prompt)
     configured = ClaudeGateConfig.is_configured(environ)
     if tag is None:
+        if configured and channel_envelope:
+            # ``None`` normally means an operator-typed prompt.  Once a
+            # channel envelope is visible, however, treating an unsupported
+            # or ambiguous source as operator input would bypass the gate.
+            return _fail_closed_channel_event(
+                environ,
+                str(payload.get("session_id") or ""),
+                {"message_id": ""},
+                "channel envelope source or attributes are unsupported",
+            )
         # Operator-typed prompts are direct instruction, not room events: no
         # observation, no attention call, no receipts. While configured this
         # is the one legitimate path that would otherwise emit empty stdout
