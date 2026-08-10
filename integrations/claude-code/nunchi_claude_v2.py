@@ -32,6 +32,14 @@ subcommand of this file:
     pre-tool             deterministic privileged-action authorization
     post-tool            observed native room-action attestation
 
+Operator DM channels (``NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS``) are the one
+configured exception to the single-room binding: a delivery from a listed
+channel whose author the transport sidecar attests as a configured operator
+(``NUNCHI_CLAUDE_V2_OPERATOR_USER_IDS``) is accepted as direct operator
+instruction — never observed, never judged by attention, never a room-caused
+turn. An unattestable delivery from a listed channel fails closed like any
+other channel event.
+
 State persists across hook processes in an owner-only directory so the
 scheduler and observation semantics survive Claude Code's process-per-hook
 model. A Claude session restart intentionally drops pending wake work (the
@@ -134,6 +142,8 @@ class ClaudeGateConfig:
     participant_name: str
     sidecar_path: Path
     tools_config_path: Path | None
+    operator_dm_channel_ids: frozenset[str]
+    operator_user_ids: frozenset[str]
 
     @staticmethod
     def from_env(environ: dict[str, str]) -> "ClaudeGateConfig":
@@ -160,6 +170,24 @@ class ClaudeGateConfig:
             / "nunchi-v2"
             / "native-events.jsonl"
         )
+        def snowflake_set(name: str) -> frozenset[str]:
+            raw = (environ.get(name) or "").strip()
+            values = frozenset(part.strip() for part in raw.split(",") if part.strip())
+            for value in values:
+                if _SNOWFLAKE_RE.fullmatch(value) is None:
+                    raise ClaudeGateConfigError(
+                        f"{name} entries must be exact snowflakes"
+                    )
+            return values
+
+        operator_dm_channel_ids = snowflake_set("NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS")
+        operator_user_ids = snowflake_set("NUNCHI_CLAUDE_V2_OPERATOR_USER_IDS")
+        if channel_id in operator_dm_channel_ids:
+            # The bound room is room traffic by definition; listing it as an
+            # operator DM channel is ambiguous intent, not a configuration.
+            raise ClaudeGateConfigError(
+                "NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS must not include the bound room"
+            )
         return ClaudeGateConfig(
             policy_path=Path(required("NUNCHI_CLAUDE_V2_POLICY")),
             state_dir=Path(required("NUNCHI_CLAUDE_V2_STATE_DIR")),
@@ -173,6 +201,8 @@ class ClaudeGateConfig:
                 (environ.get("NUNCHI_CLAUDE_V2_SIDECAR") or sidecar_default).strip()
             ),
             tools_config_path=(Path(tools_raw) if tools_raw else None),
+            operator_dm_channel_ids=operator_dm_channel_ids,
+            operator_user_ids=operator_user_ids,
         )
 
     @staticmethod
@@ -1204,6 +1234,73 @@ def _fail_closed_channel_event(
     )
 
 
+def _accept_operator_dm(
+    config: ClaudeGateConfig,
+    session_id: str,
+    tag: dict[str, str],
+) -> HookDecision:
+    """Accept one configured operator-DM delivery as direct operator instruction.
+
+    Identity is transport-attested: the sidecar record for this exact message
+    must exist and name a configured, non-bot operator author in the same
+    channel. Anything less fails closed exactly like any other unattestable
+    channel event — never bound from the envelope's display name. An accepted
+    DM is operator input, not a room event: it is never observed, never spends
+    an attention judgment, and never opens a room-caused turn, so privileged
+    tools stay governed by operator authority and Claude Code's native
+    permission system.
+    """
+    if not config.operator_user_ids:
+        return _record_marker_and_block(
+            config.state_dir,
+            session_id,
+            tag,
+            kind="operator-dm-unattested",
+            detail=(
+                "operator DM channel is configured but "
+                "NUNCHI_CLAUDE_V2_OPERATOR_USER_IDS is empty"
+            ),
+        )
+    sidecar = read_sidecar_record(config.sidecar_path, tag["message_id"])
+    if not isinstance(sidecar, dict):
+        reason = (
+            "native-fact record malformed or unsafe"
+            if sidecar is _SIDECAR_MALFORMED
+            else "no native-fact record for this message"
+        )
+        return _record_marker_and_block(
+            config.state_dir,
+            session_id,
+            tag,
+            kind="operator-dm-unattested",
+            detail=reason,
+        )
+    author = sidecar.get("author") or {}
+    author_id = str(author.get("id") or "")
+    if str(sidecar.get("channel_id") or "") != tag["chat_id"]:
+        detail = "native-fact record does not match the delivered channel"
+    elif bool(author.get("bot", False)):
+        detail = f"author {author_id} is a bot, never an operator"
+    elif author_id not in config.operator_user_ids:
+        detail = f"author {author_id} is not a configured operator"
+    else:
+        return _allow_with_context(
+            f"[nunchi-v2] operator DM accepted: message {tag['message_id']} in "
+            f"channel {tag['chat_id']}, author transport-attested as operator "
+            f"{author_id}. Treat the prompt as direct operator instruction "
+            "delivered over Discord; reply through the Discord reply tool with "
+            f"chat_id={tag['chat_id']}.",
+            f"operator DM accepted: author {author_id} channel {tag['chat_id']}",
+        )
+    return _record_marker_and_block(
+        config.state_dir,
+        session_id,
+        tag,
+        kind="operator-dm-unattested",
+        detail=detail,
+    )
+
+
 def handle_user_prompt_submit(
     payload: dict[str, Any],
     environ: dict[str, str],
@@ -1248,6 +1345,10 @@ def handle_user_prompt_submit(
             environ, session_id, tag, f"configuration error ({exc})"
         )
     if tag["chat_id"] != config.channel_id:
+        if tag["chat_id"] in config.operator_dm_channel_ids:
+            # A configured operator DM channel is direct instruction, not room
+            # traffic — accepted only on transport-attested operator identity.
+            return _accept_operator_dm(config, session_id, tag)
         # Single-room binding: a foreign room is declined, not passed through as
         # operator work. The marker keeps the session's privileged tools denied.
         return _record_marker_and_block(

@@ -1366,5 +1366,163 @@ class AdversarialRegressionCases(_GateCase):
         self.assertTrue((plugin / "server.ts").is_symlink())
 
 
+DM_CHANNEL_ID = "1000000000000000006"
+
+
+class OperatorDmAdmissionCases(_GateCase):
+    """Configured operator-DM channels admit as direct operator instruction."""
+
+    def _configure_dm(
+        self,
+        *,
+        dm_channels: str = DM_CHANNEL_ID,
+        operator_ids: str = HUMAN_ID,
+    ) -> None:
+        tools_path = self.tmp / "tools.json"
+        tools_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "privileged": [
+                        {
+                            "tool_pattern": "^Bash$",
+                            "capability": "workspace.shell.exec",
+                            "impact": "mutation",
+                            "resource_kind": "shell-command",
+                            "resource_id_input_key": "command",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.environ = make_environ(
+            self.tmp,
+            NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS=dm_channels,
+            NUNCHI_CLAUDE_V2_OPERATOR_USER_IDS=operator_ids,
+            NUNCHI_CLAUDE_V2_TOOLS=str(tools_path),
+        )
+
+    def _dm(
+        self,
+        transport,
+        *,
+        message_id: str,
+        attested: bool = True,
+        author_id: str = HUMAN_ID,
+        bot: bool = False,
+    ):
+        if attested:
+            append_sidecar(
+                self.environ,
+                sidecar_row(
+                    message_id=message_id,
+                    author_id=author_id,
+                    bot=bot,
+                    content="do you receive me?",
+                    channel_id=DM_CHANNEL_ID,
+                    guild_id=None,
+                ),
+            )
+        return self.module.handle_user_prompt_submit(
+            prompt_payload(
+                channel_prompt(
+                    message_id=message_id,
+                    chat_id=DM_CHANNEL_ID,
+                    body="do you receive me?",
+                )
+            ),
+            self.environ,
+            classifier_transport=transport,
+        )
+
+    def _turn_marker(self):
+        with self.module.RoomStateStore(
+            Path(self.environ["NUNCHI_CLAUDE_V2_STATE_DIR"])
+        ) as store:
+            return store.read_room()["turn"]
+
+    def test_attested_operator_dm_is_accepted_without_attention(self) -> None:
+        self._configure_dm()
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(transport, message_id="6000000000000000001")
+        self.assertIsNotNone(decision.output)
+        context = decision.output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("operator DM accepted", context)
+        self.assertIn(DM_CHANNEL_ID, context)
+        self.assertIn(f"operator {HUMAN_ID}", context)
+        # Direct operator instruction: zero attention judgments, no room-caused
+        # turn, and privileged tools stay operator-governed.
+        self.assertEqual(transport.call_count, 0)
+        self.assertIsNone(self._turn_marker())
+        guard = self.pre_tool(tool_name="Bash", tool_input={"command": "ls"})
+        self.assertIsNone(guard.output)
+        self.assertEqual(guard.exit_code, 0)
+
+    def test_dm_without_native_fact_record_fails_closed(self) -> None:
+        self._configure_dm()
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(
+            transport, message_id="6000000000000000002", attested=False
+        )
+        self.assert_blocked(decision)
+        marker = self._turn_marker()
+        self.assertEqual(marker["degraded_kind"], "operator-dm-unattested")
+        guard = self.pre_tool(tool_name="Bash", tool_input={"command": "ls"})
+        self.assertIsNotNone(guard.output)
+        self.assertEqual(
+            guard.output["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+
+    def test_dm_from_non_operator_author_fails_closed(self) -> None:
+        self._configure_dm()
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(
+            transport, message_id="6000000000000000003", author_id=OTHER_HUMAN_ID
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(
+            self._turn_marker()["degraded_kind"], "operator-dm-unattested"
+        )
+
+    def test_dm_from_bot_author_fails_closed(self) -> None:
+        # A bot wearing a configured operator id is still never an operator.
+        self._configure_dm(operator_ids=f"{HUMAN_ID},{PEER_BOT_ID}")
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(
+            transport, message_id="6000000000000000004", author_id=PEER_BOT_ID, bot=True
+        )
+        self.assert_blocked(decision)
+        self.assertEqual(
+            self._turn_marker()["degraded_kind"], "operator-dm-unattested"
+        )
+
+    def test_dm_with_empty_operator_ids_fails_closed(self) -> None:
+        self._configure_dm(operator_ids="")
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(transport, message_id="6000000000000000005")
+        self.assert_blocked(decision)
+        self.assertEqual(
+            self._turn_marker()["degraded_kind"], "operator-dm-unattested"
+        )
+
+    def test_unlisted_dm_channel_remains_foreign_room_declined(self) -> None:
+        self._configure_dm(dm_channels="1000000000000000007")
+        transport = CountingTransport(wake_judgment)
+        decision = self._dm(transport, message_id="6000000000000000006")
+        self.assert_blocked(decision)
+        self.assertEqual(
+            self._turn_marker()["degraded_kind"], "foreign-room-declined"
+        )
+
+    def test_operator_dm_configuration_is_validated(self) -> None:
+        for bad in (CHANNEL_ID, "not-a-snowflake"):
+            environ = make_environ(
+                self.tmp, NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS=bad
+            )
+            with self.assertRaises(self.module.ClaudeGateConfigError):
+                self.module.ClaudeGateConfig.from_env(environ)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -97,6 +97,21 @@ work and keep retained context. Privileged tool actions in room-caused turns
 require a deterministic guard decision derived from the transport-attested
 requester.
 
+## Operator DM channels
+
+By default the binding is single-room: a delivery from any other channel —
+including the operator's own DM thread with the bot — is declined fail-closed.
+Setting `NUNCHI_CLAUDE_V2_OPERATOR_DM_CHANNELS` (with
+`NUNCHI_CLAUDE_V2_OPERATOR_USER_IDS`) names exact DM channels whose deliveries
+are instead accepted as direct operator instruction, on the same footing as a
+prompt typed at the terminal. Acceptance is transport-attested: the sidecar
+record for the exact message must name a configured, non-bot operator author
+in the same channel, or the delivery fails closed like any other unattestable
+channel event. Accepted DMs are not room events — they are never observed,
+never spend an attention judgment, and never open a room-caused turn, so
+privileged tools remain governed by operator authority and Claude Code's
+native permission system. The bound room may not be listed as a DM channel.
+
 ## Verification
 
 ```sh
