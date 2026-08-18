@@ -17,7 +17,7 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      NUNCHI_ATTENTION_MODEL: google/gemini-3.1-flash-lite
+      NUNCHI_ATTENTION_MODEL: nous/deepseek/deepseek-v4-flash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
