@@ -16,7 +16,7 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      NUNCHI_CLASSIFIER_MODEL: nous/deepseek/deepseek-v4-flash
+      NUNCHI_CLASSIFIER_MODEL: google/gemini-3.1-flash-lite
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
