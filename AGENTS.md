@@ -1,5 +1,15 @@
 # Nunchi Agent Guidelines
 
+> **Working head is `integration/v2`, not `main`.**
+>
+> All V2 work happens on `integration/v2`. `main` still carries V1 plus the
+> retired SpecKit control plane, and is many commits behind. Before acting,
+> read `AGENTS.md`, `CLAUDE.md`, and any product source from
+> `integration/v2` — the guidance on `main` is stale, including the SpecKit
+> and constitution references below, which no longer exist on the working
+> head. `main` becomes current again only after the atomic V2 merge is
+> verified.
+
 Nunchi is a portable pre-attention gate for turn-aware participants in shared
 conversation.
 
