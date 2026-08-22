@@ -29,7 +29,7 @@ lands:
 |---|---|---|
 | Codex | Successor consumer implemented, unverified | platform-specific validation remains outside the foundation PR |
 | Hermes | Landed, unverified | consume ACK widening and shared operator interfaces; source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
-| Claude Code | Successor consumer implemented, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
+| Claude Code | Successor consumer implemented, unverified | the plugin-owned session seam (#43) is implemented with source tests; installation (#58), non-Discord ingress (#57), and installed/live closure (#39) remain, and the combined exact head must be reverified |
 
 Neither unverified platform may be described as done, live, or parity-ready
 until its open gates pass.
