@@ -24,15 +24,21 @@ jobs:
         include:
           - hermes_label: minimum-0.19.0-release
             hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            python_version: "3.11"
             platform: discord
           - hermes_label: minimum-0.19.0-release
             hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            python_version: "3.11"
             platform: telegram
+          # Current Hermes gates core dependencies on Python >=3.14; older
+          # interpreters are accepted only to let existing installs update.
           - hermes_label: current-main
             hermes_ref: main
+            python_version: "3.14"
             platform: discord
           - hermes_label: current-main
             hermes_ref: main
+            python_version: "3.14"
             platform: telegram
 
     steps:
@@ -49,7 +55,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python_version }}
           cache: pip
 
       - name: Install Nunchi and Hermes candidate
