@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from nunchi.integrations.hermes_dashboard_install import (
+    DashboardInstallError,
     install_dashboard_for_profile,
 )
 
@@ -95,6 +96,53 @@ class HermesDashboardProfileInstallTests(unittest.TestCase):
                         / "manifest.json"
                     ).is_file()
                 )
+
+    def test_named_profile_alias_installs_in_target_and_machine_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "hermes"
+            target = Path(temporary) / "volume" / "profile"
+            target.mkdir(parents=True)
+            alias = root / "profiles" / "fiction-writer"
+            alias.parent.mkdir(parents=True)
+            alias.symlink_to(target, target_is_directory=True)
+            modules, calls = self._modules(root=root, profile_home=alias)
+            with (
+                patch.dict(sys.modules, modules),
+                patch(
+                    "nunchi.integrations.hermes_dashboard_install.default_hermes_home",
+                    return_value=alias,
+                ),
+            ):
+                result = install_dashboard_for_profile(profile="fiction-writer")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual([("nunchi", True)], calls)
+            self.assertEqual(
+                {
+                    str(home.resolve() / "plugins/nunchi-dashboard/dashboard")
+                    for home in (root, target)
+                },
+                {entry["path"] for entry in result["installed"]},
+            )
+
+    def test_broken_machine_home_is_rejected_before_profile_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "machine"
+            root.symlink_to(Path(temporary) / "missing", target_is_directory=True)
+            profile = Path(temporary) / "profile"
+            profile.mkdir()
+            modules, calls = self._modules(root=root, profile_home=profile)
+            with (
+                patch.dict(sys.modules, modules),
+                patch(
+                    "nunchi.integrations.hermes_dashboard_install.default_hermes_home",
+                    return_value=profile,
+                ),
+                self.assertRaisesRegex(DashboardInstallError, "Hermes home"),
+            ):
+                install_dashboard_for_profile(profile="fiction-writer")
+            self.assertFalse((profile / "plugins").exists())
+            self.assertEqual([], calls)
 
     def test_explicit_machine_disable_is_respected(self):
         with tempfile.TemporaryDirectory() as temporary:

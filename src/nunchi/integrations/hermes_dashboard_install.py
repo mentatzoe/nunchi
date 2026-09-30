@@ -58,10 +58,31 @@ def default_hermes_home() -> Path:
         ) from exc
 
 
+def _resolve_hermes_home(hermes_home: Path) -> Path:
+    """Pin the operator-selected profile, allowing only working home aliases."""
+
+    home = hermes_home.expanduser().absolute()
+    try:
+        # Do not create a missing symlink target: it may be an unmounted volume.
+        # Ordinary new homes remain supported, including below aliased parents.
+        for component in (home, *home.parents):
+            if component.is_symlink():
+                component.resolve(strict=True)
+        resolved = home.resolve()
+        if resolved.exists() and not resolved.is_dir():
+            raise OSError("profile target is not a directory")
+    except (OSError, RuntimeError) as exc:
+        raise DashboardInstallError(
+            "Hermes home could not be resolved safely; repair the profile "
+            "symlink or mount its target directory"
+        ) from exc
+    return resolved
+
+
 def _assert_safe_path(path: Path, *, boundary: Path) -> None:
     current = path
     while True:
-        if current.exists() and current.is_symlink():
+        if current.is_symlink():
             raise DashboardInstallError(
                 f"refusing symlinked dashboard path: {current}"
             )
@@ -160,6 +181,7 @@ def _remove_generated_bytecode(bridge: Path) -> None:
 
 def _migrate_legacy_bridge(*, hermes_home: Path, bridge: Path) -> None:
     legacy = hermes_home / "plugins" / _LEGACY_BRIDGE_NAME
+    _assert_safe_path(legacy / "dashboard", boundary=hermes_home)
     if not legacy.exists() or bridge.exists():
         return
     if not _bridge_is_owned(legacy, _LEGACY_MARKER_NAME):
@@ -172,9 +194,11 @@ def _migrate_legacy_bridge(*, hermes_home: Path, bridge: Path) -> None:
 def install_dashboard(*, hermes_home: Path) -> dict[str, Any]:
     """Materialize wheel-owned assets where released Hermes scans for tabs."""
 
-    hermes_home = hermes_home.expanduser().absolute()
+    hermes_home = _resolve_hermes_home(hermes_home)
     assets = _assets()
     bridge = _target(hermes_home)
+    # Validate before migration or bytecode cleanup: those are writes too.
+    _assert_safe_path(bridge / "dashboard", boundary=hermes_home)
     _migrate_legacy_bridge(hermes_home=hermes_home, bridge=bridge)
     dashboard = bridge / "dashboard"
     old_marker = bridge / _LEGACY_MARKER_NAME
@@ -224,7 +248,7 @@ def install_dashboard(*, hermes_home: Path) -> dict[str, Any]:
 
 
 def verify_dashboard(*, hermes_home: Path) -> dict[str, Any]:
-    hermes_home = hermes_home.expanduser().absolute()
+    hermes_home = _resolve_hermes_home(hermes_home)
     assets = _assets()
     bridge = _target(hermes_home)
     dashboard = bridge / "dashboard"
@@ -358,13 +382,16 @@ def install_dashboard_for_profile(*, profile: str) -> dict[str, Any]:
                 f"Hermes profile {profile!r} could not be resolved"
             ) from exc
 
+    # Resolve both selected homes before writing either one. Reuse these
+    # pinned paths for deduplication and machine-profile activation too.
+    profile_home = _resolve_hermes_home(profile_home)
+    machine_home = _resolve_hermes_home(machine_home)
     installed: list[dict[str, Any]] = []
     seen: set[Path] = set()
     for home in (profile_home, machine_home):
-        resolved = home.resolve()
-        if resolved in seen:
+        if home in seen:
             continue
-        seen.add(resolved)
+        seen.add(home)
         installed.append(install_dashboard(hermes_home=home))
 
     machine_activation = {
@@ -372,7 +399,7 @@ def install_dashboard_for_profile(*, profile: str) -> dict[str, Any]:
         "enabled": True,
         "unchanged": True,
     }
-    if machine_home.resolve() != profile_home.resolve():
+    if machine_home != profile_home:
         machine_activation = _enable_machine_dashboard(
             hermes_home=machine_home,
         )
