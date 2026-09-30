@@ -81,6 +81,14 @@ one bridge;
 `nunchi-hermes-dashboard install` repairs it. These commands are repair and
 verification tools; normal setup does not require running them.
 
+A Hermes home or named profile may be a symlink to an existing directory,
+including on another volume. The installer resolves that operator-selected
+home once and keeps the dashboard inside it. Symlinks below the resolved home
+(`plugins`, either Nunchi bridge directory, dashboard assets, or markers) are
+still rejected, before migration or cleanup can modify their targets. Broken
+profile links and symlink cycles require repairing the link or mounting the
+target; the installer does not create a missing profile-link target.
+
 ## Configure
 
 Enable the plugin and restart Hermes once. That first load installs the
