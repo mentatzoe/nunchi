@@ -119,3 +119,12 @@ jobs:
             printf '### Hermes %s / %s\n\n' '${{ matrix.hermes_label }}' '${{ matrix.platform }}' >> "$GITHUB_STEP_SUMMARY"
             python -m json.tool "$RUNNER_TEMP/host-receipts/receipt.json" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Upload contract receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stock-hermes-${{ matrix.hermes_label }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/host-receipts/
+          if-no-files-found: warn
+          retention-days: 14
