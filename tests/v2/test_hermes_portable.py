@@ -3608,6 +3608,59 @@ class HermesPortableTests(unittest.TestCase):
             self.assertEqual("unknown", records[-2]["body"]["outcome"])
             self.assertEqual("failed", records[-1]["body"]["delivery"])
 
+    def test_effect_guards_cover_inherited_mixins_and_restore_exact_owners(self):
+        native = []
+
+        class MediaMixin:
+            async def send_document(self, chat_id, file_path):
+                return await self._send_file_attachment(chat_id, file_path)
+
+            async def _send_file_attachment(self, chat_id, file_path):
+                native.append((chat_id, file_path))
+                return FakeSendResult(True, message_id="attachment")
+
+        class Adapter(MediaMixin, FakeAdapter):
+            pass
+
+        originals = dict(vars(MediaMixin))
+        patches = []
+        transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+        try:
+            hermes_v2._wrap_stock_effect_methods(Adapter)
+            self.assertTrue(getattr(
+                Adapter.send_document, "__nunchi_stock_effect_boundary__", False,
+            ), "inherited platform sends must not bypass effect guards")
+            with tempfile.TemporaryDirectory() as temporary:
+                plugin, _ = self.plugin(
+                    Path(temporary), FakeLlm([judgment("WAKE", "discord:message:500")]),
+                )
+                adapter = Adapter()
+                event = FakeEvent()
+                asyncio.run(plugin.gate_ingress(
+                    adapter=adapter, event=event, stock_handle=mock.AsyncMock(),
+                ))
+                runtime = plugin._rooms[("discord", "42")]
+                trace = runtime.stock_trace(event)
+                trace.participant_invoked = True
+                runtime.cancel()
+                active = hermes_v2._ACTIVE_STOCK_TURN.set(trace)
+                try:
+                    with self.assertRaises(hermes_v2._StockEffectBlocked):
+                        asyncio.run(adapter.send_document("42", "file"))
+                    with self.assertRaises(hermes_v2._StockEffectBlocked):
+                        asyncio.run(adapter._send_file_attachment("42", "file"))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(active)
+                self.assertEqual([], native)
+                # No active/configured route: ordinary inherited dispatch works.
+                asyncio.run(adapter.send_document("77", "stock"))
+                self.assertEqual([("77", "stock")], native)
+        finally:
+            hermes_v2._PATCH_TRANSACTION.reset(transaction)
+            hermes_v2._rollback_shim_attributes(patches)
+        self.assertEqual(originals, dict(vars(MediaMixin)))
+        self.assertNotIn("send_document", vars(Adapter))
+
     def test_tool_execution_boundary_fails_closed_before_dispatch(self):
         with tempfile.TemporaryDirectory() as temporary:
             plugin, _ = self.plugin(

@@ -3717,7 +3717,13 @@ def _configured_stock_effect_target(
 
 
 def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
-    wrapped = 0
+    # Current Hermes splits Discord media into a mixin. Guard methods at their
+    # defining class, including super() dispatch, rather than shadowing inherited
+    # attributes on the concrete adapter. Transaction rollback restores the exact
+    # original owners; already-guarded methods are skipped on repeated visits.
+    wrapped = sum(
+        _wrap_stock_effect_methods(base) for base in target_class.__bases__
+    )
     for name, current in tuple(vars(target_class).items()):
         if (
             not _is_stock_effect_method(name)
