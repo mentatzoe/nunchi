@@ -4149,6 +4149,69 @@ def is_partial_silence_marker(text):
             finally:
                 del original_response.__nunchi_stock_silence__
 
+    def test_stock_stream_silence_filter_checks_current_should_edit_split(self):
+        response_filters = types.ModuleType("gateway.response_filters")
+        stream_consumer = types.ModuleType("gateway.stream_consumer")
+        exec('''
+def is_intentional_silence_response(response):
+    return response == "NO_REPLY"
+def is_intentional_silence_agent_result(agent_result, response):
+    return is_intentional_silence_response(response)
+def is_partial_silence_marker(text):
+    return text in {"N", "NO", "NO_REPLY"}
+''', response_filters.__dict__)
+        stream_consumer._is_intentional_silence_response = (
+            response_filters.is_intentional_silence_response
+        )
+        stream_consumer._is_partial_silence_marker = (
+            response_filters.is_partial_silence_marker
+        )
+        exec('''
+class GatewayStreamConsumer:
+    def _should_edit(self, tick):
+        return not _is_partial_silence_marker(tick)
+    async def run(self):
+        return (self._should_edit("<|e"),
+                _is_intentional_silence_response("<|eos|>"))
+''', stream_consumer.__dict__)
+        gateway = types.ModuleType("gateway")
+        gateway.response_filters = response_filters
+        gateway.stream_consumer = stream_consumer
+        modules = {
+            "gateway": gateway, "gateway.response_filters": response_filters,
+            "gateway.stream_consumer": stream_consumer,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_silence_filter_shim(plugin)
+                consumer = stream_consumer.GatewayStreamConsumer()
+                self.assertEqual((True, False), asyncio.run(consumer.run()))
+                active = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                try:
+                    self.assertEqual((False, True), asyncio.run(consumer.run()))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(active)
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+                hermes_v2._rollback_shim_attributes(patches)
+            # A helper with the same names but a different alias binding is not
+            # the known host shape: patching this module would miss its sends.
+            foreign = dict(stream_consumer.__dict__)
+            foreign["_is_partial_silence_marker"] = lambda text: False
+            exec('''
+def should_edit(self, tick):
+    return not _is_partial_silence_marker(tick)
+''', foreign)
+            stream_consumer.GatewayStreamConsumer._should_edit = foreign["should_edit"]
+            with mock.patch.dict(sys.modules, modules), self.assertRaisesRegex(
+                ValidationError, "streaming silence call sites",
+            ):
+                hermes_v2._install_stock_silence_filter_shim(plugin)
+
     def test_stock_stream_silence_filter_fails_closed_on_moved_calls(self):
         response_filters = types.ModuleType("gateway.response_filters")
         stream_consumer = types.ModuleType("gateway.stream_consumer")

@@ -4385,10 +4385,31 @@ def _install_stock_silence_filter_shim(
             "_is_intentional_silence_response",
             "_is_partial_silence_marker",
         }
+        direct_calls = code is not None and required_aliases.issubset(code.co_names)
+        # Released 0.21.5 moved the partial marker check into _should_edit,
+        # called synchronously by run. Accept that known split only when both
+        # call sites still resolve the aliases we actually replace below.
+        should_edit = getattr(consumer, "_should_edit", None)
+        edit_code = getattr(should_edit, "__code__", None)
+        split_calls = (
+            code is not None
+            and {"_is_intentional_silence_response", "_should_edit"}.issubset(code.co_names)
+            and inspect.isfunction(should_edit)
+            and not inspect.iscoroutinefunction(should_edit)
+            and edit_code is not None
+            and "_is_partial_silence_marker" in edit_code.co_names
+            and getattr(run, "__globals__", None) is vars(stream_consumer)
+            and getattr(should_edit, "__globals__", None) is vars(stream_consumer)
+        )
+        if split_calls:
+            _require_signature(
+                should_edit,
+                required=("self", "tick"),
+                label="gateway streaming silence edit filter",
+            )
         if (
             not inspect.iscoroutinefunction(run)
-            or code is None
-            or not required_aliases.issubset(set(code.co_names))
+            or not (direct_calls or split_calls)
         ):
             raise _shape_error("gateway streaming silence call sites")
         module_response_patched = bool(
