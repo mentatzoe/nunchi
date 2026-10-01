@@ -4529,6 +4529,30 @@ def _install_stock_streaming_tts_guard(
             _SHIM_OWNER = plugin
             return
         required_calls = {"StreamingTTSConsumer", "active", "start"}
+        if not required_calls.issubset(call_names):
+            # Current stock moved this block into a synchronous runner mixin
+            # helper. Check that exact call edge and its native import rather
+            # than accepting an arbitrary helper with a similar name.
+            start_tts = getattr(GatewayRunner, "_run_agent_start_streaming_tts", None)
+            _require_signature(
+                start_tts,
+                required=(
+                    "self", "source", "message_type", "_status_thread_metadata",
+                    "streaming_tts_consumer_holder",
+                ),
+                label="gateway streaming TTS start helper",
+            )
+            helper_names = set(getattr(getattr(start_tts, "__code__", None), "co_names", ()))
+            if (
+                "_run_agent_start_streaming_tts" not in call_names
+                or not inspect.isfunction(start_tts)
+                or inspect.iscoroutinefunction(start_tts)
+                or start_tts.__globals__ is not run_agent.__globals__
+                or "gateway.streaming_tts_consumer" not in helper_names
+                or not required_calls.issubset(helper_names)
+            ):
+                raise _shape_error("gateway streaming TTS call sites")
+            call_names |= helper_names
         if (
             "message_type" not in parameters
             or not required_calls.issubset(call_names)

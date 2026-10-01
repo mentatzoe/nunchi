@@ -4329,6 +4329,67 @@ class GatewayRunner:
             hermes_v2._rollback_shim_attributes(patches)
             self.assertIs(original_active, StreamingTTSConsumer.active)
 
+    def test_stock_streaming_tts_guard_checks_current_start_helper(self):
+        module = types.ModuleType("gateway.streaming_tts_consumer")
+        native_calls = []
+
+        class StreamingTTSConsumer:
+            @property
+            def active(self):
+                return True
+
+            def start(self):
+                native_calls.append("start")
+
+        module.StreamingTTSConsumer = StreamingTTSConsumer
+        run_module = types.ModuleType("gateway.run")
+        exec(
+            """
+class GatewayRunner:
+    def _run_agent_start_streaming_tts(
+        self, source, message_type, _status_thread_metadata, streaming_tts_consumer_holder
+    ):
+        from gateway.streaming_tts_consumer import StreamingTTSConsumer
+        consumer = StreamingTTSConsumer()
+        if consumer.active:
+            streaming_tts_consumer_holder[0] = consumer
+            consumer.start()
+
+    async def _run_agent_inner(self, message, source, message_type=None):
+        self._run_agent_start_streaming_tts(source, message_type, None, [None])
+""",
+            run_module.__dict__,
+        )
+        modules = {
+            "gateway.run": run_module,
+            "gateway.streaming_tts_consumer": module,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_streaming_tts_guard(plugin)
+                    runner = run_module.GatewayRunner()
+                    asyncio.run(runner._run_agent_inner("hello", object(), "voice"))
+                    self.assertEqual(["start"], native_calls)
+                    token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                    try:
+                        asyncio.run(runner._run_agent_inner("hello", object(), "voice"))
+                    finally:
+                        hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+                    self.assertEqual(["start"], native_calls)
+                    original = runner._run_agent_start_streaming_tts
+                    run_module.GatewayRunner._run_agent_start_streaming_tts = lambda self: None
+                    with self.assertRaises(ValidationError):
+                        hermes_v2._install_stock_streaming_tts_guard(plugin)
+                    run_module.GatewayRunner._run_agent_start_streaming_tts = original.__func__
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+                hermes_v2._rollback_shim_attributes(patches)
+            self.assertTrue(StreamingTTSConsumer().active)
+
     def test_stock_streaming_tts_guard_is_noop_for_hermes_019_shape(self):
         run_module = types.ModuleType("gateway.run")
         exec(
