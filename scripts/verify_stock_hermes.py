@@ -42,7 +42,10 @@ def distribution_identity(name):
         path = Path(str(dist.locate_file(relative)))
         if path.is_file():
             digest.update(str(relative).encode() + b"\0" + path.read_bytes() + b"\0")
-    return {"version": dist.version, "sha256": digest.hexdigest()}
+    direct = json.loads(dist.read_text("direct_url.json") or "{}")
+    return {"version": dist.version, "sha256": digest.hexdigest(),
+            "artifact_hashes": direct.get("archive_info", {}).get("hashes", {}),
+            "editable": direct.get("dir_info", {}).get("editable", False)}
 
 
 def probe(args):
