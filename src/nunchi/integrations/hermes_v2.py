@@ -15,7 +15,6 @@ from copy import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
-import importlib.metadata
 import inspect
 import json
 import logging
@@ -607,13 +606,9 @@ def _meets_minimum_hermes_version(raw: str) -> bool:
 
 
 def _hermes_version() -> str:
-    try:
-        return importlib.metadata.version("hermes-agent")
-    except importlib.metadata.PackageNotFoundError as exc:
-        raise ValidationError(
-            "Nunchi's Hermes integration can only activate inside an installed "
-            "hermes-agent runtime"
-        ) from exc
+    from .hermes_version import hermes_version
+
+    return hermes_version()
 
 
 def _require_private_regular_file(path: Path, label: str) -> bytes:

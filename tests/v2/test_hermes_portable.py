@@ -5026,6 +5026,17 @@ class GatewayRunner:
             with self.subTest(version=version):
                 self.assertTrue(hermes_v2._meets_minimum_hermes_version(version))
 
+    def test_activation_uses_verified_source_version_instead_of_placeholder(self):
+        with (
+            mock.patch("importlib.metadata.version", return_value="0.0.0"),
+            mock.patch(
+                "nunchi.integrations.hermes_version.hermes_version",
+                return_value="0.21.5+17.gabcdef1",
+            ) as resolver,
+        ):
+            self.assertEqual("0.21.5+17.gabcdef1", hermes_v2._hermes_version())
+            resolver.assert_called_once_with()
+
     def test_compatible_future_release_uses_checked_host_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
