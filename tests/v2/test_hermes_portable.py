@@ -2453,6 +2453,56 @@ class HermesPortableTests(unittest.TestCase):
             asyncio.run(adapter.handle_message(FakeEvent(text="unauthorized")))
             self.assertEqual(["/stop", "unauthorized"], adapter.stock)
 
+    def test_native_approval_commands_bypass_attention_without_cancelling_turn(self):
+        class BasePlatformAdapter(FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.gateway_runner = types.SimpleNamespace(
+                    _is_user_authorized=lambda source: True,
+                )
+                self.stock = []
+
+            async def handle_message(self, event):
+                authorization = hermes_v2._AUTHORIZED_STOCK_CONTROL.get()
+                self.stock.append((event, authorization))
+                self.assert_authorized = authorization is not None and (
+                    authorization.allows_current_task(
+                        command=event.get_command(), runtime=runtime, event=event,
+                    )
+                )
+
+        base = types.ModuleType("gateway.platforms.base")
+        base.BasePlatformAdapter = BasePlatformAdapter
+        modules = {
+            "gateway": types.ModuleType("gateway"),
+            "gateway.platforms": types.ModuleType("gateway.platforms"),
+            "gateway.platforms.base": base,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            llm = FakeLlm([judgment("WAKE", "discord:message:500")])
+            plugin, _ = self.plugin(Path(temporary), llm)
+            runtime = plugin._rooms[("discord", "42")]
+            event = FakeEvent()
+            asyncio.run(plugin.gate_ingress(
+                adapter=FakeAdapter(), event=event, stock_handle=mock.AsyncMock(),
+            ))
+            trace = runtime.stock_trace(event)
+            self.assertIsNotNone(trace)
+            with mock.patch.dict(sys.modules, modules):
+                hermes_v2._install_claimed_ingress_shim(plugin)
+            adapter = BasePlatformAdapter()
+            for command in ("approve", "deny"):
+                with self.subTest(command=command):
+                    control = FakeEvent(text=f"/{command}", message_id=command)
+                    asyncio.run(adapter.handle_message(control))
+                    self.assertTrue(adapter.stock, "approval control never reached Hermes")
+                    self.assertIs(adapter.stock[-1][0], control)
+                    self.assertTrue(adapter.assert_authorized)
+                    self.assertFalse(adapter.stock[-1][1].parent_active)
+                    self.assertFalse(trace.token.cancel_event.is_set())
+                    self.assertTrue(runtime.scheduler.is_current(trace.token))
+                    self.assertEqual(1, len(llm.calls))
+
     def test_configured_internal_ingress_fails_closed_and_records_gap(self):
         class Runner:
             def _is_user_authorized(self, source):
@@ -3466,9 +3516,11 @@ class HermesPortableTests(unittest.TestCase):
             )
 
     def test_absolute_deadline_blocks_cancellation_ignoring_late_draft(self):
+        clock = [1000.0]
+
         class SlowLlm(FakeLlm):
             def complete_structured(self, **kwargs):
-                time.sleep(0.03)
+                clock[0] += 0.03
                 return super().complete_structured(**kwargs)
 
         class Runner:
@@ -3491,6 +3543,7 @@ class HermesPortableTests(unittest.TestCase):
             async def _process_message_background(self, event, session_key):
                 del event, session_key
                 hermes_v2._ACTIVE_STOCK_TURN.get().participant_invoked = True
+                clock[0] += 0.04
                 try:
                     await asyncio.sleep(0.04)
                 except asyncio.CancelledError:
@@ -3538,7 +3591,17 @@ class HermesPortableTests(unittest.TestCase):
                     pass
                 await asyncio.sleep(0.08)
 
-            asyncio.run(run())
+            # Only the plugin's deadline clock is controlled. asyncio's clock
+            # remains real, and the child really receives/ignores cancellation.
+            # Journal fsync latency must not expire the test before that child
+            # starts (which is safe product behaviour, but misses this probe).
+            deadline_clock = mock.Mock(wraps=time)
+            deadline_clock.monotonic.side_effect = lambda: clock[0]
+            with (
+                mock.patch.object(hermes_v2, "time", deadline_clock),
+                mock.patch("nunchi.attention.time", deadline_clock),
+            ):
+                asyncio.run(run())
             self.assertTrue(adapter.late_effect_blocked)
             self.assertEqual([], adapter.native_effects)
             records = plugin._rooms[("discord", "42")].receipts.all_records()

@@ -221,7 +221,10 @@ _AUTHORIZED_STOCK_CONTROL: ContextVar[
     "nunchi_authorized_stock_control",
     default=None,
 )
-_STOCK_CONTROL_COMMANDS = frozenset({"stop", "new", "reset", "restart"})
+_STOCK_CANCEL_COMMANDS = frozenset({"stop", "new", "reset", "restart"})
+# Approval controls must reach Hermes while its participant is waiting. They
+# neither create an opportunity nor revoke the one whose approval they answer.
+_STOCK_CONTROL_COMMANDS = _STOCK_CANCEL_COMMANDS | {"approve", "deny"}
 _DERIVED_PARTICIPANT_COMMANDS = frozenset(
     {"background", "goal", "queue", "retry", "steer"}
 )
@@ -3399,10 +3402,11 @@ def _install_claimed_ingress_shim(
                     raise _StockEffectBlocked(
                         "Hermes control command has no matching Nunchi room"
                     )
-                await owner.gateway_session_cancel(
-                    route=source,
-                    reason=command,
-                )
+                if command in _STOCK_CANCEL_COMMANDS:
+                    await owner.gateway_session_cancel(
+                        route=source,
+                        reason=command,
+                    )
                 control_authorization = _StockControlAuthorization.begin(
                     command,
                     runtime,
