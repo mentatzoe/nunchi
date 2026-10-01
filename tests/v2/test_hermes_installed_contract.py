@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from nunchi.integrations import hermes_v2
+from nunchi.integrations.hermes_version import hermes_version as installed_hermes_version
 from tests.v2.test_hermes_portable import FakeLlm, room_config
 
 
@@ -203,7 +204,7 @@ class InstalledHermesHostContractTests(unittest.TestCase):
         self.assertIsNone(plugin["error"])
 
     def test_installed_runtime_satisfies_host_contract_v1(self):
-        hermes_version = importlib.metadata.version("hermes-agent")
+        hermes_version = installed_hermes_version()
         platform = os.environ.get("NUNCHI_HERMES_PLATFORM", "discord")
         self.assertIn(platform, {"discord", "telegram"})
         self.assertGreaterEqual(
