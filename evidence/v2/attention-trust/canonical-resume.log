@@ -1,0 +1,64 @@
+..................................................................................................................................................................................................................................................Claude Code V2 runner error: --config-sha256 is required
+................................................................................ssss.................................................................ssssNunchi did not observe pre-LLM context injection for request discord:42:e29027bb-0d78-4d94-a5f2-2cafac640ae2
+......Nunchi did not observe pre-LLM context injection for request discord:42:a4628884-2ac9-4a77-a6a0-dd9d93faa7ec
+.Nunchi did not observe pre-LLM context injection for request discord:42:1d7ef397-8b9b-487e-8a09-4503c69aa973
+.Nunchi did not observe pre-LLM context injection for request discord:42:5428ec49-cfd1-472e-ba97-04e9eabf5996
+...Nunchi blocked a configured Hermes internal participant event because it did not enter through a Nunchi opportunity
+..Nunchi blocked Hermes /background on a configured route because it creates participant work from a different or detached event without a new Nunchi opportunity
+Nunchi blocked Hermes /goal on a configured route because it creates participant work from a different or detached event without a new Nunchi opportunity
+Nunchi blocked Hermes /queue on a configured route because it creates participant work from a different or detached event without a new Nunchi opportunity
+Nunchi blocked Hermes /retry on a configured route because it creates participant work from a different or detached event without a new Nunchi opportunity
+Nunchi blocked Hermes /steer on a configured route because it creates participant work from a different or detached event without a new Nunchi opportunity
+...Nunchi blocked Discord /retry in a configured route before Hermes could start detached participant work
+.Nunchi blocked Discord /thread in a configured route because Hermes would create an unclaimed child route before Nunchi ingress
+Nunchi blocked Discord /thread in a configured route because Hermes would create an unclaimed child route before Nunchi ingress
+.Nunchi blocked Discord voice input in a configured route before transcription, transcript echo, or participant work
+..Nunchi Hermes opportunity failed without an effect: participant attention model failed
+..Nunchi did not observe pre-LLM context injection for request discord:42:c62ba3e4-4738-4542-9941-6355e94bd19b
+Nunchi did not observe pre-LLM context injection for request discord:42:1035dbea-f636-4396-8b71-f6a3f794c711
+.Nunchi did not observe pre-LLM context injection for request discord:42:fced14b4-8070-4f1c-b0fe-d913b6fc7e2e
+....Nunchi blocked Hermes handoff to a configured route before thread creation or session mutation
+Nunchi blocked Hermes handoff to a configured route before thread creation or session mutation
+....Nunchi could not build a valid current snapshot; this configured participant produces no model, tool, or platform effect for the event: authenticated Hermes self identity must be non-empty
+......Nunchi did not observe pre-LLM context injection for request discord:42:0c9c7425-1904-4792-b343-5703cb429832
+.Nunchi did not observe pre-LLM context injection for request discord:42:01b462ab-4971-4a63-a8f4-11f7bd95cb0f
+...Nunchi blocked an out-of-band Hermes send that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes send that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes send that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes send_draft that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes send_image that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes edit_message that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes _add_reaction that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes _send_file_attachment that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes _edit_overflow_split that could affect a configured route because it had no matching active Nunchi opportunity
+.Nunchi blocked an out-of-band Hermes _send_with_dm_topic_reply_anchor_retry that could affect a configured route because it had no matching active Nunchi opportunity
+Nunchi blocked an out-of-band Hermes rename_dm_topic that could affect a configured route because it had no matching active Nunchi opportunity
+..Nunchi did not observe pre-LLM context injection for request discord:42:b454426c-0a31-4770-9dcd-4ad03421ed5d
+...Nunchi did not observe pre-LLM context injection for request discord:42:5802bcd8-d9be-4951-ab92-746bca903692
+..Nunchi did not observe pre-LLM context injection for request discord:42:e983ac62-7427-446c-87d8-f97ea1fced60
+......Nunchi could not build a valid current snapshot; this configured participant produces no model, tool, or platform effect for the event: authenticated Hermes self identity must be non-empty
+...Nunchi did not observe pre-LLM context injection for request discord:42:3ad6b5a4-f2d7-4dde-ba2a-473e2081c138
+..Nunchi blocked Hermes participant work on a configured route because the event had no matching active Nunchi opportunity
+.Nunchi blocked Hermes participant work on a configured route because the event had no matching active Nunchi opportunity
+..Nunchi retained an unconstructable Hermes event as an explicit error; this configured participant produces no model, tool, or platform effect for the event
+..Nunchi did not observe pre-LLM context injection for request discord:42:545c2bac-86bd-4255-8626-e80177dd24fc
+.Nunchi did not observe pre-LLM context injection for request discord:42:df93f369-dc35-4aa2-a0fe-73279ffd70c9
+...Nunchi blocked derived Hermes participant work on a configured route because the event had no matching active Nunchi opportunity
+....Nunchi did not observe pre-LLM context injection for request discord:42:bb8e512b-944d-4473-b8da-9e0204b79693
+.Nunchi did not observe pre-LLM context injection for request discord:42:96195e67-6e9c-48b8-8219-c1b91a18e68f
+.........Nunchi did not observe pre-LLM context injection for request discord:42:98fa026e-3630-4f3d-9721-0305e5cd9629
+Nunchi did not observe pre-LLM context injection for request discord:42:4063cab6-aed1-4970-80cd-0aa92a909717
+Nunchi did not observe pre-LLM context injection for request discord:42:0d17a575-d76c-44b2-8a7e-4c3dacc3ebcd
+..Nunchi did not observe pre-LLM context injection for request discord:42:486d6eb4-8725-4476-a480-2644ffd7fec7
+....Nunchi Hermes opportunity failed without an effect: attention snapshot unavailable after one reconstruction attempt: unrecoverable snapshot
+.............................................................usage: nunchi [-h]
+              {attention,validate,probe,setup,config,diagnose,dashboard,service,uninstall} ...
+nunchi: error: argument command: invalid choice: 'admit' (choose from attention, validate, probe, setup, config, diagnose, dashboard, service, uninstall)
+......gateway connect failed: offline test; retrying in 1.0s
+...notification queue full (maxsize=1); rejected a routed Discord delivery; a continuity-gap signal is pending
+.........................................................................................HTTP 503 on GET /channels/42/messages; retrying in 2.0s
+..........
+----------------------------------------------------------------------
+Ran 653 tests in 49.892s
+
+OK (skipped=8)

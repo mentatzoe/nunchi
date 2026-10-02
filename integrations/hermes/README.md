@@ -173,7 +173,12 @@ model. The dashboard defaults new rooms to
 Nunchi's lightweight operational attention route. Keep it explicit so the
 participant model cannot silently replace it.
 
-Allow only that exact route in the Hermes profile:
+The dashboard's **Save & allow attention models** action configures the
+profile's stock Hermes trust gate as part of setup: provider/model overrides
+are allowed only for the providers and models selected across its rooms.
+Saving again reconciles those allowlists (including removed routes). Runtime
+attention never grants itself permission. Managed configurations can instead
+allow only their selected routes directly in the Hermes profile:
 
 ```yaml
 plugins:
@@ -191,6 +196,29 @@ to Hermes's public plugin LLM API and verifies the returned attribution. A
 present credential is not proof that the route has usable quota. Provider
 failure is recorded and follows `attention.policy.error_action`; Nunchi never
 silently falls back to the participant model for attention.
+
+A host permission denial is recorded as `host-permission-denied`, with the
+exact setting names and dashboard repair action rather than raw host exception
+text. The dashboard shows saved-config trust readiness even if the Nunchi form
+is unchanged, so Save can repair missing permissions. This readiness check is
+not a provider/credential/quota check and does not prove the running gateway has
+reloaded. The configured error policy still applies; an error-fallback wake is
+not a successful classifier judgment.
+
+Trust setup preserves unrelated configuration values and writes a private,
+content-addressed `config.yaml.nunchi-backup-<sha256>` in that profile's Hermes
+home before changing `config.yaml`. The active file is rewritten as JSON
+(valid YAML); original YAML formatting and comments remain in the backup.
+Unsupported non-JSON YAML values fail closed rather than being discarded.
+A caught save failure restores the previous host bytes or absence; a concurrent
+external edit is not overwritten. A process crash may leave the narrow grant
+installed: repeat Save to reconcile it with the pinned room configuration.
+For manual rollback, first stop editing the profile and review any intervening
+changes, then restore the selected private backup together with the matching
+pinned room config/digest. Never upload these backups: they may contain host
+credentials. Restart remains an explicit operator action, not part of saving
+or rollback. Host trust is checked per call, so a permission change can affect
+attention immediately even before a gateway restart.
 
 An explicit environment-managed config overrides the dashboard-created
 profile config. For dashboard editing, put its digest in a private sidecar

@@ -40,6 +40,18 @@ class AttentionError(NunchiError):
     label = "attention error"
 
 
+class HostAttentionPermissionError(AttentionError):
+    """A host refused explicit routing; safe to expose without provider text."""
+
+    detail = (
+        "Host denied the configured attention provider/model. In Hermes, open "
+        "the Nunchi dashboard for this profile and Save & allow attention models, "
+        "then restart Hermes. For managed configuration, review "
+        "plugins.entries.nunchi.llm: allow_provider_override, allow_model_override, "
+        "allowed_providers and allowed_models. No substitute attention model was used."
+    )
+
+
 @dataclass(frozen=True)
 class ParticipantProfile:
     profile_id: str
@@ -398,7 +410,15 @@ class HostStructuredAttentionModel:
             raise ValidationError(
                 "host does not provide the structured completion capability"
             )
-        self._complete = complete
+        def permitted_completion(**kwargs: Any) -> Any:
+            try:
+                return complete(**kwargs)
+            except PermissionError as exc:
+                raise HostAttentionPermissionError(
+                    HostAttentionPermissionError.detail
+                ) from exc
+
+        self._complete = permitted_completion
         self.name = selection.name
         self.provider = selection.provider
         self.model_id = selection.model
@@ -698,6 +718,11 @@ class AttentionEngine:
                 deadline=deadline,
             )
             judgment = _validate_model_judgment(raw, event_ids=event_ids)
+        except HostAttentionPermissionError:
+            return self._error(
+                checked, "host-permission-denied",
+                HostAttentionPermissionError.detail, invoked=True,
+            )
         except AttentionError as exc:
             code = (
                 "cancelled"

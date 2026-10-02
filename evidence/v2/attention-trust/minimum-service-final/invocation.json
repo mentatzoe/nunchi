@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/minimum-env/bin/python",
+    "-I",
+    "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/minimum-service-final/runner.py",
+    "--child",
+    "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/minimum-service-final",
+    "--service-only"
+  ],
+  "exit_code": 0,
+  "wheel_sha256": "5c9890b9f93e94166c3bcf2ec935ce9b42c5c8c505f1a07ff8415a38a170bbb5",
+  "fixture_sha256": {
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "test_hermes_normal_turn.py": "183e5b6d1b0805a2ed35b674568ade31a31f6c7863a405e7b714ab4b329cbab9",
+    "test_hermes_attention_setup_installed.py": "abc37d54db73533a7f750fb3e9f84d06af4ef9b1e1b3365f3a44953e50147a95",
+    "hermes_normal_turn_support.py": "62b605dba188b413f60440e18b6f38f809b9c1342fdb14c6f72f9a62e42b4c71"
+  }
+}

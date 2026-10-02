@@ -154,6 +154,7 @@ def _write_config(root: Path) -> tuple[Path, Path, dict, dict[str, str]]:
     digest_path.write_text(f"{digest}\n", encoding="ascii")
     digest_path.chmod(0o600)
     environ = {
+        "HERMES_HOME": str(root),
         "NUNCHI_HERMES_V2_CONFIG": str(config_path),
         "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE": str(digest_path),
     }
@@ -1311,6 +1312,7 @@ class HermesDashboardConfigTests(unittest.TestCase):
             config_path, _, document, sidecar_environ = _write_config(root)
             digest = hashlib.sha256(config_path.read_bytes()).hexdigest()
             environ = {
+                "HERMES_HOME": str(root),
                 "NUNCHI_HERMES_V2_CONFIG": str(config_path),
                 "NUNCHI_HERMES_V2_CONFIG_SHA256": digest,
             }

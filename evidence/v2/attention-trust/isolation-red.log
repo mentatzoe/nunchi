@@ -1,0 +1,31 @@
+test_injected_environment_without_home_cannot_select_real_profile (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_injected_environment_without_home_cannot_select_real_profile) ... FAIL
+
+======================================================================
+FAIL: test_injected_environment_without_home_cannot_select_real_profile (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_injected_environment_without_home_cannot_select_real_profile)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/tests/v2/test_hermes_attention_trust.py", line 36, in test_injected_environment_without_home_cannot_select_real_profile
+    write_config_document("default", document=document,
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                          expected_revision=before.revision, environ=env)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/src/nunchi/integrations/hermes_dashboard_store.py", line 1036, in write_config_document
+    _hermes_home(environment), validated,
+    ~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/src/nunchi/integrations/hermes_dashboard_store.py", line 1237, in _hermes_home
+    return Path.home() / ".hermes"
+           ~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1169, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1173, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/unittest/mock.py", line 1228, in _execute_mock_call
+    raise effect
+AssertionError: ambient home selected
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+FAILED (failures=1)

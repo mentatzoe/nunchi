@@ -1,0 +1,15 @@
+test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes) ... FAIL
+
+======================================================================
+FAIL: test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/tests/v2/test_hermes_attention_trust.py", line 32, in test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes
+    self.assertIs(document["plugins"]["entries"]["other"]["llm"]["allow_model_override"], False)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: True is not False
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (failures=1)
