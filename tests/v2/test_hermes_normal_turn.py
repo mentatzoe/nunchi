@@ -511,7 +511,7 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         self.assertEqual([], self.server.bodies(), "no attention call for an unauthenticated sender")
 
     def test_ordinary_tool_on_configured_route(self) -> None:
-        """Baseline fact: today the plugin blanket-denies tools on configured routes."""
+        """The probe must agree with an ordinary tool executing under stock Hermes."""
 
         self.server.script(
             self.attend("WAKE"),
@@ -523,6 +523,18 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         self.assertEqual(2, len(turns), self.server.bodies())
         tool_result = str(turns[1]["messages"][-1].get("content"))
         self.assertIn("model:", tool_result, f"read_file did not execute natively on a configured route; model received: {tool_result[:200]}")
+        self._assert_tool_probe()
+
+    def _assert_tool_probe(self) -> None:
+        from nunchi.integrations import hermes_v2
+
+        probe = hermes_v2._SHIM_OWNER.probe()
+        self.assertEqual("stock-hermes-with-nunchi-invocation-guards", probe["tool_execution"])
+        self.assertFalse(probe["complete_v2_lifecycle"])
+        self.assertEqual("disabled-configured-routes", probe["auto_title"])
+        self.assertEqual("disabled-configured-turns", probe["stock_typing"])
+        self.assertEqual("disabled-configured-routes", probe["discord_voice_input"])
+        self.assertIn("background", probe["unsupported_configured_commands"])
 
     def test_native_approval_control_on_configured_route(self) -> None:
         """Owner fa0119a: /approve must reach stock while its participant waits."""
@@ -560,6 +572,7 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         )
         self.assertTrue(outcome["approve_admitted"])
         self.assertIn("done after approval", self.deliveries())
+        self._assert_tool_probe()
 
     def test_cancel_via_stop_makes_no_new_native_invocation(self) -> None:
         hold = threading.Event()

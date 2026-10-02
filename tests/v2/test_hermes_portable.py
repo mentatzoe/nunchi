@@ -4989,7 +4989,7 @@ class GatewayRunner:
             )
             self.assertFalse(plugin.probe()["complete_v2_lifecycle"])
             self.assertEqual(
-                "blocked-configured-routes",
+                "stock-hermes-with-nunchi-invocation-guards",
                 plugin.probe()["tool_execution"],
             )
 

@@ -2653,7 +2653,7 @@ class NunchiHermesV2Plugin:
             "supported_platforms": sorted(_SUPPORTED_HERMES_PLATFORMS),
             "compatibility_mode": self.mode,
             "participant_execution": "stock-hermes-with-nunchi-guards",
-            "tool_execution": "blocked-configured-routes",
+            "tool_execution": "stock-hermes-with-nunchi-invocation-guards",
             "unsupported_configured_commands": sorted(
                 _DERIVED_PARTICIPANT_COMMANDS
             ),

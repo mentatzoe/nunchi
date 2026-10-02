@@ -664,15 +664,18 @@ async def _reserve_before_dispatch(
         except PersistenceError as exc:
             with gate:
                 abandoned = state["abandoned"]
+                if not abandoned:
+                    # Publish the error atomically with readiness: the observer
+                    # must either own this failure's cleanup or leave it to us.
+                    state["error"] = exc
+                    state["ready"].set()
             if abandoned:
                 _suppress_late_reservation(
                     journal,
                     binding,
                     deadline=cleanup_end,
                 )
-            else:
-                state["error"] = exc
-            state["ready"].set()
+                state["ready"].set()
             return
         with gate:
             if state["abandoned"]:
@@ -696,13 +699,19 @@ async def _reserve_before_dispatch(
     loop = asyncio.get_running_loop()
     future = loop.run_in_executor(None, attempt)
     try:
-        await asyncio.wait_for(
+        completed = await asyncio.wait_for(
             asyncio.shield(asyncio.to_thread(state["ready"].wait, remaining)),
             remaining + 0.02,
         )
+        if not completed:
+            # threading.Event.wait times out by returning False, not raising.
+            # The worker still owns a reservation attempt and must be abandoned
+            # and tracked just as when the asyncio observer timer expires.
+            raise TimeoutError
     except TimeoutError:
         with gate:
-            if state["ready"].is_set() and state["error"] is None:
+            cleanup_needed = state["error"] is not None
+            if state["ready"].is_set() and not cleanup_needed:
                 ack_id = state["ack_id"]
                 reserved = bool(state["reserved"])
             else:
@@ -711,13 +720,19 @@ async def _reserve_before_dispatch(
                 reserved = False
         if ack_id is None:
             _own_future(future)
+            if cleanup_needed:
+                # A completed error cannot observe our abandonment itself.
+                _own_future(loop.run_in_executor(None, cleanup_attempt))
             return None, "refused"
         _consume_future(future)
         return ack_id, "reserved" if reserved else "duplicate"
     except asyncio.CancelledError:
         with gate:
             state["abandoned"] = True
+            cleanup_needed = state["error"] is not None
         _own_future(future)
+        if cleanup_needed:
+            _own_future(loop.run_in_executor(None, cleanup_attempt))
         raise
     _consume_future(future)
     if state["error"] is not None:

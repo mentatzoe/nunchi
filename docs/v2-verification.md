@@ -60,7 +60,8 @@ and Claude participant identity/surface blockers in
 |---|---|---|
 | source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
 | clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
-| installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | automated matrix records each resolved candidate commit and exact before/after hashes; first-save/restart and live-platform acceptance remain **pending** |
+| installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | minimum/release/moving-main contract CI passed for the predecessor; successor minimum/release reruns are recorded below; first-save/restart and live-platform acceptance remain **pending** |
+| installed Hermes normal turns | exact wheel; ordinary participant and tools/approvals; isolated homes; no installed skips or external egress; before/after integrity | minimum/release stock-host matrix passed; current-main normal turns, live platforms and adoption remain **pending** |
 | installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
 | deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
 | live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
@@ -71,31 +72,53 @@ had exact source, package, installed, live-room, and non-author approval. Those
 records remain below as historical evidence only. Final V2 acceptance requires
 every current row to name immutable evidence.
 
-## Current Hermes source status
+## Current Hermes candidate: portable plugin-owned tools and ACK
 
-The landed, unverified Hermes integration reuses Nunchi's shared observation, attention,
-opportunity preparation, scheduling, wake, and participant-receipt behavior.
-Stock Hermes supplies the admitted participant prompt, main model, memory,
-reactions, cancellation, delivery, and platform adapter behind checked
-process-local guards.
+PR [#83](https://github.com/mentatzoe/nunchi/pull/83) and its diagnostic/fixture
+successor reuse Nunchi's shared observation, attention, opportunity preparation,
+scheduling, wake and participant-receipt behavior. Stock Hermes supplies the
+admitted participant prompt, main model, memory, tools, approvals, reactions,
+cancellation, delivery and platform adapter behind checked process-local guards.
 
-The current source is deliberately partial:
+- Hermes 0.19.0 is the minimum; later versions must pass the checked capability
+  contract. Nunchi changes no Hermes source or installed distribution files.
+- Ordinary tools use the stock registry and approval flow, with durable
+  at-most-once native invocation claims and post-approval rechecks. Hermes
+  remains authoritative. This is not atomic universal external-effect
+  authority; journal `finish` means callback result, not effect confirmation.
+- Auto-title, stock typing, Discord voice input, native `/thread`, detached
+  participant commands and handoff into configured rooms remain disabled.
+  Media ingress, reaction/membership ingress and other-platform coverage are
+  still incomplete. The probe keeps `complete_v2_lifecycle: false`.
 
-- it requires Hermes 0.19.0 or newer and accepts current Hermes when the
-  checked host capability contract passes;
-- it blocks generic Hermes tools on configured rooms because Hermes 0.19.0
-  lacks a safe final effect hook after approval;
-- it disables Hermes auto-title on configured rooms because that background
-  work can outlive the turn;
-- it disables stock typing, Discord voice input, native `/thread`, detached
-  participant commands, and handoff into configured rooms; and
-- it reports `complete_v2_lifecycle: false`.
+The owner verified exact predecessor `9682792ad8dd5202387c843b1a329a2c1b8251ec`
+with local wheel SHA-256
+`39ed326fbe352ab750c29bca3602841187bf4fe95c0b86506743063a3f832066`:
+32 normal-turn/attention-setup checks per host, four 4-test Discord/Telegram
+contract lanes and four 1-test startup lanes, all with no installed skips and
+no external connection attempts. The minimum is 0.19.0 at
+`3ef6bbd201263d354fd83ec55b3c306ded2eb72a`; release 0.21.5 is
+`f97608f178d1ffeca59860195ab7da295f7c8e5f`. These use stock participant/tool/
+approval code with isolated homes, loopback model responses and captured
+platform output, not live models or platform delivery.
 
-The installed-host lane pins the exact Hermes 0.19.0 target at tag
-`v2026.7.20`, commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`, and
-resolves the current `main` candidate on every run. It records tracked-source
-and installed-distribution hashes before and after Nunchi activation. Live
-first-save/restart acceptance remains pending.
+Host-contract CI [37067969821](https://github.com/mentatzoe/nunchi/actions/runs/37067969821)
+passed all six minimum/release/moving-main Discord/Telegram lanes. That main
+revision was `c3b4a30eff6d01d136afadbfefb4e078c8d05799`; it was **contract-only**,
+not normal-turn proof. CI built independent wheels with separate digests, not
+the local wheel above. Canonical CI
+[37067969752](https://github.com/mentatzoe/nunchi/actions/runs/37067969752) failed
+the Python 3.12 ACK timer assertion; 3.11, 3.13 and packaging passed. The
+[successor diagnosis and verification](verification/2026-10-02-ack-fixtures-and-diagnostics.md)
+records the narrow repair, exact artifacts and reruns; predecessor proof alone
+does not verify those changes.
+
+Installed proof is no longer absent, but live first-save/restart and native
+platform acceptance, current-main normal turns, remaining surfaces, release,
+running-profile adoption and complete V2 acceptance remain open. The
+[Hermes operator guide](../integrations/hermes/README.md#upgrade-disable-uninstall-and-rollback)
+also names the missing automatic state migration and complete user-data cleanup
+mechanisms rather than implying package uninstall performs them.
 
 ## Superseded Hermes `b6ee0c2` evidence
 

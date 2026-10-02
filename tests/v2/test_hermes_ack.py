@@ -11,6 +11,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from nunchi.ack import AckJournal, AckPolicy
 from nunchi.integrations import hermes_ack
@@ -586,38 +587,75 @@ class CommitBoundaryTests(unittest.TestCase):
         return Adapter()
 
     async def _dispatch(self, adapter, scheduler, token, deadline, directory, request_id):
-        event = SimpleNamespace(raw_message=_Message(7, _Channel("42", allow=True)))
+        dispatch, journal = self._prepare_dispatch(
+            adapter, scheduler, token, directory, request_id
+        )
+        return await dispatch(deadline), journal
+
+    def _prepare_dispatch(
+        self, adapter, scheduler, token, directory, request_id,
+        *, room_id="42", message_id=7,
+    ):
+        # Synchronous receipt seeding is fixture setup, not ACK dispatch latency.
+        event = SimpleNamespace(raw_message=_Message(message_id, _Channel(room_id, allow=True)))
         capability = discord_reaction_capability(
-            adapter,
-            event,
-            room_id="42",
-            actor_id="discord:actor:999",
+            adapter, event, room_id=room_id, actor_id="discord:actor:999",
         )
         receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
         journal = AckJournal(Path(directory) / "ack.jsonl")
         _seed(receipts, request_id, capability.permissions_revision)
-        route = _CONFIGURED_ROUTE_CONTEXT.set(True)
-        try:
-            result = await dispatch_attention_ack(
-                adapter=adapter,
-                event=event,
-                platform="discord",
-                room_id="42",
-                actor_id="discord:actor:999",
-                policy=AckPolicy(),
-                journal=journal,
-                receipts=receipts,
-                wake=_wake(),
-                request={"request_id": request_id},
-                decision=_decision(capability.permissions_revision),
-                token=token,
-                deadline=deadline,
-                lifecycle_id=scheduler.lifecycle_id,
-                scheduler=scheduler,
-            )
-        finally:
-            _CONFIGURED_ROUTE_CONTEXT.reset(route)
-        return result, journal
+        wake = _wake(f"discord:message:{message_id}")
+        wake["room"]["id"] = room_id
+        wake["room"]["continuity_scope_id"] = f"discord-room-{room_id}"
+
+        async def dispatch(deadline):
+            route = _CONFIGURED_ROUTE_CONTEXT.set(True)
+            try:
+                return await dispatch_attention_ack(
+                    adapter=adapter,
+                    event=event,
+                    platform="discord",
+                    room_id=room_id,
+                    actor_id="discord:actor:999",
+                    policy=AckPolicy(),
+                    journal=journal,
+                    receipts=receipts,
+                    wake=wake,
+                    request={"request_id": request_id},
+                    decision=_decision(capability.permissions_revision),
+                    token=token,
+                    deadline=deadline,
+                    lifecycle_id=scheduler.lifecycle_id,
+                    scheduler=scheduler,
+                )
+            finally:
+                _CONFIGURED_ROUTE_CONTEXT.reset(route)
+
+        return dispatch, journal
+
+    def _observe_journal_call(self, journal, method):
+        """Signal actual worker entry/return without replacing persistence."""
+        entered = asyncio.Event()
+        returned = threading.Event()
+        loop = asyncio.get_running_loop()
+        original = getattr(journal, method)
+
+        def observed(*args, **kwargs):
+            loop.call_soon_threadsafe(entered.set)
+            try:
+                return original(*args, **kwargs)
+            finally:
+                returned.set()
+
+        setattr(journal, method, observed)
+        return entered, returned
+
+    async def _assert_wait_progress(self, entered, returned):
+        began = time.monotonic()
+        await asyncio.wait_for(entered.wait(), 0.5)
+        await asyncio.sleep(0)  # a loop turn after the real journal call starts
+        self.assertLess(time.monotonic() - began, 0.5)
+        self.assertFalse(returned.is_set(), "journal call blocked the event loop")
 
     def test_cancel_before_native_entry_makes_zero_calls(self) -> None:
         async def scenario() -> None:
@@ -858,79 +896,40 @@ class CommitBoundaryTests(unittest.TestCase):
             other_token = other_scheduler.offer("discord:message:8")
             assert other_token is not None
             with tempfile.TemporaryDirectory() as directory:
+                dispatch, journal = self._prepare_dispatch(
+                    adapter, scheduler, token, directory, "req-reserve"
+                )
+                other_dir = Path(directory) / "other"
+                other_dir.mkdir()
+                other_dispatch, _ = self._prepare_dispatch(
+                    other_adapter, other_scheduler, other_token, other_dir,
+                    "req-other", room_id="99", message_id=8,
+                )
+                entered, returned = self._observe_journal_call(journal, "reserve")
                 lock_path = Path(directory) / ".ack.jsonl.lock"
                 fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
                 fcntl.flock(fd, fcntl.LOCK_EX)
-
-                def unlock() -> None:
-                    time.sleep(0.4)
+                start = time.monotonic()
+                pending = asyncio.create_task(dispatch(start + 0.15))
+                try:
+                    await self._assert_wait_progress(entered, returned)
+                    other_start = time.monotonic()
+                    other_result = await asyncio.wait_for(
+                        other_dispatch(other_start + 1), 0.2
+                    )
+                    self.assertLess(time.monotonic() - other_start, 0.2)
+                    self.assertEqual("sent", other_result.delivery)
+                    result = await asyncio.wait_for(pending, 0.35)
+                    self.assertLess(time.monotonic() - start, 0.35)
+                    self.assertEqual([], calls)
+                    self.assertEqual("failed", result.delivery)
+                    # The real lock remains held through other-room progress
+                    # AND deadline refusal, not an arbitrary sleep in a holder.
+                finally:
                     fcntl.flock(fd, fcntl.LOCK_UN)
                     os.close(fd)
-
-                holder = threading.Thread(target=unlock)
-                holder.start()
-                ticks: list[float] = []
-                other_elapsed: list[float] = []
-                start = time.monotonic()
-                asyncio.get_running_loop().call_later(
-                    0.02,
-                    lambda: ticks.append(time.monotonic() - start),
-                )
-
-                async def other_room() -> None:
-                    other_dir = Path(directory) / "other"
-                    other_dir.mkdir()
-                    other_event = SimpleNamespace(
-                        raw_message=_Message(8, _Channel("99", allow=True))
-                    )
-                    capability = discord_reaction_capability(
-                        other_adapter,
-                        other_event,
-                        room_id="99",
-                        actor_id="discord:actor:999",
-                    )
-                    receipts = ReceiptJournal(other_dir / "receipts.jsonl")
-                    _seed(receipts, "req-other", capability.permissions_revision)
-                    began = time.monotonic()
-                    await dispatch_attention_ack(
-                        adapter=other_adapter,
-                        event=other_event,
-                        platform="discord",
-                        room_id="99",
-                        actor_id="discord:actor:999",
-                        policy=AckPolicy(),
-                        journal=AckJournal(other_dir / "ack.jsonl"),
-                        receipts=receipts,
-                        wake=_wake("discord:message:8"),
-                        request={"request_id": "req-other"},
-                        decision=_decision(capability.permissions_revision),
-                        token=other_token,
-                        deadline=time.monotonic() + 1,
-                        lifecycle_id=other_scheduler.lifecycle_id,
-                        scheduler=other_scheduler,
-                    )
-                    other_elapsed.append(time.monotonic() - began)
-
-                other = asyncio.create_task(other_room())
-                result, journal = await self._dispatch(
-                    adapter,
-                    scheduler,
-                    token,
-                    start + 0.15,
-                    directory,
-                    "req-reserve",
-                )
-                elapsed = time.monotonic() - start
-                await other
-                holder.join()
-                self.assertTrue(await drain_ack_ownership(3))
-                self.assertLess(elapsed, 0.35)
-                self.assertTrue(ticks)
-                self.assertLess(ticks[0], 0.1)
-                self.assertTrue(other_elapsed)
-                self.assertLess(other_elapsed[0], 0.2)
-                self.assertEqual([], calls)
-                self.assertEqual("failed", result.delivery)
+                    await asyncio.gather(pending, return_exceptions=True)
+                    self.assertTrue(await drain_ack_ownership(3))
                 replay_scheduler = ConversationOpportunityScheduler("replay")
                 replay = replay_scheduler.offer("discord:message:7")
                 assert replay is not None
@@ -949,23 +948,140 @@ class CommitBoundaryTests(unittest.TestCase):
 
         self._run(scenario())
 
+    def test_reservation_wait_expiry_keeps_cleanup_owned(self) -> None:
+        async def scenario() -> None:
+            calls = []
+            release_error = threading.Event()
+            expired = threading.Event()
+
+            async def reaction(_self, message, emoji):
+                calls.append((message.id, emoji))
+                return True
+
+            adapter = self._adapter(reaction)
+            scheduler = ConversationOpportunityScheduler("delayed-reserve-error")
+            token = scheduler.offer("discord:message:7")
+            assert token is not None
+            with tempfile.TemporaryDirectory() as directory:
+                dispatch, journal = self._prepare_dispatch(
+                    adapter, scheduler, token, directory, "req-delayed-error"
+                )
+                original = journal.reserve
+
+                def delayed_error(*args, **kwargs):
+                    try:
+                        return original(*args, **kwargs)
+                    except hermes_ack.PersistenceError:
+                        # Hold the worker between real lock timeout and error
+                        # publication. Event.wait in the async observer must
+                        # expire normally (False), not finish the reservation.
+                        expired.set()
+                        release_error.wait(2)
+                        raise
+
+                journal.reserve = delayed_error
+                fd = os.open(Path(directory) / ".ack.jsonl.lock", os.O_CREAT | os.O_RDWR, 0o600)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    start = time.monotonic()
+                    wait_for = asyncio.wait_for
+
+                    async def delayed_observer_timeout(awaitable, timeout):
+                        # Select the legal ordering where threading.Event.wait
+                        # returns False before asyncio's fallback timer fires.
+                        # Do not alter the journal or dispatch deadline.
+                        if timeout < 0.3:
+                            timeout += 0.2
+                        return await wait_for(awaitable, timeout)
+
+                    with mock.patch.object(asyncio, "wait_for", delayed_observer_timeout):
+                        result = await asyncio.wait_for(dispatch(start + 0.15), 0.35)
+                    self.assertLess(time.monotonic() - start, 0.35)
+                    self.assertEqual([], calls)
+                    self.assertEqual("failed", result.delivery)
+                    self.assertFalse(ack_effects_quiescent(), "reservation cleanup lost ownership")
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    release_error.set()
+                    self.assertTrue(await drain_ack_ownership(3))
+                self.assertTrue(expired.is_set())
+                self.assertEqual("failed", journal.records()[-1]["delivery"])
+                replay_scheduler = ConversationOpportunityScheduler("delayed-error-replay")
+                replay = replay_scheduler.offer("discord:message:7")
+                assert replay is not None
+                replay_result, _ = await self._dispatch(
+                    adapter, replay_scheduler, replay, time.monotonic() + 1,
+                    directory, "req-delayed-error-replay",
+                )
+                self.assertEqual([], calls)
+                self.assertEqual("unknown", replay_result.delivery)
+                self.assertIn("duplicate", replay_result.detail)
+
+        self._run(scenario())
+
+    def test_published_reservation_error_keeps_cleanup_on_timeout_or_cancel(self) -> None:
+        async def scenario(mode) -> None:
+            binding = {
+                "request_id": "req-published-error", "participant_id": "participant",
+                "actor_id": "discord:actor:999", "platform": "discord", "room_id": "42",
+                "continuity_scope_id": "discord-room-42", "target_event_id": "discord:message:7",
+                "reaction": "👂", "operation": "add", "opportunity_generation": 1,
+                "lifecycle_id": "published-error", "deadline_id": "deadline", "permissions_revision": "test",
+            }
+            to_thread = asyncio.to_thread
+            wait_for = asyncio.wait_for
+
+            async def interrupted_observer(fn, _remaining):
+                # Let the real worker publish its lock-timeout error first,
+                # then select timeout/cancellation before delivery to its owner.
+                self.assertTrue(await to_thread(fn, 1))
+                if mode == "timeout":
+                    raise TimeoutError
+                raise asyncio.CancelledError
+
+            async def observer_timer(awaitable, _timeout):
+                return await wait_for(awaitable, 1)
+
+            with tempfile.TemporaryDirectory() as directory:
+                journal = AckJournal(Path(directory) / "ack.jsonl")
+                fd = os.open(Path(directory) / ".ack.jsonl.lock", os.O_CREAT | os.O_RDWR, 0o600)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    with (
+                        mock.patch.object(asyncio, "to_thread", interrupted_observer),
+                        mock.patch.object(asyncio, "wait_for", observer_timer),
+                    ):
+                        operation = hermes_ack._reserve_before_dispatch(
+                            journal, binding, deadline=time.monotonic() + 0.05
+                        )
+                        if mode == "timeout":
+                            self.assertEqual((None, "refused"), await operation)
+                        else:
+                            with self.assertRaises(asyncio.CancelledError):
+                                await operation
+                    self.assertFalse(ack_effects_quiescent())
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    self.assertTrue(await drain_ack_ownership(3))
+                self.assertEqual("failed", journal.records()[-1]["delivery"])
+                self.assertFalse(AckJournal(journal.path).reserve(binding)[1])
+
+        for mode in ("timeout", "cancel"):
+            with self.subTest(mode=mode):
+                self._run(scenario(mode))
+
     def test_settlement_contention_stays_responsive_and_does_not_duplicate(self) -> None:
         async def scenario() -> None:
             calls: list[tuple] = []
 
             async def reaction(_self, message, emoji):
                 calls.append((message.id, emoji))
-                lock_path = Path(directory) / ".ack.jsonl.lock"
-                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-
-                def hold() -> None:
-                    fcntl.flock(fd, fcntl.LOCK_EX)
-                    time.sleep(0.4)
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                    os.close(fd)
-
-                threading.Thread(target=hold).start()
-                await asyncio.sleep(0.02)
+                # Reservation is durable before the native callback. Acquire
+                # synchronously here so settlement must contend, without a race
+                # between a sleeping test thread and the real journal worker.
+                fcntl.flock(fd, fcntl.LOCK_EX)
                 return True
 
             adapter = self._adapter(reaction)
@@ -973,22 +1089,22 @@ class CommitBoundaryTests(unittest.TestCase):
             token = scheduler.offer("discord:message:7")
             assert token is not None
             with tempfile.TemporaryDirectory() as directory:
-                ticks: list[float] = []
+                dispatch, journal = self._prepare_dispatch(
+                    adapter, scheduler, token, directory, "req-settle"
+                )
+                entered, returned = self._observe_journal_call(journal, "settle")
+                fd = os.open(Path(directory) / ".ack.jsonl.lock", os.O_CREAT | os.O_RDWR, 0o600)
                 start = time.monotonic()
-                asyncio.get_running_loop().call_later(
-                    0.02,
-                    lambda: ticks.append(time.monotonic() - start),
-                )
-                result, journal = await self._dispatch(
-                    adapter,
-                    scheduler,
-                    token,
-                    start + 2,
-                    directory,
-                    "req-settle",
-                )
-                self.assertTrue(ticks)
-                self.assertLess(ticks[0], 0.12)
+                pending = asyncio.create_task(dispatch(start + 2))
+                try:
+                    await self._assert_wait_progress(entered, returned)
+                    self.assertFalse(pending.done())
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    result = await asyncio.wait_for(pending, 2.5)
+                    self.assertTrue(await drain_ack_ownership(3))
+                self.assertLess(time.monotonic() - start, 2)
                 self.assertEqual([(7, "👂")], calls)
                 self.assertEqual("sent", result.delivery)
                 replay_scheduler = ConversationOpportunityScheduler("settle-replay")
@@ -1032,13 +1148,6 @@ class CommitBoundaryTests(unittest.TestCase):
             token = scheduler.offer("discord:message:7")
             assert token is not None
             with tempfile.TemporaryDirectory() as directory:
-                ticks: list[float] = []
-                start = time.monotonic()
-                deadline = start + 0.35
-                asyncio.get_running_loop().call_later(
-                    0.02,
-                    lambda: ticks.append(time.monotonic() - start),
-                )
                 journal = AckJournal(Path(directory) / "ack.jsonl")
                 receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
                 event = SimpleNamespace(raw_message=_Message(7, _Channel("42", allow=True)))
@@ -1049,6 +1158,10 @@ class CommitBoundaryTests(unittest.TestCase):
                     actor_id="discord:actor:999",
                 )
                 _seed(receipts, "req-rlock", capability.permissions_revision)
+                entered, returned = self._observe_journal_call(journal, "settle")
+                start = time.monotonic()
+                deadline = start + 0.35
+                progress = asyncio.create_task(self._assert_wait_progress(entered, returned))
                 route = _CONFIGURED_ROUTE_CONTEXT.set(True)
                 try:
                     result = await dispatch_attention_ack(
@@ -1070,12 +1183,19 @@ class CommitBoundaryTests(unittest.TestCase):
                     )
                 finally:
                     _CONFIGURED_ROUTE_CONTEXT.reset(route)
-                self.assertTrue(ticks)
-                self.assertLess(ticks[0], 0.12)
+                await progress
                 self.assertLess(time.monotonic() - start, 0.7)
                 self.assertEqual([(7, "👂")], calls)
                 self.assertEqual("unknown", result.delivery)
-                await asyncio.sleep(max(0.0, deadline + 2.15 - time.monotonic()))
+                # Await owned-future delivery rather than assuming a sleeping
+                # timer runs after every executor callback. The writer's absolute
+                # cleanup deadline is unchanged; allow a bounded half-second
+                # for the loop to observe completion, with the lock still held.
+                cleanup_observed_by = deadline + 2.5
+                self.assertTrue(await drain_ack_ownership(
+                    max(0, cleanup_observed_by - time.monotonic())
+                ))
+                self.assertLess(time.monotonic(), cleanup_observed_by)
                 self.assertTrue(ack_effects_quiescent())
                 raw_before = (Path(directory) / "ack.jsonl").read_text(encoding="utf-8")
                 self.assertNotIn('"delivery":"sent"', raw_before)
