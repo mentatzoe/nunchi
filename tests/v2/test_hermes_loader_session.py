@@ -335,11 +335,14 @@ class DiscordAdapterResolutionTests(unittest.TestCase):
         registry = Registry()
         modules = {**_install_shipped(shipped), **_registry_module(registry)}
         with mock.patch.dict(sys.modules, modules):
-            resolved = hermes_v2._active_discord_adapter_class()
+            with self.assertRaises(ValidationError) as raised:
+                hermes_v2._active_discord_adapter_class()
 
-        self.assertIs(shipped, resolved)
+        self.assertIn("unknown loader", str(raised.exception))
         self.assertEqual([], loaded)
         self.assertEqual(0, registry.get_calls)
+        self.assertEqual({}, registry._entries)
+        self.assertIn("discord", registry._deferred)
 
     def test_concrete_shipped_registration_is_the_resolved_class(self) -> None:
         shipped = _shipped_discord()
@@ -1077,7 +1080,7 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
         # A generation published after ours must survive the same inverse.
         self.assertIsNotNone(state["entry"])
 
-    def test_failed_register_restores_minimum_deferred_loader(self) -> None:
+    def test_foreign_minimum_loader_rejects_activation_without_registry_changes(self) -> None:
         from tests.v2.test_hermes_portable import FakeLlm, room_config
 
         shipped = _shipped_discord()
@@ -1115,16 +1118,16 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
                     with mock.patch.object(
                         hermes_v2, "_install_host_contract_v1", side_effect=install
                     ):
-                        with self.assertRaisesRegex(
-                            RuntimeError, "injected later activation failure"
-                        ):
+                        with self.assertRaises(ValidationError) as raised:
                             hermes_v2.register(
                                 ctx,
                                 config_loader=lambda _: config,
                                 dashboard_installer=lambda: None,
                             )
+        self.assertIn("unknown loader", str(raised.exception))
         self.assertNotIn("discord", registry._entries)
         self.assertIs(loader, registry._deferred.get("discord"))
+        self.assertEqual([], hermes_v2._REGISTRY_ROLLBACKS.get() or [])
 
     def test_publication_preserves_manifest_name_and_ledger_inverse(self) -> None:
         from tests.v2.test_hermes_portable import FakeLlm, room_config
@@ -1266,30 +1269,30 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
             resolved = hermes_v2._active_discord_adapter_class()
         self.assertIs(shipped, resolved)
 
-    def test_newer_deferred_loader_is_preserved_and_activation_fails_closed(self) -> None:
+    def test_foreign_minimum_loader_is_not_invoked_or_published(self) -> None:
         shipped = _shipped_discord()
         shipped.__module__ = "plugins.platforms.discord.adapter"
-        loader = self._loader()
-        newer = self._loader()
-        registry = types.SimpleNamespace(
-            _entries={}, _deferred={"discord": loader}, register=lambda entry: None
-        )
-        build = hermes_v2._host_platform_entry
-
-        def replace_loader(**kwargs):
-            registry._deferred["discord"] = newer
-            return build(**kwargs)
-
+        calls: list[str] = []
+        loader = lambda: calls.append("foreign")
+        registry = _MinimumRegistry()
+        registry.register_deferred("discord", loader)
+        maps = registry._entries, registry._deferred
         with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
-            with mock.patch.object(hermes_v2, "_host_platform_entry", side_effect=replace_loader):
-                with self.assertRaises(ValidationError):
-                    hermes_v2._active_discord_adapter_class()
-        self.assertEqual({}, registry._entries)
-        self.assertIs(newer, registry._deferred["discord"])
+            with self.assertRaises(ValidationError) as raised:
+                hermes_v2._active_discord_adapter_class()
+        self.assertIn("unknown loader", str(raised.exception))
+        self.assertEqual([], calls)
+        self.assertIs(maps[0], registry._entries)
+        self.assertIs(maps[1], registry._deferred)
+        self.assertIs(loader, registry._deferred["discord"])
+        self.assertNotIn("discord", registry._entries)
+        self.assertFalse(hasattr(hermes_v2, "_ObservedRegistryMap"))
+        self.assertFalse(hasattr(hermes_v2, "_swap_minimum_maps_locked"))
 
     def test_concurrent_publication_keeps_and_validates_winner(self) -> None:
-        # Pause at the actual write operation, not at a preceding snapshot.
-        for scoped in (False, True):
+        # Pause at the native CAS write, not at a preceding snapshot.
+        # Minimum no longer publishes, so this race is current-host only.
+        for scoped in (True,):
             for foreign in (False, True):
                 with self.subTest(scoped=scoped, foreign=foreign):
                     shipped = _shipped_discord()
@@ -1458,208 +1461,85 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
         self.assertFalse(restored)
         self.assertIs(newer, state["entry"])
 
-    def test_minimum_rollback_pop_keeps_a_concurrent_native_entry(self) -> None:
-        # Pause before the inverse commit. A native register() that finished
-        # there must still be the owner; the commit re-checks under the writer gate.
-        published = types.SimpleNamespace(name="discord", adapter_factory=object)
-        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
-        old_loader = self._loader()
-        registry = _MinimumRegistry()
-        registry.register(published)
-
-        def writer() -> None:
-            registry.register(newer)
-
-        restored = _run_at_source_line(
-            hermes_v2._restore_discord_registration,
-            "_commit_minimum_discord_inverse(",
-            writer,
-            lambda: hermes_v2._restore_discord_registration(
-                registry, None, (published, None), (None, old_loader)
-            ),
-        )
-        self.assertFalse(restored)
-        self.assertIs(newer, registry._entries.get("discord"))
-        self.assertNotIn("discord", registry._deferred)
-
-    def test_minimum_rollback_restore_keeps_a_native_entry(self) -> None:
-        published = types.SimpleNamespace(name="discord", adapter_factory=object)
-        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
-        old_loader = self._loader()
-        registry = _MinimumRegistry()
-        registry.register(published)
-
-        def writer() -> None:
-            registry.register(newer)
-
-        restored = _run_at_source_line(
-            hermes_v2._restore_discord_registration,
-            "_commit_minimum_discord_inverse(",
-            writer,
-            lambda: hermes_v2._restore_discord_registration(
-                registry, None, (published, None), (None, old_loader)
-            ),
-        )
-        self.assertFalse(restored)
-        self.assertIs(newer, registry._entries.get("discord"))
-        self.assertNotIn("discord", registry._deferred)
-
-    def test_deferred_winner_after_loader_claim_fails_closed(self) -> None:
-        shipped = _shipped_discord()
-        shipped.__module__ = "plugins.platforms.discord.adapter"
-        old_loader = self._loader()
-        newer_loader = self._loader()
-        registry = _MinimumRegistry()
-        registry.register_deferred("discord", old_loader)
-        rollbacks: list[object] = []
-        token = hermes_v2._REGISTRY_ROLLBACKS.set(rollbacks)
-        try:
-            with mock.patch.dict(
-                sys.modules, _publication_modules(registry, shipped)
-            ):
-
-                def writer() -> None:
-                    registry.register_deferred("discord", newer_loader)
-
-                with self.assertRaises(ValidationError):
-                    _run_at_source_line(
-                        hermes_v2._replace_deferred_discord_registration,
-                        'entries.setdefault("discord", entry)',
-                        writer,
-                        hermes_v2._active_discord_adapter_class,
-                    )
-        finally:
-            hermes_v2._REGISTRY_ROLLBACKS.reset(token)
-        self.assertEqual([], rollbacks)
-        self.assertNotIn("discord", registry._entries)
-        self.assertIs(newer_loader, registry._deferred.get("discord"))
-
-    def test_unowned_publication_release_keeps_a_newer_native_entry(self) -> None:
-        shipped = _shipped_discord()
-        shipped.__module__ = "plugins.platforms.discord.adapter"
-        old_loader = self._loader()
-        newer_loader = self._loader()
-        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
-        registry = _MinimumRegistry()
-
-        class GapDeferred(dict):
-            def get(self, key, default=None):
-                # The claim/insert gap already installed a deferred winner.
-                if (
-                    key == "discord"
-                    and registry._entries.get("discord") is not None
-                    and "discord" not in self
-                ):
-                    self["discord"] = newer_loader
-                return super().get(key, default)
-
-        registry._deferred = GapDeferred({"discord": old_loader})
-        token = hermes_v2._REGISTRY_ROLLBACKS.set([])
-        try:
-            with mock.patch.dict(
-                sys.modules, _publication_modules(registry, shipped)
-            ):
-
-                def writer() -> None:
-                    registry.register(newer)
-
-                with self.assertRaises(ValidationError):
-                    _run_at_source_line(
-                        hermes_v2._release_minimum_discord_entry,
-                        "_commit_minimum_entry_release(",
-                        writer,
-                        hermes_v2._active_discord_adapter_class,
-                    )
-        finally:
-            hermes_v2._REGISTRY_ROLLBACKS.reset(token)
-        self.assertIs(newer, registry._entries.get("discord"))
-        self.assertNotIn("discord", registry._deferred)
-
-    def _stale_minimum_owner(self):
+    def test_minimum_restore_does_not_hide_or_resurrect_a_native_owner(self) -> None:
         published = types.SimpleNamespace(name="discord", adapter_factory=object)
         newer = types.SimpleNamespace(name="discord", adapter_factory=object)
         registry = _ReadableMinimumRegistry()
         registry.register(published)
         registry.register(newer)
-        return registry, published, newer
-
-    def _assert_stale_inverse_stays_visible(self, function, operation_for) -> None:
-        registry, published, newer = self._stale_minimum_owner()
-        lines = _executed_lines(function, lambda: operation_for(registry, published, newer))
-        self.assertGreater(len(lines), 0)
-        for lineno in lines:
-            fresh, fresh_published, fresh_newer = self._stale_minimum_owner()
-            observed: list[object] = []
-            _run_at_lineno(
-                function,
-                lineno,
-                lambda: observed.append(fresh.get("discord")),
-                lambda: operation_for(fresh, fresh_published, fresh_newer),
-            )
-            self.assertEqual(
-                [fresh_newer],
-                observed,
-                _source_line(function, lineno),
-            )
-            self.assertIs(fresh_newer, fresh.get("discord"), _source_line(function, lineno))
-            self.assertEqual(0, fresh.loader_calls)
-
-    def _assert_stale_inverse_does_not_resurrect(self, function, operation_for) -> None:
-        registry, published, newer = self._stale_minimum_owner()
-        lines = _executed_lines(function, lambda: operation_for(registry, published, newer))
-        self.assertGreater(len(lines), 0)
-        for lineno in lines:
-            fresh, fresh_published, fresh_newer = self._stale_minimum_owner()
-            returned: list[bool] = []
-            _run_at_lineno(
-                function,
-                lineno,
-                lambda: returned.append(fresh.unregister("discord")),
-                lambda: operation_for(fresh, fresh_published, fresh_newer),
-            )
-            self.assertEqual([True], returned, _source_line(function, lineno))
-            self.assertIsNone(
-                fresh.get("discord"),
-                _source_line(function, lineno),
-            )
-            self.assertEqual(0, fresh.loader_calls)
-
-    def test_stale_minimum_rollback_keeps_newer_owner_visible(self) -> None:
-        def operation(registry, published, newer):
-            del newer
-            return hermes_v2._restore_discord_registration(
-                registry, None, (published, None), (None, self._loader())
-            )
-
-        self._assert_stale_inverse_stays_visible(
-            hermes_v2._restore_discord_registration, operation
+        maps = (registry._entries, registry._deferred)
+        restored = hermes_v2._restore_discord_registration(
+            registry, None, (published, None), (None, self._loader())
         )
-
-    def test_stale_minimum_rollback_does_not_resurrect_native_unregister(self) -> None:
-        def operation(registry, published, newer):
-            del newer
-            return hermes_v2._restore_discord_registration(
-                registry, None, (published, None), (None, self._loader())
-            )
-
-        self._assert_stale_inverse_does_not_resurrect(
-            hermes_v2._restore_discord_registration, operation
+        self.assertFalse(restored)
+        self.assertIs(newer, registry.get("discord"))
+        self.assertEqual(0, registry.loader_calls)
+        self.assertIs(maps[0], registry._entries)
+        self.assertIs(maps[1], registry._deferred)
+        self.assertNotIn("register", registry.__dict__)
+        self.assertTrue(registry.unregister("discord"))
+        again = hermes_v2._restore_discord_registration(
+            registry, None, (published, None), (None, self._loader())
         )
+        self.assertFalse(again)
+        self.assertIsNone(registry.get("discord"))
+        self.assertEqual(0, registry.loader_calls)
 
-    def test_stale_minimum_cleanup_keeps_newer_owner_visible(self) -> None:
-        def operation(registry, published, newer):
-            del newer
-            hermes_v2._release_minimum_discord_entry(registry._entries, published)
+    def test_concrete_minimum_shipped_entry_is_used_without_publication(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        registry = _MinimumRegistry()
+        entry = types.SimpleNamespace(name="discord", adapter_factory=shipped)
+        registry.register(entry)
+        maps = (registry._entries, registry._deferred)
+        with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+            resolved = hermes_v2._active_discord_adapter_class()
+        self.assertIs(shipped, resolved)
+        self.assertIs(entry, registry._entries["discord"])
+        self.assertIs(maps[0], registry._entries)
+        self.assertIs(maps[1], registry._deferred)
+        self.assertNotIn("register", registry.__dict__)
 
-        self._assert_stale_inverse_stays_visible(
-            hermes_v2._release_minimum_discord_entry, operation
-        )
+    def test_foreign_minimum_concrete_owner_fails_closed(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        registry = _MinimumRegistry()
+        foreign = types.SimpleNamespace(name="discord", adapter_factory=object)
+        registry.register(foreign)
+        with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+            with self.assertRaises(ValidationError) as raised:
+                hermes_v2._active_discord_adapter_class()
+        self.assertIn("foreign concrete owner", str(raised.exception))
+        self.assertIs(foreign, registry._entries["discord"])
 
-    def test_stale_minimum_cleanup_does_not_resurrect_native_unregister(self) -> None:
-        def operation(registry, published, newer):
-            del newer
-            hermes_v2._release_minimum_discord_entry(registry._entries, published)
+    def test_absent_minimum_owner_fails_closed_without_waiting(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        registry = _MinimumRegistry()
+        with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+            with self.assertRaises(ValidationError) as raised:
+                hermes_v2._active_discord_adapter_class()
+        self.assertIn("absent or in-progress owner", str(raised.exception))
+        self.assertEqual({}, registry._entries)
+        self.assertEqual({}, registry._deferred)
 
-        self._assert_stale_inverse_does_not_resurrect(
-            hermes_v2._release_minimum_discord_entry, operation
-        )
+    def test_changed_minimum_owner_fails_activation_without_a_registry_write(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        registry = _MinimumRegistry()
+        entry = types.SimpleNamespace(name="discord", adapter_factory=shipped)
+        registry.register(entry)
+        holder: list[object] = []
+        token = hermes_v2._MINIMUM_PREPARATION.set(holder)
+        try:
+            with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+                self.assertIs(shipped, hermes_v2._active_discord_adapter_class())
+                foreign = types.SimpleNamespace(name="discord", adapter_factory=object)
+                registry.register(foreign)
+                with self.assertRaises(ValidationError) as raised:
+                    hermes_v2._revalidate_minimum_discord_preparation()
+        finally:
+            hermes_v2._MINIMUM_PREPARATION.reset(token)
+        self.assertIn("changed owner", str(raised.exception))
+        self.assertIs(foreign, registry._entries["discord"])
+        self.assertEqual([], hermes_v2._REGISTRY_ROLLBACKS.get() or [])

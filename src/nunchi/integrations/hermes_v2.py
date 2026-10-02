@@ -24,6 +24,7 @@ from pathlib import Path
 import re
 import sys
 import threading
+import types
 import time
 from typing import Any
 
@@ -456,6 +457,9 @@ _PATCH_TRANSACTION: ContextVar[list[tuple[Any, str, Any, Any]] | None] = (
 )
 _REGISTRY_ROLLBACKS: ContextVar[list[Callable[[], None]] | None] = ContextVar(
     "nunchi_hermes_registry_rollbacks", default=None
+)
+_MINIMUM_PREPARATION: ContextVar[list[Any] | None] = ContextVar(
+    "nunchi_minimum_discord_preparation", default=None
 )
 _ACTIVE_PLUGIN_CONTEXT: ContextVar[Any] = ContextVar(
     "nunchi_hermes_active_plugin_context", default=None
@@ -2991,200 +2995,29 @@ def _discord_registration_state(registry: Any, scope: Any) -> tuple[Any, Any]:
     return entry, loader
 
 
-class _ObservedRegistryMap(dict):
-    """Minimum registry dict whose methods native register/get/unregister call.
-
-    0.19.0 has no registry lock. Swapping this map in makes those method bodies
-    take the same lock as an inverse commit. A lock held only around a Nunchi
-    read would not cover ``register`` or ``unregister``.
-    """
-
-    def __init__(self, mapping: Any = (), *, lock: threading.RLock) -> None:
-        super().__init__(mapping)
-        self._coordination_lock = lock
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        with self._coordination_lock:
-            dict.__setitem__(self, key, value)
-
-    def __delitem__(self, key: str) -> None:
-        with self._coordination_lock:
-            dict.__delitem__(self, key)
-
-    def __getitem__(self, key: str) -> Any:
-        with self._coordination_lock:
-            return dict.__getitem__(self, key)
-
-    def __contains__(self, key: object) -> bool:
-        with self._coordination_lock:
-            return dict.__contains__(self, key)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        with self._coordination_lock:
-            return dict.get(self, key, default)
-
-    def pop(self, key: str, *args: Any) -> Any:
-        with self._coordination_lock:
-            return dict.pop(self, key, *args)
-
-    def setdefault(self, key: str, default: Any = None) -> Any:
-        with self._coordination_lock:
-            return dict.setdefault(self, key, default)
-
-
-_MINIMUM_REGISTRY_GATE = "_nunchi_minimum_registry_gate"
-_MINIMUM_WRITER_METHODS = ("register", "unregister", "register_deferred")
-_REGISTRY_LOCK_TYPE = type(threading.RLock())
-
-
-def _minimum_coordination_lock(registry: Any) -> Any:
-    """One lock for this registry's writer gate and both maps."""
-
-    existing = getattr(registry, _MINIMUM_REGISTRY_GATE, None)
-    if isinstance(existing, _REGISTRY_LOCK_TYPE):
-        return existing
-    entries = getattr(registry, "_entries", None)
-    entries_lock = getattr(entries, "_coordination_lock", None)
-    if isinstance(entries_lock, _REGISTRY_LOCK_TYPE):
-        return entries_lock
-    return threading.RLock()
-
-
-def _install_minimum_writer_gate(registry: Any, lock: threading.RLock) -> None:
-    """Make later native writers wait on ``lock`` before touching the maps.
-
-    ``get`` is not wrapped. Wrapping it would hold the lock across the deferred
-    loader, which this plugin must not invoke and must not serialize that way.
-    """
-
-    if getattr(registry, _MINIMUM_REGISTRY_GATE, None) is lock:
-        return
-    for name in _MINIMUM_WRITER_METHODS:
-        original = getattr(registry, name, None)
-        if not callable(original):
-            continue
-
-        def gated(
-            *args: Any,
-            _original: Callable[..., Any] = original,
-            _lock: threading.RLock = lock,
-            **kwargs: Any,
-        ) -> Any:
-            with _lock:
-                return _original(*args, **kwargs)
-
-        setattr(registry, name, gated)
-    setattr(registry, _MINIMUM_REGISTRY_GATE, lock)
-
-
-def _swap_minimum_maps_locked(
-    registry: Any, lock: threading.RLock
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    """Install coordinating maps. Caller holds ``lock``."""
-
-    entries = getattr(registry, "_entries", None)
-    deferred = getattr(registry, "_deferred", None)
-    if not isinstance(entries, dict) or not isinstance(deferred, dict):
-        return None
-    if (
-        type(entries) is _ObservedRegistryMap
-        and type(deferred) is _ObservedRegistryMap
-        and getattr(entries, "_coordination_lock", None) is lock
-        and getattr(deferred, "_coordination_lock", None) is lock
-    ):
-        return entries, deferred
-    wrapped_entries = _ObservedRegistryMap(entries, lock=lock)
-    wrapped_deferred = _ObservedRegistryMap(deferred, lock=lock)
-    registry._entries = wrapped_entries
-    registry._deferred = wrapped_deferred
-    return wrapped_entries, wrapped_deferred
-
-
-def _commit_minimum_discord_inverse(
-    registry: Any, current: tuple[Any, Any], previous: tuple[Any, Any]
-) -> bool:
-    """Restore ``previous`` only if ``current`` is still both maps' owner.
-
-    The identity check and the write share the lock native ``register`` and
-    ``unregister`` take after the writer gate is installed. A foreign entry is
-    not popped. A native removal that finished before this commit is not put
-    back.
-    """
-
-    lock = _minimum_coordination_lock(registry)
-    _install_minimum_writer_gate(registry, lock)
-    with lock:
-        coordinated = _swap_minimum_maps_locked(registry, lock)
-        if coordinated is None:
-            return False
-        live_entries, live_deferred = coordinated
-        if dict.get(live_entries, "discord") is not current[0]:
-            return False
-        if dict.get(live_deferred, "discord") is not current[1]:
-            return False
-        if previous[0] is None:
-            dict.pop(live_entries, "discord", None)
-        else:
-            dict.__setitem__(live_entries, "discord", previous[0])
-        if previous[1] is None:
-            dict.pop(live_deferred, "discord", None)
-        else:
-            dict.__setitem__(live_deferred, "discord", previous[1])
-        return (
-            dict.get(live_entries, "discord") is previous[0]
-            and dict.get(live_deferred, "discord") is previous[1]
-        )
-
-
-def _commit_minimum_entry_release(
-    entries: dict[str, Any], entry: Any, registry: Any = None
-) -> None:
-    """Pop our entry only while it is still the live owner."""
-
-    if registry is None:
-        lock = getattr(entries, "_coordination_lock", None)
-        if isinstance(lock, _REGISTRY_LOCK_TYPE):
-            with lock:
-                if dict.get(entries, "discord") is entry:
-                    dict.pop(entries, "discord", None)
-        return
-    lock = _minimum_coordination_lock(registry)
-    _install_minimum_writer_gate(registry, lock)
-    with lock:
-        coordinated = _swap_minimum_maps_locked(registry, lock)
-        if coordinated is None:
-            return
-        live_entries = coordinated[0]
-        if dict.get(live_entries, "discord") is entry:
-            dict.pop(live_entries, "discord", None)
-
-
 def _restore_discord_registration(
     registry: Any,
     scope: Any,
     current: tuple[Any, Any],
     previous: tuple[Any, Any],
 ) -> bool:
-    """Restore Discord only while *current* is still the published generation."""
+    """Restore Discord only while *current* is still the published generation.
+
+    Minimum hosts do not record a registry inverse. A registry without native
+    compare-and-swap is left untouched: popping to inspect would hide a newer
+    owner, and writing the predecessor back could undo a native removal.
+    """
 
     restore = getattr(registry, "restore_registration", None)
-    if callable(restore):
+    if not callable(restore):
+        return False
+    try:
+        return bool(restore("discord", current, previous, scope=scope))
+    except TypeError:
         try:
-            return bool(restore("discord", current, previous, scope=scope))
+            return bool(restore("discord", current, previous))
         except TypeError:
-            try:
-                return bool(restore("discord", current, previous))
-            except TypeError:
-                return False
-    entries = getattr(registry, "_entries", None)
-    deferred = getattr(registry, "_deferred", None)
-    if not isinstance(entries, dict) or not isinstance(deferred, dict):
-        return False
-    # Foreign generation: leave both maps untouched. Popping to inspect would
-    # hide that owner from native get() and let a native unregister be undone.
-    if entries.get("discord") is not current[0] or deferred.get("discord") is not current[1]:
-        return False
-    return _commit_minimum_discord_inverse(registry, current, previous)
+            return False
 
 
 def _rollback_registry_publications(rollbacks: Sequence[Callable[[], None]]) -> None:
@@ -3259,64 +3092,19 @@ def _remember_discord_publication(
 def _replace_deferred_discord_registration(
     registry: Any, scope: Any, previous: tuple[Any, Any], entry: Any
 ) -> bool:
-    """Conditionally publish without invoking a loader or a last-writer-wins API."""
+    """Publish through native compare-and-swap.
 
-    if callable(getattr(registry, "restore_registration", None)):
-        # The current host's CAS holds its own lock, includes in-flight loader
-        # identity, and cancels that generation so it cannot publish over us.
-        return _restore_discord_registration(registry, scope, previous, (entry, None))
+    Minimum Hermes has no registry lock that a plugin can share with an
+    already-running native writer. That host does not call this function.
+    """
 
-    # Minimum Hermes has plain dictionaries and no registry lock or two-map
-    # CAS. Claim the predecessor loader, then insert-if-absent. A native
-    # register_deferred() in that gap leaves a loader beside the new entry;
-    # drop only our entry and fail. Never call register() or the loader, and
-    # never overwrite a concrete native writer. A lock observed only by Nunchi
-    # would not serialize those writers.
-    entries = getattr(registry, "_entries", None)
-    deferred = getattr(registry, "_deferred", None)
-    if scope is not None or not isinstance(entries, dict) or not isinstance(deferred, dict):
+    if not callable(getattr(registry, "restore_registration", None)):
         return False
-    if previous[0] is not None or previous[1] is None:
-        return False
-    loader = deferred.pop("discord", None)
-    if loader is not previous[1]:
-        if loader is not None:
-            deferred.setdefault("discord", loader)
-        return False
-    # This remains the publication write. The deferred check is in the same
-    # expression so a native register_deferred() that won the claim/insert gap
-    # cannot be reported as a successful publication.
-    return entries.setdefault("discord", entry) is entry and _minimum_publication_kept(
-        entries, deferred, entry, registry
-    )
-
-
-def _minimum_publication_kept(
-    entries: dict[str, Any],
-    deferred: dict[str, Any],
-    entry: Any,
-    registry: Any = None,
-) -> bool:
-    """Drop our entry when a deferred loader won the claim/insert gap."""
-
-    if deferred.get("discord") is None:
-        return True
-    _release_minimum_discord_entry(entries, entry, registry)
-    return False
-
-
-def _release_minimum_discord_entry(
-    entries: dict[str, Any], entry: Any, registry: Any = None
-) -> None:
-    """Remove our concrete entry. A foreign owner stays visible to native get()."""
-
-    if entries.get("discord") is not entry:
-        return
-    _commit_minimum_entry_release(entries, entry, registry)
+    return _restore_discord_registration(registry, scope, previous, (entry, None))
 
 
 def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
-    """Replace a deferred Discord loader with the shipped registration.
+    """Replace a deferred Discord loader using the host's native CAS.
 
     The loader takes ``PluginManager._discovery_lock``. Calling it from
     ``register()`` deadlocks on current Hermes, and letting it run later
@@ -3324,9 +3112,11 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
     already imported from that file pops the loader, so ``get()`` instantiates
     the class Nunchi patches. The predecessor is restored on activation
     failure and by the native registration lease on unload or rediscovery.
-    A newer concrete entry is left alone.
+    A newer concrete entry is left alone. Minimum hosts do not use this path.
     """
 
+    if not callable(getattr(registry, "restore_registration", None)):
+        return
     module = inspect.getmodule(shipped)
     stock_register = getattr(module, "register", None)
     register = getattr(registry, "register", None)
@@ -3386,27 +3176,16 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
         return
     current = _discord_registration_state(registry, scope)
     if current[0] is not entry or current[1] is not None:
-        # Minimum can observe a deferred winner only in the claim/insert gap.
-        # If one is still visible, this publication is unowned: drop our entry
-        # and fail closed. Current hosts use native CAS and are left to that
-        # inverse. A concrete winner is resolved by the caller.
-        if current[1] is not None and not callable(
-            getattr(registry, "restore_registration", None)
-        ):
-            minimum_entries = getattr(registry, "_entries", None)
-            if isinstance(minimum_entries, dict):
-                _release_minimum_discord_entry(minimum_entries, entry, registry)
-            raise _shape_error("Discord adapter")
         return
     _remember_discord_publication(registry, scope, current, previous)
 
 
 def _active_discord_adapter_class() -> type[Any]:
-    """Return the shipped Discord class without loading a deferred platform.
+    """Return the Discord class Nunchi patches, without loading a deferred platform.
 
-    A concrete foreign registration fails closed. ``register()`` then rolls
-    the activation transaction back instead of patching an unsupported class
-    or silently falling back to the shipped one while another adapter is live.
+    Current hosts publish through native compare-and-swap. Minimum hosts
+    prepare the class the native importer caches, and leave publication to
+    Hermes. A concrete foreign registration fails closed.
     """
 
     shipped = _shipped_discord_adapter_class()
@@ -3414,16 +3193,251 @@ def _active_discord_adapter_class() -> type[Any]:
         from gateway.platform_registry import platform_registry
     except (ImportError, ModuleNotFoundError):
         return shipped
-    entry = _peek_discord_registration(platform_registry)
+    if _is_stock_minimum_registry(platform_registry):
+        return _prepare_minimum_discord_adapter_class(platform_registry, shipped)
+    return _resolve_cas_discord_adapter_class(platform_registry, shipped)
+
+
+def _resolve_cas_discord_adapter_class(
+    registry: Any, shipped: type[Any]
+) -> type[Any]:
+    """Current-host resolution. Does not mutate a minimum registry."""
+
+    entry = _peek_discord_registration(registry)
     if entry is None:
-        _publish_shipped_discord_registration(platform_registry, shipped)
-        entry = _peek_discord_registration(platform_registry)
+        _publish_shipped_discord_registration(registry, shipped)
+        entry = _peek_discord_registration(registry)
         if entry is None:
             return shipped
     resolved = _discord_registration_is_shipped(entry, shipped)
     if resolved is None:
         raise _shape_error("Discord adapter")
     return resolved
+
+
+def _discord_owner_error(reason: str) -> ValidationError:
+    return ValidationError(
+        "Nunchi did not activate because Hermes host contract V1 no longer "
+        f"provides the required Discord adapter shape ({reason}). "
+        "Stock Hermes can continue without Nunchi; "
+        "to restore the gate, update Nunchi or use a maintained Hermes build."
+    )
+
+
+def _is_stock_minimum_registry(registry: Any) -> bool:
+    """True only for the tested 0.19.0 plain-dict registry.
+
+    A missing compare-and-swap method is not enough. Current hosts expose a
+    snapshot API even in tests that omit the CAS method, and a previously
+    wrapped map is not a stock registry. Those shapes do not take the minimum
+    import path.
+    """
+
+    if callable(getattr(registry, "restore_registration", None)):
+        return False
+    if callable(getattr(registry, "snapshot_registration", None)):
+        return False
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    return type(entries) is dict and type(deferred) is dict
+
+
+def _minimum_discord_snapshot(registry: Any) -> tuple[Any, Any]:
+    """Concrete entry and deferred loader, without resolving either."""
+
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    entry = entries.get("discord") if isinstance(entries, Mapping) else None
+    loader = deferred.get("discord") if isinstance(deferred, Mapping) else None
+    return entry, loader
+
+
+@dataclass(frozen=True)
+class _MinimumDiscordPreparation:
+    registry: Any
+    before: tuple[Any, Any]
+    adapter_class: type[Any]
+
+
+def _current_minimum_preparation(
+    registry: Any,
+) -> _MinimumDiscordPreparation | None:
+    holder = _MINIMUM_PREPARATION.get()
+    if not isinstance(holder, list) or not holder:
+        return None
+    prep = holder[0]
+    if not isinstance(prep, _MinimumDiscordPreparation) or prep.registry is not registry:
+        return None
+    return prep
+
+
+def _store_minimum_preparation(prep: _MinimumDiscordPreparation) -> None:
+    holder = _MINIMUM_PREPARATION.get()
+    if isinstance(holder, list):
+        holder.clear()
+        holder.append(prep)
+
+
+def _minimum_preparation_still_valid(
+    prep: _MinimumDiscordPreparation, shipped: type[Any]
+) -> bool:
+    now = _minimum_discord_snapshot(prep.registry)
+    if now[0] is prep.before[0] and now[1] is prep.before[1]:
+        return True
+    # Native resolution of this exact class is allowed. Nothing is undone.
+    if now[0] is not None and now[1] is None:
+        return (
+            _discord_registration_is_shipped(now[0], shipped) is prep.adapter_class
+        )
+    return False
+
+
+def _revalidate_minimum_discord_preparation() -> None:
+    """Fail activation if the prepared owner changed. Do not touch the registry."""
+
+    holder = _MINIMUM_PREPARATION.get()
+    if not isinstance(holder, list) or not holder:
+        return
+    prep = holder[0]
+    if not isinstance(prep, _MinimumDiscordPreparation):
+        return
+    if not _minimum_preparation_still_valid(prep, _shipped_discord_adapter_class()):
+        raise _discord_owner_error("changed owner")
+
+
+def _native_minimum_loader_owner(loader: Any, shipped: type[Any]) -> tuple[Any, Any]:
+    """Return the native manager and manifest, or fail closed.
+
+    Identity is the nested loader created by the stock deferred registrar, not
+    a module name or a path suffix. A foreign callable is not executed.
+    """
+
+    try:
+        from hermes_cli.plugins import PluginManager, PluginManifest
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _discord_owner_error("unknown loader") from exc
+    code = next(
+        (
+            item
+            for item in PluginManager._register_deferred_platform.__code__.co_consts
+            if isinstance(item, types.CodeType) and item.co_name == "_loader"
+        ),
+        None,
+    )
+    if (
+        code is None
+        or not isinstance(loader, types.FunctionType)
+        or loader.__code__ is not code
+    ):
+        raise _discord_owner_error("unknown loader")
+    defaults = loader.__defaults__ or ()
+    closure = dict(
+        zip(
+            loader.__code__.co_freevars,
+            (cell.cell_contents for cell in loader.__closure__ or ()),
+        )
+    )
+    manager = closure.get("self")
+    if len(defaults) != 1 or type(defaults[0]) is not PluginManifest:
+        raise _discord_owner_error("unknown loader")
+    manifest = defaults[0]
+    if type(manager) is not PluginManager:
+        raise _discord_owner_error("unknown loader")
+    importer = getattr(manager, "_load_directory_module", None)
+    if getattr(importer, "__func__", None) is not PluginManager._load_directory_module:
+        raise _discord_owner_error("unknown loader")
+    try:
+        shipped_file = inspect.getfile(shipped)
+    except (TypeError, OSError) as exc:
+        raise _discord_owner_error("foreign file") from exc
+    shipped_dir = Path(shipped_file).resolve().parent
+    manifest_path = getattr(manifest, "path", None)
+    if (
+        getattr(manifest, "source", None) != "bundled"
+        or getattr(manifest, "kind", None) != "platform"
+        or getattr(manifest, "name", None) != "discord-platform"
+        or not manifest_path
+        or Path(manifest_path).resolve() != shipped_dir
+    ):
+        raise _discord_owner_error("foreign deferred loader")
+    return manager, manifest
+
+
+def _class_from_minimum_parent(module: Any, shipped: type[Any]) -> type[Any]:
+    try:
+        shipped_init = Path(inspect.getfile(shipped)).resolve().parent / "__init__.py"
+        module_file = Path(module.__file__).resolve()
+    except (TypeError, OSError, AttributeError) as exc:
+        raise _discord_owner_error("foreign file") from exc
+    if module_file != shipped_init:
+        raise _discord_owner_error("foreign file")
+    register = getattr(module, "register", None)
+    adapter_module = inspect.getmodule(register)
+    if not _is_shipped_discord_module(None, adapter_module):
+        raise _discord_owner_error("foreign file")
+    cls = getattr(adapter_module, "DiscordAdapter", None)
+    factory = getattr(adapter_module, "_build_adapter", None)
+    if not isinstance(cls, type) or not callable(factory):
+        raise _discord_owner_error("unsupported factory")
+    if (
+        _discord_registration_is_shipped(
+            types.SimpleNamespace(adapter_factory=factory), shipped
+        )
+        is not cls
+    ):
+        raise _discord_owner_error("unsupported factory")
+    return cls
+
+
+def _prepare_minimum_deferred_class(loader: Any, shipped: type[Any]) -> type[Any]:
+    """Import only the native directory module. Never call the loader."""
+
+    manager, manifest = _native_minimum_loader_owner(loader, shipped)
+    try:
+        module = manager._load_directory_module(manifest)
+    except Exception as exc:
+        raise _discord_owner_error("unsupported adapter module") from exc
+    return _class_from_minimum_parent(module, shipped)
+
+
+def _prepare_minimum_discord_adapter_class(
+    registry: Any, shipped: type[Any]
+) -> type[Any]:
+    """Select the minimum Discord class without a registry write.
+
+    A deferred owner is prepared through the native directory importer. A
+    concrete shipped owner is used as published. A foreign, removed, or
+    in-progress owner fails closed. Repeated calls in one activation reuse
+    the prepared class and recheck the owner.
+    """
+
+    stored = _current_minimum_preparation(registry)
+    if stored is not None:
+        if not _minimum_preparation_still_valid(stored, shipped):
+            raise _discord_owner_error("changed owner")
+        return stored.adapter_class
+
+    before = _minimum_discord_snapshot(registry)
+    if before[0] is not None:
+        cls = _discord_registration_is_shipped(before[0], shipped)
+        if cls is None:
+            raise _discord_owner_error("foreign concrete owner")
+    elif before[1] is not None:
+        cls = _prepare_minimum_deferred_class(before[1], shipped)
+    else:
+        raise _discord_owner_error("absent or in-progress owner")
+
+    prep = _MinimumDiscordPreparation(registry, before, cls)
+    if not _minimum_preparation_still_valid(prep, shipped):
+        raise _discord_owner_error("changed owner")
+    _store_minimum_preparation(prep)
+    logger.debug(
+        "minimum Discord compatibility path selected %s.%s (%s)",
+        cls.__module__,
+        cls.__name__,
+        _resolved_module_file(inspect.getmodule(cls)) or "",
+    )
+    return cls
 
 
 def _adapter_matches_owner_profile(
@@ -6266,9 +6280,11 @@ def register(
     context_registries = _snapshot_context_registries(ctx)
     previous_owner = _SHIM_OWNER
     previous_base_handle = _ORIGINAL_BASE_HANDLE
+    preparation_holder: list[Any] = []
     transaction_token = _PATCH_TRANSACTION.set(patches)
     rollback_token = _REGISTRY_ROLLBACKS.set(registry_rollbacks)
     context_token = _ACTIVE_PLUGIN_CONTEXT.set(ctx)
+    preparation_token = _MINIMUM_PREPARATION.set(preparation_holder)
     try:
         _install_host_contract_v1(plugin)
         ctx.register_hook("pre_tool_call", plugin.pre_tool_call)
@@ -6280,6 +6296,7 @@ def register(
             description="Report Nunchi Hermes compatibility and configuration",
             args_hint="[probe]",
         )
+        _revalidate_minimum_discord_preparation()
     except BaseException:
         _rollback_shim_attributes(patches)
         _restore_context_registries(context_registries)
@@ -6291,6 +6308,7 @@ def register(
         _PATCH_TRANSACTION.reset(transaction_token)
         _REGISTRY_ROLLBACKS.reset(rollback_token)
         _ACTIVE_PLUGIN_CONTEXT.reset(context_token)
+        _MINIMUM_PREPARATION.reset(preparation_token)
     return plugin
 
 
