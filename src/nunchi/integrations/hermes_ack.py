@@ -8,8 +8,9 @@ copy a second ACK policy.
 The native call is awaited outside the shared scheduler lock and the room
 runtime lock. Authority is consumed at the native method's entry, under the
 scheduler lock and before the network await. A lost or late result is unknown
-and is not retried. Journal and receipt writes run off the gateway loop and
-do not outlive a bounded, tracked cleanup.
+and is not retried. Journal and receipt writes run off the gateway loop. Lock
+waits are bounded; active file I/O cannot be cancelled in Python and remains
+owned until it actually finishes (including any uncertain-write rollback).
 """
 
 from __future__ import annotations
@@ -736,39 +737,48 @@ async def _settle_observed(
     result: TransportResult,
     *,
     deadline: float,
+    abandoned: threading.Event | None = None,
 ) -> bool:
-    """Settle off the loop. Return whether that write finished before the deadline.
+    """Settle off-loop, accepting only the requested durable outcome.
 
-    The opportunity deadline and the following cleanup bound are one absolute
-    budget. A miss does not restart the clock and is not recorded sent.
+    Lock waits use an absolute budget. Active file I/O remains owned until it
+    completes, and the journal withdraws writes that complete late/abandoned.
     """
-
     remaining = deadline - time.monotonic()
     cleanup_end = deadline + _PERSISTENCE_CLEANUP_SECONDS
     confirmed = threading.Event()
+    abandoned = abandoned if abandoned is not None else threading.Event()
     ok = {"value": False}
-    delivery = result.delivery
-    detail = result.detail
+    gate = threading.Lock()
+
+    def confirm(actual: str) -> None:
+        # No I/O under this gate: atomically choose confirmation or abandonment.
+        with gate:
+            if abandoned.is_set() or time.monotonic() >= deadline:
+                raise PersistenceError("ACK confirmation arrived after abandonment")
+            ok["value"] = actual == result.delivery
+            confirmed.set()
+
+    def abandon() -> bool:
+        with gate:
+            if not confirmed.is_set():
+                abandoned.set()
+            return bool(ok["value"])
 
     def attempt() -> None:
         try:
             if time.monotonic() < deadline:
                 journal.settle(
-                    ack_id,
-                    delivery=delivery,
-                    detail=detail,
-                    deadline=deadline,
+                    ack_id, delivery=result.delivery, detail=result.detail,
+                    deadline=deadline, abandoned=abandoned, confirm=confirm,
                 )
-                ok["value"] = True
         except PersistenceError:
-            ok["value"] = False
+            pass
         finally:
             confirmed.set()
         if not ok["value"]:
             _settle_quietly(
-                journal,
-                ack_id,
-                delivery="unknown",
+                journal, ack_id, delivery="unknown",
                 detail="ACK dispatch acknowledgement was lost",
                 deadline=cleanup_end,
             )
@@ -776,17 +786,18 @@ async def _settle_observed(
     future = asyncio.get_running_loop().run_in_executor(None, attempt)
     _own_future(future)
     if remaining <= 0:
-        return False
+        return abandon()
     try:
         await asyncio.wait_for(
             asyncio.shield(asyncio.to_thread(confirmed.wait, remaining)),
             remaining + 0.02,
         )
     except TimeoutError:
-        return False
+        return abandon()
     except asyncio.CancelledError:
+        abandon()
         raise
-    return bool(ok["value"])
+    return abandon()
 
 
 async def _write_receipt(
@@ -797,6 +808,7 @@ async def _write_receipt(
     stage: str,
     writer: str,
     body: Mapping[str, Any],
+    observe_completion: bool = False,
 ) -> bool:
     remaining = deadline - time.monotonic()
     wait = remaining if remaining > 0 else 0.05
@@ -813,14 +825,21 @@ async def _write_receipt(
         )
 
     try:
-        await _off_loop(attempt, wait=max(0.01, wait))
+        if observe_completion:
+            # Stage ordering depends on this exact write, not a second attempt.
+            # Lock acquisition is bounded; active kernel I/O is not cancellable.
+            future = asyncio.get_running_loop().run_in_executor(None, attempt)
+            _own_future(future)
+            await asyncio.shield(future)
+        else:
+            await _off_loop(attempt, wait=max(0.01, wait))
     except PersistenceError:
         logger.exception("Nunchi could not persist the Hermes ACK receipt")
         return False
     return True
 
 
-async def _close_cancelled_ack(
+async def _close_ack(
     journal: AckJournal,
     receipts: ReceiptJournal,
     ack_id: str,
@@ -828,8 +847,9 @@ async def _close_cancelled_ack(
     *,
     deadline: float,
     request_id: str,
-) -> None:
-    """Settle unknown and write the transport receipt. Do not retry the effect."""
+    abandoned: threading.Event | None = None,
+) -> TransportResult:
+    """Observe one settlement and write one terminal receipt. Never retry effects."""
 
     cleanup_end = deadline + _PERSISTENCE_CLEANUP_SECONDS
     closed = result
@@ -839,6 +859,7 @@ async def _close_cancelled_ack(
             ack_id,
             result,
             deadline=deadline,
+            abandoned=abandoned,
         )
         if not confirmed:
             closed = TransportResult(
@@ -853,7 +874,9 @@ async def _close_cancelled_ack(
             stage="transport",
             writer="transport",
             body={"delivery": closed.delivery, "detail": closed.detail},
+            observe_completion=True,
         )
+    return closed
 
 
 async def _finish_owned(task: asyncio.Task[Any]) -> None:
@@ -879,27 +902,6 @@ async def _finish_owned(task: asyncio.Task[Any]) -> None:
             _consume_task(task)
         else:
             _own_future(task)
-
-
-def _start_cancelled_closure(
-    journal: AckJournal,
-    receipts: ReceiptJournal,
-    ack_id: str,
-    result: TransportResult,
-    *,
-    deadline: float,
-    request_id: str,
-) -> asyncio.Task[Any]:
-    return asyncio.create_task(
-        _close_cancelled_ack(
-            journal,
-            receipts,
-            ack_id,
-            result,
-            deadline=deadline,
-            request_id=request_id,
-        )
-    )
 
 
 async def _await_cancelled_closure(task: asyncio.Task[Any]) -> None:
@@ -1123,63 +1125,81 @@ async def dispatch_attention_ack(
         ),
         "permissions_revision": current.permissions_revision,
     }
-    ack_id, reservation = await _reserve_before_dispatch(
-        journal,
-        binding,
-        deadline=deadline,
-    )
-    host_body = participant_host_receipt_body(
-        wake,
-        expansion_calls=0,
-        invoked=False,
-        outcome="unknown",
-    )
-    if reservation != "reserved":
-        result = (
-            TransportResult("unknown", "duplicate ACK was durably suppressed")
-            if reservation == "duplicate"
-            else TransportResult("failed", "ACK reservation was not durable before dispatch")
+    async def prepare() -> tuple[str | None, str, bool]:
+        ack_id, reservation = await _reserve_before_dispatch(
+            journal, binding, deadline=deadline,
         )
-        await _write_receipt(
+        handoff = await _write_receipt(
             receipts,
             deadline=deadline,
             request_id=request_id,
             stage="participant-host",
             writer="participant-host",
-            body=host_body,
+            body=participant_host_receipt_body(
+                wake, expansion_calls=0, invoked=False, outcome="unknown",
+            ),
+            observe_completion=True,
         )
-        await _write_receipt(
-            receipts,
-            deadline=deadline,
-            request_id=request_id,
-            stage="transport",
-            writer="transport",
-            body={"delivery": result.delivery, "detail": result.detail},
-        )
-        return result
-    if not await _write_receipt(
-        receipts,
-        deadline=deadline,
-        request_id=request_id,
-        stage="participant-host",
-        writer="participant-host",
-        body=host_body,
-    ):
-        result = TransportResult(
-            "failed",
-            "ACK handoff was not durable before native dispatch",
-        )
-        if ack_id is not None:
-            await _settle_observed(journal, ack_id, result, deadline=deadline)
-        await _write_receipt(
-            receipts,
-            deadline=deadline,
-            request_id=request_id,
-            stage="transport",
-            writer="transport",
-            body={"delivery": result.delivery, "detail": result.detail},
-        )
-        return result
+        return ack_id, reservation, handoff
+
+    # Preparation cannot dispatch. Keep its exact reservation and handoff write
+    # alive across cancellation, including a cancellation racing completion.
+    preparation = asyncio.create_task(prepare())
+    _own_future(preparation)
+    try:
+        ack_id, reservation, handoff = await asyncio.shield(preparation)
+    except asyncio.CancelledError:
+        async def close_preparation() -> None:
+            ack_id, reservation, _handoff = await preparation
+            result = TransportResult("failed", "ACK cancelled before native dispatch")
+            if ack_id is not None and reservation == "reserved":
+                await _close_ack(
+                    journal, receipts, ack_id, result,
+                    deadline=deadline,
+                    request_id=request_id,
+                )
+            else:
+                await _write_receipt(
+                    receipts, deadline=deadline + _PERSISTENCE_CLEANUP_SECONDS,
+                    request_id=request_id, stage="transport", writer="transport",
+                    body={"delivery": result.delivery, "detail": result.detail},
+                    observe_completion=True,
+                )
+
+        closure = asyncio.create_task(close_preparation())
+        _own_future(closure)
+        await _await_cancelled_closure(closure)
+        raise
+
+    if reservation != "reserved" or not handoff:
+        if reservation == "duplicate":
+            result = TransportResult("unknown", "duplicate ACK was durably suppressed")
+        elif reservation != "reserved":
+            result = TransportResult("failed", "ACK reservation was not durable before dispatch")
+        else:
+            result = TransportResult("failed", "ACK handoff was not durable before native dispatch")
+
+        async def close_refused() -> TransportResult:
+            if ack_id is not None and reservation == "reserved":
+                return await _close_ack(
+                    journal, receipts, ack_id, result, deadline=deadline,
+                    request_id=request_id,
+                )
+            await _write_receipt(
+                receipts, deadline=deadline + _PERSISTENCE_CLEANUP_SECONDS,
+                request_id=request_id, stage="transport", writer="transport",
+                body={"delivery": result.delivery, "detail": result.detail},
+                observe_completion=True,
+            )
+            return result
+
+        closure = asyncio.create_task(close_refused())
+        _own_future(closure)
+        try:
+            return await asyncio.shield(closure)
+        except asyncio.CancelledError:
+            await _await_cancelled_closure(closure)
+            raise
 
     result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
     permit: AckEffectPermit | None = None
@@ -1268,67 +1288,22 @@ async def dispatch_attention_ack(
         result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
     finally:
         if ack_id is not None:
+            abandoned = threading.Event()
+
+            # One finalization owns both persistence and the terminal receipt.
+            # Never start a second write when cancellation races their completion.
+            closure = asyncio.create_task(_close_ack(
+                journal, receipts, ack_id, result, deadline=deadline,
+                request_id=request_id, abandoned=abandoned,
+            ))
+            _own_future(closure)
             if cancelled_dispatch:
-                closure = _start_cancelled_closure(
-                    journal,
-                    receipts,
-                    ack_id,
-                    result,
-                    deadline=deadline,
-                    request_id=request_id,
-                )
-                while not closure.done():
-                    try:
-                        await _await_cancelled_closure(closure)
-                        break
-                    except asyncio.CancelledError:
-                        continue
-                if closure.done():
-                    _consume_task(closure)
+                await _await_cancelled_closure(closure)
             else:
-                current = asyncio.current_task()
-                cancelling = current is not None and current.cancelling() > 0
-                if cancelling and current is not None:
-                    current.uncancel()
                 try:
-                    confirmed = await _settle_observed(
-                        journal,
-                        ack_id,
-                        result,
-                        deadline=deadline,
-                    )
-                    if not confirmed:
-                        result = TransportResult(
-                            "unknown",
-                            "ACK dispatch acknowledgement was lost",
-                        )
-                    await _write_receipt(
-                        receipts,
-                        deadline=deadline,
-                        request_id=request_id,
-                        stage="transport",
-                        writer="transport",
-                        body={"delivery": result.delivery, "detail": result.detail},
-                    )
+                    result = await asyncio.shield(closure)
                 except asyncio.CancelledError:
-                    closure = _start_cancelled_closure(
-                        journal,
-                        receipts,
-                        ack_id,
-                        result,
-                        deadline=deadline,
-                        request_id=request_id,
-                    )
-                    while not closure.done():
-                        try:
-                            await _await_cancelled_closure(closure)
-                            break
-                        except asyncio.CancelledError:
-                            continue
-                    if closure.done():
-                        _consume_task(closure)
+                    abandoned.set()
+                    await _await_cancelled_closure(closure)
                     raise
-                finally:
-                    if cancelling and current is not None and current.cancelling() == 0:
-                        current.cancel()
     return result

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -303,26 +303,63 @@ class AckJournal:
             raise PersistenceError(f"ACK journal {self.path} is untrustworthy: {exc}") from exc
         self._records = loaded
 
-    def _append(self, record: Mapping[str, Any]) -> None:
+    def _append(
+        self, record: Mapping[str, Any], *, deadline: float | None = None,
+        abandoned: threading.Event | None = None,
+        confirm: Callable[[], None] | None = None,
+    ) -> None:
+        """Append under the journal locks, withdrawing an uncertain final write.
+
+        A deadline bounds lock waits, not a kernel call already in progress.
+        Recheck after file setup and each write/sync. If completion is late,
+        restore the previous prefix before releasing the locks; the reservation
+        remains the no-retry fence. Rollback I/O itself must remain owned too.
+        """
+        def check() -> None:
+            self._ensure_deadline(deadline)
+            if abandoned is not None and abandoned.is_set():
+                raise PersistenceError("ACK persistence was abandoned")
+
+        check()
         if self.path is None:
+            if confirm is not None:
+                confirm()
             return
         existed = self.path.exists()
         payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        offset = None
+        writing = False
         try:
+            offset = os.fstat(fd).st_size
+            check()
+            writing = True
             if os.write(fd, payload) != len(payload):
                 raise OSError("short ACK journal write")
+            check()
             os.fsync(fd)
-        except OSError as exc:
+            check()
+            if not existed:
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    check()
+                    os.fsync(directory_fd)
+                    check()
+                finally:
+                    os.close(directory_fd)
+            if confirm is not None:
+                # The observer accepts the durable commit here, not when an
+                # executor future is eventually delivered to the event loop.
+                confirm()
+        except (OSError, PersistenceError) as exc:
+            if writing and offset is not None:
+                # No other journal writer can append while we own both locks.
+                # Never remove the previously durable reservation on settlement.
+                os.ftruncate(fd, offset)
+                os.fsync(fd)
             raise PersistenceError(f"could not durably append ACK state: {exc}") from exc
         finally:
             os.close(fd)
-        if not existed:
-            directory_fd = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
 
     @staticmethod
     def _absolute_deadline(
@@ -393,7 +430,7 @@ class AckJournal:
                     "binding": checked,
                 }
                 self._ensure_deadline(absolute)
-                self._append(record)
+                self._append(record, deadline=absolute)
                 self._records[ack_id] = [deepcopy(record)]
                 return ack_id, True
         finally:
@@ -407,7 +444,14 @@ class AckJournal:
         detail: str = "",
         timeout: float | None = None,
         deadline: float | None = None,
-    ) -> None:
+        abandoned: threading.Event | None = None,
+        confirm: Callable[[str], None] | None = None,
+    ) -> str:
+        """Return the actual delivery; confirm at commit, not at worker return.
+
+        ``confirm`` must be a non-blocking observer. It may reject an abandoned
+        commit with PersistenceError, causing the unconfirmed append to roll back.
+        """
         if delivery not in ("sent", "failed", "unknown", "unavailable"):
             raise ValidationError("ACK settlement delivery is invalid")
         if not isinstance(detail, str):
@@ -421,7 +465,10 @@ class AckJournal:
                 if records is None:
                     raise ValidationError("ACK settlement has no reservation")
                 if len(records) > 1:
-                    return
+                    actual = str(records[-1]["delivery"])
+                    if confirm is not None:
+                        confirm(actual)
+                    return actual
                 record = {
                     "schema_version": 1,
                     "ack_id": ack_id,
@@ -430,8 +477,12 @@ class AckJournal:
                     **({"detail": detail} if detail else {}),
                 }
                 self._ensure_deadline(absolute)
-                self._append(record)
+                self._append(
+                    record, deadline=absolute, abandoned=abandoned,
+                    confirm=(lambda: confirm(delivery)) if confirm is not None else None,
+                )
                 records.append(deepcopy(record))
+                return delivery
         finally:
             self._lock.release()
 
