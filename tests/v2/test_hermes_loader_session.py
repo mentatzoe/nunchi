@@ -182,6 +182,100 @@ def _run_at_source_line(function, fragment, action, operation):
             raise errors[0]
 
 
+def _run_at_lineno(function, lineno: int, action, operation):
+    """Run action to completion immediately before function executes lineno."""
+
+    entered = threading.Event()
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        try:
+            if not entered.wait(5):
+                raise AssertionError(f"line {lineno} not reached")
+            action()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    def trace(frame, event, arg):
+        del arg
+        if event == "line" and frame.f_code is function.__code__ and frame.f_lineno == lineno:
+            entered.set()
+            if not done.wait(5):
+                raise AssertionError(f"native reader did not finish at line {lineno}")
+        return trace
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    previous = sys.gettrace()
+    sys.settrace(trace)
+    try:
+        return operation()
+    finally:
+        sys.settrace(previous)
+        thread.join(6)
+        if thread.is_alive():
+            raise AssertionError("native reader still running")
+        if errors:
+            raise errors[0]
+
+
+def _executed_lines(function, operation) -> list[int]:
+    seen: list[int] = []
+
+    def trace(frame, event, arg):
+        del arg
+        if event == "line" and frame.f_code is function.__code__ and frame.f_lineno not in seen:
+            seen.append(frame.f_lineno)
+        return trace
+
+    previous = sys.gettrace()
+    sys.settrace(trace)
+    try:
+        operation()
+    finally:
+        sys.settrace(previous)
+    return seen
+
+
+def _source_line(function, lineno: int) -> str:
+    lines, start = inspect.getsourcelines(function)
+    return lines[lineno - start].strip()
+
+
+class _ReadableMinimumRegistry:
+    """0.19.0 register/get/unregister, including the documented atomic reads."""
+
+    def __init__(self) -> None:
+        self._entries: dict[str, object] = {}
+        self._deferred: dict[str, object] = {}
+        self.loader_calls = 0
+
+    def register(self, entry: object) -> None:
+        name = getattr(entry, "name", "discord")
+        self._deferred.pop(name, None)
+        self._entries[name] = entry
+
+    def register_deferred(self, name: str, loader: object) -> None:
+        if name in self._entries:
+            return
+        self._deferred[name] = loader
+
+    def unregister(self, name: str) -> bool:
+        self._deferred.pop(name, None)
+        return self._entries.pop(name, None) is not None
+
+    def get(self, name: str) -> object:
+        if name not in self._entries:
+            loader = self._deferred.pop(name, None)
+            if loader is not None:
+                self.loader_calls += 1
+                loader()  # type: ignore[operator]
+        return self._entries.get(name)
+
+
 class DiscordAdapterResolutionTests(unittest.TestCase):
     def test_deferred_loader_is_not_invoked_under_discovery(self) -> None:
         shipped = _shipped_discord()
@@ -1365,7 +1459,8 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
         self.assertIs(newer, state["entry"])
 
     def test_minimum_rollback_pop_keeps_a_concurrent_native_entry(self) -> None:
-        # Pause before the inverse pop, as a native register() can finish there.
+        # Pause before the inverse commit. A native register() that finished
+        # there must still be the owner; the commit re-checks under the writer gate.
         published = types.SimpleNamespace(name="discord", adapter_factory=object)
         newer = types.SimpleNamespace(name="discord", adapter_factory=object)
         old_loader = self._loader()
@@ -1377,7 +1472,7 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
 
         restored = _run_at_source_line(
             hermes_v2._restore_discord_registration,
-            'entries.pop("discord", None)',
+            "_commit_minimum_discord_inverse(",
             writer,
             lambda: hermes_v2._restore_discord_registration(
                 registry, None, (published, None), (None, old_loader)
@@ -1399,7 +1494,7 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
 
         restored = _run_at_source_line(
             hermes_v2._restore_discord_registration,
-            'deferred.setdefault("discord", previous[1])',
+            "_commit_minimum_discord_inverse(",
             writer,
             lambda: hermes_v2._restore_discord_registration(
                 registry, None, (published, None), (None, old_loader)
@@ -1471,7 +1566,7 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     _run_at_source_line(
                         hermes_v2._release_minimum_discord_entry,
-                        'entries.pop("discord", None)',
+                        "_commit_minimum_entry_release(",
                         writer,
                         hermes_v2._active_discord_adapter_class,
                     )
@@ -1479,3 +1574,92 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
             hermes_v2._REGISTRY_ROLLBACKS.reset(token)
         self.assertIs(newer, registry._entries.get("discord"))
         self.assertNotIn("discord", registry._deferred)
+
+    def _stale_minimum_owner(self):
+        published = types.SimpleNamespace(name="discord", adapter_factory=object)
+        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
+        registry = _ReadableMinimumRegistry()
+        registry.register(published)
+        registry.register(newer)
+        return registry, published, newer
+
+    def _assert_stale_inverse_stays_visible(self, function, operation_for) -> None:
+        registry, published, newer = self._stale_minimum_owner()
+        lines = _executed_lines(function, lambda: operation_for(registry, published, newer))
+        self.assertGreater(len(lines), 0)
+        for lineno in lines:
+            fresh, fresh_published, fresh_newer = self._stale_minimum_owner()
+            observed: list[object] = []
+            _run_at_lineno(
+                function,
+                lineno,
+                lambda: observed.append(fresh.get("discord")),
+                lambda: operation_for(fresh, fresh_published, fresh_newer),
+            )
+            self.assertEqual(
+                [fresh_newer],
+                observed,
+                _source_line(function, lineno),
+            )
+            self.assertIs(fresh_newer, fresh.get("discord"), _source_line(function, lineno))
+            self.assertEqual(0, fresh.loader_calls)
+
+    def _assert_stale_inverse_does_not_resurrect(self, function, operation_for) -> None:
+        registry, published, newer = self._stale_minimum_owner()
+        lines = _executed_lines(function, lambda: operation_for(registry, published, newer))
+        self.assertGreater(len(lines), 0)
+        for lineno in lines:
+            fresh, fresh_published, fresh_newer = self._stale_minimum_owner()
+            returned: list[bool] = []
+            _run_at_lineno(
+                function,
+                lineno,
+                lambda: returned.append(fresh.unregister("discord")),
+                lambda: operation_for(fresh, fresh_published, fresh_newer),
+            )
+            self.assertEqual([True], returned, _source_line(function, lineno))
+            self.assertIsNone(
+                fresh.get("discord"),
+                _source_line(function, lineno),
+            )
+            self.assertEqual(0, fresh.loader_calls)
+
+    def test_stale_minimum_rollback_keeps_newer_owner_visible(self) -> None:
+        def operation(registry, published, newer):
+            del newer
+            return hermes_v2._restore_discord_registration(
+                registry, None, (published, None), (None, self._loader())
+            )
+
+        self._assert_stale_inverse_stays_visible(
+            hermes_v2._restore_discord_registration, operation
+        )
+
+    def test_stale_minimum_rollback_does_not_resurrect_native_unregister(self) -> None:
+        def operation(registry, published, newer):
+            del newer
+            return hermes_v2._restore_discord_registration(
+                registry, None, (published, None), (None, self._loader())
+            )
+
+        self._assert_stale_inverse_does_not_resurrect(
+            hermes_v2._restore_discord_registration, operation
+        )
+
+    def test_stale_minimum_cleanup_keeps_newer_owner_visible(self) -> None:
+        def operation(registry, published, newer):
+            del newer
+            hermes_v2._release_minimum_discord_entry(registry._entries, published)
+
+        self._assert_stale_inverse_stays_visible(
+            hermes_v2._release_minimum_discord_entry, operation
+        )
+
+    def test_stale_minimum_cleanup_does_not_resurrect_native_unregister(self) -> None:
+        def operation(registry, published, newer):
+            del newer
+            hermes_v2._release_minimum_discord_entry(registry._entries, published)
+
+        self._assert_stale_inverse_does_not_resurrect(
+            hermes_v2._release_minimum_discord_entry, operation
+        )

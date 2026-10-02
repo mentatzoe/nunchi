@@ -2991,6 +2991,174 @@ def _discord_registration_state(registry: Any, scope: Any) -> tuple[Any, Any]:
     return entry, loader
 
 
+class _ObservedRegistryMap(dict):
+    """Minimum registry dict whose methods native register/get/unregister call.
+
+    0.19.0 has no registry lock. Swapping this map in makes those method bodies
+    take the same lock as an inverse commit. A lock held only around a Nunchi
+    read would not cover ``register`` or ``unregister``.
+    """
+
+    def __init__(self, mapping: Any = (), *, lock: threading.RLock) -> None:
+        super().__init__(mapping)
+        self._coordination_lock = lock
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        with self._coordination_lock:
+            dict.__setitem__(self, key, value)
+
+    def __delitem__(self, key: str) -> None:
+        with self._coordination_lock:
+            dict.__delitem__(self, key)
+
+    def __getitem__(self, key: str) -> Any:
+        with self._coordination_lock:
+            return dict.__getitem__(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        with self._coordination_lock:
+            return dict.__contains__(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        with self._coordination_lock:
+            return dict.get(self, key, default)
+
+    def pop(self, key: str, *args: Any) -> Any:
+        with self._coordination_lock:
+            return dict.pop(self, key, *args)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        with self._coordination_lock:
+            return dict.setdefault(self, key, default)
+
+
+_MINIMUM_REGISTRY_GATE = "_nunchi_minimum_registry_gate"
+_MINIMUM_WRITER_METHODS = ("register", "unregister", "register_deferred")
+_REGISTRY_LOCK_TYPE = type(threading.RLock())
+
+
+def _minimum_coordination_lock(registry: Any) -> Any:
+    """One lock for this registry's writer gate and both maps."""
+
+    existing = getattr(registry, _MINIMUM_REGISTRY_GATE, None)
+    if isinstance(existing, _REGISTRY_LOCK_TYPE):
+        return existing
+    entries = getattr(registry, "_entries", None)
+    entries_lock = getattr(entries, "_coordination_lock", None)
+    if isinstance(entries_lock, _REGISTRY_LOCK_TYPE):
+        return entries_lock
+    return threading.RLock()
+
+
+def _install_minimum_writer_gate(registry: Any, lock: threading.RLock) -> None:
+    """Make later native writers wait on ``lock`` before touching the maps.
+
+    ``get`` is not wrapped. Wrapping it would hold the lock across the deferred
+    loader, which this plugin must not invoke and must not serialize that way.
+    """
+
+    if getattr(registry, _MINIMUM_REGISTRY_GATE, None) is lock:
+        return
+    for name in _MINIMUM_WRITER_METHODS:
+        original = getattr(registry, name, None)
+        if not callable(original):
+            continue
+
+        def gated(
+            *args: Any,
+            _original: Callable[..., Any] = original,
+            _lock: threading.RLock = lock,
+            **kwargs: Any,
+        ) -> Any:
+            with _lock:
+                return _original(*args, **kwargs)
+
+        setattr(registry, name, gated)
+    setattr(registry, _MINIMUM_REGISTRY_GATE, lock)
+
+
+def _swap_minimum_maps_locked(
+    registry: Any, lock: threading.RLock
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Install coordinating maps. Caller holds ``lock``."""
+
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    if not isinstance(entries, dict) or not isinstance(deferred, dict):
+        return None
+    if (
+        type(entries) is _ObservedRegistryMap
+        and type(deferred) is _ObservedRegistryMap
+        and getattr(entries, "_coordination_lock", None) is lock
+        and getattr(deferred, "_coordination_lock", None) is lock
+    ):
+        return entries, deferred
+    wrapped_entries = _ObservedRegistryMap(entries, lock=lock)
+    wrapped_deferred = _ObservedRegistryMap(deferred, lock=lock)
+    registry._entries = wrapped_entries
+    registry._deferred = wrapped_deferred
+    return wrapped_entries, wrapped_deferred
+
+
+def _commit_minimum_discord_inverse(
+    registry: Any, current: tuple[Any, Any], previous: tuple[Any, Any]
+) -> bool:
+    """Restore ``previous`` only if ``current`` is still both maps' owner.
+
+    The identity check and the write share the lock native ``register`` and
+    ``unregister`` take after the writer gate is installed. A foreign entry is
+    not popped. A native removal that finished before this commit is not put
+    back.
+    """
+
+    lock = _minimum_coordination_lock(registry)
+    _install_minimum_writer_gate(registry, lock)
+    with lock:
+        coordinated = _swap_minimum_maps_locked(registry, lock)
+        if coordinated is None:
+            return False
+        live_entries, live_deferred = coordinated
+        if dict.get(live_entries, "discord") is not current[0]:
+            return False
+        if dict.get(live_deferred, "discord") is not current[1]:
+            return False
+        if previous[0] is None:
+            dict.pop(live_entries, "discord", None)
+        else:
+            dict.__setitem__(live_entries, "discord", previous[0])
+        if previous[1] is None:
+            dict.pop(live_deferred, "discord", None)
+        else:
+            dict.__setitem__(live_deferred, "discord", previous[1])
+        return (
+            dict.get(live_entries, "discord") is previous[0]
+            and dict.get(live_deferred, "discord") is previous[1]
+        )
+
+
+def _commit_minimum_entry_release(
+    entries: dict[str, Any], entry: Any, registry: Any = None
+) -> None:
+    """Pop our entry only while it is still the live owner."""
+
+    if registry is None:
+        lock = getattr(entries, "_coordination_lock", None)
+        if isinstance(lock, _REGISTRY_LOCK_TYPE):
+            with lock:
+                if dict.get(entries, "discord") is entry:
+                    dict.pop(entries, "discord", None)
+        return
+    lock = _minimum_coordination_lock(registry)
+    _install_minimum_writer_gate(registry, lock)
+    with lock:
+        coordinated = _swap_minimum_maps_locked(registry, lock)
+        if coordinated is None:
+            return
+        live_entries = coordinated[0]
+        if dict.get(live_entries, "discord") is entry:
+            dict.pop(live_entries, "discord", None)
+
+
 def _restore_discord_registration(
     registry: Any,
     scope: Any,
@@ -3012,41 +3180,11 @@ def _restore_discord_registration(
     deferred = getattr(registry, "_deferred", None)
     if not isinstance(entries, dict) or not isinstance(deferred, dict):
         return False
-    # Pop is the inverse write. A native register() that finished before this
-    # line replaced the generation; put that entry back and do not install the
-    # predecessor loader over it. Later restores use setdefault so a native
-    # writer that lands after the claim is not overwritten. Minimum has no
-    # shared lock, so a Nunchi-only lock would not cover these writers.
-    taken_entry = entries.pop("discord", None)
-    if taken_entry is not current[0]:
-        if taken_entry is not None:
-            entries.setdefault("discord", taken_entry)
+    # Foreign generation: leave both maps untouched. Popping to inspect would
+    # hide that owner from native get() and let a native unregister be undone.
+    if entries.get("discord") is not current[0] or deferred.get("discord") is not current[1]:
         return False
-    taken_loader = deferred.pop("discord", None)
-    if taken_loader is not current[1]:
-        if taken_loader is not None:
-            deferred.setdefault("discord", taken_loader)
-        # A newer deferred owner must not sit beside the entry we removed.
-        if taken_loader is None and current[0] is not None:
-            entries.setdefault("discord", current[0])
-        return False
-    if previous[0] is not None:
-        if entries.setdefault("discord", previous[0]) is not previous[0]:
-            return False
-    elif entries.get("discord") is not None:
-        return False
-    if previous[1] is not None:
-        if deferred.setdefault("discord", previous[1]) is not previous[1]:
-            return False
-        live = entries.get("discord")
-        if live is not None and live is not previous[0]:
-            popped = deferred.pop("discord", None)
-            if popped is not previous[1] and popped is not None:
-                deferred.setdefault("discord", popped)
-            return False
-    elif deferred.get("discord") is not None:
-        return False
-    return True
+    return _commit_minimum_discord_inverse(registry, current, previous)
 
 
 def _rollback_registry_publications(rollbacks: Sequence[Callable[[], None]]) -> None:
@@ -3149,27 +3287,32 @@ def _replace_deferred_discord_registration(
     # expression so a native register_deferred() that won the claim/insert gap
     # cannot be reported as a successful publication.
     return entries.setdefault("discord", entry) is entry and _minimum_publication_kept(
-        entries, deferred, entry
+        entries, deferred, entry, registry
     )
 
 
 def _minimum_publication_kept(
-    entries: dict[str, Any], deferred: dict[str, Any], entry: Any
+    entries: dict[str, Any],
+    deferred: dict[str, Any],
+    entry: Any,
+    registry: Any = None,
 ) -> bool:
     """Drop our entry when a deferred loader won the claim/insert gap."""
 
     if deferred.get("discord") is None:
         return True
-    _release_minimum_discord_entry(entries, entry)
+    _release_minimum_discord_entry(entries, entry, registry)
     return False
 
 
-def _release_minimum_discord_entry(entries: dict[str, Any], entry: Any) -> None:
-    """Remove our concrete entry without deleting a newer native owner."""
+def _release_minimum_discord_entry(
+    entries: dict[str, Any], entry: Any, registry: Any = None
+) -> None:
+    """Remove our concrete entry. A foreign owner stays visible to native get()."""
 
-    taken = entries.pop("discord", None)
-    if taken is not entry and taken is not None:
-        entries.setdefault("discord", taken)
+    if entries.get("discord") is not entry:
+        return
+    _commit_minimum_entry_release(entries, entry, registry)
 
 
 def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
@@ -3252,7 +3395,7 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
         ):
             minimum_entries = getattr(registry, "_entries", None)
             if isinstance(minimum_entries, dict):
-                _release_minimum_discord_entry(minimum_entries, entry)
+                _release_minimum_discord_entry(minimum_entries, entry, registry)
             raise _shape_error("Discord adapter")
         return
     _remember_discord_publication(registry, scope, current, previous)
