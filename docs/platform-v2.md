@@ -69,11 +69,13 @@ not a sandbox or a zero-syscall guarantee. See
 
 Auto-title is disabled because it can outlive the turn. Native typing, Discord voice
 input, `/thread`, detached participant commands, and handoff into configured
-rooms are disabled for the same lifecycle reason. Stock reactions run only
-after the participant invocation begins. Because the current Hermes seam does
-not attest the shared native ACK capability, a model ACK widens to DEFER and
-runs the normal participant path. These are open product gaps: the current
-Hermes source is not a complete V2 lifecycle.
+rooms are disabled for the same lifecycle reason. A model ACK is not a
+participant turn: when the authenticated adapter attests the configured
+reaction, Nunchi adds that one reaction through the shipped adapter method
+and the shared ACK journal. Unsupported or unknown permission still widens
+ACK to DEFER and runs the normal participant path. These exclusions are not
+a complete V2 lifecycle. See
+[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md).
 
 The plugin requires Hermes 0.19.0 or newer. It checks the host capability
 contract and installs its compatibility shim transactionally on every

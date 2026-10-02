@@ -578,6 +578,144 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         self.assertNotIn(("transport", "sent"), stages, stages)
 
 
+class NunchiAttentionAck(_Base):
+    """Native attention ACK on the installed host. Not a participant turn."""
+
+    enable_nunchi = True
+    trust_nunchi_llm = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        os.environ["DISCORD_REACTIONS"] = "false"
+        self.client.reaction_started = threading.Event()
+        self.client.reaction_hold = None
+
+    def _ears(self, message: Any) -> list[tuple[str, str]]:
+        return [item for item in message.reactions if item == ("add", "👂")]
+
+    def test_ack_adds_one_native_reaction_and_skips_the_participant(self) -> None:
+        self.attend("ACK")
+        message = self.human("please just acknowledge, do not answer")
+        admitted = _deliver_and_settle(self.host, message)
+        self.assertTrue(admitted)
+        self.assertEqual([], self.model_turns(), "ACK must not invoke the participant or main model")
+        self.assertEqual([], self.deliveries())
+        self.assertEqual([("add", "👂")], self._ears(message))
+        bodies = [r.get("body", {}) for r in self.receipts()]
+        self.assertTrue(any(body.get("effective_disposition") == "ACK" for body in bodies), bodies)
+        self.assertTrue(any(body.get("invoked") is False for body in bodies), bodies)
+        self.assertIn(("transport", "sent"), [(r.get("stage"), r.get("body", {}).get("delivery")) for r in self.receipts()])
+
+    def test_replay_after_restart_does_not_repeat_the_reaction(self) -> None:
+        self.attend("ACK")
+        message = self.human("ack once")
+        _deliver_and_settle(self.host, message)
+        self.assertEqual(1, len(self._ears(message)))
+        sup.unload_nunchi(self.loaded)
+        self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+        self.host = sup.ProbeHost(home=self.home, client=self.client)
+        self.attend("ACK")
+        again = _deliver_and_settle(self.host, message)
+        self.assertTrue(again)
+        self.assertEqual(1, len(self._ears(message)), "restarted journal must not emit a second reaction")
+        self.assertEqual([], self.model_turns())
+
+    def test_unsupported_permission_falls_back_to_defer_without_a_reaction(self) -> None:
+        channel = self.client.channel(self.room)
+        channel.permissions.add_reactions = False
+        self.server.script(self.attend("ACK"), {"content": "deferred participant"})
+        message = self.human("cannot react here")
+        _deliver_and_settle(self.host, message)
+        self.assertEqual([], self._ears(message))
+        self.assertEqual(1, len(self.model_turns()), "unsupported ACK widens to DEFER and runs the participant")
+        attention = [r for r in self.receipts() if r.get("stage") == "attention"]
+        self.assertTrue(attention)
+        body = attention[-1]["body"]
+        self.assertEqual("DEFER", body.get("effective_disposition"))
+        self.assertEqual("ack-unsupported", body.get("routing_audit", {}).get("override_cause"))
+
+    def test_changed_permission_does_not_send_the_reaction_or_wake(self) -> None:
+        channel = self.client.channel(self.room)
+
+        def _answer(body: dict[str, Any]) -> dict[str, Any]:
+            channel.permissions.add_reactions = False
+            return {"content": sup.attention_judgment("ACK", _event_id_from_prompt(body))}
+
+        self.server.attention = _answer
+        message = self.human("permission may change")
+        _deliver_and_settle(self.host, message)
+        self.assertEqual([], self._ears(message))
+        self.assertEqual([], self.model_turns())
+        deliveries = [r.get("body", {}).get("delivery") for r in self.receipts() if r.get("stage") == "transport"]
+        self.assertIn("unavailable", deliveries, self.receipts())
+        self.assertNotIn("sent", deliveries)
+
+    def test_cancellation_and_late_native_result_are_not_sent(self) -> None:
+        hold = asyncio.Event()
+        self.client.reaction_hold = hold
+        self.attend("ACK")
+        message = self.human("cancel this ack")
+
+        async def _go() -> None:
+            task = asyncio.create_task(self.host.deliver(message))
+            for _ in range(400):
+                if self.client.reaction_started.is_set():
+                    break
+                await asyncio.sleep(0.05)
+            await self.host.deliver(self.human("/stop"))
+            hold.set()
+            await task
+            await self.host.settle(timeout=30)
+
+        sup.run(_go(), timeout=60)
+        deliveries = [r.get("body", {}).get("delivery") for r in self.receipts() if r.get("stage") == "transport"]
+        self.assertNotIn("sent", deliveries, self.receipts())
+        self.assertEqual([], self.model_turns())
+
+        sup.unload_nunchi(self.loaded)
+        self._load_nunchi(timeout_seconds=1.5)
+        self.host = sup.ProbeHost(home=self.home, client=self.client)
+        hold = asyncio.Event()
+        self.client.reaction_hold = hold
+        self.client.reaction_started = threading.Event()
+        self.attend("ACK")
+        late = self.human("late ack")
+
+        async def _late() -> None:
+            task = asyncio.create_task(self.host.deliver(late))
+            await asyncio.sleep(2.2)
+            hold.set()
+            await task
+            await self.host.settle(timeout=30)
+
+        sup.run(_late(), timeout=60)
+        late_deliveries = [r.get("body", {}).get("delivery") for r in self.receipts() if r.get("stage") == "transport" and r.get("body", {}).get("detail", "").find("late") >= -1]
+        sent = [r for r in self.receipts() if r.get("stage") == "transport" and r.get("body", {}).get("delivery") == "sent"]
+        self.assertEqual([], sent, self.receipts())
+        self.assertEqual([], self.model_turns())
+
+    def test_rollback_and_nonplugin_do_not_keep_the_ack_permit(self) -> None:
+        from gateway.platforms.base import BasePlatformAdapter
+
+        self.attend("ACK")
+        message = self.human("before rollback")
+        _deliver_and_settle(self.host, message)
+        self.assertEqual(1, len(self._ears(message)))
+        sup.unload_nunchi(self.loaded)
+        self.loaded = None
+        self.assertFalse(getattr(BasePlatformAdapter.handle_message, "__nunchi_v2_ingress__", False))
+        stock_host = sup.ProbeHost(home=self.home, client=self.client)
+        try:
+            stock = self.human("stock after rollback")
+            self.server.script({"content": "plain stock reply"})
+            admitted = _deliver_and_settle(stock_host, stock)
+            self.assertTrue(admitted)
+            self.assertEqual([], self._ears(stock))
+            self.assertEqual(1, len(self.model_turns()))
+        finally:
+            sup.run(stock_host.close(), timeout=20)
+
+
 def _event_id_from_prompt(body: dict[str, Any]) -> str:
     """Pull the canonical event id Nunchi put in the attention projection."""
 

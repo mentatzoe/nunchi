@@ -347,6 +347,21 @@ class FakeDiscordUser:
         return f"FakeDiscordUser({self.id}, {self.name!r}, bot={self.bot})"
 
 
+class FakeDiscordPermissions:
+    """Labelled double of a discord.py Permissions result. Not a live grant."""
+
+    def __init__(
+        self,
+        *,
+        view_channel: bool = True,
+        read_message_history: bool = True,
+        add_reactions: bool = True,
+    ) -> None:
+        self.view_channel = view_channel
+        self.read_message_history = read_message_history
+        self.add_reactions = add_reactions
+
+
 class FakeGuild:
     def __init__(self, guild_id: int = 7000) -> None:
         self.id = guild_id
@@ -369,6 +384,23 @@ class FakeTextChannel:
         self.client = client
         self.sent: list[dict[str, Any]] = []
         self.messages: dict[int, "FakeDiscordMessage"] = {}
+        self.permissions = FakeDiscordPermissions()
+
+    def permissions_for(self, member: Any) -> "FakeDiscordPermissions":
+        """SDK-shaped permission read. Only the authenticated bot is allowed.
+
+        This is a labelled double of discord.py ``permissions_for``. It does
+        not open a socket. A subject that is not the probe bot is denied, so
+        a capability probe cannot treat the message author as the bot.
+        """
+
+        if str(getattr(member, "id", "")) != str(self.client.user.id):
+            return FakeDiscordPermissions(
+                view_channel=False,
+                read_message_history=False,
+                add_reactions=False,
+            )
+        return self.permissions
 
     async def send(self, content: str | None = None, *, reference: Any = None, **kwargs: Any) -> "FakeDiscordMessage":
         self.client.send_calls.append(
@@ -452,6 +484,13 @@ class FakeDiscordMessage:
         self.jump_url = f"https://discord.test/{channel.id}/{message_id}"
 
     async def add_reaction(self, emoji: str) -> None:
+        client = self.channel.client
+        started = getattr(client, "reaction_started", None)
+        if started is not None:
+            started.set()
+        hold = getattr(client, "reaction_hold", None)
+        if hold is not None:
+            await hold.wait()
         self.reactions.append(("add", str(emoji)))
 
     async def remove_reaction(self, emoji: str, _member: Any) -> None:
