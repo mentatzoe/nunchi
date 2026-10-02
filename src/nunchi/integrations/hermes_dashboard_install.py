@@ -382,6 +382,20 @@ def install_dashboard_for_profile(*, profile: str) -> dict[str, Any]:
                 f"Hermes profile {profile!r} could not be resolved"
             ) from exc
 
+    from nunchi.integrations.hermes_lifecycle import lifecycle_dashboard_scope
+
+    if lifecycle_dashboard_scope(profile_home, profile):
+        # Explicit lifecycle opt-in owns only this profile. Fresh startup must
+        # not enable Nunchi or create a dashboard in the machine home.
+        verified = verify_dashboard(hermes_home=profile_home)
+        return {
+            "ok": True,
+            "profile": profile,
+            "scope": "lifecycle-selected-profile",
+            "installed": [verified],
+            "machine_dashboard": {"unchanged": True},
+        }
+
     # Resolve both selected homes before writing either one. Reuse these
     # pinned paths for deduplication and machine-profile activation too.
     profile_home = _resolve_hermes_home(profile_home)

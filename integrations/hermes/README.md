@@ -69,13 +69,26 @@ checkout files, or installed distribution files.
 
 ## Install
 
-Install Nunchi into the same environment as Hermes, enable its discovered
-runtime plugin, then restart Hermes:
+For a predecessor cutover or reversible profile-local setup, use the
+[lifecycle procedure](../../docs/hermes-profile-lifecycle.md). It installs only
+in the explicitly selected Hermes interpreter and keeps package changes
+separate from profile activation.
+
+For ordinary setup without a predecessor, select the actual Hermes environment
+and profile first. Stop its affected processes before replacing the package:
 
 ```sh
-python -m pip install nunchi
+HERMES_PYTHON=/absolute/path/to/hermes/.venv/bin/python
+uv pip install --python "$HERMES_PYTHON" /absolute/path/to/reviewed/nunchi-2.0.0-py3-none-any.whl
+# Run the matching Hermes launcher in the selected profile:
 hermes plugins enable nunchi
 ```
+
+If using pip instead, first check `"$HERMES_PYTHON" -m pip --version`; then use
+`"$HERMES_PYTHON" -m pip install /absolute/path/to/reviewed.whl`. Minimum stock
+Hermes's uv environment may not include pip; use `uv pip --python` rather than
+an unrelated shell Python. Restart using the operator's existing service
+controls after configuration and verification.
 
 The package metadata exposes the `nunchi` entry point in the
 `hermes_agent.plugins` group. When Hermes loads it, Nunchi installs its three
@@ -88,6 +101,11 @@ Hermes checkout or installed package. `nunchi-hermes-dashboard verify` checks
 one bridge;
 `nunchi-hermes-dashboard install` repairs it. These commands are repair and
 verification tools; normal setup does not require running them.
+A lifecycle-managed profile instead verifies its pre-staged bridge at startup:
+its `.nunchi-lifecycle-active.json` marker prevents automatic installation or
+activation in the machine profile. This opt-in does not change ordinary setup.
+For a named lifecycle profile, use an isolated dashboard for that profile;
+provisioning a shared machine dashboard remains a separate explicit action.
 
 A Hermes home or named profile may be a symlink to an existing directory,
 including on another volume. The installer resolves that operator-selected
@@ -352,36 +370,37 @@ adoption remain separate, unproven gates.
 
 ## Upgrade, disable, uninstall and rollback
 
-Use the Python environment and selected Hermes profile that own the install;
-do not apply these steps to unrelated profiles. Before a package change, stop
-the affected gateway and dashboard using their operator-managed service controls,
-and retain the exact previous wheel, pinned room config/digest, private host
-config backups and Nunchi state. Do not reset journals to make a retry succeed.
+Use [the supported profile lifecycle procedure](../../docs/hermes-profile-lifecycle.md)
+for dry planning, digest-bound activation/retirement, verification and guarded
+restoration. `nunchi-hermes-lifecycle` is shipped by the wheel; it does not
+install/uninstall packages or stop/restart processes.
 
-- Upgrade by installing the exact reviewed wheel in that environment, then
-  restart and run `/nunchi probe` and the dashboard verification above. The
-  dashboard installer migrates only its safely attributed legacy `plugins/nunchi-v2-dashboard`
-  bridge to `plugins/nunchi-dashboard`; this is not a V1 configuration or journal
-  converter. There is no automatic V1-to-V2 state migration. Keep V1 stopped,
-  retain its state separately and configure V2 afresh; never run both in the
-  same room/session.
-- To return to stock Hermes, run `hermes plugins disable nunchi` in each affected
-  profile and restart its gateway. Process-local guards are not removed from
-  an already-running worker just by editing saved configuration. If setup also
-  enabled Nunchi in the machine dashboard profile, disable it there separately
-  when no other profile needs it, and restart the dashboard.
-- To remove the Python package after disabling/stopping those processes, use
-  `python -m pip uninstall nunchi` in the same environment. This does not remove
-  the user-data dashboard bridges, pinned room configs, journals, host trust
-  settings or private backups. The `nunchi-hermes-dashboard` command currently
-  has only `install` and `verify`, not an uninstall operation. Retain these
-  files for audit; complete verified user-data cleanup is a missing mechanism,
-  not something package uninstall claims to do. The shared `nunchi uninstall`
-  command does not uninstall a Hermes profile.
-- Roll back a package by reinstalling the retained exact predecessor wheel
-  while affected processes are stopped. Restore its matching pinned config
-  and digest only after reviewing intervening edits; host attention-trust
-  rollback uses the private backup procedure above. Then restart and verify
-  the probe/dashboard. Do not assume arbitrary older wheels can consume newer
-  state. When no compatible predecessor is verified, disable Nunchi and run
-  stock Hermes instead. Nothing here rolls back already-issued native effects.
+- `plan --mode activate` accepts an explicit valid V2 config/digest and describes
+  the cutover; applying it archives attributed historical V1 runtime copies
+  (including discoverable backup copies), config/state and dashboard assets
+  outside `plugins`, and stages one V2 successor. It does not translate V1
+  policy/history into V2 obligations.
+- `plan --mode retire` describes archival of Nunchi-owned profile assets/state
+  and disabling both runtime names. Applying it preserves unrelated files and
+  host trust/config outside the plugin activation node. Unknown ownership
+  refuses the operation.
+- `apply` requires the exact plan digest and `--processes-stopped`. `verify`
+  checks saved filesystem state, not adoption by running workers. Fresh-process
+  discovery and the existing live canaries are separate checks.
+- `rollback --mode restore` restores retained before-images only when target
+  state still matches the transaction. It refuses later edits. Recover an
+  interrupted transaction before starting another one; never reset journals to
+  make a retry succeed.
+- Package removal is optional and interpreter-wide. After retiring every
+  consumer and stopping its processes, use `uv pip uninstall --python
+  "$HERMES_PYTHON" nunchi`, or explicitly verify pip exists before using
+  `"$HERMES_PYTHON" -m pip uninstall nunchi`. Reinstall the exact lifecycle
+  wheel before restoring a retired profile. To return to V1, perform guarded
+  profile restoration first, then install its retained matching wheel while all
+  affected processes remain stopped.
+
+Shared machine dashboard setup from older ordinary installs must be retired
+separately only when its other consumers no longer need it. Lifecycle activation
+never silently changes that profile. The shared `nunchi uninstall` command is
+not Hermes-profile retirement. Keep private transaction archives for audit;
+there is no destructive purge command. Prior native effects cannot be undone.
