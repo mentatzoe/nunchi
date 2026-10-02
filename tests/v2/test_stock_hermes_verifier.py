@@ -1,6 +1,7 @@
 """Offline tests of the installed verifier's isolation and fail-closed checks."""
 import importlib.util
 import os
+import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -18,6 +19,17 @@ def script(name):
 
 
 class StockVerifierTests(unittest.TestCase):
+    def test_approval_target_is_new_private_fixture_data(self):
+        from tests.v2.test_hermes_normal_turn import _Base
+        with tempfile.TemporaryDirectory(prefix="approval home ") as tmp:
+            case = _Base()
+            case.home = Path(tmp)
+            command, target = case.approval_command()
+            self.assertTrue(target.is_relative_to(case.home.resolve()))
+            self.assertEqual(["rm", "-rf", "--", str(target)], shlex.split(command))
+            self.assertEqual("disposable approval fixture\n", (target / "marker").read_text())
+            self.assertNotEqual(target, case.approval_command()[1])
+
     def test_child_environment_does_not_inherit_profile_keys_or_pythonpath(self):
         verifier = script("verify_stock_hermes")
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {

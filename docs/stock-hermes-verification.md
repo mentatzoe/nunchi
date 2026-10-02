@@ -106,7 +106,10 @@ origins are asserted before and after dispatch. Python audit hooks reject extern
 DNS, TCP and UDP operations, even if host code catches the exception; the denied
 attempt remains a lane failure. Numeric loopback and local Unix sockets are
 allowed. This is an in-process test fence, not a general OS sandbox for arbitrary
-untrusted subprocesses; these fixtures do not approve terminal execution.
+untrusted subprocesses. Approval fixtures exercise a real native terminal command
+against a fresh directory created inside their disposable home, never a fixed
+shared `/tmp` target. They assert it remains intact before approval/after denial
+and is removed only after the synthetic authorized `/approve` message.
 
 Receipts include commands, UTC timestamps, interpreter, requested host ref and
 resolved commit/tree, installed versions/dependencies, direct-install metadata,
