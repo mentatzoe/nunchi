@@ -59,7 +59,11 @@ class NativeInvocationJournal:
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         self._check_file()
-        db = sqlite3.connect(self.path, timeout=0)
+        # Native batches reserve under the runtime lock but finish outside it.
+        # Allow their short durable writes to settle instead of spuriously
+        # refusing another invocation. This never retries a native effect;
+        # callers still recheck cancellation/deadline after reservation.
+        db = sqlite3.connect(self.path, timeout=0.25)
         try:
             db.execute("PRAGMA synchronous=FULL")
             with db:

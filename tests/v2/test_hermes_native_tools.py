@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from contextvars import copy_context
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import sys
@@ -72,6 +74,29 @@ class NativeToolTests(unittest.TestCase):
             self.assertEqual("unknown", record["effect"])
             self.assertEqual("read_file", record["binding"]["tool_name"])
             self.assertEqual("native-turn", record["binding"]["turn_id"])
+
+    def test_concurrent_distinct_native_calls_reserve_and_finish_without_loss(self):
+        with self.active_turn() as (_, runtime, trace, middleware), ThreadPoolExecutor(2) as pool:
+            # Repeat the actual middleware lock order: reserve under _lock,
+            # run the host outside it, finish after releasing it again.
+            assert trace is not None
+            trace.deadline += 30
+            calls = []
+            for batch in range(20):
+                start = threading.Barrier(2)
+                def invoke(call_id):
+                    start.wait(timeout=2)
+                    return self.invoke(middleware, lambda args: calls.append(call_id) or call_id,
+                                       tool_call_id=call_id)
+                ids = [f"batch-{batch}-{slot}" for slot in range(2)]
+                futures = [pool.submit(copy_context().run, invoke, identity) for identity in ids]
+                self.assertEqual(ids, [future.result(timeout=3) for future in futures])
+            records = runtime.native_invocations.records()
+            self.assertEqual(40, len(records))
+            self.assertEqual(40, len(set(calls)))
+            self.assertTrue(all(record["invocation"] == "returned" for record in records))
+            self.assertTrue(all(record["effect"] == "unknown" for record in records))
+            self.assertEqual({}, runtime._native_threads)
 
     def test_cancellation_interrupts_only_registered_native_threads_without_clearing(self):
         with self.active_turn() as (_, runtime, trace, middleware):
