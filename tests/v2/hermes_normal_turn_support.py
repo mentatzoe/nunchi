@@ -843,6 +843,15 @@ class ProbeHost:
         ]
 
     async def close(self) -> None:
+        # Cancelling a session coroutine does not stop its gateway-owned
+        # worker thread. In particular /stop may leave a native HTTP retry
+        # sleeping after the adapter reports settled. Drain before resetting
+        # the shared model script or unloading hooks in the next test.
+        pools = [pool for name in ("_executor", "_housekeeping_executor")
+                 if (pool := getattr(self.runner, name, None)) is not None]
+        self.runner._shutdown_executor()
+        for pool in pools:
+            await asyncio.to_thread(pool.shutdown, wait=True, cancel_futures=True)
         try:
             await self.runner._async_session_store.close()  # type: ignore[attr-defined]
         except Exception:

@@ -32,7 +32,7 @@ class NativeInvocationJournal:
             else:
                 os.close(fd)
             self._check_file()
-            with self._connect() as db:
+            with self._connect(write=True) as db:
                 db.execute(
                     "CREATE TABLE IF NOT EXISTS invocations ("
                     "identity TEXT PRIMARY KEY, binding TEXT NOT NULL, "
@@ -57,24 +57,52 @@ class NativeInvocationJournal:
             raise PersistenceError("native invocation ledger is not a private regular file")
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         self._check_file()
         # Native batches reserve under the runtime lock but finish outside it.
         # Allow their short durable writes to settle instead of spuriously
         # refusing another invocation. This never retries a native effect;
         # callers still recheck cancellation/deadline after reservation.
-        db = sqlite3.connect(self.path, timeout=0.25)
+        # SQLite's busy timeout sums requested sleeps, not elapsed time.
+        # Scheduler delays can therefore multiply it. Share one monotonic
+        # budget across setup, writer-lock acquisition and commit contention.
+        db = sqlite3.connect(self.path, timeout=0)
+        deadline = time.monotonic() + 0.25
+
+        def wait_for_lock(operation: Callable[[], Any]) -> None:
+            while True:
+                try:
+                    operation()
+                    return
+                except sqlite3.OperationalError as exc:
+                    if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_BUSY:
+                        raise
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    time.sleep(min(0.01, remaining))
+                    if time.monotonic() >= deadline:
+                        raise
+
         try:
-            db.execute("PRAGMA synchronous=FULL")
-            with db:
-                yield db
+            # Schema access here can contend with an exclusive commit lock.
+            wait_for_lock(lambda: db.execute("PRAGMA synchronous=FULL"))
+            if write:
+                wait_for_lock(lambda: db.execute("BEGIN IMMEDIATE"))
+            yield db
+            # A reader can delay commit after the mutation already ran. Retry
+            # only commit on the same transaction, never the mutation/effect.
+            wait_for_lock(db.commit)
+        except BaseException:
+            db.rollback()
+            raise
         finally:
             db.close()
 
     def reserve(self, identity: str, binding: Mapping[str, Any]) -> bool:
         try:
             payload = json.dumps(dict(binding), sort_keys=True, separators=(",", ":"), allow_nan=False)
-            with self._connect() as db:
+            with self._connect(write=True) as db:
                 result = db.execute(
                     "INSERT OR IGNORE INTO invocations VALUES (?, ?, 'committed', 'unknown')",
                     (identity, payload),
@@ -87,7 +115,7 @@ class NativeInvocationJournal:
         if invocation not in {"returned", "raised", "cancelled-before-handoff"}:
             raise ValueError("unsupported native invocation outcome")
         try:
-            with self._connect() as db:
+            with self._connect(write=True) as db:
                 result = db.execute(
                     "UPDATE invocations SET invocation = ? WHERE identity = ?",
                     (invocation, identity),

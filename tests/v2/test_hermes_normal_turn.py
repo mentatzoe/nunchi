@@ -520,7 +520,7 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         )
         _deliver_and_settle(self.host, self.human("read my config"))
         turns = self.model_turns()
-        self.assertEqual(2, len(turns), "model saw a tool result and answered")
+        self.assertEqual(2, len(turns), self.server.bodies())
         tool_result = str(turns[1]["messages"][-1].get("content"))
         self.assertIn("model:", tool_result, f"read_file did not execute natively on a configured route; model received: {tool_result[:200]}")
 

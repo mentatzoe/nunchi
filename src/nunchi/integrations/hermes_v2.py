@@ -3755,8 +3755,7 @@ def _install_discord_room_admission_shim(
             self: Any,
             adapter: Any,
             platform: Any,
-            *,
-            is_reconnect: bool = False,
+            **connect_options: Any,
         ) -> Any:
             if not isinstance(
                 getattr(adapter, _ADAPTER_PROFILE_ATTRIBUTE, None),
@@ -3778,7 +3777,10 @@ def _install_discord_room_admission_shim(
                 self,
                 adapter,
                 platform,
-                is_reconnect=is_reconnect,
+                # Preserve the native call exactly: newer hosts pass initial
+                # for a cold-start budget; minimum hosts accept only reconnect.
+                # The native signature still rejects unsupported options.
+                **connect_options,
             )
 
         def discord_message_admission(
