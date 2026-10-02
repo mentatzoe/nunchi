@@ -47,7 +47,9 @@ still widens ACK to DEFER.
 
 An ACK decision records its reaction, trusted policy provenance, and native
 permission revision. Immediately before dispatch the host rechecks those
-facts. It durably reserves an ACK key bound to participant, actor, platform,
+facts. Hermes consumes the same check again at native entry, before the
+network await, and does not hold the scheduler lock across that await. It
+durably reserves an ACK key bound to participant, actor, platform,
 room, continuity scope, target message, reaction, and operation. Request,
 generation, lifecycle, deadline, and permission revision remain in the durable
 reservation audit. A restart, replay, concurrent opportunity, cancellation, or

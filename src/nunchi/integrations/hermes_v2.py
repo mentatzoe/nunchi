@@ -49,6 +49,7 @@ from nunchi.participant import (
 from nunchi.pipeline import OpportunityPreparation, prepare_opportunity
 from nunchi.receipts import ReceiptJournal
 from nunchi.integrations.hermes_ack import (
+    ack_effects_quiescent,
     claim_ack_effect,
     dispatch_attention_ack,
     probe_reaction_capability,
@@ -1596,6 +1597,7 @@ class _RoomRuntime:
             token=pending.token,
             deadline=pending.deadline,
             lifecycle_id=self.scheduler.lifecycle_id,
+            scheduler=self.scheduler,
         )
 
     def finish_ack(self, token: OpportunityToken) -> OpportunityToken | None:
@@ -2255,11 +2257,18 @@ class _RoomRuntime:
                         "Nunchi could not persist terminal Hermes settlement"
                     )
                     return False
-            while self._processing_traces or self._detached_stock_tasks:
+            while (
+                self._processing_traces
+                or self._detached_stock_tasks
+                or not ack_effects_quiescent()
+            ):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
-                self._settlement_changed.wait(remaining)
+                if self._processing_traces or self._detached_stock_tasks:
+                    self._settlement_changed.wait(remaining)
+                else:
+                    self._settlement_changed.wait(min(remaining, 0.05))
             return self._active_trace is None
 
 

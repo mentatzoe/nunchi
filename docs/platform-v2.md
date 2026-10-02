@@ -72,10 +72,13 @@ input, `/thread`, detached participant commands, and handoff into configured
 rooms are disabled for the same lifecycle reason. A model ACK is not a
 participant turn: when the authenticated adapter attests the configured
 reaction, Nunchi adds that one reaction through the shipped adapter method
-and the shared ACK journal. Unsupported or unknown permission still widens
+and the shared ACK journal. The effect is committed only while that
+opportunity and deadline are still current, and journal waits stay off the
+gateway loop. Unsupported or unknown permission still widens
 ACK to DEFER and runs the normal participant path. These exclusions are not
 a complete V2 lifecycle. See
-[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md).
+[`verification/2026-10-02-hermes-ack.md`](verification/2026-10-02-hermes-ack.md)
+and [`verification/2026-10-02-hermes-ack-repair.md`](verification/2026-10-02-hermes-ack-repair.md).
 
 The plugin requires Hermes 0.19.0 or newer. It checks the host capability
 contract and installs its compatibility shim transactionally on every

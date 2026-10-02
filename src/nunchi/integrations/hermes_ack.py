@@ -6,14 +6,16 @@ reaction those facts allow. It does not judge social meaning, and it does not
 copy a second ACK policy.
 
 The native call is awaited outside the shared scheduler lock and the room
-runtime lock. The one opportunity deadline bounds that wait. A lost or late
-result is unknown and is not retried.
+runtime lock. Authority is consumed at the native method's entry, under the
+scheduler lock and before the network await. A lost or late result is unknown
+and is not retried. Journal and receipt writes run off the gateway loop and
+do not outlive a bounded, tracked cleanup.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import hashlib
@@ -30,11 +32,12 @@ from nunchi.ack import (
     UNAVAILABLE_REACTION_CAPABILITY,
 )
 from nunchi.participant import (
+    ConversationOpportunityScheduler,
     OpportunityToken,
     TransportResult,
     participant_host_receipt_body,
 )
-from nunchi.receipts import ReceiptJournal
+from nunchi.receipts import PersistenceError, ReceiptJournal
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,80 @@ _ACK_EFFECT_PERMIT: ContextVar["AckEffectPermit | None"] = ContextVar(
     "nunchi_hermes_ack_effect_permit",
     default=None,
 )
+_PERSISTENCE_CLEANUP_SECONDS = 2.0
+_OWNED_NATIVE: set[asyncio.Task[Any]] = set()
+_OWNED_PERSISTENCE: set[Any] = set()
+_OWNERSHIP_LOCK = threading.Lock()
+
+
+class AckAuthorityClosed(Exception):
+    """The call matched a permit whose opportunity may no longer commit."""
+
+
+def ack_effects_quiescent() -> bool:
+    """Return whether every ACK child and late writer has finished."""
+
+    with _OWNERSHIP_LOCK:
+        natives = {task for task in _OWNED_NATIVE if not task.done()}
+        writers = {item for item in _OWNED_PERSISTENCE if not item.done()}
+        _OWNED_NATIVE.clear()
+        _OWNED_NATIVE.update(natives)
+        _OWNED_PERSISTENCE.clear()
+        _OWNED_PERSISTENCE.update(writers)
+        return not natives and not writers
+
+
+def _own_native(task: asyncio.Task[Any]) -> None:
+    with _OWNERSHIP_LOCK:
+        _OWNED_NATIVE.add(task)
+
+    def _finished(done: asyncio.Task[Any]) -> None:
+        _consume_task(done)
+        with _OWNERSHIP_LOCK:
+            _OWNED_NATIVE.discard(done)
+
+    task.add_done_callback(_finished)
+
+
+def _own_future(future: Any) -> None:
+    with _OWNERSHIP_LOCK:
+        _OWNED_PERSISTENCE.add(future)
+
+    def _finished(done: Any) -> None:
+        _consume_future(done)
+        with _OWNERSHIP_LOCK:
+            _OWNED_PERSISTENCE.discard(done)
+
+    future.add_done_callback(_finished)
+
+
+def _consume_task(task: asyncio.Task[Any]) -> None:
+    if not task.done():
+        return
+    try:
+        task.exception()
+    except BaseException:
+        pass
+
+
+def _consume_future(future: Any) -> None:
+    if not future.done():
+        return
+    try:
+        future.exception()
+    except BaseException:
+        pass
+
+
+async def drain_ack_ownership(timeout: float = _PERSISTENCE_CLEANUP_SECONDS + 0.5) -> bool:
+    """Wait until owned ACK children and writers finish, without blocking the loop."""
+
+    deadline = time.monotonic() + timeout
+    while not ack_effects_quiescent():
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.01)
+    return True
 
 
 def unavailable(detail: str) -> ReactionCapability:
@@ -147,7 +224,11 @@ class AckEffectPermit:
     native_message_id: str
     message: Any = None
     chat_id: str | None = None
+    scheduler: ConversationOpportunityScheduler | None = None
+    token: OpportunityToken | None = None
+    deadline: float = 0.0
     consumed: bool = False
+    revoked: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def matches(self, adapter: Any, method: str, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> bool:
@@ -176,6 +257,12 @@ class AckEffectPermit:
             )
         return False
 
+    def revoke(self) -> None:
+        """Refuse a later commit. Does not undo a call that already passed it."""
+
+        with self._lock:
+            self.revoked = True
+
 
 def claim_ack_effect(
     adapter: Any,
@@ -183,10 +270,12 @@ def claim_ack_effect(
     args: tuple[Any, ...],
     kwargs: Mapping[str, Any],
 ) -> bool:
-    """Consume the current task's permit only when the call is the exact ACK.
+    """Consume the current task's permit only at the actual effect commit.
 
-    Any other method, target, emoji, or adapter returns False so the existing
-    effect guard keeps blocking it. A second exact call also returns False.
+    A matching call whose opportunity, generation, or deadline is no longer
+    current raises ``AckAuthorityClosed`` instead of returning False. Returning
+    False would let the stock guard treat that call as ordinary unconfigured
+    traffic. Any other method, target, emoji, or adapter still returns False.
     """
 
     permit = _ACK_EFFECT_PERMIT.get()
@@ -195,6 +284,15 @@ def claim_ack_effect(
     with permit._lock:
         if permit.consumed or not permit.matches(adapter, method, args, kwargs):
             return False
+        scheduler = permit.scheduler
+        token = permit.token
+        if (
+            permit.revoked
+            or scheduler is None
+            or token is None
+            or not scheduler.authorize_effect_commit(token, deadline=permit.deadline)
+        ):
+            raise AckAuthorityClosed("ACK effect authority is no longer current")
         permit.consumed = True
         return True
 
@@ -438,19 +536,280 @@ def _native_target(platform: str, event: Any, room_id: str) -> tuple[str, Any, s
     raise ValueError(f"Hermes platform {platform} cannot dispatch ACK")
 
 
+async def _off_loop(fn: Callable[[], Any], *, wait: float) -> Any:
+    """Run one blocking persistence call off the gateway loop."""
+
+    if wait <= 0:
+        raise PersistenceError("ACK persistence deadline exhausted")
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(None, fn)
+    try:
+        return await asyncio.wait_for(asyncio.shield(future), wait)
+    except TimeoutError as exc:
+        _own_future(future)
+        raise PersistenceError(
+            "ACK persistence exceeded the opportunity deadline"
+        ) from exc
+    except asyncio.CancelledError:
+        _own_future(future)
+        raise
+    except PersistenceError:
+        _consume_future(future)
+        raise
+
+
+def _settle_quietly(
+    journal: AckJournal,
+    ack_id: str,
+    *,
+    delivery: str,
+    detail: str,
+) -> None:
+    try:
+        journal.settle(
+            ack_id,
+            delivery=delivery,
+            detail=detail,
+            timeout=_PERSISTENCE_CLEANUP_SECONDS,
+        )
+    except Exception:
+        logger.exception("Nunchi could not finish a late Hermes ACK settlement")
+
+
+def _suppress_late_reservation(journal: AckJournal, binding: Mapping[str, Any]) -> None:
+    """Reserve after a refused dispatch, then settle failed. Never dispatch."""
+
+    try:
+        ack_id, reserved = journal.reserve(
+            binding,
+            timeout=_PERSISTENCE_CLEANUP_SECONDS,
+        )
+    except PersistenceError:
+        logger.warning(
+            "Hermes ACK reservation was not durable before the cleanup bound"
+        )
+        return
+    if reserved:
+        _settle_quietly(
+            journal,
+            ack_id,
+            delivery="failed",
+            detail="ACK reservation completed after dispatch was refused",
+        )
+
+
+async def _reserve_before_dispatch(
+    journal: AckJournal,
+    binding: Mapping[str, Any],
+    *,
+    deadline: float,
+) -> tuple[str | None, str]:
+    """Return ``(ack_id, status)`` with status reserved, duplicate, or refused.
+
+    A refused reservation does not dispatch. If the lock lands after that
+    refusal, the tracked worker settles it failed so replay cannot emit.
+    """
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None, "refused"
+    state: dict[str, Any] = {
+        "abandoned": False,
+        "ready": threading.Event(),
+        "ack_id": None,
+        "reserved": False,
+        "error": None,
+    }
+    gate = threading.Lock()
+
+    def attempt() -> None:
+        try:
+            ack_id, reserved = journal.reserve(binding, timeout=remaining)
+        except PersistenceError as exc:
+            with gate:
+                abandoned = state["abandoned"]
+            if abandoned:
+                _suppress_late_reservation(journal, binding)
+            else:
+                state["error"] = exc
+            state["ready"].set()
+            return
+        with gate:
+            if state["abandoned"]:
+                if reserved:
+                    _settle_quietly(
+                        journal,
+                        ack_id,
+                        delivery="failed",
+                        detail="ACK reservation completed after dispatch was refused",
+                    )
+                state["ready"].set()
+                return
+            state["ack_id"] = ack_id
+            state["reserved"] = reserved
+            state["ready"].set()
+
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(None, attempt)
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(asyncio.to_thread(state["ready"].wait, remaining)),
+            remaining + 0.02,
+        )
+    except TimeoutError:
+        with gate:
+            if state["ready"].is_set() and state["error"] is None:
+                ack_id = state["ack_id"]
+                reserved = bool(state["reserved"])
+            else:
+                state["abandoned"] = True
+                ack_id = None
+                reserved = False
+        if ack_id is None:
+            _own_future(future)
+            return None, "refused"
+        _consume_future(future)
+        return ack_id, "reserved" if reserved else "duplicate"
+    except asyncio.CancelledError:
+        with gate:
+            state["abandoned"] = True
+        _own_future(future)
+        raise
+    _consume_future(future)
+    if state["error"] is not None:
+        with gate:
+            state["abandoned"] = True
+        cleanup = loop.run_in_executor(
+            None,
+            _suppress_late_reservation,
+            journal,
+            binding,
+        )
+        _own_future(cleanup)
+        return None, "refused"
+    if not state["reserved"]:
+        return state["ack_id"], "duplicate"
+    return state["ack_id"], "reserved"
+
+
+async def _settle_observed(
+    journal: AckJournal,
+    ack_id: str,
+    result: TransportResult,
+    *,
+    deadline: float,
+) -> bool:
+    """Settle off the loop. Return whether that write finished before the deadline."""
+
+    remaining = deadline - time.monotonic()
+    confirmed = threading.Event()
+    ok = {"value": False}
+    delivery = result.delivery
+    detail = result.detail
+
+    def attempt() -> None:
+        try:
+            if remaining > 0:
+                journal.settle(
+                    ack_id,
+                    delivery=delivery,
+                    detail=detail,
+                    timeout=remaining,
+                )
+                ok["value"] = True
+        except PersistenceError:
+            ok["value"] = False
+        finally:
+            confirmed.set()
+        if not ok["value"]:
+            _settle_quietly(
+                journal,
+                ack_id,
+                delivery="unknown",
+                detail="ACK dispatch acknowledgement was lost",
+            )
+
+    future = asyncio.get_running_loop().run_in_executor(None, attempt)
+    _own_future(future)
+    if remaining <= 0:
+        return False
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(asyncio.to_thread(confirmed.wait, remaining)),
+            remaining + 0.02,
+        )
+    except TimeoutError:
+        return False
+    except asyncio.CancelledError:
+        raise
+    return bool(ok["value"])
+
+
+async def _write_receipt(
+    receipts: ReceiptJournal,
+    *,
+    deadline: float,
+    request_id: str,
+    stage: str,
+    writer: str,
+    body: Mapping[str, Any],
+) -> bool:
+    remaining = deadline - time.monotonic()
+    wait = remaining if remaining > 0 else 0.05
+
+    def attempt() -> None:
+        _append_receipt(
+            receipts,
+            request_id=request_id,
+            stage=stage,
+            writer=writer,
+            body=body,
+        )
+
+    try:
+        await _off_loop(attempt, wait=max(0.01, wait))
+    except PersistenceError:
+        logger.exception("Nunchi could not persist the Hermes ACK receipt")
+        return False
+    return True
+
+
+async def _stop_native(native: asyncio.Task[Any], permit: AckEffectPermit) -> None:
+    """Cancel the child and revoke unused authority. A resistant child stays owned."""
+
+    permit.revoke()
+    if native.done():
+        _consume_task(native)
+        return
+    native.cancel()
+    current = asyncio.current_task()
+    if current is not None and current.cancelling():
+        current.uncancel()
+        try:
+            await asyncio.wait({native}, timeout=0)
+        finally:
+            if current.cancelling() == 0:
+                current.cancel()
+        return
+    await asyncio.wait({native}, timeout=0.05)
+    _consume_task(native)
+
+
 async def _await_native(
     call: Any,
     *,
     token: OpportunityToken,
     deadline: float,
+    permit: AckEffectPermit,
 ) -> tuple[str, Any]:
     """Wait for one native call without holding scheduler or runtime locks.
 
-    Returns ``("value", result)``, ``("late", None)``, or ``("lost", None)``.
-    The call is started only by the caller, after cancel and deadline checks.
+    The child is owned until it terminates. Parent cancellation cancels that
+    child and revokes authority that has not yet committed.
     """
 
     native = asyncio.create_task(call)
+    _own_native(native)
     remaining = deadline - time.monotonic()
 
     async def _watch() -> str:
@@ -464,7 +823,7 @@ async def _await_native(
     watcher = asyncio.create_task(_watch())
     try:
         if remaining <= 0 or token.cancel_event.is_set():
-            native.cancel()
+            await _stop_native(native, permit)
             return "late", None
         done, _pending = await asyncio.wait(
             {native, watcher},
@@ -474,22 +833,31 @@ async def _await_native(
         if native in done and not native.cancelled():
             try:
                 return "value", native.result()
+            except AckAuthorityClosed:
+                return "rejected", None
             except asyncio.CancelledError:
                 return "lost", None
             except Exception:
                 logger.debug("Hermes ACK native call failed", exc_info=True)
                 return "lost", None
-        native.cancel()
+        await _stop_native(native, permit)
         return "late", None
+    except asyncio.CancelledError:
+        await _stop_native(native, permit)
+        raise
     finally:
         watcher.cancel()
-        for task in (native, watcher):
-            if not task.done():
-                continue
-            try:
-                task.result()
-            except BaseException:
-                pass
+        current = asyncio.current_task()
+        if watcher.done():
+            _consume_task(watcher)
+        elif current is None or current.cancelling() == 0:
+            await asyncio.wait({watcher}, timeout=0)
+            if watcher.done():
+                _consume_task(watcher)
+            else:
+                _own_native(watcher)
+        else:
+            _own_native(watcher)
 
 
 async def dispatch_attention_ack(
@@ -508,20 +876,23 @@ async def dispatch_attention_ack(
     token: OpportunityToken,
     deadline: float,
     lifecycle_id: str,
+    scheduler: ConversationOpportunityScheduler,
 ) -> TransportResult:
     """Reserve one shared ACK and add exactly one native reaction.
 
     Social widening already happened in AttentionEngine. This function rechecks
     the bound permission revision, cancellation, and the one total deadline,
-    then calls the shipped adapter method. It does not invoke a participant.
+    then calls the shipped adapter method. The permit consumes authority at
+    native entry. Persistence waits off the gateway loop. It does not invoke
+    a participant.
     """
 
     request_id = str(request["request_id"])
-    ack = decision.get("ack") if isinstance(decision, Mapping) else None
-    if not isinstance(ack, Mapping):
-        result = TransportResult("unavailable", "ACK decision has no authority audit")
-        _append_receipt(
+
+    async def _close(result: TransportResult) -> TransportResult:
+        await _write_receipt(
             receipts,
+            deadline=deadline,
             request_id=request_id,
             stage="participant-host",
             writer="participant-host",
@@ -532,14 +903,21 @@ async def dispatch_attention_ack(
                 outcome="unknown",
             ),
         )
-        _append_receipt(
+        await _write_receipt(
             receipts,
+            deadline=deadline,
             request_id=request_id,
             stage="transport",
             writer="transport",
             body={"delivery": result.delivery, "detail": result.detail},
         )
         return result
+
+    ack = decision.get("ack") if isinstance(decision, Mapping) else None
+    if not isinstance(ack, Mapping):
+        return await _close(
+            TransportResult("unavailable", "ACK decision has no authority audit")
+        )
 
     remaining = deadline - time.monotonic()
     try:
@@ -569,52 +947,12 @@ async def dispatch_attention_ack(
             else "ACK authority changed before dispatch"
         )
         delivery = "failed" if "cancelled" in detail else "unavailable"
-        result = TransportResult(delivery, detail)
-        _append_receipt(
-            receipts,
-            request_id=request_id,
-            stage="participant-host",
-            writer="participant-host",
-            body=participant_host_receipt_body(
-                wake,
-                expansion_calls=0,
-                invoked=False,
-                outcome="unknown",
-            ),
-        )
-        _append_receipt(
-            receipts,
-            request_id=request_id,
-            stage="transport",
-            writer="transport",
-            body={"delivery": result.delivery, "detail": result.detail},
-        )
-        return result
+        return await _close(TransportResult(delivery, detail))
 
     try:
         method, native_target, chat_id = _native_target(platform, event, room_id)
     except ValueError as exc:
-        result = TransportResult("unavailable", str(exc))
-        _append_receipt(
-            receipts,
-            request_id=request_id,
-            stage="participant-host",
-            writer="participant-host",
-            body=participant_host_receipt_body(
-                wake,
-                expansion_calls=0,
-                invoked=False,
-                outcome="unknown",
-            ),
-        )
-        _append_receipt(
-            receipts,
-            request_id=request_id,
-            stage="transport",
-            writer="transport",
-            body={"delivery": result.delivery, "detail": result.detail},
-        )
-        return result
+        return await _close(TransportResult("unavailable", str(exc)))
 
     binding = {
         "request_id": request_id,
@@ -636,23 +974,57 @@ async def dispatch_attention_ack(
         ),
         "permissions_revision": current.permissions_revision,
     }
-    ack_id, reserved = journal.reserve(binding)
-    _append_receipt(
+    ack_id, reservation = await _reserve_before_dispatch(
+        journal,
+        binding,
+        deadline=deadline,
+    )
+    host_body = participant_host_receipt_body(
+        wake,
+        expansion_calls=0,
+        invoked=False,
+        outcome="unknown",
+    )
+    if reservation != "reserved":
+        result = (
+            TransportResult("unknown", "duplicate ACK was durably suppressed")
+            if reservation == "duplicate"
+            else TransportResult("failed", "ACK reservation was not durable before dispatch")
+        )
+        await _write_receipt(
+            receipts,
+            deadline=deadline,
+            request_id=request_id,
+            stage="participant-host",
+            writer="participant-host",
+            body=host_body,
+        )
+        await _write_receipt(
+            receipts,
+            deadline=deadline,
+            request_id=request_id,
+            stage="transport",
+            writer="transport",
+            body={"delivery": result.delivery, "detail": result.detail},
+        )
+        return result
+    if not await _write_receipt(
         receipts,
+        deadline=deadline,
         request_id=request_id,
         stage="participant-host",
         writer="participant-host",
-        body=participant_host_receipt_body(
-            wake,
-            expansion_calls=0,
-            invoked=False,
-            outcome="unknown",
-        ),
-    )
-    if not reserved:
-        result = TransportResult("unknown", "duplicate ACK was durably suppressed")
-        _append_receipt(
+        body=host_body,
+    ):
+        result = TransportResult(
+            "failed",
+            "ACK handoff was not durable before native dispatch",
+        )
+        if ack_id is not None:
+            await _settle_observed(journal, ack_id, result, deadline=deadline)
+        await _write_receipt(
             receipts,
+            deadline=deadline,
             request_id=request_id,
             stage="transport",
             writer="transport",
@@ -661,6 +1033,7 @@ async def dispatch_attention_ack(
         return result
 
     result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
+    permit: AckEffectPermit | None = None
     try:
         remaining = deadline - time.monotonic()
         try:
@@ -695,6 +1068,9 @@ async def dispatch_attention_ack(
                 ),
                 message=native_target if method == "_add_reaction" else None,
                 chat_id=chat_id,
+                scheduler=scheduler,
+                token=token,
+                deadline=deadline,
             )
             permit_token = _ACK_EFFECT_PERMIT.set(permit)
             try:
@@ -703,10 +1079,22 @@ async def dispatch_attention_ack(
                     call = native_method(native_target, policy.reaction)
                 else:
                     call = native_method(chat_id, str(native_target), policy.reaction)
-                kind, value = await _await_native(call, token=token, deadline=deadline)
+                kind, value = await _await_native(
+                    call,
+                    token=token,
+                    deadline=deadline,
+                    permit=permit,
+                )
             finally:
                 _ACK_EFFECT_PERMIT.reset(permit_token)
-            if kind == "value" and value is True and not token.cancel_event.is_set() and time.monotonic() < deadline:
+            if kind == "rejected":
+                result = TransportResult("failed", "ACK cancelled before native dispatch")
+            elif (
+                kind == "value"
+                and value is True
+                and not token.cancel_event.is_set()
+                and time.monotonic() < deadline
+            ):
                 result = TransportResult(
                     "sent",
                     f"{platform}:reaction:{getattr(native_target, 'id', native_target)}",
@@ -720,22 +1108,40 @@ async def dispatch_attention_ack(
                 )
             else:
                 result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
+    except asyncio.CancelledError:
+        result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
+        if permit is not None:
+            permit.revoke()
+        raise
     except Exception:
         result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
     finally:
-        try:
-            journal.settle(ack_id, delivery=result.delivery, detail=result.detail)
-        except Exception:
-            logger.exception("Nunchi could not settle the Hermes ACK journal")
-            result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
-        try:
-            _append_receipt(
-                receipts,
-                request_id=request_id,
-                stage="transport",
-                writer="transport",
-                body={"delivery": result.delivery, "detail": result.detail},
-            )
-        except Exception:
-            logger.exception("Nunchi could not persist the Hermes ACK transport receipt")
+        if ack_id is not None:
+            current = asyncio.current_task()
+            cancelled = current is not None and current.cancelling() > 0
+            if cancelled and current is not None:
+                current.uncancel()
+            try:
+                confirmed = await _settle_observed(
+                    journal,
+                    ack_id,
+                    result,
+                    deadline=deadline,
+                )
+                if not confirmed:
+                    result = TransportResult(
+                        "unknown",
+                        "ACK dispatch acknowledgement was lost",
+                    )
+                await _write_receipt(
+                    receipts,
+                    deadline=deadline,
+                    request_id=request_id,
+                    stage="transport",
+                    writer="transport",
+                    body={"delivery": result.delivery, "detail": result.detail},
+                )
+            finally:
+                if cancelled and current is not None and current.cancelling() == 0:
+                    current.cancel()
     return result

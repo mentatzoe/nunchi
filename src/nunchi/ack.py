@@ -6,11 +6,13 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Iterator
 
 from .errors import ValidationError
@@ -142,7 +144,7 @@ class AckJournal:
                 self._load()
 
     @contextmanager
-    def _process_lock(self) -> Iterator[None]:
+    def _process_lock(self, *, timeout: float | None = None) -> Iterator[None]:
         if self.path is None:
             yield
             return
@@ -152,9 +154,14 @@ class AckJournal:
             fd = os.open(lock_path, flags, 0o600)
         except OSError as exc:
             raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
+        if fcntl is None:
+            os.close(fd)
+            raise PersistenceError("durable ACK journal requires process locking")
+        locker = fcntl
+        acquired = False
         try:
-            assert fcntl is not None
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._acquire_flock(fd, timeout)
+            acquired = True
             if self.path.exists():
                 self._load()
             else:
@@ -163,8 +170,43 @@ class AckJournal:
         except OSError as exc:
             raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if acquired:
+                locker.flock(fd, locker.LOCK_UN)
             os.close(fd)
+
+    @staticmethod
+    def _acquire_flock(fd: int, timeout: float | None) -> None:
+        """Take the shared journal lock. ``None`` waits; a number is a bound.
+
+        The bounded path uses a non-blocking lock so a contending writer cannot
+        pin the caller past the opportunity deadline. It does not run on the
+        gateway event loop; the async ACK path calls it from a worker thread.
+        """
+
+        assert fcntl is not None
+        if timeout is None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or timeout < 0
+        ):
+            raise PersistenceError("ACK journal lock timeout is invalid")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PersistenceError(
+                        "ACK journal lock was not acquired before the deadline"
+                    ) from exc
+                time.sleep(min(0.005, remaining))
 
     @staticmethod
     def ack_id(binding: Mapping[str, Any]) -> str:
@@ -282,11 +324,16 @@ class AckJournal:
             finally:
                 os.close(directory_fd)
 
-    def reserve(self, binding: Mapping[str, Any]) -> tuple[str, bool]:
+    def reserve(
+        self,
+        binding: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> tuple[str, bool]:
         checked = self._validate_binding(binding)
         ack_id = self.ack_id(checked)
         with self._lock:
-            with self._process_lock():
+            with self._process_lock(timeout=timeout):
                 if ack_id in self._records:
                     return ack_id, False
                 record = {
@@ -299,13 +346,20 @@ class AckJournal:
                 self._records[ack_id] = [deepcopy(record)]
                 return ack_id, True
 
-    def settle(self, ack_id: str, *, delivery: str, detail: str = "") -> None:
+    def settle(
+        self,
+        ack_id: str,
+        *,
+        delivery: str,
+        detail: str = "",
+        timeout: float | None = None,
+    ) -> None:
         if delivery not in ("sent", "failed", "unknown", "unavailable"):
             raise ValidationError("ACK settlement delivery is invalid")
         if not isinstance(detail, str):
             raise ValidationError("ACK settlement detail must be a string")
         with self._lock:
-            with self._process_lock():
+            with self._process_lock(timeout=timeout):
                 records = self._records.get(ack_id)
                 if records is None:
                     raise ValidationError("ACK settlement has no reservation")
