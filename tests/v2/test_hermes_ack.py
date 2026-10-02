@@ -542,11 +542,11 @@ class DispatchTests(unittest.TestCase):
         route = _CONFIGURED_ROUTE_CONTEXT.set(True)
         try:
             asyncio.run(adapter._add_reaction(message, "👂"))
-            with self.assertRaises(_StockEffectBlocked):
+            with self.assertRaises(AckAuthorityClosed):
                 asyncio.run(adapter._add_reaction(message, "👂"))
-            with self.assertRaises(_StockEffectBlocked):
+            with self.assertRaises(AckAuthorityClosed):
                 asyncio.run(adapter._add_reaction(other, "👂"))
-            with self.assertRaises(_StockEffectBlocked):
+            with self.assertRaises(AckAuthorityClosed):
                 asyncio.run(adapter.send("42", "not an ack"))
         finally:
             hermes_ack._ACK_EFFECT_PERMIT.reset(context)
@@ -1008,6 +1008,260 @@ class CommitBoundaryTests(unittest.TestCase):
                 self.assertEqual("sent", journal.records()[-1]["delivery"])
 
         self._run(scenario())
+
+    def test_rlock_contention_bounds_writers_and_does_not_record_sent(self) -> None:
+        async def scenario() -> None:
+            calls: list[tuple] = []
+            release = threading.Event()
+            acquired = threading.Event()
+
+            async def reaction(_self, message, emoji):
+                calls.append((message.id, emoji))
+
+                def hold() -> None:
+                    with journal._lock:
+                        acquired.set()
+                        release.wait(8)
+
+                threading.Thread(target=hold).start()
+                self.assertTrue(acquired.wait(1))
+                return True
+
+            adapter = self._adapter(reaction)
+            scheduler = ConversationOpportunityScheduler("settle-rlock")
+            token = scheduler.offer("discord:message:7")
+            assert token is not None
+            with tempfile.TemporaryDirectory() as directory:
+                ticks: list[float] = []
+                start = time.monotonic()
+                deadline = start + 0.35
+                asyncio.get_running_loop().call_later(
+                    0.02,
+                    lambda: ticks.append(time.monotonic() - start),
+                )
+                journal = AckJournal(Path(directory) / "ack.jsonl")
+                receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
+                event = SimpleNamespace(raw_message=_Message(7, _Channel("42", allow=True)))
+                capability = discord_reaction_capability(
+                    adapter,
+                    event,
+                    room_id="42",
+                    actor_id="discord:actor:999",
+                )
+                _seed(receipts, "req-rlock", capability.permissions_revision)
+                route = _CONFIGURED_ROUTE_CONTEXT.set(True)
+                try:
+                    result = await dispatch_attention_ack(
+                        adapter=adapter,
+                        event=event,
+                        platform="discord",
+                        room_id="42",
+                        actor_id="discord:actor:999",
+                        policy=AckPolicy(),
+                        journal=journal,
+                        receipts=receipts,
+                        wake=_wake(),
+                        request={"request_id": "req-rlock"},
+                        decision=_decision(capability.permissions_revision),
+                        token=token,
+                        deadline=deadline,
+                        lifecycle_id=scheduler.lifecycle_id,
+                        scheduler=scheduler,
+                    )
+                finally:
+                    _CONFIGURED_ROUTE_CONTEXT.reset(route)
+                self.assertTrue(ticks)
+                self.assertLess(ticks[0], 0.12)
+                self.assertLess(time.monotonic() - start, 0.7)
+                self.assertEqual([(7, "👂")], calls)
+                self.assertEqual("unknown", result.delivery)
+                await asyncio.sleep(max(0.0, deadline + 2.15 - time.monotonic()))
+                self.assertTrue(ack_effects_quiescent())
+                raw_before = (Path(directory) / "ack.jsonl").read_text(encoding="utf-8")
+                self.assertNotIn('"delivery":"sent"', raw_before)
+                release.set()
+                await asyncio.sleep(0.05)
+                raw_after = (Path(directory) / "ack.jsonl").read_text(encoding="utf-8")
+                self.assertEqual(raw_before, raw_after)
+                self.assertNotIn('"delivery":"sent"', raw_after)
+                stages = [record["stage"] for record in receipts.records("req-rlock")]
+                self.assertEqual(
+                    ["observation", "attention", "participant-host", "transport"],
+                    stages,
+                )
+                self.assertEqual("unknown", receipts.records("req-rlock")[-1]["body"]["delivery"])
+                replay_scheduler = ConversationOpportunityScheduler("rlock-replay")
+                replay = replay_scheduler.offer("discord:message:7")
+                assert replay is not None
+                replay_result, _replay_journal = await self._dispatch(
+                    self._adapter(reaction),
+                    replay_scheduler,
+                    replay,
+                    time.monotonic() + 1,
+                    directory,
+                    "req-rlock-replay",
+                )
+                self.assertEqual([(7, "👂")], calls)
+                self.assertEqual("unknown", replay_result.delivery)
+                self.assertIn("duplicate", replay_result.detail)
+
+        self._run(scenario())
+
+    def test_cancelled_dispatch_closes_transport_receipt(self) -> None:
+        async def once(mode: str, repeats: int) -> None:
+            calls: list[tuple] = []
+            entered = asyncio.Event()
+            release = asyncio.Event()
+            child: list[asyncio.Task] = []
+
+            async def reaction(_self, message, emoji):
+                child.append(asyncio.current_task())
+                entered.set()
+                if mode == "cooperative":
+                    await release.wait()
+                else:
+                    while not release.is_set():
+                        try:
+                            await release.wait()
+                        except asyncio.CancelledError:
+                            pass
+                calls.append((message.id, emoji))
+                return True
+
+            adapter = self._adapter(reaction)
+            scheduler = ConversationOpportunityScheduler(f"{mode}-{repeats}")
+            token = scheduler.offer("discord:message:7")
+            assert token is not None
+            with tempfile.TemporaryDirectory() as directory:
+                task = asyncio.create_task(
+                    self._dispatch(
+                        adapter,
+                        scheduler,
+                        token,
+                        time.monotonic() + 2,
+                        directory,
+                        "req-cancel-receipt",
+                    )
+                )
+                await entered.wait()
+                for _ in range(repeats):
+                    task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                release.set()
+                self.assertTrue(await drain_ack_ownership(3))
+                receipts = ReceiptJournal(Path(directory) / "receipts.jsonl")
+                journal = AckJournal(Path(directory) / "ack.jsonl")
+                self.assertEqual(
+                    ["observation", "attention", "participant-host", "transport"],
+                    [record["stage"] for record in receipts.records("req-cancel-receipt")],
+                )
+                self.assertEqual(
+                    "unknown",
+                    receipts.records("req-cancel-receipt")[-1]["body"]["delivery"],
+                )
+                deliveries = [
+                    record.get("delivery")
+                    for record in journal.records()
+                    if record.get("state") == "settled"
+                ]
+                self.assertEqual(["unknown"], deliveries)
+                self.assertNotIn("sent", deliveries)
+                if mode == "cooperative":
+                    self.assertEqual([], calls)
+                    self.assertTrue(child[0].done())
+                else:
+                    self.assertFalse(child[0].cancelled() and child[0].done() and calls)
+                    self.assertLessEqual(len(calls), 1)
+
+        async def scenario() -> None:
+            await once("cooperative", 1)
+            await once("cooperative", 2)
+            await once("resistant", 1)
+            await once("resistant", 2)
+
+        self._run(scenario())
+
+
+class PermitContextTests(unittest.TestCase):
+    def test_invalid_permit_fails_closed_without_route_context(self) -> None:
+        class Adapter:
+            def __init__(self) -> None:
+                self.calls: list[tuple] = []
+
+            async def _add_reaction(self, message, emoji):
+                self.calls.append(("reaction", message.id, emoji))
+                return True
+
+            async def send(self, chat_id, content, reply_to=None, metadata=None):
+                self.calls.append(("send", chat_id, content))
+                return True
+
+        _wrap_stock_effect_methods(Adapter)
+        adapter = Adapter()
+        other_adapter = Adapter()
+        message = _Message(7, _Channel("42", allow=True))
+        other = _Message(8, _Channel("99", allow=True))
+        scheduler = ConversationOpportunityScheduler("invalid-permit")
+        token = scheduler.offer("discord:message:7")
+        assert token is not None
+        permit = AckEffectPermit(
+            adapter=adapter,
+            method="_add_reaction",
+            emoji="👂",
+            room_id="42",
+            native_message_id="7",
+            message=message,
+            scheduler=scheduler,
+            token=token,
+            deadline=time.monotonic() + 5,
+        )
+        context = hermes_ack._ACK_EFFECT_PERMIT.set(permit)
+        try:
+            asyncio.run(adapter._add_reaction(message, "👂"))
+            for call in (
+                lambda: adapter._add_reaction(message, "👂"),
+                lambda: adapter._add_reaction(other, "👂"),
+                lambda: adapter._add_reaction(message, "👍"),
+                lambda: other_adapter._add_reaction(message, "👂"),
+                lambda: adapter.send("42", "not an ack"),
+            ):
+                with self.assertRaises(AckAuthorityClosed):
+                    asyncio.run(call())
+        finally:
+            hermes_ack._ACK_EFFECT_PERMIT.reset(context)
+        self.assertEqual([("reaction", 7, "👂")], adapter.calls)
+        self.assertEqual([], other_adapter.calls)
+        self.assertTrue(permit.consumed)
+
+    def test_ordinary_traffic_without_permit_still_falls_through(self) -> None:
+        class Adapter:
+            def __init__(self) -> None:
+                self.calls: list[tuple] = []
+
+            async def _add_reaction(self, message, emoji):
+                self.calls.append((message.id, emoji))
+                return True
+
+            async def send(self, chat_id, content, reply_to=None, metadata=None):
+                self.calls.append(("send", content))
+                return True
+
+        _wrap_stock_effect_methods(Adapter)
+        adapter = Adapter()
+        message = _Message(7, _Channel("42", allow=True))
+        asyncio.run(adapter._add_reaction(message, "👂"))
+        asyncio.run(adapter.send("42", "ordinary"))
+        self.assertEqual([(7, "👂"), ("send", "ordinary")], adapter.calls)
+        route = _CONFIGURED_ROUTE_CONTEXT.set(True)
+        try:
+            with self.assertRaises(_StockEffectBlocked):
+                asyncio.run(adapter._add_reaction(message, "👍"))
+        finally:
+            _CONFIGURED_ROUTE_CONTEXT.reset(route)
+        self.assertEqual([(7, "👂"), ("send", "ordinary")], adapter.calls)
 
 
 if __name__ == "__main__":

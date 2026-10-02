@@ -324,16 +324,66 @@ class AckJournal:
             finally:
                 os.close(directory_fd)
 
+    @staticmethod
+    def _absolute_deadline(
+        timeout: float | None,
+        deadline: float | None,
+    ) -> float | None:
+        """Return one monotonic budget. A relative timeout must not extend it."""
+
+        if deadline is not None:
+            if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+                raise PersistenceError("ACK journal deadline is invalid")
+            return deadline
+        if timeout is None:
+            return None
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or timeout < 0
+        ):
+            raise PersistenceError("ACK journal lock timeout is invalid")
+        return time.monotonic() + timeout
+
+    def _acquire_thread_lock(self, deadline: float | None) -> None:
+        """Take the in-process lock without starting a new budget afterwards."""
+
+        if deadline is None:
+            self._lock.acquire()
+            return
+        remaining = deadline - time.monotonic()
+        if remaining < 0:
+            remaining = 0
+        if not self._lock.acquire(timeout=remaining):
+            raise PersistenceError(
+                "ACK journal lock was not acquired before the deadline"
+            )
+
+    @staticmethod
+    def _ensure_deadline(deadline: float | None) -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise PersistenceError("ACK persistence deadline exhausted")
+
+    def _lock_timeout(self, deadline: float | None) -> float | None:
+        if deadline is None:
+            return None
+        self._ensure_deadline(deadline)
+        return max(0.0, deadline - time.monotonic())
+
     def reserve(
         self,
         binding: Mapping[str, Any],
         *,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> tuple[str, bool]:
         checked = self._validate_binding(binding)
         ack_id = self.ack_id(checked)
-        with self._lock:
-            with self._process_lock(timeout=timeout):
+        absolute = self._absolute_deadline(timeout, deadline)
+        self._acquire_thread_lock(absolute)
+        try:
+            with self._process_lock(timeout=self._lock_timeout(absolute)):
+                self._ensure_deadline(absolute)
                 if ack_id in self._records:
                     return ack_id, False
                 record = {
@@ -342,9 +392,12 @@ class AckJournal:
                     "state": "reserved",
                     "binding": checked,
                 }
+                self._ensure_deadline(absolute)
                 self._append(record)
                 self._records[ack_id] = [deepcopy(record)]
                 return ack_id, True
+        finally:
+            self._lock.release()
 
     def settle(
         self,
@@ -353,13 +406,17 @@ class AckJournal:
         delivery: str,
         detail: str = "",
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> None:
         if delivery not in ("sent", "failed", "unknown", "unavailable"):
             raise ValidationError("ACK settlement delivery is invalid")
         if not isinstance(detail, str):
             raise ValidationError("ACK settlement detail must be a string")
-        with self._lock:
-            with self._process_lock(timeout=timeout):
+        absolute = self._absolute_deadline(timeout, deadline)
+        self._acquire_thread_lock(absolute)
+        try:
+            with self._process_lock(timeout=self._lock_timeout(absolute)):
+                self._ensure_deadline(absolute)
                 records = self._records.get(ack_id)
                 if records is None:
                     raise ValidationError("ACK settlement has no reservation")
@@ -372,8 +429,11 @@ class AckJournal:
                     "delivery": delivery,
                     **({"detail": detail} if detail else {}),
                 }
+                self._ensure_deadline(absolute)
                 self._append(record)
                 records.append(deepcopy(record))
+        finally:
+            self._lock.release()
 
     def records(self) -> tuple[dict[str, Any], ...]:
         with self._lock:

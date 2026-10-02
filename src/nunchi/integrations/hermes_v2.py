@@ -49,6 +49,8 @@ from nunchi.participant import (
 from nunchi.pipeline import OpportunityPreparation, prepare_opportunity
 from nunchi.receipts import ReceiptJournal
 from nunchi.integrations.hermes_ack import (
+    AckAuthorityClosed,
+    ack_effect_permit_present,
     ack_effects_quiescent,
     claim_ack_effect,
     dispatch_attention_ack,
@@ -3970,6 +3972,10 @@ def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
             if trace is None:
                 if claim_ack_effect(self, __name, args, kwargs):
                     return await __current(self, *args, **kwargs)
+                if ack_effect_permit_present():
+                    raise AckAuthorityClosed(
+                        "ACK effect authority does not allow this call"
+                    )
                 owner = _SHIM_OWNER
                 control_authorization = _AUTHORIZED_STOCK_CONTROL.get()
                 configured_target = (
