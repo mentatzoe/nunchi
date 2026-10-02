@@ -101,30 +101,50 @@ jobs:
           fi
           "$host_python" -m pip check
 
-      - name: Verify installed host contract and Hermes integrity
+      - name: Verify installed contract and integrity
         shell: bash
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/host-env/bin/python" scripts/verify_stock_hermes.py \
+            --lane contract \
+            --nunchi-wheel "$RUNNER_TEMP"/nunchi-wheels/*.whl \
+            --host-ref '${{ matrix.hermes_ref }}' \
             --hermes-source "$RUNNER_TEMP/stock-hermes" \
             --host-mode '${{ matrix.host_mode }}' \
             --platform '${{ matrix.platform }}' \
             --output "$RUNNER_TEMP/host-receipts"
 
+      - name: Verify native Discord normal attention and both startup modes
+        if: always() && matrix.platform == 'discord'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/host-env/bin/python" scripts/verify_stock_hermes.py \
+            --lane normal-attention --lane startup-single --lane startup-multiplex \
+            --nunchi-wheel "$RUNNER_TEMP"/nunchi-wheels/*.whl \
+            --host-ref '${{ matrix.hermes_ref }}' \
+            --hermes-source "$RUNNER_TEMP/stock-hermes" \
+            --host-mode '${{ matrix.host_mode }}' --platform discord \
+            --output "$RUNNER_TEMP/normal-receipts"
+
       - name: Preserve exact host and artifact receipts
         if: always()
         shell: bash
         run: |
-          if [ -f "$RUNNER_TEMP/host-receipts/receipt.json" ]; then
-            printf '### Hermes %s / %s\n\n' '${{ matrix.hermes_label }}' '${{ matrix.platform }}' >> "$GITHUB_STEP_SUMMARY"
-            python -m json.tool "$RUNNER_TEMP/host-receipts/receipt.json" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          for directory in host-receipts normal-receipts; do
+            if [ -f "$RUNNER_TEMP/$directory/receipt.json" ]; then
+              printf '### Hermes %s / %s / %s\n\nReceipt and raw logs are in the uploaded artifact.\n' \
+                '${{ matrix.hermes_label }}' '${{ matrix.platform }}' "$directory" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: Upload contract receipts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: stock-hermes-${{ matrix.hermes_label }}-${{ matrix.platform }}
-          path: ${{ runner.temp }}/host-receipts/
+          path: |
+            ${{ runner.temp }}/host-receipts/
+            ${{ runner.temp }}/normal-receipts/
           if-no-files-found: warn
           retention-days: 14

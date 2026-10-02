@@ -35,7 +35,7 @@ class InstalledAttentionSetupTests(_Base):
             default_config_paths, read_dashboard_snapshot, write_config_document,
         )
         from nunchi.integrations.hermes_dashboard_api import _config_response
-        import yaml
+        yaml = sup.host_yaml()
 
         self.assertNotIn("entries", yaml.safe_load((self.home / "config.yaml").read_text())["plugins"])
         # Use the existing fixture only to obtain the closed room document;
@@ -97,7 +97,7 @@ class InstalledAttentionSetupTests(_Base):
         self.assertNotIn("classifier_disposition", attention)
         # Stock runner construction normalizes YAML/adds its own defaults;
         # the invariant is that Nunchi never changes/regrants revoked trust.
-        import yaml
+        yaml = sup.host_yaml()
         after = yaml.safe_load(path.read_text())
         self.assertEqual(document["plugins"]["entries"]["nunchi"]["llm"],
                          after["plugins"]["entries"]["nunchi"]["llm"])
@@ -117,7 +117,7 @@ class InstalledAttentionServiceTests(_Base):
             AttentionModelSelection, HostAttentionPermissionError,
             HostStructuredAttentionModel,
         )
-        import yaml
+        yaml = sup.host_yaml()
 
         model = HostStructuredAttentionModel(
             PluginLlm(plugin_id="nunchi"),
