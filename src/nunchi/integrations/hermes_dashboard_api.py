@@ -8,12 +8,14 @@ Configuration validation and storage live in the dependency-free store module.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 
 from nunchi.errors import ValidationError
+from nunchi.integrations.hermes_attention_trust import attention_trust_status
 from nunchi.integrations.hermes_dashboard_store import (
     DashboardConfigConflict,
     DashboardConfigError,
@@ -67,6 +69,9 @@ def _config_response(
         snapshot,
         environ=environment,
     )
+    result["attention_trust"] = attention_trust_status(
+        Path(environment["HERMES_HOME"]), snapshot.config,
+    )
     result["restart_endpoint"] = (
         f"/api/gateway/restart?profile={quote(profile, safe='')}"
     )
@@ -85,8 +90,10 @@ def get_health(profile: str | None = Query(default=None)) -> dict[str, Any]:
         )
     except Exception as exc:
         raise _http_error(exc) from exc
+    trust = attention_trust_status(Path(environment["HERMES_HOME"]), snapshot.config)
     return {
-        "ok": True,
+        "ok": bool(trust["ready"] and not snapshot.bootstrap_required),
+        "attention_trust": trust,
         "api_version": "2",
         "profile": selected,
         "config_sha256": snapshot.sha256,

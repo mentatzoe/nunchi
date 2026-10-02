@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Iterator
 
 from .errors import ValidationError
@@ -142,7 +144,7 @@ class AckJournal:
                 self._load()
 
     @contextmanager
-    def _process_lock(self) -> Iterator[None]:
+    def _process_lock(self, *, timeout: float | None = None) -> Iterator[None]:
         if self.path is None:
             yield
             return
@@ -152,9 +154,14 @@ class AckJournal:
             fd = os.open(lock_path, flags, 0o600)
         except OSError as exc:
             raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
+        if fcntl is None:
+            os.close(fd)
+            raise PersistenceError("durable ACK journal requires process locking")
+        locker = fcntl
+        acquired = False
         try:
-            assert fcntl is not None
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._acquire_flock(fd, timeout)
+            acquired = True
             if self.path.exists():
                 self._load()
             else:
@@ -163,8 +170,43 @@ class AckJournal:
         except OSError as exc:
             raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if acquired:
+                locker.flock(fd, locker.LOCK_UN)
             os.close(fd)
+
+    @staticmethod
+    def _acquire_flock(fd: int, timeout: float | None) -> None:
+        """Take the shared journal lock. ``None`` waits; a number is a bound.
+
+        The bounded path uses a non-blocking lock so a contending writer cannot
+        pin the caller past the opportunity deadline. It does not run on the
+        gateway event loop; the async ACK path calls it from a worker thread.
+        """
+
+        assert fcntl is not None
+        if timeout is None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or timeout < 0
+        ):
+            raise PersistenceError("ACK journal lock timeout is invalid")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except OSError as exc:
+                if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PersistenceError(
+                        "ACK journal lock was not acquired before the deadline"
+                    ) from exc
+                time.sleep(min(0.005, remaining))
 
     @staticmethod
     def ack_id(binding: Mapping[str, Any]) -> str:
@@ -261,32 +303,124 @@ class AckJournal:
             raise PersistenceError(f"ACK journal {self.path} is untrustworthy: {exc}") from exc
         self._records = loaded
 
-    def _append(self, record: Mapping[str, Any]) -> None:
+    def _append(
+        self, record: Mapping[str, Any], *, deadline: float | None = None,
+        abandoned: threading.Event | None = None,
+        confirm: Callable[[], None] | None = None,
+    ) -> None:
+        """Append under the journal locks, withdrawing an uncertain final write.
+
+        A deadline bounds lock waits, not a kernel call already in progress.
+        Recheck after file setup and each write/sync. If completion is late,
+        restore the previous prefix before releasing the locks; the reservation
+        remains the no-retry fence. Rollback I/O itself must remain owned too.
+        """
+        def check() -> None:
+            self._ensure_deadline(deadline)
+            if abandoned is not None and abandoned.is_set():
+                raise PersistenceError("ACK persistence was abandoned")
+
+        check()
         if self.path is None:
+            if confirm is not None:
+                confirm()
             return
         existed = self.path.exists()
         payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
         fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        offset = None
+        writing = False
         try:
+            offset = os.fstat(fd).st_size
+            check()
+            writing = True
             if os.write(fd, payload) != len(payload):
                 raise OSError("short ACK journal write")
+            check()
             os.fsync(fd)
-        except OSError as exc:
+            check()
+            if not existed:
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    check()
+                    os.fsync(directory_fd)
+                    check()
+                finally:
+                    os.close(directory_fd)
+            if confirm is not None:
+                # The observer accepts the durable commit here, not when an
+                # executor future is eventually delivered to the event loop.
+                confirm()
+        except (OSError, PersistenceError) as exc:
+            if writing and offset is not None:
+                # No other journal writer can append while we own both locks.
+                # Never remove the previously durable reservation on settlement.
+                os.ftruncate(fd, offset)
+                os.fsync(fd)
             raise PersistenceError(f"could not durably append ACK state: {exc}") from exc
         finally:
             os.close(fd)
-        if not existed:
-            directory_fd = os.open(self.path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
 
-    def reserve(self, binding: Mapping[str, Any]) -> tuple[str, bool]:
+    @staticmethod
+    def _absolute_deadline(
+        timeout: float | None,
+        deadline: float | None,
+    ) -> float | None:
+        """Return one monotonic budget. A relative timeout must not extend it."""
+
+        if deadline is not None:
+            if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+                raise PersistenceError("ACK journal deadline is invalid")
+            return deadline
+        if timeout is None:
+            return None
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or timeout < 0
+        ):
+            raise PersistenceError("ACK journal lock timeout is invalid")
+        return time.monotonic() + timeout
+
+    def _acquire_thread_lock(self, deadline: float | None) -> None:
+        """Take the in-process lock without starting a new budget afterwards."""
+
+        if deadline is None:
+            self._lock.acquire()
+            return
+        remaining = deadline - time.monotonic()
+        if remaining < 0:
+            remaining = 0
+        if not self._lock.acquire(timeout=remaining):
+            raise PersistenceError(
+                "ACK journal lock was not acquired before the deadline"
+            )
+
+    @staticmethod
+    def _ensure_deadline(deadline: float | None) -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise PersistenceError("ACK persistence deadline exhausted")
+
+    def _lock_timeout(self, deadline: float | None) -> float | None:
+        if deadline is None:
+            return None
+        self._ensure_deadline(deadline)
+        return max(0.0, deadline - time.monotonic())
+
+    def reserve(
+        self,
+        binding: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        deadline: float | None = None,
+    ) -> tuple[str, bool]:
         checked = self._validate_binding(binding)
         ack_id = self.ack_id(checked)
-        with self._lock:
-            with self._process_lock():
+        absolute = self._absolute_deadline(timeout, deadline)
+        self._acquire_thread_lock(absolute)
+        try:
+            with self._process_lock(timeout=self._lock_timeout(absolute)):
+                self._ensure_deadline(absolute)
                 if ack_id in self._records:
                     return ack_id, False
                 record = {
@@ -295,22 +429,46 @@ class AckJournal:
                     "state": "reserved",
                     "binding": checked,
                 }
-                self._append(record)
+                self._ensure_deadline(absolute)
+                self._append(record, deadline=absolute)
                 self._records[ack_id] = [deepcopy(record)]
                 return ack_id, True
+        finally:
+            self._lock.release()
 
-    def settle(self, ack_id: str, *, delivery: str, detail: str = "") -> None:
+    def settle(
+        self,
+        ack_id: str,
+        *,
+        delivery: str,
+        detail: str = "",
+        timeout: float | None = None,
+        deadline: float | None = None,
+        abandoned: threading.Event | None = None,
+        confirm: Callable[[str], None] | None = None,
+    ) -> str:
+        """Return the actual delivery; confirm at commit, not at worker return.
+
+        ``confirm`` must be a non-blocking observer. It may reject an abandoned
+        commit with PersistenceError, causing the unconfirmed append to roll back.
+        """
         if delivery not in ("sent", "failed", "unknown", "unavailable"):
             raise ValidationError("ACK settlement delivery is invalid")
         if not isinstance(detail, str):
             raise ValidationError("ACK settlement detail must be a string")
-        with self._lock:
-            with self._process_lock():
+        absolute = self._absolute_deadline(timeout, deadline)
+        self._acquire_thread_lock(absolute)
+        try:
+            with self._process_lock(timeout=self._lock_timeout(absolute)):
+                self._ensure_deadline(absolute)
                 records = self._records.get(ack_id)
                 if records is None:
                     raise ValidationError("ACK settlement has no reservation")
                 if len(records) > 1:
-                    return
+                    actual = str(records[-1]["delivery"])
+                    if confirm is not None:
+                        confirm(actual)
+                    return actual
                 record = {
                     "schema_version": 1,
                     "ack_id": ack_id,
@@ -318,8 +476,15 @@ class AckJournal:
                     "delivery": delivery,
                     **({"detail": detail} if detail else {}),
                 }
-                self._append(record)
+                self._ensure_deadline(absolute)
+                self._append(
+                    record, deadline=absolute, abandoned=abandoned,
+                    confirm=(lambda: confirm(delivery)) if confirm is not None else None,
+                )
                 records.append(deepcopy(record))
+                return delivery
+        finally:
+            self._lock.release()
 
     def records(self) -> tuple[dict[str, Any], ...]:
         with self._lock:

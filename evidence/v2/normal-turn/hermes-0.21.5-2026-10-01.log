@@ -1,0 +1,227 @@
+test_default_install_attention_is_refused_and_falls_back_to_wake (tests.v2.test_hermes_normal_turn.NunchiDefaultInstallTrustGate.test_default_install_attention_is_refused_and_falls_back_to_wake) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_command() after its load timed out; ignored
+test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_cancel_via_stop_makes_no_new_native_invocation (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_cancel_via_stop_makes_no_new_native_invocation) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_delivery_failure_is_recorded_not_sent (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_delivery_failure_is_recorded_not_sent) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_native_approval_control_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_native_approval_control_on_configured_route)
+Owner fa0119a: /approve must reach stock while its participant waits. ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_ordinary_tool_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_ordinary_tool_on_configured_route)
+Baseline fact: today the plugin blanket-denies tools on configured routes. ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_plugin_loaded_and_shims_installed (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_plugin_loaded_and_shims_installed) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_stale_run_past_deadline_is_not_delivered (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stale_run_past_deadline_is_not_delivered) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_stock_session_guard_released_after_configured_turn (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stock_session_guard_released_after_configured_turn)
+Baseline fact: Nunchi's lifecycle shim runs stock's ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_suppressed_turn_makes_no_native_invocation_or_delivery (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_suppressed_turn_makes_no_native_invocation_or_delivery) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_unconfigured_room_human_turn_is_pure_stock (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unconfigured_room_human_turn_is_pure_stock) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_authenticated_human_turn_reaches_model_and_delivers_ack (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_authenticated_human_turn_reaches_model_and_delivers_ack) ... state.db: linked SQLite 3.50.4 (interpreter $WS/envs/current-env/bin/python) is vulnerable to the WAL-reset corruption bug (https://sqlite.org/wal.html#walresetbug) — using journal_mode=DELETE instead of enabling WAL. Upgrade to SQLite 3.51.3+ (or backports 3.50.7 / 3.44.6); Hermes-managed installs can repair the embedded runtime with `hermes update`. See `hermes doctor`. This warning fires once per process per database.
+ok
+test_native_approval_blocks_dangerous_terminal_until_approve (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_native_approval_blocks_dangerous_terminal_until_approve) ... FAIL
+test_native_deny_returns_blocked_result_to_model (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_native_deny_returns_blocked_result_to_model) ... ok
+test_ordinary_tool_runs_through_native_dispatcher (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_ordinary_tool_runs_through_native_dispatcher) ... ok
+test_peer_bot_is_dropped_by_stock_default_allow_bots_none (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_peer_bot_is_dropped_by_stock_default_allow_bots_none) ... ok
+test_unauthorised_human_is_dropped_before_model (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_unauthorised_human_is_dropped_before_model) ... ok
+
+======================================================================
+FAIL: test_default_install_attention_is_refused_and_falls_back_to_wake (tests.v2.test_hermes_normal_turn.NunchiDefaultInstallTrustGate.test_default_install_attention_is_refused_and_falls_back_to_wake)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_cancel_via_stop_makes_no_new_native_invocation (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_cancel_via_stop_makes_no_new_native_invocation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_delivery_failure_is_recorded_not_sent (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_delivery_failure_is_recorded_not_sent)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_native_approval_control_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_native_approval_control_on_configured_route)
+Owner fa0119a: /approve must reach stock while its participant waits.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_ordinary_tool_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_ordinary_tool_on_configured_route)
+Baseline fact: today the plugin blanket-denies tools on configured routes.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_plugin_loaded_and_shims_installed (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_plugin_loaded_and_shims_installed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_stale_run_past_deadline_is_not_delivered (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stale_run_past_deadline_is_not_delivered)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_stock_session_guard_released_after_configured_turn (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stock_session_guard_released_after_configured_turn)
+Baseline fact: Nunchi's lifecycle shim runs stock's
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_suppressed_turn_makes_no_native_invocation_or_delivery (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_suppressed_turn_makes_no_native_invocation_or_delivery)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_unconfigured_room_human_turn_is_pure_stock (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unconfigured_room_human_turn_is_pure_stock)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 155, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_native_approval_blocks_dangerous_terminal_until_approve (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_native_approval_blocks_dangerous_terminal_until_approve)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-current/tests/v2/test_hermes_normal_turn.py", line 299, in test_native_approval_blocks_dangerous_terminal_until_approve
+    self.assertTrue(outcome["prompt_seen"], self.deliveries())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : ["⚠️ **Hermes wants to run a command that needs your OK**\n\nDo you want Hermes to run this command?\n\n**Requested command:**\n```bash\nrm -rf /tmp/nunchi-probe-nothing\n```\n**Why it was flagged:** delete in root path\n\nIf you don't answer within 5 minutes it will NOT run.", '✅ Command approved. The agent is resuming...', 'done after approval']
+
+----------------------------------------------------------------------
+Ran 20 tests in 147.829s
+
+FAILED (failures=15)

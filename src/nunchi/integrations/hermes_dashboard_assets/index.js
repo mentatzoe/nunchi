@@ -386,6 +386,8 @@
     var snapshot = props.snapshot;
     var document = props.document;
     var discord = snapshot.discord_runtime || {};
+    var attentionTrust = snapshot.attention_trust || {};
+    var needsTrustRepair = !attentionTrust.ready;
     var [advanced, setAdvanced] = useState(false);
     var [raw, setRaw] = useState(JSON.stringify(document, null, 2));
     var [rawError, setRawError] = useState(null);
@@ -415,6 +417,19 @@
     }
 
     return h("div", { style: styles.page },
+      h(Card, null,
+        h(CardHeader, null, h(CardTitle, null, "Attention model permissions")),
+        h(CardContent, null,
+          h("div", { style: styles.status }, attentionTrust.detail || "Attention trust has not been checked."),
+          h("div", { style: styles.hint },
+            "Saving explicitly allows Nunchi's configured attention providers and models in this " +
+            "profile's config.yaml. It replaces Nunchi's provider/model allowlists with the room " +
+            "selections, preserves unrelated settings, and keeps a private backup of the original " +
+            "YAML. Permission changes apply per call, before restart. Runtime never grants itself " +
+            "permission. This check does not test credentials or quota."
+          )
+        )
+      ),
       h(Card, null,
         h(CardHeader, null, h(CardTitle, null, "Discord room behavior")),
         h(CardContent, null,
@@ -524,14 +539,14 @@
       h("div", { style: styles.row },
         h(Button, {
           size: "sm",
-          disabled: !props.dirty || !snapshot.dashboard_writable || Boolean(rawError),
+          disabled: (!props.dirty && !needsTrustRepair) || !snapshot.dashboard_writable || Boolean(rawError),
           onClick: function () { props.onSave(false); }
-        }, props.saving ? "Saving…" : "Save"),
+        }, props.saving ? "Saving…" : "Save & allow attention models"),
         h(Button, {
           size: "sm",
           disabled: !snapshot.dashboard_writable || Boolean(rawError),
           onClick: function () { props.onSave(true); }
-        }, props.saving ? "Saving…" : (props.dirty ? "Save & restart" : "Restart Hermes")),
+        }, props.saving ? "Saving…" : ((props.dirty || needsTrustRepair) ? "Save & restart (allow attention models)" : "Restart Hermes")),
         h(Button, { size: "sm", ghost: true, onClick: props.onReload }, "Reload"),
         props.message ? h("span", { style: styles.hint }, props.message) : null
       )
@@ -638,7 +653,8 @@
     function save(andRestart) {
       if (!snapshot || !document) return;
       var dirty = JSON.stringify(document) !== JSON.stringify(savedDocument);
-      if (!dirty && andRestart) {
+      var needsTrustRepair = !(snapshot.attention_trust || {}).ready;
+      if (!dirty && !needsTrustRepair && andRestart) {
         restart(snapshot.restart_endpoint);
         return;
       }

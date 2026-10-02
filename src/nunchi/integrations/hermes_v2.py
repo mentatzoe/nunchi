@@ -12,10 +12,9 @@ import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 import hashlib
-import importlib.metadata
 import inspect
 import json
 import logging
@@ -23,7 +22,9 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 import threading
+import types
 import time
 from typing import Any
 
@@ -35,6 +36,7 @@ from nunchi.attention import (
     HostStructuredAttentionModel,
     ParticipantProfile,
 )
+from nunchi.ack import AckJournal, AckPolicy, ReactionCapability, UNAVAILABLE_REACTION_CAPABILITY
 from nunchi.errors import ValidationError
 from nunchi.observation import (
     ObservationLimits,
@@ -48,6 +50,15 @@ from nunchi.participant import (
 )
 from nunchi.pipeline import OpportunityPreparation, prepare_opportunity
 from nunchi.receipts import ReceiptJournal
+from nunchi.integrations.hermes_ack import (
+    AckAuthorityClosed,
+    ack_effect_permit_present,
+    ack_effects_quiescent,
+    claim_ack_effect,
+    dispatch_attention_ack,
+    probe_reaction_capability,
+)
+from nunchi.integrations.hermes_tools import NativeInvocationJournal, install_approval_boundary
 from nunchi.v2_contracts import validate_canonical_event
 
 
@@ -221,7 +232,10 @@ _AUTHORIZED_STOCK_CONTROL: ContextVar[
     "nunchi_authorized_stock_control",
     default=None,
 )
-_STOCK_CONTROL_COMMANDS = frozenset({"stop", "new", "reset", "restart"})
+_STOCK_CANCEL_COMMANDS = frozenset({"stop", "new", "reset", "restart"})
+# Approval controls must reach Hermes while its participant is waiting. They
+# neither create an opportunity nor revoke the one whose approval they answer.
+_STOCK_CONTROL_COMMANDS = _STOCK_CANCEL_COMMANDS | {"approve", "deny"}
 _DERIVED_PARTICIPANT_COMMANDS = frozenset(
     {"background", "goal", "queue", "retry", "steer"}
 )
@@ -281,6 +295,8 @@ _STOCK_PROCESS_CONTROL_EFFECTS = frozenset({"_delete_webhook_best_effort"})
 # deliberately absent: that typing refresh happens after message delivery.
 _STOCK_EFFECT_DELEGATION_EDGES = frozenset(
     {
+        ("_send_final_text", "send_final_ledgered"),
+        ("send_final_ledgered", "_send_with_retry"),
         ("_send_with_retry", "send"),
         ("_stop_typing_with_metadata", "stop_typing"),
         ("edit_message", "_edit_overflow_split"),
@@ -440,6 +456,15 @@ _HOST_CONTRACT_V1_PLATFORM_EFFECTS = {
 }
 _PATCH_TRANSACTION: ContextVar[list[tuple[Any, str, Any, Any]] | None] = (
     ContextVar("nunchi_hermes_patch_transaction", default=None)
+)
+_REGISTRY_ROLLBACKS: ContextVar[list[Callable[[], None]] | None] = ContextVar(
+    "nunchi_hermes_registry_rollbacks", default=None
+)
+_MINIMUM_PREPARATION: ContextVar[list[Any] | None] = ContextVar(
+    "nunchi_minimum_discord_preparation", default=None
+)
+_ACTIVE_PLUGIN_CONTEXT: ContextVar[Any] = ContextVar(
+    "nunchi_hermes_active_plugin_context", default=None
 )
 
 
@@ -604,13 +629,9 @@ def _meets_minimum_hermes_version(raw: str) -> bool:
 
 
 def _hermes_version() -> str:
-    try:
-        return importlib.metadata.version("hermes-agent")
-    except importlib.metadata.PackageNotFoundError as exc:
-        raise ValidationError(
-            "Nunchi's Hermes integration can only activate inside an installed "
-            "hermes-agent runtime"
-        ) from exc
+    from .hermes_version import hermes_version
+
+    return hermes_version()
 
 
 def _require_private_regular_file(path: Path, label: str) -> bytes:
@@ -1264,6 +1285,14 @@ class _GateIngress:
 
 
 @dataclass
+class _PendingAck:
+    token: OpportunityToken
+    evaluation: OpportunityPreparation
+    ingress: _GateIngress
+    deadline: float
+
+
+@dataclass
 class _StockTurnTrace:
     request_id: str
     wake: Mapping[str, Any]
@@ -1377,6 +1406,12 @@ class _RoomRuntime:
             "Hermes V2 room state directory",
         )
         receipts = ReceiptJournal(self.directory / "receipts.jsonl")
+        self.ack_policy = AckPolicy()
+        self.ack_journal = AckJournal(self.directory / "ack.jsonl")
+        self._ack_cache_lock = threading.Lock()
+        self._ack_capability: ReactionCapability = UNAVAILABLE_REACTION_CAPABILITY
+        self._ack_capability_generation: int | None = None
+        self._pending_ack: _PendingAck | None = None
         observation = ObservationProvider(
             config.binding,
             limits=config.limits,
@@ -1403,12 +1438,17 @@ class _RoomRuntime:
             ),
             policy=config.attention,
             receipts=receipts,
+            ack_policy=self.ack_policy,
+            reaction_capability_provider=self.reaction_capability,
         )
         self.scheduler = ConversationOpportunityScheduler(
             f"{config.binding.participant_id}:{config.binding.platform}:"
             f"{config.binding.room_id}:{config.binding.continuity_scope_id}"
         )
         self.receipts = receipts
+        self.native_invocations = NativeInvocationJournal(self.directory / "native-invocations.sqlite3")
+        self._native_threads: dict[int, int] = {}
+        self._native_interrupt: Callable[..., Any] | None = None
         self.observation = observation
         self.attention = attention
         self.observation.mark_continuity_gap(
@@ -1488,6 +1528,110 @@ class _RoomRuntime:
     def _forget_deadline(self, token: OpportunityToken | None) -> None:
         if token is not None:
             self._opportunity_deadlines.pop(token.generation, None)
+
+    def reaction_capability(self) -> ReactionCapability:
+        """Return the capability captured for the active opportunity.
+
+        The capture happens on the event-loop task after stock ingress auth
+        and before attention. A missing or stale capture is unavailable, which
+        widens ACK to DEFER. It is not a fabricated allow.
+        """
+
+        with self._ack_cache_lock:
+            token = self._active_token
+            if (
+                token is None
+                or self._ack_capability_generation != token.generation
+            ):
+                return UNAVAILABLE_REACTION_CAPABILITY
+            return self._ack_capability
+
+    def _store_reaction_capability(
+        self,
+        token: OpportunityToken,
+        capability: ReactionCapability,
+    ) -> None:
+        with self._ack_cache_lock:
+            if self._active_token is not token and (
+                self._active_token is None
+                or self._active_token.generation != token.generation
+            ):
+                return
+            self._ack_capability = capability
+            self._ack_capability_generation = token.generation
+
+    async def refresh_reaction_capability(self, token: OpportunityToken) -> None:
+        """Probe the authenticated adapter without holding runtime locks."""
+
+        with self._lock:
+            if not self.scheduler.is_current(token):
+                ingress = None
+                deadline = None
+            else:
+                ingress = self._ingress.get(token.anchor_event_id)
+                deadline = self._deadline(token)
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if ingress is None or remaining is None or remaining <= 0:
+            self._store_reaction_capability(token, UNAVAILABLE_REACTION_CAPABILITY)
+            return
+        capability = await probe_reaction_capability(
+            ingress.adapter,
+            ingress.event,
+            platform=self.config.binding.platform,
+            room_id=self.config.binding.room_id,
+            actor_id=self.config.binding.actor_id,
+            timeout=remaining,
+        )
+        self._store_reaction_capability(token, capability)
+
+    def take_pending_ack(self) -> _PendingAck | None:
+        with self._lock:
+            pending = self._pending_ack
+            self._pending_ack = None
+            return pending
+
+    async def dispatch_attention_ack(self, pending: _PendingAck) -> None:
+        evaluation = pending.evaluation
+        request = evaluation.request
+        decision = evaluation.decision
+        wake = evaluation.wake
+        if request is None or decision is None or wake is None:
+            return
+        await dispatch_attention_ack(
+            adapter=pending.ingress.adapter,
+            event=pending.ingress.event,
+            platform=self.config.binding.platform,
+            room_id=self.config.binding.room_id,
+            actor_id=self.config.binding.actor_id,
+            policy=self.ack_policy,
+            journal=self.ack_journal,
+            receipts=self.receipts,
+            wake=wake,
+            request=request,
+            decision=decision,
+            token=pending.token,
+            deadline=pending.deadline,
+            lifecycle_id=self.scheduler.lifecycle_id,
+            scheduler=self.scheduler,
+        )
+
+    def finish_ack(self, token: OpportunityToken) -> OpportunityToken | None:
+        """Release the ACK opportunity without admitting a stock participant."""
+
+        with self._lock:
+            self._ingress.pop(token.anchor_event_id, None)
+            self._forget_deadline(token)
+            self._pending_ack = None
+            with self._ack_cache_lock:
+                if self._ack_capability_generation == token.generation:
+                    self._ack_capability = UNAVAILABLE_REACTION_CAPABILITY
+                    self._ack_capability_generation = None
+            next_token = self.scheduler.complete(token)
+            self._arm_deadline(next_token)
+            self._active_token = next_token
+            if next_token is not None:
+                self._pending_anchor = None
+            return next_token
 
     def _append_host_receipt(
         self,
@@ -1654,11 +1798,77 @@ class _RoomRuntime:
                 or bool(getattr(result, "success", False))
             )
 
+    def invoke_stock_tool(
+        self,
+        trace: _StockTurnTrace,
+        tool_name: str,
+        payload: dict[str, Any],
+        next_call: Callable[[dict[str, Any]], Any],
+        context: Mapping[str, Any],
+        config_revision: str,
+    ) -> Any:
+        """Commit an invocation, not an effect; Hermes retains all tool authority."""
+
+        tid = threading.get_ident()
+        with self._lock:
+            if (
+                trace is not self._active_trace
+                or trace.token.cancel_event.is_set()
+                or not self.scheduler.is_current(trace.token)
+                or time.monotonic() >= trace.deadline
+            ):
+                raise _StockEffectBlocked("Hermes tool opportunity ended")
+            try:
+                ids = {key: _nonempty(context.get(key), f"native {key}")
+                       for key in ("session_id", "turn_id", "tool_call_id")}
+                # Snapshot the final middleware payload. Only its digest is durable;
+                # raw tool arguments can contain credentials or private content.
+                encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                frozen_payload = json.loads(encoded)
+                if not isinstance(frozen_payload, dict):
+                    raise ValueError("tool arguments must be an object")
+                identity = hashlib.sha256(json.dumps(ids, sort_keys=True).encode()).hexdigest()
+                binding = dict(ids, tool_name=tool_name,
+                               args_sha256=hashlib.sha256(encoded.encode()).hexdigest(),
+                               participant_id=self.config.binding.participant_id,
+                               actor_id=self.config.binding.actor_id,
+                               room_key=trace.token.room_key,
+                               origin_event_id=trace.token.anchor_event_id,
+                               request_id=trace.request_id, generation=trace.token.generation,
+                               config_revision=config_revision)
+                if not self.native_invocations.reserve(identity, binding):
+                    raise _StockEffectBlocked("native invocation already committed; outcome may be unknown")
+                # Persistence can consume the remaining budget. This check and
+                # registration share cancellation's lock; they define commit.
+                self.prepare_stock_effect(trace, effect=f"tool:{tool_name}")
+            except _StockEffectBlocked:
+                raise
+            except Exception as exc:
+                raise _StockEffectBlocked("native invocation could not be bound and persisted") from exc
+            self._native_threads[tid] = self._native_threads.get(tid, 0) + 1
+        outcome = "raised"
+        try:
+            result = next_call(frozen_payload)
+            outcome = "returned"
+            return result
+        finally:
+            # Do not clear Hermes's coalesced interrupt bit: /stop may also own
+            # it. Native turn/worker teardown resets it before thread reuse.
+            with self._lock:
+                count = self._native_threads[tid] - 1
+                if count:
+                    self._native_threads[tid] = count
+                else:
+                    del self._native_threads[tid]
+            self.native_invocations.finish(identity, outcome)
+
     def expire_stock_turn(self, trace: _StockTurnTrace) -> None:
         with trace.lock:
             trace.delivery_late_or_cancelled = True
             trace.processing_outcome = trace.processing_outcome or "CANCELLED"
-        self.cancel()
+        with self._lock:
+            if self._active_trace is trace:
+                self.cancel()
 
     def offer(
         self,
@@ -1794,6 +2004,29 @@ class _RoomRuntime:
                 self._active_token = None
                 return None, None
             ingress = self._ingress.get(token.anchor_event_id)
+            if (
+                evaluation.acknowledge
+                and evaluation.wake is not None
+                and evaluation.request is not None
+                and evaluation.decision is not None
+                and ingress is not None
+            ):
+                deadline = self._deadline(token)
+                if deadline is None or time.monotonic() >= deadline:
+                    self.scheduler.cancel()
+                    self._forget_deadline(token)
+                    self._ingress.clear()
+                    self._pending_anchor = None
+                    self._active_token = None
+                    self._pending_ack = None
+                    return None, None
+                self._pending_ack = _PendingAck(
+                    token=token,
+                    evaluation=evaluation,
+                    ingress=ingress,
+                    deadline=deadline,
+                )
+                return None, None
             if evaluation.wake is not None and ingress is not None:
                 deadline = self._deadline(token)
                 if deadline is None or time.monotonic() >= deadline:
@@ -1995,6 +2228,9 @@ class _RoomRuntime:
     def cancel(self) -> None:
         with self._lock:
             self.scheduler.cancel()
+            if self._native_interrupt is not None:
+                for tid in self._native_threads:
+                    self._native_interrupt(True, tid)
             self._opportunity_deadlines.clear()
             self._ingress.clear()
             self._pending_anchor = None
@@ -2036,11 +2272,18 @@ class _RoomRuntime:
                         "Nunchi could not persist terminal Hermes settlement"
                     )
                     return False
-            while self._processing_traces or self._detached_stock_tasks:
+            while (
+                self._processing_traces
+                or self._detached_stock_tasks
+                or not ack_effects_quiescent()
+            ):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
-                self._settlement_changed.wait(remaining)
+                if self._processing_traces or self._detached_stock_tasks:
+                    self._settlement_changed.wait(remaining)
+                else:
+                    self._settlement_changed.wait(min(remaining, 0.05))
             return self._active_trace is None
 
 
@@ -2177,8 +2420,17 @@ class NunchiHermesV2Plugin:
     ) -> None:
         current: OpportunityToken | None = token
         while current is not None:
+            await runtime.refresh_reaction_capability(current)
             evaluation = await asyncio.to_thread(runtime.evaluate, current)
-            ingress, current = runtime.resolve(current, evaluation)
+            evaluated = current
+            ingress, current = runtime.resolve(evaluated, evaluation)
+            pending = runtime.take_pending_ack()
+            if pending is not None:
+                try:
+                    await runtime.dispatch_attention_ack(pending)
+                finally:
+                    current = runtime.finish_ack(pending.token)
+                continue
             if ingress is None:
                 continue
             await _run_configured_stock_handle(
@@ -2297,7 +2549,7 @@ class NunchiHermesV2Plugin:
         trace.assistant_response = _stock_participant_response(response)
 
     def pre_tool_call(self, *, tool_name: str = "tool", **_: Any) -> Mapping[str, str] | None:
-        """Disable tools until Hermes exposes a safe final-effect seam."""
+        """Reject stale work; native Hermes guards decide tool authority."""
 
         trace = _ACTIVE_STOCK_TURN.get()
         if trace is None:
@@ -2327,14 +2579,7 @@ class NunchiHermesV2Plugin:
                     "opportunity ended"
                 ),
             }
-        return {
-            "action": "block",
-            "message": (
-                "Nunchi blocks Hermes tools on configured routes because "
-                "Hermes 0.19.0 has no final-effect hook after approval. "
-                "Continue without a tool or use stock Hermes outside this room."
-            ),
-        }
+        return None
 
     def pre_llm_call(self, **_: Any) -> Mapping[str, str] | None:
         trace = _ACTIVE_STOCK_TURN.get()
@@ -2408,7 +2653,7 @@ class NunchiHermesV2Plugin:
             "supported_platforms": sorted(_SUPPORTED_HERMES_PLATFORMS),
             "compatibility_mode": self.mode,
             "participant_execution": "stock-hermes-with-nunchi-guards",
-            "tool_execution": "blocked-configured-routes",
+            "tool_execution": "stock-hermes-with-nunchi-invocation-guards",
             "unsupported_configured_commands": sorted(
                 _DERIVED_PARTICIPANT_COMMANDS
             ),
@@ -2529,26 +2774,672 @@ class _DiscordAdmissionAdapter:
         return True
 
 
-def _active_discord_adapter_class() -> type[Any]:
-    """Return the Discord adapter class registered in this Hermes process."""
+def _shipped_discord_adapter_class() -> type[Any]:
+    """Import the Discord adapter Hermes ships, without consulting the registry."""
 
-    try:
-        from gateway.platform_registry import platform_registry
-
-        entry = platform_registry.get("discord")
-    except (ImportError, ModuleNotFoundError):
-        entry = None
-    if entry is not None:
-        factory = getattr(entry, "adapter_factory", None)
-        module = inspect.getmodule(factory) if callable(factory) else None
-        adapter_class = getattr(module, "DiscordAdapter", None)
-        if isinstance(adapter_class, type):
-            return adapter_class
     try:
         from plugins.platforms.discord.adapter import DiscordAdapter
     except (ImportError, ModuleNotFoundError) as exc:
         raise _shape_error("Discord adapter") from exc
+    if not isinstance(DiscordAdapter, type):
+        raise _shape_error("Discord adapter")
     return DiscordAdapter
+
+
+def _peek_discord_registration(registry: Any) -> Any:
+    """Return a concrete Discord entry, or None if only a deferred loader exists.
+
+    ``platform_registry.get`` runs that loader. Under plugin discovery the
+    loader re-enters ``PluginManager._discovery_lock``, so this peek must not
+    call it. A deferred loader in the active scope is the registration that
+    would have been materialized; do not fall through to another scope.
+    """
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        scopes: list[Any] = []
+        current_scope = getattr(registry, "current_scope_key", None)
+        if callable(current_scope):
+            try:
+                scopes.append(current_scope())
+            except Exception:
+                pass
+        scopes.append(None)
+        seen: set[Any] = set()
+        for scope in scopes:
+            if scope in seen:
+                continue
+            seen.add(scope)
+            try:
+                state = snapshot("discord", scope=scope)
+            except TypeError:
+                state = snapshot("discord")
+            if isinstance(state, tuple) and state:
+                entry = state[0]
+                loader = state[1] if len(state) > 1 else None
+            else:
+                entry, loader = state, None
+            if entry is not None:
+                return entry
+            if loader is not None:
+                return None
+        return None
+
+    entries = getattr(registry, "_entries", None)
+    if isinstance(entries, Mapping) and entries.get("discord") is not None:
+        return entries.get("discord")
+    deferred = getattr(registry, "_deferred", None)
+    if isinstance(deferred, Mapping) and "discord" in deferred:
+        return None
+    return None
+
+
+_SHIPPED_HOST_DISCORD = re.compile(
+    r"^hermes_plugins\.(?:discord_platform|platforms__discord)"
+    r"(?:__home_[0-9a-fA-F]+)?\.adapter$"
+)
+_NO_DISCORD_LOADER = object()
+
+
+def _resolved_module_file(module: Any) -> str | None:
+    raw = getattr(module, "__file__", None)
+    if not isinstance(raw, str) or not raw:
+        return None
+    normalized = os.path.normpath(raw)
+    try:
+        return os.path.realpath(normalized)
+    except OSError:
+        return normalized
+
+
+def _shipped_discord_adapter_file() -> str | None:
+    """Resolved path of the Discord adapter this process actually imported."""
+
+    module = sys.modules.get("plugins.platforms.discord.adapter")
+    if module is None:
+        return None
+    return _resolved_module_file(module)
+
+
+def _is_shipped_discord_module(name: str | None, module: Any = None) -> bool:
+    """True when *module* is the imported shipped adapter file.
+
+    0.19.0 loads that file as ``hermes_plugins.discord_platform``. Current
+    hosts load it as ``hermes_plugins.platforms__discord``, with an optional
+    home suffix. Those names are aliases, not proof. A matching name or a
+    ``/plugins/platforms/discord/adapter.py`` suffix from another file still
+    fails closed.
+    """
+
+    del name
+    shipped_file = _shipped_discord_adapter_file()
+    module_file = _resolved_module_file(module)
+    return bool(shipped_file and module_file and module_file == shipped_file)
+
+
+def _discord_registration_is_shipped(
+    entry: Any, shipped: type[Any]
+) -> type[Any] | None:
+    """Return the shipped class a concrete entry builds, or None if it is foreign.
+
+    Hermes 0.19.0 registers ``_build_adapter`` in the shipped module rather
+    than the class itself. A factory from any other file is an override, even
+    when that file re-exports ``DiscordAdapter``: activation fails closed
+    instead of patching that class or falling back while it remains live.
+    """
+
+    factory = getattr(entry, "adapter_factory", None)
+    if factory is shipped:
+        return shipped
+    if not callable(factory):
+        return None
+    module = inspect.getmodule(factory)
+    if module is None or not _is_shipped_discord_module(
+        getattr(module, "__name__", None), module
+    ):
+        return None
+    adapter_class = getattr(module, "DiscordAdapter", None)
+    if not (
+        isinstance(adapter_class, type)
+        and adapter_class.__name__ == "DiscordAdapter"
+    ):
+        return None
+    if factory is adapter_class or factory is getattr(module, "_build_adapter", None):
+        return adapter_class
+    return None
+
+
+def _discord_loader_scope(registry: Any) -> Any:
+    """Scope whose deferred map holds Discord, or ``_NO_DISCORD_LOADER``."""
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        scopes: list[Any] = []
+        current_scope = getattr(registry, "current_scope_key", None)
+        if callable(current_scope):
+            try:
+                scopes.append(current_scope())
+            except Exception:
+                pass
+        scopes.append(None)
+        seen: set[Any] = set()
+        for scope in scopes:
+            if scope in seen:
+                continue
+            seen.add(scope)
+            try:
+                state = snapshot("discord", scope=scope)
+            except TypeError:
+                state = snapshot("discord")
+            entry = state[0] if isinstance(state, tuple) and state else None
+            loader = state[1] if isinstance(state, tuple) and len(state) > 1 else None
+            if entry is None and loader is not None:
+                return scope
+        return _NO_DISCORD_LOADER
+    deferred = getattr(registry, "_deferred", None)
+    if isinstance(deferred, Mapping) and "discord" in deferred:
+        return None
+    return _NO_DISCORD_LOADER
+
+
+def _host_platform_entry(
+    *,
+    name: str,
+    label: str,
+    adapter_factory: Any,
+    check_fn: Any,
+    source: str,
+    extra: Mapping[str, Any],
+) -> Any:
+    """Build the host's ``PlatformEntry``, dropping fields that host lacks."""
+
+    try:
+        from gateway.platform_registry import PlatformEntry
+    except (ImportError, ModuleNotFoundError):
+        return None
+    if not isinstance(PlatformEntry, type):
+        return None
+    payload: dict[str, Any] = {
+        "name": name,
+        "label": label,
+        "adapter_factory": adapter_factory,
+        "check_fn": check_fn,
+        "source": source,
+        **dict(extra),
+    }
+    try:
+        accepted = {item.name for item in fields(PlatformEntry)}
+    except TypeError:
+        accepted = None
+    if accepted is not None:
+        payload = {key: value for key, value in payload.items() if key in accepted}
+    return PlatformEntry(**payload)
+
+
+def _discord_registration_state(registry: Any, scope: Any) -> tuple[Any, Any]:
+    """Concrete entry and deferred loader for Discord, without invoking the loader."""
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        try:
+            state = snapshot("discord", scope=scope)
+        except TypeError:
+            state = snapshot("discord")
+        if isinstance(state, tuple):
+            entry = state[0] if state else None
+            loader = state[1] if len(state) > 1 else None
+            return entry, loader
+        return state, None
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    entry = entries.get("discord") if isinstance(entries, Mapping) else None
+    loader = deferred.get("discord") if isinstance(deferred, Mapping) else None
+    return entry, loader
+
+
+def _restore_discord_registration(
+    registry: Any,
+    scope: Any,
+    current: tuple[Any, Any],
+    previous: tuple[Any, Any],
+) -> bool:
+    """Restore Discord only while *current* is still the published generation.
+
+    Minimum hosts do not record a registry inverse. A registry without native
+    compare-and-swap is left untouched: popping to inspect would hide a newer
+    owner, and writing the predecessor back could undo a native removal.
+    """
+
+    restore = getattr(registry, "restore_registration", None)
+    if not callable(restore):
+        return False
+    try:
+        return bool(restore("discord", current, previous, scope=scope))
+    except TypeError:
+        try:
+            return bool(restore("discord", current, previous))
+        except TypeError:
+            return False
+
+
+def _rollback_registry_publications(rollbacks: Sequence[Callable[[], None]]) -> None:
+    for rollback in reversed(rollbacks):
+        try:
+            rollback()
+        except Exception:
+            logger.debug("discord publication rollback failed", exc_info=True)
+
+
+def _deferred_loader_plugin_name(loader: Any) -> str:
+    """Owning manifest name captured by a deferred loader, without calling it."""
+
+    defaults = getattr(loader, "__defaults__", None) or ()
+    for item in defaults:
+        name = getattr(item, "name", None)
+        if isinstance(name, str) and name:
+            return name
+    return ""
+
+
+def _remember_discord_publication(
+    registry: Any,
+    scope: Any,
+    current: tuple[Any, Any],
+    previous: tuple[Any, Any],
+) -> None:
+    """Record the CAS inverse for activation failure and native unload."""
+
+    def rollback() -> None:
+        _restore_discord_registration(registry, scope, current, previous)
+
+    rollbacks = _REGISTRY_ROLLBACKS.get()
+    if rollbacks is not None:
+        rollbacks.append(rollback)
+    ctx = _ACTIVE_PLUGIN_CONTEXT.get()
+    manager = getattr(ctx, "_manager", None)
+    track = getattr(manager, "_track_scoped_registration", None)
+    manifest = getattr(ctx, "manifest", None)
+    if not callable(track) or manifest is None:
+        return
+    if getattr(manager, "scope_key", None) != scope:
+        return
+    names = getattr(manager, "_plugin_platform_names", None)
+    if isinstance(names, set):
+        names.add("discord")
+    finalize = getattr(manager, "_remove_platform_name_if_unowned", None)
+
+    def release_name() -> None:
+        if callable(finalize):
+            finalize("discord")
+
+    try:
+        track(
+            manifest,
+            "platform",
+            "discord",
+            registry,
+            current,
+            previous,
+            finalize=release_name,
+        )
+    except TypeError:
+        try:
+            track(manifest, "platform", "discord", registry, current, previous)
+        except Exception:
+            logger.debug("discord publication lease was not recorded", exc_info=True)
+    except Exception:
+        logger.debug("discord publication lease was not recorded", exc_info=True)
+
+
+def _replace_deferred_discord_registration(
+    registry: Any, scope: Any, previous: tuple[Any, Any], entry: Any
+) -> bool:
+    """Publish through native compare-and-swap.
+
+    Minimum Hermes has no registry lock that a plugin can share with an
+    already-running native writer. That host does not call this function.
+    """
+
+    if not callable(getattr(registry, "restore_registration", None)):
+        return False
+    return _restore_discord_registration(registry, scope, previous, (entry, None))
+
+
+def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
+    """Replace a deferred Discord loader using the host's native CAS.
+
+    The loader takes ``PluginManager._discovery_lock``. Calling it from
+    ``register()`` deadlocks on current Hermes, and letting it run later
+    re-executes the same file as ``hermes_plugins.*``. Publishing the class
+    already imported from that file pops the loader, so ``get()`` instantiates
+    the class Nunchi patches. The predecessor is restored on activation
+    failure and by the native registration lease on unload or rediscovery.
+    A newer concrete entry is left alone. Minimum hosts do not use this path.
+    """
+
+    if not callable(getattr(registry, "restore_registration", None)):
+        return
+    module = inspect.getmodule(shipped)
+    stock_register = getattr(module, "register", None)
+    register = getattr(registry, "register", None)
+    if not callable(stock_register) or not callable(register):
+        return
+    scope = _discord_loader_scope(registry)
+    if scope is _NO_DISCORD_LOADER:
+        return
+    previous = _discord_registration_state(registry, scope)
+    if previous[0] is not None or previous[1] is None:
+        return
+    plugin_name = _deferred_loader_plugin_name(previous[1])
+    accepts_scope = "scope" in inspect.signature(register).parameters
+    # 0.21.5 infers a plugin scope when ``scope`` is omitted and source is
+    # ``plugin``. An explicit global loader must stay in the global map.
+    source = "plugin" if scope is not None or not accepts_scope else "builtin"
+    published: dict[str, Any] = {}
+
+    def register_platform(
+        name: str,
+        label: str,
+        adapter_factory: Any,
+        check_fn: Any,
+        **kwargs: Any,
+    ) -> None:
+        again = _discord_registration_state(registry, scope)
+        if again[0] is not None or again[1] is not previous[1]:
+            return
+        extra = dict(kwargs)
+        if plugin_name and not extra.get("plugin_name"):
+            extra["plugin_name"] = plugin_name
+        entry = _host_platform_entry(
+            name=name,
+            label=label,
+            adapter_factory=adapter_factory,
+            check_fn=check_fn,
+            source=source,
+            extra=extra,
+        )
+        if entry is None:
+            return
+        if _replace_deferred_discord_registration(registry, scope, previous, entry):
+            published["entry"] = entry
+
+    class _Ctx:
+        pass
+
+    _Ctx.register_platform = staticmethod(register_platform)  # type: ignore[attr-defined]
+    stock_register(_Ctx())
+    entry = published.get("entry")
+    if entry is None:
+        if _peek_discord_registration(registry) is None:
+            # Publication lost to another deferred generation (or removal).
+            # Do not patch the canonical class while an unresolved loader may
+            # later install a different class. The activation transaction fails.
+            raise _shape_error("Discord adapter")
+        return
+    current = _discord_registration_state(registry, scope)
+    if current[0] is not entry or current[1] is not None:
+        return
+    _remember_discord_publication(registry, scope, current, previous)
+
+
+def _active_discord_adapter_class() -> type[Any]:
+    """Return the Discord class Nunchi patches, without loading a deferred platform.
+
+    Current hosts publish through native compare-and-swap. Minimum hosts
+    prepare the class the native importer caches, and leave publication to
+    Hermes. A concrete foreign registration fails closed.
+    """
+
+    shipped = _shipped_discord_adapter_class()
+    try:
+        from gateway.platform_registry import platform_registry
+    except (ImportError, ModuleNotFoundError):
+        return shipped
+    if _is_stock_minimum_registry(platform_registry):
+        return _prepare_minimum_discord_adapter_class(platform_registry, shipped)
+    return _resolve_cas_discord_adapter_class(platform_registry, shipped)
+
+
+def _resolve_cas_discord_adapter_class(
+    registry: Any, shipped: type[Any]
+) -> type[Any]:
+    """Current-host resolution. Does not mutate a minimum registry."""
+
+    entry = _peek_discord_registration(registry)
+    if entry is None:
+        _publish_shipped_discord_registration(registry, shipped)
+        entry = _peek_discord_registration(registry)
+        if entry is None:
+            return shipped
+    resolved = _discord_registration_is_shipped(entry, shipped)
+    if resolved is None:
+        raise _shape_error("Discord adapter")
+    return resolved
+
+
+def _discord_owner_error(reason: str) -> ValidationError:
+    return ValidationError(
+        "Nunchi did not activate because Hermes host contract V1 no longer "
+        f"provides the required Discord adapter shape ({reason}). "
+        "Stock Hermes can continue without Nunchi; "
+        "to restore the gate, update Nunchi or use a maintained Hermes build."
+    )
+
+
+def _is_stock_minimum_registry(registry: Any) -> bool:
+    """True only for the tested 0.19.0 plain-dict registry.
+
+    A missing compare-and-swap method is not enough. Current hosts expose a
+    snapshot API even in tests that omit the CAS method, and a previously
+    wrapped map is not a stock registry. Those shapes do not take the minimum
+    import path.
+    """
+
+    if callable(getattr(registry, "restore_registration", None)):
+        return False
+    if callable(getattr(registry, "snapshot_registration", None)):
+        return False
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    return type(entries) is dict and type(deferred) is dict
+
+
+def _minimum_discord_snapshot(registry: Any) -> tuple[Any, Any]:
+    """Concrete entry and deferred loader, without resolving either."""
+
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    entry = entries.get("discord") if isinstance(entries, Mapping) else None
+    loader = deferred.get("discord") if isinstance(deferred, Mapping) else None
+    return entry, loader
+
+
+@dataclass(frozen=True)
+class _MinimumDiscordPreparation:
+    registry: Any
+    before: tuple[Any, Any]
+    adapter_class: type[Any]
+
+
+def _current_minimum_preparation(
+    registry: Any,
+) -> _MinimumDiscordPreparation | None:
+    holder = _MINIMUM_PREPARATION.get()
+    if not isinstance(holder, list) or not holder:
+        return None
+    prep = holder[0]
+    if not isinstance(prep, _MinimumDiscordPreparation) or prep.registry is not registry:
+        return None
+    return prep
+
+
+def _store_minimum_preparation(prep: _MinimumDiscordPreparation) -> None:
+    holder = _MINIMUM_PREPARATION.get()
+    if isinstance(holder, list):
+        holder.clear()
+        holder.append(prep)
+
+
+def _minimum_preparation_still_valid(
+    prep: _MinimumDiscordPreparation, shipped: type[Any]
+) -> bool:
+    now = _minimum_discord_snapshot(prep.registry)
+    if now[0] is prep.before[0] and now[1] is prep.before[1]:
+        return True
+    # Native resolution of this exact class is allowed. Nothing is undone.
+    if now[0] is not None and now[1] is None:
+        return (
+            _discord_registration_is_shipped(now[0], shipped) is prep.adapter_class
+        )
+    return False
+
+
+def _revalidate_minimum_discord_preparation() -> None:
+    """Fail activation if the prepared owner changed. Do not touch the registry."""
+
+    holder = _MINIMUM_PREPARATION.get()
+    if not isinstance(holder, list) or not holder:
+        return
+    prep = holder[0]
+    if not isinstance(prep, _MinimumDiscordPreparation):
+        return
+    if not _minimum_preparation_still_valid(prep, _shipped_discord_adapter_class()):
+        raise _discord_owner_error("changed owner")
+
+
+def _native_minimum_loader_owner(loader: Any, shipped: type[Any]) -> tuple[Any, Any]:
+    """Return the native manager and manifest, or fail closed.
+
+    Identity is the nested loader created by the stock deferred registrar, not
+    a module name or a path suffix. A foreign callable is not executed.
+    """
+
+    try:
+        from hermes_cli.plugins import PluginManager, PluginManifest
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise _discord_owner_error("unknown loader") from exc
+    code = next(
+        (
+            item
+            for item in PluginManager._register_deferred_platform.__code__.co_consts
+            if isinstance(item, types.CodeType) and item.co_name == "_loader"
+        ),
+        None,
+    )
+    if (
+        code is None
+        or not isinstance(loader, types.FunctionType)
+        or loader.__code__ is not code
+    ):
+        raise _discord_owner_error("unknown loader")
+    defaults = loader.__defaults__ or ()
+    closure = dict(
+        zip(
+            loader.__code__.co_freevars,
+            (cell.cell_contents for cell in loader.__closure__ or ()),
+        )
+    )
+    manager = closure.get("self")
+    if len(defaults) != 1 or type(defaults[0]) is not PluginManifest:
+        raise _discord_owner_error("unknown loader")
+    manifest = defaults[0]
+    if type(manager) is not PluginManager:
+        raise _discord_owner_error("unknown loader")
+    importer = getattr(manager, "_load_directory_module", None)
+    if getattr(importer, "__func__", None) is not PluginManager._load_directory_module:
+        raise _discord_owner_error("unknown loader")
+    try:
+        shipped_file = inspect.getfile(shipped)
+    except (TypeError, OSError) as exc:
+        raise _discord_owner_error("foreign file") from exc
+    shipped_dir = Path(shipped_file).resolve().parent
+    manifest_path = getattr(manifest, "path", None)
+    if (
+        getattr(manifest, "source", None) != "bundled"
+        or getattr(manifest, "kind", None) != "platform"
+        or getattr(manifest, "name", None) != "discord-platform"
+        or not manifest_path
+        or Path(manifest_path).resolve() != shipped_dir
+    ):
+        raise _discord_owner_error("foreign deferred loader")
+    return manager, manifest
+
+
+def _class_from_minimum_parent(module: Any, shipped: type[Any]) -> type[Any]:
+    try:
+        shipped_init = Path(inspect.getfile(shipped)).resolve().parent / "__init__.py"
+        module_file = Path(module.__file__).resolve()
+    except (TypeError, OSError, AttributeError) as exc:
+        raise _discord_owner_error("foreign file") from exc
+    if module_file != shipped_init:
+        raise _discord_owner_error("foreign file")
+    register = getattr(module, "register", None)
+    adapter_module = inspect.getmodule(register)
+    if not _is_shipped_discord_module(None, adapter_module):
+        raise _discord_owner_error("foreign file")
+    cls = getattr(adapter_module, "DiscordAdapter", None)
+    factory = getattr(adapter_module, "_build_adapter", None)
+    if not isinstance(cls, type) or not callable(factory):
+        raise _discord_owner_error("unsupported factory")
+    if (
+        _discord_registration_is_shipped(
+            types.SimpleNamespace(adapter_factory=factory), shipped
+        )
+        is not cls
+    ):
+        raise _discord_owner_error("unsupported factory")
+    return cls
+
+
+def _prepare_minimum_deferred_class(loader: Any, shipped: type[Any]) -> type[Any]:
+    """Import only the native directory module. Never call the loader."""
+
+    manager, manifest = _native_minimum_loader_owner(loader, shipped)
+    try:
+        module = manager._load_directory_module(manifest)
+    except Exception as exc:
+        raise _discord_owner_error("unsupported adapter module") from exc
+    return _class_from_minimum_parent(module, shipped)
+
+
+def _prepare_minimum_discord_adapter_class(
+    registry: Any, shipped: type[Any]
+) -> type[Any]:
+    """Select the minimum Discord class without a registry write.
+
+    A deferred owner is prepared through the native directory importer. A
+    concrete shipped owner is used as published. A foreign, removed, or
+    in-progress owner fails closed. Repeated calls in one activation reuse
+    the prepared class and recheck the owner.
+    """
+
+    stored = _current_minimum_preparation(registry)
+    if stored is not None:
+        if not _minimum_preparation_still_valid(stored, shipped):
+            raise _discord_owner_error("changed owner")
+        return stored.adapter_class
+
+    before = _minimum_discord_snapshot(registry)
+    if before[0] is not None:
+        cls = _discord_registration_is_shipped(before[0], shipped)
+        if cls is None:
+            raise _discord_owner_error("foreign concrete owner")
+    elif before[1] is not None:
+        cls = _prepare_minimum_deferred_class(before[1], shipped)
+    else:
+        raise _discord_owner_error("absent or in-progress owner")
+
+    prep = _MinimumDiscordPreparation(registry, before, cls)
+    if not _minimum_preparation_still_valid(prep, shipped):
+        raise _discord_owner_error("changed owner")
+    _store_minimum_preparation(prep)
+    logger.debug(
+        "minimum Discord compatibility path selected %s.%s (%s)",
+        cls.__module__,
+        cls.__name__,
+        _resolved_module_file(inspect.getmodule(cls)) or "",
+    )
+    return cls
 
 
 def _adapter_matches_owner_profile(
@@ -2864,8 +3755,7 @@ def _install_discord_room_admission_shim(
             self: Any,
             adapter: Any,
             platform: Any,
-            *,
-            is_reconnect: bool = False,
+            **connect_options: Any,
         ) -> Any:
             if not isinstance(
                 getattr(adapter, _ADAPTER_PROFILE_ATTRIBUTE, None),
@@ -2887,7 +3777,10 @@ def _install_discord_room_admission_shim(
                 self,
                 adapter,
                 platform,
-                is_reconnect=is_reconnect,
+                # Preserve the native call exactly: newer hosts pass initial
+                # for a cold-start budget; minimum hosts accept only reconnect.
+                # The native signature still rejects unsupported options.
+                **connect_options,
             )
 
         def discord_message_admission(
@@ -3399,10 +4292,11 @@ def _install_claimed_ingress_shim(
                     raise _StockEffectBlocked(
                         "Hermes control command has no matching Nunchi room"
                     )
-                await owner.gateway_session_cancel(
-                    route=source,
-                    reason=command,
-                )
+                if command in _STOCK_CANCEL_COMMANDS:
+                    await owner.gateway_session_cancel(
+                        route=source,
+                        reason=command,
+                    )
                 control_authorization = _StockControlAuthorization.begin(
                     command,
                     runtime,
@@ -3469,10 +4363,66 @@ def _consume_detached_task(task: asyncio.Task[Any]) -> None:
         pass
 
 
+def _adopt_native_session_owner(
+    adapter: Any,
+    session_key: str | None,
+    child: asyncio.Task[Any],
+) -> None:
+    """Name the child as the native session owner when this task currently is.
+
+    Stock releases ``_active_sessions`` only when ``asyncio.current_task()``
+    is the ``_session_tasks`` entry, and ``/stop`` cancels that same entry.
+    The child runs stock's ``_process_message_background``, so it has to be
+    the recorded owner for that cleanup and stop path to see it. A different
+    task already in the map is a newer owner and is left alone. This does not
+    release a guard; stock's own identity check does that, and a swapped
+    guard or newer task therefore survives.
+    """
+
+    if adapter is None or not session_key:
+        return
+    tasks = getattr(adapter, "_session_tasks", None)
+    if not isinstance(tasks, dict):
+        return
+    parent = asyncio.current_task()
+    if parent is None or tasks.get(session_key) is not parent:
+        return
+    tasks[session_key] = child
+    _bind_native_task_cleanup(adapter, child)
+
+
+def _bind_native_task_cleanup(adapter: Any, task: asyncio.Task[Any]) -> None:
+    """Give an adopted child the done callbacks stock installs on its owner.
+
+    ``cancel_session_processing`` adds the recorded owner to
+    ``_expected_cancelled_tasks``. Stock discards that entry from the task it
+    created. The deadline child is that owner, so it needs the same callback
+    and shutdown membership. The parent stays tracked: it is still the
+    wrapper task shutdown must cancel.
+    """
+
+    background = getattr(adapter, "_background_tasks", None)
+    expected = getattr(adapter, "_expected_cancelled_tasks", None)
+    if isinstance(background, set):
+        try:
+            background.add(task)
+        except TypeError:
+            return
+    if not hasattr(task, "add_done_callback"):
+        return
+    if isinstance(background, set):
+        task.add_done_callback(background.discard)
+    if isinstance(expected, set):
+        task.add_done_callback(expected.discard)
+
+
 async def _run_stock_process_with_deadline(
     runtime: _RoomRuntime,
     trace: _StockTurnTrace,
     awaitable: Any,
+    *,
+    adapter: Any = None,
+    session_key: str | None = None,
 ) -> Any:
     """Cancel stock work at the one opportunity deadline.
 
@@ -3483,6 +4433,7 @@ async def _run_stock_process_with_deadline(
     """
 
     task = asyncio.create_task(awaitable)
+    _adopt_native_session_owner(adapter, session_key, task)
     detached = False
 
     def track_detached() -> None:
@@ -3615,7 +4566,23 @@ def _configured_stock_effect_target(
         thread_id = arguments.get("thread_id")
 
     target: Any = None
-    if name == "rename_thread":
+    if name in {"_send_final_text", "send_final_ledgered"}:
+        # Stock 0.21.5's final-delivery wrappers take a MessageEvent, not a
+        # chat id. Resolve only these known helpers, from the bound signature;
+        # an arbitrary object in args[0] must never lend effect authority.
+        source = getattr(arguments.get("event"), "source", None)
+        try:
+            if _platform_name(source) != platform:
+                return platform_runtimes[0], None, True
+        except ValidationError:
+            return platform_runtimes[0], None, True
+        source_thread = getattr(source, "thread_id", None)
+        if (source_thread or None) != (thread_id or None):
+            # Native delivery uses metadata; do not let it retarget the event
+            # or silently drop a Telegram topic into the parent chat.
+            return platform_runtimes[0], None, True
+        target = getattr(source, "chat_id", None)
+    elif name == "rename_thread":
         target = arguments.get("thread_id")
     elif name == "_edit_overflow_split" and arguments.get("channel") is not None:
         target = getattr(arguments["channel"], "id", None)
@@ -3713,7 +4680,13 @@ def _configured_stock_effect_target(
 
 
 def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
-    wrapped = 0
+    # Current Hermes splits Discord media into a mixin. Guard methods at their
+    # defining class, including super() dispatch, rather than shadowing inherited
+    # attributes on the concrete adapter. Transaction rollback restores the exact
+    # original owners; already-guarded methods are skipped on repeated visits.
+    wrapped = sum(
+        _wrap_stock_effect_methods(base) for base in target_class.__bases__
+    )
     for name, current in tuple(vars(target_class).items()):
         if (
             not _is_stock_effect_method(name)
@@ -3731,6 +4704,12 @@ def _wrap_stock_effect_methods(target_class: type[Any]) -> int:
         ) -> Any:
             trace = _ACTIVE_STOCK_TURN.get()
             if trace is None:
+                if claim_ack_effect(self, __name, args, kwargs):
+                    return await __current(self, *args, **kwargs)
+                if ack_effect_permit_present():
+                    raise AckAuthorityClosed(
+                        "ACK effect authority does not allow this call"
+                    )
                 owner = _SHIM_OWNER
                 control_authorization = _AUTHORIZED_STOCK_CONTROL.get()
                 configured_target = (
@@ -4070,11 +5049,13 @@ def _install_execution_boundary_shim(plugin: NunchiHermesV2Plugin) -> None:
                     trace.runtime.expire_stock_turn(trace)
                     detail = f"Hermes tool {tool_name} opportunity ended"
                 else:
-                    detail = (
-                        "Nunchi blocks Hermes tools on configured routes "
-                        "because Hermes 0.19.0 has no final-effect hook after "
-                        "approval"
-                    )
+                    try:
+                        return trace.runtime.invoke_stock_tool(
+                            trace, tool_name, payload, next_call, context,
+                            plugin.config.provenance["sha256"],
+                        )
+                    except _StockEffectBlocked as exc:
+                        detail = str(exc)
                 return json.dumps({"error": detail}, ensure_ascii=False)
 
             return current_tool(
@@ -4242,6 +5223,8 @@ def _install_stock_lifecycle_shim(plugin: NunchiHermesV2Plugin) -> None:
                     runtime,
                     trace,
                     current_process(self, event, session_key),
+                    adapter=self,
+                    session_key=session_key,
                 )
             except asyncio.CancelledError:
                 trace.processing_outcome = trace.processing_outcome or "CANCELLED"
@@ -4380,10 +5363,31 @@ def _install_stock_silence_filter_shim(
             "_is_intentional_silence_response",
             "_is_partial_silence_marker",
         }
+        direct_calls = code is not None and required_aliases.issubset(code.co_names)
+        # Released 0.21.5 moved the partial marker check into _should_edit,
+        # called synchronously by run. Accept that known split only when both
+        # call sites still resolve the aliases we actually replace below.
+        should_edit = getattr(consumer, "_should_edit", None)
+        edit_code = getattr(should_edit, "__code__", None)
+        split_calls = (
+            code is not None
+            and {"_is_intentional_silence_response", "_should_edit"}.issubset(code.co_names)
+            and inspect.isfunction(should_edit)
+            and not inspect.iscoroutinefunction(should_edit)
+            and edit_code is not None
+            and "_is_partial_silence_marker" in edit_code.co_names
+            and getattr(run, "__globals__", None) is vars(stream_consumer)
+            and getattr(should_edit, "__globals__", None) is vars(stream_consumer)
+        )
+        if split_calls:
+            _require_signature(
+                should_edit,
+                required=("self", "tick"),
+                label="gateway streaming silence edit filter",
+            )
         if (
             not inspect.iscoroutinefunction(run)
-            or code is None
-            or not required_aliases.issubset(set(code.co_names))
+            or not (direct_calls or split_calls)
         ):
             raise _shape_error("gateway streaming silence call sites")
         module_response_patched = bool(
@@ -4503,6 +5507,30 @@ def _install_stock_streaming_tts_guard(
             _SHIM_OWNER = plugin
             return
         required_calls = {"StreamingTTSConsumer", "active", "start"}
+        if not required_calls.issubset(call_names):
+            # Current stock moved this block into a synchronous runner mixin
+            # helper. Check that exact call edge and its native import rather
+            # than accepting an arbitrary helper with a similar name.
+            start_tts = getattr(GatewayRunner, "_run_agent_start_streaming_tts", None)
+            _require_signature(
+                start_tts,
+                required=(
+                    "self", "source", "message_type", "_status_thread_metadata",
+                    "streaming_tts_consumer_holder",
+                ),
+                label="gateway streaming TTS start helper",
+            )
+            helper_names = set(getattr(getattr(start_tts, "__code__", None), "co_names", ()))
+            if (
+                "_run_agent_start_streaming_tts" not in call_names
+                or not inspect.isfunction(start_tts)
+                or inspect.iscoroutinefunction(start_tts)
+                or start_tts.__globals__ is not run_agent.__globals__
+                or "gateway.streaming_tts_consumer" not in helper_names
+                or not required_calls.issubset(helper_names)
+            ):
+                raise _shape_error("gateway streaming TTS call sites")
+            call_names |= helper_names
         if (
             "message_type" not in parameters
             or not required_calls.issubset(call_names)
@@ -5165,6 +6193,10 @@ def _install_host_contract_v1(plugin: NunchiHermesV2Plugin) -> None:
     _install_telegram_batch_identity_shim(plugin)
     _install_claimed_ingress_shim(plugin)
     _install_stock_lifecycle_shim(plugin)
+    install_approval_boundary(
+        _ACTIVE_STOCK_TURN.get, _CONFIGURED_ROUTE_CONTEXT.get,
+        _set_shim_attribute, plugin._rooms.values(),
+    )
     _install_execution_boundary_shim(plugin)
     _install_auto_title_shim(plugin)
     _install_stock_silence_filter_shim(plugin)
@@ -5264,10 +6296,15 @@ def register(
     ):
         raise _shape_error("Hermes plugin registration context")
     patches: list[tuple[Any, str, Any, Any]] = []
+    registry_rollbacks: list[Callable[[], None]] = []
     context_registries = _snapshot_context_registries(ctx)
     previous_owner = _SHIM_OWNER
     previous_base_handle = _ORIGINAL_BASE_HANDLE
+    preparation_holder: list[Any] = []
     transaction_token = _PATCH_TRANSACTION.set(patches)
+    rollback_token = _REGISTRY_ROLLBACKS.set(registry_rollbacks)
+    context_token = _ACTIVE_PLUGIN_CONTEXT.set(ctx)
+    preparation_token = _MINIMUM_PREPARATION.set(preparation_holder)
     try:
         _install_host_contract_v1(plugin)
         ctx.register_hook("pre_tool_call", plugin.pre_tool_call)
@@ -5279,14 +6316,19 @@ def register(
             description="Report Nunchi Hermes compatibility and configuration",
             args_hint="[probe]",
         )
+        _revalidate_minimum_discord_preparation()
     except BaseException:
         _rollback_shim_attributes(patches)
         _restore_context_registries(context_registries)
+        _rollback_registry_publications(registry_rollbacks)
         _SHIM_OWNER = previous_owner
         _ORIGINAL_BASE_HANDLE = previous_base_handle
         raise
     finally:
         _PATCH_TRANSACTION.reset(transaction_token)
+        _REGISTRY_ROLLBACKS.reset(rollback_token)
+        _ACTIVE_PLUGIN_CONTEXT.reset(context_token)
+        _MINIMUM_PREPARATION.reset(preparation_token)
     return plugin
 
 

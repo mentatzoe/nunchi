@@ -1,0 +1,12 @@
+11 V2 lifecycle scenario(s):
+  suppress             participant-bound classifier SUPPRESS with active recovery
+  ack                  ACK adds one exact reaction without invoking the participant
+  ack-disabled         disabled ACK widens safely to the participant DEFER path
+  ack-unsupported      unsupported ACK widens safely to the participant DEFER path
+  wake-contribution    WAKE followed by one host-owned contribution
+  wake-silence         WAKE followed by participant silence
+  classifier-defer     direct model DEFER wakes advice-free
+  margin-defer         uncertain SUPPRESS becomes audited margin DEFER
+  bypass               trusted preattention bypass invokes zero classifier calls
+  error-fallback       provider error wakes under explicit default policy
+  error-no-wake        provider error does not wake under explicit NO_WAKE policy

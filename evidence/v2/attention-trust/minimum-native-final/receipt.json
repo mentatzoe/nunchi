@@ -1,0 +1,23 @@
+{
+  "timestamp_utc": "2026-10-02T14:33:25.940006+00:00",
+  "python": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/minimum-env/bin/python",
+  "python_version": "3.11.15 (main, Mar 25 2026, 02:58:47) [Clang 22.1.1 ]",
+  "hermes_version": "0.19.0",
+  "host_gateway_origin": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/minimum-env/lib/python3.11/site-packages/gateway/run.py",
+  "nunchi_origin": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/minimum-env/lib/python3.11/site-packages/nunchi/__init__.py",
+  "nunchi_direct_url": {
+    "url": "file:///Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/artifacts/isolation-final/nunchi-2.0.0-py3-none-any.whl",
+    "archive_info": {}
+  },
+  "tests_run": 3,
+  "failures": 0,
+  "test_class": "InstalledAttentionSetupTests",
+  "errors": 0,
+  "skipped": 0,
+  "host_files_checked": 943,
+  "host_changed_files": [],
+  "host_before_sha256": "6bb589ffbf53feca641fa9c21705c485763d90888fbb77586481f722ea6cbb4c",
+  "host_after_sha256": "6bb589ffbf53feca641fa9c21705c485763d90888fbb77586481f722ea6cbb4c",
+  "environment": "allowlisted; isolated HOME/HERMES_HOME; no PYTHONPATH; -I",
+  "network": "loopback model double and fake Discord client; NOT live-provider acceptance"
+}

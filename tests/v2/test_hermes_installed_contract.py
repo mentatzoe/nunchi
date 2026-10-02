@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from nunchi.integrations import hermes_v2
+from nunchi.integrations.hermes_version import hermes_version as installed_hermes_version
 from tests.v2.test_hermes_portable import FakeLlm, room_config
 
 
@@ -38,6 +39,12 @@ class InstalledHermesHostContractTests(unittest.TestCase):
                 "nunchi.integrations.hermes_dashboard_install"
             )
             manager = plugins.PluginManager()
+            # _load_plugin follows discovery in a real gateway. Minimum stock
+            # needs its native deferred platform owner published before Nunchi
+            # activation; an entirely empty registry is not that startup state.
+            (Path(temporary) / "config.yaml").write_text("plugins:\n  enabled: []\n")
+            with mock.patch.dict(os.environ, {"HERMES_HOME": temporary}):
+                manager.discover_and_load()
             manifest = next(
                 candidate
                 for candidate in manager._scan_entry_points()
@@ -203,7 +210,7 @@ class InstalledHermesHostContractTests(unittest.TestCase):
         self.assertIsNone(plugin["error"])
 
     def test_installed_runtime_satisfies_host_contract_v1(self):
-        hermes_version = importlib.metadata.version("hermes-agent")
+        hermes_version = installed_hermes_version()
         platform = os.environ.get("NUNCHI_HERMES_PLATFORM", "discord")
         self.assertIn(platform, {"discord", "telegram"})
         self.assertGreaterEqual(

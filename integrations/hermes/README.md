@@ -5,10 +5,13 @@ Hermes dependency and edits no Hermes source or installed distribution file.
 It writes its own dashboard bridge and private configuration under Hermes's
 user-data directory.
 
-Current status: **landed, unverified**. Source and focused tests exist, but
-installed-runtime and live-platform acceptance remain open. Earlier package
-and live evidence belongs to a superseded implementation and does not verify
-the landed code.
+Current status: **source and installed-stock checks passed for the named
+candidate; live-platform acceptance and remaining V2 surfaces are unfinished**.
+The [current verification record](../../docs/v2-verification.md) distinguishes
+minimum/release normal-turn proof from host-contract-only CI on moving main.
+These checks use isolated homes, loopback model responses and captured platform
+output, not live providers or Discord/Telegram delivery. Historical evidence
+below earlier checkpoints does not transfer to this candidate.
 
 The current source accepts Hermes 0.19.0 or newer when its checked host
 capability contract passes:
@@ -25,14 +28,19 @@ capability contract passes:
 - Hermes keeps its participant prompt, main model, memory, reactions,
   cancellation, delivery, and platform adapter, subject to Nunchi's turn and
   effect guards.
-- Generic Hermes tools are blocked on configured Nunchi rooms. Hermes 0.19.0
-  exposes its tool hook before the handler performs approval and the native
-  effect, so Nunchi cannot make the required final authority check there.
+- Ordinary Hermes tools run through the stock registry and approval flow.
+  Plugin-owned native invocation guards bind an admitted turn, reserve durable
+  at-most-once invocation claims and recheck after approval waits. Hermes stays
+  authoritative; the boundary does not claim atomic universal external-effect
+  authority. A journal `finish` records the callback result, not independent
+  confirmation that an external effect occurred.
 - Hermes auto-title is disabled on configured Nunchi rooms. Its background
   provider call and rename can otherwise run after the admitted turn ends.
-- Hermes's stock reactions run only after participant invocation begins.
-  Hermes's pre-model 👀 is blocked until the shared ACK path owns that signal
-  and its receipt. Stock typing is disabled because Hermes 0.19.0 starts a
+- Hermes's stock processing reactions run only after participant invocation
+  begins. A model ACK, when the authenticated adapter can add the configured
+  reaction, is one native reaction on the exact trigger and does not run the
+  participant. Unsupported or unknown permission widens that ACK to DEFER.
+  Stock typing is disabled because Hermes 0.19.0 starts a
   background typing loop that can outlive the admitted opportunity.
 - Discord voice input and native `/thread` are disabled on configured rooms.
   Hermes handoff cannot target a configured room. `/background`, `/goal`,
@@ -80,6 +88,14 @@ Hermes checkout or installed package. `nunchi-hermes-dashboard verify` checks
 one bridge;
 `nunchi-hermes-dashboard install` repairs it. These commands are repair and
 verification tools; normal setup does not require running them.
+
+A Hermes home or named profile may be a symlink to an existing directory,
+including on another volume. The installer resolves that operator-selected
+home once and keeps the dashboard inside it. Symlinks below the resolved home
+(`plugins`, either Nunchi bridge directory, dashboard assets, or markers) are
+still rejected, before migration or cleanup can modify their targets. Broken
+profile links and symlink cycles require repairing the link or mounting the
+target; the installer does not create a missing profile-link target.
 
 ## Configure
 
@@ -163,7 +179,12 @@ model. The dashboard defaults new rooms to
 Nunchi's lightweight operational attention route. Keep it explicit so the
 participant model cannot silently replace it.
 
-Allow only that exact route in the Hermes profile:
+The dashboard's **Save & allow attention models** action configures the
+profile's stock Hermes trust gate as part of setup: provider/model overrides
+are allowed only for the providers and models selected across its rooms.
+Saving again reconciles those allowlists (including removed routes). Runtime
+attention never grants itself permission. Managed configurations can instead
+allow only their selected routes directly in the Hermes profile:
 
 ```yaml
 plugins:
@@ -181,6 +202,29 @@ to Hermes's public plugin LLM API and verifies the returned attribution. A
 present credential is not proof that the route has usable quota. Provider
 failure is recorded and follows `attention.policy.error_action`; Nunchi never
 silently falls back to the participant model for attention.
+
+A host permission denial is recorded as `host-permission-denied`, with the
+exact setting names and dashboard repair action rather than raw host exception
+text. The dashboard shows saved-config trust readiness even if the Nunchi form
+is unchanged, so Save can repair missing permissions. This readiness check is
+not a provider/credential/quota check and does not prove the running gateway has
+reloaded. The configured error policy still applies; an error-fallback wake is
+not a successful classifier judgment.
+
+Trust setup preserves unrelated configuration values and writes a private,
+content-addressed `config.yaml.nunchi-backup-<sha256>` in that profile's Hermes
+home before changing `config.yaml`. The active file is rewritten as JSON
+(valid YAML); original YAML formatting and comments remain in the backup.
+Unsupported non-JSON YAML values fail closed rather than being discarded.
+A caught save failure restores the previous host bytes or absence; a concurrent
+external edit is not overwritten. A process crash may leave the narrow grant
+installed: repeat Save to reconcile it with the pinned room configuration.
+For manual rollback, first stop editing the profile and review any intervening
+changes, then restore the selected private backup together with the matching
+pinned room config/digest. Never upload these backups: they may contain host
+credentials. Restart remains an explicit operator action, not part of saving
+or rollback. Host trust is checked per call, so a permission change can affect
+attention immediately even before a gateway restart.
 
 An explicit environment-managed config overrides the dashboard-created
 profile config. For dashboard editing, put its digest in a private sidecar
@@ -278,11 +322,10 @@ platform-neutral. This remains a required compatibility check when adding
 support for a new Hermes release.
 
 The probe reports `complete_v2_lifecycle: false`,
-`tool_execution: blocked-configured-routes`, and
+`tool_execution: stock-hermes-with-nunchi-invocation-guards`, and
 `auto_title: disabled-configured-routes`. It also reports disabled stock
-typing, Discord voice input, and detached participant commands. These features
-must not be presented as supported Nunchi-room behavior until their gaps are
-closed and reverified.
+typing, Discord voice input, and detached participant commands. Those disabled
+features remain product gaps; restoring tools does not accept them.
 
 ## Verify
 
@@ -298,8 +341,47 @@ also reports that this Nunchi implementation writes no Hermes package files.
 Only an external before/after hash comparison proves that Hermes bytes remained
 unchanged during installation and use.
 
-Source tests and a successful probe do not prove live platform behavior. Live
-acceptance still requires attributable suppress, wake, defer, silence,
+Source tests and a successful probe do not prove live platform behavior. The
+minimum/release installed-stock matrix exercises ordinary tools and native
+approval alongside normal turns and ACK; contract CI also checks moving main.
+See [the verification record](../../docs/v2-verification.md) for exact scope.
+Live acceptance still requires attributable suppress, wake, defer, silence,
 delivery, cancellation, restart, and later-message recovery runs on each
-enabled platform. The landed implementation still needs exact
-installed-runtime review and live-platform evidence.
+enabled platform. Current-main normal turns, release and running-profile
+adoption remain separate, unproven gates.
+
+## Upgrade, disable, uninstall and rollback
+
+Use the Python environment and selected Hermes profile that own the install;
+do not apply these steps to unrelated profiles. Before a package change, stop
+the affected gateway and dashboard using their operator-managed service controls,
+and retain the exact previous wheel, pinned room config/digest, private host
+config backups and Nunchi state. Do not reset journals to make a retry succeed.
+
+- Upgrade by installing the exact reviewed wheel in that environment, then
+  restart and run `/nunchi probe` and the dashboard verification above. The
+  dashboard installer migrates only its safely attributed legacy `plugins/nunchi-v2-dashboard`
+  bridge to `plugins/nunchi-dashboard`; this is not a V1 configuration or journal
+  converter. There is no automatic V1-to-V2 state migration. Keep V1 stopped,
+  retain its state separately and configure V2 afresh; never run both in the
+  same room/session.
+- To return to stock Hermes, run `hermes plugins disable nunchi` in each affected
+  profile and restart its gateway. Process-local guards are not removed from
+  an already-running worker just by editing saved configuration. If setup also
+  enabled Nunchi in the machine dashboard profile, disable it there separately
+  when no other profile needs it, and restart the dashboard.
+- To remove the Python package after disabling/stopping those processes, use
+  `python -m pip uninstall nunchi` in the same environment. This does not remove
+  the user-data dashboard bridges, pinned room configs, journals, host trust
+  settings or private backups. The `nunchi-hermes-dashboard` command currently
+  has only `install` and `verify`, not an uninstall operation. Retain these
+  files for audit; complete verified user-data cleanup is a missing mechanism,
+  not something package uninstall claims to do. The shared `nunchi uninstall`
+  command does not uninstall a Hermes profile.
+- Roll back a package by reinstalling the retained exact predecessor wheel
+  while affected processes are stopped. Restore its matching pinned config
+  and digest only after reviewing intervening edits; host attention-trust
+  rollback uses the private backup procedure above. Then restart and verify
+  the probe/dashboard. Do not assume arbitrary older wheels can consume newer
+  state. When no compatible predecessor is verified, disable Nunchi and run
+  stock Hermes instead. Nothing here rolls back already-issued native effects.

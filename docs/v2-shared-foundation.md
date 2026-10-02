@@ -30,10 +30,10 @@ Codex and Claude Code now supply only their isolated native model invocation,
 session continuity, cancellation, and result extraction. Reference platform
 transports supply authenticated capability facts and native effects. They do
 not own a prompt, parser, expansion policy, social decision, or participant
-turn protocol. Hermes remains a native-host integration: it consumes the
-shared attention and opportunity interfaces around its stock participant and
-must widen unsupported ACK to DEFER until it exposes the required native
-capability and effect boundary.
+turn protocol. Hermes consumes the same attention decision. When its
+authenticated adapter attests the configured reaction, it adds that one
+reaction and does not run the participant. Unsupported or unknown permission
+still widens ACK to DEFER.
 
 ## Core outcomes
 
@@ -47,7 +47,9 @@ capability and effect boundary.
 
 An ACK decision records its reaction, trusted policy provenance, and native
 permission revision. Immediately before dispatch the host rechecks those
-facts. It durably reserves an ACK key bound to participant, actor, platform,
+facts. Hermes consumes the same check again at native entry, before the
+network await, and does not hold the scheduler lock across that await. It
+durably reserves an ACK key bound to participant, actor, platform,
 room, continuity scope, target message, reaction, and operation. Request,
 generation, lifecycle, deadline, and permission revision remain in the durable
 reservation audit. A restart, replay, concurrent opportunity, cancellation, or
@@ -125,7 +127,7 @@ and an explicit state-purge boundary.
 | Telegram | shared protocol; unsupported ACK widens to DEFER | native ACK support only if a future verified adapter supplies it |
 | Codex | shared protocol and operator schema | platform-specific live/release gates outside this foundation |
 | Claude Code | shared protocol and operator schema | issue #39 live and supported-surface proof |
-| Hermes | shared attention/opportunity seam; unsupported ACK widens to DEFER | issues #38, #42, and #44 platform closure |
+| Hermes | shared attention ACK when the authenticated adapter attests the configured reaction; otherwise ACK widens to DEFER | issues #38, #42, and #44 platform closure |
 
 Issue #41 remains the combined acceptance gate. Security assurance, release
 work, final acceptance, and platform-specific live proof remain separate. This

@@ -28,11 +28,20 @@ lands:
 | Surface | Status | What is outstanding |
 |---|---|---|
 | Codex | Successor consumer implemented, unverified | platform-specific validation remains outside the foundation PR |
-| Hermes | Landed, unverified | consume ACK widening and shared operator interfaces; source-boundary closure (#42), supported-surface parity (#44), and installed/live acceptance (#38) |
+| Hermes | Portable PR83 candidate has source and isolated installed-stock proof; not live-verified or released | live acceptance (#38), remaining source boundaries (#42), supported-surface parity (#44), current-main normal turns and adoption; exact successor review/CI/landing still required |
 | Claude Code | Successor consumer implemented, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
 
 Neither unverified platform may be described as done, live, or parity-ready
-until its open gates pass.
+until its open gates pass. For Hermes, the current
+[verification record](v2-verification.md#current-hermes-candidate-portable-plugin-owned-tools-and-ack)
+separates predecessor proof and this successor's exact reruns: minimum/release
+stock normal turns, tools/approvals, ACK and attention setup have installed
+proof, while moving-main CI is contract-only. Blanket tool denial is no longer
+current behavior. Host-owned native authority is retained; callback journal
+completion is not proof of an external effect. Missing surfaces and live
+acceptance remain required, not narrowed out. Complete Hermes user-data
+uninstall and automatic V1 state migration are still missing mechanisms; the
+operator guide names retained files and the stop/disable/rollback boundary.
 
 Use five plain status terms:
 

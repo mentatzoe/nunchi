@@ -154,6 +154,7 @@ def _write_config(root: Path) -> tuple[Path, Path, dict, dict[str, str]]:
     digest_path.write_text(f"{digest}\n", encoding="ascii")
     digest_path.chmod(0o600)
     environ = {
+        "HERMES_HOME": str(root),
         "NUNCHI_HERMES_V2_CONFIG": str(config_path),
         "NUNCHI_HERMES_V2_CONFIG_SHA256_FILE": str(digest_path),
     }
@@ -275,6 +276,13 @@ class HermesDashboardConfigTests(unittest.TestCase):
                 updated.sha256,
                 digest_path.read_text(encoding="ascii").strip(),
             )
+            restarted = hermes_v2.resolve_config_source(
+                "fiction-writer",
+                environ=environment,
+            )
+            self.assertEqual(config_path, restarted.path)
+            self.assertEqual(digest_path, restarted.digest_path)
+            self.assertEqual(updated.sha256, restarted.expected_sha256)
             self.assertFalse(
                 default_config_paths(
                     "fiction-writer",
@@ -768,6 +776,13 @@ class HermesDashboardConfigTests(unittest.TestCase):
             home.mkdir(mode=0o700)
             with (
                 patch.dict(os.environ, {}, clear=True),
+                # An installed Hermes would resolve the operator's live
+                # profile and write that profile's config. Keep this test on
+                # the shared default_hermes_home fallback instead.
+                patch.dict(
+                    sys.modules,
+                    {"hermes_cli": None, "hermes_cli.profiles": None},
+                ),
                 patch(
                     "nunchi.integrations.hermes_dashboard_store."
                     "default_hermes_home",
@@ -788,6 +803,7 @@ class HermesDashboardConfigTests(unittest.TestCase):
             self.assertEqual(paths.config, source.path)
             self.assertEqual(paths.digest, source.digest_path)
             self.assertEqual(after.sha256, source.expected_sha256)
+            self.assertTrue(source.path.is_relative_to(home.resolve()))
 
     def test_active_profile_resolution_fails_closed(self):
         package = types.ModuleType("hermes_cli")
@@ -1296,6 +1312,7 @@ class HermesDashboardConfigTests(unittest.TestCase):
             config_path, _, document, sidecar_environ = _write_config(root)
             digest = hashlib.sha256(config_path.read_bytes()).hexdigest()
             environ = {
+                "HERMES_HOME": str(root),
                 "NUNCHI_HERMES_V2_CONFIG": str(config_path),
                 "NUNCHI_HERMES_V2_CONFIG_SHA256": digest,
             }

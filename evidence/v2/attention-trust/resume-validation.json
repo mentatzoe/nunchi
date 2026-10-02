@@ -1,0 +1,38 @@
+{
+  "timestamp": "2026-10-02T14:28:00.294192+00:00",
+  "wheel_sha256": "3c135c771bd9272d0134035ed62d3cb12f8303f5ec66ac9ba571b2080b7b867a",
+  "wheel_source_mismatches": [],
+  "runs": [
+    {
+      "label": "focused-resume",
+      "command": [
+        "/usr/local/bin/python3",
+        "-m",
+        "unittest",
+        "-v",
+        "tests.v2.test_hermes_attention_trust",
+        "tests.v2.test_hermes_dashboard"
+      ],
+      "exit_code": 0
+    },
+    {
+      "label": "canonical-resume",
+      "command": [
+        "/usr/local/bin/python3",
+        "-m",
+        "unittest"
+      ],
+      "exit_code": 0
+    },
+    {
+      "label": "eval-list-resume",
+      "command": [
+        "/usr/local/bin/python3",
+        "-m",
+        "evals.verdict_suite.runner",
+        "--list"
+      ],
+      "exit_code": 0
+    }
+  ]
+}

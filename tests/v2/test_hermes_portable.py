@@ -2453,6 +2453,56 @@ class HermesPortableTests(unittest.TestCase):
             asyncio.run(adapter.handle_message(FakeEvent(text="unauthorized")))
             self.assertEqual(["/stop", "unauthorized"], adapter.stock)
 
+    def test_native_approval_commands_bypass_attention_without_cancelling_turn(self):
+        class BasePlatformAdapter(FakeAdapter):
+            def __init__(self):
+                super().__init__()
+                self.gateway_runner = types.SimpleNamespace(
+                    _is_user_authorized=lambda source: True,
+                )
+                self.stock = []
+
+            async def handle_message(self, event):
+                authorization = hermes_v2._AUTHORIZED_STOCK_CONTROL.get()
+                self.stock.append((event, authorization))
+                self.assert_authorized = authorization is not None and (
+                    authorization.allows_current_task(
+                        command=event.get_command(), runtime=runtime, event=event,
+                    )
+                )
+
+        base = types.ModuleType("gateway.platforms.base")
+        base.BasePlatformAdapter = BasePlatformAdapter
+        modules = {
+            "gateway": types.ModuleType("gateway"),
+            "gateway.platforms": types.ModuleType("gateway.platforms"),
+            "gateway.platforms.base": base,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            llm = FakeLlm([judgment("WAKE", "discord:message:500")])
+            plugin, _ = self.plugin(Path(temporary), llm)
+            runtime = plugin._rooms[("discord", "42")]
+            event = FakeEvent()
+            asyncio.run(plugin.gate_ingress(
+                adapter=FakeAdapter(), event=event, stock_handle=mock.AsyncMock(),
+            ))
+            trace = runtime.stock_trace(event)
+            self.assertIsNotNone(trace)
+            with mock.patch.dict(sys.modules, modules):
+                hermes_v2._install_claimed_ingress_shim(plugin)
+            adapter = BasePlatformAdapter()
+            for command in ("approve", "deny"):
+                with self.subTest(command=command):
+                    control = FakeEvent(text=f"/{command}", message_id=command)
+                    asyncio.run(adapter.handle_message(control))
+                    self.assertTrue(adapter.stock, "approval control never reached Hermes")
+                    self.assertIs(adapter.stock[-1][0], control)
+                    self.assertTrue(adapter.assert_authorized)
+                    self.assertFalse(adapter.stock[-1][1].parent_active)
+                    self.assertFalse(trace.token.cancel_event.is_set())
+                    self.assertTrue(runtime.scheduler.is_current(trace.token))
+                    self.assertEqual(1, len(llm.calls))
+
     def test_configured_internal_ingress_fails_closed_and_records_gap(self):
         class Runner:
             def _is_user_authorized(self, source):
@@ -3466,9 +3516,11 @@ class HermesPortableTests(unittest.TestCase):
             )
 
     def test_absolute_deadline_blocks_cancellation_ignoring_late_draft(self):
+        clock = [1000.0]
+
         class SlowLlm(FakeLlm):
             def complete_structured(self, **kwargs):
-                time.sleep(0.03)
+                clock[0] += 0.03
                 return super().complete_structured(**kwargs)
 
         class Runner:
@@ -3491,6 +3543,7 @@ class HermesPortableTests(unittest.TestCase):
             async def _process_message_background(self, event, session_key):
                 del event, session_key
                 hermes_v2._ACTIVE_STOCK_TURN.get().participant_invoked = True
+                clock[0] += 0.04
                 try:
                     await asyncio.sleep(0.04)
                 except asyncio.CancelledError:
@@ -3538,14 +3591,77 @@ class HermesPortableTests(unittest.TestCase):
                     pass
                 await asyncio.sleep(0.08)
 
-            asyncio.run(run())
+            # Only the plugin's deadline clock is controlled. asyncio's clock
+            # remains real, and the child really receives/ignores cancellation.
+            # Journal fsync latency must not expire the test before that child
+            # starts (which is safe product behaviour, but misses this probe).
+            deadline_clock = mock.Mock(wraps=time)
+            deadline_clock.monotonic.side_effect = lambda: clock[0]
+            with (
+                mock.patch.object(hermes_v2, "time", deadline_clock),
+                mock.patch("nunchi.attention.time", deadline_clock),
+            ):
+                asyncio.run(run())
             self.assertTrue(adapter.late_effect_blocked)
             self.assertEqual([], adapter.native_effects)
             records = plugin._rooms[("discord", "42")].receipts.all_records()
             self.assertEqual("unknown", records[-2]["body"]["outcome"])
             self.assertEqual("failed", records[-1]["body"]["delivery"])
 
-    def test_tool_execution_boundary_fails_closed_before_dispatch(self):
+    def test_effect_guards_cover_inherited_mixins_and_restore_exact_owners(self):
+        native = []
+
+        class MediaMixin:
+            async def send_document(self, chat_id, file_path):
+                return await self._send_file_attachment(chat_id, file_path)
+
+            async def _send_file_attachment(self, chat_id, file_path):
+                native.append((chat_id, file_path))
+                return FakeSendResult(True, message_id="attachment")
+
+        class Adapter(MediaMixin, FakeAdapter):
+            pass
+
+        originals = dict(vars(MediaMixin))
+        patches = []
+        transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+        try:
+            hermes_v2._wrap_stock_effect_methods(Adapter)
+            self.assertTrue(getattr(
+                Adapter.send_document, "__nunchi_stock_effect_boundary__", False,
+            ), "inherited platform sends must not bypass effect guards")
+            with tempfile.TemporaryDirectory() as temporary:
+                plugin, _ = self.plugin(
+                    Path(temporary), FakeLlm([judgment("WAKE", "discord:message:500")]),
+                )
+                adapter = Adapter()
+                event = FakeEvent()
+                asyncio.run(plugin.gate_ingress(
+                    adapter=adapter, event=event, stock_handle=mock.AsyncMock(),
+                ))
+                runtime = plugin._rooms[("discord", "42")]
+                trace = runtime.stock_trace(event)
+                trace.participant_invoked = True
+                runtime.cancel()
+                active = hermes_v2._ACTIVE_STOCK_TURN.set(trace)
+                try:
+                    with self.assertRaises(hermes_v2._StockEffectBlocked):
+                        asyncio.run(adapter.send_document("42", "file"))
+                    with self.assertRaises(hermes_v2._StockEffectBlocked):
+                        asyncio.run(adapter._send_file_attachment("42", "file"))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(active)
+                self.assertEqual([], native)
+                # No active/configured route: ordinary inherited dispatch works.
+                asyncio.run(adapter.send_document("77", "stock"))
+                self.assertEqual([("77", "stock")], native)
+        finally:
+            hermes_v2._PATCH_TRANSACTION.reset(transaction)
+            hermes_v2._rollback_shim_attributes(patches)
+        self.assertEqual(originals, dict(vars(MediaMixin)))
+        self.assertNotIn("send_document", vars(Adapter))
+
+    def test_tool_execution_boundary_rejects_missing_native_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             plugin, _ = self.plugin(
                 Path(temporary),
@@ -3573,7 +3689,7 @@ class HermesPortableTests(unittest.TestCase):
             hermes_cli.middleware = middleware
             try:
                 hook_result = plugin.pre_tool_call(tool_name="terminal")
-                self.assertEqual("block", hook_result["action"])
+                self.assertIsNone(hook_result)
                 with mock.patch.dict(
                     sys.modules,
                     {
@@ -3589,7 +3705,7 @@ class HermesPortableTests(unittest.TestCase):
                 )
             finally:
                 hermes_v2._ACTIVE_STOCK_TURN.reset(context_token)
-            self.assertIn("no final-effect hook", json.loads(result)["error"])
+            self.assertIn("could not be bound", json.loads(result)["error"])
             records = runtime.receipts.all_records()
             self.assertEqual("attention", records[-1]["stage"])
 
@@ -4033,6 +4149,69 @@ def is_partial_silence_marker(text):
             finally:
                 del original_response.__nunchi_stock_silence__
 
+    def test_stock_stream_silence_filter_checks_current_should_edit_split(self):
+        response_filters = types.ModuleType("gateway.response_filters")
+        stream_consumer = types.ModuleType("gateway.stream_consumer")
+        exec('''
+def is_intentional_silence_response(response):
+    return response == "NO_REPLY"
+def is_intentional_silence_agent_result(agent_result, response):
+    return is_intentional_silence_response(response)
+def is_partial_silence_marker(text):
+    return text in {"N", "NO", "NO_REPLY"}
+''', response_filters.__dict__)
+        stream_consumer._is_intentional_silence_response = (
+            response_filters.is_intentional_silence_response
+        )
+        stream_consumer._is_partial_silence_marker = (
+            response_filters.is_partial_silence_marker
+        )
+        exec('''
+class GatewayStreamConsumer:
+    def _should_edit(self, tick):
+        return not _is_partial_silence_marker(tick)
+    async def run(self):
+        return (self._should_edit("<|e"),
+                _is_intentional_silence_response("<|eos|>"))
+''', stream_consumer.__dict__)
+        gateway = types.ModuleType("gateway")
+        gateway.response_filters = response_filters
+        gateway.stream_consumer = stream_consumer
+        modules = {
+            "gateway": gateway, "gateway.response_filters": response_filters,
+            "gateway.stream_consumer": stream_consumer,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_silence_filter_shim(plugin)
+                consumer = stream_consumer.GatewayStreamConsumer()
+                self.assertEqual((True, False), asyncio.run(consumer.run()))
+                active = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                try:
+                    self.assertEqual((False, True), asyncio.run(consumer.run()))
+                finally:
+                    hermes_v2._ACTIVE_STOCK_TURN.reset(active)
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+                hermes_v2._rollback_shim_attributes(patches)
+            # A helper with the same names but a different alias binding is not
+            # the known host shape: patching this module would miss its sends.
+            foreign = dict(stream_consumer.__dict__)
+            foreign["_is_partial_silence_marker"] = lambda text: False
+            exec('''
+def should_edit(self, tick):
+    return not _is_partial_silence_marker(tick)
+''', foreign)
+            stream_consumer.GatewayStreamConsumer._should_edit = foreign["should_edit"]
+            with mock.patch.dict(sys.modules, modules), self.assertRaisesRegex(
+                ValidationError, "streaming silence call sites",
+            ):
+                hermes_v2._install_stock_silence_filter_shim(plugin)
+
     def test_stock_stream_silence_filter_fails_closed_on_moved_calls(self):
         response_filters = types.ModuleType("gateway.response_filters")
         stream_consumer = types.ModuleType("gateway.stream_consumer")
@@ -4149,6 +4328,67 @@ class GatewayRunner:
             self.assertEqual(1, len(patches))
             hermes_v2._rollback_shim_attributes(patches)
             self.assertIs(original_active, StreamingTTSConsumer.active)
+
+    def test_stock_streaming_tts_guard_checks_current_start_helper(self):
+        module = types.ModuleType("gateway.streaming_tts_consumer")
+        native_calls = []
+
+        class StreamingTTSConsumer:
+            @property
+            def active(self):
+                return True
+
+            def start(self):
+                native_calls.append("start")
+
+        module.StreamingTTSConsumer = StreamingTTSConsumer
+        run_module = types.ModuleType("gateway.run")
+        exec(
+            """
+class GatewayRunner:
+    def _run_agent_start_streaming_tts(
+        self, source, message_type, _status_thread_metadata, streaming_tts_consumer_holder
+    ):
+        from gateway.streaming_tts_consumer import StreamingTTSConsumer
+        consumer = StreamingTTSConsumer()
+        if consumer.active:
+            streaming_tts_consumer_holder[0] = consumer
+            consumer.start()
+
+    async def _run_agent_inner(self, message, source, message_type=None):
+        self._run_agent_start_streaming_tts(source, message_type, None, [None])
+""",
+            run_module.__dict__,
+        )
+        modules = {
+            "gateway.run": run_module,
+            "gateway.streaming_tts_consumer": module,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin, _ = self.plugin(Path(temporary), FakeLlm([]))
+            patches = []
+            transaction = hermes_v2._PATCH_TRANSACTION.set(patches)
+            try:
+                with mock.patch.dict(sys.modules, modules):
+                    hermes_v2._install_stock_streaming_tts_guard(plugin)
+                    runner = run_module.GatewayRunner()
+                    asyncio.run(runner._run_agent_inner("hello", object(), "voice"))
+                    self.assertEqual(["start"], native_calls)
+                    token = hermes_v2._ACTIVE_STOCK_TURN.set(object())
+                    try:
+                        asyncio.run(runner._run_agent_inner("hello", object(), "voice"))
+                    finally:
+                        hermes_v2._ACTIVE_STOCK_TURN.reset(token)
+                    self.assertEqual(["start"], native_calls)
+                    original = runner._run_agent_start_streaming_tts
+                    run_module.GatewayRunner._run_agent_start_streaming_tts = lambda self: None
+                    with self.assertRaises(ValidationError):
+                        hermes_v2._install_stock_streaming_tts_guard(plugin)
+                    run_module.GatewayRunner._run_agent_start_streaming_tts = original.__func__
+            finally:
+                hermes_v2._PATCH_TRANSACTION.reset(transaction)
+                hermes_v2._rollback_shim_attributes(patches)
+            self.assertTrue(StreamingTTSConsumer().active)
 
     def test_stock_streaming_tts_guard_is_noop_for_hermes_019_shape(self):
         run_module = types.ModuleType("gateway.run")
@@ -4638,6 +4878,7 @@ class GatewayRunner:
                         deliverable_platforms={"discord"},
                     )
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_register_uses_process_local_gate_and_post_llm_observer(self):
         class Runner:
             def _is_user_authorized(self, source):
@@ -4748,7 +4989,7 @@ class GatewayRunner:
             )
             self.assertFalse(plugin.probe()["complete_v2_lifecycle"])
             self.assertEqual(
-                "blocked-configured-routes",
+                "stock-hermes-with-nunchi-invocation-guards",
                 plugin.probe()["tool_execution"],
             )
 
@@ -4910,6 +5151,17 @@ class GatewayRunner:
             with self.subTest(version=version):
                 self.assertTrue(hermes_v2._meets_minimum_hermes_version(version))
 
+    def test_activation_uses_verified_source_version_instead_of_placeholder(self):
+        with (
+            mock.patch("importlib.metadata.version", return_value="0.0.0"),
+            mock.patch(
+                "nunchi.integrations.hermes_version.hermes_version",
+                return_value="0.21.5+17.gabcdef1",
+            ) as resolver,
+        ):
+            self.assertEqual("0.21.5+17.gabcdef1", hermes_v2._hermes_version())
+            resolver.assert_called_once_with()
+
     def test_compatible_future_release_uses_checked_host_contract(self):
         with tempfile.TemporaryDirectory() as temporary:
             config, ctx = room_config(Path(temporary), llm=FakeLlm([]))
@@ -4943,6 +5195,7 @@ class GatewayRunner:
             self.assertEqual("checked", status["host_contract_status"])
             self.assertNotIn("verified_hermes_releases", status)
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_future_release_rolls_back_process_patches_when_contract_fails(self):
         class Target:
             value = "stock"
@@ -5043,6 +5296,7 @@ class GatewayRunner:
             self.assertEqual({}, ctx.hooks)
             self.assertEqual({}, ctx.commands)
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_register_rolls_back_patches_and_registries_on_hook_failure(self):
         class Target:
             value = "stock"

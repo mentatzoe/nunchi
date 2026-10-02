@@ -146,6 +146,32 @@ class ConversationOpportunityScheduler:
             self._dispatch_committed = True
             return True, dispatcher()
 
+    def authorize_effect_commit(
+        self,
+        token: OpportunityToken,
+        *,
+        deadline: float,
+    ) -> bool:
+        """Accept one effect only while this token is still current.
+
+        The lock covers the current-token check and the one-shot commit mark.
+        It must not be held across a network await. Cancellation that acquires
+        the lock first prevents the commit. A commit that acquires it first
+        cannot be relabelled by a later cancellation.
+        """
+
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+            return False
+        with self._lock:
+            if (
+                not self._matches(token)
+                or self._dispatch_committed
+                or time.monotonic() >= deadline
+            ):
+                return False
+            self._dispatch_committed = True
+            return True
+
     @property
     def active(self) -> bool:
         with self._lock:
@@ -202,6 +228,7 @@ class PrivilegedCoordinator(Protocol):
         proposal: Mapping[str, Any],
         wake: Mapping[str, Any],
         cancel: threading.Event,
+        deadline: float | None = None,
     ) -> TransportResult:
         """Authorize and optionally dispatch one exact privileged proposal."""
 
@@ -858,6 +885,7 @@ class ParticipantTurnHost:
                                 proposal=action,
                                 wake=wake,
                                 cancel=token.cancel_event,
+                                deadline=effective_deadline,
                             )
                     else:
                         result = self.transport.dispatch(action=action, wake=wake)
@@ -885,6 +913,15 @@ class ParticipantTurnHost:
                     )
                 except queue.Empty:
                     continue
+                # Queue.get's timeout does not bound when this consumer is
+                # scheduled again. Never accept a result observed too late.
+                if time.monotonic() >= effective_deadline:
+                    token.cancel_event.set()
+                    self.scheduler.cancel()
+                    return TransportResult(
+                        "unknown",
+                        "host total deadline exceeded during dispatch",
+                    )
                 if status == "deadline":
                     self.scheduler.cancel()
                     return value

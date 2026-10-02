@@ -24,9 +24,12 @@ passes, for configured Discord or Telegram rooms.
 Other Hermes platforms remain outside Nunchi and keep stock behavior; attempts
 to add them to a Nunchi config are rejected.
 
-On configured Hermes rooms, generic Hermes tools are blocked because Hermes
-0.19.0 has no final effect hook that can enforce Nunchi's authority checks.
-Hermes auto-title is also disabled there because its background work can
+On configured Hermes rooms, ordinary tools run through the stock Hermes
+registry and native approval flow, with plugin-owned guards at native invocation.
+Hermes remains authoritative for tools and approvals. This boundary does not
+claim atomic, universal authority over external effects: a journal `finish`
+records the callback result, not independent confirmation of the external effect.
+Hermes auto-title is disabled there because its background work can
 outlive the turn. Native typing, voice input, `/thread`, detached participant
 commands, and handoff into configured rooms are also disabled where Hermes
 0.19.0 cannot keep them inside the admitted opportunity. Reactions after the
@@ -34,9 +37,14 @@ participant starts remain guarded; Hermes's pre-model 👀 is blocked until the
 shared ACK path owns that signal and its receipt. These are explicit product
 gaps, not supported behavior.
 
-Hermes source and focused tests exist, but its installed-runtime and live
-platform gates remain open. Earlier Hermes evidence belongs to a superseded
-implementation and is not current proof. Hermes gaps are tracked in
+Hermes source and isolated installed-stock tests on the minimum and release
+hosts now cover normal turns, ordinary tools, native approval, ACK, attention
+setup, startup forwarding and compatibility contracts. See the
+[current verification record](docs/v2-verification.md) for exact artifacts and
+proof boundaries. Moving-main CI currently proves host contracts, not normal
+turns. Live platforms, current-main normal turns, release and running-profile
+adoption remain unverified. Historical Hermes evidence is not current proof.
+Remaining Hermes gaps are tracked in
 [issues #38](https://github.com/mentatzoe/nunchi/issues/38) and
 [#42](https://github.com/mentatzoe/nunchi/issues/42), with supported-surface
 parity tracked in [#44](https://github.com/mentatzoe/nunchi/issues/44).

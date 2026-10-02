@@ -899,10 +899,20 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("unknown", stream[-1]["body"]["outcome"])
 
     def test_host_total_deadline_bounds_native_transport_wait(self):
+        clock = mock.Mock(wraps=time)
+        clock.monotonic.return_value = 1000.0
+        release = threading.Event()
+        finished = threading.Event()
+        workers = []
+
         class SlowTransport(RecordingTransport):
             def dispatch(self, *, action, wake):
+                workers.append(threading.current_thread())
                 self.calls.append((deepcopy(action), deepcopy(wake)))
-                time.sleep(0.15)
+                # Spend the unchanged budget only once native dispatch started.
+                clock.monotonic.return_value = 1000.05
+                release.wait(2)  # Cleanup watchdog, not a latency assertion.
+                finished.set()
                 return TransportResult("sent", "late-native")
 
         transport = SlowTransport()
@@ -916,22 +926,32 @@ class AttentionAndHostTests(unittest.TestCase):
             participant_timeout_seconds=0.05,
             transport=transport,
         )
-        started = time.monotonic()
-        outcome = pipeline.handle_delivery(
-            delivery_id="d1",
-            event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
-        elapsed = time.monotonic() - started
-        result = outcome.opportunities[0].transport
-        self.assertIsNotNone(result)
-        self.assertEqual("unknown", result.delivery)
-        self.assertLess(elapsed, 0.13)
-        self.assertFalse(pipeline.scheduler.active)
-        stream = receipts.records(outcome.opportunities[0].request_id)
-        self.assertEqual("unknown", stream[-1]["body"]["delivery"])
-        time.sleep(0.16)
-        self.assertFalse(pipeline.scheduler.active)
+        with (
+            mock.patch("nunchi.pipeline.time", clock),
+            mock.patch("nunchi.participant.time", clock),
+            mock.patch("nunchi.attention.time", clock),
+        ):
+            try:
+                outcome = pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                result = outcome.opportunities[0].transport
+                self.assertIsNotNone(result)
+                self.assertEqual("unknown", result.delivery)
+                self.assertFalse(finished.is_set())
+                self.assertEqual(1, len(transport.calls))
+                self.assertFalse(pipeline.scheduler.active)
+                stream = receipts.records(outcome.opportunities[0].request_id)
+                self.assertEqual("unknown", stream[-1]["body"]["delivery"])
+            finally:
+                release.set()
+                for worker in workers:
+                    worker.join(2)
+                    self.assertFalse(worker.is_alive())
+            self.assertEqual(stream, receipts.records(outcome.opportunities[0].request_id))
+            self.assertFalse(pipeline.scheduler.active)
 
     def test_receipt_persistence_crossing_deadline_never_claims_sent_or_dispatches(self):
         class DelayedHostReceiptJournal(ReceiptJournal):
@@ -971,44 +991,75 @@ class AttentionAndHostTests(unittest.TestCase):
         self.assertEqual("failed", stream[3]["body"]["delivery"])
 
     def test_host_total_deadline_spans_attention_participant_and_transport(self):
+        clock = mock.Mock(wraps=time)
+        clock.monotonic.return_value = 1000.0
+        release = threading.Event()
+        finished = threading.Event()
+        workers = []
+        phases = []
+        participant_cancel = []
+
         class PhasedModel(FixtureModel):
             def judge(self, **kwargs):
-                time.sleep(0.04)
+                phases.append("attention")
+                clock.monotonic.return_value = 1000.04
                 return super().judge(**kwargs)
 
         class PhasedTransport(RecordingTransport):
             def dispatch(self, *, action, wake):
+                workers.append(threading.current_thread())
                 self.calls.append((deepcopy(action), deepcopy(wake)))
-                time.sleep(0.04)
+                phases.append("transport")
+                # After the original .10 deadline, before a restarted .14 one.
+                clock.monotonic.return_value = 1000.12
+                release.wait(2)  # Cleanup watchdog, not a latency assertion.
+                finished.set()
                 return TransportResult("sent", "late-native")
 
-        def participant(**_):
-            time.sleep(0.04)
+        def participant(**kwargs):
+            phases.append("participant")
+            participant_cancel.append(kwargs["cancel"])
+            clock.monotonic.return_value = 1000.08
             return {
                 "kind": "message",
                 "origin_event_id": "e1",
                 "text": "hello",
             }
 
-        pipeline, _, _, _ = foundation(
+        transport = PhasedTransport()
+        pipeline, _, _, receipts = foundation(
             model=PhasedModel(),
             participant=participant,
             policy=AttentionPolicy(timeout_seconds=0.1),
             participant_timeout_seconds=0.1,
-            transport=PhasedTransport(),
+            transport=transport,
         )
-        started = time.monotonic()
-        outcome = pipeline.handle_delivery(
-            delivery_id="d1",
-            event=message("e1"),
-            actors={"human:zoe": {"kind": "human"}},
-        )
-        elapsed = time.monotonic() - started
-        result = outcome.opportunities[0].transport
-        self.assertIsNotNone(result)
-        self.assertNotEqual("sent", result.delivery)
-        self.assertLess(elapsed, 0.18)
-        self.assertFalse(pipeline.scheduler.active)
+        with (
+            mock.patch("nunchi.pipeline.time", clock),
+            mock.patch("nunchi.participant.time", clock),
+            mock.patch("nunchi.attention.time", clock),
+        ):
+            try:
+                outcome = pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                result = outcome.opportunities[0].transport
+                self.assertIsNotNone(result)
+                self.assertEqual("unknown", result.delivery)
+                self.assertEqual(["attention", "participant", "transport"], phases)
+                self.assertEqual(1, len(transport.calls))
+                self.assertTrue(participant_cancel[0].is_set())
+                self.assertFalse(pipeline.scheduler.active)
+                self.assertFalse(finished.is_set())
+                stream = receipts.records(outcome.opportunities[0].request_id)
+            finally:
+                release.set()
+                for worker in workers:
+                    worker.join(2)
+                    self.assertFalse(worker.is_alive())
+            self.assertEqual(stream, receipts.records(outcome.opportunities[0].request_id))
 
     def test_async_live_ingress_is_active_plus_newest_not_fifo(self):
         entered = threading.Event()

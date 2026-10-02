@@ -8,7 +8,7 @@ channel-directory discovery. It has no FastAPI or Hermes package dependency.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -24,6 +24,7 @@ from typing import Any
 
 from nunchi.errors import ValidationError
 from nunchi.integrations.hermes_dashboard_install import default_hermes_home
+from nunchi.integrations.hermes_attention_trust import attention_trust_transaction
 from nunchi.integrations.hermes_v2 import (
     HermesConfigSource,
     HermesPluginConfig,
@@ -952,6 +953,11 @@ def write_config_document(
 ) -> DashboardConfigSnapshot:
     """Validate and commit a dashboard-managed V2 config."""
 
+    if environ is not None and not environ.get("HERMES_HOME", "").strip():
+        raise DashboardConfigError(
+            "explicit dashboard save environment requires HERMES_HOME; "
+            "refusing to select the ambient Hermes profile"
+        )
     if expected_revision is not None and expected_sha256 is not None:
         if expected_revision != expected_sha256:
             raise DashboardConfigError(
@@ -996,7 +1002,7 @@ def write_config_document(
             write_directory,
             "dashboard-managed config directory",
         )
-        with _cross_process_config_lock(write_directory):
+        with _cross_process_config_lock(write_directory), ExitStack() as transaction:
             current = read_dashboard_snapshot(
                 profile,
                 environ=environment,
@@ -1025,10 +1031,19 @@ def write_config_document(
 
             config_staged = _write_staged(config_path, encoded)
             try:
-                load_pinned_config(
+                validated = load_pinned_config(
                     config_staged,
                     expected_sha256=new_sha256,
                     hermes_profile=profile,
+                )
+                transaction.enter_context(
+                    attention_trust_transaction(
+                        _hermes_home(environment), validated,
+                        lock_held=(
+                            _hermes_home(environment).resolve()
+                            == write_directory.resolve()
+                        ),
+                    )
                 )
                 if current.bootstrap_required:
                     digest_staged = _write_staged(
