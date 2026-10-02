@@ -12,7 +12,7 @@ import asyncio
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 import hashlib
 import inspect
@@ -2761,26 +2761,265 @@ class _DiscordAdmissionAdapter:
         return True
 
 
-def _active_discord_adapter_class() -> type[Any]:
-    """Return the Discord adapter class registered in this Hermes process."""
+def _shipped_discord_adapter_class() -> type[Any]:
+    """Import the Discord adapter Hermes ships, without consulting the registry."""
 
-    try:
-        from gateway.platform_registry import platform_registry
-
-        entry = platform_registry.get("discord")
-    except (ImportError, ModuleNotFoundError):
-        entry = None
-    if entry is not None:
-        factory = getattr(entry, "adapter_factory", None)
-        module = inspect.getmodule(factory) if callable(factory) else None
-        adapter_class = getattr(module, "DiscordAdapter", None)
-        if isinstance(adapter_class, type):
-            return adapter_class
     try:
         from plugins.platforms.discord.adapter import DiscordAdapter
     except (ImportError, ModuleNotFoundError) as exc:
         raise _shape_error("Discord adapter") from exc
+    if not isinstance(DiscordAdapter, type):
+        raise _shape_error("Discord adapter")
     return DiscordAdapter
+
+
+def _peek_discord_registration(registry: Any) -> Any:
+    """Return a concrete Discord entry, or None if only a deferred loader exists.
+
+    ``platform_registry.get`` runs that loader. Under plugin discovery the
+    loader re-enters ``PluginManager._discovery_lock``, so this peek must not
+    call it. A deferred loader in the active scope is the registration that
+    would have been materialized; do not fall through to another scope.
+    """
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        scopes: list[Any] = []
+        current_scope = getattr(registry, "current_scope_key", None)
+        if callable(current_scope):
+            try:
+                scopes.append(current_scope())
+            except Exception:
+                pass
+        scopes.append(None)
+        seen: set[Any] = set()
+        for scope in scopes:
+            if scope in seen:
+                continue
+            seen.add(scope)
+            try:
+                state = snapshot("discord", scope=scope)
+            except TypeError:
+                state = snapshot("discord")
+            if isinstance(state, tuple) and state:
+                entry = state[0]
+                loader = state[1] if len(state) > 1 else None
+            else:
+                entry, loader = state, None
+            if entry is not None:
+                return entry
+            if loader is not None:
+                return None
+        return None
+
+    entries = getattr(registry, "_entries", None)
+    if isinstance(entries, Mapping) and entries.get("discord") is not None:
+        return entries.get("discord")
+    deferred = getattr(registry, "_deferred", None)
+    if isinstance(deferred, Mapping) and "discord" in deferred:
+        return None
+    return None
+
+
+_SHIPPED_HOST_DISCORD = re.compile(
+    r"^hermes_plugins\.(?:discord_platform|platforms__discord)"
+    r"(?:__home_[0-9a-fA-F]+)?\.adapter$"
+)
+_NO_DISCORD_LOADER = object()
+
+
+def _is_shipped_discord_module(name: str | None, module: Any = None) -> bool:
+    """True for the shipped Discord adapter file, whatever namespace loaded it.
+
+    0.19.0 loads it as ``hermes_plugins.discord_platform``. Current hosts load
+    the same file as ``hermes_plugins.platforms__discord``. A home suffix does
+    not make that file a foreign override. A similarly named module from
+    another file still fails closed.
+    """
+
+    path = str(getattr(module, "__file__", "") or "").replace("\\", "/")
+    if path.endswith("/plugins/platforms/discord/adapter.py"):
+        return True
+    if not name:
+        return False
+    if name == "plugins.platforms.discord.adapter":
+        return True
+    return _SHIPPED_HOST_DISCORD.fullmatch(name) is not None
+
+
+def _discord_registration_is_shipped(
+    entry: Any, shipped: type[Any]
+) -> type[Any] | None:
+    """Return the shipped class a concrete entry builds, or None if it is foreign.
+
+    Hermes 0.19.0 registers ``_build_adapter`` in the shipped module rather
+    than the class itself. Installed hosts then load that module as
+    ``hermes_plugins.discord_platform``. A factory from any other module is an
+    override: activation fails closed instead of patching that class or
+    falling back while it remains the live adapter.
+    """
+
+    factory = getattr(entry, "adapter_factory", None)
+    if factory is shipped:
+        return shipped
+    if not callable(factory):
+        return None
+    module = inspect.getmodule(factory)
+    if module is None:
+        return None
+    adapter_class = getattr(module, "DiscordAdapter", None)
+    module_name = getattr(module, "__name__", None) or getattr(
+        adapter_class, "__module__", None
+    )
+    if adapter_class is shipped or (
+        isinstance(adapter_class, type)
+        and adapter_class.__name__ == "DiscordAdapter"
+        and _is_shipped_discord_module(module_name, module)
+    ):
+        return adapter_class if isinstance(adapter_class, type) else shipped
+    return None
+
+
+def _discord_loader_scope(registry: Any) -> Any:
+    """Scope whose deferred map holds Discord, or ``_NO_DISCORD_LOADER``."""
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        scopes: list[Any] = []
+        current_scope = getattr(registry, "current_scope_key", None)
+        if callable(current_scope):
+            try:
+                scopes.append(current_scope())
+            except Exception:
+                pass
+        scopes.append(None)
+        seen: set[Any] = set()
+        for scope in scopes:
+            if scope in seen:
+                continue
+            seen.add(scope)
+            try:
+                state = snapshot("discord", scope=scope)
+            except TypeError:
+                state = snapshot("discord")
+            entry = state[0] if isinstance(state, tuple) and state else None
+            loader = state[1] if isinstance(state, tuple) and len(state) > 1 else None
+            if entry is None and loader is not None:
+                return scope
+        return _NO_DISCORD_LOADER
+    deferred = getattr(registry, "_deferred", None)
+    if isinstance(deferred, Mapping) and "discord" in deferred:
+        return None
+    return _NO_DISCORD_LOADER
+
+
+def _host_platform_entry(
+    *,
+    name: str,
+    label: str,
+    adapter_factory: Any,
+    check_fn: Any,
+    source: str,
+    extra: Mapping[str, Any],
+) -> Any:
+    """Build the host's ``PlatformEntry``, dropping fields that host lacks."""
+
+    try:
+        from gateway.platform_registry import PlatformEntry
+    except (ImportError, ModuleNotFoundError):
+        return None
+    if not isinstance(PlatformEntry, type):
+        return None
+    payload: dict[str, Any] = {
+        "name": name,
+        "label": label,
+        "adapter_factory": adapter_factory,
+        "check_fn": check_fn,
+        "source": source,
+        **dict(extra),
+    }
+    try:
+        accepted = {item.name for item in fields(PlatformEntry)}
+    except TypeError:
+        accepted = None
+    if accepted is not None:
+        payload = {key: value for key, value in payload.items() if key in accepted}
+    return PlatformEntry(**payload)
+
+
+def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
+    """Replace a deferred Discord loader with the shipped registration.
+
+    The loader takes ``PluginManager._discovery_lock``. Calling it from
+    ``register()`` deadlocks on current Hermes, and letting it run later
+    re-executes the same file as ``hermes_plugins.*``. Publishing the class
+    already imported from that file pops the loader, so ``get()`` instantiates
+    the class Nunchi patches.
+    """
+
+    module = inspect.getmodule(shipped)
+    stock_register = getattr(module, "register", None)
+    register = getattr(registry, "register", None)
+    if not callable(stock_register) or not callable(register):
+        return
+    scope = _discord_loader_scope(registry)
+    if scope is _NO_DISCORD_LOADER:
+        return
+    accepts_scope = "scope" in inspect.signature(register).parameters
+    # 0.21.5 infers a plugin scope when ``scope`` is omitted and source is
+    # ``plugin``. An explicit global loader must stay in the global map.
+    source = "plugin" if scope is not None or not accepts_scope else "builtin"
+
+    def register_platform(
+        name: str,
+        label: str,
+        adapter_factory: Any,
+        check_fn: Any,
+        **kwargs: Any,
+    ) -> None:
+        entry = _host_platform_entry(
+            name=name,
+            label=label,
+            adapter_factory=adapter_factory,
+            check_fn=check_fn,
+            source=source,
+            extra=kwargs,
+        )
+        if entry is None:
+            return
+        if accepts_scope:
+            register(entry, scope=scope)
+            return
+        register(entry)
+
+    class _Ctx:
+        pass
+
+    _Ctx.register_platform = staticmethod(register_platform)  # type: ignore[attr-defined]
+    stock_register(_Ctx())
+
+
+def _active_discord_adapter_class() -> type[Any]:
+    """Return the shipped Discord class without loading a deferred platform.
+
+    A concrete foreign registration fails closed. ``register()`` then rolls
+    the activation transaction back instead of patching an unsupported class
+    or silently falling back to the shipped one while another adapter is live.
+    """
+
+    shipped = _shipped_discord_adapter_class()
+    try:
+        from gateway.platform_registry import platform_registry
+    except (ImportError, ModuleNotFoundError):
+        return shipped
+    entry = _peek_discord_registration(platform_registry)
+    if entry is None:
+        _publish_shipped_discord_registration(platform_registry, shipped)
+        return shipped
+    resolved = _discord_registration_is_shipped(entry, shipped)
+    if resolved is None:
+        raise _shape_error("Discord adapter")
+    return resolved
 
 
 def _adapter_matches_owner_profile(
@@ -3702,10 +3941,40 @@ def _consume_detached_task(task: asyncio.Task[Any]) -> None:
         pass
 
 
+def _adopt_native_session_owner(
+    adapter: Any,
+    session_key: str | None,
+    child: asyncio.Task[Any],
+) -> None:
+    """Name the child as the native session owner when this task currently is.
+
+    Stock releases ``_active_sessions`` only when ``asyncio.current_task()``
+    is the ``_session_tasks`` entry, and ``/stop`` cancels that same entry.
+    The child runs stock's ``_process_message_background``, so it has to be
+    the recorded owner for that cleanup and stop path to see it. A different
+    task already in the map is a newer owner and is left alone. This does not
+    release a guard; stock's own identity check does that, and a swapped
+    guard or newer task therefore survives.
+    """
+
+    if adapter is None or not session_key:
+        return
+    tasks = getattr(adapter, "_session_tasks", None)
+    if not isinstance(tasks, dict):
+        return
+    parent = asyncio.current_task()
+    if parent is None or tasks.get(session_key) is not parent:
+        return
+    tasks[session_key] = child
+
+
 async def _run_stock_process_with_deadline(
     runtime: _RoomRuntime,
     trace: _StockTurnTrace,
     awaitable: Any,
+    *,
+    adapter: Any = None,
+    session_key: str | None = None,
 ) -> Any:
     """Cancel stock work at the one opportunity deadline.
 
@@ -3716,6 +3985,7 @@ async def _run_stock_process_with_deadline(
     """
 
     task = asyncio.create_task(awaitable)
+    _adopt_native_session_owner(adapter, session_key, task)
     detached = False
 
     def track_detached() -> None:
@@ -4489,6 +4759,8 @@ def _install_stock_lifecycle_shim(plugin: NunchiHermesV2Plugin) -> None:
                     runtime,
                     trace,
                     current_process(self, event, session_key),
+                    adapter=self,
+                    session_key=session_key,
                 )
             except asyncio.CancelledError:
                 trace.processing_outcome = trace.processing_outcome or "CANCELLED"
