@@ -2898,7 +2898,9 @@ def _discord_registration_is_shipped(
         and adapter_class.__name__ == "DiscordAdapter"
     ):
         return None
-    return adapter_class
+    if factory is adapter_class or factory is getattr(module, "_build_adapter", None):
+        return adapter_class
+    return None
 
 
 def _discord_loader_scope(registry: Any) -> Any:
@@ -3092,6 +3094,34 @@ def _remember_discord_publication(
         logger.debug("discord publication lease was not recorded", exc_info=True)
 
 
+def _replace_deferred_discord_registration(
+    registry: Any, scope: Any, previous: tuple[Any, Any], entry: Any
+) -> bool:
+    """Conditionally publish without invoking a loader or a last-writer-wins API."""
+
+    if callable(getattr(registry, "restore_registration", None)):
+        # The current host's CAS holds its own lock, includes in-flight loader
+        # identity, and cancels that generation so it cannot publish over us.
+        return _restore_discord_registration(registry, scope, previous, (entry, None))
+
+    # Minimum Hermes has plain dictionaries and no registry lock/CAS API.
+    # Claim the loader with pop, then insert-if-absent: a native concrete
+    # writer before or during publication always wins. Never call register(),
+    # whose unconditional assignment can clobber that writer.
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    if scope is not None or not isinstance(entries, dict) or not isinstance(deferred, dict):
+        return False
+    if previous[0] is not None or previous[1] is None:
+        return False
+    loader = deferred.pop("discord", None)
+    if loader is not previous[1]:
+        if loader is not None:
+            deferred.setdefault("discord", loader)
+        return False
+    return entries.setdefault("discord", entry) is entry
+
+
 def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
     """Replace a deferred Discord loader with the shipped registration.
 
@@ -3145,12 +3175,8 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
         )
         if entry is None:
             return
-        if accepts_scope:
-            register(entry, scope=scope)
+        if _replace_deferred_discord_registration(registry, scope, previous, entry):
             published["entry"] = entry
-            return
-        register(entry)
-        published["entry"] = entry
 
     class _Ctx:
         pass
@@ -3159,6 +3185,11 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
     stock_register(_Ctx())
     entry = published.get("entry")
     if entry is None:
+        if _peek_discord_registration(registry) is None:
+            # Publication lost to another deferred generation (or removal).
+            # Do not patch the canonical class while an unresolved loader may
+            # later install a different class. The activation transaction fails.
+            raise _shape_error("Discord adapter")
         return
     current = _discord_registration_state(registry, scope)
     if current[0] is not entry or current[1] is not None:
@@ -3182,7 +3213,9 @@ def _active_discord_adapter_class() -> type[Any]:
     entry = _peek_discord_registration(platform_registry)
     if entry is None:
         _publish_shipped_discord_registration(platform_registry, shipped)
-        return shipped
+        entry = _peek_discord_registration(platform_registry)
+        if entry is None:
+            return shipped
     resolved = _discord_registration_is_shipped(entry, shipped)
     if resolved is None:
         raise _shape_error("Discord adapter")

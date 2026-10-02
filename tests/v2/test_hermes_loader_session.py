@@ -232,7 +232,7 @@ class DiscordAdapterResolutionTests(unittest.TestCase):
             return shipped(config)
 
         modules = _install_shipped(shipped)
-        modules["plugins.platforms.discord.adapter"].build_adapter = build_adapter
+        modules["plugins.platforms.discord.adapter"]._build_adapter = build_adapter
         build_adapter.__module__ = "plugins.platforms.discord.adapter"
 
         class Registry:
@@ -263,6 +263,7 @@ class DiscordAdapterResolutionTests(unittest.TestCase):
             return live()
 
         build_adapter.__module__ = live_module.__name__
+        live_module._build_adapter = build_adapter
         modules = _install_shipped(shipped)
         modules[live_module.__name__] = live_module
 
@@ -291,6 +292,7 @@ class DiscordAdapterResolutionTests(unittest.TestCase):
             return live()
 
         build_adapter.__module__ = live_module.__name__
+        live_module._build_adapter = build_adapter
         modules = _install_shipped(shipped)
         modules[live_module.__name__] = live_module
 
@@ -357,8 +359,14 @@ class DiscordAdapterResolutionTests(unittest.TestCase):
                 return (None, None)
 
             def register(self, entry: object, *, scope: str | None = None) -> None:
-                published["entry"] = entry
+                raise AssertionError("publication must use native CAS")
+
+            def restore_registration(self, name, current, previous, *, scope=None):
+                if self.snapshot_registration(name, scope=scope) != current:
+                    return False
+                published["entry"] = previous[0]
                 published["scope"] = scope
+                return True
 
             def get(self, name: str):
                 raise AssertionError(name)
@@ -601,6 +609,22 @@ def _alias_module(name: str, *, file: str) -> tuple[types.ModuleType, type]:
 
 
 class ShippedFileProvenanceTests(unittest.TestCase):
+    def test_same_file_nonfactory_is_not_an_adapter(self) -> None:
+        shipped = _shipped_discord()
+        modules = _install_shipped(shipped)
+        module = modules["plugins.platforms.discord.adapter"]
+
+        def register(ctx: object) -> None:
+            raise AssertionError("must not invoke a candidate factory")
+
+        register.__module__ = module.__name__
+        module.register = register
+        entry = types.SimpleNamespace(adapter_factory=register)
+        with mock.patch.dict(sys.modules, modules):
+            self.assertIsNone(
+                hermes_v2._discord_registration_is_shipped(entry, shipped)
+            )
+
     def test_recognised_namespace_with_contradictory_file_is_not_shipped(self) -> None:
         shipped = _shipped_discord()
         name = "hermes_plugins.platforms__discord.adapter"
@@ -660,6 +684,7 @@ class ShippedFileProvenanceTests(unittest.TestCase):
                     return cls()
 
                 build_adapter.__module__ = name
+                alias._build_adapter = build_adapter
                 modules = _install_shipped(shipped)
                 modules[name] = alias
                 entry = types.SimpleNamespace(adapter_factory=build_adapter)
@@ -976,6 +1001,7 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
                 del name
                 if scope != "home" or (state["entry"], state["loader"]) != current:
                     return False
+                self.scope = scope
                 state["entry"], state["loader"] = previous
                 return True
 
@@ -1079,6 +1105,115 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, modules):
             resolved = hermes_v2._active_discord_adapter_class()
         self.assertIs(shipped, resolved)
+
+    def test_newer_deferred_loader_is_preserved_and_activation_fails_closed(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        loader = self._loader()
+        newer = self._loader()
+        registry = types.SimpleNamespace(
+            _entries={}, _deferred={"discord": loader}, register=lambda entry: None
+        )
+        build = hermes_v2._host_platform_entry
+
+        def replace_loader(**kwargs):
+            registry._deferred["discord"] = newer
+            return build(**kwargs)
+
+        with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+            with mock.patch.object(hermes_v2, "_host_platform_entry", side_effect=replace_loader):
+                with self.assertRaises(ValidationError):
+                    hermes_v2._active_discord_adapter_class()
+        self.assertEqual({}, registry._entries)
+        self.assertIs(newer, registry._deferred["discord"])
+
+    def test_concurrent_publication_keeps_and_validates_winner(self) -> None:
+        # Pause at the actual write operation, not at a preceding snapshot.
+        for scoped in (False, True):
+            for foreign in (False, True):
+                with self.subTest(scoped=scoped, foreign=foreign):
+                    shipped = _shipped_discord()
+                    shipped.__module__ = "plugins.platforms.discord.adapter"
+                    loader = self._loader()
+                    winner = types.SimpleNamespace(
+                        adapter_factory=object if foreign else shipped
+                    )
+                    entered = threading.Event()
+                    completed = threading.Event()
+                    errors = []
+
+                    def pause():
+                        entered.set()
+                        if not completed.wait(2):
+                            raise AssertionError("concurrent writer did not finish")
+
+                    class Entries(dict):
+                        def setdefault(self, name, value):
+                            pause()
+                            return super().setdefault(name, value)
+
+                    class Registry:
+                        def __init__(self):
+                            self._entries = Entries()
+                            self._deferred = {"discord": loader}
+                            self._lock = threading.RLock()
+
+                        def register(self, entry, *, scope=None):
+                            # The old implementation takes this unconditional path.
+                            pause()
+                            with self._lock:
+                                self._deferred.pop("discord", None)
+                                self._entries["discord"] = entry
+
+                    registry = Registry()
+                    if scoped:
+                        registry.current_scope_key = lambda: "home"
+
+                        def snapshot(name, *, scope=None):
+                            with registry._lock:
+                                if scope != "home":
+                                    return None, None
+                                return registry._entries.get(name), registry._deferred.get(name)
+
+                        def restore(name, current, previous, *, scope=None):
+                            pause()
+                            with registry._lock:
+                                if snapshot(name, scope=scope) != current:
+                                    return False
+                                registry._entries[name] = previous[0]
+                                registry._deferred.pop(name, None)
+                                return True
+
+                        registry.snapshot_registration = snapshot
+                        registry.restore_registration = restore
+
+                    def writer():
+                        try:
+                            if not entered.wait(2):
+                                raise AssertionError("publication never reached write")
+                            with registry._lock:
+                                registry._deferred.pop("discord", None)
+                                registry._entries["discord"] = winner
+                        except BaseException as exc:
+                            errors.append(exc)
+                        finally:
+                            completed.set()
+
+                    thread = threading.Thread(target=writer)
+                    thread.start()
+                    try:
+                        with mock.patch.dict(sys.modules, _publication_modules(registry, shipped)):
+                            if foreign:
+                                with self.assertRaises(ValidationError):
+                                    hermes_v2._active_discord_adapter_class()
+                            else:
+                                self.assertIs(shipped, hermes_v2._active_discord_adapter_class())
+                    finally:
+                        thread.join(3)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual([], errors)
+                    self.assertIs(winner, registry._entries["discord"])
+                    self.assertNotIn("discord", registry._deferred)
 
     def test_unload_inverse_does_not_replace_a_newer_entry(self) -> None:
         from tests.v2.test_hermes_portable import FakeLlm, room_config
