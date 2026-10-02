@@ -295,6 +295,8 @@ _STOCK_PROCESS_CONTROL_EFFECTS = frozenset({"_delete_webhook_best_effort"})
 # deliberately absent: that typing refresh happens after message delivery.
 _STOCK_EFFECT_DELEGATION_EDGES = frozenset(
     {
+        ("_send_final_text", "send_final_ledgered"),
+        ("send_final_ledgered", "_send_with_retry"),
         ("_send_with_retry", "send"),
         ("_stop_typing_with_metadata", "stop_typing"),
         ("edit_message", "_edit_overflow_split"),
@@ -4562,7 +4564,23 @@ def _configured_stock_effect_target(
         thread_id = arguments.get("thread_id")
 
     target: Any = None
-    if name == "rename_thread":
+    if name in {"_send_final_text", "send_final_ledgered"}:
+        # Stock 0.21.5's final-delivery wrappers take a MessageEvent, not a
+        # chat id. Resolve only these known helpers, from the bound signature;
+        # an arbitrary object in args[0] must never lend effect authority.
+        source = getattr(arguments.get("event"), "source", None)
+        try:
+            if _platform_name(source) != platform:
+                return platform_runtimes[0], None, True
+        except ValidationError:
+            return platform_runtimes[0], None, True
+        source_thread = getattr(source, "thread_id", None)
+        if (source_thread or None) != (thread_id or None):
+            # Native delivery uses metadata; do not let it retarget the event
+            # or silently drop a Telegram topic into the parent chat.
+            return platform_runtimes[0], None, True
+        target = getattr(source, "chat_id", None)
+    elif name == "rename_thread":
         target = arguments.get("thread_id")
     elif name == "_edit_overflow_split" and arguments.get("channel") is not None:
         target = getattr(arguments["channel"], "id", None)

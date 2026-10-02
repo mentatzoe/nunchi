@@ -39,6 +39,12 @@ class InstalledHermesHostContractTests(unittest.TestCase):
                 "nunchi.integrations.hermes_dashboard_install"
             )
             manager = plugins.PluginManager()
+            # _load_plugin follows discovery in a real gateway. Minimum stock
+            # needs its native deferred platform owner published before Nunchi
+            # activation; an entirely empty registry is not that startup state.
+            (Path(temporary) / "config.yaml").write_text("plugins:\n  enabled: []\n")
+            with mock.patch.dict(os.environ, {"HERMES_HOME": temporary}):
+                manager.discover_and_load()
             manifest = next(
                 candidate
                 for candidate in manager._scan_entry_points()

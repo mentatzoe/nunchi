@@ -608,7 +608,9 @@ def write_hermes_home(
         },
         "display": {"tool_progress": "off", "thinking_progress": False},
         "terminal": {"backend": "local"},
-        "gateway": {"stream_output": False},
+        # We assemble one profile without GatewayRunner.start(), which normally
+        # resolves the modern tri-state multiplex setting before connecting.
+        "gateway": {"stream_output": False, "multiplex_profiles": False},
         "platforms": {
             "discord": {
                 "enabled": True,
@@ -661,8 +663,12 @@ def write_nunchi_config(
     from nunchi.integrations.hermes_dashboard_store import default_config_paths
 
     paths = default_config_paths(profile, hermes_home=home)
-    paths.config.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(paths.config.parent, 0o700)
+    # Match the private directory layout created by the real dashboard Save.
+    # mkdir(parents=True) alone leaves intermediate directories at 0755 and
+    # causes a later real Save in the same process to reject this fixture.
+    for directory in (paths.config.parent.parent.parent, paths.config.parent.parent, paths.config.parent):
+        directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
     document = {
         "schema_version": 2,
         "hermes_profile": profile,

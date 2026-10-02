@@ -353,14 +353,53 @@ class NunchiDefaultInstallTrustGate(_Base):
         attention = [r for r in self.receipts() if r.get("stage") == "attention"]
         self.assertTrue(attention, self.receipts())
         error = attention[-1].get("body", {}).get("error", {})
-        self.assertEqual(
-            {},
-            error,
-            "default install: stock plugin_llm trust gate refuses Nunchi's provider/model override; "
-            f"attention receipt recorded {error} and the turn woke via ERROR_FALLBACK. "
-            "Either the setup flow must write plugins.entries.nunchi.llm.allow_*_override or the "
-            "attention path must not pass overrides.",
+        self.assertEqual("host-permission-denied", error["code"])
+        self.assertIn("Save & allow attention models", error["detail"])
+        self.assertIn("restart Hermes", error["detail"])
+        self.assertIn("No substitute attention model was used", error["detail"])
+        self.assertNotIn("classifier_disposition", attention[-1]["body"])
+        self.assertEqual([], self.attention_calls())
+        self.assertEqual(1, len(self.model_turns()))
+        self.assertEqual("probe-model", self.model_turns()[0]["model"])
+        self.assertIn("ERROR_FALLBACK", json.dumps(self.model_turns()[0]["messages"]))
+        self.assertIn("woke by error fallback", self.deliveries())
+
+    def test_denied_attention_then_save_and_restart_uses_selected_model(self) -> None:
+        from nunchi.integrations.hermes_dashboard_store import (
+            default_config_paths, read_dashboard_snapshot, write_config_document,
         )
+        self.server.script({"content": "before consent"})
+        self.assertTrue(_deliver_and_settle(self.host, self.human("first")))
+        self.assertEqual([], self.attention_calls())
+        self.assertEqual("host-permission-denied", [r["body"] for r in self.receipts()
+                         if r["stage"] == "attention"][-1]["error"]["code"])
+        paths = default_config_paths("default", hermes_home=self.home)
+        document = json.loads(paths.config.read_text())
+        document["rooms"][0]["attention"]["model"]["model"] = "attention-after-save"
+        env = {"HERMES_HOME": str(self.home)}
+        before = read_dashboard_snapshot("default", environ=env)
+        write_config_document("default", document=document, expected_revision=before.revision, environ=env)
+        # Restart the installed plugin/runner, retaining the real saved files.
+        # No manual trust edit or fixture config rewrite occurs after Save.
+        sup.run(self.host.close())
+        assert self.loaded is not None
+        sup.unload_nunchi(self.loaded)
+        self.loaded = sup.load_nunchi_via_plugin_manager()
+        self.assertIsNone(self.loaded["state"]["error"])
+        self.host = sup.ProbeHost(home=self.home, client=self.client)
+        self.server.reset()
+        self.server.script(self.attend("WAKE"), {"content": "after consent"})
+        self.assertTrue(_deliver_and_settle(self.host, self.human("second")))
+        self.assertEqual(1, len(self.attention_calls()))
+        self.assertEqual("attention-after-save", self.attention_calls()[0]["model"])
+        self.assertEqual(1, len(self.model_turns()))
+        self.assertEqual("probe-model", self.model_turns()[0]["model"])
+        self.assertIn("after consent", self.deliveries())
+        attention = [r["body"] for r in self.receipts() if r["stage"] == "attention"][-1]
+        self.assertNotIn("error", attention)
+        self.assertEqual("WAKE", attention["effective_disposition"])
+        self.assertTrue(any(r["stage"] == "transport" and r["body"].get("delivery") == "sent"
+                            for r in self.receipts()))
 
 
 class NunchiOnInstalledHostNormalTurn(_Base):
@@ -423,9 +462,20 @@ class NunchiOnInstalledHostNormalTurn(_Base):
 
     def test_suppressed_turn_makes_no_native_invocation_or_delivery(self) -> None:
         self.attend("SUPPRESS")
-        admitted = _deliver_and_settle(self.host, self.human("just chatting", mention=False))
+        message = self.human("just chatting", mention=False)
+        admitted = _deliver_and_settle(self.host, message)
         self.assertTrue(admitted)
+        self.assertEqual(1, len(self.attention_calls()))
         self.assertEqual([], self.model_turns(), "SUPPRESS must not reach the stock participant")
+        self.assertEqual([], self.deliveries())
+        self.assertEqual([], message.reactions)
+
+    def test_self_bot_in_configured_room_keeps_stock_denial(self) -> None:
+        message = self.peer("own echo")
+        message.author = self.client.user
+        self.assertFalse(_deliver_and_settle(self.host, message))
+        self.assertEqual([], self.attention_calls())
+        self.assertEqual([], self.model_turns())
         self.assertEqual([], self.deliveries())
 
     def test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi(self) -> None:
