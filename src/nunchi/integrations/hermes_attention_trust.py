@@ -45,7 +45,12 @@ def _read_host_config(path: Path) -> tuple[bytes | None, dict[str, Any]]:
         document = json.loads(raw)
     except (ValueError, UnicodeError):
         try:
-            import yaml  # supplied by stock Hermes; not needed for JSON homes
+            try:
+                import hermes_yaml as yaml  # use the installed host's YAML policy
+            except ModuleNotFoundError as exc:
+                if exc.name != "hermes_yaml":
+                    raise  # a broken host dependency must not select another parser
+                import yaml  # released hosts before hermes_yaml supply PyYAML
             document = yaml.safe_load(raw)
         except Exception as exc:
             raise ValidationError("Hermes config.yaml could not be parsed; repair it before saving Nunchi") from exc
