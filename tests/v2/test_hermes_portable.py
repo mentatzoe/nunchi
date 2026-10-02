@@ -3661,7 +3661,7 @@ class HermesPortableTests(unittest.TestCase):
         self.assertEqual(originals, dict(vars(MediaMixin)))
         self.assertNotIn("send_document", vars(Adapter))
 
-    def test_tool_execution_boundary_fails_closed_before_dispatch(self):
+    def test_tool_execution_boundary_rejects_missing_native_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             plugin, _ = self.plugin(
                 Path(temporary),
@@ -3689,7 +3689,7 @@ class HermesPortableTests(unittest.TestCase):
             hermes_cli.middleware = middleware
             try:
                 hook_result = plugin.pre_tool_call(tool_name="terminal")
-                self.assertEqual("block", hook_result["action"])
+                self.assertIsNone(hook_result)
                 with mock.patch.dict(
                     sys.modules,
                     {
@@ -3705,7 +3705,7 @@ class HermesPortableTests(unittest.TestCase):
                 )
             finally:
                 hermes_v2._ACTIVE_STOCK_TURN.reset(context_token)
-            self.assertIn("no final-effect hook", json.loads(result)["error"])
+            self.assertIn("could not be bound", json.loads(result)["error"])
             records = runtime.receipts.all_records()
             self.assertEqual("attention", records[-1]["stage"])
 
@@ -4878,6 +4878,7 @@ class GatewayRunner:
                         deliverable_platforms={"discord"},
                     )
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_register_uses_process_local_gate_and_post_llm_observer(self):
         class Runner:
             def _is_user_authorized(self, source):
@@ -5194,6 +5195,7 @@ class GatewayRunner:
             self.assertEqual("checked", status["host_contract_status"])
             self.assertNotIn("verified_hermes_releases", status)
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_future_release_rolls_back_process_patches_when_contract_fails(self):
         class Target:
             value = "stock"
@@ -5294,6 +5296,7 @@ class GatewayRunner:
             self.assertEqual({}, ctx.hooks)
             self.assertEqual({}, ctx.commands)
 
+    @mock.patch.object(hermes_v2, "install_approval_boundary", new=lambda *args: None)
     def test_register_rolls_back_patches_and_registries_on_hook_failure(self):
         class Target:
             value = "stock"

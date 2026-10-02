@@ -103,8 +103,9 @@ The following record applies only to implementation
 `b6ee0c2dbe918140fcc77f19320402bb35b44b75`. That implementation has been
 superseded. Its wheel, installation, dashboard, and Discord results must not be
 used to claim compatibility or acceptance for the current successor. In
-particular, its live tool execution is historical behavior; tools are blocked
-in configured rooms by the current source.
+particular, its live tool execution is historical behavior, not evidence for
+the successor's durable native invocation boundary. Current source verification
+is recorded in [the native-tool checkpoint](verification/2026-10-02-native-tools.md).
 
 Implementation `b6ee0c2dbe918140fcc77f19320402bb35b44b75` made Nunchi a
 pre-attention gate around the stock Hermes participant:

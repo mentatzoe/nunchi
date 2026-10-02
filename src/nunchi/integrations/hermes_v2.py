@@ -47,6 +47,7 @@ from nunchi.participant import (
 )
 from nunchi.pipeline import OpportunityPreparation, prepare_opportunity
 from nunchi.receipts import ReceiptJournal
+from nunchi.integrations.hermes_tools import NativeInvocationJournal, install_approval_boundary
 from nunchi.v2_contracts import validate_canonical_event
 
 
@@ -1407,6 +1408,9 @@ class _RoomRuntime:
             f"{config.binding.room_id}:{config.binding.continuity_scope_id}"
         )
         self.receipts = receipts
+        self.native_invocations = NativeInvocationJournal(self.directory / "native-invocations.sqlite3")
+        self._native_threads: dict[int, int] = {}
+        self._native_interrupt: Callable[..., Any] | None = None
         self.observation = observation
         self.attention = attention
         self.observation.mark_continuity_gap(
@@ -1652,11 +1656,77 @@ class _RoomRuntime:
                 or bool(getattr(result, "success", False))
             )
 
+    def invoke_stock_tool(
+        self,
+        trace: _StockTurnTrace,
+        tool_name: str,
+        payload: dict[str, Any],
+        next_call: Callable[[dict[str, Any]], Any],
+        context: Mapping[str, Any],
+        config_revision: str,
+    ) -> Any:
+        """Commit an invocation, not an effect; Hermes retains all tool authority."""
+
+        tid = threading.get_ident()
+        with self._lock:
+            if (
+                trace is not self._active_trace
+                or trace.token.cancel_event.is_set()
+                or not self.scheduler.is_current(trace.token)
+                or time.monotonic() >= trace.deadline
+            ):
+                raise _StockEffectBlocked("Hermes tool opportunity ended")
+            try:
+                ids = {key: _nonempty(context.get(key), f"native {key}")
+                       for key in ("session_id", "turn_id", "tool_call_id")}
+                # Snapshot the final middleware payload. Only its digest is durable;
+                # raw tool arguments can contain credentials or private content.
+                encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                frozen_payload = json.loads(encoded)
+                if not isinstance(frozen_payload, dict):
+                    raise ValueError("tool arguments must be an object")
+                identity = hashlib.sha256(json.dumps(ids, sort_keys=True).encode()).hexdigest()
+                binding = dict(ids, tool_name=tool_name,
+                               args_sha256=hashlib.sha256(encoded.encode()).hexdigest(),
+                               participant_id=self.config.binding.participant_id,
+                               actor_id=self.config.binding.actor_id,
+                               room_key=trace.token.room_key,
+                               origin_event_id=trace.token.anchor_event_id,
+                               request_id=trace.request_id, generation=trace.token.generation,
+                               config_revision=config_revision)
+                if not self.native_invocations.reserve(identity, binding):
+                    raise _StockEffectBlocked("native invocation already committed; outcome may be unknown")
+                # Persistence can consume the remaining budget. This check and
+                # registration share cancellation's lock; they define commit.
+                self.prepare_stock_effect(trace, effect=f"tool:{tool_name}")
+            except _StockEffectBlocked:
+                raise
+            except Exception as exc:
+                raise _StockEffectBlocked("native invocation could not be bound and persisted") from exc
+            self._native_threads[tid] = self._native_threads.get(tid, 0) + 1
+        outcome = "raised"
+        try:
+            result = next_call(frozen_payload)
+            outcome = "returned"
+            return result
+        finally:
+            # Do not clear Hermes's coalesced interrupt bit: /stop may also own
+            # it. Native turn/worker teardown resets it before thread reuse.
+            with self._lock:
+                count = self._native_threads[tid] - 1
+                if count:
+                    self._native_threads[tid] = count
+                else:
+                    del self._native_threads[tid]
+            self.native_invocations.finish(identity, outcome)
+
     def expire_stock_turn(self, trace: _StockTurnTrace) -> None:
         with trace.lock:
             trace.delivery_late_or_cancelled = True
             trace.processing_outcome = trace.processing_outcome or "CANCELLED"
-        self.cancel()
+        with self._lock:
+            if self._active_trace is trace:
+                self.cancel()
 
     def offer(
         self,
@@ -1993,6 +2063,9 @@ class _RoomRuntime:
     def cancel(self) -> None:
         with self._lock:
             self.scheduler.cancel()
+            if self._native_interrupt is not None:
+                for tid in self._native_threads:
+                    self._native_interrupt(True, tid)
             self._opportunity_deadlines.clear()
             self._ingress.clear()
             self._pending_anchor = None
@@ -2295,7 +2368,7 @@ class NunchiHermesV2Plugin:
         trace.assistant_response = _stock_participant_response(response)
 
     def pre_tool_call(self, *, tool_name: str = "tool", **_: Any) -> Mapping[str, str] | None:
-        """Disable tools until Hermes exposes a safe final-effect seam."""
+        """Reject stale work; native Hermes guards decide tool authority."""
 
         trace = _ACTIVE_STOCK_TURN.get()
         if trace is None:
@@ -2325,14 +2398,7 @@ class NunchiHermesV2Plugin:
                     "opportunity ended"
                 ),
             }
-        return {
-            "action": "block",
-            "message": (
-                "Nunchi blocks Hermes tools on configured routes because "
-                "Hermes 0.19.0 has no final-effect hook after approval. "
-                "Continue without a tool or use stock Hermes outside this room."
-            ),
-        }
+        return None
 
     def pre_llm_call(self, **_: Any) -> Mapping[str, str] | None:
         trace = _ACTIVE_STOCK_TURN.get()
@@ -4075,11 +4141,13 @@ def _install_execution_boundary_shim(plugin: NunchiHermesV2Plugin) -> None:
                     trace.runtime.expire_stock_turn(trace)
                     detail = f"Hermes tool {tool_name} opportunity ended"
                 else:
-                    detail = (
-                        "Nunchi blocks Hermes tools on configured routes "
-                        "because Hermes 0.19.0 has no final-effect hook after "
-                        "approval"
-                    )
+                    try:
+                        return trace.runtime.invoke_stock_tool(
+                            trace, tool_name, payload, next_call, context,
+                            plugin.config.provenance["sha256"],
+                        )
+                    except _StockEffectBlocked as exc:
+                        detail = str(exc)
                 return json.dumps({"error": detail}, ensure_ascii=False)
 
             return current_tool(
@@ -5215,6 +5283,10 @@ def _install_host_contract_v1(plugin: NunchiHermesV2Plugin) -> None:
     _install_telegram_batch_identity_shim(plugin)
     _install_claimed_ingress_shim(plugin)
     _install_stock_lifecycle_shim(plugin)
+    install_approval_boundary(
+        _ACTIVE_STOCK_TURN.get, _CONFIGURED_ROUTE_CONTEXT.get,
+        _set_shim_attribute, plugin._rooms.values(),
+    )
     _install_execution_boundary_shim(plugin)
     _install_auto_title_shim(plugin)
     _install_stock_silence_filter_shim(plugin)

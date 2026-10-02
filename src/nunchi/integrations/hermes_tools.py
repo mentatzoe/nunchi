@@ -7,13 +7,17 @@ Unknown and returned claims both remain reserved across process restarts.
 from __future__ import annotations
 
 import json
+import importlib
+import inspect
 import os
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import stat
-from typing import Any, Iterator, Mapping
+import time
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
+from ..errors import ValidationError
 from ..receipts import PersistenceError
 
 
@@ -101,3 +105,78 @@ class NativeInvocationJournal:
                 ]
         except (OSError, sqlite3.Error, ValueError) as exc:
             raise PersistenceError("could not read native invocation ledger") from exc
+
+
+def install_approval_boundary(
+    active_trace: Callable[[], Any],
+    configured_route: Callable[[], bool],
+    set_attribute: Callable[[Any, str, Any], None],
+    runtimes: Iterable[Any],
+) -> None:
+    """Check native approval waits before and after resolution, never grant them.
+
+    0.19 owns the wait in approval.py; 0.21 binds its shared gateway helper
+    by name, whose global _poll_event covers both leaders and followers.
+    Unknown private shapes reject activation before any callback is registered.
+    """
+    try:
+        approval = importlib.import_module("tools.approval")
+        interrupt = importlib.import_module("tools.interrupt")
+        decision = approval._await_gateway_decision
+        if decision.__module__ == "tools.approval_gateway_wait":
+            target = importlib.import_module("tools.approval_gateway_wait")
+            if decision is not target._await_gateway_decision:
+                raise ValueError("approval helper binding changed")
+            name = "_poll_event"
+            required = {"event", "session_key", "interrupt_log"}
+            denied: Any = "interrupted"
+        elif decision.__module__ == "tools.approval":
+            target, name = approval, "_await_gateway_decision"
+            required = {"session_key", "notify_cb", "approval_data", "surface"}
+            denied = {"resolved": True, "choice": "deny", "reason": None}
+        else:
+            raise ValueError("foreign approval implementation")
+        current = getattr(target, name)
+        if getattr(current, "__nunchi_approval_boundary__", False):
+            return
+        if (
+            current.__module__ != target.__name__
+            or not required.issubset(inspect.signature(current).parameters)
+            or "is_interrupted" not in inspect.getsource(current)
+            or not {"active", "thread_id"}.issubset(inspect.signature(interrupt.set_interrupt).parameters)
+            or not callable(interrupt.is_interrupted)
+        ):
+            raise ValueError("native interrupt/approval wait shape changed")
+    except (ImportError, AttributeError, TypeError, ValueError, OSError) as exc:
+        raise ValidationError("unsupported Hermes native approval/interrupt boundary") from exc
+
+    def current_opportunity() -> bool:
+        trace = active_trace()
+        if trace is None:
+            return not configured_route()
+        runtime = trace.runtime
+        with runtime._lock:
+            valid = (
+                runtime._active_trace is trace
+                and not trace.token.cancel_event.is_set()
+                and runtime.scheduler.is_current(trace.token)
+                and time.monotonic() < trace.deadline
+            )
+        if not valid:
+            runtime.expire_stock_turn(trace)
+        return valid
+
+    def checked_wait(*args: Any, **kwargs: Any) -> Any:
+        if not current_opportunity():
+            return dict(denied) if isinstance(denied, dict) else denied
+        result = current(*args, **kwargs)
+        if not current_opportunity():
+            return dict(denied) if isinstance(denied, dict) else denied
+        return result
+
+    checked_wait.__nunchi_approval_boundary__ = True  # type: ignore[attr-defined]
+    # Preserve origin for repeated registration's shape selection.
+    checked_wait.__module__ = current.__module__
+    set_attribute(target, name, checked_wait)
+    for runtime in runtimes:
+        runtime._native_interrupt = interrupt.set_interrupt

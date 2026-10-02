@@ -57,9 +57,17 @@ builder, and participant-receipt formation as a gate around that pipeline:
 5. Nunchi observes completion and writes only the lifecycle facts exposed by
    Hermes.
 
-For configured Nunchi rooms, Hermes tools are blocked because Hermes 0.19.0
-does not expose a safe final authority boundary after approval. Auto-title is
-also disabled because it can outlive the turn. Native typing, Discord voice
+Configured-room tools use a durable invocation claim at the stock middleware
+handoff. Hermes keeps its approvals and guards; Nunchi checks the opportunity
+before dispatch, propagates cancellation through native thread interrupts,
+and rechecks native approval waits on return. Invocation outcomes remain
+unknown as effects, even when a tool returns text; claims are never retried
+automatically after restart. Already-committed handlers that do not poll native
+interrupts can continue after cancellation. This is cooperative cancellation,
+not a sandbox or a zero-syscall guarantee. See
+[`verification/2026-10-02-native-tools.md`](verification/2026-10-02-native-tools.md).
+
+Auto-title is disabled because it can outlive the turn. Native typing, Discord voice
 input, `/thread`, detached participant commands, and handoff into configured
 rooms are disabled for the same lifecycle reason. Stock reactions run only
 after the participant invocation begins. Because the current Hermes seam does

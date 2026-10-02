@@ -78,9 +78,10 @@ When Nunchi admits a configured turn, stock Hermes keeps its participant
 prompt, main model, memory, post-invocation reactions, cancellation, delivery,
 and platform adapter behind Nunchi's shared core and effect guards. Hermes's
 current seam does not attest the shared native ACK capability, so model ACK
-widens to DEFER. Hermes tools and
-auto-title are disabled for that configured turn because Hermes 0.19.0 does
-not expose safe final boundaries for them. Stock typing, Discord voice input,
+widens to DEFER. Hermes tools retain native authority, with durable at-most-once
+invocation claims and cooperative cancellation; see the
+[native-tool verification record](verification/2026-10-02-native-tools.md).
+Auto-title remains disabled because it can outlive the turn. Stock typing, Discord voice input,
 native `/thread`, detached participant commands, and handoff into a configured
 room are also disabled. `/stop`, `/new`, `/reset`, and `/restart` remain
 available.
