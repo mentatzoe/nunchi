@@ -116,6 +116,72 @@ def _registry_module(registry: object) -> dict[str, types.ModuleType]:
     return {"gateway": gateway, "gateway.platform_registry": registry_module}
 
 
+class _MinimumRegistry:
+    """0.19.0 registry writes: no lock and no two-map CAS."""
+
+    def __init__(self) -> None:
+        self._entries: dict[str, object] = {}
+        self._deferred: dict[str, object] = {}
+
+    def register(self, entry: object) -> None:
+        self._deferred.pop(getattr(entry, "name", "discord"), None)
+        self._entries[getattr(entry, "name", "discord")] = entry
+
+    def register_deferred(self, name: str, loader: object) -> None:
+        if name in self._entries:
+            return
+        self._deferred[name] = loader
+
+
+def _run_at_source_line(function, fragment, action, operation):
+    """Run action to completion immediately before function executes fragment."""
+
+    lines, start = inspect.getsourcelines(function)
+    try:
+        target = next(start + index for index, line in enumerate(lines) if fragment in line)
+    except StopIteration as exc:
+        raise AssertionError(f"boundary not in {function.__name__}: {fragment}") from exc
+    entered = threading.Event()
+    done = threading.Event()
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        try:
+            if not entered.wait(5):
+                raise AssertionError("boundary not reached")
+            action()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    def trace(frame, event, arg):
+        del arg
+        if (
+            event == "line"
+            and frame.f_code is function.__code__
+            and frame.f_lineno == target
+        ):
+            entered.set()
+            if not done.wait(5):
+                raise AssertionError("writer did not finish")
+        return trace
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    previous = sys.gettrace()
+    sys.settrace(trace)
+    try:
+        return operation()
+    finally:
+        sys.settrace(previous)
+        thread.join(6)
+        if thread.is_alive():
+            raise AssertionError("writer still running")
+        if errors:
+            raise errors[0]
+
+
 class DiscordAdapterResolutionTests(unittest.TestCase):
     def test_deferred_loader_is_not_invoked_under_discovery(self) -> None:
         shipped = _shipped_discord()
@@ -1297,3 +1363,119 @@ class DiscordPublicationOwnershipTests(unittest.TestCase):
         )
         self.assertFalse(restored)
         self.assertIs(newer, state["entry"])
+
+    def test_minimum_rollback_pop_keeps_a_concurrent_native_entry(self) -> None:
+        # Pause before the inverse pop, as a native register() can finish there.
+        published = types.SimpleNamespace(name="discord", adapter_factory=object)
+        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
+        old_loader = self._loader()
+        registry = _MinimumRegistry()
+        registry.register(published)
+
+        def writer() -> None:
+            registry.register(newer)
+
+        restored = _run_at_source_line(
+            hermes_v2._restore_discord_registration,
+            'entries.pop("discord", None)',
+            writer,
+            lambda: hermes_v2._restore_discord_registration(
+                registry, None, (published, None), (None, old_loader)
+            ),
+        )
+        self.assertFalse(restored)
+        self.assertIs(newer, registry._entries.get("discord"))
+        self.assertNotIn("discord", registry._deferred)
+
+    def test_minimum_rollback_restore_keeps_a_native_entry(self) -> None:
+        published = types.SimpleNamespace(name="discord", adapter_factory=object)
+        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
+        old_loader = self._loader()
+        registry = _MinimumRegistry()
+        registry.register(published)
+
+        def writer() -> None:
+            registry.register(newer)
+
+        restored = _run_at_source_line(
+            hermes_v2._restore_discord_registration,
+            'deferred.setdefault("discord", previous[1])',
+            writer,
+            lambda: hermes_v2._restore_discord_registration(
+                registry, None, (published, None), (None, old_loader)
+            ),
+        )
+        self.assertFalse(restored)
+        self.assertIs(newer, registry._entries.get("discord"))
+        self.assertNotIn("discord", registry._deferred)
+
+    def test_deferred_winner_after_loader_claim_fails_closed(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        old_loader = self._loader()
+        newer_loader = self._loader()
+        registry = _MinimumRegistry()
+        registry.register_deferred("discord", old_loader)
+        rollbacks: list[object] = []
+        token = hermes_v2._REGISTRY_ROLLBACKS.set(rollbacks)
+        try:
+            with mock.patch.dict(
+                sys.modules, _publication_modules(registry, shipped)
+            ):
+
+                def writer() -> None:
+                    registry.register_deferred("discord", newer_loader)
+
+                with self.assertRaises(ValidationError):
+                    _run_at_source_line(
+                        hermes_v2._replace_deferred_discord_registration,
+                        'entries.setdefault("discord", entry)',
+                        writer,
+                        hermes_v2._active_discord_adapter_class,
+                    )
+        finally:
+            hermes_v2._REGISTRY_ROLLBACKS.reset(token)
+        self.assertEqual([], rollbacks)
+        self.assertNotIn("discord", registry._entries)
+        self.assertIs(newer_loader, registry._deferred.get("discord"))
+
+    def test_unowned_publication_release_keeps_a_newer_native_entry(self) -> None:
+        shipped = _shipped_discord()
+        shipped.__module__ = "plugins.platforms.discord.adapter"
+        old_loader = self._loader()
+        newer_loader = self._loader()
+        newer = types.SimpleNamespace(name="discord", adapter_factory=object)
+        registry = _MinimumRegistry()
+
+        class GapDeferred(dict):
+            def get(self, key, default=None):
+                # The claim/insert gap already installed a deferred winner.
+                if (
+                    key == "discord"
+                    and registry._entries.get("discord") is not None
+                    and "discord" not in self
+                ):
+                    self["discord"] = newer_loader
+                return super().get(key, default)
+
+        registry._deferred = GapDeferred({"discord": old_loader})
+        token = hermes_v2._REGISTRY_ROLLBACKS.set([])
+        try:
+            with mock.patch.dict(
+                sys.modules, _publication_modules(registry, shipped)
+            ):
+
+                def writer() -> None:
+                    registry.register(newer)
+
+                with self.assertRaises(ValidationError):
+                    _run_at_source_line(
+                        hermes_v2._release_minimum_discord_entry,
+                        'entries.pop("discord", None)',
+                        writer,
+                        hermes_v2._active_discord_adapter_class,
+                    )
+        finally:
+            hermes_v2._REGISTRY_ROLLBACKS.reset(token)
+        self.assertIs(newer, registry._entries.get("discord"))
+        self.assertNotIn("discord", registry._deferred)

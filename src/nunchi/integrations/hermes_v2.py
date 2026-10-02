@@ -3012,16 +3012,40 @@ def _restore_discord_registration(
     deferred = getattr(registry, "_deferred", None)
     if not isinstance(entries, dict) or not isinstance(deferred, dict):
         return False
-    if entries.get("discord") is not current[0] or deferred.get("discord") is not current[1]:
+    # Pop is the inverse write. A native register() that finished before this
+    # line replaced the generation; put that entry back and do not install the
+    # predecessor loader over it. Later restores use setdefault so a native
+    # writer that lands after the claim is not overwritten. Minimum has no
+    # shared lock, so a Nunchi-only lock would not cover these writers.
+    taken_entry = entries.pop("discord", None)
+    if taken_entry is not current[0]:
+        if taken_entry is not None:
+            entries.setdefault("discord", taken_entry)
         return False
-    if previous[0] is None:
-        entries.pop("discord", None)
-    else:
-        entries["discord"] = previous[0]
-    if previous[1] is None:
-        deferred.pop("discord", None)
-    else:
-        deferred["discord"] = previous[1]
+    taken_loader = deferred.pop("discord", None)
+    if taken_loader is not current[1]:
+        if taken_loader is not None:
+            deferred.setdefault("discord", taken_loader)
+        # A newer deferred owner must not sit beside the entry we removed.
+        if taken_loader is None and current[0] is not None:
+            entries.setdefault("discord", current[0])
+        return False
+    if previous[0] is not None:
+        if entries.setdefault("discord", previous[0]) is not previous[0]:
+            return False
+    elif entries.get("discord") is not None:
+        return False
+    if previous[1] is not None:
+        if deferred.setdefault("discord", previous[1]) is not previous[1]:
+            return False
+        live = entries.get("discord")
+        if live is not None and live is not previous[0]:
+            popped = deferred.pop("discord", None)
+            if popped is not previous[1] and popped is not None:
+                deferred.setdefault("discord", popped)
+            return False
+    elif deferred.get("discord") is not None:
+        return False
     return True
 
 
@@ -3104,10 +3128,12 @@ def _replace_deferred_discord_registration(
         # identity, and cancels that generation so it cannot publish over us.
         return _restore_discord_registration(registry, scope, previous, (entry, None))
 
-    # Minimum Hermes has plain dictionaries and no registry lock/CAS API.
-    # Claim the loader with pop, then insert-if-absent: a native concrete
-    # writer before or during publication always wins. Never call register(),
-    # whose unconditional assignment can clobber that writer.
+    # Minimum Hermes has plain dictionaries and no registry lock or two-map
+    # CAS. Claim the predecessor loader, then insert-if-absent. A native
+    # register_deferred() in that gap leaves a loader beside the new entry;
+    # drop only our entry and fail. Never call register() or the loader, and
+    # never overwrite a concrete native writer. A lock observed only by Nunchi
+    # would not serialize those writers.
     entries = getattr(registry, "_entries", None)
     deferred = getattr(registry, "_deferred", None)
     if scope is not None or not isinstance(entries, dict) or not isinstance(deferred, dict):
@@ -3119,7 +3145,31 @@ def _replace_deferred_discord_registration(
         if loader is not None:
             deferred.setdefault("discord", loader)
         return False
-    return entries.setdefault("discord", entry) is entry
+    # This remains the publication write. The deferred check is in the same
+    # expression so a native register_deferred() that won the claim/insert gap
+    # cannot be reported as a successful publication.
+    return entries.setdefault("discord", entry) is entry and _minimum_publication_kept(
+        entries, deferred, entry
+    )
+
+
+def _minimum_publication_kept(
+    entries: dict[str, Any], deferred: dict[str, Any], entry: Any
+) -> bool:
+    """Drop our entry when a deferred loader won the claim/insert gap."""
+
+    if deferred.get("discord") is None:
+        return True
+    _release_minimum_discord_entry(entries, entry)
+    return False
+
+
+def _release_minimum_discord_entry(entries: dict[str, Any], entry: Any) -> None:
+    """Remove our concrete entry without deleting a newer native owner."""
+
+    taken = entries.pop("discord", None)
+    if taken is not entry and taken is not None:
+        entries.setdefault("discord", taken)
 
 
 def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
@@ -3193,6 +3243,17 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
         return
     current = _discord_registration_state(registry, scope)
     if current[0] is not entry or current[1] is not None:
+        # Minimum can observe a deferred winner only in the claim/insert gap.
+        # If one is still visible, this publication is unowned: drop our entry
+        # and fail closed. Current hosts use native CAS and are left to that
+        # inverse. A concrete winner is resolved by the caller.
+        if current[1] is not None and not callable(
+            getattr(registry, "restore_registration", None)
+        ):
+            minimum_entries = getattr(registry, "_entries", None)
+            if isinstance(minimum_entries, dict):
+                _release_minimum_discord_entry(minimum_entries, entry)
+            raise _shape_error("Discord adapter")
         return
     _remember_discord_publication(registry, scope, current, previous)
 
