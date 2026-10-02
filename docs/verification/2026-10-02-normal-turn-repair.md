@@ -30,7 +30,7 @@ Wheel SHA256: `01636ce06260a4ce0dfe7e50d0c762d39f8dcb356d696c4b5fcb7c96b76bc02a`
 All log paths below are relative to workspace `evidence/`.
 
 - RED: `red-minimum.txt` and `red-release.txt` reproduce the original diagnostic, admission and final-delivery failures; `red-contract-minimum.txt` reproduces the early owner-publication failure.
-- Target regression: `red-event-target.txt` is the initial environment/import failure, not behavioural RED. The release normal-turn RED above establishes the real delivery defect. `green-event-target.txt` verifies focused boundaries; `final-focused.txt` records portable plus new boundary coverage.
+- Target regression: `red-event-target.txt` fails for both Discord and Telegram on the valid destination with `_StockEffectBlocked: Hermes _send_final_text target does not match the active Nunchi room` (system Python 3.9). `green-event-target.txt` verifies focused boundaries on Python 3.13; `final-focused.txt` passes all 94 portable plus new boundary tests.
 - Final installed minimum: `final-minimum.txt`, 32/32 pass, zero skips.
 - Final installed release: `final-release-repeat.txt`, 32/32 pass, zero skips. The first final run (`final-release.txt`) had one native-tool model-call-count failure (expected 2, observed 3); the repeat passed. Retained as a reliability finding, not hidden.
 - Final contracts: `final-contract-{minimum,release}-{discord,telegram}/receipt.json`, four runs of 4/4, zero skips, unchanged host integrity. These are discovery/contract probes, not Telegram full normal-turn proof.
