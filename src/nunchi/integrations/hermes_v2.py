@@ -22,6 +22,7 @@ import math
 import os
 from pathlib import Path
 import re
+import sys
 import threading
 import time
 from typing import Any
@@ -452,6 +453,12 @@ _HOST_CONTRACT_V1_PLATFORM_EFFECTS = {
 }
 _PATCH_TRANSACTION: ContextVar[list[tuple[Any, str, Any, Any]] | None] = (
     ContextVar("nunchi_hermes_patch_transaction", default=None)
+)
+_REGISTRY_ROLLBACKS: ContextVar[list[Callable[[], None]] | None] = ContextVar(
+    "nunchi_hermes_registry_rollbacks", default=None
+)
+_ACTIVE_PLUGIN_CONTEXT: ContextVar[Any] = ContextVar(
+    "nunchi_hermes_active_plugin_context", default=None
 )
 
 
@@ -2828,23 +2835,40 @@ _SHIPPED_HOST_DISCORD = re.compile(
 _NO_DISCORD_LOADER = object()
 
 
-def _is_shipped_discord_module(name: str | None, module: Any = None) -> bool:
-    """True for the shipped Discord adapter file, whatever namespace loaded it.
+def _resolved_module_file(module: Any) -> str | None:
+    raw = getattr(module, "__file__", None)
+    if not isinstance(raw, str) or not raw:
+        return None
+    normalized = os.path.normpath(raw)
+    try:
+        return os.path.realpath(normalized)
+    except OSError:
+        return normalized
 
-    0.19.0 loads it as ``hermes_plugins.discord_platform``. Current hosts load
-    the same file as ``hermes_plugins.platforms__discord``. A home suffix does
-    not make that file a foreign override. A similarly named module from
-    another file still fails closed.
+
+def _shipped_discord_adapter_file() -> str | None:
+    """Resolved path of the Discord adapter this process actually imported."""
+
+    module = sys.modules.get("plugins.platforms.discord.adapter")
+    if module is None:
+        return None
+    return _resolved_module_file(module)
+
+
+def _is_shipped_discord_module(name: str | None, module: Any = None) -> bool:
+    """True when *module* is the imported shipped adapter file.
+
+    0.19.0 loads that file as ``hermes_plugins.discord_platform``. Current
+    hosts load it as ``hermes_plugins.platforms__discord``, with an optional
+    home suffix. Those names are aliases, not proof. A matching name or a
+    ``/plugins/platforms/discord/adapter.py`` suffix from another file still
+    fails closed.
     """
 
-    path = str(getattr(module, "__file__", "") or "").replace("\\", "/")
-    if path.endswith("/plugins/platforms/discord/adapter.py"):
-        return True
-    if not name:
-        return False
-    if name == "plugins.platforms.discord.adapter":
-        return True
-    return _SHIPPED_HOST_DISCORD.fullmatch(name) is not None
+    del name
+    shipped_file = _shipped_discord_adapter_file()
+    module_file = _resolved_module_file(module)
+    return bool(shipped_file and module_file and module_file == shipped_file)
 
 
 def _discord_registration_is_shipped(
@@ -2853,10 +2877,9 @@ def _discord_registration_is_shipped(
     """Return the shipped class a concrete entry builds, or None if it is foreign.
 
     Hermes 0.19.0 registers ``_build_adapter`` in the shipped module rather
-    than the class itself. Installed hosts then load that module as
-    ``hermes_plugins.discord_platform``. A factory from any other module is an
-    override: activation fails closed instead of patching that class or
-    falling back while it remains the live adapter.
+    than the class itself. A factory from any other file is an override, even
+    when that file re-exports ``DiscordAdapter``: activation fails closed
+    instead of patching that class or falling back while it remains live.
     """
 
     factory = getattr(entry, "adapter_factory", None)
@@ -2865,19 +2888,17 @@ def _discord_registration_is_shipped(
     if not callable(factory):
         return None
     module = inspect.getmodule(factory)
-    if module is None:
+    if module is None or not _is_shipped_discord_module(
+        getattr(module, "__name__", None), module
+    ):
         return None
     adapter_class = getattr(module, "DiscordAdapter", None)
-    module_name = getattr(module, "__name__", None) or getattr(
-        adapter_class, "__module__", None
-    )
-    if adapter_class is shipped or (
+    if not (
         isinstance(adapter_class, type)
         and adapter_class.__name__ == "DiscordAdapter"
-        and _is_shipped_discord_module(module_name, module)
     ):
-        return adapter_class if isinstance(adapter_class, type) else shipped
-    return None
+        return None
+    return adapter_class
 
 
 def _discord_loader_scope(registry: Any) -> Any:
@@ -2947,6 +2968,130 @@ def _host_platform_entry(
     return PlatformEntry(**payload)
 
 
+def _discord_registration_state(registry: Any, scope: Any) -> tuple[Any, Any]:
+    """Concrete entry and deferred loader for Discord, without invoking the loader."""
+
+    snapshot = getattr(registry, "snapshot_registration", None)
+    if callable(snapshot):
+        try:
+            state = snapshot("discord", scope=scope)
+        except TypeError:
+            state = snapshot("discord")
+        if isinstance(state, tuple):
+            entry = state[0] if state else None
+            loader = state[1] if len(state) > 1 else None
+            return entry, loader
+        return state, None
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    entry = entries.get("discord") if isinstance(entries, Mapping) else None
+    loader = deferred.get("discord") if isinstance(deferred, Mapping) else None
+    return entry, loader
+
+
+def _restore_discord_registration(
+    registry: Any,
+    scope: Any,
+    current: tuple[Any, Any],
+    previous: tuple[Any, Any],
+) -> bool:
+    """Restore Discord only while *current* is still the published generation."""
+
+    restore = getattr(registry, "restore_registration", None)
+    if callable(restore):
+        try:
+            return bool(restore("discord", current, previous, scope=scope))
+        except TypeError:
+            try:
+                return bool(restore("discord", current, previous))
+            except TypeError:
+                return False
+    entries = getattr(registry, "_entries", None)
+    deferred = getattr(registry, "_deferred", None)
+    if not isinstance(entries, dict) or not isinstance(deferred, dict):
+        return False
+    if entries.get("discord") is not current[0] or deferred.get("discord") is not current[1]:
+        return False
+    if previous[0] is None:
+        entries.pop("discord", None)
+    else:
+        entries["discord"] = previous[0]
+    if previous[1] is None:
+        deferred.pop("discord", None)
+    else:
+        deferred["discord"] = previous[1]
+    return True
+
+
+def _rollback_registry_publications(rollbacks: Sequence[Callable[[], None]]) -> None:
+    for rollback in reversed(rollbacks):
+        try:
+            rollback()
+        except Exception:
+            logger.debug("discord publication rollback failed", exc_info=True)
+
+
+def _deferred_loader_plugin_name(loader: Any) -> str:
+    """Owning manifest name captured by a deferred loader, without calling it."""
+
+    defaults = getattr(loader, "__defaults__", None) or ()
+    for item in defaults:
+        name = getattr(item, "name", None)
+        if isinstance(name, str) and name:
+            return name
+    return ""
+
+
+def _remember_discord_publication(
+    registry: Any,
+    scope: Any,
+    current: tuple[Any, Any],
+    previous: tuple[Any, Any],
+) -> None:
+    """Record the CAS inverse for activation failure and native unload."""
+
+    def rollback() -> None:
+        _restore_discord_registration(registry, scope, current, previous)
+
+    rollbacks = _REGISTRY_ROLLBACKS.get()
+    if rollbacks is not None:
+        rollbacks.append(rollback)
+    ctx = _ACTIVE_PLUGIN_CONTEXT.get()
+    manager = getattr(ctx, "_manager", None)
+    track = getattr(manager, "_track_scoped_registration", None)
+    manifest = getattr(ctx, "manifest", None)
+    if not callable(track) or manifest is None:
+        return
+    if getattr(manager, "scope_key", None) != scope:
+        return
+    names = getattr(manager, "_plugin_platform_names", None)
+    if isinstance(names, set):
+        names.add("discord")
+    finalize = getattr(manager, "_remove_platform_name_if_unowned", None)
+
+    def release_name() -> None:
+        if callable(finalize):
+            finalize("discord")
+
+    try:
+        track(
+            manifest,
+            "platform",
+            "discord",
+            registry,
+            current,
+            previous,
+            finalize=release_name,
+        )
+    except TypeError:
+        try:
+            track(manifest, "platform", "discord", registry, current, previous)
+        except Exception:
+            logger.debug("discord publication lease was not recorded", exc_info=True)
+    except Exception:
+        logger.debug("discord publication lease was not recorded", exc_info=True)
+
+
 def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> None:
     """Replace a deferred Discord loader with the shipped registration.
 
@@ -2954,7 +3099,9 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
     ``register()`` deadlocks on current Hermes, and letting it run later
     re-executes the same file as ``hermes_plugins.*``. Publishing the class
     already imported from that file pops the loader, so ``get()`` instantiates
-    the class Nunchi patches.
+    the class Nunchi patches. The predecessor is restored on activation
+    failure and by the native registration lease on unload or rediscovery.
+    A newer concrete entry is left alone.
     """
 
     module = inspect.getmodule(shipped)
@@ -2965,10 +3112,15 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
     scope = _discord_loader_scope(registry)
     if scope is _NO_DISCORD_LOADER:
         return
+    previous = _discord_registration_state(registry, scope)
+    if previous[0] is not None or previous[1] is None:
+        return
+    plugin_name = _deferred_loader_plugin_name(previous[1])
     accepts_scope = "scope" in inspect.signature(register).parameters
     # 0.21.5 infers a plugin scope when ``scope`` is omitted and source is
     # ``plugin``. An explicit global loader must stay in the global map.
     source = "plugin" if scope is not None or not accepts_scope else "builtin"
+    published: dict[str, Any] = {}
 
     def register_platform(
         name: str,
@@ -2977,26 +3129,41 @@ def _publish_shipped_discord_registration(registry: Any, shipped: type[Any]) -> 
         check_fn: Any,
         **kwargs: Any,
     ) -> None:
+        again = _discord_registration_state(registry, scope)
+        if again[0] is not None or again[1] is not previous[1]:
+            return
+        extra = dict(kwargs)
+        if plugin_name and not extra.get("plugin_name"):
+            extra["plugin_name"] = plugin_name
         entry = _host_platform_entry(
             name=name,
             label=label,
             adapter_factory=adapter_factory,
             check_fn=check_fn,
             source=source,
-            extra=kwargs,
+            extra=extra,
         )
         if entry is None:
             return
         if accepts_scope:
             register(entry, scope=scope)
+            published["entry"] = entry
             return
         register(entry)
+        published["entry"] = entry
 
     class _Ctx:
         pass
 
     _Ctx.register_platform = staticmethod(register_platform)  # type: ignore[attr-defined]
     stock_register(_Ctx())
+    entry = published.get("entry")
+    if entry is None:
+        return
+    current = _discord_registration_state(registry, scope)
+    if current[0] is not entry or current[1] is not None:
+        return
+    _remember_discord_publication(registry, scope, current, previous)
 
 
 def _active_discord_adapter_class() -> type[Any]:
@@ -3966,6 +4133,32 @@ def _adopt_native_session_owner(
     if parent is None or tasks.get(session_key) is not parent:
         return
     tasks[session_key] = child
+    _bind_native_task_cleanup(adapter, child)
+
+
+def _bind_native_task_cleanup(adapter: Any, task: asyncio.Task[Any]) -> None:
+    """Give an adopted child the done callbacks stock installs on its owner.
+
+    ``cancel_session_processing`` adds the recorded owner to
+    ``_expected_cancelled_tasks``. Stock discards that entry from the task it
+    created. The deadline child is that owner, so it needs the same callback
+    and shutdown membership. The parent stays tracked: it is still the
+    wrapper task shutdown must cancel.
+    """
+
+    background = getattr(adapter, "_background_tasks", None)
+    expected = getattr(adapter, "_expected_cancelled_tasks", None)
+    if isinstance(background, set):
+        try:
+            background.add(task)
+        except TypeError:
+            return
+    if not hasattr(task, "add_done_callback"):
+        return
+    if isinstance(background, set):
+        task.add_done_callback(background.discard)
+    if isinstance(expected, set):
+        task.add_done_callback(expected.discard)
 
 
 async def _run_stock_process_with_deadline(
@@ -5832,10 +6025,13 @@ def register(
     ):
         raise _shape_error("Hermes plugin registration context")
     patches: list[tuple[Any, str, Any, Any]] = []
+    registry_rollbacks: list[Callable[[], None]] = []
     context_registries = _snapshot_context_registries(ctx)
     previous_owner = _SHIM_OWNER
     previous_base_handle = _ORIGINAL_BASE_HANDLE
     transaction_token = _PATCH_TRANSACTION.set(patches)
+    rollback_token = _REGISTRY_ROLLBACKS.set(registry_rollbacks)
+    context_token = _ACTIVE_PLUGIN_CONTEXT.set(ctx)
     try:
         _install_host_contract_v1(plugin)
         ctx.register_hook("pre_tool_call", plugin.pre_tool_call)
@@ -5850,11 +6046,14 @@ def register(
     except BaseException:
         _rollback_shim_attributes(patches)
         _restore_context_registries(context_registries)
+        _rollback_registry_publications(registry_rollbacks)
         _SHIM_OWNER = previous_owner
         _ORIGINAL_BASE_HANDLE = previous_base_handle
         raise
     finally:
         _PATCH_TRANSACTION.reset(transaction_token)
+        _REGISTRY_ROLLBACKS.reset(rollback_token)
+        _ACTIVE_PLUGIN_CONTEXT.reset(context_token)
     return plugin
 
 
