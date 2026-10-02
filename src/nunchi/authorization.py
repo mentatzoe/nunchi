@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import threading
+import time
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -466,6 +467,27 @@ class AuthorizationJournal:
             return tuple(deepcopy(self._records))
 
 
+@dataclass(frozen=True)
+class _AuthorizationLifetime:
+    """Keep the host's absolute monotonic deadline with its cancellation.
+
+    Each authorization boundary checks time itself: correctness must not
+    depend on the host waiter being scheduled to set the Event. Pending
+    approvals retain the same lifetime after the host returns.
+    """
+
+    event: threading.Event
+    deadline: float | None
+
+    def is_set(self) -> bool:
+        return self.event.is_set() or (
+            self.deadline is not None and time.monotonic() >= self.deadline
+        )
+
+    def set(self) -> None:
+        self.event.set()
+
+
 @dataclass
 class _PendingApproval:
     request: dict[str, Any]
@@ -473,7 +495,7 @@ class _PendingApproval:
     challenge: dict[str, Any]
     operation: dict[str, Any]
     effect_fingerprint: str
-    cancel: threading.Event
+    cancel: _AuthorizationLifetime
     unknown_retry: bool = False
 
 
@@ -670,7 +692,7 @@ class AuthorizationCoordinator:
         operation: Mapping[str, Any],
         decision: Mapping[str, Any],
         rule: CapabilityRule,
-        cancel: threading.Event,
+        cancel: _AuthorizationLifetime,
     ) -> TransportResult:
         if cancel.is_set():
             return TransportResult("failed", "privileged work cancelled before commit")
@@ -729,14 +751,15 @@ class AuthorizationCoordinator:
             committed_recheck=True,
         )
         if (
-            cancel.is_set()
-            or outcome != "ALLOW"
+            outcome != "ALLOW"
             or reason != "policy-allow"
             or current_rule != rule
             or current_policy.provenance != decision["policy_provenance"]
             or moment >= _parse_time(decision["expires_at"])
             or self.observation.resolve_event(binding["origin_event_id"]) is None
             or canonical_operation_digest(operation) != binding["action_digest"]
+            # Origin lookup and digest work can also consume the deadline.
+            or cancel.is_set()
         ):
             return TransportResult(
                 "failed",
@@ -771,7 +794,7 @@ class AuthorizationCoordinator:
         operation: Mapping[str, Any],
         decision: Mapping[str, Any],
         rule: CapabilityRule,
-        cancel: threading.Event,
+        cancel: _AuthorizationLifetime,
         authenticated_approval: bool,
     ) -> TransportResult:
         """Retry one previously unknown effect under fresh exact authority."""
@@ -847,14 +870,14 @@ class AuthorizationCoordinator:
             )
         )
         if (
-            cancel.is_set()
-            or not authority_matches
+            not authority_matches
             or current_rule != rule
             or policy.provenance != decision["policy_provenance"]
             or now >= _parse_time(decision["expires_at"])
             or self.observation.resolve_event(binding["origin_event_id"]) is None
             or canonical_operation_digest(operation) != binding["action_digest"]
             or self.journal.idempotency_key(fingerprint) != expected_key
+            or cancel.is_set()
         ):
             return TransportResult(
                 "failed",
@@ -891,18 +914,20 @@ class AuthorizationCoordinator:
         proposal: Mapping[str, Any],
         wake: Mapping[str, Any],
         cancel: threading.Event,
+        deadline: float | None = None,
     ) -> TransportResult:
-        """Authorize one proposal; never accepts room text as authority."""
-        if cancel.is_set():
+        """Authorize one proposal; optional deadline uses time.monotonic()."""
+        lifetime = _AuthorizationLifetime(cancel, deadline)
+        if lifetime.is_set():
             return TransportResult("failed", "privileged proposal was already cancelled")
         with self._lock:
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was already cancelled")
             try:
                 binding, operation = self._build_binding(proposal, wake)
             except (AuthorizationError, ValidationError) as exc:
                 return TransportResult("failed", str(exc))
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled before audit")
             requested_at = _now()
             request_id = f"authorization:{uuid4()}"
@@ -914,13 +939,13 @@ class AuthorizationCoordinator:
                 "requested_at": _iso(requested_at),
             }
             self._persist_contract(request)
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled during audit")
             try:
                 policy = self.policy_source.load()
             except BaseException:
                 return TransportResult("failed", "trusted authorization policy is unavailable")
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled during policy load")
             evaluated_at = _strictly_after(requested_at)
             fingerprint = self._effect_fingerprint(binding)
@@ -941,7 +966,7 @@ class AuthorizationCoordinator:
                 # fresh authenticated operator accepts the duplicate risk.
                 outcome = "APPROVAL_REQUIRED"
                 reason = "approval-required"
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled during evaluation")
             if outcome == "APPROVAL_REQUIRED":
                 challenge_id = f"approval:{secrets.token_urlsafe(24)}"
@@ -968,13 +993,13 @@ class AuthorizationCoordinator:
                     ),
                     "host_only": True,
                 }
-                if cancel.is_set():
+                if lifetime.is_set():
                     return TransportResult("failed", "privileged proposal was cancelled before challenge")
                 self._persist_contract(decision)
-                if cancel.is_set():
+                if lifetime.is_set():
                     return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._persist_contract(challenge)
-                if cancel.is_set():
+                if lifetime.is_set():
                     return TransportResult("failed", "privileged proposal was cancelled during challenge audit")
                 self._pending[challenge_id] = _PendingApproval(
                     request=request,
@@ -982,10 +1007,10 @@ class AuthorizationCoordinator:
                     challenge=challenge,
                     operation=operation,
                     effect_fingerprint=fingerprint,
-                    cancel=cancel,
+                    cancel=lifetime,
                     unknown_retry=unknown_retry,
                 )
-                if cancel.is_set():
+                if lifetime.is_set():
                     self._pending.pop(challenge_id, None)
                     return TransportResult("failed", "privileged proposal was cancelled before challenge publication")
                 return TransportResult("unavailable", "authenticated operator approval required")
@@ -999,7 +1024,7 @@ class AuthorizationCoordinator:
                 authorization_path="direct-policy",
             )
             self._persist_contract(decision)
-            if cancel.is_set():
+            if lifetime.is_set():
                 return TransportResult("failed", "privileged proposal was cancelled during decision audit")
             if outcome != "ALLOW" or rule is None:
                 return TransportResult("failed", f"privileged action denied: {reason}")
@@ -1009,7 +1034,7 @@ class AuthorizationCoordinator:
                     operation=operation,
                     decision=decision,
                     rule=rule,
-                    cancel=cancel,
+                    cancel=lifetime,
                     authenticated_approval=False,
                 )
             return self._dispatch_once(
@@ -1017,7 +1042,7 @@ class AuthorizationCoordinator:
                 operation=operation,
                 decision=decision,
                 rule=rule,
-                cancel=cancel,
+                cancel=lifetime,
             )
 
     def pending_for_operator(self) -> tuple[dict[str, Any], ...]:
@@ -1165,7 +1190,7 @@ class AuthorizationCoordinator:
         operation: Mapping[str, Any],
         decision: Mapping[str, Any],
         rule: CapabilityRule,
-        cancel: threading.Event,
+        cancel: _AuthorizationLifetime,
     ) -> TransportResult:
         if cancel.is_set():
             return TransportResult("failed", "approved work was cancelled before commit")
@@ -1216,14 +1241,14 @@ class AuthorizationCoordinator:
             committed_recheck=True,
         )
         if (
-            cancel.is_set()
-            or outcome != "APPROVAL_REQUIRED"
+            outcome != "APPROVAL_REQUIRED"
             or reason != "approval-required"
             or current_rule != rule
             or policy.provenance != decision["policy_provenance"]
             or now >= _parse_time(decision["expires_at"])
             or self.observation.resolve_event(binding["origin_event_id"]) is None
             or canonical_operation_digest(operation) != binding["action_digest"]
+            or cancel.is_set()
         ):
             return TransportResult(
                 "failed",

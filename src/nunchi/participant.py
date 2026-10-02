@@ -202,6 +202,7 @@ class PrivilegedCoordinator(Protocol):
         proposal: Mapping[str, Any],
         wake: Mapping[str, Any],
         cancel: threading.Event,
+        deadline: float | None = None,
     ) -> TransportResult:
         """Authorize and optionally dispatch one exact privileged proposal."""
 
@@ -858,6 +859,7 @@ class ParticipantTurnHost:
                                 proposal=action,
                                 wake=wake,
                                 cancel=token.cancel_event,
+                                deadline=effective_deadline,
                             )
                     else:
                         result = self.transport.dispatch(action=action, wake=wake)
@@ -885,6 +887,15 @@ class ParticipantTurnHost:
                     )
                 except queue.Empty:
                     continue
+                # Queue.get's timeout does not bound when this consumer is
+                # scheduled again. Never accept a result observed too late.
+                if time.monotonic() >= effective_deadline:
+                    token.cancel_event.set()
+                    self.scheduler.cancel()
+                    return TransportResult(
+                        "unknown",
+                        "host total deadline exceeded during dispatch",
+                    )
                 if status == "deadline":
                     self.scheduler.cancel()
                     return value
