@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+from contextlib import contextmanager
 import json
 import importlib
 from copy import deepcopy
@@ -21,6 +23,161 @@ from nunchi.integrations.hermes_dashboard_store import (
     write_config_document,
 )
 from tests.v2.test_hermes_dashboard import _document, _write_config
+
+
+class AttentionTrustYamlTests(unittest.TestCase):
+    # Dependency-selection unit double only. The installed stock-host suite
+    # exercises these same production Save paths with the real YAML parsers.
+    raw = b"# retain original bytes in backup\nother: &shared\n  llm:\n    allow_model_override: false\nplugins:\n  entries:\n    other: *shared\n    nunchi: *shared\n"
+
+    @contextmanager
+    def _parsers(self, *, modern_error=None, legacy_error=None, load_error=None):
+        real_import = builtins.__import__
+        imports = []
+        loads = []
+
+        def safe_load(raw):
+            loads.append(raw)
+            if load_error is not None:
+                raise load_error
+            self.assertEqual(self.raw, raw)
+            shared = {"llm": {"allow_model_override": False}}
+            return {"other": shared, "plugins": {"entries": {
+                "other": shared, "nunchi": shared,
+            }}}
+
+        def dependency(name, *args, **kwargs):
+            if name in ("hermes_yaml", "yaml"):
+                imports.append(name)
+                error = modern_error if name == "hermes_yaml" else legacy_error
+                if error is not None:
+                    raise error
+                return SimpleNamespace(safe_load=safe_load)
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", side_effect=dependency):
+            yield imports, loads
+
+    def test_modern_host_save_without_pyyaml_preserves_values_and_backup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / "config.yaml"
+            path.write_bytes(self.raw)
+            env = {"HERMES_HOME": str(home)}
+            before = read_dashboard_snapshot("default", environ=env)
+            with self._parsers(legacy_error=ModuleNotFoundError(name="yaml")) as (imports, loads):
+                saved = write_config_document("default", document=_document(home),
+                                              expected_revision=before.revision, environ=env)
+            self.assertTrue(loads)
+            self.assertEqual({"hermes_yaml"}, set(imports))
+            result = json.loads(path.read_bytes())
+            self.assertFalse(result["other"]["llm"]["allow_model_override"])
+            self.assertFalse(result["plugins"]["entries"]["other"]["llm"]["allow_model_override"])
+            llm = result["plugins"]["entries"]["nunchi"]["llm"]
+            self.assertTrue(llm["allow_model_override"])
+            self.assertEqual(["test-provider"], llm["allowed_providers"])
+            self.assertEqual(["test-model"], llm["allowed_models"])
+            backups = list(home.glob("config.yaml.nunchi-backup-*"))
+            self.assertEqual(1, len(backups))
+            self.assertEqual(self.raw, backups[0].read_bytes())
+            self.assertTrue(attention_trust_status(home, saved.config)["ready"])
+
+    def test_released_host_falls_back_only_when_host_module_is_absent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / "config.yaml").write_bytes(self.raw)
+            env = {"HERMES_HOME": str(home)}
+            before = read_dashboard_snapshot("default", environ=env)
+            with self._parsers(modern_error=ModuleNotFoundError(name="hermes_yaml")) as (imports, loads):
+                saved = write_config_document("default", document=_document(home),
+                                              expected_revision=before.revision, environ=env)
+            self.assertTrue(loads)
+            self.assertEqual(["hermes_yaml", "yaml"] * len(loads), imports)
+            self.assertTrue(attention_trust_status(home, saved.config)["ready"])
+
+    def test_broken_host_import_fails_closed_without_legacy_fallback(self):
+        for error in (ModuleNotFoundError(name="ruamel"),
+                      ModuleNotFoundError(name="ruamel.yaml"),
+                      ImportError("broken host YAML API")):
+            with self.subTest(error=repr(error)), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary)
+                path = home / "config.yaml"
+                path.write_bytes(self.raw)
+                env = {"HERMES_HOME": str(home)}
+                before = read_dashboard_snapshot("default", environ=env)
+                with self._parsers(modern_error=error) as (imports, loads):
+                    with self.assertRaisesRegex(ValidationError, "could not be parsed") as caught:
+                        write_config_document("default", document=_document(home),
+                                              expected_revision=before.revision, environ=env)
+                self.assertIs(error, caught.exception.__cause__)
+                self.assertEqual(["hermes_yaml"], imports)
+                self.assertEqual([], loads)
+                self.assertEqual(self.raw, path.read_bytes())
+                self.assertFalse(before.source.write_path.exists())
+                self.assertEqual([], list(home.glob("config.yaml.nunchi-backup-*")))
+
+    def test_modern_parse_failure_does_not_retry_with_legacy_parser(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / "config.yaml"
+            path.write_bytes(self.raw)
+            env = {"HERMES_HOME": str(home)}
+            before = read_dashboard_snapshot("default", environ=env)
+            # Even a ModuleNotFoundError raised by safe_load is not an absent
+            # host module at import time and must not enable the fallback.
+            with self._parsers(load_error=ModuleNotFoundError(name="hermes_yaml")) as (imports, loads):
+                with self.assertRaises(ValidationError):
+                    write_config_document("default", document=_document(home),
+                                          expected_revision=before.revision, environ=env)
+            self.assertEqual(["hermes_yaml"], imports)
+            self.assertEqual([self.raw], loads)
+            self.assertEqual(self.raw, path.read_bytes())
+            self.assertFalse(before.source.write_path.exists())
+
+    def test_missing_both_parsers_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            path = home / "config.yaml"
+            path.write_bytes(self.raw)
+            env = {"HERMES_HOME": str(home)}
+            before = read_dashboard_snapshot("default", environ=env)
+            with self._parsers(modern_error=ModuleNotFoundError(name="hermes_yaml"),
+                               legacy_error=ModuleNotFoundError(name="yaml")) as (imports, loads):
+                with self.assertRaises(ValidationError):
+                    write_config_document("default", document=_document(home),
+                                          expected_revision=before.revision, environ=env)
+            self.assertEqual(["hermes_yaml", "yaml"], imports)
+            self.assertEqual([], loads)
+            self.assertEqual(self.raw, path.read_bytes())
+            self.assertFalse(before.source.write_path.exists())
+
+    def test_modern_yaml_save_failure_restores_exact_bytes_and_isolates_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home, other = root / "a", root / "b"
+            home.mkdir()
+            other.mkdir()
+            path = home / "config.yaml"
+            path.write_bytes(self.raw)
+            (other / "config.yaml").write_bytes(self.raw)
+            env = {"HERMES_HOME": str(home)}
+            before = read_dashboard_snapshot("default", environ=env)
+            original = store._publish_complete_file_exclusive
+
+            def interrupted(source, destination, **kwargs):
+                if destination.suffix == ".sha256":
+                    raise OSError("injected publication failure")
+                return original(source, destination, **kwargs)
+
+            with self._parsers(legacy_error=ModuleNotFoundError(name="yaml")):
+                with patch.object(store, "_publish_complete_file_exclusive", side_effect=interrupted):
+                    with self.assertRaisesRegex(OSError, "injected"):
+                        write_config_document("default", document=_document(home),
+                                              expected_revision=before.revision, environ=env)
+                self.assertTrue(read_dashboard_snapshot("default", environ=env).bootstrap_required)
+            self.assertEqual(self.raw, path.read_bytes())
+            self.assertEqual(self.raw, (other / "config.yaml").read_bytes())
+            self.assertEqual(["config.yaml"], [p.name for p in other.iterdir()])
 
 
 class AttentionTrustSetupTests(unittest.TestCase):

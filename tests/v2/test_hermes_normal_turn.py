@@ -38,6 +38,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -169,6 +171,14 @@ class _Base(unittest.TestCase):
 
     # -- helpers -----------------------------------------------------------
 
+    def approval_command(self) -> tuple[str, Path]:
+        # Native /approve really executes this command. Never use a shared
+        # fixed /tmp target: delete only data just created in this fixture home.
+        target = Path(tempfile.mkdtemp(prefix="approval-target-", dir=self.home)).resolve()
+        assert target.is_relative_to(self.home.resolve())
+        (target / "marker").write_text("disposable approval fixture\n")
+        return f"rm -rf -- {shlex.quote(str(target))}", target
+
     def human(self, content: str, *, room: int | None = None, author: int = HUMAN, mention: bool = True) -> Any:
         room = self.room if room is None else room
         message = sup.human_message(self.host, channel_id=room, author_id=author, content=(f"<@{BOT}> " if mention else "") + content)
@@ -276,8 +286,9 @@ class StockHermesNormalTurnBaseline(_Base):
     def test_native_approval_blocks_dangerous_terminal_until_approve(self) -> None:
         # Stock approval flow: dangerous terminal command parks the agent
         # thread in tools.approval; /approve from the same route resumes it.
+        command, target = self.approval_command()
         self.server.script(
-            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": "rm -rf /tmp/nunchi-probe-nothing"})]},
+            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": command})]},
             {"content": "done after approval"},
         )
         from tools import approval as approval_mod
@@ -295,6 +306,7 @@ class StockHermesNormalTurnBaseline(_Base):
             prompt_seen = any("Approval Required" in d or "needs your OK" in d or "/approve" in d for d in self.deliveries())
             if session_key is None:
                 return {"pending": False, "prompt_seen": prompt_seen}
+            self.assertTrue((target / "marker").is_file(), "executed before approval")
             approve_admitted = await self.host.deliver(self.human("/approve"))
             await self.host.settle(timeout=60)
             await asyncio.sleep(0.2)
@@ -306,10 +318,12 @@ class StockHermesNormalTurnBaseline(_Base):
         self.assertTrue(outcome["approve_admitted"])
         self.assertIn("done after approval", self.deliveries())
         self.assertEqual(2, len(self.model_turns()))
+        self.assertFalse(target.exists(), "approved native command did not execute")
 
     def test_native_deny_returns_blocked_result_to_model(self) -> None:
+        command, target = self.approval_command()
         self.server.script(
-            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": "rm -rf /tmp/nunchi-probe-nothing"})]},
+            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": command})]},
             {"content": "ok, not deleting"},
         )
         from tools import approval as approval_mod
@@ -331,6 +345,7 @@ class StockHermesNormalTurnBaseline(_Base):
         self.assertEqual(2, len(turns))
         self.assertIn("denied", str(turns[1]["messages"][-1].get("content")).lower())
         self.assertIn("ok, not deleting", self.deliveries())
+        self.assertTrue((target / "marker").is_file(), "denied command executed")
 
 
 # ===========================================================================
@@ -539,9 +554,10 @@ class NunchiOnInstalledHostNormalTurn(_Base):
     def test_native_approval_control_on_configured_route(self) -> None:
         """Owner fa0119a: /approve must reach stock while its participant waits."""
 
+        command, target = self.approval_command()
         self.server.script(
             self.attend("WAKE"),
-            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": "rm -rf /tmp/nunchi-probe-nothing"})]},
+            {"content": None, "tool_calls": [sup.tool_call("terminal", {"command": command})]},
             {"content": "done after approval"},
         )
         from tools import approval as approval_mod
@@ -557,6 +573,7 @@ class NunchiOnInstalledHostNormalTurn(_Base):
             if not parked:
                 await self.host.settle(timeout=60)
                 return {"parked": False}
+            self.assertTrue((target / "marker").is_file(), "executed before approval")
             approve_admitted = await self.host.deliver(self.human("/approve"))
             await self.host.settle(timeout=60)
             await asyncio.sleep(0.2)
@@ -573,6 +590,7 @@ class NunchiOnInstalledHostNormalTurn(_Base):
         self.assertTrue(outcome["approve_admitted"])
         self.assertIn("done after approval", self.deliveries())
         self._assert_tool_probe()
+        self.assertFalse(target.exists(), "approved native command did not execute")
 
     def test_cancel_via_stop_makes_no_new_native_invocation(self) -> None:
         hold = threading.Event()

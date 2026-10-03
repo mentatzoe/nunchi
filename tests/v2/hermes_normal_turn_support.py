@@ -69,7 +69,13 @@ def scrub_ambient_environment() -> list[str]:
 
 
 def hermes_version() -> str:
-    return importlib.metadata.version("hermes-agent")
+    installed = importlib.metadata.version("hermes-agent")
+    if installed != "0.0.0":
+        return installed
+    # Source-installed main deliberately publishes placeholder metadata.
+    # Compare the plugin with the host's own identity, never spoof metadata.
+    from hermes_cli.version_info import get_version_info
+    return get_version_info().derived_version
 
 
 def nunchi_version() -> str:
@@ -568,6 +574,16 @@ class FakeDiscordClient:
 # ---------------------------------------------------------------------------
 
 
+def host_yaml():
+    """Use the installed host's YAML implementation, not an added dependency."""
+    try:
+        return importlib.import_module("hermes_yaml")
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_yaml":
+            raise
+        return importlib.import_module("yaml")
+
+
 def write_hermes_home(
     home: Path,
     *,
@@ -623,9 +639,7 @@ def write_hermes_home(
     }
     if extra_config:
         _deep_update(config, extra_config)
-    import yaml  # provided by Hermes (pyyaml)
-
-    (home / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    (home / "config.yaml").write_text(host_yaml().safe_dump(config, sort_keys=False), encoding="utf-8")
     (home / ".env").write_text(
         "DISCORD_BOT_TOKEN=probe-token-not-a-secret\n"
         "DISCORD_ALLOWED_USERS=100\n"

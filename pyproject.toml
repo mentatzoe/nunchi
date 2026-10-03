@@ -39,7 +39,9 @@ classifiers = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
 mcp-discord = ["mcp>=1.9,<2"]
-test = ["jsonschema==4.26.0"]
+# Source-only tests use the released-host parser; modern installed-host probes
+# use Hermes' own dependencies, never this extra to mask a missing host parser.
+test = ["jsonschema==4.26.0", "PyYAML==6.0.3"]
 
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"
@@ -57,6 +59,7 @@ nunchi-discord = "nunchi.adapters.discord:main"
 nunchi-mcp-discord = "nunchi.mcp_discord.server:main"
 nunchi-codex-room-runner = "nunchi.integrations.codex_v2:main"
 nunchi-hermes-dashboard = "nunchi.integrations.hermes_dashboard_install:main"
+nunchi-hermes-lifecycle = "nunchi.integrations.hermes_lifecycle:main"
 nunchi-claude-code-room-runner = "nunchi.integrations.claude_code_v2:main"
 nunchi-service-worker = "nunchi.service_worker:main"
 

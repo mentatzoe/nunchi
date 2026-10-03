@@ -117,6 +117,7 @@ output authority.
 ## Verify
 
 ```sh
+python3 -m pip install '.[test]'
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 python3 -m evals.verdict_suite.runner

@@ -28,7 +28,7 @@ lands:
 | Surface | Status | What is outstanding |
 |---|---|---|
 | Codex | Successor consumer implemented, unverified | platform-specific validation remains outside the foundation PR |
-| Hermes | Portable PR83 candidate has source and isolated installed-stock proof; not live-verified or released | live acceptance (#38), remaining source boundaries (#42), supported-surface parity (#44), current-main normal turns and adoption; exact successor review/CI/landing still required |
+| Hermes | PR83 landed at `19ba139`; combined PR84 successor adds host-parser portability, installed verification and reversible profile lifecycle | exact combined review/CI/landing, live acceptance (#38), remaining source boundaries (#42), supported-surface parity (#44) and authorised adoption |
 | Claude Code | Successor consumer implemented, unverified | live real-room and supported-surface closure (#39, #43); the combined exact head must be reverified |
 
 Neither unverified platform may be described as done, live, or parity-ready
@@ -36,12 +36,15 @@ until its open gates pass. For Hermes, the current
 [verification record](v2-verification.md#current-hermes-candidate-portable-plugin-owned-tools-and-ack)
 separates predecessor proof and this successor's exact reruns: minimum/release
 stock normal turns, tools/approvals, ACK and attention setup have installed
-proof, while moving-main CI is contract-only. Blanket tool denial is no longer
+proof. PR84 adds the same normal/startup verifier to moving-main CI; the current
+[combined record](verification/2026-10-03-combined-portability.md) names local
+exact-host results separately from remote CI. Blanket tool denial is no longer
 current behavior. Host-owned native authority is retained; callback journal
 completion is not proof of an external effect. Missing surfaces and live
-acceptance remain required, not narrowed out. Complete Hermes user-data
-uninstall and automatic V1 state migration are still missing mechanisms; the
-operator guide names retained files and the stop/disable/rollback boundary.
+acceptance remain required, not narrowed out. The stopped profile lifecycle now
+archives attributed V1 runtime/state and V2 data, supports guarded restoration
+and package removal/reinstallation, and preserves private archives. It does not
+convert V1 social policy/history or automatically purge user data.
 
 Use five plain status terms:
 
