@@ -39,7 +39,9 @@ classifiers = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.4"]
 mcp-discord = ["mcp>=1.9,<2"]
-test = ["jsonschema==4.26.0"]
+# Source-only tests use the released-host parser; modern installed-host probes
+# use Hermes' own dependencies, never this extra to mask a missing host parser.
+test = ["jsonschema==4.26.0", "PyYAML==6.0.3"]
 
 [project.urls]
 Homepage = "https://github.com/mentatzoe/nunchi"

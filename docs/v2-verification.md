@@ -61,7 +61,7 @@ and Claude participant identity/surface blockers in
 | source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
 | clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
 | installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | minimum/release/moving-main contract CI passed for the predecessor; successor minimum/release reruns are recorded below; first-save/restart and live-platform acceptance remain **pending** |
-| installed Hermes normal turns | exact wheel; ordinary participant and tools/approvals; isolated homes; no installed skips or external egress; before/after integrity | minimum/release stock-host matrix passed; current-main normal turns, live platforms and adoption remain **pending** |
+| installed Hermes normal turns | exact wheel; ordinary participant and tools/approvals; isolated homes; no installed skips or external egress; before/after integrity | minimum/release and resolved-main installed results are in the combined PR84 record below; live platforms and adoption remain **pending** |
 | installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
 | deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
 | live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
@@ -74,8 +74,11 @@ every current row to name immutable evidence.
 
 ## Current Hermes candidate: portable plugin-owned tools and ACK
 
-PR [#83](https://github.com/mentatzoe/nunchi/pull/83) and its diagnostic/fixture
-successor reuse Nunchi's shared observation, attention, opportunity preparation,
+PR [#83](https://github.com/mentatzoe/nunchi/pull/83) landed at
+`19ba1398a3619bd077edc3bdc03fb5088f3a8fd3`. Its combined
+[PR84 successor](verification/2026-10-03-combined-portability.md) adds reversible
+profile lifecycle and repeatable normal/startup verification, including modern
+host YAML compatibility. These candidates reuse Nunchi's shared observation, attention, opportunity preparation,
 scheduling, wake and participant-receipt behavior. Stock Hermes supplies the
 admitted participant prompt, main model, memory, tools, approvals, reactions,
 cancellation, delivery and platform adapter behind checked process-local guards.
@@ -113,12 +116,13 @@ the Python 3.12 ACK timer assertion; 3.11, 3.13 and packaging passed. The
 records the narrow repair, exact artifacts and reruns; predecessor proof alone
 does not verify those changes.
 
-Installed proof is no longer absent, but live first-save/restart and native
-platform acceptance, current-main normal turns, remaining surfaces, release,
-running-profile adoption and complete V2 acceptance remain open. The
-[Hermes operator guide](../integrations/hermes/README.md#upgrade-disable-uninstall-and-rollback)
-also names the missing automatic state migration and complete user-data cleanup
-mechanisms rather than implying package uninstall performs them.
+Installed proof is no longer absent. The combined PR84 record supersedes the
+historical contract-only main limitation above. Live first-save/restart, native
+platform acceptance, remaining surfaces, release, running-profile adoption and
+complete V2 acceptance remain open. The
+[profile lifecycle guide](hermes-profile-lifecycle.md) covers stopped cutover,
+quarantine, retirement and guarded restoration. Archives remain private and
+retained; no V1 social state is converted and package uninstall is not data purge.
 
 ## Superseded Hermes `b6ee0c2` evidence
 

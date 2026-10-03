@@ -52,7 +52,13 @@ shasum -a 256 "$WHEEL" "$OLD_WHEEL" "$CONFIG"
 ```
 
 Nunchi has no mandatory package dependencies; it uses the selected stock Hermes
-environment's dependencies. Minimum stock's uv environment need not contain pip.
+environment's dependencies: modern Hermes provides `hermes_yaml` plus ruamel
+(load/dump and token/node parsing); releases 0.19.0/0.21.5 provide PyYAML.
+A broken modern host parser is an error, not permission to fall back. No extra
+parser installation is needed on these stock hosts. Do not install the source
+`[test]` extra into a modern host proof environment: that extra declares PyYAML
+for the no-Hermes offline suite only.
+Minimum stock's uv environment need not contain pip.
 If using pip, first run `"$HERMES_PYTHON" -m pip --version`; only if available use
 `"$HERMES_PYTHON" -m pip install --no-deps --force-reinstall "$WHEEL"` instead.
 Do not install pip into an unrelated interpreter as a workaround.
@@ -95,7 +101,7 @@ identity, predecessor identity, operations and `plan_sha256`. Plans contain
 paths and hashes, not config/state values. Do not approve a plan for the wrong
 profile. A validated selected-home alias is allowed; descendant symlinks,
 hard-linked files, unknown ownership and changed inputs are refused. Host YAML
-anchors/aliases, duplicate root keys and flow-style plugin mappings are refused
+anchors/aliases, duplicate mapping keys and flow-style plugin mappings are refused
 rather than risk rewriting private configuration incorrectly. Explicit document
 start/end markers are retained. The rendered YAML is parsed again and compared
 with the intended mapping during planning, before it can be staged or published;

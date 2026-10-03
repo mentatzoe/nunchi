@@ -124,21 +124,35 @@ normal/startup lanes, and `always()` uploads retain failed diagnostics. Offline 
 also runs on `integration/v2` pushes. No remote CI execution is implied by local
 CI-shaped commands; publication and GitHub CI consumption belong to the owner.
 
-## Current canary finding (2 October 2026)
+## Current parser and lifecycle support (3 October 2026)
 
-Minimum and release probes pass locally. At main commit
-`1af98f58baed50c9e09bca5555596780c91a62e9`, Python 3.14 and actual declared
-`ruamel.yaml` replace PyYAML. Fixtures now use the host's real `hermes_yaml` API,
-falling back to PyYAML only when that host module does not exist. Placeholder
-`0.0.0` metadata is compared against the official host source-version API, not
-rewritten or treated as a released host.
+The combined PR84 successor uses actual `hermes_yaml` load/dump and ruamel
+scan/compose on modern stock Hermes. Released hosts without `hermes_yaml` use
+their declared PyYAML. Missing transitive dependencies and parse errors never
+trigger parser fallback. Do not install PyYAML into modern host test environments
+to hide incompatibility. The source-only suite is different: install `.[test]`
+in a clean no-Hermes environment to obtain its declared JSON-Schema and PyYAML
+oracles. CI uses that same extra on Python 3.11/3.12/3.13.
 
-This exposes a production blocker: `hermes_attention_trust._read_host_config`
-still imports `yaml` for ordinary YAML config. Five normal-attention Save cases
-fail with `ModuleNotFoundError` wrapped in `ValidationError`. Do not add PyYAML
-only to CI, write JSON instead to evade the failing path, or mock the Save reader.
-The canary remains visibly failing pending an owner-routed production repair.
-Contract and startup checks are separate evidence, not substitutes for that gap.
+The verifier requires both source directories to be their exact resolved Git
+roots, with a tracked project inventory, before hashing or launching lanes.
+An extracted archive nested beneath another Git checkout is not source provenance.
+
+The [combined verification record](verification/2026-10-03-combined-portability.md)
+separates the frozen candidate, release pins, resolved moving main, deterministic
+lifecycle/package proof and remaining live gaps. Profile retirement/restoration
+is covered by the [lifecycle guide](hermes-profile-lifecycle.md), not by the four
+normal verifier lanes alone.
+
+### Historical canary failure (2 October 2026)
+
+At main `1af98f58baed50c9e09bca5555596780c91a62e9`, the pre-repair artifact
+failed five production attention Save cases because it imported absent PyYAML.
+Repair `b5c55fe` selected the host parser and those cases passed; the combined
+`a0dc5a6` then exposed the same dependency mistake in profile lifecycle paths.
+Original failed logs remain evidence, not the current candidate's result.
+Placeholder `0.0.0` main metadata is compared with the official source-version
+API; it is never rewritten or treated as a released host.
 
 ## Recovery and rollback
 

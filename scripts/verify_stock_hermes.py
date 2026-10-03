@@ -23,9 +23,20 @@ import tempfile
 from datetime import datetime, timezone
 
 
-def source_identity(root):
-    commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+def source_identity(root, required_files=('pyproject.toml',)):
+    root = Path(root).resolve(strict=True)
+    top = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--show-toplevel"], text=True).strip()
+    if Path(top).resolve(strict=True) != root:
+        raise ValueError('source must be the exact Git root, not an archive inside another repository')
     names = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z"]).split(b"\0")
+    if not all(os.fsencode(name) in names for name in required_files) or not any(names):
+        raise ValueError('source requires a nonempty tracked project inventory: ' + ', '.join(required_files))
+    # Validate all names before reading any bytes (including tracked symlinks).
+    for name in filter(None, names):
+        path = root / os.fsdecode(name)
+        if not path.resolve(strict=True).is_relative_to(root) or not path.is_file():
+            raise ValueError('tracked source path escapes project or is not a file')
+    commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     digest = hashlib.sha256()
     for name in sorted(filter(None, names)):
         path = root / os.fsdecode(name)
@@ -132,7 +143,7 @@ def main():
             [{"name": dist.metadata["Name"], "version": dist.version} for dist in importlib.metadata.distributions()],
             key=lambda entry: entry["name"].lower())
         receipt["wheel"] = wheel_identity(args.nunchi_wheel.resolve(), repo)
-        receipt["before"] = {"host": source_identity(args.hermes_source),
+        receipt["before"] = {"host": source_identity(args.hermes_source, ('pyproject.toml', 'hermes_cli/__init__.py', 'gateway/run.py', 'run_agent.py')),
                              "distribution": distribution_identity("hermes-agent"),
                              "nunchi": distribution_identity("nunchi")}
         for lane in args.lane or ["contract"]:
@@ -157,7 +168,7 @@ def main():
                 entry["finished_at"] = datetime.now(timezone.utc).isoformat()
                 receipt["lanes"].append(entry)
                 print((output / f"{lane}.log").read_text())
-        receipt["after"] = {"host": source_identity(args.hermes_source),
+        receipt["after"] = {"host": source_identity(args.hermes_source, ('pyproject.toml', 'hermes_cli/__init__.py', 'gateway/run.py', 'run_agent.py')),
                             "distribution": distribution_identity("hermes-agent"),
                             "nunchi": distribution_identity("nunchi")}
         receipt["integrity_unchanged"] = receipt["before"] == receipt["after"]

@@ -11,6 +11,43 @@ import unittest
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_yaml_safety_refusals_are_read_only(self):
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        cases = (
+            b'plugins:\n  enabled: [nunchi]\nplugins:\n  enabled: [other]\n',
+            b'plugins:\n  enabled: [nunchi]\n  enabled: [other]\n',
+            b'private:\n  key: one\n  key: two\n',
+            b'private: &anchor [secret]\ncopy: *anchor\n',
+            b'{plugins: {enabled: [nunchi]}}\n',
+            b'plugins: {enabled: [nunchi]}\n',
+            b'---\nmodel: one\n---\nmodel: two\n',
+            b'plugins:\n  enabled: [false]\n',
+            b'plugins: null\n', b'[]\n', b'private: [\n',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp)
+                (home / 'config.yaml').write_bytes(raw)
+                with self.assertRaises(lifecycle.LifecycleError):
+                    lifecycle.plan(home=home, mode='retire', profile='default')
+                self.assertEqual(raw, (home / 'config.yaml').read_bytes())
+                self.assertFalse((home / lifecycle.STORE).exists())
+
+    def test_yaml_import_fallback_only_for_absent_host_api(self):
+        from unittest.mock import patch, call
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        import importlib
+        released = object()
+        with patch.object(importlib, 'import_module', side_effect=[
+                ModuleNotFoundError(name='hermes_yaml'), released]) as load:
+            self.assertIs(released, lifecycle._host_yaml())
+            self.assertEqual(load.call_args_list, [call('hermes_yaml'), call('yaml')])
+        for error in (ModuleNotFoundError(name='ruamel'), ImportError('broken host')):
+            with patch.object(importlib, 'import_module', side_effect=error) as load:
+                with self.assertRaises(type(error)):
+                    lifecycle._config(b'plugins:\n  enabled: []\n', 'activate')
+                load.assert_called_once_with('hermes_yaml')
+
     def test_native_publication_never_replaces_a_new_destination(self):
         from unittest.mock import patch
         from nunchi.integrations import hermes_lifecycle as lifecycle
@@ -98,7 +135,8 @@ class LifecycleTests(unittest.TestCase):
 
     def test_legacy_path_fallback_and_disabled_log_matrix(self):
         import os
-        import yaml
+        from tests.v2.hermes_normal_turn_support import host_yaml
+        yaml = host_yaml()
         from unittest.mock import patch
         from nunchi.integrations import hermes_lifecycle as lifecycle
         with tempfile.TemporaryDirectory() as directory:
@@ -199,7 +237,8 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual((home / lifecycle.STORE / receipt['transaction'] / 'before-0').read_bytes(), original)
 
     def test_yaml_document_boundaries_remain_valid(self):
-        import yaml
+        from tests.v2.hermes_normal_turn_support import host_yaml
+        yaml = host_yaml()
         from nunchi.integrations import hermes_lifecycle as lifecycle
         for raw in (b'model: unchanged\n...\n',
                     b'---\nmodel: "private: sentinel"\n... # end\n',

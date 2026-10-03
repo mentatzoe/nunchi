@@ -19,6 +19,35 @@ def script(name):
 
 
 class StockVerifierTests(unittest.TestCase):
+    def test_source_identity_requires_exact_nonempty_project_root(self):
+        import subprocess
+        verifier = script('verify_stock_hermes')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(root), *args], stderr=subprocess.DEVNULL)
+            git('init')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '--allow-empty', '-m', 'empty')
+            with self.assertRaisesRegex(ValueError, 'tracked project inventory'):
+                verifier.source_identity(root)
+            (root / 'pyproject.toml').write_text('[project]\nname="fixture"\n')
+            git('add', 'pyproject.toml')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'project')
+            identity = verifier.source_identity(root)
+            self.assertTrue(identity['tracked_clean'])
+            with self.assertRaisesRegex(ValueError, 'tracked project inventory'):
+                verifier.source_identity(root, ('pyproject.toml', 'hermes_cli/__init__.py'))
+            nested = root / 'archive'
+            nested.mkdir()
+            for dirty in (False, True):
+                if dirty:
+                    (root / 'pyproject.toml').write_text('# changed\n')
+                # Reject before inventory/hashing; don't read the enclosing project.
+                with mock.patch.object(Path, 'read_bytes', side_effect=AssertionError('unrelated read')):
+                    with self.assertRaisesRegex(ValueError, 'exact Git root'):
+                        verifier.source_identity(nested)
+
     def test_approval_target_is_new_private_fixture_data(self):
         from tests.v2.test_hermes_normal_turn import _Base
         with tempfile.TemporaryDirectory(prefix="approval home ") as tmp:

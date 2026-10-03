@@ -70,8 +70,33 @@ def _legacy_owned(fd, path, tree):
     return True
 
 
+def _host_yaml():
+    """Use the host's data policy and its real token/node implementation.
+
+    Modern Hermes exposes load/dump but not scan/compose. Its declared ruamel
+    parser supplies marks; pure YAML 1.1 matches hermes_yaml's parse authority.
+    Never fall back after a broken host import or a parser error.
+    """
+    import importlib
+    from types import SimpleNamespace
+    try:
+        host = importlib.import_module('hermes_yaml')
+    except ModuleNotFoundError as exc:
+        if exc.name != 'hermes_yaml':
+            raise
+        return importlib.import_module('yaml')
+    from ruamel.yaml import YAML, tokens
+    from ruamel.yaml.nodes import MappingNode, ScalarNode
+    parser = YAML(typ='safe', pure=True)
+    parser.version = (1, 1)
+    return SimpleNamespace(safe_load=host.safe_load, safe_dump=host.safe_dump,
+                           scan=parser.scan, compose=parser.compose, tokens=tokens,
+                           MappingNode=MappingNode, ScalarNode=ScalarNode,
+                           YAMLError=host.YAMLError)
+
+
 def _predecessors(fd, tree, prefix='plugins'):
-    import yaml
+    yaml = _host_yaml()
     for name, entry in tree['entries'].items():
         path = prefix + '/' + name
         if entry['type'] != 'directory':
@@ -242,9 +267,9 @@ def _locked(root):
 
 
 def _config(raw, mode):
-    # Hermes ships PyYAML. Only splice the plugins node; private host config,
-    # comments and trust outside that node retain their exact original bytes.
-    import yaml
+    # Only splice the plugins node; private host config, comments and trust
+    # outside that node retain their exact original bytes.
+    yaml = _host_yaml()
     text = raw.decode('utf-8')
     try:
         tokens = list(yaml.scan(text))
@@ -258,9 +283,17 @@ def _config(raw, mode):
             raise LifecycleError('host config must be a mapping')
         if node and node.flow_style:
             raise LifecycleError('host config must use block YAML')
-        keys = [k.value for k, v in node.value] if node else []
-        if len(set(keys)) != len(keys):
-            raise LifecycleError('duplicate host config keys')
+        def check_keys(current):
+            if isinstance(current, yaml.MappingNode):
+                keys = [yaml.safe_load(text[k.start_mark.index:k.end_mark.index]) for k, _ in current.value]
+                if len(set(keys)) != len(keys):
+                    raise LifecycleError('duplicate host config keys')
+                for _, value in current.value:
+                    check_keys(value)
+            elif current is not None and current.id == 'sequence':
+                for value in current.value:
+                    check_keys(value)
+        check_keys(node)
         plugins = document.get('plugins', {})
         if not isinstance(plugins, dict):
             raise LifecycleError('plugins must be a mapping')
@@ -460,8 +493,7 @@ def _build(root, mode, profile, config=None, config_sha256=None, predecessor_whe
         for path in predecessors:
             payloads[path] = None
         if predecessors:
-            import yaml
-            host = yaml.safe_load(raw)
+            host = _host_yaml().safe_load(raw)
             legacy = host.get('nunchi', host.get('turnaware', {}))
             if not isinstance(legacy, dict):
                 legacy = {}  # historical _nunchi_config: present invalid nunchi wins
