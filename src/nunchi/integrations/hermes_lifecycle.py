@@ -252,6 +252,8 @@ def _config(raw, mode):
             raise LifecycleError('aliased host configuration needs operator repair')
         node = yaml.compose(text)
         document = yaml.safe_load(text) or {}
+        if isinstance(node, yaml.ScalarNode) and node.tag == 'tag:yaml.org,2002:null' and node.value == '':
+            node = None  # an empty document with optional explicit markers
         if not isinstance(document, dict) or (node and not isinstance(node, yaml.MappingNode)):
             raise LifecycleError('host config must be a mapping')
         if node and node.flow_style:
@@ -275,13 +277,30 @@ def _config(raw, mode):
         else:
             plugins['disabled'] += ['nunchi']
         replacement = yaml.safe_dump({'plugins': plugins}, sort_keys=False)
+        # Insert inside the document, never after an explicit end marker.
+        end = next((t.start_mark.index for t in tokens if isinstance(t, yaml.tokens.DocumentEndToken)), len(text))
+        rendered = text[:end] + ('\n' if end and text[end - 1] != '\n' else '') + replacement + text[end:]
         if node:
             for key, value in node.value:
                 if key.value == 'plugins':
-                    if node.flow_style or value.flow_style:
+                    if value.flow_style:
                         raise LifecycleError('plugins mapping must use block YAML')
-                    return (text[:key.start_mark.index] + replacement + text[value.end_mark.index:]).encode()
-        return (text + ('\n' if text and not text.endswith('\n') else '') + replacement).encode()
+                    # compose's block end mark includes following comments.
+                    # End at the last real token's line, retaining those bytes.
+                    last = max(t.end_mark.index for t in tokens
+                               if key.start_mark.index <= t.start_mark.index < value.end_mark.index
+                               and t.end_mark.index <= value.end_mark.index
+                               and not isinstance(t, (yaml.tokens.BlockEndToken, yaml.tokens.StreamEndToken)))
+                    newline = text.find('\n', last)
+                    stop = last if last and text[last - 1] == '\n' else (len(text) if newline == -1 else newline + 1)
+                    rendered = text[:key.start_mark.index] + replacement + text[stop:]
+                    break
+        # Parsing the source is not proof that the splice is valid. Refuse any
+        # unsupported layout before staging, including changes to non-owned data.
+        document['plugins'] = plugins
+        if yaml.safe_load(rendered) != document:
+            raise LifecycleError('host YAML layout cannot be preserved safely')
+        return rendered.encode()
     except (yaml.YAMLError, UnicodeError) as exc:
         raise LifecycleError('invalid host YAML; values omitted') from exc
 
@@ -444,12 +463,25 @@ def _build(root, mode, profile, config=None, config_sha256=None, predecessor_whe
             import yaml
             host = yaml.safe_load(raw)
             legacy = host.get('nunchi', host.get('turnaware', {}))
-            for key, default in (('state_path', 'nunchi-gate.state.json'), ('log_path', 'logs/nunchi-gate.jsonl')):
-                selected = legacy.get(key, str(root.path / default))
-                if selected is None or str(selected).lower() in ('', 'false', 'none', 'off', '0'):
-                    continue
-                path = Path(str(selected)).expanduser()
-                if not path.is_absolute() or not path.is_relative_to(root.path):
+            if not isinstance(legacy, dict):
+                legacy = {}  # historical _nunchi_config: present invalid nunchi wins
+            # Exact V1 bypassed HERMES_HOME. State false/null/empty values fall
+            # back to ~/.hermes; only the log has disabled-value semantics.
+            state_path = str(legacy.get('state_path') or '~/.hermes/nunchi-gate.state.json')
+            log_value = legacy.get('log_path', '~/.hermes/logs/nunchi-gate.jsonl')
+            log_path = '' if log_value is None else str(log_value).strip()
+            selected_paths = [state_path]
+            if log_path.lower() not in ('', '0', 'false', 'no', 'off', 'none'):
+                selected_paths.append(log_path)
+            for selected in selected_paths:
+                path = Path(selected).expanduser()
+                if not path.is_absolute() or '..' in path.parts:
+                    raise LifecycleError('predecessor state/log outside selected home; retain and isolate it before cutover')
+                # Only the already-validated home alias may be followed. Do
+                # not resolve arbitrary external state or descendant symlinks.
+                if path.is_relative_to(root.selected):
+                    path = root.path / path.relative_to(root.selected)
+                if not path.is_relative_to(root.path):
                     raise LifecycleError('predecessor state/log outside selected home; retain and isolate it before cutover')
                 relative = str(path.relative_to(root.path))
                 if relative not in ('nunchi-gate.state.json', 'logs/nunchi-gate.jsonl'):
@@ -542,12 +574,48 @@ def _checkpoint(stage):
     """No-op seam for deterministic failure and hard-exit tests."""
 
 
-def _move(root, src_fd, src, dst_fd, dst):
+def _rename_noreplace(sp, sn, dp, dn):
+    """Atomic no-replace rename, including directories; never emulate with stat.
+
+    The lifecycle lock only coordinates lifecycle clients, not editors. Both
+    supported POSIX kernels provide a directory-relative exclusive rename.
+    Unsupported kernels/filesystems fail closed, retaining the journal.
+    """
+    import ctypes
+    import errno
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == 'darwin':
+        rename = getattr(libc, 'renameatx_np', None)
+        flag = 0x00000004  # RENAME_EXCL
+    elif sys.platform == 'linux':
+        rename = getattr(libc, 'renameat2', None)
+        flag = 1  # RENAME_NOREPLACE
+    else:
+        rename = None
+    if rename is None:
+        raise LifecycleError('atomic no-replace rename unavailable')
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(sp, os.fsencode(sn), dp, os.fsencode(dn), flag):
+        error = ctypes.get_errno()
+        if error in (errno.EEXIST, errno.ENOTEMPTY):
+            raise LifecycleError('destination appeared; conflict preserved')
+        raise LifecycleError('atomic no-replace rename failed; journal retained')
+
+
+def _move(root, src_fd, src, dst_fd, dst, expected):
     root.check()
     with _parent(src_fd, src) as (sp, sn), _parent(dst_fd, dst) as (dp, dn):
-        os.rename(sn, dn, src_dir_fd=sp, dst_dir_fd=dp)
+        if expected is None or _snapshot(sp, sn) != expected:
+            raise LifecycleError('source drift at move; evidence preserved')
+        root.check()
+        _rename_noreplace(sp, sn, dp, dn)
         os.fsync(sp)
         os.fsync(dp)
+        # An external writer may race the source check. Capture, do not destroy
+        # it, and refuse to publish/restore anything over that conflict.
+        if _snapshot(dp, dn) != expected:
+            raise LifecycleError('source changed during move; captured conflict preserved')
 
 
 def _transaction(store, transaction):
@@ -623,12 +691,15 @@ def apply(*, home, plan, digest, stopped=False):
                     if _snapshot(root.fd, op['path']) != op['before']:
                         raise LifecycleError('target drift before commit')
                     if op['before'] is not None:
-                        _move(root, root.fd, op['path'], tx, f'before-{i}')
+                        _move(root, root.fd, op['path'], tx, f'before-{i}', op['before'])
                     _checkpoint('backed-up')
                     if receipt['post'][op['path']] is not None:
-                        _move(root, tx, f'new-{i}', root.fd, op['path'])
+                        _move(root, tx, f'new-{i}', root.fd, op['path'], receipt['post'][op['path']])
                     _checkpoint('installed')
                 root.check()
+                for op in plan['operations']:
+                    if _snapshot(root.fd, op['path']) != receipt['post'][op['path']]:
+                        raise LifecycleError('target drift after commit')
                 receipt['status'] = 'applied'
                 _json_write(tx, 'receipt.json', receipt)
             except BaseException:
@@ -642,8 +713,10 @@ def apply(*, home, plan, digest, stopped=False):
 def _restore(root, tx, receipt):
     root.check()
     # Preflight every target before restoring any: no partial clobber on drift.
+    targets = {}
     for i, op in enumerate(receipt['plan']['operations']):
         target = _snapshot(root.fd, op['path'])
+        targets[op['path']] = target
         backup = _snapshot(tx, f'before-{i}')
         if backup is not None and backup != op['before']:
             raise LifecycleError('backup drift')
@@ -663,12 +736,15 @@ def _restore(root, tx, receipt):
     receipt['status'] = 'rolling_back'
     _json_write(tx, 'receipt.json', receipt)
     for i, op in reversed(list(enumerate(receipt['plan']['operations']))):
-        if _snapshot(root.fd, op['path']) == op['before']:
+        target = targets[op['path']]
+        if _snapshot(root.fd, op['path']) != target:
+            raise LifecycleError('later edits prevent rollback')
+        if target == op['before']:
             continue
-        if _snapshot(root.fd, op['path']) is not None:
-            _move(root, root.fd, op['path'], tx, f'retired-{i}')
+        if target is not None:
+            _move(root, root.fd, op['path'], tx, f'retired-{i}', target)
         if op['before'] is not None:
-            _move(root, tx, f'before-{i}', root.fd, op['path'])
+            _move(root, tx, f'before-{i}', root.fd, op['path'], op['before'])
     for path in reversed(receipt['plan']['created_parents']):
         root.check()
         try:

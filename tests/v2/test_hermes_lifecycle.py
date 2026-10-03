@@ -11,6 +11,219 @@ import unittest
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_native_publication_never_replaces_a_new_destination(self):
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        for rollback in (False, True):
+            for kind in ('file', 'directory', 'symlink'):
+                with self.subTest(rollback=rollback, kind=kind), tempfile.TemporaryDirectory() as directory:
+                    home = Path(directory)
+                    original = b'plugins:\n  enabled: [nunchi]\n'
+                    edit = b'late-private-edit'
+                    (home / 'config.yaml').write_bytes(original)
+                    outside = home / 'unrelated'
+                    outside.write_bytes(edit)
+                    plan = lifecycle.plan(home=home, mode='retire', profile='default')
+                    receipt = None
+                    if rollback:
+                        receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+                    native = lifecycle._rename_noreplace
+                    def race(sp, sn, dp, dn):
+                        if dn == 'config.yaml':
+                            if kind == 'file':
+                                (home / dn).write_bytes(edit)
+                            elif kind == 'directory':
+                                (home / dn).mkdir()
+                            else:
+                                (home / dn).symlink_to(outside)
+                        return native(sp, sn, dp, dn)
+                    with patch.object(lifecycle, '_rename_noreplace', side_effect=race):
+                        with self.assertRaises(lifecycle.LifecycleError):
+                            if rollback:
+                                assert receipt is not None
+                                lifecycle.rollback(home=home, transaction=receipt['transaction'], digest=lifecycle.digest(plan), stopped=True)
+                            else:
+                                lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+                    if kind == 'directory':
+                        self.assertTrue((home / 'config.yaml').is_dir())
+                    else:
+                        self.assertEqual((home / 'config.yaml').read_bytes(), edit)
+                    self.assertEqual(outside.read_bytes(), edit)
+                    self.assertTrue(any(p.read_bytes() == original for p in (home / lifecycle.STORE).rglob('before-*') if p.is_file()))
+
+    def test_move_captures_source_conflict_and_refuses_restore(self):
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original = b'plugins:\n  enabled: [nunchi]\n'
+            edit = b'late-private-edit'
+            (home / 'config.yaml').write_bytes(original)
+            plan = lifecycle.plan(home=home, mode='retire', profile='default')
+            receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+            native = lifecycle._rename_noreplace
+            def race(sp, sn, dp, dn):
+                if sn == 'config.yaml':
+                    (home / sn).write_bytes(edit)
+                return native(sp, sn, dp, dn)
+            with patch.object(lifecycle, '_rename_noreplace', side_effect=race):
+                with self.assertRaises(lifecycle.LifecycleError):
+                    lifecycle.rollback(home=home, transaction=receipt['transaction'], digest=lifecycle.digest(plan), stopped=True)
+            archive = home / lifecycle.STORE / receipt['transaction']
+            self.assertEqual((archive / 'before-0').read_bytes(), original)
+            self.assertEqual((archive / 'retired-0').read_bytes(), edit)
+            self.assertFalse((home / 'config.yaml').exists())
+
+    def test_hard_exit_inside_each_native_move_recovers(self):
+        import multiprocessing
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        for restoring in (False, True):
+            for move in (1, 2):
+                with self.subTest(restoring=restoring, move=move), tempfile.TemporaryDirectory() as directory:
+                    home = Path(directory)
+                    original = b'plugins:\n  enabled: [nunchi]\n'
+                    (home / 'config.yaml').write_bytes(original)
+                    plan = lifecycle.plan(home=home, mode='retire', profile='default')
+                    transaction = None
+                    if restoring:
+                        transaction = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)['transaction']
+                    process = multiprocessing.get_context('fork').Process(target=_crash_native, args=(str(home), plan, transaction, move))
+                    process.start()
+                    process.join(10)
+                    self.assertEqual(process.exitcode, 72)
+                    transaction = next(p.name for p in (home / lifecycle.STORE).iterdir() if p.is_dir())
+                    lifecycle.rollback(home=home, transaction=transaction, digest=lifecycle.digest(plan), stopped=True)
+                    self.assertEqual((home / 'config.yaml').read_bytes(), original)
+                    self.assertTrue(lifecycle.verify(home=home, transaction=transaction)['ok'])
+
+    def test_legacy_path_fallback_and_disabled_log_matrix(self):
+        import os
+        import yaml
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            user = Path(directory).resolve()
+            machine = user / '.hermes'
+            named = machine / 'profiles/worker'
+            for home in (machine, named):
+                (home / 'plugins/nunchi-gate').mkdir(parents=True)
+                (home / 'nunchi-gate.state.json').write_bytes(b'private-state')
+                (home / 'logs').mkdir()
+                (home / 'logs/nunchi-gate.jsonl').write_bytes(b'private-log')
+            alias = user / 'alias'
+            alias.symlink_to(named, target_is_directory=True)
+            omitted = object()
+            for home in (machine, named, alias):
+                for state in (omitted, None, '', False, 0, str(home / 'nunchi-gate.state.json')):
+                    for log in (omitted, None, '', False, 0, ' no ', 'OFF', 'none', str(home / 'logs/nunchi-gate.jsonl')):
+                        legacy = {}
+                        if state is not omitted:
+                            legacy['state_path'] = state
+                        if log is not omitted:
+                            legacy['log_path'] = log
+                        raw = yaml.safe_dump({'plugins': {'enabled': ['nunchi-gate']}, 'turnaware': legacy}).encode()
+                        (home / 'config.yaml').write_bytes(raw)
+                        refused = home != machine and (not state or state is omitted or log is omitted)
+                        with self.subTest(home=home.name, state=repr(state), log=repr(log)), \
+                                patch.dict(os.environ, {'HOME': str(user), 'HERMES_HOME': str(home)}, clear=True), \
+                                patch.object(lifecycle, '_predecessors', return_value=['plugins/nunchi-gate']):
+                            if refused:
+                                with self.assertRaisesRegex(lifecycle.LifecycleError, 'outside selected home'):
+                                    lifecycle.plan(home=home, mode='retire', profile='default')
+                            else:
+                                plan = lifecycle.plan(home=home, mode='retire', profile='default')
+                                paths = {op['path'] for op in plan['operations']}
+                                self.assertIn('nunchi-gate.state.json', paths)
+                                self.assertEqual('logs/nunchi-gate.jsonl' in paths, log is omitted or log == str(home / 'logs/nunchi-gate.jsonl'))
+                            self.assertEqual((home / 'config.yaml').read_bytes(), raw)
+                            self.assertFalse((home / lifecycle.STORE).exists())
+                            self.assertEqual((machine / 'nunchi-gate.state.json').read_bytes(), b'private-state')
+
+    def test_legacy_defaults_follow_home_not_hermes_home(self):
+        import os
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            user = Path(directory).resolve()
+            machine = user / '.hermes'
+            home = machine / 'profiles/worker'
+            (home / 'plugins/nunchi-gate').mkdir(parents=True)
+            original = b'plugins:\n  enabled: [nunchi-gate]\n'
+            (home / 'config.yaml').write_bytes(original)
+            # Attribution has its own exact-source installed test. Isolate path
+            # resolution here without shipping executable V1 fixtures.
+            with patch.dict(os.environ, {'HOME': str(user), 'HERMES_HOME': str(home)}, clear=True), \
+                    patch.object(lifecycle, '_predecessors', return_value=['plugins/nunchi-gate']):
+                with self.assertRaisesRegex(lifecycle.LifecycleError, 'outside selected home'):
+                    lifecycle.plan(home=home, mode='retire', profile='worker')
+            self.assertEqual((home / 'config.yaml').read_bytes(), original)
+            self.assertFalse((home / lifecycle.STORE).exists())
+
+    def test_late_apply_edit_is_not_clobbered(self):
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original = b'plugins:\n  enabled: [nunchi]\n'
+            edit = b'private_operator_edit: preserve-me\n'
+            (home / 'config.yaml').write_bytes(original)
+            plan = lifecycle.plan(home=home, mode='retire', profile='default')
+            def late_edit(stage):
+                if stage == 'backed-up':
+                    (home / 'config.yaml').write_bytes(edit)
+            with patch.object(lifecycle, '_checkpoint', side_effect=late_edit):
+                with self.assertRaises(lifecycle.LifecycleError):
+                    lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+            self.assertEqual((home / 'config.yaml').read_bytes(), edit)
+            self.assertTrue(any(p.read_bytes() == original for p in (home / lifecycle.STORE).rglob('before-*') if p.is_file()))
+
+    def test_late_rollback_edit_is_not_clobbered(self):
+        from unittest.mock import patch
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original = b'plugins:\n  enabled: [nunchi]\n'
+            edit = b'private_operator_edit: preserve-me\n'
+            (home / 'config.yaml').write_bytes(original)
+            plan = lifecycle.plan(home=home, mode='retire', profile='default')
+            receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+            write = lifecycle._json_write
+            def late_edit(fd, name, value):
+                write(fd, name, value)
+                if value.get('status') == 'rolling_back':
+                    (home / 'config.yaml').write_bytes(edit)
+            with patch.object(lifecycle, '_json_write', side_effect=late_edit):
+                with self.assertRaises(lifecycle.LifecycleError):
+                    lifecycle.rollback(home=home, transaction=receipt['transaction'], digest=lifecycle.digest(plan), stopped=True)
+            self.assertEqual((home / 'config.yaml').read_bytes(), edit)
+            self.assertEqual((home / lifecycle.STORE / receipt['transaction'] / 'before-0').read_bytes(), original)
+
+    def test_yaml_document_boundaries_remain_valid(self):
+        import yaml
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        for raw in (b'model: unchanged\n...\n',
+                    b'---\nmodel: "private: sentinel"\n... # end\n',
+                    b'---\n"plugins":\n    enabled: [other, nunchi]\n# private comment\nprivate: unchanged\n...\n',
+                    b'# private comment\nmodel: unchanged', b'---\n# empty\n...\n'):
+            for mode in ('retire', 'activate'):
+                with self.subTest(raw=raw, mode=mode):
+                    rendered = lifecycle._config(raw, mode)
+                    result = yaml.safe_load(rendered)
+                    before = yaml.safe_load(raw) or {}
+                    self.assertEqual({k: v for k, v in result.items() if k != 'plugins'},
+                                     {k: v for k, v in before.items() if k != 'plugins'})
+                    self.assertEqual('nunchi' in result['plugins']['enabled'], mode == 'activate')
+                    for line in raw.splitlines():
+                        if line.startswith((b'model:', b'private:', b'#', b'---', b'...')):
+                            self.assertIn(line, rendered)
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / 'config.yaml').write_bytes(b'model: unchanged\n...\n')
+            plan = lifecycle.plan(home=home, mode='retire', profile='default')
+            receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+            self.assertIsInstance(yaml.safe_load((home / 'config.yaml').read_bytes()), dict)
+            self.assertTrue(lifecycle.verify(home=home, transaction=receipt['transaction'])['ok'])
+
     def test_named_lifecycle_install_does_not_touch_machine_dashboard(self):
         import sys
         from unittest.mock import patch
@@ -272,6 +485,24 @@ class LifecycleTests(unittest.TestCase):
             lifecycle.rollback(home=home, transaction=transaction, digest=lifecycle.digest(plan), stopped=True)
             self.assertEqual((home / 'config.yaml').read_bytes(), original)
             self.assertTrue(lifecycle.verify(home=home, transaction=transaction)['ok'])
+
+
+def _crash_native(home, plan, transaction, move):
+    import os
+    from nunchi.integrations import hermes_lifecycle as lifecycle
+    native = lifecycle._rename_noreplace
+    count = 0
+    def crash(sp, sn, dp, dn):
+        nonlocal count
+        native(sp, sn, dp, dn)
+        count += 1
+        if count == move:
+            os._exit(72)
+    lifecycle._rename_noreplace = crash
+    if transaction:
+        lifecycle.rollback(home=home, transaction=transaction, digest=lifecycle.digest(plan), stopped=True)
+    else:
+        lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
 
 
 def _crash_apply(home, plan):

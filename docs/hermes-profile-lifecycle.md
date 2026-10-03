@@ -96,7 +96,10 @@ paths and hashes, not config/state values. Do not approve a plan for the wrong
 profile. A validated selected-home alias is allowed; descendant symlinks,
 hard-linked files, unknown ownership and changed inputs are refused. Host YAML
 anchors/aliases, duplicate root keys and flow-style plugin mappings are refused
-rather than risk rewriting private configuration incorrectly.
+rather than risk rewriting private configuration incorrectly. Explicit document
+start/end markers are retained. The rendered YAML is parsed again and compared
+with the intended mapping during planning, before it can be staged or published;
+unsupported layouts are refused read-only.
 
 ```sh
 PLAN_SHA256=the_inspected_plan_sha256
@@ -113,6 +116,11 @@ journals the transaction and renames each before-image into
 runtime copies and historical backup copies under `plugins` are quarantined,
 never left as a second executable fallback. Known V1 state/log files move there
 without translation. Custom/out-of-home predecessor state paths are refused.
+Historical V1 defaults use `~/.hermes`, not `HERMES_HOME`: missing, null, empty,
+false or zero `state_path` values fall back there. Only `log_path` supports
+null/empty/false/zero/no/off/none as disabled values. A named-profile V1 install
+with machine-home defaults therefore needs explicit operator reconciliation;
+the command does not inspect or archive that machine state on its behalf.
 Unrelated files and host config/trust outside the plugin activation node retain
 their bytes. The complete original config is retained privately for guarded
 restoration. No command purges archives.
@@ -183,10 +191,20 @@ and its ORIGINAL plan digest, not a newly manufactured plan:
   --plan-sha256 "$PLAN_SHA256" --processes-stopped
 ```
 
-All targets are checked before restoration starts. If any target has later
-edits or the home/parent identity changed, the command refuses instead of
-clobbering it. There is no force flag. Preserve those files and the receipt for
-operator reconciliation; do not delete journals, rewrite receipts or reset
+All targets are checked before restoration starts and again at each move.
+Publication uses the kernel's atomic no-replace rename on macOS/Linux; an
+unsupported kernel/filesystem refuses rather than emulating it with a racy
+existence check. The lifecycle lock does not coordinate external editors.
+A destination appearing during apply/restore is left intact. A source changed
+in the check-to-move interval is captured in the archive and causes refusal,
+not replacement by another version; the target can then be absent. Keep
+processes stopped and preserve all before-images, captured conflicts and the
+receipt for operator reconciliation. Do not resume a partial transaction by
+removing conflicting files or editing its journal.
+
+If any target has later edits or the home/parent identity changed, the command
+refuses instead of clobbering it. There is no force flag. Preserve those files
+and the receipt for operator reconciliation; do not delete journals, rewrite receipts or reset
 state to bypass the check. An ordinary apply failure restores its managed
 before-state automatically when safe. After an abrupt exit, `verify` reports
 an interrupted transaction and a new apply is blocked until stopped rollback
