@@ -281,8 +281,17 @@ def _config(raw, mode):
             node = None  # an empty document with optional explicit markers
         if not isinstance(document, dict) or (node and not isinstance(node, yaml.MappingNode)):
             raise LifecycleError('host config must be a mapping')
-        if node and node.flow_style:
-            raise LifecycleError('host config must use block YAML')
+        json_root = bool(node and node.flow_style)
+        if json_root:
+            # Dashboard Save writes JSON. Accept that exact syntax (including
+            # existing saves), not arbitrary flow YAML; use JSON value splicing
+            # below rather than inserting a block node into a flow document.
+            def reject_constant(value):
+                raise ValueError('non-finite JSON constant')
+            try:
+                json.loads(text, parse_constant=reject_constant)
+            except ValueError as exc:
+                raise LifecycleError('host config must use block YAML or strict JSON') from exc
         def check_keys(current):
             if isinstance(current, yaml.MappingNode):
                 keys = [yaml.safe_load(text[k.start_mark.index:k.end_mark.index]) for k, _ in current.value]
@@ -309,6 +318,32 @@ def _config(raw, mode):
             plugins['enabled'] += ['nunchi']
         else:
             plugins['disabled'] += ['nunchi']
+        if json_root and node is not None:
+            # Only activation-list values change. In particular, retain trust
+            # entries and other private plugin settings byte for byte.
+            plugin_node = next((value for key, value in node.value if key.value == 'plugins'), None)
+            edits = []
+            if plugin_node is None:
+                end = node.end_mark.index - 1  # closing JSON object brace
+                addition = (',' if node.value else '') + '"plugins": ' + json.dumps(plugins)
+                edits.append((end, end, addition))
+            else:
+                missing = {'enabled': plugins['enabled'], 'disabled': plugins['disabled']}
+                for key, value in plugin_node.value:
+                    if key.value in missing:
+                        replacement = json.dumps(missing.pop(key.value), ensure_ascii=False)
+                        edits.append((value.start_mark.index, value.end_mark.index, replacement))
+                if missing:
+                    end = plugin_node.end_mark.index - 1
+                    addition = (',' if plugin_node.value else '') + json.dumps(missing, ensure_ascii=False)[1:-1]
+                    edits.append((end, end, addition))
+            rendered = text
+            for start, end, replacement in sorted(edits, reverse=True):
+                rendered = rendered[:start] + replacement + rendered[end:]
+            document['plugins'] = plugins
+            if yaml.safe_load(rendered) != document:
+                raise LifecycleError('host JSON layout cannot be preserved safely')
+            return rendered.encode()
         replacement = yaml.safe_dump({'plugins': plugins}, sort_keys=False)
         # Insert inside the document, never after an explicit end marker.
         end = next((t.start_mark.index for t in tokens if isinstance(t, yaml.tokens.DocumentEndToken)), len(text))

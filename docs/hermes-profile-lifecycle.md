@@ -101,9 +101,14 @@ identity, predecessor identity, operations and `plan_sha256`. Plans contain
 paths and hashes, not config/state values. Do not approve a plan for the wrong
 profile. A validated selected-home alias is allowed; descendant symlinks,
 hard-linked files, unknown ownership and changed inputs are refused. Host YAML
-anchors/aliases, duplicate mapping keys and flow-style plugin mappings are refused
-rather than risk rewriting private configuration incorrectly. Explicit document
-start/end markers are retained. The rendered YAML is parsed again and compared
+anchors/aliases, duplicate mapping keys and general flow-style YAML mappings are
+refused rather than risk rewriting private configuration incorrectly. Strict
+JSON objects, including existing and new dashboard Saves, are supported directly:
+only plugin activation-list values are spliced, preserving unrelated bytes,
+including attention trust entries. No manual conversion or restart is needed.
+Non-JSON flow syntax, duplicate JSON keys and non-finite JSON constants are refused.
+Explicit YAML document start/end markers are retained. The rendered document is
+parsed again with the host parser and compared
 with the intended mapping during planning, before it can be staged or published;
 unsupported layouts are refused read-only.
 
@@ -247,8 +252,11 @@ selected stock Hermes Python outside the source checkout. HOME must be a
 private child of that working directory. It deliberately installs/removes
 Nunchi in that disposable interpreter. It tests actual historical installation,
 cutover, one successor registration, profile plus archived-wheel restoration,
-retirement, package removal/reinstallation and named-profile isolation, while
-comparing host sources and other distributions' RECORD files. Never run that
+real dashboard Save followed by retirement and verification, package removal/
+reinstallation, byte-exact guarded restoration and reactivation. The Save cycle
+runs for default and named profiles, preserving attention trust and unrelated
+machine/sibling config. It compares host sources and other distributions' RECORD
+files. Never run that
 probe in a live Hermes environment.
 
 The reviewed normal-turn, attention, startup and contract checks remain

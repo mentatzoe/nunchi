@@ -2,8 +2,33 @@
 
 PR83 landed at `19ba1398a3619bd077edc3bdc03fb5088f3a8fd3`. PR84 combines
 installed-host verification, attention Save parser portability and the stopped
-profile lifecycle. This successor repairs the combined `a0dc5a6` findings;
-it is not a whole-V2, release or live-adoption claim.
+profile lifecycle. The parser/provenance repair below addressed `a0dc5a6`;
+the next repair also addresses review's real Save→retire failure at `78f60e7`.
+Neither is a whole-V2, release or live-adoption claim.
+
+## Dashboard Save and lifecycle interoperability
+
+Dashboard Save intentionally emits JSON. The lifecycle now recognises strict
+JSON objects as a separate rendering path rather than treating them as block
+YAML. It changes only activation-list values and inserts absent activation keys;
+all other JSON bytes, including nested trust entries, remain unchanged. Existing
+saved JSON needs no migration. Both formats still undergo the real host parser,
+recursive duplicate/alias checks and rendered semantic comparison. General flow
+YAML and malformed/non-finite JSON constants still refuse read-only.
+
+The regression first reproduced the public Save→retire failure for default and
+named profiles. A separate RED case caught trust-byte reformatting before the
+narrower splice was applied. Repository lifecycle tests now cover those paths,
+existing compact/pretty/escaped-key JSON, absent nodes, unsafe JSON, byte-exact
+restore and publication races for both YAML and JSON. The installed package
+runner includes real Save→retire→verify→uninstall/reinstall→restore in default
+and named profiles, followed by named-profile reactivation and fresh discovery.
+
+The new canary resolved for this repair is stock main
+`eaecc99c7ec5b6f37e880a0b69d16871cd3e4f57`, not the earlier snapshots below.
+The frozen successor manifest and raw logs carry its exact wheel and final
+matrix/source/eval outcomes. Modern host dependencies remain separate from the
+source-only test extra; no PyYAML is added to modern hosts.
 
 ## Repair and reproduced failures
 
@@ -28,7 +53,8 @@ the task evidence rather than replaced by successful reruns.
 
 ## Verification and provenance
 
-Fresh task-owned environments use these independent stock targets:
+Fresh task-owned environments for the prior parser/provenance repair used these
+stock targets (historical evidence, not the Save→retire successor's final run):
 
 | Target | Exact stock identity | Installation |
 |---|---|---|

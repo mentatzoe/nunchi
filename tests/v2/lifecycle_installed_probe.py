@@ -152,6 +152,26 @@ def main():
     nunchi_state = next(s for s in loaded['states'] if s['name'] == 'nunchi')
     assert nunchi_state['enabled'] and not nunchi_state['error'], loaded
     assert loaded['hooks'] == {'pre_tool_call': 1, 'pre_llm_call': 1, 'post_llm_call': 1}, loaded
+    # Ordinary dashboard Save grants attention trust and serializes host config
+    # as JSON. The installed CLI must accept those bytes without normalization.
+    save_script = root.parent / 'save.py'
+    save_script.write_text('''
+import json, os, sys
+from pathlib import Path
+from nunchi.integrations.hermes_dashboard_store import read_dashboard_snapshot, write_config_document
+from nunchi.integrations.hermes_attention_trust import attention_trust_status
+profile = sys.argv[1]
+snapshot = read_dashboard_snapshot(profile, environ=os.environ)
+if len(sys.argv) > 2:
+    snapshot = write_config_document(profile, document=json.loads(Path(sys.argv[2]).read_bytes()),
+                                     expected_revision=snapshot.revision, environ=os.environ)
+assert attention_trust_status(Path(os.environ['HERMES_HOME']), snapshot.config)['ready']
+print('REAL_SAVE_TRUST_READY')
+''')
+    run([python, '-I', save_script, 'default', supplied], cwd=root.parent, env=env)
+    saved_host = (home / 'config.yaml').read_bytes()
+    assert isinstance(json.loads(saved_host), dict)
+    saved_trust = json.loads(saved_host)['plugins']['entries']['nunchi']['llm']
     # Fresh process is registration evidence, not a live platform canary.
     retirement = json.loads(run([*cli, 'plan', *common, '--mode', 'retire', '--profile', 'default',
                                  '--wheel-sha256', sha(args.new_wheel)], cwd=root.parent, env=env))
@@ -159,6 +179,8 @@ def main():
     retirementfile.write_text(json.dumps(retirement))
     retired = json.loads(run([*cli, 'apply', *common, '--plan', retirementfile,
         '--plan-sha256', retirement['plan_sha256'], '--processes-stopped'], cwd=root.parent, env=env))
+    run([*cli, 'verify', *common, '--transaction', retired['transaction']], cwd=root.parent, env=env)
+    assert json.loads((home / 'config.yaml').read_bytes())['plugins']['entries']['nunchi']['llm'] == saved_trust
     stock = json.loads(run([python, '-I', discovery], cwd=root.parent, env=env).strip().splitlines()[-1])
     assert not any(s['enabled'] for s in stock['states'])
     assert not (home / 'plugins/nunchi-dashboard').exists()
@@ -167,6 +189,9 @@ def main():
     install(args.new_wheel)
     run([*cli, 'rollback', *common, '--mode', 'restore', '--transaction', retired['transaction'],
          '--plan-sha256', retirement['plan_sha256'], '--processes-stopped'], cwd=root.parent, env=env)
+    assert (home / 'config.yaml').read_bytes() == saved_host
+    run([*cli, 'verify', *common, '--transaction', retired['transaction']], cwd=root.parent, env=env)
+    run([python, '-I', save_script, 'default'], cwd=root.parent, env=env)
     # Discovery generates owned bytecode/data after activation. The activation
     # rollback must refuse those intervening state changes, not erase them.
     result = subprocess.run([str(v) for v in [*cli, 'rollback', *common, '--mode', 'restore',
@@ -202,7 +227,36 @@ def main():
          '--processes-stopped'], cwd=root.parent, env=named_env)
     run([python, '-I', '-c', 'from nunchi.integrations.hermes_dashboard_install import install_dashboard_for_profile; print(install_dashboard_for_profile(profile="worker"))'],
         cwd=root.parent, env=named_env)
+    run([python, '-I', save_script, 'worker', supplied], cwd=root.parent, env=named_env)
+    named_saved = (named_home / 'config.yaml').read_bytes()
+    named_trust = json.loads(named_saved)['plugins']['entries']['nunchi']['llm']
+    def named_apply(mode):
+        arguments = ['--config', supplied, '--config-sha256', sha(supplied)] if mode == 'activate' else []
+        planned = json.loads(run([*cli, 'plan', *named_common, '--mode', mode, '--profile', 'worker',
+            '--wheel-sha256', sha(args.new_wheel), *arguments], cwd=root.parent, env=named_env))
+        planfile.write_text(json.dumps(planned))
+        applied = json.loads(run([*cli, 'apply', *named_common, '--plan', planfile,
+            '--plan-sha256', planned['plan_sha256'], '--processes-stopped'], cwd=root.parent, env=named_env))
+        run([*cli, 'verify', *named_common, '--transaction', applied['transaction']], cwd=root.parent, env=named_env)
+        assert json.loads((named_home / 'config.yaml').read_bytes())['plugins']['entries']['nunchi']['llm'] == named_trust
+        return planned, applied
+    named_retirement, named_retired = named_apply('retire')
+    run([args.uv, 'pip', 'uninstall', '--python', python, 'nunchi'], cwd=root.parent, env=env)
+    run([python, '-I', '-c', 'import importlib.util; assert importlib.util.find_spec("nunchi") is None'], cwd=root.parent, env=env)
+    install(args.new_wheel)
+    run([*cli, 'rollback', *named_common, '--mode', 'restore', '--transaction', named_retired['transaction'],
+         '--plan-sha256', named_retirement['plan_sha256'], '--processes-stopped'], cwd=root.parent, env=named_env)
+    assert (named_home / 'config.yaml').read_bytes() == named_saved
+    run([*cli, 'verify', *named_common, '--transaction', named_retired['transaction']], cwd=root.parent, env=named_env)
+    run([python, '-I', save_script, 'worker'], cwd=root.parent, env=named_env)
+    named_apply('retire')
+    named_apply('activate')
+    run([python, '-I', save_script, 'worker', supplied], cwd=root.parent, env=named_env)
+    reactivated = json.loads(run([python, '-I', discovery], cwd=root.parent, env=named_env).strip().splitlines()[-1])
+    assert any(s['name'] == 'nunchi' and s['enabled'] and not s['error'] for s in reactivated['states'])
     assert (machine / 'config.yaml').read_bytes() == machine_config
+    assert (home / 'config.yaml').read_bytes() == saved_host
+    assert (sibling / 'config.yaml').read_bytes() == b'private: unrelated-sentinel\n'
     assert not (machine / 'plugins').exists()
     assert records() == before_records, 'other distributions RECORD changed'
     assert host_hashes() == before_host, 'host sources changed'

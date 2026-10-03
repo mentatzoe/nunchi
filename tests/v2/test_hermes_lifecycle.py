@@ -11,6 +11,100 @@ import unittest
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_real_dashboard_save_can_retire_and_restore_exact_bytes(self):
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        from nunchi.integrations.hermes_dashboard_store import (
+            default_config_paths, read_dashboard_snapshot, write_config_document,
+        )
+        from nunchi.integrations.hermes_attention_trust import attention_trust_status
+        from tests.v2.test_hermes_dashboard import _document
+        for profile in ('default', 'worker'):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                machine = root / 'machine'
+                home = machine / 'profiles' / profile
+                home.mkdir(parents=True)
+                machine_config = machine / 'config.yaml'
+                machine_config.write_bytes(b'model: machine-private\n')
+                host = home / 'config.yaml'
+                host.write_bytes(b'model: unchanged\nplugins:\n  enabled: [other]\n')
+                doc = _document(home)
+                doc['hermes_profile'] = profile
+                doc['state_directory'] = str(default_config_paths(profile, hermes_home=home).state_directory)
+                supplied = root / 'supplied.json'
+                supplied.write_text(json.dumps(doc))
+                supplied.chmod(0o600)
+                plan = lifecycle.plan(home=home, mode='activate', profile=profile, config=supplied,
+                                      config_sha256=hashlib.sha256(supplied.read_bytes()).hexdigest())
+                receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+                self.assertTrue(lifecycle.verify(home=home, transaction=receipt['transaction'])['ok'])
+                env = {'HERMES_HOME': str(home)}
+                before = read_dashboard_snapshot(profile, environ=env)
+                saved = write_config_document(profile, document=doc, expected_revision=before.revision, environ=env)
+                self.assertTrue(attention_trust_status(home, saved.config)['ready'])
+                raw = host.read_bytes()
+                self.assertIsInstance(json.loads(raw), dict)
+                retire = lifecycle.plan(home=home, mode='retire', profile=profile)
+                retired = lifecycle.apply(home=home, plan=retire, digest=lifecycle.digest(retire), stopped=True)
+                self.assertTrue(lifecycle.verify(home=home, transaction=retired['transaction'])['ok'])
+                self.assertTrue(attention_trust_status(home, saved.config)['ready'])
+                lifecycle.rollback(home=home, transaction=retired['transaction'], digest=lifecycle.digest(retire), stopped=True)
+                self.assertEqual(host.read_bytes(), raw)
+                self.assertTrue(lifecycle.verify(home=home, transaction=retired['transaction'])['ok'])
+                self.assertEqual(machine_config.read_bytes(), b'model: machine-private\n')
+
+    def test_existing_json_preserves_non_plugin_bytes_and_host_semantics(self):
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        from tests.v2.hermes_normal_turn_support import host_yaml
+        yaml = host_yaml()
+        cases = (
+            ('{', '"plugins": {"enabled":["other", "nunchi"], "custom":true}', ',"private":"雪\\u0061","number":1e+20}\n'),
+            ('{ "private" : [null, false, {"yes":"no"}], ', '"plu\\u0067ins" : {}', ' }\n'),
+            ('{\n  "private": "plugins: { not syntax }",\n  ', '"plugins": {"disabled":["other"]}', '\n}\n'),
+            ('{ "private": "untouched" ', '', '}\n'),
+            ('{"plugins": {"entries" : { "nunchi": {"llm" : {"allow_model_override":true}}}, ', '"enabled": ["nunchi"]', '}}'),
+            ('{', '', '}'),
+        )
+        for prefix, middle, suffix in cases:
+            raw = (prefix + middle + suffix).encode()
+            for mode in ('activate', 'retire'):
+                with self.subTest(raw=raw, mode=mode):
+                    output = lifecycle._config(raw, mode)
+                    self.assertTrue(output.startswith(prefix.encode()))
+                    self.assertTrue(output.endswith(suffix.encode()))
+                    result = json.loads(output)
+                    self.assertEqual('nunchi' in result['plugins']['enabled'], mode == 'activate')
+                    self.assertEqual({k: v for k, v in yaml.safe_load(raw).items() if k != 'plugins'},
+                                     {k: v for k, v in yaml.safe_load(output).items() if k != 'plugins'})
+                    with tempfile.TemporaryDirectory() as tmp:
+                        home = Path(tmp)
+                        (home / 'config.yaml').write_bytes(raw)
+                        plan = lifecycle.plan(home=home, mode='retire', profile='default')
+                        receipt = lifecycle.apply(home=home, plan=plan, digest=lifecycle.digest(plan), stopped=True)
+                        lifecycle.rollback(home=home, transaction=receipt['transaction'], digest=lifecycle.digest(plan), stopped=True)
+                        self.assertEqual((home / 'config.yaml').read_bytes(), raw)
+
+    def test_json_safety_refusals_are_read_only(self):
+        from nunchi.integrations import hermes_lifecycle as lifecycle
+        cases = (
+            b'{"plugins": {}, "plu\\u0067ins": {}}',
+            b'{"private": {"key": 1, "key": 2}}',
+            b'{"private": [{"key": 1, "key": 2}]}',
+            b'{"plugins": {"enabled": [false]}}', b'{"plugins": null}',
+            b'{"private": NaN}', b'{"private": Infinity}',
+            b'{"private": -Infinity}', b'{"private": 1,}',
+            b'{"private": 1} # YAML comment', b'---\n{"private": 1}',
+            b'{"plugins": &a {}}', b'{"private": 1} {}',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw), tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp)
+                (home / 'config.yaml').write_bytes(raw)
+                with self.assertRaises(lifecycle.LifecycleError):
+                    lifecycle.plan(home=home, mode='retire', profile='default')
+                self.assertEqual((home / 'config.yaml').read_bytes(), raw)
+                self.assertFalse((home / lifecycle.STORE).exists())
+
     def test_yaml_safety_refusals_are_read_only(self):
         from nunchi.integrations import hermes_lifecycle as lifecycle
         cases = (
@@ -49,13 +143,14 @@ class LifecycleTests(unittest.TestCase):
                 load.assert_called_once_with('hermes_yaml')
 
     def test_native_publication_never_replaces_a_new_destination(self):
+        from itertools import product
         from unittest.mock import patch
         from nunchi.integrations import hermes_lifecycle as lifecycle
+        originals = (b'plugins:\n  enabled: [nunchi]\n', b'{"plugins": {"enabled": ["nunchi"]}}\n')
         for rollback in (False, True):
-            for kind in ('file', 'directory', 'symlink'):
-                with self.subTest(rollback=rollback, kind=kind), tempfile.TemporaryDirectory() as directory:
+            for kind, original in product(('file', 'directory', 'symlink'), originals):
+                with self.subTest(rollback=rollback, kind=kind, original=original), tempfile.TemporaryDirectory() as directory:
                     home = Path(directory)
-                    original = b'plugins:\n  enabled: [nunchi]\n'
                     edit = b'late-private-edit'
                     (home / 'config.yaml').write_bytes(original)
                     outside = home / 'unrelated'
