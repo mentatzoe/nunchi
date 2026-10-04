@@ -2,9 +2,9 @@ name: Hermes host contract
 
 on:
   pull_request:
-    branches: [integration/v2]
+    branches: [main]
   push:
-    branches: [integration/v2]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

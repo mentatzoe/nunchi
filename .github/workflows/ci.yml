@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, integration/v2]
+    branches: [main]
   pull_request:
 
 # Deterministic V2 tests are offline. Live-provider and real-room evidence are

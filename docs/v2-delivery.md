@@ -3,6 +3,12 @@
 This is the implementation entrypoint. The target is the product described in
 `v2-completion-goal.md`, not a collection of completed planning artifacts.
 
+> **2026-10-04, Zoe's decision:** `main` is the working branch and holds V2.
+> `integration/v2` is retired, and work merges into `main` as it lands, before
+> live proof. A current `main` is not a claim that V2 is complete. Branch and
+> status references below to `integration/v2` describe history until this
+> document's refresh ([#85](https://github.com/mentatzoe/nunchi/issues/85)).
+
 ## Current truth
 
 Shared-foundation commit

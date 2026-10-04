@@ -1,46 +1,47 @@
 # Nunchi Claude guidance
 
-Follow `AGENTS.md`. Claude owns the Claude Code integration and security
-assurance, not the shared V2 foundation or other platform implementations.
+Follow `AGENTS.md`. It states the product goal (agents that read the room in a
+live, multi-turn conversation) and Zoe's current working decisions. This file
+adds only Claude-specific notes.
 
-## Goal-first working style
+## Scope
 
-Start from the product outcome, not the current mechanism. Treat inherited
-design, version, installation, and process assumptions as changeable unless
-Zoe explicitly fixed them. Bugs in an implementation are bugs to repair; they
-are not proof that the approach is impossible.
+- Default scope: the Claude Code integration and security assurance.
+- As of 2026-10-04 Zoe has also directed Claude to make the shared core agent-
+  and provider-agnostic ([#85](https://github.com/mentatzoe/nunchi/issues/85))
+  and to keep the documentation current.
 
-Reviews must state what actually breaks, whether it prevents the goal, and the
-smallest concrete fix. Documentation and status reports state the outcome
-first, then the decision-changing technical facts. Keep the language concise,
-plain, and technically exact. Avoid jargon, doublespeak, inflated severity,
-and process theatre.
+## Claude Code integration
 
-Before platform work:
+The integration is a Claude Code mod plus one Python gate per room
+([#43](https://github.com/mentatzoe/nunchi/issues/43)):
 
-1. start from current `integration/v2`;
-2. confirm every declared upstream behavior is implemented, reviewed, and
-   integrated;
-3. read `docs/v2-completion-goal.md`, the selected design and contract, and the
-   relevant reference specification;
-4. inspect ordinary source and installed-runtime truth.
+- The participant is a dedicated Claude Code session per room that uses the
+  user's normal configuration, memory, tools, MCP servers, and skills.
+- The gate owns transport, observation, attention, scheduling, authority, and
+  receipts. The mod starts a turn on `WAKE`, gives the session the only
+  room-send tool, and reports how each turn ended.
+- Native tools follow the user's Claude Code permission rules, plus an optional
+  configured deny list applied when the session starts.
+- The earlier headless subprocess runner and channel-plugin designs are
+  superseded.
 
-Use ordinary branches, commits, pull requests, tests, and runtime evidence.
-There is no SpecKit workflow or slice lifecycle to operate. Planning artifacts
-are reference material, not work authorization or evidence of completion.
+## Habits
 
-Claude may implement only its owned platform surface and assurance tooling.
-Security defects in another component return to that owner for repair. Because
-Claude authors the Claude Code integration, Claude's own assessment cannot be
-the independent review of that surface or of the final security candidate.
+- Before changing the core, ask two questions: does this help an agent read
+  the room across a multi-turn conversation, and does it stay agent- and
+  provider-agnostic?
+- When briefing subagents, give them the goal of the task, not only the
+  mechanism, and point them to `AGENTS.md` instead of restating it.
+- Say plainly when a review is a self-review.
 
-The core is Python 3.11+ and stdlib-only unless a reviewed product change says
-otherwise. Run:
+## Commands
 
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 ```
 
-Live calls require explicit provider/platform credentials and must record the
-installed candidate, identity, configuration, command, and complete result.
+The core is Python 3.11+ and standard-library only. Live calls need explicit
+provider and platform credentials and must record the installed version,
+identity, configuration, command, and complete result.
