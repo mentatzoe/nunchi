@@ -40,6 +40,18 @@ class AttentionError(NunchiError):
     label = "attention error"
 
 
+class AttentionCancelled(AttentionError):
+    """The host cancelled this attention work. Raised only by the engine.
+
+    Cancellation is the one error that never wakes, so it is decided by the
+    engine's own cancel signal and never inferred from provider or model text.
+    """
+
+
+class AttentionDeadlineExceeded(AttentionError):
+    """The host's attention deadline expired. Raised only by the engine."""
+
+
 class HostAttentionPermissionError(AttentionError):
     """A host refused explicit routing; safe to expose without provider text."""
 
@@ -207,12 +219,12 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
         },
         "reasons": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {"type": "string", "minLength": 1},
             "maxItems": 8,
         },
         "evidence_event_ids": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {"type": "string", "minLength": 1},
             "uniqueItems": True,
         },
         "legacy_verdict_confidences": {
@@ -231,10 +243,11 @@ ATTENTION_JUDGMENT_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["note", "evidence_event_ids"],
                 "properties": {
-                    "note": {"type": "string"},
+                    "note": {"type": "string", "minLength": 1},
                     "evidence_event_ids": {
                         "type": "array",
-                        "items": {"type": "string"},
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
                         "uniqueItems": True,
                     },
                 },
@@ -502,6 +515,8 @@ def _validate_model_judgment(
         or set(evidence) - event_ids
     ):
         raise AttentionError("model evidence must cite only supplied event IDs")
+    if len(set(evidence)) != len(evidence):
+        raise AttentionError("model evidence must not repeat an event ID")
     vector = raw["legacy_verdict_confidences"]
     if not isinstance(vector, Mapping) or set(vector) != {"PASS", "ACK", "ASK", "SPEAK"}:
         raise AttentionError("model confidence vector must contain exactly PASS, ACK, ASK, SPEAK")
@@ -529,6 +544,8 @@ def _validate_model_judgment(
                 or set(cited) - event_ids
             ):
                 raise AttentionError("attention advice cites an unavailable event")
+            if len(set(cited)) != len(cited):
+                raise AttentionError("attention advice must not repeat an event ID")
     return deepcopy(dict(raw))
 
 
@@ -628,7 +645,7 @@ class AttentionEngine:
             stage_deadline = min(stage_deadline, deadline)
         provider_timeout = stage_deadline - started
         if provider_timeout <= 0:
-            raise AttentionError("participant attention deadline expired")
+            raise AttentionDeadlineExceeded("participant attention deadline expired")
         result_queue: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
 
         def invoke() -> None:
@@ -649,18 +666,21 @@ class AttentionEngine:
         worker.start()
         while True:
             if cancel is not None and cancel.is_set():
-                raise AttentionError("attention work was cancelled")
+                raise AttentionCancelled("attention work was cancelled")
             remaining = stage_deadline - time.monotonic()
             if remaining <= 0:
-                raise AttentionError("participant attention deadline expired")
+                raise AttentionDeadlineExceeded("participant attention deadline expired")
             try:
                 ok, value = result_queue.get(timeout=min(remaining, 0.05))
             except queue.Empty:
                 continue
             if not ok:
-                if isinstance(value, AttentionError):
+                if isinstance(value, HostAttentionPermissionError):
                     raise value
-                raise AttentionError(f"participant attention model failed: {value}") from value
+                # Anything the model or provider raises is a provider failure,
+                # whatever its type or text: only the engine's own cancel signal
+                # and deadline may produce the cancelled and deadline codes.
+                raise AttentionError("participant attention model failed") from value
             return value
 
     def judge(
@@ -723,20 +743,24 @@ class AttentionEngine:
                 checked, "host-permission-denied",
                 HostAttentionPermissionError.detail, invoked=True,
             )
-        except AttentionError as exc:
-            code = (
-                "cancelled"
-                if "cancelled" in str(exc)
-                else "deadline-exceeded"
-                if "deadline" in str(exc)
-                else "provider-failure"
+        except AttentionCancelled:
+            return self._error(
+                checked, "cancelled", "attention work was cancelled", invoked=True
             )
-            detail = {
-                "cancelled": "attention work was cancelled",
-                "deadline-exceeded": "participant attention deadline expired",
-                "provider-failure": "participant attention model failed",
-            }[code]
-            return self._error(checked, code, detail, invoked=True)
+        except AttentionDeadlineExceeded:
+            return self._error(
+                checked,
+                "deadline-exceeded",
+                "participant attention deadline expired",
+                invoked=True,
+            )
+        except AttentionError:
+            return self._error(
+                checked,
+                "provider-failure",
+                "participant attention model failed",
+                invoked=True,
+            )
 
         disposition = judgment["disposition"]
         effective = disposition
@@ -829,7 +853,18 @@ class AttentionEngine:
             decision["attention_advice"] = deepcopy(judgment["attention_advice"])
         if ack_audit is not None:
             decision["ack"] = ack_audit
-        checked_decision = validate_attention_decision(decision, request=checked)
+        try:
+            checked_decision = validate_attention_decision(decision, request=checked)
+        except ValidationError:
+            # Every field the contract can reject here came from the model, so
+            # an invalid judgment is an operational failure that follows the
+            # error policy (wake by default), never a crash that drops the turn.
+            return self._error(
+                checked,
+                "provider-failure",
+                "participant attention model returned an invalid judgment",
+                invoked=True,
+            )
         self.receipts.append(
             {
                 "request_id": checked["request_id"],
