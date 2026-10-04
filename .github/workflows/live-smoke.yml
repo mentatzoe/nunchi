@@ -5,9 +5,19 @@ name: live-smoke
 # detector: run it at release time, or when a provider/model regression is
 # suspected, to confirm the configured delegated attention model returns one
 # valid participant-bound V2 decision.
-# If the OPENROUTER_API_KEY secret is not set, the job skips cleanly (exit 0).
+#
+# The model is called through OpenRouter with the NUNCHI_OPENROUTER repository
+# secret. A missing secret or any decision other than status "ok" fails the
+# job. The job summary records the installed version, model, configuration
+# digests, command, and complete decision; the files are uploaded as an
+# artifact. None of them contain the key.
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: OpenRouter model ID
+        required: true
+        default: google/gemini-3.8-flash
 
 permissions:
   contents: read
@@ -17,23 +27,26 @@ jobs:
     name: live provider smoke (manual)
     runs-on: ubuntu-latest
     env:
-      NUNCHI_ATTENTION_MODEL: nous/deepseek/deepseek-v4-flash
+      NUNCHI_ATTENTION_MODEL: ${{ inputs.model }}
+      NUNCHI_ATTENTION_BASE_URL: https://openrouter.ai/api/v1
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install Nunchi
-        run: pip install .
+        run: python -m pip install .
       - name: Prepare one exact V2 attention request
         shell: bash
         run: |
+          mkdir -p live-smoke
           python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
           from nunchi.observation import ObservationProvider, ParticipantBinding
           from nunchi.receipts import ReceiptJournal
 
+          out = Path("live-smoke")
           profile = {
               "profile_id": "ci-live",
               "participant_id": "ci-live",
@@ -48,14 +61,16 @@ jobs:
               },
               "model": {
                   "model": os.environ["NUNCHI_ATTENTION_MODEL"],
+                  "base_url": os.environ["NUNCHI_ATTENTION_BASE_URL"],
+                  "provider": "openrouter",
                   "api_key_env": "NUNCHI_ATTENTION_API_KEY",
               },
           }
           profile_raw = json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()
           config_raw = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
-          Path("/tmp/nunchi-live-profile.json").write_bytes(profile_raw)
-          Path("/tmp/nunchi-live-config.json").write_bytes(config_raw)
-          journal = ReceiptJournal("/tmp/nunchi-live-receipts.jsonl")
+          (out / "profile.json").write_bytes(profile_raw)
+          (out / "config.json").write_bytes(config_raw)
+          journal = ReceiptJournal(str(out / "receipts.jsonl"))
           observation = ObservationProvider(
               ParticipantBinding(
                   participant_id="ci-live",
@@ -82,7 +97,7 @@ jobs:
               },
           )
           request = observation.build_snapshot("discord:message:ci-live")
-          Path("/tmp/nunchi-live-request.json").write_text(json.dumps(request))
+          (out / "request.json").write_text(json.dumps(request))
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write("NUNCHI_PROFILE_SHA256=" + hashlib.sha256(profile_raw).hexdigest() + "\n")
               env.write("NUNCHI_ATTENTION_CONFIG_SHA256=" + hashlib.sha256(config_raw).hexdigest() + "\n")
@@ -90,18 +105,51 @@ jobs:
       - name: One real V2 attention call
         # Secret scoped to this step only, so the install step never sees it.
         env:
-          NUNCHI_ATTENTION_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          NUNCHI_ATTENTION_API_KEY: ${{ secrets.NUNCHI_OPENROUTER }}
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${NUNCHI_ATTENTION_API_KEY:-}" ]; then
-            echo "No OPENROUTER_API_KEY secret -- skipping live smoke."
-            exit 0
+            echo "::error::The NUNCHI_OPENROUTER secret is not set."
+            exit 1
           fi
-          echo "Live smoke: model=${NUNCHI_ATTENTION_MODEL}, interface=I-030A"
-          nunchi attention \
-            --input /tmp/nunchi-live-request.json \
-            --profile /tmp/nunchi-live-profile.json \
-            --config /tmp/nunchi-live-config.json \
-            --receipt-journal /tmp/nunchi-live-receipts.jsonl \
-            | python -c 'import json,sys; r=json.load(sys.stdin); assert r["status"] in ("ok","bypass","error"); print("live V2 smoke OK: status=%s" % r["status"])'
+          version=$(nunchi probe | python -c 'import json,sys; print(json.load(sys.stdin)["product_version"])')
+          command="nunchi attention --input live-smoke/request.json --profile live-smoke/profile.json --config live-smoke/config.json --receipt-journal live-smoke/receipts.jsonl"
+          # Keep going on failure so the record below is always written.
+          code=0
+          $command > live-smoke/decision.json || code=$?
+          {
+            echo "## Live smoke"
+            echo
+            echo "- Nunchi: ${version}"
+            echo "- Model: \`${NUNCHI_ATTENTION_MODEL}\` via ${NUNCHI_ATTENTION_BASE_URL}"
+            echo "- Profile sha256: \`${NUNCHI_PROFILE_SHA256}\`"
+            echo "- Config sha256: \`${NUNCHI_ATTENTION_CONFIG_SHA256}\`"
+            echo "- Command: \`${command}\` (exit ${code})"
+            echo
+            echo '```json'
+            cat live-smoke/decision.json
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat live-smoke/decision.json
+          python - <<'PY'
+          import json, sys
+          try:
+              decision = json.load(open("live-smoke/decision.json"))
+          except ValueError:
+              sys.exit("live V2 smoke failed: no decision; see the command's error above")
+          if decision.get("status") != "ok":
+              sys.exit(f"live V2 smoke failed: status={decision.get('status')} {decision.get('error')}")
+          print(
+              "live V2 smoke OK: classifier=%s effective=%s"
+              % (decision["classifier_disposition"], decision["effective_disposition"])
+          )
+          PY
+      - name: Upload the record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: live-smoke-${{ github.run_id }}
+          path: live-smoke/
+          if-no-files-found: ignore

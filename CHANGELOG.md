@@ -86,6 +86,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- The manual `live-smoke` workflow works again. Its model config lacked the
+  now-required `base_url`, so every run failed before calling a model. It now
+  calls a current model (chosen at dispatch) through OpenRouter with the
+  `NUNCHI_OPENROUTER` secret. It fails on a missing secret or any decision
+  other than `ok` instead of skipping or passing. It records the version,
+  model, digests, command, and full decision in the job summary and an
+  artifact.
 - Discord REST errors no longer echo the bot token into error text (#88).
 - Three defects from #94.
   - The attention snapshot keeps the newest messages of the participant's
