@@ -31,7 +31,7 @@ Nothing below is **verified**.
 | Reference adapters (generic channel, Discord, Matrix, Telegram) and shared Discord MCP transport | **merged, unverified** | offline tests; clean-install probes | live proof per platform |
 | Hermes | **merged, unverified** (PRs #36, #83, #84) | offline tests; installed stock-Hermes CI on 0.19.0, 0.21.5, and current Hermes `main`: contract lanes for Discord and Telegram, normal-attention and startup lanes for Discord | live acceptance ([#38](https://github.com/mentatzoe/nunchi/issues/38)); receipt/deadline/restart boundaries ([#42](https://github.com/mentatzoe/nunchi/issues/42)); supported-surface parity ([#44](https://github.com/mentatzoe/nunchi/issues/44)) |
 | Codex | **merged, unverified**, reduced: Discord only, Codex tools, skills, plugins, and MCP disabled | offline tests; clean-install probe | continuity binding and other adapters in draft PR [#71](https://github.com/mentatzoe/nunchi/pull/71) (**implemented, unverified**); parity gaps #59–#65; live proof |
-| Claude Code | headless runner (PR #32) **merged, unverified** and superseded; the selected mod design ([#43](https://github.com/mentatzoe/nunchi/issues/43)) is **missing** on `main` | offline tests and clean-install probe of the headless runner only | the mod and per-room gate (#43); every adapter ([#57](https://github.com/mentatzoe/nunchi/issues/57)); install and supervision ([#58](https://github.com/mentatzoe/nunchi/issues/58)); live acceptance ([#39](https://github.com/mentatzoe/nunchi/issues/39)) |
+| Claude Code | **merged, unverified**: per-room gate, dedicated session, and Nunchi mod ([#43](https://github.com/mentatzoe/nunchi/issues/43)); Discord only | offline tests, including a stub session over the real gate socket; `claude plugin validate --strict` and `claude plugin test` on Claude Code 2.1.289; clean-install probe | every adapter ([#57](https://github.com/mentatzoe/nunchi/issues/57)); install and supervision ([#58](https://github.com/mentatzoe/nunchi/issues/58)); live acceptance ([#39](https://github.com/mentatzoe/nunchi/issues/39)) |
 
 No unverified platform (Hermes, Codex, or Claude Code) may be described as
 done, live, or parity-ready until its open gates pass.
@@ -47,11 +47,11 @@ stopped profile lifecycle archives V1 and V2 state and supports guarded
 restoration; it does not convert V1 social history. See the
 [verification record](v2-verification.md) for exact runs.
 
-The Claude Code design selected by Zoe is a Claude Code mod plus one Python gate
-per room, with a dedicated Claude Code session for each room (#43). The headless
-subprocess runner (`nunchi-claude-code-room-runner`) and the channel-plugin
-designs (PR #72, issue #77) are superseded. The runner stays in the tree until
-the mod PR replaces it.
+Claude Code follows the design Zoe selected (#43): one Python gate per room,
+a dedicated Claude Code session per room that keeps the user's configuration,
+and a Nunchi mod in that session for the room tools. It replaced the headless
+subprocess runner (PR #32); the channel-plugin designs (PR #72, issue #77) are
+superseded. `nunchi-claude-code-room-runner` now starts the gate.
 
 Open gates:
 

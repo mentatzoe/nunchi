@@ -39,7 +39,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
             "Historical Hermes evidence is not current proof",
             "normal turns, ordinary tools, native approval, ACK",
             "installed-runtime checks, not live ones",
-            "superseded and not live",
+            "it has not run in a real room",
             "issues/43",
             "issue #41",
             "issues/44",
@@ -51,6 +51,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         forbidden = (
             "Moving-main CI currently proves host contracts, not normal turns",
             "in candidate source",
+            "headless runner",
         )
         for phrase in forbidden:
             with self.subTest(forbidden=phrase):

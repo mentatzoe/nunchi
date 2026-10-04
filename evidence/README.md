@@ -33,9 +33,9 @@ historical provenance only.
   installed hosts with loopback fixtures; not live-provider or live-room
   evidence.
 - `v2/claude-code/` — review record and offline participant scenes for the
-  headless Claude Code runner (PR #32), which the Claude Code mod design
-  supersedes ([#43](https://github.com/mentatzoe/nunchi/issues/43)); no live
-  real-room evidence.
+  headless Claude Code runner (PR #32), which the Claude Code gate and mod
+  replaced ([#43](https://github.com/mentatzoe/nunchi/issues/43)). History,
+  not evidence for the current integration; no live real-room evidence.
 - `governance/` — historical workflow and ownership provenance; never current
   status or V2 runtime evidence.
 

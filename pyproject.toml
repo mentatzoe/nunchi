@@ -70,6 +70,11 @@ nunchi = "nunchi.integrations.hermes_v2"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"nunchi.integrations" = [
+  "claude_code_mod/.claude-plugin/plugin.json",
+  "claude_code_mod/hooks/hooks.json",
+  "claude_code_mod/hooks/register.ts",
+]
 "nunchi.integrations.hermes_dashboard_assets" = [
   "index.js",
   "manifest.json",

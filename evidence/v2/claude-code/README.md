@@ -1,5 +1,13 @@
 # Claude Code V2 evidence
 
+> **History, 2026-10-04.** Everything below records the headless Claude Code
+> runner from PR #32. The gate and mod (#43) replaced that runner and removed
+> `evals/v2/claude_code/`, so this record is not evidence for the current
+> Claude Code integration. The workspace executor it reviews is still in use
+> unchanged. Current status and checks are in
+> [`integrations/claude-code/README.md`](../../../integrations/claude-code/README.md);
+> live proof is [#39](https://github.com/mentatzoe/nunchi/issues/39).
+
 **Surface**: Claude Code (`070`) · **Owner lane**: `v2-claude-owner`
 (`evidence/governance/assignments/claude-v2-claude-owner-2026-07-24.md`)
 

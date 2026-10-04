@@ -90,8 +90,9 @@ revoked, mismatched, replayed, or not durably persisted.
   `authorization` policy is configured but pass no executors, so every
   privileged proposal is denied. The Codex runner disables privileged actions.
   Hermes does not use the coordinator; its tools keep Hermes's native
-  approvals. Only the superseded headless Claude Code runner has an executor
-  (`workspace.file.write`, with a private `workspace_root`).
+  approvals. Only the Claude Code gate has an executor
+  (`workspace.file.write`, with a private `workspace_root`); its agent
+  proposes through `mcp__nunchi__room_propose`.
 - **Authenticated operator approval surface.** `pending_for_operator()` and
   `complete_authenticated_approval()` are library methods. No shipped command,
   dashboard, or transport calls them, so an `APPROVAL_REQUIRED` proposal

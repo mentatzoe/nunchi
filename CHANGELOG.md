@@ -32,8 +32,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   Discord.
 - Codex room runner in a reduced mode: Discord only, with Codex tools, skills,
   plugins, and MCP disabled.
-- Claude Code headless room runner (PR #32). It is superseded by the Claude
-  Code mod design (#43) and stays in the tree until that work replaces it.
+- Claude Code gate and mod (#43): one gate per room starts a dedicated Claude
+  Code session that keeps the user's configuration; a Nunchi mod in that
+  session registers the room tools and binds each turn to its wake. The core
+  gains host-neutral helpers for participants that act through tools.
+  Discord only, no live proof yet.
 - Deterministic lifecycle evaluation (11 scenarios), adversarial runtime
   coverage, clean-artifact probes, and the platform interface and conformance
   contract.
@@ -87,6 +90,8 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   `evals/verdict_suite/fixtures/` as seed conversations for behavioral
   evaluation (#86).
 - `HostStructuredParticipant` (#91).
+- The headless Claude Code runner (PR #32) and its real-binary scene runner
+  (`evals/v2/claude_code/`), replaced by the gate and mod (#43).
 - The executable SpecKit workflow, generated task and checklist control plane,
   and slice lifecycle as implementation authority. Specifications and plans
   remain reference material.

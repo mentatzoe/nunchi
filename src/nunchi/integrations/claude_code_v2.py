@@ -1,19 +1,18 @@
-"""Claude Code V2 room presence over the shared Discord transport.
+"""Claude Code V2 room presence: a per-room gate and a dedicated session.
 
-This is the platform-owned wrapper described by `docs/v2-delivery.md` and
-`docs/platform-v2.md`.  It owns exactly the platform obligations — native
-identity, the headless Claude Code participant, session continuity,
-cancellation, private persistence, and the live-proof seam — and reuses the
-shared owners for everything else.  Observation, attention, scheduling, the
-participant host, the privileged-action coordinator, and the Discord consumer
-transport are imported, never reimplemented: social judgment and authority
-semantics are not forked into this integration.
+The gate is the platform-owned wrapper described by `docs/v2-delivery.md` and
+`docs/platform-v2.md`.  It owns the platform obligations: native identity, the
+dedicated Claude Code session and its Nunchi mod, the session's environment,
+cancellation, private persistence, and the inventoried privileged executors.
+It reuses the shared owners for everything else.  Observation, attention,
+scheduling, the participant host, the privileged-action coordinator, and the
+Discord consumer transport are imported, never reimplemented.
 
-The participant is one headless `claude` turn per opportunity.  It runs with no
-built-in tools, no MCP servers, no inherited settings, no slash commands, and a
-private configuration root, so the only way a Claude Code contribution can
-reach the room is by being returned to this host and dispatched at the host's
-one output commit point.
+The participant is the user's own Claude Code agent in one dedicated session
+per room (`claude_code_gate`).  It keeps the user's configuration and native
+tools under the user's own permission rules.  Its only way into the room is
+the room tools the Nunchi mod registers, and every room action passes the
+host's one output commit point.
 """
 
 from __future__ import annotations
@@ -32,11 +31,10 @@ import shutil
 import stat
 import subprocess
 import sys
-import threading
+import tempfile
 import time
 from typing import Any
 import urllib.error
-import uuid
 
 from .. import __version__
 from ..ack import AckJournal, AckPolicy
@@ -54,118 +52,41 @@ from ..authorization import (
 )
 from ..errors import NunchiError, ValidationError
 from ..observation import ObservationLimits, ObservationProvider, ParticipantBinding
-from ..participant import (
-    ConversationOpportunityScheduler,
-    ParticipantTurnHost,
-    TransportResult,
-)
-from ..participant_model import (
-    PARTICIPANT_TURN_PROTOCOL_VERSION,
-    ParticipantModelError,
-    ParticipantTurnProtocol,
-    participant_turn_prompt,
-)
+from ..participant import ConversationOpportunityScheduler, TransportResult
 from ..pipeline import AsyncDeliveryLane, DeliveryOutcome, NunchiV2Pipeline
 from ..receipts import ReceiptJournal
 from ..v2_contracts import validate_canonical_event
 from ..mcp_discord.authorization import make_tool_authorization
+from .claude_code_gate import (
+    SESSION_ENV,
+    SOCKET_ENV,
+    ClaudeCodeSession,
+    GatedParticipant,
+    GatedTurnHost,
+    GateServer,
+    SecretGuard,
+    full_tool_name,
+)
 from .discord_participant_transport import MCPDiscordTransport
 from .mcp_client import StreamableMCPClient
 
 NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 SURFACE = "claude-code"
+MINIMUM_CLAUDE_CODE = (2, 1, 287)
+MOD_DIRECTORY = Path(__file__).with_name("claude_code_mod")
 
-_SESSION_ID = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
-
-# The participant returns one compact action envelope and nothing else.  The
-# CLI validates this shape itself via ``--json-schema`` and echoes the parsed
-# object back as ``structured_output``.
-_ACTION_ENVELOPE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "action_json": {
-            "type": "string",
-            "description": (
-                "One compact JSON object encoding a Nunchi V2 action or silence."
-            ),
-        }
-    },
-    "required": ["action_json"],
+_CLAUDE_CODE_KEYS = {
+    "executable",
+    "working_directory",
+    "model",
+    "timeout_seconds",
+    "session_mode",
+    "disallowed_tools",
+    "protect_nunchi_files",
+    "withhold_env",
 }
-
-# Exactly the process environment a headless participant turn may observe.
-# Everything else — notably the shared Discord output-authorization key, the
-# attention classifier credential, and this host's own Claude Code session
-# variables — is withheld, so a participant turn cannot forge transport
-# authorization or inherit another room's session.
-_PARTICIPANT_ENV_ALLOWLIST = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_CUSTOM_HEADERS",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_MODEL",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "AWS_REGION",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLOUD_ML_REGION",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "HOME",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "LANG",
-    "LC_ALL",
-    "LOGNAME",
-    "NO_PROXY",
-    "PATH",
-    "SSL_CERT_FILE",
-    "TMPDIR",
-    "USER",
-)
-
-# Isolation flags applied to every headless participant turn.  ``--tools ""``
-# removes every built-in tool, ``--strict-mcp-config`` with an empty server map
-# removes every MCP server (including any Discord plugin the operator may have
-# installed for their own interactive use), and the setting/skill flags stop
-# ambient repository or user configuration from reshaping the participant.
-#
-# ``--setting-sources ""`` and ``--safe-mode`` are deliberately *both* present.
-# Either one alone suppresses ancestor ``CLAUDE.md``/``CLAUDE.local.md``
-# discovery (measured — see `evals/v2/claude_code/participant_scenes.py`
-# scene ``ambient-instruction-isolation``), but only ``--safe-mode`` documents
-# that intent.  Keeping both means a change to how one of them treats memory
-# files cannot silently reopen the ambient-instruction path.  ``--system-prompt``
-# is NOT sufficient on its own: with it alone, an ancestor ``CLAUDE.md`` still
-# reaches the turn.
-_ISOLATION_ARGUMENTS = (
-    "--print",
-    "--output-format",
-    "json",
-    "--tools",
-    "",
-    "--strict-mcp-config",
-    "--mcp-config",
-    '{"mcpServers":{}}',
-    "--setting-sources",
-    "",
-    "--disable-slash-commands",
-    "--safe-mode",
-    "--permission-mode",
-    "manual",
-)
-
-_MAX_EXPANSION_TURNS = 3
-
-# One participant/room lane runs one opportunity at a time, so a staged
-# pin is normally consumed or superseded immediately.  This cap only has
-# to stop closed work from accumulating; it is deliberately small.
-_MAX_PENDING_PINS = 8
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 class ConfinedPathDrift(OSError):
@@ -177,56 +98,6 @@ class ConfinedPathDrift(OSError):
     becomes `unknown` rather than `sent` or `failed`.
     """
 
-
-class ClaudeCodeParticipantError(RuntimeError):
-    """An operational failure of the headless participant turn.
-
-    This is never silence.  The host records it as an operational failure with
-    an ``unknown`` participant-host outcome and makes no native call.
-    """
-
-
-def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
-    """Write `payload` to `path` atomically without ever following a symlink.
-
-    The staging file is unpredictable and opened `O_EXCL | O_NOFOLLOW`, so a
-    pre-planted symlink at the staging path cannot redirect the write outside
-    the intended directory: `O_EXCL` fails on any existing name, including a
-    dangling or pointing symlink, and `O_NOFOLLOW` refuses a symlink even if
-    one is created between the name choice and the open.  `os.replace` renames
-    the staging file itself and never traverses a symlink at the destination,
-    so the destination is left as a regular file.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
-    fd = os.open(
-        temporary,
-        os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
-        mode,
-    )
-    try:
-        try:
-            if os.write(fd, payload) != len(payload):
-                raise OSError(f"short write to {path}")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temporary, path)
-        # The rename is only durable once the directory entry is synced.  If
-        # that fails the write is uncertain, so remove it rather than leave
-        # state a later load would treat as trustworthy.
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except BaseException:
-        for leftover in (temporary, path):
-            try:
-                os.unlink(leftover)
-            except OSError:
-                pass
-        raise
 
 
 def _assert_root_identity(root_fd: int, root_path: Path) -> None:
@@ -433,476 +304,61 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def parse_claude_result(stdout: str) -> tuple[str | None, dict[str, Any] | None]:
-    """Return the reported session ID and the one decoded participant action.
 
-    A `None` action means the output was not exactly one well-formed action
-    envelope.  The caller treats that as an operational failure, never as
-    silence: a malformed or truncated model turn must not be reported as a
-    participant's considered decision to stay quiet.
-    """
+def claude_code_version(executable: str) -> tuple[int, int, int] | None:
+    """Return the installed Claude Code version, or None when it cannot be read."""
+
     try:
-        document = json.loads(stdout)
-    except json.JSONDecodeError:
-        return None, None
-    if not isinstance(document, Mapping) or document.get("type") != "result":
-        return None, None
-    reported = document.get("session_id")
-    session_id = (
-        reported
-        if isinstance(reported, str) and _SESSION_ID.fullmatch(reported)
-        else None
-    )
-    if document.get("is_error") is not False or document.get("subtype") != "success":
-        return session_id, None
-    envelope = document.get("structured_output")
-    if not isinstance(envelope, Mapping):
-        # ``--json-schema`` is the contract; fall back to the raw result text
-        # only so a CLI that omits the echo is still parseable, never so a
-        # differently shaped answer becomes valid.
-        raw = document.get("result")
-        if not isinstance(raw, str):
-            return session_id, None
-        try:
-            envelope = json.loads(raw)
-        except json.JSONDecodeError:
-            return session_id, None
-    if (
-        not isinstance(envelope, Mapping)
-        or set(envelope) != {"action_json"}
-        or not isinstance(envelope["action_json"], str)
-    ):
-        return session_id, None
-    try:
-        action = json.loads(envelope["action_json"])
-    except json.JSONDecodeError:
-        return session_id, None
-    return session_id, action if isinstance(action, dict) else None
-
-
-class ClaudeCodeParticipant:
-    """One headless, tool-free `claude` turn per conversation opportunity."""
-
-    core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
-
-    def __init__(
-        self,
-        *,
-        profile: ParticipantProfile,
-        config: Mapping[str, Any],
-        binding: ParticipantBinding,
-        state_directory: str | Path,
-    ) -> None:
-        allowed = {"model", "timeout_seconds", "session_mode", "effort"}
-        unexpected = set(config) - allowed
-        if unexpected:
-            raise ValidationError(
-                "Claude Code participant config has unexpected fields: "
-                + ", ".join(sorted(unexpected))
-            )
-        self.profile = profile
-        self.binding = binding
-        binary = shutil.which("claude")
-        if binary is None:
-            raise ValidationError(
-                "Claude Code executable is not installed on trusted PATH"
-            )
-        self.binary = binary
-        self.model = config.get("model")
-        if self.model is not None and (
-            not isinstance(self.model, str) or not self.model
-        ):
-            raise ValidationError("Claude Code model must be a non-empty string")
-        self.effort = config.get("effort")
-        if self.effort is not None and self.effort not in (
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-        ):
-            raise ValidationError("Claude Code effort is not a supported level")
-        self.timeout_seconds = float(config.get("timeout_seconds", 300))
-        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
-            raise ValidationError("Claude Code timeout must be positive and finite")
-        self.session_mode = str(config.get("session_mode", "persistent"))
-        if self.session_mode not in ("persistent", "fresh"):
-            raise ValidationError(
-                "Claude Code session_mode must be persistent or fresh"
-            )
-
-        state_root = Path(state_directory)
-        self.working_directory = state_root / "claude-code-participant-workspace"
-        self.working_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        # A private Claude Code configuration root keeps this participant's
-        # sessions, projects, and skills out of the operator's own Claude Code
-        # state and out of every other room's runtime.
-        self.config_directory = state_root / "claude-code-participant-config"
-        self.config_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.session_path = state_root / "claude-code-v2-session.json"
-
-        behavior = {
-            "profile_sha256": self.profile.sha256,
-            "participant_id": self.binding.participant_id,
-            "actor_id": self.binding.actor_id,
-            "room_id": self.binding.room_id,
-            "continuity_scope_id": self.binding.continuity_scope_id,
-            "model": self.model,
-            "effort": self.effort,
-            "isolation": list(_ISOLATION_ARGUMENTS),
-            "environment_allowlist": list(_PARTICIPANT_ENV_ALLOWLIST),
-        }
-        self.behavior_sha256 = hashlib.sha256(
-            _canonical_json(behavior).encode("utf-8")
-        ).hexdigest()
-        self._lock = threading.Lock()
-        self._pending_lock = threading.Lock()
-        self._pending_pins: dict[str, str] = {}
-
-    # -- session continuity -------------------------------------------------
-
-    def _load_session(self) -> str | None:
-        if self.session_mode == "fresh" or not self.session_path.exists():
-            return None
-        try:
-            state = json.loads(self.session_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ClaudeCodeParticipantError(
-                f"Claude Code session state is not trustworthy: {exc}"
-            ) from exc
-        expected = {
-            "schema_version",
-            "session_id",
-            "participant_id",
-            "actor_id",
-            "room_id",
-            "continuity_scope_id",
-            "profile_sha256",
-            "behavior_sha256",
-        }
-        if not isinstance(state, dict) or set(state) != expected:
-            raise ClaudeCodeParticipantError(
-                "Claude Code session state has an invalid closed shape"
-            )
-        if (
-            state["schema_version"] != 2
-            or state["participant_id"] != self.binding.participant_id
-            or state["actor_id"] != self.binding.actor_id
-            or state["room_id"] != self.binding.room_id
-            or state["continuity_scope_id"] != self.binding.continuity_scope_id
-            or state["profile_sha256"] != self.profile.sha256
-            or state["behavior_sha256"] != self.behavior_sha256
-            or not isinstance(state["session_id"], str)
-            or not _SESSION_ID.fullmatch(state["session_id"])
-        ):
-            raise ClaudeCodeParticipantError(
-                "Claude Code session state binding is invalid"
-            )
-        return state["session_id"]
-
-    def stage_pin(self, request_id: str, session_id: str) -> None:
-        """Record continuity as *pending* for one attention pass.
-
-        Nothing is persisted here.  The participant cannot know whether the
-        host will accept its action: the origin may be invisible, the
-        opportunity stale, the deadline blown, or the turn cancelled before the
-        commit point.  Persisting at this point would make a rejected or
-        cancelled turn resumable, so the pin waits for the host's own receipt.
-
-        A turn the host never accepts leaves its staged entry behind, because
-        rejection produces no receipt to discard it.  The store is therefore
-        bounded: it keeps only the most recent `_MAX_PENDING_PINS` entries and
-        evicts oldest-first, so repeated rejected, cancelled, or malformed
-        turns cannot accumulate closed work without limit.
-        """
-        if self.session_mode != "persistent" or not isinstance(request_id, str):
-            return
-        with self._pending_lock:
-            self._pending_pins.pop(request_id, None)
-            self._pending_pins[request_id] = session_id
-            while len(self._pending_pins) > _MAX_PENDING_PINS:
-                self._pending_pins.pop(next(iter(self._pending_pins)))
-
-    def commit_pin(self, request_id: str) -> None:
-        """Persist a staged pin once the host has accepted the turn."""
-        with self._pending_lock:
-            session_id = self._pending_pins.pop(request_id, None)
-        if session_id is not None:
-            self._save_session(session_id)
-
-    def discard_pin(self, request_id: str | None) -> None:
-        """Drop staged continuity for work that will never be accepted."""
-        if not isinstance(request_id, str):
-            return
-        with self._pending_lock:
-            self._pending_pins.pop(request_id, None)
-
-    @property
-    def pending_pin_count(self) -> int:
-        with self._pending_lock:
-            return len(self._pending_pins)
-
-    def _save_session(self, session_id: str) -> None:
-        _atomic_write(
-            self.session_path,
-            _canonical_json(
-                {
-                    "schema_version": 2,
-                    "session_id": session_id,
-                    "participant_id": self.binding.participant_id,
-                    "actor_id": self.binding.actor_id,
-                    "room_id": self.binding.room_id,
-                    "continuity_scope_id": self.binding.continuity_scope_id,
-                    "profile_sha256": self.profile.sha256,
-                    "behavior_sha256": self.behavior_sha256,
-                }
-            ).encode("utf-8"),
-        )
-
-    # -- prompt construction ------------------------------------------------
-
-    def system_prompt(self) -> str:
-        """Compatibility accessor for the core-owned prompt bytes."""
-
-        return participant_turn_prompt(self.profile)
-
-    def _turn_prompt(self, protocol: ParticipantTurnProtocol) -> str:
-        """Compatibility accessor; request and prompt rendering live in core."""
-
-        if not isinstance(protocol, ParticipantTurnProtocol):
-            raise ValidationError("Claude Code requires a core participant protocol")
-        return protocol.text
-
-    # -- invocation ---------------------------------------------------------
-
-    def _environment(self) -> dict[str, str]:
-        environment = {
-            name: os.environ[name]
-            for name in _PARTICIPANT_ENV_ALLOWLIST
-            if name in os.environ
-        }
-        environment["CLAUDE_CONFIG_DIR"] = str(self.config_directory)
-        return environment
-
-    def credential_status(self, *, timeout_seconds: float = 20.0) -> dict[str, Any]:
-        """Report the credential the participant turn would actually receive.
-
-        This asks the CLI, under the participant's exact environment and
-        private configuration root, rather than inferring from the operator's
-        own shell -- which routinely holds a credential the participant does
-        not inherit.  An expired participant login and an absent one look
-        identical at a glance, and an expired one is how a first live run
-        typically dies, so the two are reported separately.
-
-        The remedy is the same for both (`claude auth login` against the
-        participant's own configuration root), so misreading `logged-out` as
-        `absent` costs an operator nothing.  That matters because a
-        keychain-backed login leaves no file here to observe: the distinction
-        is diagnostic, never load-bearing.  A diagnostic must not be able to
-        stop the runtime, so every failure resolves to `unknown`.
-        """
-        state = "unknown"
-        detail: dict[str, Any] = {}
-        try:
-            completed = subprocess.run(
-                [self.binary, "auth", "status"],
-                cwd=self.working_directory,
-                env=self._environment(),
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return {"state": state, "detail": detail}
-        try:
-            reported = json.loads(completed.stdout)
-        except json.JSONDecodeError:
-            return {"state": state, "detail": detail}
-        if not isinstance(reported, Mapping):
-            return {"state": state, "detail": detail}
-        logged_in = reported.get("loggedIn")
-        if not isinstance(logged_in, bool):
-            return {"state": state, "detail": detail}
-        method = reported.get("authMethod")
-        if isinstance(method, str) and method:
-            detail["auth_method"] = method
-        stored = self.config_directory / ".credentials.json"
-        detail["stored_credential_present"] = stored.exists()
-        if logged_in:
-            state = "authenticated"
-        elif detail["stored_credential_present"]:
-            state = "logged-out"
-        else:
-            state = "absent"
-        return {"state": state, "detail": detail}
-
-    def _command(self, *, session_id: str, resume: bool, prompt: str) -> list[str]:
-        command = [self.binary, *_ISOLATION_ARGUMENTS]
-        command.extend(("--system-prompt", self.system_prompt()))
-        command.extend(("--json-schema", _canonical_json(_ACTION_ENVELOPE_SCHEMA)))
-        if self.model is not None:
-            command.extend(("--model", self.model))
-        if self.effort is not None:
-            command.extend(("--effort", self.effort))
-        if resume:
-            command.extend(("--resume", session_id))
-        else:
-            command.extend(("--session-id", session_id))
-        command.append(prompt)
-        return command
-
-    def _run_turn(
-        self,
-        *,
-        session_id: str,
-        resume: bool,
-        prompt: str,
-        cancel: threading.Event,
-        deadline: float,
-    ) -> tuple[str | None, dict[str, Any] | None, bool]:
-        """Run one CLI turn.  The third result is True when cancelled."""
-        with subprocess.Popen(
-            self._command(session_id=session_id, resume=resume, prompt=prompt),
-            cwd=self.working_directory,
-            env=self._environment(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        completed = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
             text=True,
-        ) as process:
-            while process.poll() is None:
-                if cancel.is_set() or time.monotonic() >= deadline:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=2)
-                    # A cancelled turn is closed work, not silence and not an
-                    # answer.  A turn the host has *not* cancelled that runs
-                    # past this participant's own budget is an operational
-                    # failure, so the host records `unknown` rather than
-                    # reporting a considered decision to stay quiet.
-                    if cancel.is_set():
-                        return None, None, True
-                    raise ClaudeCodeParticipantError(
-                        "Claude Code participant turn exceeded its configured "
-                        "budget"
-                    )
-                time.sleep(0.05)
-            stdout, stderr = process.communicate()
-        if process.returncode != 0:
-            raise ClaudeCodeParticipantError(
-                (stderr or f"Claude Code exited {process.returncode}").strip()[-500:]
-            )
-        reported, action = parse_claude_result(stdout)
-        return reported, action, False
-
-    def run_protocol(self, *, wake, opportunity, expand, cancel):
-        protocol = ParticipantTurnProtocol(
-            profile=self.profile,
-            wake=wake,
-            opportunity=opportunity,
-            max_expansions=_MAX_EXPANSION_TURNS,
+            timeout=20,
+            check=False,
         )
-        with self._lock:
-            active = self._load_session()
-            resume = active is not None
-            session_id = active or str(uuid.uuid4())
-            deadline = time.monotonic() + self.timeout_seconds
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = _VERSION.search(completed.stdout or "")
+    if completed.returncode != 0 or match is None:
+        return None
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
 
-            while True:
-                reported, raw_action, cancelled = self._run_turn(
-                    session_id=session_id,
-                    resume=resume,
-                    prompt=self._turn_prompt(protocol),
-                    cancel=cancel,
-                    deadline=deadline,
-                )
-                if cancelled:
-                    # Closed work: drop any continuity staged by an earlier
-                    # expansion turn of this same pass.
-                    self.discard_pin(protocol.request_id)
-                    return None
-                # The CLI echoes back the session it ran under.  Anything else
-                # — a different session, or none at all — means continuity is
-                # unattested, so there is nothing trustworthy to pin.
-                if reported != session_id:
-                    raise ClaudeCodeParticipantError(
-                        "Claude Code did not attest the pinned session "
-                        f"{session_id}"
-                        + (f"; it reported {reported}" if reported else "")
-                    )
-                # Every turn after the first continues the same session.
-                resume = True
 
-                if raw_action is None:
-                    raise ClaudeCodeParticipantError(
-                        "Claude Code participant output was not one bound "
-                        "action envelope"
-                    )
-                try:
-                    done, action = protocol.consume(raw_action, expand=expand)
-                except ParticipantModelError as exc:
-                    raise ClaudeCodeParticipantError(str(exc)) from exc
-                if done:
-                    self.stage_pin(protocol.request_id, session_id)
-                    return action
+def mod_version() -> str | None:
+    """Return the version of the Nunchi mod shipped with this package."""
 
-    def __call__(self, *, wake, expand, cancel):
-        return self.run_protocol(
-            wake=wake,
-            opportunity={
-                "generation": 1,
-                "lifecycle_id": "direct-library-call",
-                "deadline_id": "direct-library-call",
-                "permissions": {
-                    "revision": "direct-library-call",
-                    "ordinary_actions": ["message", "reply", "reaction"],
-                    "privileged_proposals": True,
-                },
-            },
-            expand=expand,
-            cancel=cancel,
+    try:
+        manifest = json.loads(
+            (MOD_DIRECTORY / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
         )
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    return version if isinstance(version, str) else None
 
 
-class SessionPinningReceiptJournal(ReceiptJournal):
-    """The receipt journal that decides when continuity becomes durable.
+def _string_list(value: Any, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ValidationError(f"Claude Code {label} must be a list of non-empty strings")
+    return tuple(value)
 
-    The host owns acceptance, and its own receipts are the only truthful
-    signal of it:
 
-    * a ``participant-host`` record with outcome ``silent`` means the host
-      accepted the participant's decision to stay quiet;
-    * a ``transport`` record exists only after the host validated the action
-      and reached its single output-commit point.
+def _absolute(value: Any, label: str) -> Path:
+    if not isinstance(value, str) or not value or not Path(value).is_absolute():
+        raise ValidationError(f"Claude Code {label} must be an absolute path")
+    return Path(value)
 
-    A rejected action, a stale opportunity, a blown deadline, or a
-    cancellation ordered before the commit point produces neither, so the
-    staged pin is simply never committed and the turn leaves no resumable
-    state.  Persisting continuity is therefore strictly downstream of host
-    acceptance, not concurrent with it.
-    """
 
-    def __init__(self, path, *, participant=None, **kwargs) -> None:
-        super().__init__(path, **kwargs)
-        self.participant = participant
+def _runtime_directory() -> Path:
+    """A short private directory for the gate socket (Unix socket paths are short)."""
 
-    def append(self, record, *, writer):
-        appended = super().append(record, writer=writer)
-        participant = self.participant
-        if participant is None:
-            return appended
-        stage = appended["stage"]
-        accepted = stage == "transport" or (
-            stage == "participant-host"
-            and appended["body"].get("outcome") == "silent"
-        )
-        if accepted:
-            participant.commit_pin(appended["request_id"])
-        return appended
+    base = os.environ.get("XDG_RUNTIME_DIR")
+    if not base or len(base) > 60 or not os.path.isdir(base):
+        base = tempfile.gettempdir()
+    return Path(base) / f"nunchi-cc-{secrets.token_hex(6)}"
+
 
 
 class ClaudeCodeRoomRuntime:
@@ -912,6 +368,8 @@ class ClaudeCodeRoomRuntime:
         self,
         config: Mapping[str, Any],
         client: StreamableMCPClient,
+        *,
+        session: Any = None,
     ) -> None:
         required = {
             "schema_version",
@@ -978,10 +436,10 @@ class ClaudeCodeRoomRuntime:
         limits = ObservationLimits(**config["limits"])
         state = Path(config["state_directory"])
         state.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.state_directory = state
+        self.settings = self._claude_code_settings(config["claude_code"], state)
 
-        receipts = SessionPinningReceiptJournal(
-            state / "claude-code-v2-receipts.jsonl"
-        )
+        receipts = ReceiptJournal(state / "claude-code-v2-receipts.jsonl")
         observation = ObservationProvider(
             self.binding,
             limits=limits,
@@ -996,16 +454,6 @@ class ClaudeCodeRoomRuntime:
         scheduler = ConversationOpportunityScheduler(
             f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
         )
-        participant = ClaudeCodeParticipant(
-            profile=profile,
-            config=config["claude_code"],
-            binding=self.binding,
-            state_directory=state,
-        )
-        self.participant = participant
-        # Continuity becomes durable only when the host's own receipts
-        # attest that it accepted the turn.
-        receipts.participant = participant
         self.output_secret = self._output_secret(config["transport"])
         transport = MCPDiscordTransport(
             client,
@@ -1019,11 +467,58 @@ class ClaudeCodeRoomRuntime:
             observation=observation,
             state=state,
         )
+
+        # Nunchi's own secrets never enter the session's environment, and the
+        # gate refuses room text that carries one.
+        withheld = {config["transport"]["output_key_env"], *self.settings["withhold_env"]}
+        model_config = attention_raw.get("model")
+        if isinstance(model_config, Mapping):
+            withheld.update(
+                value
+                for key, value in model_config.items()
+                if key.endswith("_env") and isinstance(value, str) and value
+            )
+        self.withheld_env = frozenset(withheld)
+        guard = SecretGuard(
+            [os.environ[name] for name in self.withheld_env if name in os.environ]
+            + [self.output_secret.decode()]
+        )
+
+        self.socket_path = _runtime_directory() / "gate.sock"
+        self.session_secret = secrets.token_urlsafe(32)
+        self.disallowed_tools = self._disallowed_tools()
+        if session is None:
+            try:
+                executable: str | None = self.executable()
+            except ValidationError:
+                executable = None
+            session = ClaudeCodeSession(
+                executable=executable,
+                plugin_directory=MOD_DIRECTORY,
+                working_directory=self.settings["working_directory"],
+                environment=self.session_environment(),
+                model=self.settings["model"],
+                disallowed_tools=self.disallowed_tools,
+                session_store=(
+                    state / "claude-code-session.json"
+                    if self.settings["session_mode"] == "persistent"
+                    else None
+                ),
+            )
+        self.session = session
+        participant = GatedParticipant(
+            profile=profile,
+            session=session,
+            guard=guard,
+            privileged_enabled=privileged is not None,
+        )
+        session.on_turn_end = participant.turn_ended
+        self.participant = participant
         try:
             ack_policy = AckPolicy(**dict(config.get("ack", {})))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Claude Code ACK policy is invalid: {exc}") from exc
-        host = ParticipantTurnHost(
+        host = GatedTurnHost(
             observation=observation,
             participant=participant,
             transport=transport,
@@ -1032,7 +527,7 @@ class ClaudeCodeRoomRuntime:
             privileged=privileged,
             ack_policy=ack_policy,
             ack_journal=AckJournal(state / "claude-code-v2-acks.jsonl"),
-            participant_timeout_seconds=participant.timeout_seconds + 5,
+            participant_timeout_seconds=self.settings["timeout_seconds"],
         )
         attention = AttentionEngine(
             profile=profile,
@@ -1051,6 +546,123 @@ class ClaudeCodeRoomRuntime:
         )
         self.lane = AsyncDeliveryLane(self.pipeline)
         self.client = client
+        self.server = GateServer(
+            participant,
+            socket_path=self.socket_path,
+            session_secret=self.session_secret,
+        )
+
+    @staticmethod
+    def _claude_code_settings(raw: Any, state: Path) -> dict[str, Any]:
+        if not isinstance(raw, Mapping):
+            raise ValidationError("Claude Code session config must be an object")
+        unexpected = set(raw) - _CLAUDE_CODE_KEYS
+        if unexpected:
+            raise ValidationError(
+                "Claude Code session config has unexpected fields: "
+                + ", ".join(sorted(unexpected))
+            )
+        model = raw.get("model")
+        if model is not None and (not isinstance(model, str) or not model):
+            raise ValidationError("Claude Code model must be a non-empty string")
+        timeout = raw.get("timeout_seconds", 300)
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not math.isfinite(float(timeout))
+            or timeout <= 0
+        ):
+            raise ValidationError("Claude Code timeout must be positive and finite")
+        session_mode = raw.get("session_mode", "persistent")
+        if session_mode not in ("persistent", "fresh"):
+            raise ValidationError("Claude Code session_mode must be persistent or fresh")
+        protect = raw.get("protect_nunchi_files", True)
+        if not isinstance(protect, bool):
+            raise ValidationError("Claude Code protect_nunchi_files must be a boolean")
+        withhold = _string_list(raw.get("withhold_env", []), "withhold_env")
+        if not all(_ENV_NAME.fullmatch(name) for name in withhold):
+            raise ValidationError("Claude Code withhold_env names must be variable names")
+        working = (
+            Path(raw["working_directory"]).resolve()
+            if isinstance(raw.get("working_directory"), str)
+            else None
+        )
+        if protect and working is not None and working.is_relative_to(state.resolve()):
+            raise ValidationError(
+                "Claude Code working_directory must be outside state_directory, "
+                "which the session may not read"
+            )
+        return {
+            "executable": (
+                _absolute(raw["executable"], "executable") if "executable" in raw else None
+            ),
+            "working_directory": (
+                _absolute(raw["working_directory"], "working_directory")
+                if "working_directory" in raw
+                else state.parent / f"{state.name}-workspace"
+            ),
+            "model": model,
+            "timeout_seconds": float(timeout),
+            "session_mode": session_mode,
+            "disallowed_tools": _string_list(
+                raw.get("disallowed_tools", []), "disallowed_tools"
+            ),
+            "protect_nunchi_files": protect,
+            "withhold_env": withhold,
+        }
+
+    def executable(self) -> str:
+        configured = self.settings["executable"]
+        found = str(configured) if configured is not None else shutil.which("claude")
+        if found is None or not os.access(found, os.X_OK):
+            raise ValidationError("Claude Code executable is not installed on trusted PATH")
+        return found
+
+    def _disallowed_tools(self) -> tuple[str, ...]:
+        rules = list(self.settings["disallowed_tools"])
+        if self.settings["protect_nunchi_files"]:
+            state = self.state_directory.resolve()
+            # Claude Code spells an absolute path in a rule with a leading //.
+            rules.extend((f"Read(/{state}/**)", f"Edit(/{state}/**)"))
+        return tuple(dict.fromkeys(rules))
+
+    def session_environment(self) -> dict[str, str]:
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if name not in self.withheld_env and not name.startswith("NUNCHI_")
+        }
+        environment[SOCKET_ENV] = str(self.socket_path)
+        environment[SESSION_ENV] = self.session_secret
+        return environment
+
+    def require_supported_claude_code(self) -> tuple[int, int, int]:
+        version = claude_code_version(self.executable())
+        if version is None or version < MINIMUM_CLAUDE_CODE:
+            raise ValidationError(
+                "Claude Code "
+                + ".".join(map(str, MINIMUM_CLAUDE_CODE))
+                + " or later is required for the Nunchi mod"
+                + (f"; found {'.'.join(map(str, version))}" if version else "")
+            )
+        return version
+
+    def start(self) -> None:
+        """Open the gate socket.  The session starts on the first wake."""
+
+        self.socket_path.parent.mkdir(mode=0o700)
+        self.server.start()
+
+    def close(self) -> None:
+        self.lane.cancel()
+        self.server.close()
+        stop = getattr(self.session, "stop", None)
+        if callable(stop):
+            stop()
+        try:
+            self.socket_path.parent.rmdir()
+        except OSError:
+            pass
 
     @staticmethod
     def _output_secret(transport: Mapping[str, Any]) -> bytes:
@@ -1060,11 +672,6 @@ class ClaudeCodeRoomRuntime:
         if not isinstance(env_name, str) or not env_name:
             raise ValidationError(
                 "Claude Code transport output_key_env must be non-empty"
-            )
-        if env_name in _PARTICIPANT_ENV_ALLOWLIST:
-            raise ValidationError(
-                "Claude Code transport output key must not be readable by the "
-                "participant turn"
             )
         value = os.environ.get(env_name)
         if value is None or len(value.encode()) < 32:
@@ -1321,6 +928,11 @@ class ClaudeCodeRoomRuntime:
         )
 
     def probe(self) -> dict[str, Any]:
+        try:
+            executable: str | None = self.executable()
+        except ValidationError:
+            executable = None
+        version = claude_code_version(executable) if executable else None
         return {
             "product": "nunchi",
             "product_version": __version__,
@@ -1329,13 +941,24 @@ class ClaudeCodeRoomRuntime:
             "participant_id": self.binding.participant_id,
             "actor_id": self.binding.actor_id,
             "room_id": self.binding.room_id,
-            "session_mode": self.participant.session_mode,
-            "persistent_session": self.participant.session_mode == "persistent",
-            "participant_credential": self.participant.credential_status()["state"],
+            "participant": "claude-code-session",
+            "claude_code_executable": executable,
+            "claude_code_version": ".".join(map(str, version)) if version else None,
+            "minimum_claude_code_version": ".".join(map(str, MINIMUM_CLAUDE_CODE)),
+            "claude_code_supported": version is not None and version >= MINIMUM_CLAUDE_CODE,
+            "mod_directory": str(MOD_DIRECTORY),
+            "mod_version": mod_version(),
+            "session_mode": self.settings["session_mode"],
+            "persistent_session": self.settings["session_mode"] == "persistent",
+            "working_directory": str(self.settings["working_directory"]),
+            "native_tools": "claude-code-permission-rules",
+            "disallowed_tools": list(self.disallowed_tools),
+            "room_tools": [
+                full_tool_name(role) for role in self.participant.registered_roles
+            ],
             "shared_discord_transport": True,
             "send_time_social_judgment": False,
             "privileged_actions_enabled": self.privileged is not None,
-            "participant_tools_enabled": False,
             "v1_fallback": False,
         }
 
@@ -1364,6 +987,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "generation": 2,
                             "surface": SURFACE,
                             "configured": False,
+                            "mod_version": mod_version(),
                             "v1_fallback": False,
                         }
                     )
@@ -1390,40 +1014,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             probe["configured"] = True
             print(_canonical_json(probe))
             return 0
-        # An expired participant login is indistinguishable from a working one
-        # until the first wake, and it is a routine way for a first live run to
-        # fail.  Say so at startup, naming the exact remedy.  This is a warning
-        # rather than a refusal: the answer comes from a third-party CLI's
-        # self-report, which is good enough to alert an operator and not good
-        # enough to justify refusing to run an otherwise healthy room.
-        credential = runtime.participant.credential_status()
-        if credential["state"] != "authenticated":
-            print(
-                "Claude Code participant credential is "
-                f"{credential['state']}; the participant turn may fail. "
-                "Authenticate it as itself with: CLAUDE_CONFIG_DIR="
-                f"{runtime.participant.config_directory} claude auth login",
-                file=sys.stderr,
-            )
-        delay = 1.0
-        while True:
-            try:
-                client.connect()
-                runtime.register_transport()
-                for method, params in client.notifications():
-                    if method != NOTIFICATION_METHOD:
-                        continue
-                    runtime.handle(params)
-                runtime.transport_interrupted()
-                delay = 1.0
-            except (urllib.error.URLError, RuntimeError, OSError):
-                runtime.transport_interrupted()
-                print(
-                    "Claude Code shared transport reconnect after operational error",
-                    file=sys.stderr,
-                )
-                time.sleep(delay)
-                delay = min(delay * 2, 30)
+        runtime.require_supported_claude_code()
+        runtime.start()
+        try:
+            delay = 1.0
+            while True:
+                try:
+                    client.connect()
+                    runtime.register_transport()
+                    for method, params in client.notifications():
+                        if method != NOTIFICATION_METHOD:
+                            continue
+                        runtime.handle(params)
+                    runtime.transport_interrupted()
+                    delay = 1.0
+                except (urllib.error.URLError, RuntimeError, OSError):
+                    runtime.transport_interrupted()
+                    print(
+                        "Claude Code shared transport reconnect after operational error",
+                        file=sys.stderr,
+                    )
+                    time.sleep(delay)
+                    delay = min(delay * 2, 30)
+        finally:
+            runtime.close()
     except (NunchiError, ValueError) as exc:
         print(f"Claude Code V2 runner error: {exc}", file=sys.stderr)
         return 3 if isinstance(exc, ValidationError) else 1

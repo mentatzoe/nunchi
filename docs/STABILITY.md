@@ -36,10 +36,10 @@ Integrations:
 
 Installed but not part of the stable boundary:
 
-- `nunchi-claude-code-room-runner` — the headless Claude Code runner. It is
-  superseded by the Claude Code mod design
-  ([#43](https://github.com/mentatzoe/nunchi/issues/43)) and stays only until
-  the mod replaces it.
+- `nunchi-claude-code-room-runner` — the Claude Code gate and its mod
+  ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Its configuration and
+  the mod's room tools may still change: it depends on Claude Code's mods API,
+  which is early access, and it has no live proof.
 - `nunchi-service-worker` — internal supervisor that `nunchi service` starts.
 
 No V1 request, verdict, hook, responder, configuration, or exit-code contract
