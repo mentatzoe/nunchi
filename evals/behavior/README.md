@@ -49,7 +49,9 @@ attention path to each model, then writes three files to `--out`:
 - `summary.md`: per-model counts, a table of moments, and the clear misses;
 - `run.json`: the commit, Nunchi version, models, settings, and command.
 
-The key is never written. The manual `behavior-eval` GitHub workflow runs
+The key is never written. If any call fails, the summary lists the errors
+first and the run exits non-zero, because a failed call would otherwise
+count as a woken agent. The manual `behavior-eval` GitHub workflow runs
 the same command with the `NUNCHI_OPENROUTER` repository secret.
 
 ## What today's V2 can show

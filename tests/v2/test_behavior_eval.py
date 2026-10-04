@@ -297,7 +297,7 @@ class RunTests(unittest.TestCase):
             run, "openai_compatible_factory", return_value=lambda model_id: FixedModel("SUPPRESS", model_id=model_id)
         ):
             with mock.patch("sys.stdout"):
-                run.main(
+                code = run.main(
                     [
                         "--models", "a/model,b/model",
                         "--runs", "2",
@@ -306,6 +306,8 @@ class RunTests(unittest.TestCase):
                     ]
                 )
             files = {path.name: path.read_text(encoding="utf-8") for path in Path(directory).iterdir()}
+        self.assertEqual(0, code)
+        self.assertNotIn("## Provider errors", files["summary.md"])
         self.assertEqual({"results.jsonl", "run.json", "summary.md"}, set(files))
         for name, text in files.items():
             self.assertNotIn(secret, text, name)
@@ -317,6 +319,23 @@ class RunTests(unittest.TestCase):
         self.assertEqual(16, len(records))
         self.assertIn("| `a/model` | 8 |", files["summary.md"])
         self.assertIn("story-across-messages", files["summary.md"])
+
+    def test_provider_errors_fail_the_run_and_lead_the_summary(self):
+        class Broken(FixedModel):
+            def judge(self, **kwargs):
+                raise RuntimeError("HTTP 402 insufficient credits")
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ, {"NUNCHI_OPENROUTER": "k"}
+        ), mock.patch.object(
+            run, "openai_compatible_factory", return_value=lambda model_id: Broken("WAKE", model_id=model_id)
+        ), mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            code = run.main(["--models", "a/model", "--runs", "1", "--scenes", "bot-status-report", "--out", directory])
+            summary = (Path(directory) / "summary.md").read_text(encoding="utf-8")
+        self.assertEqual(1, code)
+        self.assertLess(summary.index("## Provider errors"), summary.index("## Per model"))
+        self.assertIn("1 of 1 calls failed", summary)
+        self.assertIn("HTTP 402 insufficient credits", summary)
 
     def test_a_live_run_needs_the_key(self):
         with mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stderr"):
