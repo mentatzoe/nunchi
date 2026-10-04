@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/participant-wake.schema.json",
+  "title": "ParticipantWakeV2",
+  "description": "I-010C ParticipantWakeV2@2 — the materialized normal-turn or ACK effect facts. @2 adds ACK as an explicit advice-free source; WAKE, DEFER, ERROR_FALLBACK, PREATTENTION_BYPASS, exact identity/room/event facts, bounded coverage, and host-only continuation semantics remain unchanged. No admission meta-answer, composed reply, or social ledger is part of the contract.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "$comment": "PREATTENTION_BYPASS is a lifecycle fact, not a social judgment.",
+          "enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]
+        },
+        "advice": {
+          "type": "array",
+          "items": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/attentionAdvice"}
+        },
+        "evidence_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "FR-013: ACK, DEFER, ERROR_FALLBACK, and PREATTENTION_BYPASS wakes are advice-free because no classifier advice exists for those sources.",
+          "if": {"required": ["source"], "properties": {"source": {"const": "WAKE"}}},
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["advice"]},
+                {"required": ["evidence_event_ids"]}
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "self", "room", "actors", "events", "trigger_event_id", "coverage", "attention"],
+  "properties": {
+    "request_id": {"$ref": "#/$defs/nonEmptyString"},
+    "self": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/self"},
+    "room": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/room"},
+    "actors": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/actorMap"},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/event"}
+    },
+    "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
+    "coverage": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"},
+    "continuation": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/continuation"},
+    "attention": {"$ref": "#/$defs/attention"}
+  }
+}

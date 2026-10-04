@@ -1,0 +1,74 @@
+test_revoked_stock_trust_is_not_regranted_by_runtime (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_revoked_stock_trust_is_not_regranted_by_runtime) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_setup_attention_suppresses_without_error_fallback_or_participant (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_setup_attention_suppresses_without_error_fallback_or_participant) ... Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_hook() after its load timed out; ignored
+Plugin 'nunchi' called register_command() after its load timed out; ignored
+Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+test_setup_attention_wakes_and_native_participant_delivers (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_setup_attention_wakes_and_native_participant_delivers) ... Failed to load plugin 'nunchi': load timed out after 10s (import + register() never returned)
+FAIL
+
+======================================================================
+FAIL: test_revoked_stock_trust_is_not_regranted_by_runtime (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_revoked_stock_trust_is_not_regranted_by_runtime)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_attention_setup_installed.py", line 31, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_setup_attention_suppresses_without_error_fallback_or_participant (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_setup_attention_suppresses_without_error_fallback_or_participant)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_attention_setup_installed.py", line 31, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+======================================================================
+FAIL: test_setup_attention_wakes_and_native_participant_delivers (tests.v2.test_hermes_attention_setup_installed.InstalledAttentionSetupTests.test_setup_attention_wakes_and_native_participant_delivers)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_normal_turn.py", line 142, in setUp
+    self._load_nunchi(timeout_seconds=self.nunchi_timeout_seconds)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/proof/current-native-final/harness/tests/v2/test_hermes_attention_setup_installed.py", line 31, in _load_nunchi
+    self.assertIsNone(self.loaded["state"]["error"], self.loaded["state"])
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'load timed out after 10s (import + register() never returned)' is not None : {'name': 'nunchi', 'key': 'nunchi', 'kind': 'standalone', 'version': '2.0.0', 'description': 'Participant-shaped pre-attention for secure shared conversations', 'source': 'entrypoint', 'enabled': False, 'tools': 0, 'hooks': 0, 'middleware': 0, 'commands': 0, 'error': 'load timed out after 10s (import + register() never returned)'}
+
+----------------------------------------------------------------------
+Ran 3 tests in 30.651s
+
+FAILED (failures=3)
+{
+  "timestamp_utc": "2026-10-02T14:34:04.561964+00:00",
+  "python": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/current-env/bin/python",
+  "python_version": "3.13.7 (v3.13.7:bcee1c32211, Aug 14 2025, 19:10:51) [Clang 16.0.0 (clang-1600.0.26.6)]",
+  "hermes_version": "0.21.5",
+  "host_gateway_origin": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/stock/current/gateway/run.py",
+  "nunchi_origin": "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/envs/current-env/lib/python3.13/site-packages/nunchi/__init__.py",
+  "nunchi_direct_url": {
+    "url": "file:///Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/artifacts/isolation-final/nunchi-2.0.0-py3-none-any.whl",
+    "archive_info": {}
+  },
+  "tests_run": 3,
+  "failures": 3,
+  "test_class": "InstalledAttentionSetupTests",
+  "errors": 0,
+  "skipped": 0,
+  "host_files_checked": 7302,
+  "host_changed_files": [],
+  "host_before_sha256": "b449a920e3020178df4986f8cdc3ebe841ad42537cb92dd0509251b5cd55d014",
+  "host_after_sha256": "b449a920e3020178df4986f8cdc3ebe841ad42537cb92dd0509251b5cd55d014",
+  "environment": "allowlisted; isolated HOME/HERMES_HOME; no PYTHONPATH; -I",
+  "network": "loopback model double and fake Discord client; NOT live-provider acceptance"
+}

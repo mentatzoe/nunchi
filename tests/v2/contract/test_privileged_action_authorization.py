@@ -1,0 +1,271 @@
+"""Contract tests for ``I-010F PrivilegedActionAuthorizationV2@1`` (A3).
+
+The contract carries only non-secret, exact-bound authorization facts. It does
+not execute an action or turn a decision into a bearer token: slice 040 must
+still persist, recheck, and consume a valid allow at its effect-commit point.
+These tests prove the portable schema and the deterministic correlation rules
+that prevent a supplied flow from substituting an origin, requester, digest,
+scope, approval, or prior decision.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+import unittest
+
+from tests.v2.contract.schema_helpers import (
+    ContractCorpusMixin,
+    assert_schema_verdict,
+    make_approval_challenge,
+    make_approval_completion,
+    make_authenticated_approval_flow,
+    make_authorization_decision,
+    make_authorization_request,
+    validate_privileged_action_authorization_flow,
+)
+
+
+class PrivilegedActionAuthorizationCorpusSuite(ContractCorpusMixin, unittest.TestCase):
+    CORPUS = "privileged-action-authorization"
+    REQUIRED_SCENES = frozenset({"S18"})
+
+
+class AuthorizationShapeCases(unittest.TestCase):
+    def test_each_union_member_has_a_valid_closed_shape(self):
+        for document in (
+            make_authorization_request(),
+            make_authorization_decision(),
+            make_approval_challenge(),
+            make_approval_completion(),
+        ):
+            with self.subTest(kind=document["kind"]):
+                assert_schema_verdict(
+                    self, "privileged-action-authorization", document, "valid"
+                )
+
+    def test_digest_requires_sha256_lower_hex_and_a_profile(self):
+        for digest in (
+            {"algorithm": "sha512", "value": "0" * 64, "canonicalization_profile": "v1"},
+            {"algorithm": "sha256", "value": "A" * 64, "canonicalization_profile": "v1"},
+            {"algorithm": "sha256", "value": "0" * 63, "canonicalization_profile": "v1"},
+            {"algorithm": "sha256", "value": "0" * 64},
+            {
+                "algorithm": "sha256",
+                "value": "0" * 64,
+                "canonicalization_profile": "unknown.profile.v1",
+            },
+        ):
+            with self.subTest(digest=digest):
+                document = make_authorization_request()
+                document["binding"]["action_digest"] = digest
+                assert_schema_verdict(
+                    self, "privileged-action-authorization", document, "invalid"
+                )
+
+    def test_room_model_and_operation_body_cannot_claim_authority(self):
+        for field, value in (
+            ("operation", {"shell": "rm -rf /"}),
+            ("room_approval", "approved in chat"),
+            ("model_assertion", "the admin asked for this"),
+            ("bearer_token", "copied-decision"),
+        ):
+            with self.subTest(field=field):
+                document = make_authorization_decision()
+                document[field] = value
+                assert_schema_verdict(
+                    self, "privileged-action-authorization", document, "invalid"
+                )
+
+    def test_approval_members_are_explicit_and_host_only(self):
+        challenge = make_approval_challenge(host_only=False)
+        assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
+        challenge = make_approval_challenge(approver_ids=["operator:zoe", "operator:zoe"])
+        assert_schema_verdict(self, "privileged-action-authorization", challenge, "invalid")
+
+
+class AuthorizationFlowCases(unittest.TestCase):
+    def test_valid_direct_allow_is_bound_to_one_request(self):
+        flow = [make_authorization_request(), make_authorization_decision()]
+        self.assertEqual([], validate_privileged_action_authorization_flow(flow))
+
+    def test_valid_authenticated_approval_rechecks_before_new_allow(self):
+        self.assertEqual([], validate_privileged_action_authorization_flow(make_authenticated_approval_flow()))
+
+    def test_changed_digest_or_requester_cannot_reuse_allow(self):
+        for field, value in (
+            ("action_digest", {"algorithm": "sha256", "value": "f" * 64, "canonicalization_profile": "nunchi.operation-json.v1"}),
+            ("derived_requester", {"actor_id": "discord:9999", "origin_event_id": "discord:event:1001", "source": "transport-attested-origin-event"}),
+        ):
+            with self.subTest(field=field):
+                flow = [make_authorization_request(), make_authorization_decision()]
+                flow[1]["binding"][field] = value
+                errors = validate_privileged_action_authorization_flow(flow)
+                self.assertTrue(any("substituted" in error for error in errors), errors)
+
+    def test_unknown_persistence_revocation_or_expiry_never_allows(self):
+        for field, value in (
+            ("persistence_status", "unknown"),
+            ("revocation_status", "revoked"),
+            ("expires_at", "2026-07-24T01:01:00Z"),
+            ("revocation_checked_at", "2000-01-01T00:00:00Z"),
+        ):
+            with self.subTest(field=field):
+                flow = [make_authorization_request(), make_authorization_decision()]
+                flow[1][field] = value
+                self.assertTrue(validate_privileged_action_authorization_flow(flow))
+
+    def test_reason_must_match_the_decision_outcome(self):
+        for outcome, reason in (
+            ("ALLOW", "policy-deny"),
+            ("APPROVAL_REQUIRED", "policy-allow"),
+            ("DENY", "policy-allow"),
+        ):
+            with self.subTest(outcome=outcome, reason=reason):
+                flow = [
+                    make_authorization_request(),
+                    make_authorization_decision(outcome, reason=reason),
+                ]
+                if outcome == "APPROVAL_REQUIRED":
+                    flow.append(make_approval_challenge())
+                errors = validate_privileged_action_authorization_flow(flow)
+                self.assertTrue(any(".reason:" in error for error in errors), errors)
+
+    def test_approval_prompt_requires_an_otherwise_valid_durable_decision(self):
+        for field, value in (
+            ("persistence_status", "unknown"),
+            ("revocation_status", "revoked"),
+            ("revocation_checked_at", "2000-01-01T00:00:00Z"),
+        ):
+            with self.subTest(field=field):
+                flow = [
+                    make_authorization_request(),
+                    make_authorization_decision(
+                        "APPROVAL_REQUIRED", **{field: value}
+                    ),
+                    make_approval_challenge(),
+                ]
+                self.assertTrue(validate_privileged_action_authorization_flow(flow))
+
+    def test_request_cannot_accumulate_multiple_initial_policy_decisions(self):
+        flow = [
+            make_authorization_request(),
+            make_authorization_decision(),
+            make_authorization_decision(
+                "DENY",
+                decision_id="authorization-decision-0002",
+                evaluated_at="2026-07-24T01:02:00Z",
+                revocation_checked_at="2026-07-24T01:02:00Z",
+            ),
+        ]
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any("only one initial direct-policy decision" in error for error in errors),
+            errors,
+        )
+
+    def test_wrong_approver_and_replayed_challenge_reject(self):
+        wrong_approver = make_authenticated_approval_flow()
+        wrong_approver[3]["authenticated_approver_id"] = "operator:mallory"
+        self.assertTrue(validate_privileged_action_authorization_flow(wrong_approver))
+
+        replay = make_authenticated_approval_flow()
+        second_completion = deepcopy(replay[3])
+        second_completion["approval_completion_id"] = "approval-completion-0002"
+        second_completion["completed_at"] = "2026-07-24T01:06:00Z"
+        second_completion["recheck"]["evaluated_at"] = "2026-07-24T01:07:00Z"
+        second_completion["recheck"]["revocation_checked_at"] = "2026-07-24T01:07:00Z"
+        replay.insert(4, second_completion)
+        errors = validate_privileged_action_authorization_flow(replay)
+        self.assertTrue(any("challenge replayed" in error for error in errors), errors)
+
+    def test_approval_required_without_its_host_only_challenge_rejects(self):
+        flow = [make_authorization_request(), make_authorization_decision("APPROVAL_REQUIRED")]
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(any("missing host-only challenge" in error for error in errors), errors)
+
+    def test_completion_must_follow_its_approval_required_decision(self):
+        flow = make_authenticated_approval_flow()
+        flow[3]["completed_at"] = "2026-07-24T00:30:00Z"
+        flow[3]["recheck"]["evaluated_at"] = "2026-07-24T00:31:00Z"
+        flow[3]["recheck"]["revocation_checked_at"] = "2026-07-24T00:31:00Z"
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any("completed_at: must be later than records[1].evaluated_at" in error for error in errors),
+            errors,
+        )
+
+    def test_approval_recheck_requires_a_fresh_revocation_check(self):
+        flow = make_authenticated_approval_flow()
+        flow[3]["recheck"]["revocation_checked_at"] = "2000-01-01T00:00:00Z"
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any(
+                "recheck.revocation_checked_at: must equal records[3].recheck.evaluated_at"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_approval_recheck_must_keep_the_challenge_policy(self):
+        flow = make_authenticated_approval_flow()
+        revision = "2026-07-24T02:00:00Z"
+        flow[3]["recheck"]["policy_provenance"]["revision"] = revision
+        flow[-1]["policy_provenance"]["revision"] = revision
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(
+            any("recheck.policy_provenance: must equal the approval challenge" in error for error in errors),
+            errors,
+        )
+
+    def test_authenticated_allow_must_match_and_follow_its_fresh_recheck(self):
+        mutations = (
+            (
+                "policy provenance",
+                lambda decision: decision["policy_provenance"].update(
+                    {"revision": "2026-07-24T02:00:00Z"}
+                ),
+                "policy_provenance: must equal the authenticated recheck",
+            ),
+            (
+                "expiry",
+                lambda decision: decision.update({"expires_at": "2026-07-24T02:00:00Z"}),
+                "expires_at: must equal records[3].recheck.expires_at",
+            ),
+            (
+                "revocation status",
+                lambda decision: decision.update({"revocation_status": "revoked"}),
+                "revocation_status: must equal the authenticated recheck",
+            ),
+            (
+                "persistence status",
+                lambda decision: decision.update({"persistence_status": "unknown"}),
+                "persistence_status: must equal the authenticated recheck",
+            ),
+            (
+                "evaluation and revocation timestamps",
+                lambda decision: decision.update(
+                    {
+                        "evaluated_at": "2026-07-24T01:05:30Z",
+                        "revocation_checked_at": "2026-07-24T01:05:30Z",
+                    }
+                ),
+                "must be later than records[3].recheck",
+            ),
+        )
+        for name, mutate, expected in mutations:
+            with self.subTest(name=name):
+                flow = make_authenticated_approval_flow()
+                mutate(flow[-1])
+                errors = validate_privileged_action_authorization_flow(flow)
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_completion_cannot_authorize_more_than_one_decision(self):
+        flow = make_authenticated_approval_flow()
+        second_allow = deepcopy(flow[-1])
+        second_allow["decision_id"] = "authorization-decision-0003"
+        second_allow["evaluated_at"] = "2026-07-24T01:08:00Z"
+        second_allow["revocation_checked_at"] = "2026-07-24T01:08:00Z"
+        flow.append(second_allow)
+        errors = validate_privileged_action_authorization_flow(flow)
+        self.assertTrue(any("reused by multiple decisions" in error for error in errors), errors)

@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Observation
 
+> **Reference only.** Product requirements and interfaces remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `v2/observation`
 
 **Created**: 2026-07-11
@@ -25,13 +29,14 @@ and establishes `READY` before `ACTIVE`)
 reusable reference scenes that every in-tree surface can bind and prove in its
 own integration slice.
 
-**Authority source**: Zoe-selected Aleph Vault design at `bdd1ebb`, contract-clarified in PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-observation-owner`
 
-**Assigned participant / source**: Aleph — evidence/governance/assignments/aleph-v2-observation-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-observation-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/020-v2-observation`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/020-v2-observation`
 

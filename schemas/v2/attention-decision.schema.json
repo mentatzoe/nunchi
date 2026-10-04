@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json",
+  "title": "AttentionDecisionV2",
+  "description": "I-010B AttentionDecisionV2@3 — the closed host-facing decision union. @3 adds first-class ACK classifier and effective dispositions, ACK->ACK and conservative ACK->DEFER transitions, capability-defer routing, and an ACK-only audit binding the exact reaction, trusted policy provenance, and authenticated permission revision. Existing SUPPRESS, WAKE, DEFER, bypass, error, margin, evidence, and advice semantics remain unchanged.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
+    "confidence": {
+      "$comment": "Finite [0,1]. The contradictory-bounds not-clause rejects NaN, which vacuously satisfies every numeric comparison keyword; strict JSON cannot carry non-finite literals, but sentinel-decoded corpus instances can.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
+    },
+    "attentionAdvice": {
+      "$comment": "Classifier-authored, non-authoritative annotation grounded in named evidence events; never a system instruction.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note", "evidence_event_ids"],
+      "properties": {
+        "note": {"$ref": "#/$defs/nonEmptyString"},
+        "evidence_event_ids": {
+          "$comment": "Every citation must reference an event ID supplied in the request; that cross-document rule is runtime-adapter-only (FR-012/FR-013).",
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      }
+    },
+    "classifierAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "provider": {"$ref": "#/$defs/nonEmptyString"},
+        "model": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "routingAudit": {
+      "$comment": "The closed FR-005 routing audit with its per-combination rules: a margin counts as applied exactly on valve margin-defer — the effective margin is then required and is forbidden on every other valve, override cause must be margin, and the margin status must be active (a retired margin cannot apply); the trusted margin source may appear only on that margin-applied decision (optional there); valves none and classifier-defer pair with override cause none; valve policy-defer pairs with override cause suppression-disabled or recoverability-unproven.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valve", "override_cause", "margin_status"],
+      "properties": {
+        "valve": {"enum": ["none", "classifier-defer", "margin-defer", "policy-defer", "capability-defer"]},
+        "override_cause": {"enum": ["none", "margin", "suppression-disabled", "recoverability-unproven", "ack-disabled", "ack-unsupported"]},
+        "margin_status": {"enum": ["active", "retired"]},
+        "effective_margin": {
+          "$comment": "Finite [0, 1] (@2 amendment A2, c834e8c 'a transition margin, when active, is a finite number within [0,1]'; the accepted @1 shape wrongly used exclusiveMinimum, excluding the exact boundary the retained inclusive <= comparison relies on). The contradictory-bounds not-clause rejects NaN exactly as $defs/confidence does.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "not": {"allOf": [{"minimum": 2}, {"maximum": -1}]}
+        },
+        "margin_source": {"$ref": "#/$defs/nonEmptyString"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "margin-defer"}}},
+          "then": {
+            "required": ["effective_margin"],
+            "properties": {
+              "override_cause": {"const": "margin"},
+              "margin_status": {"const": "active"}
+            }
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["effective_margin"]},
+                {"required": ["margin_source"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"enum": ["none", "classifier-defer"]}}},
+          "then": {"properties": {"override_cause": {"const": "none"}}}
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "policy-defer"}}},
+          "then": {"properties": {"override_cause": {"enum": ["suppression-disabled", "recoverability-unproven", "ack-disabled"]}}}
+        },
+        {
+          "if": {"required": ["valve"], "properties": {"valve": {"const": "capability-defer"}}},
+          "then": {"properties": {"override_cause": {"const": "ack-unsupported"}}}
+        }
+      ]
+    },
+    "ok": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "request_id",
+        "classifier_disposition",
+        "effective_disposition",
+        "routing_audit",
+        "reasons",
+        "evidence_event_ids",
+        "classifier"
+      ],
+      "properties": {
+        "status": {"const": "ok"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "classifier_disposition": {"$ref": "#/$defs/disposition"},
+        "effective_disposition": {"$ref": "#/$defs/disposition"},
+        "routing_audit": {"$ref": "#/$defs/routingAudit"},
+        "reasons": {
+          "$comment": "A required sibling ok-branch audit field — never a member of the routing-audit object — retained as audit material that never enters the participant turn.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "evidence_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "classifier": {"$ref": "#/$defs/classifierAudit"},
+        "legacy_verdict_confidences": {
+          "$comment": "FR-007: optional on status ok and required exactly when the classifier disposition is SUPPRESS while the routing audit reports the margin active; a well-formed vector may accompany WAKE, DEFER, or a margin-retired SUPPRESS without invalidating them. When present: exactly the four legacy verdict keys with finite values in [0,1]. The optional field, its exact shape, and the conditional requirement were fixed as of @1 and remain unchanged through @2 (amendment A2 touches only routing_audit.effective_margin); reshaping this field's own shape would itself be a further breaking edit.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["PASS", "ACK", "ASK", "SPEAK"],
+          "properties": {
+            "PASS": {"$ref": "#/$defs/confidence"},
+            "ACK": {"$ref": "#/$defs/confidence"},
+            "ASK": {"$ref": "#/$defs/confidence"},
+            "SPEAK": {"$ref": "#/$defs/confidence"}
+          }
+        },
+        "attention_advice": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/attentionAdvice"}
+        },
+        "ack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reaction", "policy_provenance", "permissions_revision"],
+          "properties": {
+            "reaction": {"$ref": "#/$defs/nonEmptyString"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+            "permissions_revision": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "$comment": "WAKE->WAKE: valve none (no widening valve applied); the only pair that may carry advice (FR-013).",
+          "properties": {
+            "classifier_disposition": {"const": "WAKE"},
+            "effective_disposition": {"const": "WAKE"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          }
+        },
+        {
+          "$comment": "ACK->ACK: one core-selected lightweight reaction with current authenticated native capability.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "ACK"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "ACK->DEFER: disabled ACK policy conservatively wakes the participant path.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "ACK->DEFER: unavailable authenticated reaction capability conservatively wakes the participant path.",
+          "required": ["ack"],
+          "properties": {
+            "classifier_disposition": {"const": "ACK"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "DEFER->DEFER: the classifier-defer valve, distinct from margin-defer (S08).",
+          "properties": {
+            "classifier_disposition": {"const": "DEFER"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->DEFER: widened by the uncertainty margin with its exact audit.",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "margin-defer"}, "override_cause": {"const": "margin"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->DEFER: widened by disabled suppression or unproven recovery, never by ACK policy.",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "DEFER"},
+            "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        },
+        {
+          "$comment": "SUPPRESS->SUPPRESS: governed suppression with no widening valve applied (S05).",
+          "properties": {
+            "classifier_disposition": {"const": "SUPPRESS"},
+            "effective_disposition": {"const": "SUPPRESS"},
+            "routing_audit": {"properties": {"valve": {"const": "none"}}}
+          },
+          "not": {"required": ["attention_advice"]}
+        }
+      ],
+      "allOf": [
+        {
+          "$comment": "The exact reaction and authority revision accompany ACK and no other classifier selection.",
+          "if": {"required": ["classifier_disposition"], "properties": {"classifier_disposition": {"const": "ACK"}}},
+          "then": {"required": ["ack"]},
+          "else": {"not": {"required": ["ack"]}}
+        },
+        {
+          "$comment": "FR-007 conditional requirement: a margin-active candidate SUPPRESS must carry the legacy vector.",
+          "if": {
+            "required": ["classifier_disposition", "routing_audit"],
+            "properties": {
+              "classifier_disposition": {"const": "SUPPRESS"},
+              "routing_audit": {
+                "required": ["margin_status"],
+                "properties": {"margin_status": {"const": "active"}}
+              }
+            }
+          },
+          "then": {"required": ["legacy_verdict_confidences"]}
+        }
+      ]
+    },
+    "bypass": {
+      "$comment": "A non-social no-classifier outcome excluding the full FR-005 set: no classifier/effective disposition, classifier audit, reasons, evidence, legacy confidence vector, routing audit, or advice. Not a successful disposition pairing; it must not fabricate a model judgment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "request_id", "cause"],
+      "properties": {
+        "status": {"const": "bypass"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "cause": {"const": "preattention-disabled"}
+      }
+    },
+    "error": {
+      "$comment": "The tagged operational branch: malformed output, illegal pairings, and invalid legacy confidence land here and cannot fabricate a social suppression. request_id is optional on both the pre-validation and post-validation branches (a pre-validation error may occur before a request ID is assignable); classifier is optional and present only when the error occurred after classifier invocation. code is the authority's open string (FR-014, rejection R7) — not a locally narrowed enum; detail is required (the authority's complete error object is {code, detail}, both required).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": {"const": "error"},
+        "request_id": {"$ref": "#/$defs/nonEmptyString"},
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "detail"],
+          "properties": {
+            "code": {"$ref": "#/$defs/nonEmptyString"},
+            "detail": {"type": "string"}
+          }
+        },
+        "classifier": {"$ref": "#/$defs/classifierAudit"}
+      }
+    }
+  },
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ok"},
+    {"$ref": "#/$defs/bypass"},
+    {"$ref": "#/$defs/error"}
+  ]
+}

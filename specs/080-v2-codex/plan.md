@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Codex Harness
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/codex` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/080-v2-codex/spec.md`
@@ -8,7 +11,7 @@
 
 **Accountable owner lane**: `v2-codex-owner`
 
-**Assigned participant / source**: Vigil — evidence/governance/assignments/vigil-v2-codex-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-codex-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/080-v2-codex`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/080-v2-codex`
 

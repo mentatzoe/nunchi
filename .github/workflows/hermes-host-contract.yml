@@ -1,0 +1,150 @@
+name: Hermes host contract
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-host-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-host-contract:
+    name: Hermes ${{ matrix.hermes_label }} / ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - hermes_label: minimum-0.19.0-release
+            hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            python_version: "3.11"
+            platform: discord
+            host_mode: wheel
+          - hermes_label: minimum-0.19.0-release
+            hermes_ref: 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
+            python_version: "3.11"
+            platform: telegram
+            host_mode: wheel
+          - hermes_label: current-0.21.5-release
+            # v2026.9.24: the latest released host, not a replacement for main.
+            hermes_ref: f97608f178d1ffeca59860195ab7da295f7c8e5f
+            python_version: "3.11"
+            platform: discord
+            host_mode: source
+          - hermes_label: current-0.21.5-release
+            hermes_ref: f97608f178d1ffeca59860195ab7da295f7c8e5f
+            python_version: "3.11"
+            platform: telegram
+            host_mode: source
+          # Current Hermes gates core dependencies on Python >=3.14; older
+          # interpreters are accepted only to let existing installs update.
+          - hermes_label: current-main
+            hermes_ref: main
+            python_version: "3.14"
+            platform: discord
+            host_mode: source
+          - hermes_label: current-main
+            hermes_ref: main
+            python_version: "3.14"
+            platform: telegram
+            host_mode: source
+
+    steps:
+      - name: Check out Nunchi
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check out Hermes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.hermes_ref }}
+          path: hermes-agent
+          # Official version_info needs release ancestry, not a shallow/tagless
+          # 0.0.0 tree. Keep main moving and record its resolved commit.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python_version }}
+          cache: pip
+
+      - name: Install Nunchi artifact and untouched stock Hermes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip wheel --no-deps . --wheel-dir "$RUNNER_TEMP/nunchi-wheels"
+          python -m venv "$RUNNER_TEMP/host-env"
+          host_python="$RUNNER_TEMP/host-env/bin/python"
+          "$host_python" -m pip install --upgrade pip
+          "$host_python" -m pip install "$RUNNER_TEMP"/nunchi-wheels/*.whl jsonschema==4.26.0
+          git clone --no-local --no-checkout hermes-agent "$RUNNER_TEMP/stock-hermes"
+          git -C "$RUNNER_TEMP/stock-hermes" checkout --detach "$(git -C hermes-agent rev-parse HEAD)"
+          if [ '${{ matrix.host_mode }}' = wheel ]; then
+            "$host_python" -m pip wheel --no-deps "$RUNNER_TEMP/stock-hermes" --wheel-dir "$RUNNER_TEMP/host-wheels"
+            wheel=("$RUNNER_TEMP"/host-wheels/*.whl)
+            "$host_python" -m pip install "${wheel[0]}[messaging]"
+          else
+            # Upstream deliberately forbids generic wheels on newer hosts.
+            # Its shell installer uses an editable source runtime. Keep that
+            # untouched installation outside the Nunchi development checkout;
+            # Nunchi itself is always a non-editable artifact. No Nix bypass.
+            "$host_python" -m pip install -e "$RUNNER_TEMP/stock-hermes[messaging]"
+          fi
+          "$host_python" -m pip check
+
+      - name: Verify installed contract and integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/host-env/bin/python" scripts/verify_stock_hermes.py \
+            --lane contract \
+            --nunchi-wheel "$RUNNER_TEMP"/nunchi-wheels/*.whl \
+            --host-ref '${{ matrix.hermes_ref }}' \
+            --hermes-source "$RUNNER_TEMP/stock-hermes" \
+            --host-mode '${{ matrix.host_mode }}' \
+            --platform '${{ matrix.platform }}' \
+            --output "$RUNNER_TEMP/host-receipts"
+
+      - name: Verify native Discord normal attention and both startup modes
+        if: always() && matrix.platform == 'discord'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/host-env/bin/python" scripts/verify_stock_hermes.py \
+            --lane normal-attention --lane startup-single --lane startup-multiplex \
+            --nunchi-wheel "$RUNNER_TEMP"/nunchi-wheels/*.whl \
+            --host-ref '${{ matrix.hermes_ref }}' \
+            --hermes-source "$RUNNER_TEMP/stock-hermes" \
+            --host-mode '${{ matrix.host_mode }}' --platform discord \
+            --output "$RUNNER_TEMP/normal-receipts"
+
+      - name: Preserve exact host and artifact receipts
+        if: always()
+        shell: bash
+        run: |
+          for directory in host-receipts normal-receipts; do
+            if [ -f "$RUNNER_TEMP/$directory/receipt.json" ]; then
+              printf '### Hermes %s / %s / %s\n\nReceipt and raw logs are in the uploaded artifact.\n' \
+                '${{ matrix.hermes_label }}' '${{ matrix.platform }}' "$directory" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload contract receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: stock-hermes-${{ matrix.hermes_label }}-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/host-receipts/
+            ${{ runner.temp }}/normal-receipts/
+          if-no-files-found: warn
+          retention-days: 14

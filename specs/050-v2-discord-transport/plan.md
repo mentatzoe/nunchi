@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Discord Transport
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/discord-transport` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/050-v2-discord-transport/spec.md`
@@ -8,7 +11,7 @@
 
 **Accountable owner lane**: `v2-transport-owner`
 
-**Assigned participant / source**: devops — evidence/governance/assignments/devops-v2-transport-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-transport-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/050-v2-discord-transport`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
 

@@ -1,0 +1,306 @@
+Building wheel...
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: SetuptoolsDeprecationWarning: `project.license` as a TOML table is deprecated
+!!
+
+        ********************************************************************************
+        Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+
+        By 2027-Feb-18, you need to update your project and remove deprecated calls
+        or your builds will no longer be supported.
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  corresp(dist, value, root_dir)
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+!!
+
+        ********************************************************************************
+        Please consider removing the following classifiers in favor of a SPDX license expression:
+
+        License :: OSI Approved :: MIT License
+        License :: OSI Approved :: Apache Software License
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  dist._finalize_license_expression()
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/dist.py:765: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+!!
+
+        ********************************************************************************
+        Please consider removing the following classifiers in favor of a SPDX license expression:
+
+        License :: OSI Approved :: MIT License
+        License :: OSI Approved :: Apache Software License
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  self._finalize_license_expression()
+running egg_info
+writing src/nunchi.egg-info/PKG-INFO
+writing dependency_links to src/nunchi.egg-info/dependency_links.txt
+writing entry points to src/nunchi.egg-info/entry_points.txt
+writing requirements to src/nunchi.egg-info/requires.txt
+writing top-level names to src/nunchi.egg-info/top_level.txt
+reading manifest file 'src/nunchi.egg-info/SOURCES.txt'
+adding license file 'LICENSE'
+adding license file 'LICENSE-APACHE'
+adding license file 'LICENSE-MIT'
+writing manifest file 'src/nunchi.egg-info/SOURCES.txt'
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: SetuptoolsDeprecationWarning: `project.license` as a TOML table is deprecated
+!!
+
+        ********************************************************************************
+        Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+
+        By 2027-Feb-18, you need to update your project and remove deprecated calls
+        or your builds will no longer be supported.
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  corresp(dist, value, root_dir)
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+!!
+
+        ********************************************************************************
+        Please consider removing the following classifiers in favor of a SPDX license expression:
+
+        License :: OSI Approved :: MIT License
+        License :: OSI Approved :: Apache Software License
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  dist._finalize_license_expression()
+/Users/zmll/.cache/uv/builds-v0/.tmp3NRqus/lib/python3.14/site-packages/setuptools/dist.py:765: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+!!
+
+        ********************************************************************************
+        Please consider removing the following classifiers in favor of a SPDX license expression:
+
+        License :: OSI Approved :: MIT License
+        License :: OSI Approved :: Apache Software License
+
+        See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+        ********************************************************************************
+
+!!
+  self._finalize_license_expression()
+running bdist_wheel
+running build
+running build_py
+copying src/nunchi/v2_contracts.py -> build/lib/nunchi
+copying src/nunchi/attention.py -> build/lib/nunchi
+copying src/nunchi/observation.py -> build/lib/nunchi
+copying src/nunchi/receipts.py -> build/lib/nunchi
+copying src/nunchi/operator.py -> build/lib/nunchi
+copying src/nunchi/ack.py -> build/lib/nunchi
+copying src/nunchi/__init__.py -> build/lib/nunchi
+copying src/nunchi/core.py -> build/lib/nunchi
+copying src/nunchi/dashboard.py -> build/lib/nunchi
+copying src/nunchi/participant.py -> build/lib/nunchi
+copying src/nunchi/authorization.py -> build/lib/nunchi
+copying src/nunchi/cli.py -> build/lib/nunchi
+copying src/nunchi/pipeline.py -> build/lib/nunchi
+copying src/nunchi/service_worker.py -> build/lib/nunchi
+copying src/nunchi/conformance.py -> build/lib/nunchi
+copying src/nunchi/install.py -> build/lib/nunchi
+copying src/nunchi/errors.py -> build/lib/nunchi
+copying src/nunchi/__main__.py -> build/lib/nunchi
+copying src/nunchi/participant_model.py -> build/lib/nunchi
+copying src/nunchi/mcp_discord/runner.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/gateway.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/server.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/config.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/events.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/rest.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/tools.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/__init__.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/ratelimit.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/ws.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/authorization.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/hygiene.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/mcp_discord/_binding.py -> build/lib/nunchi/mcp_discord
+copying src/nunchi/integrations/hermes_tools.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/discord_participant_transport.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_attention_trust.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_v2.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_version.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/__init__.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_dashboard_install.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/codex_room_runner.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/codex_v2.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/mcp_client.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/claude_code_v2.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_dashboard_store.py -> build/lib/nunchi/integrations
+copying src/nunchi/integrations/hermes_dashboard_api.py -> build/lib/nunchi/integrations
+copying src/nunchi/adapters/matrix.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/telegram.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/channel.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/discord.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/__init__.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/runtime.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/v2.py -> build/lib/nunchi/adapters
+copying src/nunchi/adapters/__main__.py -> build/lib/nunchi/adapters
+copying src/nunchi/integrations/hermes_dashboard_assets/__init__.py -> build/lib/nunchi/integrations/hermes_dashboard_assets
+copying src/nunchi/integrations/hermes_dashboard_assets/plugin_api.py -> build/lib/nunchi/integrations/hermes_dashboard_assets
+running egg_info
+writing src/nunchi.egg-info/PKG-INFO
+writing dependency_links to src/nunchi.egg-info/dependency_links.txt
+writing entry points to src/nunchi.egg-info/entry_points.txt
+writing requirements to src/nunchi.egg-info/requires.txt
+writing top-level names to src/nunchi.egg-info/top_level.txt
+reading manifest file 'src/nunchi.egg-info/SOURCES.txt'
+adding license file 'LICENSE'
+adding license file 'LICENSE-APACHE'
+adding license file 'LICENSE-MIT'
+writing manifest file 'src/nunchi.egg-info/SOURCES.txt'
+copying src/nunchi/integrations/hermes_dashboard_assets/index.js -> build/lib/nunchi/integrations/hermes_dashboard_assets
+copying src/nunchi/integrations/hermes_dashboard_assets/manifest.json -> build/lib/nunchi/integrations/hermes_dashboard_assets
+copying src/nunchi/integrations/hermes_dashboard_assets/plugin_api.py -> build/lib/nunchi/integrations/hermes_dashboard_assets
+installing to build/bdist.macosx-11.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-11.0-arm64/wheel
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi
+copying build/lib/nunchi/v2_contracts.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/attention.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/observation.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/receipts.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/operator.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/ack.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/core.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/runner.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/gateway.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/server.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/config.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/events.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/rest.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/tools.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/ratelimit.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/ws.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/authorization.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/hygiene.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/mcp_discord/_binding.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/mcp_discord
+copying build/lib/nunchi/dashboard.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_tools.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/discord_participant_transport.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_attention_trust.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_v2.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_version.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi/integrations/hermes_dashboard_assets
+copying build/lib/nunchi/integrations/hermes_dashboard_assets/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations/hermes_dashboard_assets
+copying build/lib/nunchi/integrations/hermes_dashboard_assets/index.js -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations/hermes_dashboard_assets
+copying build/lib/nunchi/integrations/hermes_dashboard_assets/plugin_api.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations/hermes_dashboard_assets
+copying build/lib/nunchi/integrations/hermes_dashboard_assets/manifest.json -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations/hermes_dashboard_assets
+copying build/lib/nunchi/integrations/hermes_dashboard_install.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/codex_room_runner.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/codex_v2.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/mcp_client.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/claude_code_v2.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_dashboard_store.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+copying build/lib/nunchi/integrations/hermes_dashboard_api.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/integrations
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi/adapters
+copying build/lib/nunchi/adapters/matrix.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/telegram.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/channel.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/discord.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/__init__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/runtime.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/v2.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/adapters/__main__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi/adapters
+copying build/lib/nunchi/participant.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/authorization.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/cli.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/pipeline.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/service_worker.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/conformance.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/install.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/errors.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/__main__.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+copying build/lib/nunchi/participant_model.py -> build/bdist.macosx-11.0-arm64/wheel/./nunchi
+running install_egg_info
+Copying src/nunchi.egg-info to build/bdist.macosx-11.0-arm64/wheel/./nunchi-2.0.0-py3.14.egg-info
+running install_scripts
+creating build/bdist.macosx-11.0-arm64/wheel/nunchi-2.0.0.dist-info/WHEEL
+creating '/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/artifacts/isolation-final/.tmp-wxalbr84/nunchi-2.0.0-py3-none-any.whl' and adding 'build/bdist.macosx-11.0-arm64/wheel' to it
+adding 'nunchi/__init__.py'
+adding 'nunchi/__main__.py'
+adding 'nunchi/ack.py'
+adding 'nunchi/attention.py'
+adding 'nunchi/authorization.py'
+adding 'nunchi/cli.py'
+adding 'nunchi/conformance.py'
+adding 'nunchi/core.py'
+adding 'nunchi/dashboard.py'
+adding 'nunchi/errors.py'
+adding 'nunchi/install.py'
+adding 'nunchi/observation.py'
+adding 'nunchi/operator.py'
+adding 'nunchi/participant.py'
+adding 'nunchi/participant_model.py'
+adding 'nunchi/pipeline.py'
+adding 'nunchi/receipts.py'
+adding 'nunchi/service_worker.py'
+adding 'nunchi/v2_contracts.py'
+adding 'nunchi/adapters/__init__.py'
+adding 'nunchi/adapters/__main__.py'
+adding 'nunchi/adapters/channel.py'
+adding 'nunchi/adapters/discord.py'
+adding 'nunchi/adapters/matrix.py'
+adding 'nunchi/adapters/runtime.py'
+adding 'nunchi/adapters/telegram.py'
+adding 'nunchi/adapters/v2.py'
+adding 'nunchi/integrations/__init__.py'
+adding 'nunchi/integrations/claude_code_v2.py'
+adding 'nunchi/integrations/codex_room_runner.py'
+adding 'nunchi/integrations/codex_v2.py'
+adding 'nunchi/integrations/discord_participant_transport.py'
+adding 'nunchi/integrations/hermes_attention_trust.py'
+adding 'nunchi/integrations/hermes_dashboard_api.py'
+adding 'nunchi/integrations/hermes_dashboard_install.py'
+adding 'nunchi/integrations/hermes_dashboard_store.py'
+adding 'nunchi/integrations/hermes_tools.py'
+adding 'nunchi/integrations/hermes_v2.py'
+adding 'nunchi/integrations/hermes_version.py'
+adding 'nunchi/integrations/mcp_client.py'
+adding 'nunchi/integrations/hermes_dashboard_assets/__init__.py'
+adding 'nunchi/integrations/hermes_dashboard_assets/index.js'
+adding 'nunchi/integrations/hermes_dashboard_assets/manifest.json'
+adding 'nunchi/integrations/hermes_dashboard_assets/plugin_api.py'
+adding 'nunchi/mcp_discord/__init__.py'
+adding 'nunchi/mcp_discord/_binding.py'
+adding 'nunchi/mcp_discord/authorization.py'
+adding 'nunchi/mcp_discord/config.py'
+adding 'nunchi/mcp_discord/events.py'
+adding 'nunchi/mcp_discord/gateway.py'
+adding 'nunchi/mcp_discord/hygiene.py'
+adding 'nunchi/mcp_discord/ratelimit.py'
+adding 'nunchi/mcp_discord/rest.py'
+adding 'nunchi/mcp_discord/runner.py'
+adding 'nunchi/mcp_discord/server.py'
+adding 'nunchi/mcp_discord/tools.py'
+adding 'nunchi/mcp_discord/ws.py'
+adding 'nunchi-2.0.0.dist-info/licenses/LICENSE'
+adding 'nunchi-2.0.0.dist-info/licenses/LICENSE-APACHE'
+adding 'nunchi-2.0.0.dist-info/licenses/LICENSE-MIT'
+adding 'nunchi-2.0.0.dist-info/METADATA'
+adding 'nunchi-2.0.0.dist-info/WHEEL'
+adding 'nunchi-2.0.0.dist-info/entry_points.txt'
+adding 'nunchi-2.0.0.dist-info/top_level.txt'
+adding 'nunchi-2.0.0.dist-info/RECORD'
+removing build/bdist.macosx-11.0-arm64/wheel
+Successfully built ../artifacts/isolation-final/nunchi-2.0.0-py3-none-any.whl

@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nunchi.invalid/schemas/v2/attention-receipt.schema.json",
+  "title": "AttentionReceiptV2",
+  "description": "I-010E AttentionReceiptV2@3 — one immutable, request-correlated stage record. @3 adds ACK dispositions, ACK participant-host source, and an ACK-only attention audit containing the reaction, policy provenance, and permission revision. The canonical observation -> attention -> participant-host -> transport order, stage ownership, explicit silence/unknown/unavailable outcomes, policy provenance, and operational-error separation remain unchanged.",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {"enum": ["SUPPRESS", "ACK", "WAKE", "DEFER"]},
+    "observationBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "trigger_event_id", "continuity_scope_id", "event_count", "byte_count", "coverage", "included_event_ids"],
+      "properties": {
+        "schema_version": {"const": 2},
+        "trigger_event_id": {"$ref": "#/$defs/nonEmptyString"},
+        "continuity_scope_id": {"$ref": "#/$defs/nonEmptyString"},
+        "event_count": {"type": "integer", "minimum": 0},
+        "byte_count": {"type": "integer", "minimum": 0},
+        "coverage": {"$ref": "https://nunchi.invalid/schemas/v2/attention-request.schema.json#/$defs/coverage"},
+        "included_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      }
+    },
+    "attentionBody": {
+      "oneOf": [
+        {
+          "$comment": "Classifier outcome with effective routing (transition-valve facts), classifier identity/evidence, and the effective policy's inspectable provenance (@2 amendment A1: c834e8c 'the effective policy and its source are inspectable in receipts').",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classifier_disposition", "effective_disposition", "classifier", "evidence_event_ids", "routing_audit", "policy_provenance"],
+          "properties": {
+            "classifier_disposition": {"$ref": "#/$defs/disposition"},
+            "effective_disposition": {"$ref": "#/$defs/disposition"},
+            "classifier": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/classifierAudit"},
+            "evidence_event_ids": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/nonEmptyString"}
+            },
+            "routing_audit": {"$ref": "https://nunchi.invalid/schemas/v2/attention-decision.schema.json#/$defs/routingAudit"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+            "ack": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reaction", "policy_provenance", "permissions_revision"],
+              "properties": {
+                "reaction": {"$ref": "#/$defs/nonEmptyString"},
+                "policy_provenance": {"$ref": "#/$defs/nonEmptyString"},
+                "permissions_revision": {"$ref": "#/$defs/nonEmptyString"}
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {"required": ["classifier_disposition"], "properties": {"classifier_disposition": {"const": "ACK"}}},
+              "then": {"required": ["ack"]},
+              "else": {"not": {"required": ["ack"]}}
+            },
+            {
+              "$comment": "Attention receipts preserve the exact successful transition matrix and widening cause.",
+              "oneOf": [
+                {"properties": {"classifier_disposition": {"const": "WAKE"}, "effective_disposition": {"const": "WAKE"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "ACK"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"const": "ack-disabled"}}}}},
+                {"properties": {"classifier_disposition": {"const": "ACK"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "capability-defer"}, "override_cause": {"const": "ack-unsupported"}}}}},
+                {"properties": {"classifier_disposition": {"const": "DEFER"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "classifier-defer"}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "margin-defer"}, "override_cause": {"const": "margin"}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "DEFER"}, "routing_audit": {"properties": {"valve": {"const": "policy-defer"}, "override_cause": {"enum": ["suppression-disabled", "recoverability-unproven"]}}}}},
+                {"properties": {"classifier_disposition": {"const": "SUPPRESS"}, "effective_disposition": {"const": "SUPPRESS"}, "routing_audit": {"properties": {"valve": {"const": "none"}}}}}
+              ]
+            }
+          ]
+        },
+        {
+          "$comment": "Operational error, kept separate from any social outcome. wake_action is the closed override discriminator, exactly 'NO_WAKE' (rejection A1-R1, review-2026-07-19-v2-integrator-amendment-A1.md: WAKE is the shared default, never itself a receipted override, so it is not a permitted member); wake_action and policy_provenance are present together exactly when that explicit operator override applied (@2 amendment A1: c834e8c 'NO_WAKE is an explicit operator override... receipted as operational failure policy'); their absence means the default WAKE behavior applied with no override to receipt.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "detail"],
+              "properties": {
+                "code": {"$ref": "#/$defs/nonEmptyString"},
+                "detail": {"type": "string"}
+              }
+            },
+            "wake_action": {"const": "NO_WAKE"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"}
+          },
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {"required": ["wake_action"]},
+                  {"required": ["policy_provenance"]}
+                ]
+              },
+              "then": {"required": ["wake_action", "policy_provenance"]}
+            }
+          ]
+        },
+        {
+          "$comment": "Trusted bypass: no classifier was invoked and no social result is fabricated.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classifier_not_invoked", "cause", "policy_provenance"],
+          "properties": {
+            "classifier_not_invoked": {"const": true},
+            "cause": {"const": "preattention-disabled"},
+            "policy_provenance": {"$ref": "#/$defs/nonEmptyString"}
+          }
+        }
+      ]
+    },
+    "participantHostBody": {
+      "$comment": "Participant silence is a distinct staged outcome — separate from model suppression and from non-invocation — with no handled/owed/obligation state. The observed outcome is sent/silent/unknown (FR-014), not a handled/owed social state.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wake_source", "packet_event_count", "packet_byte_count", "delivered_event_ids", "expansion_calls", "invoked", "outcome"],
+      "properties": {
+        "wake_source": {"enum": ["ACK", "WAKE", "DEFER", "ERROR_FALLBACK", "PREATTENTION_BYPASS"]},
+        "packet_event_count": {"type": "integer", "minimum": 0},
+        "packet_byte_count": {"type": "integer", "minimum": 0},
+        "delivered_event_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "expansion_calls": {"type": "integer", "minimum": 0},
+        "invoked": {"type": "boolean"},
+        "outcome": {"enum": ["sent", "silent", "unknown"]}
+      },
+      "allOf": [
+        {
+          "$comment": "Core ACK bypasses the participant model; an ACK host receipt can never claim participant invocation.",
+          "if": {
+            "required": ["wake_source"],
+            "properties": {"wake_source": {"const": "ACK"}}
+          },
+          "then": {"properties": {"invoked": {"const": false}}}
+        }
+      ]
+    },
+    "transportBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delivery"],
+      "properties": {
+        "delivery": {"enum": ["sent", "failed", "unknown", "unavailable"]},
+        "detail": {"type": "string"}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "stage", "writer", "body"],
+  "properties": {
+    "request_id": {"$ref": "#/$defs/nonEmptyString"},
+    "stage": {"enum": ["observation", "attention", "participant-host", "transport"]},
+    "writer": {"enum": ["observation-provider", "attention-engine", "participant-host", "transport"]},
+    "body": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "$comment": "FR-010 per-record stage-to-writer binding: each stage is written only by its single directly observing owner; a cross-owner record is invalid as a single document.",
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "observation"}}},
+      "then": {
+        "properties": {
+          "writer": {"const": "observation-provider"},
+          "body": {"$ref": "#/$defs/observationBody"}
+        }
+      }
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "attention"}}},
+      "then": {
+        "properties": {
+          "writer": {"const": "attention-engine"},
+          "body": {"$ref": "#/$defs/attentionBody"}
+        }
+      }
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "participant-host"}}},
+      "then": {
+        "properties": {
+          "writer": {"const": "participant-host"},
+          "body": {"$ref": "#/$defs/participantHostBody"}
+        }
+      }
+    },
+    {
+      "if": {"required": ["stage"], "properties": {"stage": {"const": "transport"}}},
+      "then": {
+        "properties": {
+          "writer": {"const": "transport"},
+          "body": {"$ref": "#/$defs/transportBody"}
+        }
+      }
+    }
+  ]
+}

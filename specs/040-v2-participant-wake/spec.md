@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Participant Wake
 
+> **Reference only.** Product requirements and interfaces remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `v2/participant-wake`
 
 **Created**: 2026-07-11
@@ -23,13 +27,14 @@ and establishes `READY` before `ACTIVE`)
 
 **Input**: Provide one shared participant-turn host that converts V2 attention routing into a compact normal act-or-silence turn with bound context expansion, no intermediate admission answer, and no send-time social reclassification.
 
-**Authority source**: Zoe-selected Aleph Vault design at `bdd1ebb`, contract-clarified in PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-wake-owner`
 
-**Assigned participant / source**: architect — evidence/governance/assignments/architect-v2-wake-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-wake-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/040-v2-participant-wake`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/040-v2-participant-wake`
 

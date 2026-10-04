@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Implemented the shared V2 runtime: canonical bounded observation and
+  continuation, participant-shaped attention, coalescing opportunity
+  scheduler, participant wake/silence, staged receipts, execution-time
+  privileged authorization, shared Discord transport, CLI, Codex, and generic,
+  Discord, Matrix, and Telegram reference adapters.
+- Removed executable V1 verdict, adapter gate, Codex hook/send-gate/config-app,
+  installer, and compatibility entry points. Historical V1 tests and documents
+  remain only as an explicit retirement record.
+- Added deterministic lifecycle evaluation, adversarial runtime coverage,
+  stable private V2 state initialization, clean-artifact probes, and the
+  downstream platform interface/conformance contract.
+- Hermes and Claude Code V2 integrations remain explicitly outside this
+  candidate and are neither implemented nor armed.
+- Retired the executable SpecKit workflow, generated task/checklist control
+  plane, and slice lifecycle as implementation authority. Detailed product
+  specifications and technical plans remain reference material; V2 now uses
+  ordinary dependency-ordered implementation PRs governed by
+  `docs/v2-delivery.md` and the completion goal.
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -175,8 +196,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Destination ancestors that resolve outside the configured root are rejected
   before any write (symlinked `hooks/` escaping `--prefix` was reproducible);
   symlinks that stay inside the root remain legitimate operator topology.
-
-### Changed — Claude Code: one judgment per turn, at wake (send-time gate retired)
 
 ### Removed — fastpath mention-elsewhere short-circuit (the precursor, in detail)
 

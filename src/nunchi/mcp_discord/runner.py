@@ -18,7 +18,7 @@ import logging
 import random
 from typing import Awaitable, Callable
 
-from .events import MessageEvent, filter_message_create
+from .events import v2_notification_from_dispatch
 from .gateway import (
     CloseAndReconnect,
     Dispatch,
@@ -45,8 +45,11 @@ class GatewayRunner:
     def __init__(
         self,
         protocol: GatewayProtocol,
-        on_event: Callable[[MessageEvent], None],
+        on_event: Callable[[dict], None],
         *,
+        allowed_channel_ids: frozenset[str] | None = None,
+        membership_room_ids: tuple[str, ...] = (),
+        on_source_gap: Callable[[], None] | None = None,
         connect: Callable[[str], Awaitable] | None = None,
         rng: Callable[[], float] = random.random,
         initial_backoff: float = 1.0,
@@ -56,8 +59,22 @@ class GatewayRunner:
         self._connect = connect or WSClient.connect
         self._rng = rng
         self._initial_backoff = initial_backoff
+        self._allowed_channel_ids = allowed_channel_ids or frozenset()
+        self._membership_room_ids = membership_room_ids
+        self._on_source_gap = on_source_gap
+        self._initial_gap_declared = False
 
     async def run(self, shutdown: asyncio.Event) -> None:
+        if (
+            not self._initial_gap_declared
+            and not self._protocol.can_resume
+            and self._on_source_gap is not None
+        ):
+            # Gateway session state is intentionally process-local. A fresh
+            # process therefore cannot prove that no Discord events occurred
+            # between the prior process and this IDENTIFY.
+            self._on_source_gap()
+            self._initial_gap_declared = True
         backoff = self._initial_backoff
         while not shutdown.is_set():
             url = self._protocol.connect_url()
@@ -87,6 +104,8 @@ class GatewayRunner:
                     f"gateway closed with code {close_code}: {hint or 'not retryable'}"
                 )
             if strategy == "identify":
+                if self._on_source_gap is not None:
+                    self._on_source_gap()
                 self._protocol.invalidate_session()
             logger.warning(
                 "gateway connection ended (code=%s); will %s in %.1fs",
@@ -115,17 +134,59 @@ class GatewayRunner:
                         if action.payload.get("op") == 1:
                             self._protocol.mark_heartbeat_sent()
                     elif isinstance(action, Dispatch):
-                        if action.event == "MESSAGE_CREATE":
-                            event = filter_message_create(
-                                action.data, self._protocol.own_user_id
-                            )
-                            if event is not None:
-                                self._on_event(event)
+                        if action.event in {
+                            "MESSAGE_CREATE",
+                            "MESSAGE_REACTION_ADD",
+                            "MESSAGE_REACTION_REMOVE",
+                        }:
+                            channel_id = str(action.data.get("channel_id") or "")
+                            if channel_id in self._allowed_channel_ids:
+                                if (
+                                    self._protocol.own_user_id is None
+                                    or self._protocol.session_id is None
+                                ):
+                                    raise GatewayFatalError(
+                                        "gateway dispatch arrived before authenticated session identity"
+                                    )
+                                self._on_event(
+                                    v2_notification_from_dispatch(
+                                        action.event,
+                                        action.data,
+                                        sequence=self._protocol.seq,
+                                        delivery_epoch=self._protocol.session_id,
+                                        transport_self_actor_id=(
+                                            f"discord:actor:{self._protocol.own_user_id}"
+                                        ),
+                                    )
+                                )
+                        elif action.event in {"GUILD_MEMBER_ADD", "GUILD_MEMBER_REMOVE"}:
+                            for room_id in self._membership_room_ids:
+                                if (
+                                    self._protocol.own_user_id is None
+                                    or self._protocol.session_id is None
+                                ):
+                                    raise GatewayFatalError(
+                                        "membership dispatch arrived before authenticated self identity"
+                                    )
+                                self._on_event(
+                                    v2_notification_from_dispatch(
+                                        action.event,
+                                        action.data,
+                                        sequence=self._protocol.seq,
+                                        delivery_epoch=self._protocol.session_id,
+                                        transport_self_actor_id=(
+                                            f"discord:actor:{self._protocol.own_user_id}"
+                                        ),
+                                        room_id=room_id,
+                                    )
+                                )
                     elif isinstance(action, CloseAndReconnect):
                         logger.info(
                             "gateway asked us to reconnect (resume=%s)", action.resume
                         )
                         if not action.resume:
+                            if self._on_source_gap is not None:
+                                self._on_source_gap()
                             self._protocol.invalidate_session()
                         await ws.send_close(_RECONNECT_CLOSE_CODE)
                         return None

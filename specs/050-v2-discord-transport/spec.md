@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Discord Transport
 
+> **Reference only.** Product requirements and interfaces remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `v2/discord-transport`
 
 **Created**: 2026-07-11
@@ -23,13 +27,14 @@ facts and establishes `READY` before `ACTIVE`)
 
 **Input**: Plan the shared Discord transport cutover without implementing V2 product behavior now.
 
-**Authority source**: Aleph Vault selected design `bdd1ebb`, contract-clarified at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-transport-owner`
 
-**Assigned participant / source**: devops — evidence/governance/assignments/devops-v2-transport-owner-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-transport-owner-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/050-v2-discord-transport`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/050-v2-discord-transport`
 

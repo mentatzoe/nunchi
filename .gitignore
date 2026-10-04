@@ -36,12 +36,5 @@ pnpm-debug.log*
 # Embedding model cache from external tooling
 .fastembed_cache/
 
-# Claude local state is private, except for the pinned SpecKit skill surface.
-.claude/*
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/speckit-*/
-!.claude/skills/speckit-*/SKILL.md
-
-# SpecKit workflow run state is local control-plane state.
-.specify/workflows/runs/
+# Claude local state is private.
+.claude/

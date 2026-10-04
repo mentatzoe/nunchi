@@ -1,0 +1,34 @@
+{
+  "schema-expressible": {
+    "valid": 24,
+    "invalid": 48
+  },
+  "id-uniqueness": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "timestamp-order": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "advice-citation": {
+    "valid": 1,
+    "invalid": 1
+  },
+  "trigger-membership": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "actor-reference-integrity": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "binding-expiry": {
+    "valid": 0,
+    "invalid": 0
+  },
+  "receipt-sequence": {
+    "valid": 0,
+    "invalid": 0
+  }
+}

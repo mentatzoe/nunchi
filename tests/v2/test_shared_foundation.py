@@ -1,0 +1,2260 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import multiprocessing
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+import unittest
+from unittest import mock
+
+from nunchi.ack import (
+    AckJournal,
+    AckPolicy,
+    ReactionCapability,
+    UNAVAILABLE_REACTION_CAPABILITY,
+)
+from nunchi.attention import (
+    AttentionEngine,
+    AttentionPolicy,
+    ParticipantProfile,
+    participant_attention_prompt,
+)
+from nunchi.authorization import (
+    AuthorizationCoordinator,
+    AuthorizationError,
+    AuthorizationJournal,
+    CapabilityRule,
+    PolicySnapshot,
+    StaticPolicySource,
+    canonical_operation_digest,
+)
+from nunchi.errors import ValidationError
+from nunchi.adapters.matrix import MatrixTransport
+from nunchi.integrations.discord_participant_transport import MCPDiscordTransport
+from nunchi.observation import (
+    ObservationLimits,
+    ObservationProvider,
+    ParticipantBinding,
+    SnapshotUnavailable,
+)
+from nunchi.participant import (
+    ConversationOpportunityScheduler,
+    ParticipantError,
+    ParticipantTurnHost,
+    TransportResult,
+)
+from nunchi.pipeline import AsyncDeliveryLane, NunchiV2Pipeline
+from nunchi.receipts import PersistenceError, ReceiptJournal
+from nunchi.v2_contracts import classifier_projection, validate_receipt_stream
+from tests.v2.contract.schema_helpers import (
+    validate_privileged_action_authorization_flow,
+)
+
+
+def _reserve_ack_in_process(path, start, results):
+    binding = {
+        "request_id": "process-request",
+        "participant_id": "vigil",
+        "actor_id": "discord:bot:9",
+        "platform": "discord",
+        "room_id": "42",
+        "continuity_scope_id": "discord:channel:42",
+        "target_event_id": "e-process",
+        "reaction": "👂",
+        "operation": "add",
+        "opportunity_generation": 1,
+        "lifecycle_id": "process-lifecycle",
+        "deadline_id": "process-deadline",
+        "permissions_revision": "process-permissions",
+    }
+    journal = AckJournal(path)
+    if not start.wait(10):
+        results.put("timeout")
+        return
+    results.put(journal.reserve(binding)[1])
+
+
+def message(
+    event_id: str,
+    author_id: str = "human:zoe",
+    text: str = "Could you look at this?",
+    **extra,
+):
+    event = {
+        "id": event_id,
+        "type": "message",
+        "author_id": author_id,
+        "text": text,
+        "mentioned_actor_ids": [],
+        "mentions_room": False,
+    }
+    event.update(extra)
+    return event
+
+
+class FixtureModel:
+    name = "fixture-participant-attention"
+    provider = "fixture"
+    model_id = "fixture-v2"
+
+    def __init__(self, disposition="WAKE", *, block=None, fail=False):
+        self.disposition = disposition
+        self.block = block
+        self.fail = fail
+        self.calls = []
+        self.started = threading.Event()
+
+    def judge(self, *, instructions, projection, timeout_seconds):
+        self.calls.append((instructions, deepcopy(projection)))
+        self.started.set()
+        if self.block is not None:
+            self.block.wait(timeout_seconds * 2)
+        if self.fail:
+            raise RuntimeError("fixture provider failed")
+        evidence = [projection["trigger_event_id"]]
+        return {
+            "disposition": self.disposition,
+            "reasons": ["participant-shaped judgment"],
+            "evidence_event_ids": evidence,
+            "legacy_verdict_confidences": (
+                {"PASS": 0.9, "ACK": 0.03, "ASK": 0.03, "SPEAK": 0.04}
+                if self.disposition == "SUPPRESS"
+                else {"PASS": 0.02, "ACK": 0.9, "ASK": 0.03, "SPEAK": 0.05}
+                if self.disposition == "ACK"
+                else {"PASS": 0.02, "ACK": 0.03, "ASK": 0.05, "SPEAK": 0.9}
+            ),
+        }
+
+
+class RecordingTransport:
+    def __init__(self, result=None, *, capability=None):
+        self.calls = []
+        self.result = result or TransportResult("sent", "native:1")
+        self.capability = capability or UNAVAILABLE_REACTION_CAPABILITY
+
+    def dispatch(self, *, action, wake):
+        self.calls.append((deepcopy(action), deepcopy(wake)))
+        return self.result
+
+    def reaction_capability(self):
+        return self.capability
+
+
+def foundation(
+    *,
+    model=None,
+    participant=None,
+    policy=None,
+    persistence_path=None,
+    limits=None,
+    transport=None,
+    participant_timeout_seconds=300,
+    ack_policy=None,
+    ack_journal=None,
+    binding=None,
+):
+    binding = binding or ParticipantBinding(
+        participant_id="vigil",
+        actor_id="discord:bot:9",
+        platform="discord",
+        room_id="42",
+        continuity_scope_id="discord:channel:42",
+        names=("Vigil", "Codex"),
+    )
+    receipts = ReceiptJournal()
+    observation = ObservationProvider(
+        binding,
+        receipts=receipts,
+        persistence_path=persistence_path,
+        limits=limits,
+    )
+    model = model or FixtureModel()
+    transport = transport or RecordingTransport()
+    ack_policy = ack_policy or AckPolicy()
+    attention = AttentionEngine(
+        profile=ParticipantProfile(
+            profile_id="vigil-default",
+            participant_id=binding.participant_id,
+            actor_id=binding.actor_id,
+            instructions="Contribute on security and implementation correctness.",
+            provenance="trusted:test",
+            sha256="0" * 64,
+        ),
+        model=model,
+        policy=policy,
+        receipts=receipts,
+        ack_policy=ack_policy,
+        reaction_capability_provider=getattr(
+            transport,
+            "reaction_capability",
+            lambda: UNAVAILABLE_REACTION_CAPABILITY,
+        ),
+    )
+    scheduler = ConversationOpportunityScheduler(
+        f"{binding.participant_id}:{binding.continuity_scope_id}"
+    )
+    host = ParticipantTurnHost(
+        observation=observation,
+        participant=participant or (lambda **_: None),
+        transport=transport,
+        scheduler=scheduler,
+        receipts=receipts,
+        participant_timeout_seconds=participant_timeout_seconds,
+        ack_policy=ack_policy,
+        ack_journal=ack_journal,
+    )
+    pipeline = NunchiV2Pipeline(
+        observation=observation,
+        attention=attention,
+        host=host,
+        scheduler=scheduler,
+    )
+    return pipeline, model, transport, receipts
+
+
+class ObservationTests(unittest.TestCase):
+    def test_attention_engine_owns_the_exact_model_prompt(self):
+        pipeline, model, _, _ = foundation()
+        pipeline.handle_delivery(
+            delivery_id="d-prompt",
+            event=message("e-prompt"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual(
+            participant_attention_prompt(pipeline.attention.profile),
+            model.calls[0][0],
+        )
+
+    def test_exact_self_is_context_only_but_alias_collision_is_not_self(self):
+        pipeline, model, _, _ = foundation()
+        self_result = pipeline.handle_delivery(
+            delivery_id="d-self",
+            event=message("e-self", "discord:bot:9", "my earlier contribution"),
+            actors={"discord:bot:9": {"display_name": "Vigil", "kind": "bot"}},
+        )
+        self.assertEqual("exact-self-context", self_result.observation.audit.outcome)
+        self.assertEqual(0, len(model.calls))
+
+        collision = pipeline.handle_delivery(
+            delivery_id="d-human",
+            event=message("e-human", "human:zoe", "Vigil is also my display name"),
+            actors={
+                "human:zoe": {"display_name": "Vigil", "kind": "human"},
+            },
+        )
+        self.assertTrue(collision.observation.wake_eligible)
+        self.assertEqual(1, len(model.calls))
+        self.assertEqual(["e-self", "e-human"], [
+            event["id"] for event in pipeline.observation.retained_events()
+        ])
+
+    def test_exact_self_membership_cause_is_context_only(self):
+        pipeline, model, _, _ = foundation()
+        result = pipeline.handle_delivery(
+            delivery_id="d-membership",
+            event={
+                "id": "e-membership",
+                "type": "membership",
+                "scope": {"kind": "room", "id": "42"},
+                "subject_actor_id": "human:zoe",
+                "caused_by_actor_id": "discord:bot:9",
+                "change": "join",
+            },
+            actors={
+                "human:zoe": {"display_name": "Zoe", "kind": "human"},
+                "discord:bot:9": {"display_name": "Vigil", "kind": "bot"},
+            },
+        )
+        self.assertEqual("exact-self-context", result.observation.audit.outcome)
+        self.assertFalse(result.observation.wake_eligible)
+        self.assertEqual([], model.calls)
+
+    def test_duplicate_unconstructable_and_route_rejection_never_call_model(self):
+        pipeline, model, _, _ = foundation()
+        first = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual(1, len(first.opportunities))
+        for kwargs in (
+            {
+                "delivery_id": "d1",
+                "event": message("e1"),
+                "actors": {"human:zoe": {"kind": "human"}},
+            },
+            {"delivery_id": "d2", "event": None, "actors": None},
+            {
+                "delivery_id": "d3",
+                "event": message("e3"),
+                "actors": {"human:zoe": {"kind": "human"}},
+                "authorized_route": False,
+            },
+        ):
+            pipeline.handle_delivery(**kwargs)
+        self.assertEqual(1, len(model.calls))
+
+    def test_bounded_context_is_truthful_and_continuation_is_model_secret(self):
+        limits = ObservationLimits(
+            retention_events=20,
+            retention_bytes=100_000,
+            snapshot_events=3,
+            snapshot_bytes=10_000,
+            snapshot_age_seconds=86_400,
+            continuation_events=2,
+            continuation_bytes=10_000,
+        )
+        pipeline, model, _, _ = foundation(limits=limits)
+        for index in range(5):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}", text=f"event {index}"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        request = pipeline.observation.build_snapshot("e4")
+        self.assertEqual(["e2", "e3", "e4"], [item["id"] for item in request["events"]])
+        self.assertTrue(request["coverage"]["has_more_before"])
+        self.assertIn("events", request["coverage"]["truncated_by"])
+        projection = classifier_projection(request)
+        serialized = json.dumps(projection)
+        self.assertNotIn(request["continuation"]["handle_id"], serialized)
+        self.assertNotIn("bound_to", serialized)
+        self.assertTrue(projection["expansion"]["available"])
+
+        with self.assertRaises(ValidationError):
+            pipeline.observation.fetch_context(
+                {
+                    "request_id": request["request_id"],
+                    "handle_id": request["continuation"]["handle_id"],
+                    "direction": "before",
+                    "max_events": 2,
+                    "max_bytes": 1000,
+                },
+                host_context={
+                    **request["continuation"]["bound_to"],
+                    "room_id": "other-room",
+                },
+            )
+
+    def test_restart_restores_context_without_creating_wake_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            first, _, _, _ = foundation(persistence_path=store)
+            first.observation.observe(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            second, model, _, _ = foundation(persistence_path=store)
+            self.assertEqual(["e1"], [event["id"] for event in second.observation.retained_events()])
+            self.assertFalse(second.scheduler.active)
+            self.assertEqual(0, len(model.calls))
+            second.handle_delivery(
+                delivery_id="d2",
+                event=message("e2"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual(["e1", "e2"], [
+                event["id"] for event in model.calls[0][1]["events"]
+            ])
+
+    def test_late_delivery_is_retained_in_canonical_event_time_order(self):
+        reference = datetime.now(timezone.utc)
+        newer_timestamp = reference.isoformat().replace("+00:00", "Z")
+        older_timestamp = (reference - timedelta(hours=1)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            first, _, _, _ = foundation(persistence_path=store)
+            first.observation.observe(
+                delivery_id="d-newer",
+                event=message(
+                    "e-newer",
+                    timestamp=newer_timestamp,
+                ),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            first.observation.observe(
+                delivery_id="d-older",
+                event=message(
+                    "e-older",
+                    timestamp=older_timestamp,
+                ),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in first.observation.retained_events()
+                ],
+            )
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in first.observation.build_snapshot(
+                        "e-newer"
+                    )["events"]
+                ],
+            )
+
+            restored, _, _, _ = foundation(persistence_path=store)
+            self.assertEqual(
+                ["e-older", "e-newer"],
+                [
+                    event["id"]
+                    for event in restored.observation.retained_events()
+                ],
+            )
+
+    def test_unparseable_timestamp_is_retained_as_unknown_by_omission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            first, _, _, _ = foundation(persistence_path=store)
+
+            first.observation.observe(
+                delivery_id="d-invalid-time",
+                event=message("e-invalid-time", timestamp="not-a-timestamp"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+            retained = first.observation.retained_events()[0]
+            self.assertNotIn("timestamp", retained)
+            self.assertNotIn(
+                "timestamp",
+                first.observation.build_snapshot("e-invalid-time")["events"][0],
+            )
+
+            restored, _, _, _ = foundation(persistence_path=store)
+            self.assertNotIn(
+                "timestamp",
+                restored.observation.retained_events()[0],
+            )
+
+    def test_mixed_aware_and_naive_timestamps_do_not_raise(self):
+        reference = datetime.now(timezone.utc)
+        pipeline, _, _, _ = foundation()
+        pipeline.observation.observe(
+            delivery_id="d-aware",
+            event=message(
+                "e-aware",
+                timestamp=reference.isoformat().replace("+00:00", "Z"),
+            ),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        pipeline.observation.observe(
+            delivery_id="d-naive",
+            event=message(
+                "e-naive",
+                timestamp=(reference - timedelta(hours=1))
+                .replace(tzinfo=None)
+                .isoformat(),
+            ),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        retained = pipeline.observation.retained_events()
+        self.assertEqual(["e-aware", "e-naive"], [event["id"] for event in retained])
+        self.assertNotIn("timestamp", retained[1])
+        snapshot = pipeline.observation.build_snapshot("e-naive")
+        self.assertEqual(
+            ["e-aware", "e-naive"],
+            [event["id"] for event in snapshot["events"]],
+        )
+
+
+class AttentionAndHostTests(unittest.TestCase):
+    def test_snapshot_reconstruction_uses_error_fallback_without_model_call(self):
+        wakes = []
+        pipeline, model, _, receipts = foundation(
+            participant=lambda **kwargs: wakes.append(kwargs["wake"]) or None,
+        )
+        original = pipeline.observation.build_snapshot
+        calls = 0
+
+        def transient_snapshot(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise SnapshotUnavailable("transient snapshot fault")
+            return original(*args, **kwargs)
+
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=transient_snapshot,
+        ):
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-reconstruct",
+                event=message("e-reconstruct"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        opportunity = outcome.opportunities[0]
+        self.assertEqual("error", opportunity.decision_status)
+        self.assertEqual("ERROR_FALLBACK", opportunity.effective_disposition)
+        self.assertEqual([], model.calls)
+        self.assertEqual("ERROR_FALLBACK", wakes[0]["attention"]["source"])
+        stream = receipts.records(opportunity.request_id)
+        self.assertEqual(
+            "snapshot-reconstructed",
+            stream[1]["body"]["error"]["code"],
+        )
+
+    def test_unrecoverable_snapshot_is_an_explicit_error_without_effect(self):
+        pipeline, model, transport, receipts = foundation()
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=SnapshotUnavailable("unrecoverable snapshot"),
+        ) as build_snapshot:
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-unrecoverable",
+                event=message("e-unrecoverable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        opportunity = outcome.opportunities[0]
+        self.assertEqual(2, build_snapshot.call_count)
+        self.assertIsNone(opportunity.request_id)
+        self.assertIn(
+            "after one reconstruction attempt",
+            opportunity.operational_error,
+        )
+        self.assertEqual([], model.calls)
+        self.assertEqual([], transport.calls)
+        self.assertEqual((), receipts.all_records())
+
+    def test_snapshot_persistence_error_is_not_retried_or_woken(self):
+        pipeline, model, transport, _ = foundation()
+        with mock.patch.object(
+            pipeline.observation,
+            "build_snapshot",
+            side_effect=PersistenceError("receipt durability uncertain"),
+        ) as build_snapshot:
+            with self.assertRaisesRegex(
+                PersistenceError,
+                "durability uncertain",
+            ):
+                pipeline.handle_delivery(
+                    delivery_id="d-persistence",
+                    event=message("e-persistence"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+        self.assertEqual(1, build_snapshot.call_count)
+        self.assertEqual([], model.calls)
+        self.assertEqual([], transport.calls)
+
+    def test_participant_request_cannot_cross_opportunity_token_binding(self):
+        participant_calls = []
+        pipeline, _, transport, _ = foundation(
+            participant=lambda **kwargs: participant_calls.append(kwargs) or None,
+        )
+        for event_id in ("e-a", "e-b"):
+            pipeline.observation.observe(
+                delivery_id=f"d-{event_id}",
+                event=message(event_id),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        request_b = pipeline.observation.build_snapshot("e-b")
+        decision_b = pipeline.attention.judge(request_b)
+        token_a = pipeline.scheduler.offer("e-a")
+
+        with self.assertRaisesRegex(
+            ParticipantError,
+            "does not match",
+        ):
+            pipeline.host.run(
+                request=request_b,
+                decision=decision_b,
+                token=token_a,
+            )
+
+        self.assertEqual([], participant_calls)
+        self.assertEqual([], transport.calls)
+
+    def test_bypass_invokes_participant_without_model_or_advice(self):
+        wakes = []
+        model = FixtureModel()
+        policy = AttentionPolicy(preattention_enabled=False)
+        pipeline, _, transport, receipts = foundation(
+            model=model,
+            policy=policy,
+            participant=lambda **kwargs: wakes.append(kwargs["wake"]) or None,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual(0, len(model.calls))
+        self.assertEqual("PREATTENTION_BYPASS", wakes[0]["attention"]["source"])
+        self.assertEqual([], transport.calls)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertTrue(stream[1]["body"]["classifier_not_invoked"])
+        self.assertEqual("silent", stream[2]["body"]["outcome"])
+
+    def test_direct_and_margin_defer_remain_distinct(self):
+        for disposition, expected_valve in (
+            ("DEFER", "classifier-defer"),
+            ("SUPPRESS", "margin-defer"),
+        ):
+            with self.subTest(disposition=disposition):
+                model = FixtureModel(disposition)
+                if disposition == "SUPPRESS":
+                    original = model.judge
+
+                    def close_margin(**kwargs):
+                        result = original(**kwargs)
+                        result["legacy_verdict_confidences"] = {
+                            "PASS": 0.52,
+                            "ACK": 0.1,
+                            "ASK": 0.18,
+                            "SPEAK": 0.48,
+                        }
+                        return result
+
+                    model.judge = close_margin
+                wakes = []
+                pipeline, _, _, receipts = foundation(
+                    model=model,
+                    participant=lambda **kwargs: wakes.append(kwargs["wake"]) or None,
+                )
+                outcome = pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                self.assertEqual("DEFER", wakes[0]["attention"]["source"])
+                request_id = outcome.opportunities[0].request_id
+                self.assertEqual(
+                    expected_valve,
+                    receipts.records(request_id)[1]["body"]["routing_audit"]["valve"],
+                )
+
+    def test_governed_suppress_stops_only_participant(self):
+        model = FixtureModel("SUPPRESS")
+        pipeline, _, transport, receipts = foundation(model=model)
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("SUPPRESS", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(0, pipeline.host.invocation_count)
+        self.assertEqual([], transport.calls)
+        self.assertEqual(2, len(receipts.records(outcome.opportunities[0].request_id)))
+        self.assertEqual(["e1"], [event["id"] for event in pipeline.observation.retained_events()])
+
+    def test_profile_binding_mismatch_errors_before_model_and_wakes_by_default(self):
+        wakes = []
+        pipeline, model, _, receipts = foundation(
+            participant=lambda **kwargs: wakes.append(kwargs["wake"]) or None,
+        )
+        pipeline.attention.profile = ParticipantProfile(
+            profile_id="swapped",
+            participant_id="other",
+            actor_id="discord:bot:other",
+            instructions="unrelated",
+            provenance="trusted:test",
+            sha256="1" * 64,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual(0, len(model.calls))
+        self.assertEqual("error", outcome.opportunities[0].decision_status)
+        self.assertEqual("ERROR_FALLBACK", wakes[0]["attention"]["source"])
+        request_id = outcome.opportunities[0].request_id
+        self.assertIn("profile-binding-mismatch", receipts.records(request_id)[1]["body"]["error"]["code"])
+
+    def test_attention_and_dispatch_errors_do_not_persist_exception_content(self):
+        secret = "room-context-and-credential-secret"
+        model = FixtureModel(fail=True)
+        pipeline, _, _, receipts = foundation(
+            model=model,
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "safe output",
+            },
+        )
+        model.judge = lambda **_: (_ for _ in ()).throw(RuntimeError(secret))
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        serialized = json.dumps(
+            receipts.records(outcome.opportunities[0].request_id)
+        )
+        self.assertNotIn(secret, serialized)
+
+        class FailingTransport:
+            def dispatch(self, **_):
+                raise RuntimeError(secret)
+
+        second, _, _, second_receipts = foundation(
+            transport=FailingTransport(),
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e2",
+                "text": "safe output",
+            },
+        )
+        second_outcome = second.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        second_stream = second_receipts.records(
+            second_outcome.opportunities[0].request_id
+        )
+        self.assertNotIn(secret, json.dumps(second_stream))
+        self.assertEqual("unknown", second_outcome.opportunities[0].transport.delivery)
+
+    def test_participant_silence_makes_no_transport_stage(self):
+        pipeline, _, transport, receipts = foundation(participant=lambda **_: None)
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual(["observation", "attention", "participant-host"], [
+            record["stage"] for record in stream
+        ])
+        self.assertEqual("silent", stream[-1]["body"]["outcome"])
+        self.assertEqual([], transport.calls)
+
+    def test_contribution_delivery_is_attested_only_by_transport(self):
+        pipeline, _, transport, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "one direct contribution",
+            }
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in stream],
+        )
+        self.assertEqual("unknown", stream[2]["body"]["outcome"])
+        self.assertEqual("sent", stream[3]["body"]["delivery"])
+        self.assertEqual(1, len(transport.calls))
+
+    def test_host_receipt_failure_blocks_transport_dispatch(self):
+        pipeline, _, transport, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "must not dispatch",
+            }
+        )
+        original_append = receipts.append
+
+        def append(record, *, writer):
+            if record.get("stage") == "participant-host":
+                raise PersistenceError("host receipt durability uncertain")
+            return original_append(record, writer=writer)
+
+        with mock.patch.object(receipts, "append", side_effect=append):
+            with self.assertRaisesRegex(
+                PersistenceError,
+                "host receipt durability uncertain",
+            ):
+                pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+        self.assertEqual([], transport.calls)
+
+    def test_cancellation_before_dispatch_prevents_stale_output(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def participant(**_):
+            entered.set()
+            release.wait(2)
+            return {"kind": "message", "origin_event_id": "e1", "text": "late"}
+
+        pipeline, _, transport, receipts = foundation(participant=participant)
+        result = {}
+
+        def run():
+            result["outcome"] = pipeline.handle_delivery(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        pipeline.cancel()
+        release.set()
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([], transport.calls)
+        request_id = result["outcome"].opportunities[0].request_id
+        stream = receipts.records(request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in stream],
+        )
+        self.assertTrue(stream[-1]["body"]["invoked"])
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_cancellation_during_action_validation_settles_host_without_output(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingAction(dict):
+            def __iter__(self):
+                entered.set()
+                release.wait(2)
+                return super().__iter__()
+
+        def participant(**_):
+            return BlockingAction(
+                kind="message",
+                origin_event_id="e1",
+                text="late",
+            )
+
+        pipeline, _, transport, receipts = foundation(participant=participant)
+        result = {}
+
+        def run():
+            result["outcome"] = pipeline.handle_delivery(
+                delivery_id="d1",
+                event=message("e1"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        self.assertTrue(entered.wait(1))
+        pipeline.cancel()
+        release.set()
+        thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([], transport.calls)
+        request_id = result["outcome"].opportunities[0].request_id
+        stream = receipts.records(request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in stream],
+        )
+        self.assertTrue(stream[-1]["body"]["invoked"])
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_host_deadline_invalidates_ignoring_participant_without_output(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def participant(**_):
+            entered.set()
+            release.wait(2)
+            return {"kind": "message", "origin_event_id": "e1", "text": "late"}
+
+        pipeline, _, transport, receipts = foundation(
+            participant=participant,
+            participant_timeout_seconds=0.05,
+        )
+        started = time.monotonic()
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        release.set()
+        self.assertTrue(entered.is_set())
+        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertFalse(pipeline.scheduler.active)
+        self.assertEqual([], transport.calls)
+        self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual("unknown", stream[-1]["body"]["outcome"])
+
+    def test_host_total_deadline_bounds_native_transport_wait(self):
+        clock = mock.Mock(wraps=time)
+        clock.monotonic.return_value = 1000.0
+        release = threading.Event()
+        finished = threading.Event()
+        workers = []
+
+        class SlowTransport(RecordingTransport):
+            def dispatch(self, *, action, wake):
+                workers.append(threading.current_thread())
+                self.calls.append((deepcopy(action), deepcopy(wake)))
+                # Spend the unchanged budget only once native dispatch started.
+                clock.monotonic.return_value = 1000.05
+                release.wait(2)  # Cleanup watchdog, not a latency assertion.
+                finished.set()
+                return TransportResult("sent", "late-native")
+
+        transport = SlowTransport()
+        pipeline, _, _, receipts = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "hello",
+            },
+            policy=AttentionPolicy(preattention_enabled=False),
+            participant_timeout_seconds=0.05,
+            transport=transport,
+        )
+        with (
+            mock.patch("nunchi.pipeline.time", clock),
+            mock.patch("nunchi.participant.time", clock),
+            mock.patch("nunchi.attention.time", clock),
+        ):
+            try:
+                outcome = pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                result = outcome.opportunities[0].transport
+                self.assertIsNotNone(result)
+                self.assertEqual("unknown", result.delivery)
+                self.assertFalse(finished.is_set())
+                self.assertEqual(1, len(transport.calls))
+                self.assertFalse(pipeline.scheduler.active)
+                stream = receipts.records(outcome.opportunities[0].request_id)
+                self.assertEqual("unknown", stream[-1]["body"]["delivery"])
+            finally:
+                release.set()
+                for worker in workers:
+                    worker.join(2)
+                    self.assertFalse(worker.is_alive())
+            self.assertEqual(stream, receipts.records(outcome.opportunities[0].request_id))
+            self.assertFalse(pipeline.scheduler.active)
+
+    def test_receipt_persistence_crossing_deadline_never_claims_sent_or_dispatches(self):
+        class DelayedHostReceiptJournal(ReceiptJournal):
+            def append(self, record, *, writer):
+                if record.get("stage") == "participant-host":
+                    time.sleep(0.07)
+                return super().append(record, writer=writer)
+
+        pipeline, _, transport, _ = foundation(
+            participant=lambda **_: {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "must not escape after the deadline",
+            },
+            policy=AttentionPolicy(preattention_enabled=False),
+            participant_timeout_seconds=0.03,
+        )
+        receipts = DelayedHostReceiptJournal()
+        pipeline.observation.receipts = receipts
+        pipeline.attention.receipts = receipts
+        pipeline.host.receipts = receipts
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual([], transport.calls)
+        self.assertEqual("failed", outcome.opportunities[0].transport.delivery)
+        stream = receipts.records(outcome.opportunities[0].request_id)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in stream],
+        )
+        self.assertEqual("unknown", stream[2]["body"]["outcome"])
+        self.assertEqual("failed", stream[3]["body"]["delivery"])
+
+    def test_host_total_deadline_spans_attention_participant_and_transport(self):
+        clock = mock.Mock(wraps=time)
+        clock.monotonic.return_value = 1000.0
+        release = threading.Event()
+        finished = threading.Event()
+        workers = []
+        phases = []
+        participant_cancel = []
+
+        class PhasedModel(FixtureModel):
+            def judge(self, **kwargs):
+                phases.append("attention")
+                clock.monotonic.return_value = 1000.04
+                return super().judge(**kwargs)
+
+        class PhasedTransport(RecordingTransport):
+            def dispatch(self, *, action, wake):
+                workers.append(threading.current_thread())
+                self.calls.append((deepcopy(action), deepcopy(wake)))
+                phases.append("transport")
+                # After the original .10 deadline, before a restarted .14 one.
+                clock.monotonic.return_value = 1000.12
+                release.wait(2)  # Cleanup watchdog, not a latency assertion.
+                finished.set()
+                return TransportResult("sent", "late-native")
+
+        def participant(**kwargs):
+            phases.append("participant")
+            participant_cancel.append(kwargs["cancel"])
+            clock.monotonic.return_value = 1000.08
+            return {
+                "kind": "message",
+                "origin_event_id": "e1",
+                "text": "hello",
+            }
+
+        transport = PhasedTransport()
+        pipeline, _, _, receipts = foundation(
+            model=PhasedModel(),
+            participant=participant,
+            policy=AttentionPolicy(timeout_seconds=0.1),
+            participant_timeout_seconds=0.1,
+            transport=transport,
+        )
+        with (
+            mock.patch("nunchi.pipeline.time", clock),
+            mock.patch("nunchi.participant.time", clock),
+            mock.patch("nunchi.attention.time", clock),
+        ):
+            try:
+                outcome = pipeline.handle_delivery(
+                    delivery_id="d1",
+                    event=message("e1"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                result = outcome.opportunities[0].transport
+                self.assertIsNotNone(result)
+                self.assertEqual("unknown", result.delivery)
+                self.assertEqual(["attention", "participant", "transport"], phases)
+                self.assertEqual(1, len(transport.calls))
+                self.assertTrue(participant_cancel[0].is_set())
+                self.assertFalse(pipeline.scheduler.active)
+                self.assertFalse(finished.is_set())
+                stream = receipts.records(outcome.opportunities[0].request_id)
+            finally:
+                release.set()
+                for worker in workers:
+                    worker.join(2)
+                    self.assertFalse(worker.is_alive())
+            self.assertEqual(stream, receipts.records(outcome.opportunities[0].request_id))
+
+    def test_async_live_ingress_is_active_plus_newest_not_fifo(self):
+        entered = threading.Event()
+        release = threading.Event()
+        seen = []
+
+        def participant(**kwargs):
+            seen.append(kwargs["wake"]["trigger_event_id"])
+            if len(seen) == 1:
+                entered.set()
+                release.wait(2)
+            return None
+
+        pipeline, _, _, _ = foundation(
+            participant=participant,
+            limits=ObservationLimits(snapshot_events=20),
+        )
+        lane = AsyncDeliveryLane(pipeline)
+        lane.submit(
+            delivery_id="d0",
+            event=message("e0"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertTrue(entered.wait(1))
+        for index in range(1, 8):
+            outcome = lane.submit(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertTrue(outcome.coalesced)
+        release.set()
+        self.assertTrue(lane.drain(2))
+        self.assertEqual(["e0", "e7"], seen)
+        self.assertEqual(
+            [f"e{index}" for index in range(8)],
+            [event["id"] for event in pipeline.observation.retained_events()],
+        )
+
+    def test_twenty_events_during_slow_turn_create_one_fresh_opportunity(self):
+        release = threading.Event()
+        model = FixtureModel(block=release)
+        seen_wakes = []
+        pipeline, _, _, _ = foundation(
+            model=model,
+            participant=lambda **kwargs: seen_wakes.append(kwargs["wake"]) or None,
+            limits=ObservationLimits(snapshot_events=24),
+        )
+
+        thread = threading.Thread(
+            target=lambda: pipeline.handle_delivery(
+                delivery_id="d0",
+                event=message("e0"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        )
+        thread.start()
+        self.assertTrue(model.started.wait(1))
+        for index in range(1, 21):
+            outcome = pipeline.handle_delivery(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}", text=f"intervening {index}"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertTrue(outcome.coalesced)
+        self.assertEqual("e20", pipeline.scheduler.pending_anchor)
+        release.set()
+        thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(2, len(model.calls))
+        self.assertEqual(2, len(seen_wakes))
+        self.assertEqual("e20", seen_wakes[-1]["trigger_event_id"])
+        self.assertEqual([f"e{i}" for i in range(21)], [
+            event["id"] for event in seen_wakes[-1]["events"]
+        ])
+
+    def test_profile_bytes_are_pinned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.json"
+            payload = {
+                "profile_id": "vigil",
+                "participant_id": "vigil",
+                "actor_id": "discord:bot:9",
+                "instructions": "security focus",
+                "provenance": "operator:test",
+            }
+            raw = json.dumps(payload).encode()
+            path.write_bytes(raw)
+            digest = hashlib.sha256(raw).hexdigest()
+            self.assertEqual("vigil", ParticipantProfile.load(path, expected_sha256=digest).profile_id)
+            path.write_text(json.dumps({**payload, "instructions": "swapped"}))
+            with self.assertRaises(ValidationError):
+                ParticipantProfile.load(path, expected_sha256=digest)
+
+
+class AuthorizationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.pipeline, _, _, _ = foundation()
+        self.pipeline.observation.observe(
+            delivery_id="d1",
+            event=message("e1"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.wake = self.pipeline.observation.build_snapshot("e1")
+        self.wake.pop("schema_version")
+        self.wake.pop("continuation", None)
+        self.wake["attention"] = {"source": "WAKE"}
+        self.rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            direct_allow=True,
+            impact="low",
+        )
+        self.policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "r1",
+                (self.rule,),
+                ("operator:zoe",),
+            )
+        )
+        self.journal = AuthorizationJournal(Path(self.temp.name) / "authorization.jsonl")
+        self.native_calls = []
+
+    def coordinator(self, policy=None, result=None):
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return result or TransportResult("sent", "native-effect:1")
+
+        return AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy or self.policy,
+            journal=self.journal,
+            executors={"workspace.file.write": execute},
+        )
+
+    def test_pipeline_cancel_discards_pending_approval(self):
+        approval_rule = CapabilityRule(
+            requester_actor_id="human:zoe",
+            capability="workspace.file.write",
+            platform="discord",
+            room_id="42",
+            participant_id="vigil",
+            resource_kind="workspace-file",
+            resource_id="repo:README.md",
+            direct_allow=False,
+            impact="high",
+        )
+        coordinator = self.coordinator(
+            StaticPolicySource(
+                PolicySnapshot(
+                    "policy",
+                    "approval",
+                    (approval_rule,),
+                    ("operator:zoe",),
+                )
+            )
+        )
+        self.pipeline.host.privileged = coordinator
+        self.pipeline.host.participant = lambda **_: {
+            "kind": "privileged",
+            "origin_event_id": "e2",
+            "capability": "workspace.file.write",
+            "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+            "operation": {"path": "README.md", "content": "bounded"},
+        }
+        outcome = self.pipeline.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+        challenge = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+        self.pipeline.cancel()
+        result = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge,
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_host_deadline_during_policy_load_never_publishes_stale_approval(self):
+        approval_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        loaded = threading.Event()
+
+        class DelayedApprovalPolicy:
+            def load(inner):
+                time.sleep(0.08)
+                loaded.set()
+                return PolicySnapshot(
+                    "policy",
+                    "delayed-approval",
+                    (approval_rule,),
+                    ("operator:zoe",),
+                )
+
+        coordinator = self.coordinator(policy=DelayedApprovalPolicy())
+        self.pipeline.host.privileged = coordinator
+        self.pipeline.host.host_timeout_seconds = 0.03
+        self.pipeline.host.participant_timeout_seconds = 0.03
+        self.pipeline.host.participant = lambda **_: {
+            "kind": "privileged",
+            "origin_event_id": "e2",
+            "capability": "workspace.file.write",
+            "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+            "operation": {"path": "README.md", "content": "bounded"},
+        }
+
+        outcome = self.pipeline.handle_delivery(
+            delivery_id="d2",
+            event=message("e2"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertIn(
+            outcome.opportunities[0].transport.delivery,
+            ("failed", "unknown"),
+        )
+        self.assertTrue(loaded.wait(1))
+        self.assertEqual((), coordinator.pending_for_operator())
+        self.assertEqual([], self.native_calls)
+
+    def test_corrupt_authorization_journal_and_executor_error_detail_fail_safe(self):
+        corrupt = Path(self.temp.name) / "corrupt-authorization.jsonl"
+        corrupt.write_text('{"kind":"invented"}\n')
+        with self.assertRaises(AuthorizationError):
+            AuthorizationJournal(corrupt)
+
+        secret = "executor-secret-room-content"
+        coordinator = self.coordinator(
+            result=TransportResult("unknown", secret)
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unknown", result.delivery)
+        self.assertNotIn(secret, json.dumps(self.journal.records()))
+
+    def proposal(self):
+        return {
+            "kind": "privileged",
+            "origin_event_id": "e1",
+            "capability": "workspace.file.write",
+            "resource": {"kind": "workspace-file", "id": "repo:README.md"},
+            "operation": {"path": "README.md", "content": "new"},
+        }
+
+    def test_direct_allow_rechecks_consumes_and_replay_dispatches_once(self):
+        coordinator = self.coordinator()
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("sent", first.delivery)
+        self.assertEqual("failed", second.delivery)
+        self.assertEqual(1, len(self.native_calls))
+        self.assertEqual(1, len([
+            record for record in self.journal.records() if record["kind"] == "effect_commit"
+        ]))
+        flow = [
+            record["record"]
+            for record in self.journal.records()
+            if record["kind"] == "authorization_contract"
+        ][:2]
+        self.assertEqual([], validate_privileged_action_authorization_flow(flow))
+
+    def test_policy_revocation_between_initial_check_and_commit_makes_zero_calls(self):
+        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        revoked_rule = CapabilityRule(**{**vars(self.rule), "revoked": True})
+        revoked = PolicySnapshot("policy", "r1", (revoked_rule,), ("operator:zoe",))
+
+        class ChangingPolicy:
+            def __init__(self):
+                self.calls = 0
+
+            def load(inner):
+                inner.calls += 1
+                return allowed if inner.calls == 1 else revoked
+
+        result = self.coordinator(policy=ChangingPolicy()).execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_effect_commit_delay_cannot_outlive_rule_expiry(self):
+        class DelayedEffectCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                if record.get("kind") == "effect_commit":
+                    time.sleep(0.2)
+                return super().append(record)
+
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=0.12)
+        ).isoformat().replace("+00:00", "Z")
+        expiring_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "expires_at": expires_at,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "expiring",
+                (expiring_rule,),
+                ("operator:zoe",),
+            )
+        )
+        journal = DelayedEffectCommitJournal(
+            Path(self.temp.name) / "delayed-effect-commit.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+        self.assertEqual(
+            ["authorization_contract", "authorization_contract", "effect_commit"],
+            [record["kind"] for record in journal.records()],
+        )
+
+    def test_revocation_during_effect_commit_makes_zero_calls(self):
+        allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
+        revoked_rule = CapabilityRule(**{**vars(self.rule), "revoked": True})
+        revoked = PolicySnapshot(
+            "policy",
+            "r1",
+            (revoked_rule,),
+            ("operator:zoe",),
+        )
+        policy = StaticPolicySource(allowed)
+
+        class RevokingEffectCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_commit":
+                    policy.replace(revoked)
+                return result
+
+        journal = RevokingEffectCommitJournal(
+            Path(self.temp.name) / "revoking-effect-commit.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_high_impact_requires_authenticated_approval_and_wrong_actor_fails(self):
+        high_rule = CapabilityRule(**{
+            **vars(self.rule),
+            "direct_allow": False,
+            "impact": "high",
+        })
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        result = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unavailable", result.delivery)
+        pending = coordinator.pending_for_operator()
+        self.assertEqual(1, len(pending))
+        challenge_id = pending[0]["challenge"]["approval_challenge_id"]
+        denied = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge_id,
+            authenticated_approver_id="operator:mallory",
+        )
+        self.assertEqual("failed", denied.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_authenticated_approval_executes_exact_retained_operation(self):
+        high_rule = CapabilityRule(**{
+            **vars(self.rule),
+            "direct_allow": False,
+            "impact": "high",
+        })
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
+        approved = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge_id,
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("sent", approved.delivery)
+        self.assertEqual(self.proposal()["operation"], self.native_calls[0][0])
+        flow = [
+            record["record"]
+            for record in self.journal.records()
+            if record["kind"] == "authorization_contract"
+        ]
+        self.assertEqual([], validate_privileged_action_authorization_flow(flow))
+
+    def test_revocation_during_approved_effect_commit_makes_zero_calls(self):
+        approval_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "direct_allow": False,
+                "impact": "high",
+            }
+        )
+        revoked_rule = CapabilityRule(
+            **{
+                **vars(approval_rule),
+                "revoked": True,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "approval-revocation",
+                (approval_rule,),
+                ("operator:zoe",),
+            )
+        )
+
+        class RevokingApprovedCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_commit":
+                    policy.replace(
+                        PolicySnapshot(
+                            "policy",
+                            "approval-revocation",
+                            (revoked_rule,),
+                            ("operator:zoe",),
+                        )
+                    )
+                return result
+
+        journal = RevokingApprovedCommitJournal(
+            Path(self.temp.name) / "approved-revocation.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("sent", "must-not-run")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"][
+            "approval_challenge_id"
+        ]
+        result = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge_id,
+            authenticated_approver_id="operator:zoe",
+        )
+
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_restart_discards_pending_approval(self):
+        high_rule = CapabilityRule(**{
+            **vars(self.rule),
+            "direct_allow": False,
+            "impact": "high",
+        })
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "r1", (high_rule,), ("operator:zoe",))
+        )
+        coordinator = self.coordinator(policy=policy)
+        coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        challenge_id = coordinator.pending_for_operator()[0]["challenge"]["approval_challenge_id"]
+        coordinator.restart()
+        result = coordinator.complete_authenticated_approval(
+            approval_challenge_id=challenge_id,
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("failed", result.delivery)
+        self.assertEqual([], self.native_calls)
+
+    def test_nonidempotent_unknown_requires_fresh_duplicate_risk_approval(self):
+        coordinator = self.coordinator(
+            result=TransportResult("unknown", "acknowledgement lost")
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual("unknown", first.delivery)
+        self.assertEqual("unavailable", second.delivery)
+        self.assertEqual(1, len(self.native_calls))
+        pending = coordinator.pending_for_operator()
+        self.assertEqual(1, len(pending))
+        self.assertTrue(pending[0]["duplicate_effect_risk"])
+        self.assertEqual(self.proposal()["operation"], pending[0]["operation"])
+        self.assertEqual("e1", pending[0]["origin_observation"]["id"])
+        retried = coordinator.complete_authenticated_approval(
+            approval_challenge_id=pending[0]["challenge"]["approval_challenge_id"],
+            authenticated_approver_id="operator:zoe",
+        )
+        self.assertEqual("unknown", retried.delivery)
+        self.assertEqual(2, len(self.native_calls))
+        retries = [
+            record
+            for record in self.journal.records()
+            if record["kind"] == "effect_retry_commit"
+        ]
+        self.assertEqual(1, len(retries))
+        self.assertTrue(retries[0]["duplicate_effect_risk"])
+
+    def test_idempotent_unknown_reuses_same_key_and_confirmation_closes_replay(self):
+        idempotent_rule = CapabilityRule(
+            **{**vars(self.rule), "target_idempotency": True}
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot("policy", "idempotent", (idempotent_rule,), ("operator:zoe",))
+        )
+        results = [
+            TransportResult("unknown", "lost"),
+            TransportResult("sent", "confirmed"),
+        ]
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return results.pop(0)
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=self.journal,
+            executors={"workspace.file.write": execute},
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        third = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        self.assertEqual(("unknown", "sent", "failed"), (
+            first.delivery,
+            second.delivery,
+            third.delivery,
+        ))
+        self.assertEqual(2, len(self.native_calls))
+        self.assertIsNotNone(self.native_calls[0][1])
+        self.assertEqual(self.native_calls[0][1], self.native_calls[1][1])
+        self.assertFalse(
+            self.journal.unknown(
+                next(
+                    record["effect_fingerprint"]
+                    for record in self.journal.records()
+                    if record["kind"] == "effect_commit"
+                )
+            )
+        )
+
+    def test_revocation_during_unknown_retry_commit_makes_no_second_call(self):
+        idempotent_rule = CapabilityRule(
+            **{
+                **vars(self.rule),
+                "target_idempotency": True,
+            }
+        )
+        revoked_rule = CapabilityRule(
+            **{
+                **vars(idempotent_rule),
+                "revoked": True,
+            }
+        )
+        policy = StaticPolicySource(
+            PolicySnapshot(
+                "policy",
+                "retry-revocation",
+                (idempotent_rule,),
+                ("operator:zoe",),
+            )
+        )
+
+        class RevokingRetryCommitJournal(AuthorizationJournal):
+            def append(inner, record):
+                result = super().append(record)
+                if record.get("kind") == "effect_retry_commit":
+                    policy.replace(
+                        PolicySnapshot(
+                            "policy",
+                            "retry-revocation",
+                            (revoked_rule,),
+                            ("operator:zoe",),
+                        )
+                    )
+                return result
+
+        journal = RevokingRetryCommitJournal(
+            Path(self.temp.name) / "retry-revocation.jsonl"
+        )
+
+        def execute(operation, idempotency_key):
+            self.native_calls.append((deepcopy(operation), idempotency_key))
+            return TransportResult("unknown", "acknowledgement lost")
+
+        coordinator = AuthorizationCoordinator(
+            observation=self.pipeline.observation,
+            policy_source=policy,
+            journal=journal,
+            executors={"workspace.file.write": execute},
+        )
+        first = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+        second = coordinator.execute_proposal(
+            proposal=self.proposal(),
+            wake=self.wake,
+            cancel=threading.Event(),
+        )
+
+        self.assertEqual("unknown", first.delivery)
+        self.assertEqual("failed", second.delivery)
+        self.assertEqual(1, len(self.native_calls))
+
+    def test_operation_digest_is_order_stable_and_rejects_nonfinite(self):
+        self.assertEqual(
+            canonical_operation_digest({"a": 1, "b": 2}),
+            canonical_operation_digest({"b": 2, "a": 1}),
+        )
+        with self.assertRaises(ValidationError):
+            canonical_operation_digest({"value": float("nan")})
+
+
+class AckOutcomeTests(unittest.TestCase):
+    @staticmethod
+    def capability(revision="discord-reactions:v1"):
+        return ReactionCapability(
+            supported=True,
+            authenticated=True,
+            operations=("add", "remove"),
+            reactions=("*",),
+            permissions_revision=revision,
+        )
+
+    def test_ack_emits_one_exact_reaction_without_running_participant(self):
+        participant_calls = []
+        transport = RecordingTransport(capability=self.capability())
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-ack",
+            event=message("e-ack"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("ACK", outcome.opportunities[0].effective_disposition)
+        self.assertEqual([], participant_calls)
+        self.assertEqual(1, len(transport.calls))
+        action, wake = transport.calls[0]
+        self.assertEqual(
+            {
+                "kind": "reaction",
+                "origin_event_id": "e-ack",
+                "target_event_id": "e-ack",
+                "reaction": "👂",
+                "operation": "add",
+            },
+            action,
+        )
+        self.assertEqual("ACK", wake["attention"]["source"])
+        records = receipts.all_records()
+        validate_receipt_stream(list(records))
+        attention = next(record for record in records if record["stage"] == "attention")
+        host = next(record for record in records if record["stage"] == "participant-host")
+        self.assertEqual("ACK", attention["body"]["classifier_disposition"])
+        self.assertEqual("discord-reactions:v1", attention["body"]["ack"]["permissions_revision"])
+        self.assertFalse(host["body"]["invoked"])
+        self.assertEqual("ACK", host["body"]["wake_source"])
+
+    def test_disabled_or_unsupported_ack_widens_to_defer(self):
+        cases = (
+            (
+                AckPolicy(enabled=False),
+                self.capability(),
+                "policy-defer",
+                "ack-disabled",
+            ),
+            (
+                AckPolicy(),
+                UNAVAILABLE_REACTION_CAPABILITY,
+                "capability-defer",
+                "ack-unsupported",
+            ),
+        )
+        for ack_policy, capability, valve, cause in cases:
+            with self.subTest(cause=cause):
+                participant_calls = []
+                transport = RecordingTransport(capability=capability)
+                pipeline, _, _, receipts = foundation(
+                    model=FixtureModel("ACK"),
+                    participant=lambda **kwargs: participant_calls.append(kwargs),
+                    transport=transport,
+                    ack_policy=ack_policy,
+                )
+                outcome = pipeline.handle_delivery(
+                    delivery_id=f"d-{cause}",
+                    event=message(f"e-{cause}"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+                self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+                self.assertEqual(1, len(participant_calls))
+                self.assertEqual([], transport.calls)
+                attention = next(
+                    record
+                    for record in receipts.all_records()
+                    if record["stage"] == "attention"
+                )
+                self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
+                self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
+
+    def test_measured_discord_permission_denial_reaches_defer(self):
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def call_tool(self, name, arguments):
+                self.calls.append((name, deepcopy(arguments)))
+                return {
+                    "isError": False,
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "reaction_capability": {
+                                        "channel_id": "42",
+                                        "actor_id": "9",
+                                        "capability": {
+                                            "supported": False,
+                                            "authenticated": True,
+                                            "operations": [],
+                                            "reactions": [],
+                                            "permissions_revision": "discord-denied-v1",
+                                            "detail": "add reactions denied",
+                                        },
+                                    }
+                                }
+                            ),
+                        }
+                    ],
+                }
+
+        client = Client()
+        transport = MCPDiscordTransport(
+            client,
+            "42",
+            "vigil",
+            "discord:actor:9",
+            b"y" * 32,
+        )
+        participant_calls = []
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-discord-permission-denied",
+            event=message("e-discord-permission-denied"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertTrue(client.calls)
+        self.assertEqual(
+            {"reaction_capability"},
+            {name for name, _arguments in client.calls},
+        )
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+
+    def test_measured_matrix_permission_denial_reaches_defer(self):
+        binding = ParticipantBinding(
+            participant_id="vigil",
+            actor_id="matrix:actor:@vigil:example",
+            platform="matrix",
+            room_id="!room:example",
+            continuity_scope_id="matrix:room:example",
+        )
+        with mock.patch.dict(os.environ, {"MATRIX_TOKEN": "secret"}, clear=False):
+            transport = MatrixTransport(
+                {
+                    "homeserver": "https://matrix.invalid",
+                    "access_token_env": "MATRIX_TOKEN",
+                },
+                room_id=binding.room_id,
+                actor_id=binding.actor_id,
+            )
+        native_calls = []
+
+        def request(method, path, payload=None):
+            native_calls.append((method, path, deepcopy(payload)))
+            if path.endswith("/account/whoami"):
+                return {"user_id": "@vigil:example"}
+            if path.endswith("/state/m.room.power_levels"):
+                return {
+                    "users": {"@vigil:example": 0},
+                    "events": {"m.reaction": 50},
+                }
+            raise AssertionError(f"unexpected Matrix call: {method} {path}")
+
+        transport._request = request
+        participant_calls = []
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+            binding=binding,
+        )
+
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-matrix-permission-denied",
+            event=message("e-matrix-permission-denied"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertTrue(native_calls)
+        self.assertEqual({"GET"}, {method for method, _path, _body in native_calls})
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+
+    def test_malformed_capability_widens_ack_to_defer(self):
+        participant_calls = []
+
+        class MalformedCapabilityTransport(RecordingTransport):
+            def reaction_capability(self):
+                return {"supported": True}
+
+        transport = MalformedCapabilityTransport()
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            participant=lambda **kwargs: participant_calls.append(kwargs),
+            transport=transport,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-malformed-capability",
+            event=message("e-malformed-capability"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+        self.assertEqual(1, len(participant_calls))
+        self.assertEqual([], transport.calls)
+        self.assertEqual(
+            ["observation", "attention", "participant-host"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+
+    def test_ack_settlement_failure_after_dispatch_still_writes_transport_receipt(self):
+        journal = AckJournal()
+        transport = RecordingTransport(capability=self.capability())
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            transport=transport,
+            ack_journal=journal,
+        )
+        with mock.patch.object(
+            journal,
+            "settle",
+            side_effect=PersistenceError("disk full at settle time"),
+        ):
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-lost-ack-settlement",
+                event=message("e-lost-ack-settlement"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+        self.assertEqual(1, len(transport.calls))
+        self.assertEqual("unknown", outcome.opportunities[0].transport.delivery)
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            [record["stage"] for record in receipts.all_records()],
+        )
+        self.assertEqual(
+            "unknown",
+            receipts.all_records()[-1]["body"]["delivery"],
+        )
+
+    def test_restart_replay_and_concurrency_cannot_duplicate_ack(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal_path = Path(directory) / "ack.jsonl"
+            transport = RecordingTransport(capability=self.capability())
+            first, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=AckJournal(journal_path),
+            )
+            first.handle_delivery(
+                delivery_id="d-first",
+                event=message("e-stable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            restored, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=AckJournal(journal_path),
+            )
+            replay = restored.handle_delivery(
+                delivery_id="d-replay",
+                event=message("e-stable"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual(1, len(transport.calls))
+            self.assertIn("duplicate ACK", replay.opportunities[0].transport.detail)
+
+            shared_journal = AckJournal(Path(directory) / "concurrent.jsonl")
+            concurrent_transport = RecordingTransport(capability=self.capability())
+            pipelines = [
+                foundation(
+                    model=FixtureModel("ACK"),
+                    transport=concurrent_transport,
+                    ack_journal=shared_journal,
+                )[0]
+                for _ in range(2)
+            ]
+            barrier = threading.Barrier(2)
+
+            def deliver(index):
+                barrier.wait()
+                pipelines[index].handle_delivery(
+                    delivery_id=f"d-concurrent-{index}",
+                    event=message("e-concurrent"),
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+
+            workers = [threading.Thread(target=deliver, args=(index,)) for index in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(10)
+                self.assertFalse(worker.is_alive())
+            self.assertEqual(1, len(concurrent_transport.calls))
+
+    def test_separate_processes_cannot_reserve_the_same_ack_twice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context = multiprocessing.get_context("spawn")
+            start = context.Event()
+            results = context.Queue()
+            path = str(Path(directory) / "process-concurrent.jsonl")
+            workers = [
+                context.Process(
+                    target=_reserve_ack_in_process,
+                    args=(path, start, results),
+                )
+                for _ in range(2)
+            ]
+            for worker in workers:
+                worker.start()
+            start.set()
+            observed = [results.get(timeout=15) for _ in workers]
+            for worker in workers:
+                worker.join(15)
+                self.assertEqual(0, worker.exitcode)
+            self.assertEqual([False, True], sorted(observed))
+            self.assertEqual(1, len(AckJournal(path).records()))
+
+    def test_permissions_change_after_attention_blocks_ack_with_receipts(self):
+        revisions = iter((self.capability("cap:v1"), self.capability("cap:v2")))
+
+        class ChangingTransport(RecordingTransport):
+            def reaction_capability(self):
+                try:
+                    return next(revisions)
+                except StopIteration:
+                    return self.capability
+
+        transport = ChangingTransport(capability=self.capability("cap:v2"))
+        pipeline, _, _, receipts = foundation(
+            model=FixtureModel("ACK"),
+            transport=transport,
+        )
+        outcome = pipeline.handle_delivery(
+            delivery_id="d-stale-capability",
+            event=message("e-stale-capability"),
+            actors={"human:zoe": {"kind": "human"}},
+        )
+        self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+        self.assertEqual([], transport.calls)
+        stages = [record["stage"] for record in receipts.all_records()]
+        self.assertEqual(
+            ["observation", "attention", "participant-host", "transport"],
+            stages,
+        )
+
+    def test_cancellation_before_ack_commit_reserves_and_sends_nothing(self):
+        checked = threading.Event()
+        release = threading.Event()
+
+        class BlockingCapabilityTransport(RecordingTransport):
+            def __init__(self, capability):
+                super().__init__(capability=capability)
+                self.capability_checks = 0
+
+            def reaction_capability(self):
+                self.capability_checks += 1
+                if self.capability_checks == 2:
+                    checked.set()
+                    release.wait(10)
+                return self.capability
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AckJournal(Path(directory) / "cancelled.jsonl")
+            transport = BlockingCapabilityTransport(self.capability())
+            pipeline, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=journal,
+            )
+            outcome = []
+            worker = threading.Thread(
+                target=lambda: outcome.append(
+                    pipeline.handle_delivery(
+                        delivery_id="d-cancelled-ack",
+                        event=message("e-cancelled-ack"),
+                        actors={"human:zoe": {"kind": "human"}},
+                    )
+                )
+            )
+            worker.start()
+            self.assertTrue(checked.wait(5))
+            pipeline.cancel()
+            release.set()
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual([], transport.calls)
+            self.assertEqual((), journal.records())
+            self.assertFalse(pipeline.scheduler.active)
+
+    def test_permission_change_at_ack_dispatch_boundary_sends_nothing(self):
+        revisions = iter(
+            (
+                self.capability("cap:v1"),
+                self.capability("cap:v1"),
+                self.capability("cap:v1"),
+                self.capability("cap:v2"),
+            )
+        )
+
+        class LastMomentChangeTransport(RecordingTransport):
+            def reaction_capability(self):
+                return next(revisions)
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = AckJournal(Path(directory) / "last-moment.jsonl")
+            transport = LastMomentChangeTransport(capability=self.capability("cap:v2"))
+            pipeline, _, _, _ = foundation(
+                model=FixtureModel("ACK"),
+                transport=transport,
+                ack_journal=journal,
+            )
+            outcome = pipeline.handle_delivery(
+                delivery_id="d-last-moment",
+                event=message("e-last-moment"),
+                actors={"human:zoe": {"kind": "human"}},
+            )
+            self.assertEqual("unavailable", outcome.opportunities[0].transport.delivery)
+            self.assertEqual([], transport.calls)
+            self.assertEqual(
+                ["reserved", "settled"],
+                [record["state"] for record in journal.records()],
+            )
+            self.assertEqual("unavailable", journal.records()[-1]["delivery"])
+
+
+class ReceiptTests(unittest.TestCase):
+    def test_stage_owner_and_prefix_are_enforced(self):
+        valid = [
+            {
+                "request_id": "r",
+                "stage": "observation",
+                "writer": "observation-provider",
+                "body": {
+                    "schema_version": 2,
+                    "trigger_event_id": "e",
+                    "continuity_scope_id": "scope",
+                    "event_count": 1,
+                    "byte_count": 10,
+                    "coverage": {
+                        "has_more_before": False,
+                        "has_more_after": False,
+                        "has_gaps": False,
+                        "truncated_by": [],
+                        "continuity": "session-only",
+                        "has_restart_gap": False,
+                    },
+                    "included_event_ids": ["e"],
+                },
+            }
+        ]
+        self.assertEqual(valid, validate_receipt_stream(valid))
+        forged = deepcopy(valid)
+        forged[0]["writer"] = "transport"
+        with self.assertRaises(ValidationError):
+            validate_receipt_stream(forged)
+
+
+if __name__ == "__main__":
+    unittest.main()

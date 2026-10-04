@@ -1,0 +1,79 @@
+test_allowlists_follow_multiple_rooms_and_route_removal (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_allowlists_follow_multiple_rooms_and_route_removal) ... ok
+test_dashboard_reports_missing_trust_without_granting_it (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_dashboard_reports_missing_trust_without_granting_it) ... ok
+test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_editing_trust_does_not_mutate_aliased_unrelated_yaml_nodes) ... ok
+test_explicit_save_grants_only_selected_routes_and_preserves_host_settings (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_explicit_save_grants_only_selected_routes_and_preserves_host_settings) ... ok
+test_host_permission_failure_is_actionable_without_leaking_exception_text (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_host_permission_failure_is_actionable_without_leaking_exception_text) ... ok
+test_injected_environment_without_home_cannot_select_real_profile (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_injected_environment_without_home_cannot_select_real_profile) ... ok
+test_interrupted_first_save_restores_host_bytes_or_absence (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_interrupted_first_save_restores_host_bytes_or_absence) ... ok
+test_invalid_and_symlinked_host_config_do_not_activate_rooms (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_invalid_and_symlinked_host_config_do_not_activate_rooms) ... ok
+test_ui_discloses_permission_write_and_allows_unchanged_config_repair (tests.v2.test_hermes_attention_trust.AttentionTrustSetupTests.test_ui_discloses_permission_write_and_allows_unchanged_config_repair) ... ok
+test_active_profile_resolution_fails_closed (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_active_profile_resolution_fails_closed) ... ok
+test_backup_stop_before_atomic_link_does_not_block_next_save (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_backup_stop_before_atomic_link_does_not_block_next_save) ... ok
+test_channel_directory_uses_hermes_discovery_file (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_channel_directory_uses_hermes_discovery_file) ... ok
+test_concurrent_first_saves_allow_one_commit (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_concurrent_first_saves_allow_one_commit) ... ok
+test_cross_process_first_saves_allow_one_commit (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_cross_process_first_saves_allow_one_commit) ... ok
+test_custom_profile_uses_current_hermes_home (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_custom_profile_uses_current_hermes_home) ... ok
+test_dashboard_can_upgrade_a_pinned_legacy_config (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_dashboard_can_upgrade_a_pinned_legacy_config) ... ok
+test_default_paths_are_exact_profile_scoped_and_traversal_safe (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_default_paths_are_exact_profile_scoped_and_traversal_safe) ... ok
+test_discord_runtime_status_is_room_scoped (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_discord_runtime_status_is_room_scoped) ... ok
+test_explicit_dashboard_write_requires_private_parent (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_explicit_dashboard_write_requires_private_parent) ... ok
+test_explicit_env_config_precedes_default_path (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_explicit_env_config_precedes_default_path) ... ok
+test_explicit_environment_skips_hermes_profile_resolution (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_explicit_environment_skips_hermes_profile_resolution) ... ok
+test_first_run_bootstrap_creates_private_profile_config (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_first_run_bootstrap_creates_private_profile_config) ... ok
+test_first_save_stop_before_config_publication_leaves_bootstrap (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_first_save_stop_before_config_publication_leaves_bootstrap) ... ok
+test_first_save_stop_before_digest_publication_is_repairable (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_first_save_stop_before_digest_publication_is_repairable) ... ok
+test_inline_profile_is_pinned_by_outer_config (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_inline_profile_is_pinned_by_outer_config) ... ok
+test_interleaved_reader_sees_prior_revision_during_update (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_interleaved_reader_sees_prior_revision_during_update) ... ok
+test_interrupted_update_serves_prior_revision_and_is_repairable (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_interrupted_update_serves_prior_revision_and_is_repairable) ... ok
+test_invalid_change_does_not_replace_config_or_digest (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_invalid_change_does_not_replace_config_or_digest) ... ok
+test_invalid_first_save_creates_no_config_or_digest (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_invalid_first_save_creates_no_config_or_digest) ... ok
+test_literal_and_digest_file_are_rejected_together (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_literal_and_digest_file_are_rejected_together) ... ok
+test_literal_digest_is_read_only (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_literal_digest_is_read_only) ... ERROR
+test_missing_named_custom_profile_does_not_use_machine_home (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_missing_named_custom_profile_does_not_use_machine_home) ... ok
+test_named_machine_dashboard_first_save_matches_gateway_default_path (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_named_machine_dashboard_first_save_matches_gateway_default_path) ... ok
+test_named_machine_dashboard_uses_only_exact_profile_settings (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_named_machine_dashboard_uses_only_exact_profile_settings) ... ok
+test_named_profile_env_must_be_private_and_unambiguous (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_named_profile_env_must_be_private_and_unambiguous) ... ok
+test_orphan_default_digest_fails_closed (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_orphan_default_digest_fails_closed) ... ok
+test_partial_default_config_is_recoverable (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_partial_default_config_is_recoverable) ... ok
+test_placeholder_actor_identity_is_rejected (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_placeholder_actor_identity_is_rejected) ... ok
+test_reader_retries_if_selected_revision_is_replaced (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_reader_retries_if_selected_revision_is_replaced) ... ok
+test_receipts_are_bounded_and_room_attributed (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_receipts_are_bounded_and_room_attributed) ... ok
+test_receipts_are_empty_before_first_setup (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_receipts_are_empty_before_first_setup) ... ok
+test_runtime_and_dashboard_share_hermes_home_resolver (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_runtime_and_dashboard_share_hermes_home_resolver) ... ok
+test_runtime_loader_retries_one_concurrent_revision_change (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_runtime_loader_retries_one_concurrent_revision_change) ... ok
+test_sidecar_config_round_trip_and_conflict (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_sidecar_config_round_trip_and_conflict) ... ok
+test_stale_pre_replace_backup_does_not_block_next_save (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_stale_pre_replace_backup_does_not_block_next_save) ... ok
+test_dashboard_api_maps_profile_errors_and_rejects_non_string_profile (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_dashboard_api_maps_profile_errors_and_rejects_non_string_profile) ... ok
+test_hermes_home_resolver_failure_does_not_silently_fallback (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_hermes_home_resolver_failure_does_not_silently_fallback) ... ok
+test_install_and_verify_packaged_dashboard (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_install_and_verify_packaged_dashboard) ... ok
+test_install_migrates_the_previous_bridge_name (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_install_migrates_the_previous_bridge_name) ... ok
+test_project_declares_dashboard_command_and_package_data (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_project_declares_dashboard_command_and_package_data) ... ok
+test_reinstall_rejects_unmanaged_bytecode (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_reinstall_rejects_unmanaged_bytecode) ... ok
+test_reinstall_removes_only_generated_plugin_api_bytecode (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_reinstall_removes_only_generated_plugin_api_bytecode) ... ok
+test_ui_uses_authenticated_plugin_api_and_restart (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_ui_uses_authenticated_plugin_api_and_restart) ... ok
+test_verify_rejects_modified_asset (tests.v2.test_hermes_dashboard.HermesDashboardInstallTests.test_verify_rejects_modified_asset) ... ok
+
+======================================================================
+ERROR: test_literal_digest_is_read_only (tests.v2.test_hermes_dashboard.HermesDashboardConfigTests.test_literal_digest_is_read_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/tests/v2/test_hermes_dashboard.py", line 1306, in test_literal_digest_is_read_only
+    write_config_document(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        "default",
+        ^^^^^^^^^^
+    ...<2 lines>...
+        environ=environ,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/zmll/.hermes/kanban/boards/nunchi-v2/workspaces/t_ecc91269/nunchi/src/nunchi/integrations/hermes_dashboard_store.py", line 957, in write_config_document
+    raise DashboardConfigError(
+    ...<2 lines>...
+    )
+nunchi.integrations.hermes_dashboard_store.DashboardConfigError: explicit dashboard save environment requires HERMES_HOME; refusing to select the ambient Hermes profile
+
+----------------------------------------------------------------------
+Ran 54 tests in 0.174s
+
+FAILED (errors=1)

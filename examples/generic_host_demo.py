@@ -1,114 +1,103 @@
 #!/usr/bin/env python3
-"""Demo: a NON-cc-connect host adopting the gate via the transport-neutral contract.
+"""Minimal offline V2 host showing contribution and silence ownership."""
 
-This stands in for a plain message-queue / "Slack-style" loop — no cc-connect, no
-Discord, no platform glue. A worker `helpbot` pulls events off a queue and, for
-each one, asks the gate whether to speak BEFORE composing anything. It acts only
-on the transport-neutral decision the adapter returns:
+from __future__ import annotations
 
-    if result.silent:  the host posts nothing
-    else:              the host would compose exactly one turn in result.run_shape
+from nunchi.attention import AttentionEngine, AttentionPolicy, ParticipantProfile
+from nunchi.observation import ObservationProvider, ParticipantBinding
+from nunchi.participant import (
+    ConversationOpportunityScheduler,
+    ParticipantTurnHost,
+    TransportResult,
+)
+from nunchi.pipeline import NunchiV2Pipeline
+from nunchi.receipts import ReceiptJournal
 
-It never composes reply prose — it just shows the routing a real host would do.
-To prove the contract is platform-agnostic, it also derives this host's OWN
-suppression sentinel via ``result.silent_token("<<HOST_NOOP>>")`` — a made-up
-magic string for a transport that suppresses sends by a final-output marker.
-Nothing here references cc-connect's sentinel.
 
-Run live (real classifier):
-    export NUNCHI_CLASSIFIER_MODEL=google/gemini-3.1-flash-lite
-    export OPENROUTER_API_KEY=...
-    PYTHONPATH=src python3 examples/generic_host_demo.py
+class DemoAttention:
+    name = "demo-attention"
+    provider = "offline"
+    model_id = "fixed"
 
-Run offline (pin every verdict, just to see the routing/plumbing):
-    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"PASS","confidences":{"PASS":1,"ACK":0,"ASK":0,"SPEAK":0},"context_checked":[],"reasons":["dev"]}'
-    PYTHONPATH=src python3 examples/generic_host_demo.py
+    def judge(self, *, projection, **_):
+        return {
+            "disposition": "WAKE",
+            "reasons": ["direct demo observation"],
+            "evidence_event_ids": [projection["trigger_event_id"]],
+            "legacy_verdict_confidences": {
+                "PASS": 0.02,
+                "ACK": 0.05,
+                "ASK": 0.1,
+                "SPEAK": 0.95,
+            },
+        }
 
-    # Or inject a different pinned verdict to watch it route a SPEAK:
-    export NUNCHI_CLASSIFIER_TEST_RESULT='{"verdict":"SPEAK","confidences":{"PASS":0,"ACK":0,"ASK":0,"SPEAK":1},"context_checked":[],"reasons":["dev"]}'
-"""
 
-import os
-import sys
-
-from nunchi.adapters.channel import gate
-
-# This host's own suppression marker. It is OUR convention, not Nunchi's — a
-# transport that drops an outbound message when the worker's final output equals
-# this string. (cc-connect has a different one; the gate is agnostic to both.)
-HOST_NOOP_SENTINEL = "<<HOST_NOOP>>"
-
-AGENT = {"id": "helpbot", "role": "participant", "mention_id": "U_HELPBOT"}
-
-# A few canned events off the queue: (label, trigger, recent transcript oldest-first).
-QUEUE = [
-    (
-        "operator asks this worker for substantive help",
-        {"content": "helpbot, can you summarize today's incident timeline?",
-         "author": "dana", "author_kind": "operator", "message_id": "evt-1"},
-        [],
-    ),
-    (
-        "two peers chatting, nobody addressed this worker",
-        {"content": "yeah I'll grab lunch after the deploy", "author": "sam",
-         "author_kind": "peer", "message_id": "evt-2"},
-        [{"content": "deploy's green, merging now", "author": "lee",
-          "author_kind": "peer", "message_id": "evt-1b"}],
-    ),
-    (
-        "trigger just echoes what this worker already said (duplicate)",
-        {"content": "someone should note the cache TTL changed", "author": "lee",
-         "author_kind": "peer", "message_id": "evt-3"},
-        [{"content": "Heads up: cache TTL changed to 60s in this release.",
-          "author": "helpbot", "author_kind": "self", "message_id": "evt-2b"}],
-    ),
-]
+class DemoTransport:
+    def dispatch(self, *, action, wake):
+        print({"room": wake["room"]["id"], "action": action})
+        return TransportResult("sent", "demo")
 
 
 def main() -> int:
-    if not (os.environ.get("NUNCHI_CLASSIFIER_MODEL")
-            or os.environ.get("NUNCHI_CLASSIFIER_TEST_RESULT")):
-        print("Set NUNCHI_CLASSIFIER_MODEL (+OPENROUTER_API_KEY) for a live run, "
-              "or NUNCHI_CLASSIFIER_TEST_RESULT to see routing offline.",
-              file=sys.stderr)
-        return 2
-
-    print(f"[host] generic message-queue worker: {AGENT['id']}")
-    print("[host] asking the gate per event; acting only on result.silent / verdict.\n")
-
-    posted = suppressed = 0
-    for label, trigger, history in QUEUE:
-        result = gate(
-            trigger, history,
-            agent_id=AGENT["id"], agent_role=AGENT["role"],
-            agent_mention_id=AGENT["mention_id"],
-            surface={"type": "generic-queue"}, fail_policy="open",
-        )
-
-        print(f"• {label}")
-        print(f"    trigger : {trigger['content']}")
-        print(f"    verdict : {result.verdict}")
-        if result.silent:
-            suppressed += 1
-            # Transport-neutral branch: just don't post. We ALSO show this host's
-            # own sentinel, to demonstrate the generic suppression-token helper.
-            print("    [host] suppressed (posted nothing)")
-            print(f"    [host] (our suppression marker would be: "
-                  f"{result.silent_token(HOST_NOOP_SENTINEL)!r})")
-        else:
-            posted += 1
-            # Admission only — we route, we do NOT compose the reply here.
-            print(f"    [host] would compose one turn — run_shape: {result.run_shape}")
-            # On a non-PASS verdict the host's sentinel helper yields "" (no suppression).
-            assert result.silent_token(HOST_NOOP_SENTINEL) == ""
-        if result.reasons:
-            print(f"    reason  : {result.reasons[0]}")
-        print()
-
-    print(f"[host] {suppressed} suppressed, {posted} routed for composition "
-          f"— classifier model: {result.classifier_model}")
-    return 0
+    binding = ParticipantBinding(
+        "helpbot",
+        "generic:actor:helpbot",
+        "generic",
+        "room-1",
+        "generic:room-1",
+        names=("Helpbot",),
+    )
+    profile = ParticipantProfile(
+        "helpbot-profile",
+        binding.participant_id,
+        binding.actor_id,
+        "Answer directly and briefly.",
+        "example:trusted",
+        "0" * 64,
+    )
+    receipts = ReceiptJournal()
+    observation = ObservationProvider(binding, receipts=receipts)
+    scheduler = ConversationOpportunityScheduler("helpbot:room-1")
+    host = ParticipantTurnHost(
+        observation=observation,
+        participant=lambda **kwargs: {
+            "kind": "message",
+            "origin_event_id": kwargs["wake"]["trigger_event_id"],
+            "text": "Here is the concise answer.",
+        },
+        transport=DemoTransport(),
+        scheduler=scheduler,
+        receipts=receipts,
+    )
+    pipeline = NunchiV2Pipeline(
+        observation=observation,
+        attention=AttentionEngine(
+            profile=profile,
+            model=DemoAttention(),
+            policy=AttentionPolicy(),
+            receipts=receipts,
+        ),
+        host=host,
+        scheduler=scheduler,
+    )
+    outcome = pipeline.handle_delivery(
+        delivery_id="delivery-1",
+        event={
+            "id": "message-1",
+            "type": "message",
+            "author_id": "generic:actor:zoe",
+            "text": "Helpbot, summarize the result.",
+            "mentioned_actor_ids": [binding.actor_id],
+            "mentions_room": False,
+        },
+        actors={
+            "generic:actor:zoe": {"display_name": "Zoe", "kind": "human"},
+        },
+    )
+    print([record["stage"] for record in receipts.all_records()])
+    return 0 if outcome.opportunities[0].transport.delivery == "sent" else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

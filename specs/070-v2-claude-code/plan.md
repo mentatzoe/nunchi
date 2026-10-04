@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Claude Code Harness
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/claude-code` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from `specs/070-v2-claude-code/spec.md`
@@ -8,7 +11,7 @@
 
 **Accountable owner lane**: `v2-claude-owner`
 
-**Assigned participant / source**: Station — evidence/governance/assignments/station-v2-claude-owner-2026-07-16.md
+**Assigned participant / source**: Claude — evidence/governance/assignments/claude-v2-claude-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/070-v2-claude-code`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/070-v2-claude-code`
 

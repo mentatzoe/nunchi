@@ -1,5 +1,8 @@
 # Implementation Plan: V2 Security and Runtime Provenance
 
+> **Reference only.** Technical design remains useful. Historical workflow and
+> lifecycle instructions are retired. Follow `docs/v2-delivery.md`.
+
 **Branch**: `v2/security-provenance` | **Date**: 2026-07-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Existing slice specification from
@@ -9,7 +12,7 @@
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
+**Assigned participant / source**: Claude — evidence/governance/assignments/claude-v2-security-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 

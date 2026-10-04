@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Parity and Atomic Cutover
 
+> **Reference only.** Product requirements and acceptance scenes remain useful.
+> Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `integration/v2`
 
 **Created**: 2026-07-11
@@ -36,14 +40,14 @@ prove installed-runtime and behavioral parity across adapters and harnesses,
 run staged mixed-room scenes, commit the evidence bundle, and make product and
 release documentation truthful without doing promotion."
 
-**Authority source**: Aleph Vault PR 67 selected design at `bdd1ebb`,
-contract-clarified by PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-integrator`
 
-**Assigned participant / source**: codex-session-2 — evidence/governance/assignments/codex-session-2-v2-integrator-2026-07-16.md
+**Assigned participant / source**: Codex — evidence/governance/assignments/codex-v2-integrator-2026-07-23.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/110-v2-parity-cutover`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/110-v2-parity-cutover`
 

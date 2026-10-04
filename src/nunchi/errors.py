@@ -19,6 +19,6 @@ class InputError(NunchiError):
 
 
 class ValidationError(NunchiError):
-    """Raised when an admission request is invalid."""
+    """Raised when a V2 contract input is invalid."""
 
     label = "validation error"

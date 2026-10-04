@@ -1,0 +1,73 @@
+test_default_install_attention_is_refused_and_falls_back_to_wake (tests.v2.test_hermes_normal_turn.NunchiDefaultInstallTrustGate.test_default_install_attention_is_refused_and_falls_back_to_wake) ... FAIL
+test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_admitted_human_turn_wakes_once_and_delivers_with_sent_receipt) ... ok
+test_cancel_via_stop_makes_no_new_native_invocation (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_cancel_via_stop_makes_no_new_native_invocation) ... ok
+test_delivery_failure_is_recorded_not_sent (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_delivery_failure_is_recorded_not_sent) ... ok
+test_native_approval_control_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_native_approval_control_on_configured_route)
+Owner fa0119a: /approve must reach stock while its participant waits. ... FAIL
+test_ordinary_tool_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_ordinary_tool_on_configured_route)
+Baseline fact: today the plugin blanket-denies tools on configured routes. ... FAIL
+test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_in_configured_room_is_admitted_and_routed_through_nunchi) ... ok
+test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_peer_bot_outside_configured_room_still_falls_through_to_stock_denial) ... ok
+test_plugin_loaded_and_shims_installed (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_plugin_loaded_and_shims_installed) ... ok
+test_stale_run_past_deadline_is_not_delivered (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stale_run_past_deadline_is_not_delivered) ... ok
+test_stock_session_guard_released_after_configured_turn (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stock_session_guard_released_after_configured_turn)
+Baseline fact: Nunchi's lifecycle shim runs stock's ... FAIL
+test_suppressed_turn_makes_no_native_invocation_or_delivery (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_suppressed_turn_makes_no_native_invocation_or_delivery) ... ok
+test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unauthorised_human_in_configured_room_is_still_denied_by_stock_auth) ... ok
+test_unconfigured_room_human_turn_is_pure_stock (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_unconfigured_room_human_turn_is_pure_stock) ... ok
+test_authenticated_human_turn_reaches_model_and_delivers_ack (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_authenticated_human_turn_reaches_model_and_delivers_ack) ... ok
+test_native_approval_blocks_dangerous_terminal_until_approve (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_native_approval_blocks_dangerous_terminal_until_approve) ... ok
+test_native_deny_returns_blocked_result_to_model (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_native_deny_returns_blocked_result_to_model) ... ok
+test_ordinary_tool_runs_through_native_dispatcher (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_ordinary_tool_runs_through_native_dispatcher) ... ok
+test_peer_bot_is_dropped_by_stock_default_allow_bots_none (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_peer_bot_is_dropped_by_stock_default_allow_bots_none) ... ok
+test_unauthorised_human_is_dropped_before_model (tests.v2.test_hermes_normal_turn.StockHermesNormalTurnBaseline.test_unauthorised_human_is_dropped_before_model) ... ok
+
+======================================================================
+FAIL: test_default_install_attention_is_refused_and_falls_back_to_wake (tests.v2.test_hermes_normal_turn.NunchiDefaultInstallTrustGate.test_default_install_attention_is_refused_and_falls_back_to_wake)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-minimum/tests/v2/test_hermes_normal_turn.py", line 350, in test_default_install_attention_is_refused_and_falls_back_to_wake
+    self.assertEqual(
+AssertionError: {} != {'code': 'provider-failure', 'detail': 'participant attention model failed'}
+- {}
++ {'code': 'provider-failure', 'detail': 'participant attention model failed'} : default install: stock plugin_llm trust gate refuses Nunchi's provider/model override; attention receipt recorded {'code': 'provider-failure', 'detail': 'participant attention model failed'} and the turn woke via ERROR_FALLBACK. Either the setup flow must write plugins.entries.nunchi.llm.allow_*_override or the attention path must not pass overrides.
+
+======================================================================
+FAIL: test_native_approval_control_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_native_approval_control_on_configured_route)
+Owner fa0119a: /approve must reach stock while its participant waits.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-minimum/tests/v2/test_hermes_normal_turn.py", line 499, in test_native_approval_control_on_configured_route
+    self.assertTrue(
+AssertionError: False is not true : stock approval never parked on a configured route (tool blanket-denied before approval?). turns=2 last_tool_msg={"error": "Nunchi blocks Hermes tools on configured routes because Hermes 0.19.0 has no final-effect hook after approval. Continue without a tool or use stock Hermes outside this room."} deliveries=['done after approval'] receipts=[('observation', None), ('attention', None), ('participant-host', 'WAKE'), ('transport', 'sent')]
+
+======================================================================
+FAIL: test_ordinary_tool_on_configured_route (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_ordinary_tool_on_configured_route)
+Baseline fact: today the plugin blanket-denies tools on configured routes.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-minimum/tests/v2/test_hermes_normal_turn.py", line 469, in test_ordinary_tool_on_configured_route
+    self.assertIn("model:", tool_result, f"read_file did not execute natively on a configured route; model received: {tool_result[:200]}")
+AssertionError: 'model:' not found in '{"error": "Nunchi blocks Hermes tools on configured routes because Hermes 0.19.0 has no final-effect hook after approval. Continue without a tool or use stock Hermes outside this room."}' : read_file did not execute natively on a configured route; model received: {"error": "Nunchi blocks Hermes tools on configured routes because Hermes 0.19.0 has no final-effect hook after approval. Continue without a tool or use stock Hermes outside this room."}
+
+======================================================================
+FAIL: test_stock_session_guard_released_after_configured_turn (tests.v2.test_hermes_normal_turn.NunchiOnInstalledHostNormalTurn.test_stock_session_guard_released_after_configured_turn)
+Baseline fact: Nunchi's lifecycle shim runs stock's
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "$WS/harness-minimum/tests/v2/test_hermes_normal_turn.py", line 412, in test_stock_session_guard_released_after_configured_turn
+    self.assertEqual(
+AssertionError: Lists differ: [] != ['agent:main:discord:group:42011:100']
+
+Second list contains 1 additional elements.
+First extra element 0:
+'agent:main:discord:group:42011:100'
+
+- []
++ ['agent:main:discord:group:42011:100'] : stock _active_sessions guard still held after the Nunchi-wrapped turn finished
+
+----------------------------------------------------------------------
+Ran 20 tests in 34.211s
+
+FAILED (failures=4)
+⚡ Interrupted during API call.

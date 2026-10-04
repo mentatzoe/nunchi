@@ -1,5 +1,9 @@
 # Existing Slice Specification: V2 Security and Runtime Provenance
 
+> **Reference only.** Product requirements and assurance boundaries remain
+> useful. Historical workflow and lifecycle instructions are retired. Follow
+> `docs/v2-delivery.md`.
+
 **Feature Branch**: `v2/security-provenance`
 
 **Created**: 2026-07-11
@@ -25,14 +29,14 @@ establishes `READY` before `ACTIVE`)
 operational-safety, credential, provenance, adversarial-evidence, and
 residual-risk obligations after all component slices are ready."
 
-**Authority source**: Aleph Vault PR 67 selected design at `bdd1ebb`,
-contract-clarified by PR 68 at `c834e8c`
+**Authority source**: repository-owned `docs/architecture/v2-selected-design.md`
+and `docs/contracts/nunchi-v2.md`; Aleph Vault `bdd1ebb`/`c834e8c` are provenance
 
 **Umbrella program**: `specs/001-nunchi-v2-program/`
 
 **Accountable owner lane**: `v2-security-owner`
 
-**Assigned participant / source**: cc-session-blind — evidence/governance/assignments/cc-session-blind-v2-security-owner-2026-07-16.md
+**Assigned participant / source**: Claude — evidence/governance/assignments/claude-v2-security-owner-2026-07-24.md
 
 **SpecKit binding**: planning uses `python3 scripts/run_slice_workflow.py run nunchi-plan specs/100-v2-security-provenance`; delivery uses `python3 scripts/run_slice_workflow.py run speckit specs/100-v2-security-provenance`
 

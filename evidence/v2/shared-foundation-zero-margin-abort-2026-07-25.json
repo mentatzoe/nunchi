@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "record_type": "aborted_live_runner_launch",
+  "subject": {
+    "evidence_commit": "755091b749876fa0954b42a9d5e86e2424c37b8b",
+    "wheel_sha256": "f2852390c7e4fc8beff03091e6a9478ff22186c7030846f319c5b241d00eb9c1",
+    "runtime": "/private/tmp/nunchi-755091b-live-install.EaNbcD/venv/bin/python",
+    "runner": "/private/tmp/nunchi-v2-live-755091b/launch-v2-runner.py",
+    "launch_identity": "ai.nunchi.v2live.runner"
+  },
+  "input": {
+    "config_path": "/private/tmp/nunchi-v2-live-755091b/config/vigil-suppress-zero.json",
+    "actual_config_sha256": "13ef4927832dd51b512766b59dc40be41b33aeab2e0aba5f319299a58e25a628",
+    "supplied_config_sha256": "10e7b14fb70903156f2c026d9d490a79ec1a2cfe8b9ff6285fc40cdd9de4b8da"
+  },
+  "execution": {
+    "started_at_utc": "2026-07-25T01:04:25.161Z",
+    "output_recorded_at_utc": "2026-07-25T01:04:28.299Z",
+    "workdir": "/Users/zmll/.codex/worktrees/aa9d/nunchi",
+    "command": "LC_ALL=C shasum -a 256 /private/tmp/nunchi-v2-live-755091b/config/vigil-suppress-zero.json\nlaunchctl submit -l ai.nunchi.v2live.runner -o /private/tmp/nunchi-v2-live-755091b/runner-suppress-zero.stdout.log -e /private/tmp/nunchi-v2-live-755091b/runner-suppress-zero.stderr.log -- /private/tmp/nunchi-755091b-live-install.EaNbcD/venv/bin/python /private/tmp/nunchi-v2-live-755091b/launch-v2-runner.py /private/tmp/nunchi-v2-live-755091b/config/vigil-suppress-zero.json 10e7b14fb70903156f2c026d9d490a79ec1a2cfe8b9ff6285fc40cdd9de4b8da\nsleep 3\nlaunchctl print gui/501/ai.nunchi.v2live.runner | rg -n 'state =|pid =|last exit code' | head -n 20\ntail -n 20 /private/tmp/nunchi-v2-live-755091b/runner-suppress-zero.stderr.log\ntail -n 18 /private/tmp/nunchi-v2-live-755091b/transport.stderr.log",
+    "tool_process_exit_code": 0,
+    "runner_last_exit_code": 3,
+    "raw_output": "13ef4927832dd51b512766b59dc40be41b33aeab2e0aba5f319299a58e25a628  /private/tmp/nunchi-v2-live-755091b/config/vigil-suppress-zero.json\n5:\tstate = spawn scheduled\n34:\tlast exit code = 3\nCodex V2 runner error: adapter config bytes do not match trusted sha256 pin\n2026-07-25 00:47:45,210 INFO nunchi.mcp_discord.binding: nunchi-mcp-discord listening on http://127.0.0.1:3994/mcp (transport only — no gate logic)\nINFO:     Started server process [64331]\nINFO:     Waiting for application startup.\n2026-07-25 00:47:45,251 INFO mcp.server.streamable_http_manager: StreamableHTTP session manager started\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://127.0.0.1:3994 (Press CTRL+C to quit)\n2026-07-25 00:47:45,395 INFO nunchi.mcp_discord.runner: gateway connected (identifying)\n2026-07-25 00:48:37,478 INFO mcp.server.streamable_http_manager: Created new transport with session ID: 9ffc6b6e1f554f03bd534611bb428163\n2026-07-25 00:48:37,495 INFO mcp.server.lowlevel.server: Processing request of type ListToolsRequest\n2026-07-25 00:48:37,498 INFO mcp.server.lowlevel.server: Processing request of type CallToolRequest\n2026-07-25 01:51:26,708 INFO mcp.server.lowlevel.server: Processing request of type CallToolRequest\n2026-07-25 02:00:09,614 INFO mcp.server.streamable_http_manager: Created new transport with session ID: 9c57bf2e7ac843f7acf3fb559be350b8\n2026-07-25 02:00:09,628 INFO mcp.server.lowlevel.server: Processing request of type ListToolsRequest\n2026-07-25 02:00:09,631 INFO mcp.server.lowlevel.server: Processing request of type CallToolRequest\n"
+  },
+  "attribution": {
+    "source_rollout_id": "019f9432-9300-7dd1-8225-d7f10f921968",
+    "source_tool_call_id": "call_st3beJHaY5M4L1mjBQ8Z5Rq7",
+    "source_jsonl_records": "7543-7544",
+    "source_jsonl_records_sha256": "677b3aecc39cc0be3647d3d0d20b179c0ed3a7b215081093df39c7afdc25a4ff",
+    "redactions": []
+  },
+  "result": {
+    "status": "rejected_before_registration",
+    "admitted_event": false,
+    "social_result": false,
+    "reason": "The supplied SHA-256 pin did not equal the configuration bytes."
+  }
+}

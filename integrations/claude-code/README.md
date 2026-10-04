@@ -1,196 +1,207 @@
-# nunchi for Claude Code — one judgment per turn, at wake
+# Nunchi V2 for Claude Code
 
-## The shape
+This integration gives one Claude Code participant presence in a live shared
+Discord room: it observes conversation, spends attention through its **own**
+delegated model, contributes or stays silent, and proposes privileged actions
+that the host authorizes before any effect.
 
-Nunchi asks one question, once, before an agent takes a turn: *does this agent
-have something to add for these people?* For Claude Code that judgment happens
-at **wake time** — the `UserPromptSubmit` hook — and nowhere else:
+It is a platform wrapper, not a second Nunchi. Observation, attention,
+scheduling, the participant host, the privileged-action coordinator, and the
+Discord consumer transport all come from the shared V2 owners described in
+[`docs/platform-v2.md`](../../docs/platform-v2.md). This directory owns only
+the Claude Code specifics: native identity, the headless participant, session
+continuity, private state, and the operator surface.
 
-- **PASS (confident)** → the prompt is blocked before any LLM inference runs.
-  The agent never wakes; nothing is composed; nothing is sent.
-- **PASS (uncertain)** → **DEFER**: the gate abstains. The message reaches the
-  agent with the gate's hesitation noted, and the agent's own model — the thing
-  that actually holds the room — decides. It may reply; it may choose silence.
-  A small fast gate only silences what it can confidently judge.
-- **SPEAK / ACK / ASK** → admitted. A short in-band note names the message this
-  turn answers, so composition stays anchored to its origin even if more room
-  lines land while the agent is thinking. What the agent says — and whether it
-  says anything — is the agent's.
+There is no prompt gate, no `UserPromptSubmit` hook, and no V1 verdict path.
+Nunchi V2 does not sit in front of your interactive Claude Code session.
 
-There is deliberately **no send-time re-judgment**. An earlier version ran a
-second hook (`PreToolUse`) that re-judged composed replies against the newest
-transcript line; a peer message landing mid-composition would steal the causal
-role and the reply died as a false PASS. Patching that split required a permit
-side-store — state whose only job was keeping two judgments consistent. Both
-were removed on 2026-07-10: one judgment, made once, carried in-band.
-(`tests/test_no_second_judgment.py` enforces that this stays true.)
+## How a turn actually runs
 
-Once a turn is admitted, the send itself rides on the agent's judgment — the
-same trust extended to any participant who has the floor.
-
-## What it does
-
-`nunchi_prompt_gate.py` is the single Claude Code hook. When a submitted prompt
-contains a `<channel ...>` tag (the format used by Discord/channel transport
-adapters), the hook:
-
-1. Parses the channel tag: sender, chat ID, message body.
-2. Parses the session transcript into a history window for that channel
-   (inbound messages + agent self-sends).
-3. Calls `nunchi-channel` with trigger + history + agent identity.
-4. Emits one of the three decisions above.
-
-Suppressing on a confident PASS costs one lightweight gate call instead of a
-full frontier-model turn.
-
-## What it does NOT do
-
-- **Operator prompts** (no `<channel>` tag) always pass through instantly —
-  zero gate calls, no receipt, no note. The operator is never gated.
-- **No reply prose, ever.** Admission results carry no `message`/`reply`/
-  `draft`/`content`; the in-band notes state admission facts (verdict, origin,
-  hesitation) and explicitly leave the choice with the agent.
-- **Transport bot-deafness** (the official Claude Code Discord plugin ignoring
-  messages from other bots) is a separate, upstream concern. An
-  operator-carried fix lives in [`transport-patch/`](transport-patch/README.md).
-
-## Hook output contract
-
-The hook always exits 0.
-
-**Block** (confident PASS):
-```json
-{"decision": "block", "reason": "nunchi gate: PASS — <first reason>."}
+```text
+Discord  ->  shared MCP transport  ->  observation  ->  attention (your model)
+         ->  participant host  ->  headless `claude` turn  ->  action or silence
+         ->  host commit point  ->  native send  ->  transport receipt
 ```
 
-**DEFER** (uncertain PASS) — the prompt goes through with the gate's hesitation
-added to the turn's context:
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "nunchi: the gate leaned PASS on this message but not confidently (confidences: {...}). It abstains rather than silence you. Read the room with your own judgment — replying and staying silent are both fine outcomes; if you stay silent, simply send nothing this turn."
-  }
-}
-```
+The participant runs as a **separate headless `claude` process** with no tools,
+no MCP servers, and no inherited settings. It cannot reach Discord itself. The
+only way its words enter the room is by returning one action to the host, which
+dispatches it at a single recorded output-commit point.
 
-**Admit** (SPEAK / ACK / ASK) — the admission note travels with the turn:
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "nunchi: admitted (SPEAK) — this turn answers message <id> from <author>. The gate judged only that a turn is open; what you say, and whether you say anything at all, is yours."
-  }
-}
-```
+Concretely, every turn is invoked with:
 
-**Operator prompt / any gate error**: no stdout; exit 0. The hook is
-**permanently fail-open** — a broken gate must never silence the operator or
-wedge the session.
+| Flag | Why |
+|---|---|
+| `--tools ""` | no built-in tools at all |
+| `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` | no MCP servers, including any Discord plugin you use interactively |
+| `--setting-sources ""` | no user, project, or local settings |
+| `--disable-slash-commands` | no skills or custom commands |
+| `--permission-mode manual` | nothing is auto-approved |
+| `--system-prompt <profile>` | identity comes from the pinned profile, not the coding-agent prompt |
+| `--json-schema <closed envelope>` | the turn returns exactly one action envelope |
+| `--session-id` / `--resume` | continuity is pinned to this participant, room, and profile |
 
-## settings.json configuration
-
-One `UserPromptSubmit` entry (no matcher — the hook self-selects on the
-`<channel>` tag). Prefer `nunchi-install`, which writes stable wrappers under
-`~/.claude/hooks/` and prints this snippet:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/you/.claude/hooks/nunchi-user-prompt-submit.sh",
-            "timeout": 35
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Upgrading from the two-hook layout:** delete the old `PreToolUse` entry from
-`settings.json` (exact file names in `docs/INSTALL.md`). `nunchi-install
-upgrade` removes the retired hook files themselves (with backups) and
-`nunchi-install verify` flags leftovers, but `settings.json` is operator-owned
-— the installer never edits it.
-
-**Note:** an active Claude Code session must be restarted for `settings.json`
-changes to be picked up.
-
-## Environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `NUNCHI_HOOK_AGENT_ID` | `agent` | Agent identifier in the nunchi payload. |
-| `NUNCHI_HOOK_MENTION_ID` | _(unset)_ | Optional @mention handle. This is the **platform mention token** — on Discord the numeric snowflake — **not** the display name (a display name here makes the gate blind to real @-mentions; observed live 2026-07-08). Names belong in `NUNCHI_HOOK_ALIASES`. |
-| `NUNCHI_HOOK_ALIASES` | _(unset)_ | Comma-separated additional identities this agent answers to → `agent.aliases`. |
-| `NUNCHI_HOOK_PEER_BOTS` | _(empty)_ | Comma-separated usernames treated as `peer_bot` (all others `human`). |
-| `NUNCHI_HOOK_HISTORY_WINDOW` | `25` | Max transcript events included as history (most recent N). Raise it for busy channels. |
-| `NUNCHI_HOOK_TOOL_PATTERN` | `__reply$` | Regex identifying the agent's own outbound sends in the transcript (history only). |
-| `NUNCHI_HOOK_TIMEOUT` | `30` | Timeout in seconds for the nunchi-channel subprocess. |
-| `NUNCHI_HOOK_LOG` | `~/.claude/nunchi-gate-receipts.jsonl` | Per-call receipt log (JSONL). |
-| `NUNCHI_CHANNEL_BIN` | `shutil.which("nunchi-channel")` | Path to the nunchi-channel binary. |
-| `NUNCHI_DEFER` | _(on)_ | Kill switch. Set `off`/`0`/`false`/`no` to make every PASS block regardless of confidence. |
-| `NUNCHI_DEFER_MARGIN` | `0.25` | A PASS is *uncertain* when the best alternative verdict is within this margin (inclusive). Values outside [0, 1] or non-finite fall back to the default. Placeholder pending calibration (see `DEFER_EVAL.md`). |
-
-## Receipts log format
-
-One JSON line per gate decision (telemetry only — receipts live outside the
-conversation surface):
-
-```json
-{
-  "ts": "2026-07-10T12:00:00+00:00",
-  "direction": "inbound",
-  "session_id": "abc123",
-  "chat_id": "1488717251212476569",
-  "trigger_message_id": "1515760096783761541",
-  "trigger_author": "decisionparalysis",
-  "history_len": 12,
-  "verdict": "PASS",
-  "silent": true,
-  "action": "block-pass",
-  "elapsed_ms": 38.4,
-  "reasons": ["conversation is still active"]
-}
-```
-
-`action` values:
-- `block-pass` — confident PASS; prompt blocked before the LLM
-- `defer-uncertain-pass` — uncertain PASS; gate abstained, turn handed to the
-  agent's own judgment (these rows are the offline eval corpus — see
-  `DEFER_EVAL.md`)
-- `allow-<verdict>` — admitted (e.g. `allow-speak`)
-- `allow-gate-error` — gate failed or returned a malformed directive; fail-open applied (always)
-- `allow-envelope-error` — channel tag missing required attributes; passed through unjudged (no bound verdict exists to attach)
-
-(`direction: inbound` is kept for continuity with logs written before the
-send-time hook was retired.)
+The process environment is an explicit allowlist. The shared Discord
+output-authorization key and the attention classifier credential are **never**
+in it, so a participant turn cannot forge transport authorization. Its Claude
+Code configuration root is private to this room's state directory, so sessions
+never cross rooms, participants, or your own Claude Code state.
 
 ## Requirements
 
-- Python 3.11+ stdlib only; no third-party dependencies.
-- `nunchi-channel` binary installed (via `pip install nunchi` or pointing
-  `NUNCHI_CHANNEL_BIN` at the module: `python3 -m nunchi.adapters.channel`).
-- A configured classifier environment for `nunchi-channel`
-  (`NUNCHI_CLASSIFIER_MODEL` + `OPENROUTER_API_KEY` or equivalent).
+- Nunchi V2 installed from a release artifact (`pip install nunchi`); no
+  editable install, repository import, or `PYTHONPATH` assistance.
+- The `claude` executable on a trusted `PATH`, authenticated for the identity
+  this participant should use.
+- A running shared Nunchi Discord MCP transport
+  (`nunchi-mcp-discord`, see [`../mcp-discord/README.md`](../mcp-discord/README.md))
+  with this participant registered to the room.
+- A Discord bot identity for this participant that is distinct from every other
+  participant in the room.
 
----
+## Configure
 
-# transport-patch — hearing peer bots on the official Discord plugin
+Create the participant profile. Its digest is pinned in the runtime config, so
+a swapped or edited profile fails closed rather than silently changing who is
+speaking:
 
-The hook gates what the session hears, but the official Claude Code Discord
-plugin (`anthropics/claude-plugins-official`) drops every bot-authored message
-before its own access control runs — peer agents are never delivered at all,
-allowlisted or not (upstream issues #1153/#1559, open).
+```json
+{
+  "profile_id": "vigil-default",
+  "participant_id": "vigil",
+  "actor_id": "discord:actor:149",
+  "instructions": "You care about security and implementation correctness. Contribute when you can move the room forward; stay quiet otherwise.",
+  "provenance": "trusted:operator/vigil@2026-07-25"
+}
+```
 
-[`transport-patch/`](transport-patch/README.md) carries the operator-applied
-patch (drop only self-messages; the plugin's existing `gate()`/`allowFrom`
-access control remains the authorization layer), exact apply instructions,
-and a live verification recipe for confirming a peer-bot message reaches the
-session. Applying it is a local step on your own plugin checkout; the
-upstream fix is pending.
+```sh
+sha256sum profile.json
+```
+
+Then the runtime config (`claude-code-room.json`):
+
+```json
+{
+  "schema_version": 2,
+  "binding": {
+    "participant_id": "vigil",
+    "actor_id": "discord:actor:149",
+    "platform": "discord",
+    "room_id": "152",
+    "continuity_scope_id": "discord:channel:152"
+  },
+  "profile": {
+    "path": "/etc/nunchi/profile.json",
+    "sha256": "<sha256 of profile.json>"
+  },
+  "attention": {
+    "policy": {"preattention_enabled": true},
+    "model": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-haiku-4.5",
+      "api_key_env": "NUNCHI_CLASSIFIER_API_KEY"
+    }
+  },
+  "limits": {},
+  "state_directory": "/var/lib/nunchi/vigil-152",
+  "transport": {
+    "url": "http://127.0.0.1:3993/mcp",
+    "timeout_seconds": 30,
+    "output_key_env": "NUNCHI_DISCORD_OUTPUT_KEY"
+  },
+  "claude_code": {
+    "model": "claude-sonnet-5",
+    "session_mode": "persistent",
+    "timeout_seconds": 300
+  }
+}
+```
+
+`output_key_env` must name a variable that is **not** in the participant
+environment allowlist; the runtime refuses to start otherwise.
+
+Privileged actions are disabled unless you add a pinned policy:
+
+```json
+"authorization": {
+  "policy_path": "/etc/nunchi/authorization-policy.json",
+  "policy_sha256": "<sha256 of the policy file>",
+  "workspace_root": "/srv/nunchi/vigil-workspace"
+}
+```
+
+The inventoried privileged effect for this surface is exactly one:
+`workspace.file.write`, confined to `workspace_root`. Omit `workspace_root` and
+that capability has no executor at all — there is no ambient default
+directory. Paths that are absolute, contain `..`, resolve outside the root, or
+traverse a symbolic link are refused before anything is written, and a
+completed write is confirmed by reading the exact bytes back.
+
+Speaking in the room is deliberately **not** a privileged capability. Ordinary
+contribution is guarded by attention and the host's commit point; an operator
+grant is for effects outside the conversation.
+
+Room content is never authority. Every privileged proposal is re-verified
+against the current policy immediately before dispatch, and each grant permits
+at most one logical effect.
+
+## Run
+
+The runtime pins its own configuration by digest:
+
+```sh
+export NUNCHI_CLAUDE_CODE_CONFIG_SHA256="$(sha256sum claude-code-room.json | cut -d' ' -f1)"
+nunchi-claude-code-room-runner --config claude-code-room.json
+```
+
+## Diagnostics
+
+```sh
+nunchi-claude-code-room-runner --probe
+nunchi-claude-code-room-runner --probe --config claude-code-room.json
+```
+
+The configured probe reports the exact binding and the guarantees this surface
+claims:
+
+```json
+{"actor_id":"discord:actor:149","configured":true,"generation":2,
+ "participant_id":"vigil","participant_tools_enabled":false,
+ "privileged_actions_enabled":false,"product":"nunchi","room_id":"152",
+ "send_time_social_judgment":false,"shared_discord_transport":true,
+ "surface":"claude-code","v1_fallback":false}
+```
+
+## Restart, rollback, and state
+
+- `state_directory` holds observations, receipts, the session pin, the
+  authorization journal, and the participant's private Claude Code config.
+  Back it up as one unit; it contains conversation content.
+- Restart discards all continuation authority and cancels active and pending
+  work. Retained events are **not** promoted into a new opportunity, so a
+  restart never revives a stale turn or a pending approval.
+- A transport interruption records an explicit continuity gap rather than
+  pretending coverage was complete.
+- To roll back, stop the runner and reinstall the previous release; the state
+  directory format is pinned by `schema_version` and refuses a mismatch.
+
+## Verification
+
+Platform conformance for this surface:
+
+```sh
+python3 -m unittest tests.v2.test_claude_code
+```
+
+Shared owners this integration reuses:
+
+```sh
+python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_surfaces \
+  tests.v2.test_runtime_hardening
+```
+
+What deterministic tests do **not** establish is stated in
+[`evidence/v2/claude-code/README.md`](../../evidence/v2/claude-code/README.md):
+installed-artifact and live real-room behaviour are proven separately, and are
+not claimed here.
