@@ -52,14 +52,20 @@ jobs:
             echo "::error::The NUNCHI_OPENROUTER secret is not set."
             exit 1
           fi
+          # The runner exits non-zero when any call failed; write the summary
+          # first so the failures are visible.
+          status=0
           python -m evals.behavior.run \
             --models "$MODELS" \
             --runs "$RUNS" \
             --scenes "$SCENES" \
             --temperature "$TEMPERATURE" \
             --workers 12 \
-            --out behavior-eval-out > /dev/null
-          cat behavior-eval-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+            --out behavior-eval-out > /dev/null || status=$?
+          if [ -f behavior-eval-out/summary.md ]; then
+            cat behavior-eval-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
       - name: Upload the results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

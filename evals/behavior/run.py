@@ -366,6 +366,28 @@ def summarize(
         "move is not simulated yet; those runs count as *agent decides*. See",
         "`evals/behavior/score.py` for the grades.",
         "",
+    ]
+    failed = [record for record in records if record["provider_error"]]
+    if failed:
+        # A failed call wakes the agent under the default policy, so it would
+        # read as "agent decides". Say up front that the results are incomplete.
+        lines += [
+            "## Provider errors",
+            "",
+            f"**{len(failed)} of {meta['calls']} calls failed, so these results are incomplete.**",
+            "",
+            "| Model | Errors | First error |",
+            "|---|---|---|",
+        ]
+        for model in models:
+            mine = [record for record in failed if record["model"] == model]
+            if mine:
+                engine_error = mine[0].get("decision", {}).get("error", {})
+                first = mine[0].get("error") or engine_error.get("detail") or "unknown"
+                first = first.replace("|", "/").replace("\n", " ")
+                lines.append(f"| `{model}` | {len(mine)} | {first[:300]} |")
+        lines.append("")
+    lines += [
         "## Per model",
         "",
         "| Model | Moments | Fits | Miss | Unlisted | Agent decides | Step 1 over-suppress | Step 1 over-wake | Nunchi-sent mhm | Cited facts | Errors | Median ms |",
@@ -516,6 +538,9 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize(scenes, models, records, together, meta)
     (out / "summary.md").write_text(summary, encoding="utf-8")
     print(summary)
+    if meta["provider_errors"]:
+        print(f"{meta['provider_errors']} provider error(s): the results are incomplete", file=sys.stderr)
+        return 1
     return 0
 
 
