@@ -213,8 +213,10 @@ A tagged host-facing union on `status`:
 - **`ack`** — required exactly when the delegated classifier selects ACK. It
   records the configured reaction, trusted ACK-policy provenance, and current
   authenticated native `permissions_revision`. ACK can remain ACK only while
-  that exact capability still permits the reaction. Disabled or unsupported
-  ACK widens to DEFER and never becomes suppression.
+  that exact capability still permits the reaction and the trigger is a
+  message; any other trigger cannot carry the reaction, so ACK is
+  unsupported there. Disabled or unsupported ACK widens to DEFER and never
+  becomes suppression.
 
 `@3` adds the ACK disposition, the two ACK transitions, capability-defer, and
 the ACK authority audit. These are additive product outcomes but a breaking

@@ -223,6 +223,23 @@ def _context_byte_count(
     return len(_canonical_bytes({"actors": actors, "events": events}))
 
 
+# Actor values that carry no fact and never replace a known one.
+_UNINFORMATIVE_ACTOR_VALUES = {"display_name": "", "kind": "unknown"}
+
+
+def _merged_actor(
+    known: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge actor facts so a less informative record never erases known ones."""
+    merged = dict(known or {})
+    for name, value in incoming.items():
+        if name in merged and value == _UNINFORMATIVE_ACTOR_VALUES.get(name):
+            continue
+        merged[name] = value
+    return merged
+
+
 class ObservationProvider:
     """One participant/room observation provider.
 
@@ -636,7 +653,8 @@ class ObservationProvider:
                     insert_at = index
                     break
         self._events.insert(insert_at, retained)
-        self._actors.update(checked_actors)
+        for actor_id, actor in checked_actors.items():
+            self._actors[actor_id] = _merged_actor(self._actors.get(actor_id), actor)
         self._trim_retention()
 
     def _trim_retention(self) -> None:
@@ -790,9 +808,44 @@ class ObservationProvider:
                     selected.add(related)
                     pending.append(related)
 
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
+        # Retained messages that directly address this participant (exact
+        # actor mention, or a reply to one of its own messages) stay as
+        # context ahead of newer chatter.  This surfaces transport facts only;
+        # it does not decide relevance or mark anything handled.
+        self_id = self.binding.actor_id
+        own_ids = {
+            event["id"]
+            for event in events
+            if event["type"] == "message" and event["author_id"] == self_id
+        }
+        addressed: set[int] = set()
+        for index, event in enumerate(events):
+            if (
+                index in required
+                or event["type"] != "message"
+                or event["author_id"] == self_id
+                or not (
+                    self_id in event["mentioned_actor_ids"]
+                    or event.get("reply_to_event_id") in own_ids
+                )
+            ):
+                continue
+            timestamp = _event_timestamp(event)
+            if timestamp is None or timestamp >= cutoff:
+                addressed.add(index)
+        selected |= addressed
+
+        def removal_order() -> list[int]:
+            # Ordinary context goes first, then direct address; each oldest
+            # first, so the newest direct address is kept longest.
+            optional = selected - required
+            return sorted(optional - addressed) + sorted(optional & addressed)
+
         truncated: set[str] = set()
         if len(selected) > self.limits.snapshot_events:
-            removable = sorted(selected - required)
+            removable = removal_order()
             while len(selected) > self.limits.snapshot_events and removable:
                 selected.remove(removable.pop(0))
                 truncated.add("events")
@@ -802,8 +855,6 @@ class ObservationProvider:
                 "trigger relation closure exceeds the configured event budget"
             )
 
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
         for index in sorted(selected - required):
             timestamp = _event_timestamp(events[index])
             if timestamp is not None and timestamp < cutoff:
@@ -824,7 +875,7 @@ class ObservationProvider:
                 <= self.limits.snapshot_bytes
             ):
                 break
-            removable = sorted(selected - required)
+            removable = removal_order()
             if not removable:
                 raise SnapshotUnavailable(
                     "trigger relation closure exceeds the configured byte budget"

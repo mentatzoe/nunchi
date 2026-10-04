@@ -80,6 +80,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 ### Fixed
 
 - Discord REST errors no longer echo the bot token into error text (#88).
+- Three defects from #94. An older message that mentions the participant or
+  replies to one of its messages stays in the attention snapshot, newest first
+  within the event, byte, and age limits, instead of dropping out after 24
+  newer events. An actor record with kind `unknown` or no display name, such as
+  a Discord reactor, no longer erases a known name or kind. ACK on a trigger
+  that is not a message (a reaction or a join) widens to DEFER as unsupported
+  instead of reacting to that event.
 
 ### Removed
 

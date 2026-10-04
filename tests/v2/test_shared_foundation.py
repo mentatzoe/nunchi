@@ -470,6 +470,146 @@ class ObservationTests(unittest.TestCase):
             [event["id"] for event in snapshot["events"]],
         )
 
+    def test_older_direct_mention_survives_newer_chatter(self):
+        pipeline, model, _, _ = foundation()
+        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        for index in range(1, 30):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(
+                    f"e{index}",
+                    text=f"message {index}",
+                    mentioned_actor_ids=["discord:bot:9"] if index == 2 else [],
+                ),
+                actors=actors,
+            )
+        pipeline.handle_delivery(
+            delivery_id="d30",
+            event=message("e30", text="message 30"),
+            actors=actors,
+        )
+
+        projection = model.calls[0][1]
+        self.assertEqual(
+            ["e2", *(f"e{index}" for index in range(8, 31))],
+            [event["id"] for event in projection["events"]],
+        )
+        self.assertTrue(projection["coverage"]["has_more_before"])
+        self.assertTrue(projection["coverage"]["has_gaps"])
+        self.assertIn("events", projection["coverage"]["truncated_by"])
+
+    def test_older_reply_to_own_message_survives_newer_chatter(self):
+        pipeline, _, _, _ = foundation()
+        pipeline.observation.observe(
+            delivery_id="d-own",
+            event=message("e-own", "discord:bot:9", "my earlier answer"),
+            actors={"discord:bot:9": {"display_name": "Vigil", "kind": "bot"}},
+        )
+        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        pipeline.observation.observe(
+            delivery_id="d-reply",
+            event=message("e-reply", text="why that way?", reply_to_event_id="e-own"),
+            actors=actors,
+        )
+        for index in range(28):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}", text=f"message {index}"),
+                actors=actors,
+            )
+
+        snapshot = pipeline.observation.build_snapshot("e27")
+        ids = [event["id"] for event in snapshot["events"]]
+        self.assertEqual(["e-reply", *(f"e{index}" for index in range(5, 28))], ids)
+
+    def test_direct_address_is_kept_newest_first_within_budgets(self):
+        stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        mention = ["discord:bot:9"]
+        events = (
+            message(
+                "e-stale",
+                text="stale mention",
+                mentioned_actor_ids=mention,
+                timestamp=stale.replace("+00:00", "Z"),
+            ),
+            message("e-older", text="older mention", mentioned_actor_ids=mention),
+            message("e-newer", text="newer mention", mentioned_actor_ids=mention),
+            message("e-chat1", text="chatter one"),
+            message("e-chat2", text="chatter two"),
+            message("e-chat3", text="chatter six"),
+        )
+
+        def snapshot(limits):
+            pipeline, _, _, receipts = foundation(limits=limits)
+            for event in events:
+                pipeline.observation.observe(
+                    delivery_id=f"d-{event['id']}",
+                    event=event,
+                    actors={"human:zoe": {"kind": "human"}},
+                )
+            request = pipeline.observation.build_snapshot("e-chat3")
+            return request, receipts.all_records()[-1]["body"]["byte_count"]
+
+        by_events, byte_count = snapshot(ObservationLimits(snapshot_events=2))
+        self.assertEqual(
+            ["e-newer", "e-chat3"],
+            [event["id"] for event in by_events["events"]],
+        )
+        self.assertEqual(["events"], by_events["coverage"]["truncated_by"])
+
+        by_bytes, _ = snapshot(ObservationLimits(snapshot_bytes=byte_count))
+        self.assertEqual(
+            ["e-newer", "e-chat3"],
+            [event["id"] for event in by_bytes["events"]],
+        )
+        self.assertIn("age", by_bytes["coverage"]["truncated_by"])
+        self.assertIn("bytes", by_bytes["coverage"]["truncated_by"])
+
+    def test_reaction_never_erases_known_actor_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "observations.jsonl"
+            pipeline, _, _, _ = foundation(persistence_path=store)
+            pipeline.observation.observe(
+                delivery_id="d-said",
+                event=message("e-said"),
+                actors={"human:zoe": {"display_name": "Zoe", "kind": "human"}},
+            )
+            # A reaction delivery may know only the reactor's ID.
+            pipeline.observation.observe(
+                delivery_id="d-reacted",
+                event={
+                    "id": "e-reacted",
+                    "type": "reaction",
+                    "author_id": "human:zoe",
+                    "target_event_id": "e-said",
+                    "reaction": "✅",
+                    "operation": "add",
+                },
+                actors={"human:zoe": {"kind": "unknown"}},
+            )
+            known = {"display_name": "Zoe", "kind": "human"}
+            self.assertEqual(
+                known,
+                pipeline.observation.build_snapshot("e-reacted")["actors"]["human:zoe"],
+            )
+
+            restored, _, _, _ = foundation(persistence_path=store)
+            self.assertEqual(
+                known,
+                restored.observation.build_snapshot("e-reacted")["actors"]["human:zoe"],
+            )
+
+            # A newly known name still replaces the old one.
+            restored.observation.observe(
+                delivery_id="d-renamed",
+                event=message("e-renamed"),
+                actors={"human:zoe": {"display_name": "Zoë", "kind": "human"}},
+            )
+            self.assertEqual(
+                {"display_name": "Zoë", "kind": "human"},
+                restored.observation.build_snapshot("e-renamed")["actors"]["human:zoe"],
+            )
+
 
 class AttentionAndHostTests(unittest.TestCase):
     def test_snapshot_reconstruction_uses_error_fallback_without_model_call(self):
@@ -1873,6 +2013,59 @@ class AckOutcomeTests(unittest.TestCase):
                 )
                 self.assertEqual(valve, attention["body"]["routing_audit"]["valve"])
                 self.assertEqual(cause, attention["body"]["routing_audit"]["override_cause"])
+
+    def test_ack_on_a_non_message_anchor_widens_to_defer(self):
+        anchors = (
+            {
+                "id": "e-reaction",
+                "type": "reaction",
+                "author_id": "human:zoe",
+                "target_event_id": "e-said",
+                "reaction": "✅",
+                "operation": "add",
+            },
+            {
+                "id": "e-membership",
+                "type": "membership",
+                "scope": {"kind": "room", "id": "42"},
+                "subject_actor_id": "human:zoe",
+                "change": "join",
+            },
+        )
+        for anchor in anchors:
+            with self.subTest(anchor=anchor["type"]):
+                participant_calls = []
+                transport = RecordingTransport(capability=self.capability())
+                pipeline, _, _, receipts = foundation(
+                    model=FixtureModel("ACK"),
+                    participant=lambda **kwargs: participant_calls.append(kwargs),
+                    transport=transport,
+                )
+                actors = {"human:zoe": {"kind": "human"}}
+                pipeline.observation.observe(
+                    delivery_id="d-said",
+                    event=message("e-said"),
+                    actors=actors,
+                )
+                outcome = pipeline.handle_delivery(
+                    delivery_id=f"d-{anchor['type']}",
+                    event=anchor,
+                    actors=actors,
+                )
+
+                self.assertEqual("DEFER", outcome.opportunities[0].effective_disposition)
+                self.assertEqual(1, len(participant_calls))
+                self.assertEqual([], transport.calls)
+                records = receipts.all_records()
+                validate_receipt_stream(list(records))
+                attention = next(r for r in records if r["stage"] == "attention")
+                self.assertEqual("ACK", attention["body"]["classifier_disposition"])
+                self.assertEqual("DEFER", attention["body"]["effective_disposition"])
+                routing = attention["body"]["routing_audit"]
+                self.assertEqual("capability-defer", routing["valve"])
+                self.assertEqual("ack-unsupported", routing["override_cause"])
+                host = next(r for r in records if r["stage"] == "participant-host")
+                self.assertEqual("DEFER", host["body"]["wake_source"])
 
     def test_measured_discord_permission_denial_reaches_defer(self):
         class Client:
