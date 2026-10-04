@@ -10,7 +10,16 @@ import tempfile
 import unittest
 
 
+_HOST_YAML_AVAILABLE = any(
+    importlib.util.find_spec(name) is not None for name in ("hermes_yaml", "yaml")
+)
+
+
 class LifecycleTests(unittest.TestCase):
+    @unittest.skipUnless(
+        _HOST_YAML_AVAILABLE,
+        "needs the Hermes host YAML API or PyYAML (pip install '.[test]')",
+    )
     def test_real_dashboard_save_can_retire_and_restore_exact_bytes(self):
         from nunchi.integrations import hermes_lifecycle as lifecycle
         from nunchi.integrations.hermes_dashboard_store import (

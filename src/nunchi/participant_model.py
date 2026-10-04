@@ -334,7 +334,7 @@ def participant_turn_text(
     request: Mapping[str, Any],
     pages: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] = (),
 ) -> str:
-    """Render the shared prompt for native hosts that accept one text input."""
+    """Render the shared prompt for single-text-input runners (e.g. a headless CLI)."""
 
     document = json.dumps(
         participant_turn_input(request, pages),
@@ -549,74 +549,11 @@ def _fallback_opportunity() -> dict[str, Any]:
     }
 
 
-class HostStructuredParticipant:
-    """Run the shared protocol through a host completion capability."""
-
-    core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
-
-    def __init__(
-        self,
-        *,
-        client: Any,
-        profile: ParticipantProfile,
-        timeout_seconds: float,
-        max_expansions: int = DEFAULT_MAX_EXPANSIONS,
-    ) -> None:
-        complete = getattr(client, "complete_structured", None)
-        if not callable(complete):
-            raise ValidationError("host does not provide the structured completion capability")
-        if (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, (int, float))
-            or timeout_seconds <= 0
-        ):
-            raise ValidationError("participant timeout must be positive")
-        self._complete = complete
-        self.profile = profile
-        self.timeout_seconds = float(timeout_seconds)
-        self.max_expansions = max_expansions
-
-    def run_protocol(self, *, wake, opportunity, expand, cancel):
-        protocol = ParticipantTurnProtocol(
-            profile=self.profile,
-            wake=wake,
-            opportunity=opportunity,
-            max_expansions=self.max_expansions,
-        )
-        while True:
-            if cancel.is_set():
-                return None
-            result = self._complete(
-                instructions=protocol.instructions,
-                input=[{"type": "text", "text": json.dumps(
-                    protocol.input_document,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                )}],
-                json_schema=protocol.action_schema,
-                schema_name=PARTICIPANT_ACTION_SCHEMA_NAME,
-                temperature=0.2,
-                max_tokens=1800,
-                timeout=self.timeout_seconds,
-                purpose="nunchi-v2-participant-turn",
-            )
-            parsed = getattr(result, "parsed", None)
-            done, action = protocol.consume(parsed, expand=expand)
-            if done:
-                return action
-
-    def __call__(self, *, wake, expand, cancel):
-        return self.run_protocol(
-            wake=wake,
-            opportunity=_fallback_opportunity(),
-            expand=expand,
-            cancel=cancel,
-        )
-
-
 class OpenAICompatibleParticipant:
-    """Run the shared protocol over one OpenAI-compatible native capability."""
+    """Run the shared protocol over any OpenAI-compatible endpoint.
+
+    The endpoint is always explicit configuration; the core names no vendor.
+    """
 
     core_protocol_version = PARTICIPANT_TURN_PROTOCOL_VERSION
 
@@ -626,7 +563,7 @@ class OpenAICompatibleParticipant:
         profile: ParticipantProfile,
         model: str,
         api_key: str,
-        base_url: str = "https://openrouter.ai/api/v1",
+        base_url: str,
         provider: str = "openai-compatible",
         timeout_seconds: float = 60,
         max_expansions: int = DEFAULT_MAX_EXPANSIONS,
@@ -674,6 +611,11 @@ class OpenAICompatibleParticipant:
         }
         if set(config) - allowed:
             raise ValidationError("participant model config has unexpected fields")
+        if not config.get("base_url"):
+            raise ValidationError(
+                "participant model base_url is required: name the OpenAI-compatible "
+                "endpoint explicitly"
+            )
         api_key_env = config.get("api_key_env", "NUNCHI_PARTICIPANT_API_KEY")
         if not isinstance(api_key_env, str) or not api_key_env:
             raise ValidationError("participant api_key_env must be non-empty")
@@ -684,7 +626,7 @@ class OpenAICompatibleParticipant:
             profile=profile,
             model=config.get("model"),
             api_key=api_key,
-            base_url=config.get("base_url", "https://openrouter.ai/api/v1"),
+            base_url=config["base_url"],
             provider=config.get("provider", "openai-compatible"),
             timeout_seconds=config.get("timeout_seconds", 60),
             max_expansions=config.get("max_expansions", DEFAULT_MAX_EXPANSIONS),

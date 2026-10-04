@@ -16,7 +16,7 @@ from ..ack import AckJournal, AckPolicy, ReactionCapability
 from ..attention import (
     AttentionEngine,
     AttentionPolicy,
-    OpenAICompatibleAttentionModel,
+    attention_model_from_config,
     ParticipantProfile,
 )
 from ..authorization import (
@@ -238,7 +238,7 @@ class ReferenceAdapterRuntime:
             raise ValidationError("adapter attention config must contain policy and model")
         policy = _policy(attention_raw["policy"])
         model = (
-            OpenAICompatibleAttentionModel.from_trusted_config(attention_raw["model"])
+            attention_model_from_config(attention_raw["model"])
             if policy.preattention_enabled
             else None
         )

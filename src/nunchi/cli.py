@@ -15,7 +15,7 @@ from typing import Any
 from . import __version__
 from .attention import (
     AttentionPolicy,
-    OpenAICompatibleAttentionModel,
+    attention_model_from_config,
     ParticipantProfile,
 )
 from .core import evaluate
@@ -34,7 +34,6 @@ from .operator import (
     OperatorStore,
     ServiceManager,
     build_operator_config,
-    registered_platforms,
 )
 from .v2_contracts import (
     validate_attention_decision,
@@ -95,7 +94,7 @@ def _build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--actor-id", required=True)
     setup.add_argument("--display-name", required=True)
     setup.add_argument("--instructions", required=True)
-    setup.add_argument("--platform", required=True, choices=tuple(registered_platforms()))
+    setup.add_argument("--platform", required=True, help="chat platform name of the room")
     setup.add_argument("--room-id", required=True)
     setup.add_argument("--room-name", required=True)
     setup.add_argument("--continuity-scope-id", required=True)
@@ -132,7 +131,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ack.add_argument("--reaction")
     room = config_commands.add_parser("add-room")
     _operator_roots(room)
-    room.add_argument("--platform", required=True, choices=tuple(registered_platforms()))
+    room.add_argument("--platform", required=True, help="chat platform name of the room")
     room.add_argument("--room-id", required=True)
     room.add_argument("--room-name", required=True)
     room.add_argument("--continuity-scope-id", required=True)
@@ -341,7 +340,7 @@ def _attention(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     if policy.preattention_enabled:
         if not isinstance(config["model"], Mapping):
             raise ValidationError("attention model config must be an object")
-        model = OpenAICompatibleAttentionModel.from_trusted_config(config["model"])
+        model = attention_model_from_config(config["model"])
     else:
         if config["model"] not in (None, {}):
             raise ValidationError("bypass config must not carry a model redirect")

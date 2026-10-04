@@ -53,15 +53,23 @@ class AttentionDeadlineExceeded(AttentionError):
 
 
 class HostAttentionPermissionError(AttentionError):
-    """A host refused explicit routing; safe to expose without provider text."""
+    """A host refused the configured attention model; no substitute was used.
+
+    ``detail`` is safe operator text. The core default names no host; an
+    integration passes its own repair instructions.
+    """
 
     detail = (
-        "Host denied the configured attention provider/model. In Hermes, open "
-        "the Nunchi dashboard for this profile and Save & allow attention models, "
-        "then restart Hermes. For managed configuration, review "
-        "plugins.entries.nunchi.llm: allow_provider_override, allow_model_override, "
-        "allowed_providers and allowed_models. No substitute attention model was used."
+        "Host denied the configured attention provider/model. "
+        "No substitute attention model was used."
     )
+
+    def __init__(self, detail: str | None = None) -> None:
+        if detail is not None:
+            if not isinstance(detail, str) or not detail:
+                raise ValidationError("host attention denial detail must be non-empty")
+            self.detail = detail
+        super().__init__(self.detail)
 
 
 @dataclass(frozen=True)
@@ -153,9 +161,15 @@ class AttentionPolicy:
 
 
 class AttentionModel(Protocol):
+    """The participant's own delegated attention model.
+
+    ``provider`` and ``model_id`` are opaque audit labels. ``None`` means the
+    host does not report them, and they are omitted from the audit.
+    """
+
     name: str
-    provider: str
-    model_id: str
+    provider: str | None
+    model_id: str | None
 
     def judge(
         self,
@@ -286,18 +300,60 @@ def participant_attention_prompt(profile: ParticipantProfile) -> str:
     )
 
 
+def attention_input_text(projection: Mapping[str, Any]) -> str:
+    """The exact observation bytes every attention implementation sends."""
+
+    return json.dumps(
+        {"observation": projection},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def decode_judgment_text(text: str) -> dict[str, Any]:
+    """Decode a model's text reply into one judgment object.
+
+    Accepts the object alone or wrapped in one Markdown code fence; anything
+    else is a provider failure, never a guessed judgment.
+    """
+
+    if not isinstance(text, str):
+        raise AttentionError("attention model reply was not text")
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped[3:]
+        if stripped[:4].lower() == "json":
+            stripped = stripped[4:]
+        stripped = stripped.rstrip()
+        if not stripped.endswith("```"):
+            raise AttentionError("attention model reply has an unterminated code fence")
+        stripped = stripped[:-3]
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise AttentionError("attention model reply was not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise AttentionError("attention judgment was not an object")
+    return payload
+
+
 class OpenAICompatibleAttentionModel:
-    """One configured OpenAI-compatible call through a trusted host endpoint."""
+    """One configured call to any OpenAI-compatible chat completions endpoint.
+
+    The endpoint is always explicit configuration; the core names no vendor.
+    """
 
     def __init__(
         self,
         *,
         model: str,
         api_key: str,
-        base_url: str = "https://openrouter.ai/api/v1",
+        base_url: str,
         name: str = "participant-attention",
         provider: str = "openai-compatible",
-        reasoning_effort: str | None = None,
+        temperature: float | None = 0,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         for label, value in (
             ("model", model),
@@ -308,12 +364,26 @@ class OpenAICompatibleAttentionModel:
         ):
             if not isinstance(value, str) or not value:
                 raise ValidationError(f"attention model {label} must be non-empty")
+        if temperature is not None and (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not math.isfinite(temperature)
+            or temperature < 0
+        ):
+            raise ValidationError("attention model temperature must be a finite non-negative number")
+        extra = dict(extra_body or {})
+        reserved = {"model", "messages", "response_format", "temperature"} & set(extra)
+        if reserved:
+            raise ValidationError(
+                f"attention model extra_body cannot override {sorted(reserved)}"
+            )
         self.name = name
         self.provider = provider
         self.model_id = model
         self._api_key = api_key
         self._url = base_url.rstrip("/") + "/chat/completions"
-        self._reasoning_effort = reasoning_effort
+        self._temperature = temperature
+        self._extra_body = deepcopy(extra)
 
     @classmethod
     def from_trusted_config(cls, config: Mapping[str, Any]) -> "OpenAICompatibleAttentionModel":
@@ -323,10 +393,19 @@ class OpenAICompatibleAttentionModel:
             "name",
             "provider",
             "api_key_env",
-            "reasoning_effort",
+            "temperature",
+            "extra_body",
         }
         if set(config) - allowed:
             raise ValidationError("attention model config has unexpected fields")
+        if not config.get("base_url"):
+            raise ValidationError(
+                "attention model base_url is required: name the OpenAI-compatible "
+                "endpoint explicitly"
+            )
+        extra_body = config.get("extra_body")
+        if extra_body is not None and not isinstance(extra_body, Mapping):
+            raise ValidationError("attention model extra_body must be an object")
         model = config.get("model")
         api_key_env = config.get("api_key_env", "NUNCHI_ATTENTION_API_KEY")
         if not isinstance(api_key_env, str) or not api_key_env:
@@ -337,10 +416,11 @@ class OpenAICompatibleAttentionModel:
         return cls(
             model=model,
             api_key=api_key,
-            base_url=config.get("base_url", "https://openrouter.ai/api/v1"),
+            base_url=config["base_url"],
             name=config.get("name", "participant-attention"),
             provider=config.get("provider", "openai-compatible"),
-            reasoning_effort=config.get("reasoning_effort"),
+            temperature=config.get("temperature", 0),
+            extra_body=extra_body,
         )
 
     def judge(
@@ -351,24 +431,16 @@ class OpenAICompatibleAttentionModel:
         timeout_seconds: float,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
+            **deepcopy(self._extra_body),
             "model": self.model_id,
             "messages": [
                 {"role": "system", "content": instructions},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"observation": projection},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    ),
-                },
+                {"role": "user", "content": attention_input_text(projection)},
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0,
         }
-        if self._reasoning_effort:
-            body["reasoning"] = {"effort": self._reasoning_effort}
+        if self._temperature is not None:
+            body["temperature"] = self._temperature
         request = urllib.request.Request(
             self._url,
             data=json.dumps(body).encode("utf-8"),
@@ -385,29 +457,57 @@ class OpenAICompatibleAttentionModel:
             raise AttentionError(f"attention provider returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, socket.timeout, OSError, json.JSONDecodeError) as exc:
             raise AttentionError("attention provider request failed") from exc
-        if not isinstance(payload, dict):
-            raise AttentionError("attention provider response was not an object")
-        if "choices" in payload:
-            try:
-                content = payload["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise AttentionError("attention provider response has no message content") from exc
-            if not isinstance(content, str):
-                raise AttentionError("attention provider message content was not text")
-            text = content.strip()
-            if text.startswith("```"):
-                text = text[3:]
-                if text[:4].lower() == "json":
-                    text = text[4:]
-                if text.rstrip().endswith("```"):
-                    text = text.rstrip()[:-3]
-            try:
-                payload = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise AttentionError("attention provider message was not valid JSON") from exc
-        if not isinstance(payload, dict):
-            raise AttentionError("attention judgment was not an object")
-        return payload
+        try:
+            content = payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AttentionError("attention provider response has no message content") from exc
+        return decode_judgment_text(content)
+
+
+class HostTextAttentionModel:
+    """Use a host's plain text completion under core-owned attention semantics.
+
+    For hosts whose completion returns text only, with no JSON-schema mode and
+    no report of the served model. ``complete`` is called as
+    ``complete(system=..., prompt=..., timeout_seconds=...)`` and returns the
+    reply text, or an object with a ``text`` attribute. The prompt and the
+    observation bytes are the same ones every implementation sends.
+    """
+
+    def __init__(
+        self,
+        complete: Callable[..., Any],
+        *,
+        name: str = "participant-attention",
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        if not callable(complete):
+            raise ValidationError("host text completion must be callable")
+        if not isinstance(name, str) or not name:
+            raise ValidationError("attention model name must be non-empty")
+        for label, value in (("provider", provider), ("model", model)):
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValidationError(f"attention model {label} must be non-empty or absent")
+        self._complete = complete
+        self.name = name
+        self.provider = provider
+        self.model_id = model
+
+    def judge(
+        self,
+        *,
+        instructions: str,
+        projection: Mapping[str, Any],
+        timeout_seconds: float,
+    ) -> Mapping[str, Any]:
+        result = self._complete(
+            system=instructions,
+            prompt=attention_input_text(projection),
+            timeout_seconds=timeout_seconds,
+        )
+        text = result if isinstance(result, str) else getattr(result, "text", None)
+        return decode_judgment_text(text)
 
 
 class HostStructuredAttentionModel:
@@ -417,7 +517,20 @@ class HostStructuredAttentionModel:
         self,
         client: Any,
         selection: AttentionModelSelection,
+        *,
+        is_denial: Callable[[BaseException], bool] | None = None,
+        denied_detail: str | None = None,
+        require_attestation: bool = True,
     ) -> None:
+        """Wrap a host's ``complete_structured`` capability.
+
+        ``is_denial`` recognises how this host signals that it refused the
+        configured model; such errors become ``HostAttentionPermissionError``
+        with ``denied_detail``. Anything else is a provider failure. With
+        ``require_attestation`` the host must report the provider and model it
+        actually served.
+        """
+
         complete = getattr(client, "complete_structured", None)
         if not callable(complete):
             raise ValidationError(
@@ -426,12 +539,13 @@ class HostStructuredAttentionModel:
         def permitted_completion(**kwargs: Any) -> Any:
             try:
                 return complete(**kwargs)
-            except PermissionError as exc:
-                raise HostAttentionPermissionError(
-                    HostAttentionPermissionError.detail
-                ) from exc
+            except Exception as exc:
+                if is_denial is not None and is_denial(exc):
+                    raise HostAttentionPermissionError(denied_detail) from exc
+                raise
 
         self._complete = permitted_completion
+        self._require_attestation = bool(require_attestation)
         self.name = selection.name
         self.provider = selection.provider
         self.model_id = selection.model
@@ -445,17 +559,7 @@ class HostStructuredAttentionModel:
     ) -> Mapping[str, Any]:
         result = self._complete(
             instructions=instructions,
-            input=[
-                {
-                    "type": "text",
-                    "text": json.dumps(
-                        {"observation": projection},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    ),
-                }
-            ],
+            input=[{"type": "text", "text": attention_input_text(projection)}],
             json_schema=ATTENTION_JUDGMENT_SCHEMA,
             schema_name="nunchi_v2_attention",
             provider=self.provider,
@@ -467,7 +571,9 @@ class HostStructuredAttentionModel:
         )
         actual_provider = getattr(result, "provider", None)
         actual_model = getattr(result, "model", None)
-        if actual_provider != self.provider or actual_model != self.model_id:
+        if self._require_attestation and (
+            actual_provider != self.provider or actual_model != self.model_id
+        ):
             raise ValidationError(
                 "host attention result does not attest the configured provider and model"
             )
@@ -475,6 +581,33 @@ class HostStructuredAttentionModel:
         if not isinstance(parsed, Mapping):
             raise ValidationError("host attention response is not an object")
         return deepcopy(dict(parsed))
+
+
+AttentionModelFactory = Callable[[Mapping[str, Any]], AttentionModel]
+
+
+def attention_model_from_config(
+    config: Mapping[str, Any],
+    *,
+    host_kinds: Mapping[str, AttentionModelFactory] | None = None,
+) -> AttentionModel:
+    """Build the participant's attention model from trusted configuration.
+
+    ``kind`` selects the implementation; it defaults to ``openai-compatible``.
+    Integrations add their own kinds through ``host_kinds``, so the core needs
+    no knowledge of any host or vendor.
+    """
+
+    if not isinstance(config, Mapping):
+        raise ValidationError("attention model config must be an object")
+    kind = config.get("kind", "openai-compatible")
+    body = {key: value for key, value in config.items() if key != "kind"}
+    if kind == "openai-compatible":
+        return OpenAICompatibleAttentionModel.from_trusted_config(body)
+    factory = (host_kinds or {}).get(kind)
+    if factory is None:
+        raise ValidationError(f"attention model kind {kind!r} is not available here")
+    return factory(body)
 
 
 def _validate_model_judgment(
@@ -602,11 +735,11 @@ class AttentionEngine:
             "error": {"code": code, "detail": detail},
         }
         if invoked and self.model is not None:
-            result["classifier"] = {
-                "name": self.model.name,
-                "provider": self.model.provider,
-                "model": self.model.model_id,
-            }
+            result["classifier"] = {"name": self.model.name}
+            if self.model.provider is not None:
+                result["classifier"]["provider"] = self.model.provider
+            if self.model.model_id is not None:
+                result["classifier"]["model"] = self.model.model_id
         return validate_attention_decision(result, request=request)
 
     def operational_error(
@@ -738,10 +871,10 @@ class AttentionEngine:
                 deadline=deadline,
             )
             judgment = _validate_model_judgment(raw, event_ids=event_ids)
-        except HostAttentionPermissionError:
+        except HostAttentionPermissionError as exc:
+            # The host refused before any model ran, so no classifier audit.
             return self._error(
-                checked, "host-permission-denied",
-                HostAttentionPermissionError.detail, invoked=True,
+                checked, "host-permission-denied", exc.detail, invoked=False,
             )
         except AttentionCancelled:
             return self._error(
@@ -831,11 +964,11 @@ class AttentionEngine:
         if valve == "margin-defer":
             routing["effective_margin"] = float(self.policy.effective_margin)
             routing["margin_source"] = self.policy.margin_source
-        classifier = {
-            "name": self.model.name,
-            "provider": self.model.provider,
-            "model": self.model.model_id,
-        }
+        classifier = {"name": self.model.name}
+        if self.model.provider is not None:
+            classifier["provider"] = self.model.provider
+        if self.model.model_id is not None:
+            classifier["model"] = self.model.model_id
         decision: dict[str, Any] = {
             "status": "ok",
             "request_id": checked["request_id"],

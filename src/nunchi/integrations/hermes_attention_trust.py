@@ -16,10 +16,25 @@ import stat
 from typing import Any, Iterator
 
 from nunchi.errors import ValidationError
-from nunchi.attention import HostAttentionPermissionError
 
 
-TRUST_REPAIR = HostAttentionPermissionError.detail
+# Hermes-specific repair text for a host-denied attention model. The shared
+# core carries only a neutral default; Hermes supplies this through
+# HostStructuredAttentionModel(denied_detail=...).
+TRUST_REPAIR = (
+    "Host denied the configured attention provider/model. In Hermes, open "
+    "the Nunchi dashboard for this profile and Save & allow attention models, "
+    "then restart Hermes. For managed configuration, review "
+    "plugins.entries.nunchi.llm: allow_provider_override, allow_model_override, "
+    "allowed_providers and allowed_models. No substitute attention model was used."
+)
+
+def is_hermes_attention_denial(exc: BaseException) -> bool:
+    """Hermes's PluginLlm refuses an untrusted provider/model with a bare
+    PermissionError. An OS permission failure carries an errno and is a
+    provider failure, not a trust refusal."""
+
+    return isinstance(exc, PermissionError) and exc.errno is None
 
 
 def _read_host_config(path: Path) -> tuple[bytes | None, dict[str, Any]]:

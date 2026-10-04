@@ -318,8 +318,13 @@ class AttentionTrustSetupTests(unittest.TestCase):
             calls.append(kwargs)
             raise PermissionError("SECRET_SENTINEL raw provider detail")
 
+        from nunchi.integrations.hermes_attention_trust import (
+            is_hermes_attention_denial, TRUST_REPAIR,
+        )
         model = HostStructuredAttentionModel(SimpleNamespace(complete_structured=denied),
-                                             AttentionModelSelection(provider="exact-provider", model="exact-model"))
+                                             AttentionModelSelection(provider="exact-provider", model="exact-model"),
+                                             is_denial=is_hermes_attention_denial,
+                                             denied_detail=TRUST_REPAIR)
         engine = AttentionEngine(profile=profile, model=model)
         engine.receipts.append(make_receipt("observation"), writer="observation-provider")
         result = engine.judge(request)

@@ -119,9 +119,14 @@ class InstalledAttentionServiceTests(_Base):
         )
         yaml = sup.host_yaml()
 
+        from nunchi.integrations.hermes_attention_trust import (
+            is_hermes_attention_denial, TRUST_REPAIR,
+        )
         model = HostStructuredAttentionModel(
             PluginLlm(plugin_id="nunchi"),
             AttentionModelSelection(provider="custom", model="attention-probe-model"),
+            is_denial=is_hermes_attention_denial,
+            denied_detail=TRUST_REPAIR,
         )
         arguments = {"instructions": "Judge SUPPRESS, ACK, WAKE or DEFER.",
                      "projection": {"event_id": "test-event"}, "timeout_seconds": 10}

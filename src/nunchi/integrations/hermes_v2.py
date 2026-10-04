@@ -36,6 +36,10 @@ from nunchi.attention import (
     HostStructuredAttentionModel,
     ParticipantProfile,
 )
+from nunchi.integrations.hermes_attention_trust import (
+    is_hermes_attention_denial,
+    TRUST_REPAIR,
+)
 from nunchi.ack import AckJournal, AckPolicy, ReactionCapability, UNAVAILABLE_REACTION_CAPABILITY
 from nunchi.errors import ValidationError
 from nunchi.observation import (
@@ -1432,6 +1436,8 @@ class _RoomRuntime:
                 HostStructuredAttentionModel(
                     ctx.llm,
                     config.attention_model,
+                    is_denial=is_hermes_attention_denial,
+                    denied_detail=TRUST_REPAIR,
                 )
                 if config.attention.preattention_enabled
                 else None
