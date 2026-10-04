@@ -82,6 +82,15 @@ class PendingMessageSurvivesDeadlineTests(unittest.TestCase):
         self.assertIsNotNone(successor)
         self.assertEqual("e1", successor.anchor_event_id)
 
+    def test_token_stopped_without_expire_keeps_its_previous_meaning(self) -> None:
+        # Native hosts (Hermes) set the token event themselves and rely on
+        # complete() then returning no successor; only expire() promotes.
+        scheduler = ConversationOpportunityScheduler("room")
+        token = scheduler.offer("e0")
+        scheduler.offer("e1")
+        token.cancel_event.set()
+        self.assertIsNone(scheduler.complete(token))
+
     def test_cancelled_token_still_cannot_complete(self) -> None:
         scheduler = ConversationOpportunityScheduler("room")
         token = scheduler.offer("e0")

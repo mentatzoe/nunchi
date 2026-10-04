@@ -60,6 +60,7 @@ class ConversationOpportunityScheduler:
         self._lifecycle_id = str(uuid4())
         self._cancel_event: threading.Event | None = None
         self._dispatch_committed = False
+        self._expired_generation: int | None = None
         self._lock = threading.RLock()
 
     def offer(self, anchor_event_id: str) -> OpportunityToken | None:
@@ -84,18 +85,23 @@ class ConversationOpportunityScheduler:
     def complete(self, token: OpportunityToken) -> OpportunityToken | None:
         """Finish exact current work and return one fresh pending opportunity.
 
-        A token that expired at its deadline still completes: expiry stops
-        that work, but the newest pending event must still get its own
-        attention. Cancellation bumps the generation, so it cannot complete.
+        A token stopped through ``expire()`` still completes: expiry ends that
+        work, but the newest pending event must still get its own attention.
+        A token whose event was set any other way keeps the previous meaning
+        and does not complete. Cancellation bumps the generation, so a
+        cancelled token can never complete.
         """
         with self._lock:
-            if not (
+            expired = (
                 self._active
                 and token.room_key == self.room_key
                 and token.generation == self._generation
                 and token.cancel_event is self._cancel_event
-            ):
+                and self._expired_generation == token.generation
+            )
+            if not (expired or self._matches(token)):
                 return None
+            self._expired_generation = None
             pending = self._pending_anchor
             self._pending_anchor = None
             if pending is None:
@@ -129,7 +135,12 @@ class ConversationOpportunityScheduler:
     def expire(self, token: OpportunityToken) -> None:
         """Stop this token's work at its deadline without dropping pending work."""
         with self._lock:
-            if token.cancel_event is self._cancel_event:
+            if (
+                self._active
+                and token.generation == self._generation
+                and token.cancel_event is self._cancel_event
+            ):
+                self._expired_generation = token.generation
                 token.cancel_event.set()
 
     def _matches(self, token: OpportunityToken) -> bool:
