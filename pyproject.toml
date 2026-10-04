@@ -74,6 +74,7 @@ where = ["src"]
   "claude_code_mod/.claude-plugin/plugin.json",
   "claude_code_mod/hooks/hooks.json",
   "claude_code_mod/hooks/register.ts",
+  "claude_code_mod/hooks/register.test.ts",
 ]
 "nunchi.integrations.hermes_dashboard_assets" = [
   "index.js",

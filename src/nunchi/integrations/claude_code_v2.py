@@ -74,6 +74,13 @@ NOTIFICATION_METHOD = "notifications/nunchi/v2/discord-event"
 SURFACE = "claude-code"
 MINIMUM_CLAUDE_CODE = (2, 1, 287)
 MOD_DIRECTORY = Path(__file__).with_name("claude_code_mod")
+# What the session loads.  Claude Code writes generated type files into a mod
+# folder it loads, so the session gets a private copy, never the package.
+MOD_FILES = (
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/register.ts",
+)
 
 _CLAUDE_CODE_KEYS = {
     "executable",
@@ -484,6 +491,7 @@ class ClaudeCodeRoomRuntime:
             + [self.output_secret.decode()]
         )
 
+        self.mod_directory = state / "claude-code-mod"
         self.socket_path = _runtime_directory() / "gate.sock"
         self.session_secret = secrets.token_urlsafe(32)
         self.disallowed_tools = self._disallowed_tools()
@@ -494,7 +502,7 @@ class ClaudeCodeRoomRuntime:
                 executable = None
             session = ClaudeCodeSession(
                 executable=executable,
-                plugin_directory=MOD_DIRECTORY,
+                plugin_directory=self.mod_directory,
                 working_directory=self.settings["working_directory"],
                 environment=self.session_environment(),
                 model=self.settings["model"],
@@ -647,9 +655,23 @@ class ClaudeCodeRoomRuntime:
             )
         return version
 
-    def start(self) -> None:
-        """Open the gate socket.  The session starts on the first wake."""
+    def install_mod(self) -> None:
+        """Copy the shipped mod into the private folder the session loads."""
 
+        if self.mod_directory.exists():
+            shutil.rmtree(self.mod_directory)
+        for relative in MOD_FILES:
+            target = self.mod_directory / relative
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shutil.copyfile(MOD_DIRECTORY / relative, target)
+
+    def start(self) -> None:
+        """Install the mod and open the gate socket.
+
+        The session starts on the first wake.
+        """
+
+        self.install_mod()
         self.socket_path.parent.mkdir(mode=0o700)
         self.server.start()
 

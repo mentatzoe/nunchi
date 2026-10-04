@@ -2508,8 +2508,17 @@ class RealSessionTests(unittest.TestCase):
                 argv, env = start["argv"], start["env"]
                 self.assertEqual(
                     ["-p", "--input-format", "stream-json", "--output-format",
-                     "stream-json", "--verbose", "--plugin-dir", str(MOD_DIRECTORY)],
+                     "stream-json", "--verbose", "--plugin-dir",
+                     str(harness.runtime.mod_directory)],
                     argv[:8],
+                )
+                for relative in claude_code_v2.MOD_FILES:
+                    self.assertEqual(
+                        (MOD_DIRECTORY / relative).read_bytes(),
+                        (harness.runtime.mod_directory / relative).read_bytes(),
+                    )
+                self.assertFalse(
+                    (harness.runtime.mod_directory / "hooks" / "register.test.ts").exists()
                 )
                 state = Path(harness.config["state_directory"]).resolve()
                 rules = argv[argv.index("--disallowedTools") + 1:]

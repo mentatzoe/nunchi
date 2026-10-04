@@ -38,3 +38,7 @@ pnpm-debug.log*
 
 # Claude local state is private.
 .claude/
+
+# Files Claude Code lays into a mod folder it loads
+src/nunchi/integrations/claude_code_mod/tsconfig.json
+src/nunchi/integrations/claude_code_mod/.claude-plugin/types/

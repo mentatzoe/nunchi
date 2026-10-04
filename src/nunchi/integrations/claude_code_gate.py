@@ -805,10 +805,6 @@ class GateServer:
                 self.wfile.write(payload)
 
             def do_POST(self) -> None:  # noqa: N802
-                supplied = self.headers.get("X-Nunchi-Session", "").encode()
-                if not hmac.compare_digest(supplied, gate._secret):
-                    self._answer(401, {"error": "unknown session"})
-                    return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
                 except ValueError:
@@ -816,8 +812,15 @@ class GateServer:
                 if not 0 <= length <= _MAX_BODY_BYTES:
                     self._answer(413, {"error": "request body is too large"})
                     return
+                # Read the bounded body before refusing anyone, so a refused
+                # caller gets its answer instead of a reset connection.
+                raw = self.rfile.read(length)
+                supplied = self.headers.get("X-Nunchi-Session", "").encode()
+                if not hmac.compare_digest(supplied, gate._secret):
+                    self._answer(401, {"error": "unknown session"})
+                    return
                 try:
-                    body = json.loads(self.rfile.read(length) or b"{}")
+                    body = json.loads(raw or b"{}")
                 except json.JSONDecodeError:
                     self._answer(400, {"error": "request body is not JSON"})
                     return
