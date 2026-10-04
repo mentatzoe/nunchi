@@ -1,8 +1,12 @@
 # V2 lifecycle conformance
 
-The repository-owned evaluation entry point now exercises the installed V2
-lifecycle surface. Historical V1 fixture files remain source evidence only;
-they are not an executable product path and are not used by this runner.
+The repository-owned evaluation entry point exercises the installed V2
+lifecycle plumbing. It does not judge social quality: whether an agent reads
+the room well needs behavioral evaluation across realistic multi-turn
+conversations, which is not built yet
+([#86](https://github.com/mentatzoe/nunchi/issues/86)). The V1 fixtures under
+`evals/verdict_suite/fixtures/` are kept as seed material for that work. They
+are not an executable product path and this runner does not use them.
 
 ## Run
 
@@ -12,13 +16,16 @@ python3 -m evals.verdict_suite.runner
 python3 -m evals.verdict_suite.runner --format jsonl
 ```
 
-The eight deterministic scenarios cover SUPPRESS, WAKE with contribution,
-WAKE with silence, classifier DEFER, margin DEFER, trusted bypass, wake-on-error,
-and explicit no-wake error handling. They use the same public V2 pipeline as
-installed adapters and require no provider or network.
+The eleven deterministic scenarios cover SUPPRESS; ACK, plus disabled and
+unsupported ACK widening to DEFER; WAKE with contribution; WAKE with silence;
+classifier DEFER; margin DEFER; trusted bypass; wake-on-error; and explicit
+no-wake error handling. `--list` prints the authoritative set. They use the
+same public V2 pipeline as installed adapters, with a scripted model, and
+require no provider or network.
 
-Exit code `0` means every scenario passed. JSONL output contains one
-`scenario-result` per scenario followed by a `summary`.
+Exit code `0` means every scenario passed. JSONL output is one object per
+scenario with `scenario`, `status`, `expected`, and `observed`; there is no
+summary line. `--scenario NAME` runs one scenario.
 
 ## Full deterministic verification
 

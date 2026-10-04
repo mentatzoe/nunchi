@@ -1,78 +1,64 @@
 # V2 verification record
 
-This file is updated only with attributable commands and artifacts. A green
-source suite is not installed or live evidence.
+This file records attributable checks. A green source suite is not installed or
+live evidence. It is updated only with commands and results that can be
+reproduced.
 
-## Issues #55, #56, and #40 shared-foundation successor
+## Current state (2026-10-04)
 
-The successor starts from
-`fcb1177a55892e1f642ae591315e41f54c4e8e52`. It includes the one versioned
-Nunchi-owned participant protocol, first-class ACK and safe widening, the
-shared operator/dashboard schema, and persistent-service controls documented
-in `v2-shared-foundation.md`. Platform-specific gaps, live validation,
-security acceptance, release, and final V2 acceptance remain outside this
-candidate. The PR records the exact committed head; these working-tree results
-do not substitute for exact-head review or integration.
+**Subject:** `main` at `41cb79c` (merge of PR
+[#91](https://github.com/mentatzoe/nunchi/pull/91)).
 
-Attributable local verification on 2026-07-31:
+**Summary:** V2 on `main` is **merged, unverified**. Deterministic checks and
+installed stock-Hermes CI pass. No surface has persistent installed deployment
+or live real-room proof since PR
+[#67](https://github.com/mentatzoe/nunchi/pull/67) replaced the shared core.
 
-| Gate | Result |
+PR #67, the shared-foundation successor for issues #55, #56, and #40, merged on
+2026-08-02 as `bd7fd6c`. A non-author reviewer approved it at exact head
+`b5bedec`. That approval covers source review only. Since then `main` has also
+taken the Hermes PRs #83 and #84 and the shared-core PRs #88, #89, #90, and
+#91.
+
+Passed:
+
+| Check | Result |
 |---|---|
-| full source | `python3 -m unittest` — **586 run**, OK, with 4 optional-oracle skips |
-| pinned contract oracle | `jsonschema==4.26.0`, offline isolated run — **220 passed**, no skips |
-| installed lifecycle | `python3 -m evals.verdict_suite.runner` — **11/11 passed**, including ACK, disabled ACK, and unsupported ACK |
-| static source | `git diff --check` and `python3 -m compileall -q src tests evals` — passed |
-| clean wheel | Python 3.14 venv, no checkout on `PYTHONPATH`; both probes, `pip check`, guided setup, diagnostics, dashboard API/security headers, service start/restart/stop, and `site-packages` imports passed |
+| `python3 -m unittest` | 856 tests, OK; 30 skipped, all of which need an installed Hermes host |
+| `python3 -m evals.verdict_suite.runner` | 11/11 lifecycle scenarios passed, including ACK, disabled ACK, and unsupported ACK (local run on the `41cb79c` tree) |
+| `CI` workflow, every push to `main` and every PR | offline suite and contract corpus on Python 3.11, 3.12, and 3.13; scenario list loads; clean wheel install runs every entry-point probe. Passed at `41cb79c` (run [37223306477](https://github.com/mentatzoe/nunchi/actions/runs/37223306477)). |
+| `Hermes host contract` workflow, every push to `main` and every PR into it | installed stock Hermes 0.19.0, 0.21.5, and current Hermes `main`: 4-test contract lane on Discord and Telegram; 32-test normal-attention lane and both startup lanes on Discord. All six jobs passed at `41cb79c` (run [37223306456](https://github.com/mentatzoe/nunchi/actions/runs/37223306456)). |
 
-The clean wheel is `nunchi-2.0.0-py3-none-any.whl`, SHA-256
-`22f435bc4feea1222e3486c2b5659977067ce67aaaaa1ffa74a7d210b2211d8a`.
-Its generated operator roots were mode `0700`; generated config and profile
-files were mode `0600`. This is clean-package evidence for the shared
-candidate only. It is not installed-platform or live-room acceptance.
+Not verified:
 
-## Combined V2 candidate scope
+- **Live.** No Hermes, Codex, or Claude Code run in a real room since PR #67.
+  The live runs under History used predecessor code.
+- **Persistent installed deployment.** No operator setup, service
+  supervision, V1 upgrade, or rollback has run on a persistent host since PR
+  #67; the Hermes profile lifecycle has run only in isolated test
+  environments. Persistent services need `launchd` or `systemd` user services
+  ([#78](https://github.com/mentatzoe/nunchi/issues/78)).
+- **Hermes CI scope.** The stock-Hermes lanes use isolated homes, a loopback
+  model, and captured platform output. They are installed-runtime evidence, not
+  live model or platform delivery. Telegram has the contract lane only.
+- **Claude Code.** Only the superseded headless runner is on `main`; its
+  deterministic tests and entry-point probe pass. The mod design
+  ([#43](https://github.com/mentatzoe/nunchi/issues/43)) is not on `main`.
+- **Codex.** Only the reduced Discord runner is on `main`; draft PR
+  [#71](https://github.com/mentatzoe/nunchi/pull/71) is not merged.
+- **Behavior.** Whether agents read the room well needs behavioral evaluation
+  across realistic conversations
+  ([#86](https://github.com/mentatzoe/nunchi/issues/86)); none has run.
+- **Release.** No candidate is frozen
+  ([#66](https://github.com/mentatzoe/nunchi/issues/66)); there is no V2 tag.
+  Combined acceptance is [#41](https://github.com/mentatzoe/nunchi/issues/41).
 
-Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
-reference adapters, shared Discord MCP transport, Codex, Hermes, and Claude
-Code.
+## History
 
-Hermes is landed on `integration/v2`; Claude Code is rebased onto that exact
-result for landing. Both remain unverified. Earlier platform evidence is
-historical input and does not prove the combined head.
+The dated records below describe earlier code. They are kept as written, apart
+from their headings and a one-line note, and are not proof of current `main`.
 
-Pending beyond this shared successor: the remaining Hermes live matrix in
-[issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
-implementation and proof in
-[issue #39](https://github.com/mentatzoe/nunchi/issues/39); platform consumption
-and live proof of shared ACK behavior in
-[issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
-acceptance gate in
-[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
-Hermes source blockers are tracked separately in
-[issue #42](https://github.com/mentatzoe/nunchi/issues/42), Hermes supported
-surface gaps in [issue #44](https://github.com/mentatzoe/nunchi/issues/44),
-and Claude participant identity/surface blockers in
-[issue #43](https://github.com/mentatzoe/nunchi/issues/43).
-
-## Combined successor gates
-
-| Claim | Required proof | Current status |
-|---|---|---|
-| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
-| clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
-| installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | minimum/release/moving-main contract CI passed for the predecessor; successor minimum/release reruns are recorded below; first-save/restart and live-platform acceptance remain **pending** |
-| installed Hermes normal turns | exact wheel; ordinary participant and tools/approvals; isolated homes; no installed skips or external egress; before/after integrity | minimum/release and resolved-main installed results are in the combined PR84 record below; live platforms and adoption remain **pending** |
-| installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
-| deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
-| live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
-| independent review | fresh non-author review of the exact successor with no blocker | **pending** |
-
-The foundation predecessor at `8296e11d6cb3018e68d2904765a7e1d61f218bd9`
-had exact source, package, installed, live-room, and non-author approval. Those
-records remain below as historical evidence only. Final V2 acceptance requires
-every current row to name immutable evidence.
-
-## Current Hermes candidate: portable plugin-owned tools and ACK
+### 2026-10-02 to 2026-10-03: Hermes PRs #83 and #84
 
 PR [#83](https://github.com/mentatzoe/nunchi/pull/83) landed at
 `19ba1398a3619bd077edc3bdc03fb5088f3a8fd3`. Its combined
@@ -124,7 +110,82 @@ complete V2 acceptance remain open. The
 quarantine, retirement and guarded restoration. Archives remain private and
 retained; no V1 social state is converted and package uninstall is not data purge.
 
-## Superseded Hermes `b6ee0c2` evidence
+### Before 2026-10-04: combined V2 candidate scope
+
+Superseded by Current state above. `integration/v2` is retired.
+
+Included: shared V2 foundation, CLI, packaging, generic/Discord/Matrix/Telegram
+reference adapters, shared Discord MCP transport, Codex, Hermes, and Claude
+Code.
+
+Hermes is landed on `integration/v2`; Claude Code is rebased onto that exact
+result for landing. Both remain unverified. Earlier platform evidence is
+historical input and does not prove the combined head.
+
+Pending beyond this shared successor: the remaining Hermes live matrix in
+[issue #38](https://github.com/mentatzoe/nunchi/issues/38); Claude Code
+implementation and proof in
+[issue #39](https://github.com/mentatzoe/nunchi/issues/39); platform consumption
+and live proof of shared ACK behavior in
+[issue #40](https://github.com/mentatzoe/nunchi/issues/40); and the combined
+acceptance gate in
+[issue #41](https://github.com/mentatzoe/nunchi/issues/41).
+Hermes source blockers are tracked separately in
+[issue #42](https://github.com/mentatzoe/nunchi/issues/42), Hermes supported
+surface gaps in [issue #44](https://github.com/mentatzoe/nunchi/issues/44),
+and Claude participant identity/surface blockers in
+[issue #43](https://github.com/mentatzoe/nunchi/issues/43).
+
+### Before 2026-10-04: combined successor gates
+
+Superseded by Current state above. PR #67 has since merged.
+
+| Claim | Required proof | Current status |
+|---|---|---|
+| source and contract | exact commit; clean tree; full suite; eval list/run; diff check | shared successor source is green above; **exact-head review pending** |
+| clean package | exact wheel hash; new environment; installed probes; no checkout imports | shared successor wheel is verified above; platform installs remain separate |
+| installed Hermes host contract | minimum 0.19.0 and current/latest candidates; normal plugin discovery; unchanged Hermes source and distribution hashes; Discord and Telegram shape checks | minimum/release/moving-main contract CI passed for the predecessor; successor minimum/release reruns are recorded below; first-save/restart and live-platform acceptance remain **pending** |
+| installed Hermes normal turns | exact wheel; ordinary participant and tools/approvals; isolated homes; no installed skips or external egress; before/after integrity | minimum/release and resolved-main installed results are in the combined PR84 record below; live platforms and adoption remain **pending** |
+| installed Claude Code | clean runner probe, persistent-session behavior, and native capability checks | **pending combined-head rerun** |
+| deterministic lifecycle | SUPPRESS, ACK, ACK widening, WAKE contribution, WAKE silence, both existing DEFER paths, bypass, both error policies | shared successor **11/11 passed**; platform reruns remain pending |
+| live platform | attributable Hermes and Claude Code native delivery/receipt IDs for the required lifecycle matrix | **pending** in issues #38 and #39 |
+| independent review | fresh non-author review of the exact successor with no blocker | **pending** |
+
+The foundation predecessor at `8296e11d6cb3018e68d2904765a7e1d61f218bd9`
+had exact source, package, installed, live-room, and non-author approval. Those
+records remain below as historical evidence only. Final V2 acceptance requires
+every current row to name immutable evidence.
+
+### 2026-07-31: issues #55, #56, and #40 shared-foundation successor
+
+Local run before review. PR #67 later merged as `bd7fd6c` after approval at `b5bedec`.
+
+The successor starts from
+`fcb1177a55892e1f642ae591315e41f54c4e8e52`. It includes the one versioned
+Nunchi-owned participant protocol, first-class ACK and safe widening, the
+shared operator/dashboard schema, and persistent-service controls documented
+in `v2-shared-foundation.md`. Platform-specific gaps, live validation,
+security acceptance, release, and final V2 acceptance remain outside this
+candidate. The PR records the exact committed head; these working-tree results
+do not substitute for exact-head review or integration.
+
+Attributable local verification on 2026-07-31:
+
+| Gate | Result |
+|---|---|
+| full source | `python3 -m unittest` — **586 run**, OK, with 4 optional-oracle skips |
+| pinned contract oracle | `jsonschema==4.26.0`, offline isolated run — **220 passed**, no skips |
+| installed lifecycle | `python3 -m evals.verdict_suite.runner` — **11/11 passed**, including ACK, disabled ACK, and unsupported ACK |
+| static source | `git diff --check` and `python3 -m compileall -q src tests evals` — passed |
+| clean wheel | Python 3.14 venv, no checkout on `PYTHONPATH`; both probes, `pip check`, guided setup, diagnostics, dashboard API/security headers, service start/restart/stop, and `site-packages` imports passed |
+
+The clean wheel is `nunchi-2.0.0-py3-none-any.whl`, SHA-256
+`22f435bc4feea1222e3486c2b5659977067ce67aaaaa1ffa74a7d210b2211d8a`.
+Its generated operator roots were mode `0700`; generated config and profile
+files were mode `0600`. This is clean-package evidence for the shared
+candidate only. It is not installed-platform or live-room acceptance.
+
+### 2026-07-29: superseded Hermes `b6ee0c2` evidence
 
 The following record applies only to implementation
 `b6ee0c2dbe918140fcc77f19320402bb35b44b75`. That implementation has been
@@ -168,7 +229,7 @@ clean. The installed dashboard assets verified as:
 - `manifest.json`: `d87e5c56a2659c58ca750992e473aed7f3b67cd0fd5da66b9cad549a631b9d63`
 - `plugin_api.py`: `56fec259232e2d6df017b2ab66fd1bde470f664ac3e7309539cf01d567091000`
 
-## Superseded Hermes live Discord evidence
+### Superseded Hermes live Discord evidence
 
 This historical run used the superseded wheel above. It is not evidence for
 the current source successor.
@@ -218,7 +279,7 @@ processing, active-plus-newest scheduling, incompatible host shapes, and
 unconfigured rooms. Telegram room `670011474` is configured and connected,
 but no live Telegram acceptance is claimed.
 
-## Exact source/artifact evidence
+### 2026-07-24 to 2026-07-25: foundation predecessor source and artifact evidence
 
 The repaired implementation candidate is
 `c5f5e6c0c7e2fd6af1bf888ca9a86a7a8f4d7e63`, based on the same
@@ -288,7 +349,7 @@ live installation later exposed an MCP endpoint redirect and a
 provider-incompatible Codex output schema, fixed by `887747e` and `ca4404b`
 with regression tests.
 
-## Live-room verification
+### 2026-07-24 to 2026-07-25: foundation predecessor live-room verification
 
 On 2026-07-24, exact installed implementation predecessor `ca4404b` ran an
 isolated Codex-only route as Vigil in Discord channel

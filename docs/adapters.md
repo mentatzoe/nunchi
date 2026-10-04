@@ -14,6 +14,19 @@ normalized before attention and cannot alter trusted binding or policy.
 Configured probes verify exact pinned configuration and required credentials
 but do not claim a live connection.
 
+## Platform capabilities in the operator surface
+
+The operator surface (`nunchi setup`, `nunchi config`, `nunchi diagnose`, and
+the dashboard) shows static reaction capabilities for the reference platforms.
+The adapters own that data in `src/nunchi/adapters/platforms.py`; the core
+registry names no platform. `channel` and `discord` declare reaction add and
+remove, `matrix` declares reaction add, and `telegram` declares no reactions.
+
+A room on any other platform name is still valid. Its compatibility is
+`unregistered`, and `config show` and `diagnose` warn that its capabilities
+are unknown: reactions count as unsupported, and ACK widens to DEFER, until
+the integration measures them at runtime.
+
 ## Generic JSONL
 
 Input is one closed object per line:
@@ -72,3 +85,16 @@ roles and channel overwrites. Matrix binds `whoami` to the configured actor and
 compares that user with the room's `m.reaction` power level. A denial, missing
 state, identity mismatch, or malformed response is unsupported and widens ACK
 to DEFER before any reaction dispatch.
+
+The shared Discord MCP transport's probe (`src/nunchi/mcp_discord/rest.py`)
+models guild text channels only. It does not model three cases:
+
+- **Guild owner.** Discord grants the owner every permission; the probe does
+  not read `owner_id`, so an owning bot behind a restrictive `@everyone` is
+  reported unable to react and ACK widens to DEFER.
+- **Member timeout.** The probe ignores `communication_disabled_until`, so a
+  timed-out bot can be reported able to react, and the reaction then fails
+  at dispatch.
+- **Threads.** A thread payload carries no `permission_overwrites`, so the
+  probe errors and ACK widens to DEFER. This has not been checked against
+  live Discord.
