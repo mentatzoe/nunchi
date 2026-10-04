@@ -24,7 +24,7 @@ from ..adapters.runtime import load_pinned_config
 from ..attention import (
     AttentionEngine,
     AttentionPolicy,
-    OpenAICompatibleAttentionModel,
+    attention_model_from_config,
     ParticipantProfile,
 )
 from ..errors import NunchiError, ValidationError
@@ -457,7 +457,7 @@ class CodexRoomRuntime:
             raise ValidationError("Codex attention config is invalid")
         policy = AttentionPolicy(**attention_raw["policy"])
         model = (
-            OpenAICompatibleAttentionModel.from_trusted_config(attention_raw["model"])
+            attention_model_from_config(attention_raw["model"])
             if policy.preattention_enabled
             else None
         )

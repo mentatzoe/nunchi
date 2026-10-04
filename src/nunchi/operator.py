@@ -46,13 +46,23 @@ _LOCAL_SUPERVISORS_LOCK = threading.Lock()
 
 @dataclass(frozen=True)
 class PlatformRegistration:
+    """Known capabilities of one chat platform (where rooms live).
+
+    Agent hosts are not platforms. A room on an unregistered platform is
+    valid; its capabilities are simply unknown until measured at runtime.
+    """
+
     name: str
-    participant_kind: str
     capabilities: Mapping[str, Any]
     compatibility: Mapping[str, Any]
 
 
 _PLATFORMS: dict[str, PlatformRegistration] = {}
+_UNKNOWN_CAPABILITIES: dict[str, Any] = {
+    "reaction": {"supported": False, "operations": [], "reactions": []},
+    "message": True,
+    "reply": True,
+}
 
 
 def register_platform(registration: PlatformRegistration) -> None:
@@ -60,96 +70,33 @@ def register_platform(registration: PlatformRegistration) -> None:
         raise TypeError("platform registration must be PlatformRegistration")
     if not _PROFILE.fullmatch(registration.name):
         raise ValueError("platform registration name is invalid")
-    if registration.participant_kind not in ("nunchi-owned", "native-host"):
-        raise ValueError("platform participant_kind is invalid")
     if registration.name in _PLATFORMS and _PLATFORMS[registration.name] != registration:
         raise ValueError(f"platform {registration.name!r} is already registered differently")
     _PLATFORMS[registration.name] = registration
 
 
-def _builtin_platforms() -> None:
-    reaction_all = {
-        "reaction": {"supported": True, "operations": ["add", "remove"], "reactions": ["*"]},
-        "message": True,
-        "reply": True,
-    }
-    for name, participant_kind, capabilities, compatibility in (
-        (
-            "channel",
-            "nunchi-owned",
-            reaction_all,
-            {"status": "reference", "operator_managed": True},
-        ),
-        (
-            "discord",
-            "nunchi-owned",
-            reaction_all,
-            {"status": "reference", "operator_managed": True},
-        ),
-        (
-            "matrix",
-            "nunchi-owned",
-            {
-                "reaction": {"supported": True, "operations": ["add"], "reactions": ["*"]},
-                "message": True,
-                "reply": True,
-            },
-            {"status": "reference", "operator_managed": True},
-        ),
-        (
-            "telegram",
-            "nunchi-owned",
-            {
-                "reaction": {"supported": False, "operations": [], "reactions": []},
-                "message": True,
-                "reply": True,
-            },
-            {"status": "reference", "operator_managed": True},
-        ),
-        (
-            "codex",
-            "nunchi-owned",
-            reaction_all,
-            {"status": "adapter-required", "operator_managed": True},
-        ),
-        (
-            "claude-code",
-            "nunchi-owned",
-            reaction_all,
-            {"status": "adapter-required", "operator_managed": True},
-        ),
-        (
-            "hermes",
-            "native-host",
-            {
-                "reaction": {"supported": False, "operations": [], "reactions": []},
-                "message": True,
-                "reply": True,
-            },
-            {
-                "status": "adapter-required",
-                "operator_managed": False,
-                "detail": "native participant host keeps its normal WAKE turn",
-            },
-        ),
-    ):
-        register_platform(
-            PlatformRegistration(
-                name=name,
-                participant_kind=participant_kind,
-                capabilities=deepcopy(capabilities),
-                compatibility=deepcopy(compatibility),
-            )
-        )
+_REFERENCE_PLATFORMS_LOADED = False
 
 
-_builtin_platforms()
+def _load_reference_platforms() -> None:
+    """Load the capabilities the in-tree reference adapters declare.
+
+    The adapters own that data; core only provides the registry.
+    """
+
+    global _REFERENCE_PLATFORMS_LOADED
+    if _REFERENCE_PLATFORMS_LOADED:
+        return
+    _REFERENCE_PLATFORMS_LOADED = True
+    import importlib
+
+    importlib.import_module("nunchi.adapters.platforms").register_reference_platforms()
 
 
 def registered_platforms() -> dict[str, dict[str, Any]]:
+    _load_reference_platforms()
     return {
         name: {
-            "participant_kind": item.participant_kind,
             "capabilities": deepcopy(dict(item.capabilities)),
             "compatibility": deepcopy(dict(item.compatibility)),
         }
@@ -170,15 +117,16 @@ def validate_profile_id(profile_id: str) -> str:
 
 
 def _model(value: Any, label: str) -> dict[str, Any]:
-    required = {"provider", "model", "credential_env"}
-    optional = {"base_url"}
+    # credential_env is optional: a host-served model needs no credential.
+    required = {"provider", "model"}
+    optional = {"base_url", "credential_env", "kind"}
     if not isinstance(value, Mapping) or required - set(value) or set(value) - (required | optional):
         raise ValidationError(f"operator {label} model has an invalid closed shape")
     result = dict(value)
     for name in result:
         _nonempty(result[name], f"{label} model {name}")
-    credential_env = result["credential_env"]
-    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", credential_env):
+    credential_env = result.get("credential_env")
+    if credential_env is not None and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", credential_env):
         raise ValidationError(f"operator {label} credential_env is invalid")
     return result
 
@@ -189,8 +137,8 @@ def _room(value: Any, index: int) -> dict[str, Any]:
         raise ValidationError(f"operator rooms[{index}] has an invalid closed shape")
     result = dict(value)
     platform = _nonempty(result["platform"], f"rooms[{index}].platform")
-    if platform not in _PLATFORMS:
-        raise ValidationError(f"operator platform {platform!r} is not registered")
+    if not _PROFILE.fullmatch(platform):
+        raise ValidationError(f"operator rooms[{index}].platform is not a safe name")
     for name in ("room_id", "continuity_scope_id", "name"):
         _nonempty(result[name], f"rooms[{index}].{name}")
     if not isinstance(result["enabled"], bool):
@@ -621,12 +569,28 @@ class OperatorStore:
         compatibility: dict[str, Any] = {}
         warnings = []
         ack = config["ack_policy"]
+        _load_reference_platforms()
         for room in config["rooms"]:
-            platform = _PLATFORMS[room["platform"]]
             key = f"{room['platform']}:{room['room_id']}"
-            capability = deepcopy(dict(platform.capabilities))
+            platform = _PLATFORMS.get(room["platform"])
+            if platform is None:
+                capability = deepcopy(_UNKNOWN_CAPABILITIES)
+                compatibility[key] = {"status": "unregistered", "operator_managed": True}
+                warnings.append(
+                    {
+                        "room": key,
+                        "feature": "platform",
+                        "state": "unregistered",
+                        "detail": (
+                            f"platform {room['platform']!r} has no registered capabilities; "
+                            "reactions are treated as unsupported until measured at runtime"
+                        ),
+                    }
+                )
+            else:
+                capability = deepcopy(dict(platform.capabilities))
+                compatibility[key] = deepcopy(dict(platform.compatibility))
             room_capabilities[key] = capability
-            compatibility[key] = deepcopy(dict(platform.compatibility))
             reaction = capability["reaction"]
             if ack["enabled"] and (
                 not reaction["supported"]
@@ -649,6 +613,7 @@ class OperatorStore:
                 "state": "present" if os.environ.get(model["credential_env"]) else "absent",
             }
             for name, model in config["models"].items()
+            if model.get("credential_env")
         }
         for name, credential in credentials.items():
             if credential["state"] == "absent":

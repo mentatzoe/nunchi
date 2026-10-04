@@ -1449,8 +1449,7 @@ class RuntimeHarness:
         if model is not None:
             patches.append(
                 mock.patch(
-                    "nunchi.integrations.claude_code_v2."
-                    "OpenAICompatibleAttentionModel.from_trusted_config",
+                    "nunchi.integrations.claude_code_v2.attention_model_from_config",
                     return_value=model,
                 )
             )

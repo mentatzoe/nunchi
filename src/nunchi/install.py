@@ -1,8 +1,8 @@
 """Initialize and verify stable operator state for an installed V2 artifact.
 
-Hermes discovers its V2 plugin and Claude Code its runner from the installed
-wheel. This installer owns only shared V2 operator state and never copies or
-patches a host checkout.
+Agent-host integrations discover their entry points from the installed wheel.
+This installer owns only shared V2 operator state and never copies or patches
+a host checkout.
 """
 
 from __future__ import annotations
