@@ -1,0 +1,46 @@
+{
+  "id": "litmus-d-mention-recipient-addressed",
+  "title": "Discord <@id> mention as recipient signal; addressed agent must SPEAK",
+  "source": "evals/verdict_suite/fixtures/discord/d-mention-recipient-addressed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: agent.mention_id matches the <@1494822530643398827> target, so this agent is the explicit recipient of the recap ask.",
+  "platform": "discord",
+  "participants": [
+    "castor"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1779463950000",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Hey <@1494822530643398827>, could you post a short recap of the pineapple debate to the channel when you get a sec?",
+      "mentions": [
+        "castor"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1779463950000",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. agent.mention_id matches the <@1494822530643398827> target, so this agent is the explicit recipient of the recap ask."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

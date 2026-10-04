@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-predicted-jigsaw-saw-it-ack",
+  "title": "Predicted false ACK: 'saw it' matches inside 'jigsaw items'",
+  "source": "evals/verdict_suite/fixtures/multica/m-predicted-jigsaw-saw-it-ack.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: A direct triage assignment with a requested deliverable must be SPEAK. A shallow keyword/substring classifier baits on the incidental 'saw it' inside 'jigsaw items' and downgrades the assignment to a bare acknowledgement.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "jigsaw-trig",
+      "author": "tpm",
+      "text": "The jigsaw items in the triage backlog are piling up. Dalgos, please sort them by severity and post the resulting order in this thread."
+    }
+  ],
+  "moments": [
+    {
+      "event": "jigsaw-trig",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. A direct triage assignment with a requested deliverable must be SPEAK. A shallow keyword/substring classifier baits on the incidental 'saw it' inside 'jigsaw items' and downgrades the assignment to a bare acknowledgement."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

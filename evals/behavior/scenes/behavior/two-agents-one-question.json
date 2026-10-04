@@ -1,0 +1,28 @@
+{
+  "id": "two-agents-one-question",
+  "title": "Two agents about to answer the same question",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review. Today's V2 can only show collective silence here; a pile-on needs the agent's own move.",
+  "platform": "discord",
+  "participants": ["vigil", "castor"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "q1", "author": "zoe", "at": "0s", "mentions_room": true,
+     "text": "@here quick one for the bots: what's the default timeout for the attention call?"}
+  ],
+  "moments": [
+    {
+      "label": "a question to the room that both agents can answer",
+      "event": "q1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked every bot in the room; one answer is enough", "events": ["q1"]}
+      ],
+      "fitting": ["contribute", "wait", "stay_quiet"],
+      "misses": []
+    }
+  ],
+  "together": ["not-all-quiet"]
+}

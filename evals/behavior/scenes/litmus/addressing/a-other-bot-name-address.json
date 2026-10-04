@@ -1,0 +1,55 @@
+{
+  "id": "litmus-a-other-bot-name-address",
+  "title": "Request naming a DIFFERENT bot; a fully aliased agent must still PASS",
+  "source": "evals/verdict_suite/fixtures/addressing/a-other-bot-name-address.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: The request is plainly for Dalgos, who is active in context. This agent carries three aliases, none of which is named; the correct social judgment is silence.",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "dalgos": {
+      "display_name": "Dalgos",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-addr-4-ctx-1",
+      "author": "dalgos",
+      "at": "-60s",
+      "text": "Deploy is through staging; watching the canary now."
+    },
+    {
+      "id": "msg-addr-4",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Dalgos, can you kick off the nightly backup once the deploy settles?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-4",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

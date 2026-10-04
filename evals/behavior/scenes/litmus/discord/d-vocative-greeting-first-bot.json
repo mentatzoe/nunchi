@@ -1,0 +1,35 @@
+{
+  "id": "litmus-d-vocative-greeting-first-bot",
+  "title": "Vocative greeting; no prior peer response in context",
+  "source": "evals/verdict_suite/fixtures/discord/d-vocative-greeting-first-bot.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK or ACK. V1 rationale: Operator asks 'are you there?' to an empty room; classifier must respond, not ask for clarification.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1747104742818",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Hi all, are you there?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1747104742818",
+      "step1": "pass",
+      "fitting": [
+        "contribute",
+        "mhm"
+      ],
+      "misses": []
+    }
+  ]
+}

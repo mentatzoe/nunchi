@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-baseline-speak-assigned",
+  "title": "Legitimate SPEAK — assignment to participate substantively",
+  "source": "evals/verdict_suite/fixtures/multica/m-baseline-speak-assigned.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The reworded assignment (uses 'post the results comment' instead of 'comment back with results') must produce SPEAK — proving the FR-001 failure is purely the substring trap, not the trigger meaning.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "assign-trig",
+      "author": "zoe",
+      "text": "Dalgos, you are assigned as owner. Please implement the CLI smoke and post the results comment when done."
+    }
+  ],
+  "moments": [
+    {
+      "event": "assign-trig",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The reworded assignment (uses 'post the results comment' instead of 'comment back with results') must produce SPEAK — proving the FR-001 failure is purely the substring trap, not the trigger meaning."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

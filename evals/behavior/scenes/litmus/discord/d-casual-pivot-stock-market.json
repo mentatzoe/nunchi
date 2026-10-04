@@ -1,0 +1,43 @@
+{
+  "id": "litmus-d-casual-pivot-stock-market",
+  "title": "Casual pivot with emotional padding; embedded ask at the end",
+  "source": "evals/verdict_suite/fixtures/discord/d-casual-pivot-stock-market.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The real ask ('what will the stock market be like tomorrow?') is at the end; the padding contains incidental substrings that trip the keyword classifier.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1747104589076",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Okay, wow, I didn't expect such depth, was meant to be a fun debate haha. Sorry for the recursivity of the topic. Give it your best shot: what will the stock market be like tomorrow?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1747104589076",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The real ask ('what will the stock market be like tomorrow?') is at the end; the padding contains incidental substrings that trip the keyword classifier."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

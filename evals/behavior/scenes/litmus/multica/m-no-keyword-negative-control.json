@@ -1,0 +1,35 @@
+{
+  "id": "litmus-m-no-keyword-negative-control",
+  "title": "No-keyword negative control: ASK-fallthrough must not yield 0.85-confidence ASK",
+  "source": "evals/verdict_suite/fixtures/multica/m-no-keyword-negative-control.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS or ACK or SPEAK. V1 rationale: Negative control. A future classifier that produces ASK at 0.85 here cannot be trusted to surface real clarifying needs.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "neutral-trig",
+      "author": "zoe",
+      "text": "Hello team, the weather is nice today."
+    }
+  ],
+  "moments": [
+    {
+      "event": "neutral-trig",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet",
+        "mhm",
+        "contribute"
+      ],
+      "misses": []
+    }
+  ]
+}

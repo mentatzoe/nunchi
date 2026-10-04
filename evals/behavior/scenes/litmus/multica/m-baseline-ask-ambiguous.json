@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-baseline-ask-ambiguous",
+  "title": "Legitimate ASK — ambiguous scope flagged for clarification",
+  "source": "evals/verdict_suite/fixtures/multica/m-baseline-ask-ambiguous.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected ASK. V1 rationale: Distinguishes positive ASK from ASK-by-fallthrough.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ambig-trig",
+      "author": "zoe",
+      "text": "Please pick the deploy target. The scope is ambiguous and not specified in the ticket."
+    }
+  ],
+  "moments": [
+    {
+      "event": "ambig-trig",
+      "step1": "pass",
+      "fitting": [
+        "ask"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. Distinguishes positive ASK from ASK-by-fallthrough."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

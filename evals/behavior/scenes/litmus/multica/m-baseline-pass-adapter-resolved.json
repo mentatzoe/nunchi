@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-baseline-pass-adapter-resolved",
+  "title": "Legitimate PASS — adapter thread resolved by prior peer message",
+  "source": "evals/verdict_suite/fixtures/multica/m-baseline-pass-adapter-resolved.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: If a fix to FR-001 drops the PASS branch, this baseline breaks. Catches over-broad fixes.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-vigil"
+  ],
+  "actors": {
+    "peer": {
+      "display_name": "Peer",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ctx-pass-handled",
+      "author": "peer",
+      "text": "I already handled this request and posted the fix."
+    },
+    {
+      "id": "ping-msg",
+      "author": "zoe",
+      "text": "Can turnaware-vigil respond here?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "ping-msg",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

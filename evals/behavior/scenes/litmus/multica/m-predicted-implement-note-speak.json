@@ -1,0 +1,33 @@
+{
+  "id": "litmus-m-predicted-implement-note-speak",
+  "title": "Predicted false SPEAK: 'implement' matches inside 'implementation note' on an FYI",
+  "source": "evals/verdict_suite/fixtures/multica/m-predicted-implement-note-speak.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected ACK. V1 rationale: An informational 'implementation note' that explicitly asks only for receipt is the lightweight-acknowledgement case (ACK). A shallow keyword/substring classifier baits on 'implement' and escalates to SPEAK, producing substantive participation nobody asked for.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "fyi-note-trig",
+      "author": "tpm",
+      "text": "Implementation note for the record: the retry queue now drains strictly in order after this morning's deploy. Nothing for you to do here — just give a quick thumbs-up so I know it reached you."
+    }
+  ],
+  "moments": [
+    {
+      "event": "fyi-note-trig",
+      "step1": "pass",
+      "fitting": [
+        "mhm"
+      ],
+      "misses": []
+    }
+  ]
+}

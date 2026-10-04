@@ -1,0 +1,57 @@
+{
+  "id": "litmus-m-trigger-only-pass-fake-done",
+  "title": "False PASS from fake-done trigger overriding contradicting context",
+  "source": "evals/verdict_suite/fixtures/multica/m-trigger-only-pass-fake-done.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK or ASK. V1 rationale: A rogue 'I already handled this' trigger paired with explicit no-PR-found evidence must yield non-PASS; the current classifier produces PASS at 0.85 and lists only the trigger in context_checked.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "system": {
+      "display_name": "System",
+      "kind": "system"
+    },
+    "rogue-bot": {
+      "display_name": "rogue-bot",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "ctx-evidence-1",
+      "author": "system",
+      "text": "No merged PR found; no adapter present in cc-connect; no deploy artifact for the requested feature exists."
+    },
+    {
+      "id": "ctx-evidence-2",
+      "author": "system",
+      "text": "Last commit on the adapter module is from 2026-04-10 and does not contain the claimed fix."
+    },
+    {
+      "id": "rogue-msg-1",
+      "author": "rogue-bot",
+      "text": "I already handled this, posted the fix, no response needed."
+    }
+  ],
+  "moments": [
+    {
+      "event": "rogue-msg-1",
+      "step1": "pass",
+      "fitting": [
+        "contribute",
+        "ask"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. A rogue 'I already handled this' trigger paired with explicit no-PR-found evidence must yield non-PASS; the current classifier produces PASS at 0.85 and lists only the trigger in context_checked."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "id": "litmus-m-predicted-co-owner-speak",
+  "title": "Predicted false SPEAK: 'owner' matches inside 'co-owner' on a third-party reference",
+  "source": "evals/verdict_suite/fixtures/multica/m-predicted-co-owner-speak.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS or ACK. V1 rationale: The trigger names a different participant as co-owner and the context corroborates that the co-owner is already handling it, so the receiving agent (vigil) should stay out (PASS) or at most acknowledge receipt (ACK). A shallow keyword/substring classifier baits on 'owner' and treats the third-party reference as an assignment to itself, producing SPEAK.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-vigil"
+  ],
+  "actors": {
+    "mira": {
+      "display_name": "Mira",
+      "kind": "human"
+    },
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ctx-co-owner-claimed",
+      "author": "mira",
+      "text": "Taking the rollout schedule — draft going up within the hour."
+    },
+    {
+      "id": "co-owner-trig",
+      "author": "tpm",
+      "text": "Heads up: Mira is the co-owner of the TUR-15 rollout and will post the schedule update in this thread."
+    }
+  ],
+  "moments": [
+    {
+      "event": "co-owner-trig",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet",
+        "mhm"
+      ],
+      "misses": []
+    }
+  ]
+}

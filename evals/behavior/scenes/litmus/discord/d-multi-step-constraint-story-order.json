@@ -1,0 +1,43 @@
+{
+  "id": "litmus-d-multi-step-constraint-story-order",
+  "title": "Compound instruction with explicit ordering; SPEAK must engage the meta-step",
+  "source": "evals/verdict_suite/fixtures/discord/d-multi-step-constraint-story-order.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The operator orders the steps explicitly: pick an order, do not begin the story until decided, then write, and only count it done when saved to disk. The honest verdict is SPEAK on the ordering meta-step.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1778634496917",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Okay, let's do something. I'd like you to write a collaborative story about AI agents solving a mystery. First, figure out a way to randomly choose an order. Don't begin the story until you've decided on who goes when. Then, work what the story should be, who the characters are, and the story itself. Only consider it done when the full story is saved to disk on a markdown file."
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1778634496917",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The operator orders the steps explicitly: pick an order, do not begin the story until decided, then write, and only count it done when saved to disk. The honest verdict is SPEAK on the ordering meta-step."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

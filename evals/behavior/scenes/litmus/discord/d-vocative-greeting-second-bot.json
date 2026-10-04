@@ -1,0 +1,44 @@
+{
+  "id": "litmus-d-vocative-greeting-second-bot",
+  "title": "Vocative greeting; peer already answered (Covered suppressor)",
+  "source": "evals/verdict_suite/fixtures/discord/d-vocative-greeting-second-bot.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: After Vigil's 'Here.', Dalgos has no net-new presence value to add; should PASS, not introduce.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "vigil": {
+      "display_name": "Vigil",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1747104754963",
+      "author": "vigil",
+      "at": "0s",
+      "text": "Here."
+    },
+    {
+      "id": "msg-pilot-1747104742818-echo",
+      "author": "zoe",
+      "at": "-12s",
+      "text": "Hi all, are you there?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1747104742818-echo",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

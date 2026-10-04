@@ -1,0 +1,44 @@
+{
+  "id": "litmus-d-suppressor-covered",
+  "title": "Covered suppressor: peer already provided the value-add",
+  "source": "evals/verdict_suite/fixtures/discord/d-suppressor-covered.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Vigil's prior message is the answer Dalgos would have given; adding the same point is noise.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "vigil": {
+      "display_name": "Vigil",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-peer-already-said",
+      "author": "vigil",
+      "at": "-30s",
+      "text": "I'd argue the in-process LRU is the right call; Redis adds a network hop for cached items."
+    },
+    {
+      "id": "msg-trigger-covered",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Could you share your view on the cache-backend question?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-trigger-covered",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

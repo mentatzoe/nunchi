@@ -1,0 +1,29 @@
+{
+  "id": "litmus-d-suppressor-self-caused",
+  "title": "Self-caused suppressor: trigger is receiving agent's own prior message",
+  "source": "evals/verdict_suite/fixtures/discord/d-suppressor-self-caused.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: trigger.author == agent.id is the canonical self-echo case the suppressor exists for.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {},
+  "events": [
+    {
+      "id": "msg-self-echo",
+      "author": "dalgos",
+      "at": "0s",
+      "text": "The bug in the OAuth flow is in the redirect URI handling."
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-self-echo",
+      "step1": "suppress",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "id": "litmus-m-contradiction-audit-both-listed",
+  "title": "Contradiction audit: trigger claims done, context shows missing work; both must appear in context_checked",
+  "source": "evals/verdict_suite/fixtures/multica/m-contradiction-audit-both-listed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK or ASK. V1 rationale: The trigger and the single context item disagree (done-claim vs. open subtask), so a trustworthy verdict must have consulted both — context_checked must name both trigger:done-claim-trig and context:ctx-open-subtask (invariants.check_context_checked_completeness). FR-007 leaves the exact verdict open but the contradiction rules out PASS: missing work remains.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    },
+    "rogue-bot": {
+      "display_name": "rogue-bot",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "ctx-open-subtask",
+      "author": "tpm",
+      "text": "Subtask 3 of TUR-16 (loader validation) still has no linked PR and its checklist row remains open."
+    },
+    {
+      "id": "done-claim-trig",
+      "author": "rogue-bot",
+      "text": "TUR-16 is fully done; every subtask is complete and no response is needed."
+    }
+  ],
+  "moments": [
+    {
+      "event": "done-claim-trig",
+      "step1": "pass",
+      "fitting": [
+        "contribute",
+        "ask"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The trigger and the single context item disagree (done-claim vs. open subtask), so a trustworthy verdict must have consulted both — context_checked must name both trigger:done-claim-trig and context:ctx-open-subtask (invariants.check_context_checked_completeness). FR-007 leaves the exact verdict open but the contradiction rules out PASS: missing work remains."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

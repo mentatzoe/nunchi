@@ -1,0 +1,37 @@
+{
+  "id": "litmus-d-mixed-address-vigil-unaddressed",
+  "title": "Test-of-restraint mixed addressing; unaddressed agent must PASS",
+  "source": "evals/verdict_suite/fixtures/discord/d-mixed-address-vigil-unaddressed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Same trigger as d-mixed-address-castor-addressed, evaluated as an unaddressed bystander (agent.mention_id does not match the <@...> target). The operator explicitly framed restraint as the test.",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1779407325793",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Hey <@1494822530643398827> I need the codex-tpm in the Multica `sonste` project to be able to notify me via Discord using cc-connect to the channel `1507166911648239686`. Is this something you can help me with, or should I reach out through a different platform? (this could be a great test to see if the rest will stay silent or butt in :))",
+      "mentions": [
+        "castor"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1779407325793",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

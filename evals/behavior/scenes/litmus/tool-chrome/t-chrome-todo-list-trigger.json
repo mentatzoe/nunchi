@@ -1,0 +1,44 @@
+{
+  "id": "litmus-t-chrome-todo-list-trigger",
+  "title": "Peer-bot todo-list chrome as the trigger — checklist markers are not open questions",
+  "source": "evals/verdict_suite/fixtures/tool-chrome/t-chrome-todo-list-trigger.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: The trigger is aleph's own todo readout for work zoe assigned to aleph. Open checkboxes are that bot's plan, not requests to the room; dalgos stays silent.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "aleph": {
+      "display_name": "Aleph",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-chrome-todo-1",
+      "author": "zoe",
+      "at": "-60s",
+      "text": "aleph, track the remaining gate fixes as todos please."
+    },
+    {
+      "id": "msg-chrome-todo-2",
+      "author": "aleph",
+      "at": "0s",
+      "text": "Todos updated:\n☒ Read plugin source\n☐ Wire fail_policy into the payload\n☐ Add per-channel override test"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-chrome-todo-2",
+      "step1": "either",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

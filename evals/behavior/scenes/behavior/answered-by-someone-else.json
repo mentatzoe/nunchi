@@ -1,0 +1,32 @@
+{
+  "id": "answered-by-someone-else",
+  "title": "A question someone else already answered",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "sam": {"display_name": "Sam", "kind": "human"}
+  },
+  "events": [
+    {"id": "q1", "author": "sam", "at": "-40s",
+     "text": "Does anyone know if the staging database got migrated to the new schema?"},
+    {"id": "a1", "author": "castor", "at": "0s", "reply_to": "q1",
+     "text": "Yes, migrated at 14:00 today. Staging is on schema v42 now."}
+  ],
+  "moments": [
+    {
+      "label": "judging the question after Castor answered",
+      "event": "q1",
+      "seen_through": "a1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Castor already answered Sam's question", "events": ["q1", "a1"]}
+      ],
+      "fitting": ["stay_quiet", "mhm"],
+      "misses": [
+        {"move": "ask", "why": "nothing is left to clarify; Castor answered"}
+      ]
+    }
+  ]
+}

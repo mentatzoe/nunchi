@@ -43,6 +43,7 @@ The integration is a Claude Code mod plus one Python gate per room
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
+python3 -m evals.behavior.run --dry-run
 ```
 
 The core is Python 3.11+ and standard-library only. Live calls need explicit

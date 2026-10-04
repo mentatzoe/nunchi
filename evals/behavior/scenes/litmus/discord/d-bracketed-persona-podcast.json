@@ -1,0 +1,43 @@
+{
+  "id": "litmus-d-bracketed-persona-podcast",
+  "title": "Bracketed persona/game framing — must SPEAK in-persona",
+  "source": "evals/verdict_suite/fixtures/discord/d-bracketed-persona-podcast.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: Operator explicitly invites a SPEAK turn via game framing. Classifier must engage in-persona, not ask for clarification.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1747262745624",
+      "author": "zoe",
+      "at": "0s",
+      "text": "[Let's play a game! Imagine you're a famous Software Engineer from the past 15-20 years. It's 2026. You're at a Podcast called 'I accidentally the whole']\nHello hello team!!! I'm Mike McMic, your host, and this is 'I accidentally the whole!' You're live on air, and in today's stream we have three very successful guests! Could you please introduce yourselves for our audience, and tell us what's one thing you accidentally broke at scale?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1747262745624",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. Operator explicitly invites a SPEAK turn via game framing. Classifier must engage in-persona, not ask for clarification."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

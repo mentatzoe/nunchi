@@ -42,3 +42,6 @@ pnpm-debug.log*
 # Files Claude Code lays into a mod folder it loads
 src/nunchi/integrations/claude_code_mod/tsconfig.json
 src/nunchi/integrations/claude_code_mod/.claude-plugin/types/
+
+# Behavior evaluation output (evals/behavior/run.py)
+behavior-eval-out/

@@ -1,0 +1,50 @@
+{
+  "id": "litmus-t-chrome-compaction-notice-history",
+  "title": "Peer-bot compaction notice in history, benign status trigger — not an invitation",
+  "source": "evals/verdict_suite/fixtures/tool-chrome/t-chrome-compaction-notice-history.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: The compaction notice and the resume message are aleph's own session bookkeeping while working zoe's task. Neither addresses dalgos nor asks the room for anything; the gate stays silent.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "aleph": {
+      "display_name": "Aleph",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-chrome-compact-1",
+      "author": "zoe",
+      "at": "-120s",
+      "text": "aleph, keep going on the fixture corpus when you're ready."
+    },
+    {
+      "id": "msg-chrome-compact-2",
+      "author": "aleph",
+      "at": "-60s",
+      "text": "[Context compacted — earlier conversation summarized to stay under the window. Key points retained: gate wiring in progress; fixture updates pending.]"
+    },
+    {
+      "id": "msg-chrome-compact-3",
+      "author": "aleph",
+      "at": "0s",
+      "text": "Resuming after compaction — continuing with the fixture updates."
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-chrome-compact-3",
+      "step1": "either",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

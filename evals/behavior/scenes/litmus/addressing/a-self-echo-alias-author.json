@@ -1,0 +1,40 @@
+{
+  "id": "litmus-a-self-echo-alias-author",
+  "title": "Self-echo relayed under the agent's profile name (an alias)",
+  "source": "evals/verdict_suite/fixtures/addressing/a-self-echo-alias-author.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: The trigger is this agent's own completion report, attributed by the relay to its profile name. The deterministic self-echo short-circuit was removed 2026-07-10: author name-equality and text-equality do not mechanically prove self-causation (review finding — a human repeating the agent's words, or sharing its display name, minted PASS 1.0 with no model). Ground truth stays PASS, model-scored, until the message contract carries an adapter-asserted runtime identity (schema-v2).",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {},
+  "events": [
+    {
+      "id": "msg-addr-5",
+      "author": "vigil",
+      "at": "0s",
+      "text": "Config migration landed; all 12 checks green on main."
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-5",
+      "step1": "suppress",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

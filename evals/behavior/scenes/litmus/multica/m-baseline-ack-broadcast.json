@@ -1,0 +1,33 @@
+{
+  "id": "litmus-m-baseline-ack-broadcast",
+  "title": "Legitimate ACK — explicit acknowledgement broadcast",
+  "source": "evals/verdict_suite/fixtures/multica/m-baseline-ack-broadcast.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected ACK. V1 rationale: An explicit 'please acknowledge' is the intended ACK case. Establishes baseline so the false-ACK case in FR-001 cannot be excused.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ack-trig",
+      "author": "zoe",
+      "text": "@All members please acknowledge that you saw the route change."
+    }
+  ],
+  "moments": [
+    {
+      "event": "ack-trig",
+      "step1": "pass",
+      "fitting": [
+        "mhm"
+      ],
+      "misses": []
+    }
+  ]
+}

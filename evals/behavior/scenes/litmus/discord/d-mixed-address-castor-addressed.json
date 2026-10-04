@@ -1,0 +1,46 @@
+{
+  "id": "litmus-d-mixed-address-castor-addressed",
+  "title": "Test-of-restraint mixed addressing; mention-addressed agent must SPEAK",
+  "source": "evals/verdict_suite/fixtures/discord/d-mixed-address-castor-addressed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The <@...> mention names the primary recipient (mapped to castor per the spec.md FR-018 edge-case retelling; envelope carries agent.mention_id so addressing is decidable). The parenthetical is operator meta-commentary, not the ask.",
+  "platform": "discord",
+  "participants": [
+    "castor"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1779407325793",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Hey <@1494822530643398827> I need the codex-tpm in the Multica `sonste` project to be able to notify me via Discord using cc-connect to the channel `1507166911648239686`. Is this something you can help me with, or should I reach out through a different platform? (this could be a great test to see if the rest will stay silent or butt in :))",
+      "mentions": [
+        "castor"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1779407325793",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The <@...> mention names the primary recipient (mapped to castor per the spec.md FR-018 edge-case retelling; envelope carries agent.mention_id so addressing is decidable). The parenthetical is operator meta-commentary, not the ask."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}
