@@ -1,0 +1,37 @@
+{
+  "id": "litmus-d-mention-recipient-unaddressed",
+  "title": "Discord <@id> mention as recipient signal; non-matching agent must PASS",
+  "source": "evals/verdict_suite/fixtures/discord/d-mention-recipient-unaddressed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Same trigger as d-mention-recipient-addressed, evaluated as an agent whose mention_id does not match the <@...> target; the ask belongs to the mentioned peer.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1779463950000",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Hey <@1494822530643398827>, could you post a short recap of the pineapple debate to the channel when you get a sec?",
+      "mentions": [
+        "castor"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1779463950000",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

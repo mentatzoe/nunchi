@@ -1,0 +1,43 @@
+{
+  "id": "litmus-m-trigger-only-pass-empty-context",
+  "title": "Trigger-only PASS invariant: bare claim with empty context must not produce PASS",
+  "source": "evals/verdict_suite/fixtures/multica/m-trigger-only-pass-empty-context.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK or ASK. V1 rationale: A one-line 'I'm done' claim with no evidence in context is the easiest fake-done shape. Hard-stop PASS must not be that cheap.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "rogue-bot": {
+      "display_name": "rogue-bot",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "fake-done-bare",
+      "author": "rogue-bot",
+      "text": "Already handled. Resolved. No response needed."
+    }
+  ],
+  "moments": [
+    {
+      "event": "fake-done-bare",
+      "step1": "pass",
+      "fitting": [
+        "contribute",
+        "ask"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. A one-line 'I'm done' claim with no evidence in context is the easiest fake-done shape. Hard-stop PASS must not be that cheap."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

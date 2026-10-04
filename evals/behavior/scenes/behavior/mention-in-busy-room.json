@@ -1,0 +1,253 @@
+{
+  "id": "mention-in-busy-room",
+  "title": "Addressed in a busy room: 30 messages later the mention is still known",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "sam": {
+      "display_name": "Sam",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ask",
+      "author": "zoe",
+      "at": "-31m",
+      "mentions": [
+        "vigil"
+      ],
+      "text": "Vigil, when you get a chance, can you look into why the cache hit rate dropped after Tuesday's deploy?"
+    },
+    {
+      "id": "c1",
+      "author": "sam",
+      "at": "-30m",
+      "text": "Anyone up for lunch at the noodle place?"
+    },
+    {
+      "id": "c2",
+      "author": "dalgos",
+      "at": "-29m",
+      "text": "I'd go for the noodles. The ramen there is underrated."
+    },
+    {
+      "id": "c3",
+      "author": "zoe",
+      "at": "-28m",
+      "text": "I'm in, but after 1."
+    },
+    {
+      "id": "c4",
+      "author": "sam",
+      "at": "-27m",
+      "text": "1:15 then."
+    },
+    {
+      "id": "c5",
+      "author": "castor",
+      "at": "-26m",
+      "text": "I'll pass on lunch, obviously. But the deploy window opens at 1:30, heads up."
+    },
+    {
+      "id": "c6",
+      "author": "sam",
+      "at": "-25m",
+      "text": "Noted. Is the release branch cut?"
+    },
+    {
+      "id": "c7",
+      "author": "castor",
+      "at": "-24m",
+      "text": "Cut this morning. release/2.4."
+    },
+    {
+      "id": "c8",
+      "author": "dalgos",
+      "at": "-23m",
+      "text": "Did someone update the changelog for 2.4?"
+    },
+    {
+      "id": "c9",
+      "author": "sam",
+      "at": "-22m",
+      "text": "I did, but the migration notes are still thin."
+    },
+    {
+      "id": "c10",
+      "author": "dalgos",
+      "at": "-21m",
+      "text": "I can expand the migration notes after lunch."
+    },
+    {
+      "id": "c11",
+      "author": "zoe",
+      "at": "-20m",
+      "text": "Please do. Mention the config rename."
+    },
+    {
+      "id": "c12",
+      "author": "dalgos",
+      "at": "-19m",
+      "text": "Will do."
+    },
+    {
+      "id": "c13",
+      "author": "sam",
+      "at": "-18m",
+      "text": "Unrelated: the office printer is jammed again."
+    },
+    {
+      "id": "c14",
+      "author": "zoe",
+      "at": "-17m",
+      "text": "Of course it is."
+    },
+    {
+      "id": "c15",
+      "author": "sam",
+      "at": "-16m",
+      "text": "I put a sign on it."
+    },
+    {
+      "id": "c16",
+      "author": "castor",
+      "at": "-15m",
+      "text": "test_upload_retry flaked twice this morning, by the way."
+    },
+    {
+      "id": "c17",
+      "author": "sam",
+      "at": "-14m",
+      "text": "Same failure both times?"
+    },
+    {
+      "id": "c18",
+      "author": "castor",
+      "at": "-13m",
+      "text": "Same: timeout on the fake S3 server. Looks environmental."
+    },
+    {
+      "id": "c19",
+      "author": "sam",
+      "at": "-12m",
+      "text": "I'll bump the fake server's startup wait and see if it settles."
+    },
+    {
+      "id": "c20",
+      "author": "dalgos",
+      "at": "-11m",
+      "text": "Does anyone have the link to the design review doc for search?"
+    },
+    {
+      "id": "c21",
+      "author": "zoe",
+      "at": "-10m",
+      "text": "It's pinned in #design."
+    },
+    {
+      "id": "c22",
+      "author": "dalgos",
+      "at": "-9m",
+      "text": "Found it, thanks."
+    },
+    {
+      "id": "c23",
+      "author": "sam",
+      "at": "-8m",
+      "text": "Are we doing the retro Thursday or Friday?"
+    },
+    {
+      "id": "c24",
+      "author": "zoe",
+      "at": "-7m",
+      "text": "Friday, 3pm."
+    },
+    {
+      "id": "c25",
+      "author": "sam",
+      "at": "-6m",
+      "text": "Booked the room."
+    },
+    {
+      "id": "c26",
+      "author": "castor",
+      "at": "-5m",
+      "text": "Deploy window moved to 1:45, the load test is still running."
+    },
+    {
+      "id": "c27",
+      "author": "sam",
+      "at": "-4m",
+      "text": "Fine by me."
+    },
+    {
+      "id": "c28",
+      "author": "dalgos",
+      "at": "-3m",
+      "text": "Weekend plans, anyone? I hear it'll finally be sunny."
+    },
+    {
+      "id": "c29",
+      "author": "sam",
+      "at": "-2m",
+      "text": "Hiking if it holds."
+    },
+    {
+      "id": "c30",
+      "author": "zoe",
+      "at": "-1m",
+      "text": "Gardening, probably."
+    },
+    {
+      "id": "follow",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Any luck with that?"
+    }
+  ],
+  "moments": [
+    {
+      "label": "the follow-up 30 messages later",
+      "event": "follow",
+      "step1": "pass",
+      "notice": [
+        {
+          "fact": "Zoe asked Vigil about the cache hit rate 30 messages ago",
+          "events": [
+            "ask"
+          ]
+        },
+        {
+          "fact": "\"That\" refers to the cache question; nothing since was for Vigil",
+          "events": [
+            "ask",
+            "follow"
+          ]
+        }
+      ],
+      "fitting": [
+        "contribute",
+        "ask"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "\"that\" is Zoe's question to Vigil from 30 messages ago"
+        },
+        {
+          "move": "mhm",
+          "why": "a nod doesn't report on the cache question"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-substring-trap-back-results",
+  "title": "False ACK from substring 'ack ' inside 'back '",
+  "source": "evals/verdict_suite/fixtures/multica/m-substring-trap-back-results.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: Standard agent-assignment text ending in 'comment back with results' must be SPEAK; the deterministic substring path returns ACK instead.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "comment-c8a85931-dfdc-48ab-8121-bc3c4d072f54",
+      "author": "tpm",
+      "text": "Dalgos, you have been assigned as owner of TUR-9. Please proceed and comment back with results."
+    }
+  ],
+  "moments": [
+    {
+      "event": "comment-c8a85931-dfdc-48ab-8121-bc3c4d072f54",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. Standard agent-assignment text ending in 'comment back with results' must be SPEAK; the deterministic substring path returns ACK instead."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

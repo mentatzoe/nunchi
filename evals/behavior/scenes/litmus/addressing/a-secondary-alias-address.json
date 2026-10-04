@@ -1,0 +1,60 @@
+{
+  "id": "litmus-a-secondary-alias-address",
+  "title": "Address by secondary alias ('Codex') — the harness nickname, not the display name",
+  "source": "evals/verdict_suite/fixtures/addressing/a-secondary-alias-address.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The operator asks 'Codex' for status on work this agent itself announced in context. With the secondary handle declared as an alias, this is a direct status question at this agent.",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-addr-3-ctx-1",
+      "author": "vigil",
+      "at": "-780s",
+      "text": "Starting the config migration now; will report when it lands."
+    },
+    {
+      "id": "msg-addr-3",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Codex, what's the status on the config migration?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-3",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The operator asks 'Codex' for status on work this agent itself announced in context. With the secondary handle declared as an alias, this is a direct status question at this agent."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

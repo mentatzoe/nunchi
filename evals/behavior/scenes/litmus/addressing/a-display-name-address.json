@@ -1,0 +1,54 @@
+{
+  "id": "litmus-a-display-name-address",
+  "title": "Prose address by display name (an alias of the agent)",
+  "source": "evals/verdict_suite/fixtures/addressing/a-display-name-address.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The operator addresses the bot by its room display name, not its id or mention token. With the name declared as an alias, this is a plain direct request warranting one substantive turn.",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-addr-2",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Vigil, can you take a look at the deploy logs from tonight's run?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-2",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The operator addresses the bot by its room display name, not its id or mention token. With the name declared as an alias, this is a plain direct request warranting one substantive turn."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

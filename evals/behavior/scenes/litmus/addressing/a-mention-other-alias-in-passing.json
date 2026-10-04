@@ -1,0 +1,58 @@
+{
+  "id": "litmus-a-mention-other-alias-in-passing",
+  "title": "Mention of another participant; the agent's alias appears only in passing prose",
+  "source": "evals/verdict_suite/fixtures/addressing/a-mention-other-alias-in-passing.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: The @mention targets a different participant's snowflake; 'Vigil' is only credited for earlier work. Expected ground truth stays PASS — but as a MODEL-scored judgment. The deterministic fast-path no longer short-circuits foreign mentions (removed 2026-07-10: a live false PASS proved a foreign mention cannot prove the floor went elsewhere — the operator's direct correction of an agent was hard-PASSed at 1.0 with no model call). This fixture and the 2026-07-08 over-wake class it pins are the two sides the classifier must now hold together: name-in-prose must not force a wake, and mention-of-another must not force silence.",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "user-999888777000111222": {
+      "display_name": "user-999888777000111222",
+      "kind": "unknown"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-addr-6-ctx-1",
+      "author": "vigil",
+      "at": "-840s",
+      "text": "Heads up: test_retry_backoff is failing on main after the retry PR."
+    },
+    {
+      "id": "msg-addr-6",
+      "author": "zoe",
+      "at": "0s",
+      "text": "<@999888777000111222> can you review the retry PR? Vigil already flagged the failing test earlier.",
+      "mentions": [
+        "user-999888777000111222"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-6",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

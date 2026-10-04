@@ -1,0 +1,42 @@
+{
+  "id": "litmus-m-predicted-not-specified-yet-ask",
+  "title": "Predicted false ASK: 'not specified' matches inside 'not specified yet but already inferred'",
+  "source": "evals/verdict_suite/fixtures/multica/m-predicted-not-specified-yet-ask.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The trigger resolves its own ambiguity in the same sentence (the inferred value 5 is supplied) and assigns concrete work, so no clarification is needed — the correct verdict is SPEAK. A shallow keyword/substring classifier baits on 'not specified' and asks a question that was already answered.",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "tpm": {
+      "display_name": "Tpm",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "inferred-limit-trig",
+      "author": "tpm",
+      "text": "The retry limit was not specified yet but already inferred from the SLA appendix: use 5. Dalgos, please apply it and post the diff in this thread."
+    }
+  ],
+  "moments": [
+    {
+      "event": "inferred-limit-trig",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The trigger resolves its own ambiguity in the same sentence (the inferred value 5 is supplied) and assigns concrete work, so no clarification is needed — the correct verdict is SPEAK. A shallow keyword/substring classifier baits on 'not specified' and asks a question that was already answered."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

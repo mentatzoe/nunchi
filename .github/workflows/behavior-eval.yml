@@ -1,0 +1,69 @@
+name: behavior-eval
+
+# MANUAL ONLY. Runs the behavior scenes (evals/behavior) against real models
+# through OpenRouter, so it costs money and never runs on push or pull_request.
+# The key comes from the NUNCHI_OPENROUTER repository secret and is never
+# written to the outputs. The report goes to the job summary; every call,
+# the run record, and the summary are uploaded as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: Comma-separated OpenRouter model IDs
+        required: true
+        default: google/gemini-3.8-flash,openai/gpt-6-luna,qwen/qwen3.8-flash,anthropic/claude-haiku-4.5,z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash
+      runs:
+        description: Runs per moment and model
+        required: true
+        default: "3"
+      scenes:
+        description: all, behavior, litmus, a litmus category, or scene ids
+        required: true
+        default: all
+      temperature:
+        description: Sampling temperature (production uses 0)
+        required: true
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  behavior-eval:
+    name: behavior eval (manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install Nunchi
+        run: python -m pip install .
+      - name: Run the scenes
+        env:
+          NUNCHI_OPENROUTER: ${{ secrets.NUNCHI_OPENROUTER }}
+          MODELS: ${{ inputs.models }}
+          RUNS: ${{ inputs.runs }}
+          SCENES: ${{ inputs.scenes }}
+          TEMPERATURE: ${{ inputs.temperature }}
+        run: |
+          if [ -z "$NUNCHI_OPENROUTER" ]; then
+            echo "::error::The NUNCHI_OPENROUTER secret is not set."
+            exit 1
+          fi
+          python -m evals.behavior.run \
+            --models "$MODELS" \
+            --runs "$RUNS" \
+            --scenes "$SCENES" \
+            --temperature "$TEMPERATURE" \
+            --workers 12 \
+            --out behavior-eval-out > /dev/null
+          cat behavior-eval-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: behavior-eval-${{ github.run_id }}
+          path: behavior-eval-out/
+          if-no-files-found: ignore

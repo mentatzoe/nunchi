@@ -1,0 +1,38 @@
+{
+  "id": "quiet-for-hours",
+  "title": "A room quiet for hours, then a new message",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"},
+    "sam": {"display_name": "Sam", "kind": "human"}
+  },
+  "events": [
+    {"id": "n1", "author": "zoe", "at": "-7h", "mentions": ["vigil"],
+     "text": "Vigil, can you check the nightly build when it finishes and tell us in the morning?"},
+    {"id": "n2", "author": "vigil", "at": "-7h", "reply_to": "n1",
+     "text": "Will do."},
+    {"id": "n3", "author": "zoe", "at": "-7h",
+     "text": "Thanks. Night all."},
+    {"id": "m1", "author": "sam", "at": "0s",
+     "text": "Morning! Is the nightly build green?"}
+  ],
+  "moments": [
+    {
+      "label": "first message after seven quiet hours",
+      "event": "m1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "The room was quiet for seven hours; this starts a new stretch of conversation", "events": ["n3", "m1"]},
+        {"fact": "Vigil said it would report on the nightly build in the morning", "events": ["n1", "n2"]}
+      ],
+      "fitting": ["contribute"],
+      "misses": [
+        {"move": "stay_quiet", "why": "Vigil said it would report on this build, and Sam is asking about it"},
+        {"move": "mhm", "why": "a nod doesn't say whether the build is green"}
+      ]
+    }
+  ]
+}

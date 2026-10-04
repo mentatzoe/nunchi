@@ -1,0 +1,59 @@
+{
+  "id": "litmus-t-human-ask-after-chrome",
+  "title": "Contrast case: human explicitly asks the agent right after peer-bot chrome — answer",
+  "source": "evals/verdict_suite/fixtures/tool-chrome/t-human-ask-after-chrome.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: Zoe names dalgos and asks a concrete question. The preceding skill_view chrome belongs to aleph's task and does not mute the room; dalgos answers.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    },
+    "aleph": {
+      "display_name": "Aleph",
+      "kind": "bot"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-chrome-ask-1",
+      "author": "zoe",
+      "at": "-120s",
+      "text": "aleph, load the plan skill and start on the corpus."
+    },
+    {
+      "id": "msg-chrome-ask-2",
+      "author": "aleph",
+      "at": "-60s",
+      "text": "skill_view(skill: \"speckit-plan\")\n⎿ Loaded 412 lines from .claude/skills/speckit-plan/SKILL.md"
+    },
+    {
+      "id": "msg-chrome-ask-3",
+      "author": "zoe",
+      "at": "0s",
+      "text": "dalgos, while aleph runs that — did the nightly suite come back green?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-chrome-ask-3",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. Zoe names dalgos and asks a concrete question. The preceding skill_view chrome belongs to aleph's task and does not mute the room; dalgos answers."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

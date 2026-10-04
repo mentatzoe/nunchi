@@ -153,6 +153,10 @@ floor.
     many taken from real rooms.
   - New scenes cover rhythm, memory and several agents
     ([#86](https://github.com/mentatzoe/nunchi/issues/86)).
+- **The suite is `evals/behavior/`.** Each scene lists what a socially
+  aware participant would notice, the moves that fit and the clear misses.
+  A run reports how each model spreads across that range. See
+  `evals/behavior/README.md`.
 - **Deterministic tests prove plumbing only.**
 - **Scenes the new suite must include:**
   - a story told across five messages: the agent nods, then replies at the

@@ -1,0 +1,44 @@
+{
+  "id": "addressee-first",
+  "title": "A question to another agent that this agent can answer: wait, then join if nobody answers",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "v1", "author": "vigil", "at": "-2h",
+     "text": "I rewrote the gateway retry backoff: exponential with full jitter, capped at 30 seconds, and it gives up after 6 tries."},
+    {"id": "q1", "author": "zoe", "at": "0s", "mentions": ["castor"],
+     "text": "Castor, how does the retry backoff in the gateway work these days?"}
+  ],
+  "moments": [
+    {
+      "label": "the question to Castor",
+      "event": "q1",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe asked Castor, not Vigil", "events": ["q1"]},
+        {"fact": "Vigil wrote the backoff two hours ago and knows the answer", "events": ["v1"]}
+      ],
+      "fitting": ["wait", "stay_quiet"],
+      "misses": []
+    },
+    {
+      "label": "five minutes later, nobody has answered",
+      "pause_after": "q1",
+      "pause": "5m",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Castor hasn't answered in five minutes", "events": ["q1"]},
+        {"fact": "Vigil wrote the backoff and knows the answer", "events": ["v1"]}
+      ],
+      "fitting": ["contribute", "ask"],
+      "misses": [
+        {"move": "stay_quiet", "why": "nobody answered and Vigil knows the answer"}
+      ]
+    }
+  ]
+}

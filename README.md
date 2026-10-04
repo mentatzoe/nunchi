@@ -149,6 +149,7 @@ python3 -m pip install '.[test]'
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
 python3 -m evals.verdict_suite.runner
+python3 -m evals.behavior.run --dry-run
 ```
 
 The first command runs the offline suite under `tests/v2`: V2 schemas and
@@ -159,7 +160,10 @@ installed Hermes host skip without one. The suite does not prove a built
 package or installed runtime; those require a fresh package build and isolated
 installation. Whether an agent reads the room well needs behavioral evaluation
 ([#86](https://github.com/mentatzoe/nunchi/issues/86)); the deterministic
-scenarios do not measure it. `tests/V1-REPLACEMENT.md` maps the removed V1
+scenarios do not measure it. The behavior scenes live in
+[`evals/behavior/`](evals/behavior/README.md); `--dry-run` checks their
+plumbing offline, and the manual `behavior-eval` workflow runs them against
+real models. `tests/V1-REPLACEMENT.md` maps the removed V1
 tests to their V2 coverage.
 
 ## Product and integration documentation

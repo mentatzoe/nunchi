@@ -1,0 +1,57 @@
+{
+  "id": "litmus-a-mention-snowflake-direct",
+  "title": "Direct @<snowflake> mention where the snowflake is one of the agent's aliases",
+  "source": "evals/verdict_suite/fixtures/addressing/a-mention-snowflake-direct.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: One bot carries several identities; here the platform mention snowflake is carried via aliases. A direct operator question at that snowflake warrants a substantive turn. The SPEAK is the model's judgment end to end — the deterministic fast-path that once guaranteed escalation was removed 2026-07-10 (nothing short-circuits; everything is model-judged).",
+  "platform": "discord",
+  "participants": [
+    "vigil"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-addr-1",
+      "author": "zoe",
+      "at": "0s",
+      "text": "<@1496355876234199040> can you check the deploy queue? The staging job looks stuck.",
+      "mentions": [
+        "vigil"
+      ]
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-addr-1",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. One bot carries several identities; here the platform mention snowflake is carried via aliases. A direct operator question at that snowflake warrants a substantive turn. The SPEAK is the model's judgment end to end — the deterministic fast-path that once guaranteed escalation was removed 2026-07-10 (nothing short-circuits; everything is model-judged)."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ],
+  "profiles": {
+    "vigil": {
+      "display_name": "Vigil",
+      "names": [
+        "Vigil",
+        "Codex",
+        "Aether"
+      ],
+      "instructions": "You are Vigil, an AI participant in a team chat with people and other agents. You care about security and implementation correctness. Contribute when you can add something useful; you don't need to answer everything."
+    }
+  }
+}

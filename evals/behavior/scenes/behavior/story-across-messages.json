@@ -1,0 +1,62 @@
+{
+  "id": "story-across-messages",
+  "title": "A story told across five messages: nod along, then reply at the end",
+  "source": "docs/behavior.md",
+  "review": "draft: written from docs/behavior.md; ranges need Zoe's review",
+  "platform": "discord",
+  "participants": ["vigil"],
+  "actors": {
+    "zoe": {"display_name": "Zoe", "kind": "human"}
+  },
+  "events": [
+    {"id": "s1", "author": "zoe", "at": "-100s", "mentions": ["vigil"],
+     "text": "Vigil, you won't believe what happened with the deploy last night."},
+    {"id": "s2", "author": "zoe", "at": "-80s",
+     "text": "So the canary looked fine for the first ten minutes, error rate flat."},
+    {"id": "s3", "author": "zoe", "at": "-60s",
+     "text": "Then the token refresh job kicked in and every request from the old pods started failing auth."},
+    {"id": "s4", "author": "zoe", "at": "-35s",
+     "text": "Turns out the new pods rotated the signing key and the old ones never picked it up, so we rolled back at 2am."},
+    {"id": "s5", "author": "zoe", "at": "0s",
+     "text": "Anyway. What would you have done differently?"}
+  ],
+  "moments": [
+    {
+      "label": "mid-story, second message",
+      "event": "s2",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe is telling Vigil a story across several messages and hasn't finished", "events": ["s1", "s2"]}
+      ],
+      "fitting": ["mhm", "stay_quiet", "wait"],
+      "misses": [
+        {"move": "contribute", "why": "takes the floor while Zoe is mid-story"}
+      ]
+    },
+    {
+      "label": "mid-story, fourth message",
+      "event": "s4",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe is still telling the story: four messages in about a minute", "events": ["s1", "s2", "s3", "s4"]}
+      ],
+      "fitting": ["mhm", "stay_quiet", "wait"],
+      "misses": [
+        {"move": "contribute", "why": "interrupts the story before Zoe gets to her point"}
+      ]
+    },
+    {
+      "label": "the story ends with a question",
+      "event": "s5",
+      "step1": "pass",
+      "notice": [
+        {"fact": "Zoe finished the story and asked Vigil directly what it would have done", "events": ["s1", "s5"]}
+      ],
+      "fitting": ["contribute", "ask"],
+      "misses": [
+        {"move": "stay_quiet", "why": "the story ended with a question to Vigil"},
+        {"move": "mhm", "why": "a nod doesn't answer the question"}
+      ]
+    }
+  ]
+}

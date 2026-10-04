@@ -13,6 +13,13 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Added
 
+- Behavioral evaluation (#86): scenes in `evals/behavior/` that judge whether
+  a participant reads the room, with ranges of fitting moves instead of one
+  expected verdict. Eight scenes come from `docs/behavior.md`; 57 are drafts
+  converted from the V1 litmus corpus. The runner drives the production
+  observation and attention path against OpenAI-compatible models, reports
+  per-model spread, and never writes its key. The manual `behavior-eval`
+  workflow runs it through OpenRouter.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,

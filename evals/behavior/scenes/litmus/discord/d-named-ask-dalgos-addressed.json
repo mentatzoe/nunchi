@@ -1,0 +1,43 @@
+{
+  "id": "litmus-d-named-ask-dalgos-addressed",
+  "title": "Direct-named maintenance ask; addressed agent must SPEAK",
+  "source": "evals/verdict_suite/fixtures/discord/d-named-ask-dalgos-addressed.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: Operator addressed Dalgos specifically with a concrete maintenance ask. SPEAK is the only honest verdict.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1747104824168",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Dalgos, can you update your CLAUDE.md so that it matches the same classifier the others have?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1747104824168",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. Operator addressed Dalgos specifically with a concrete maintenance ask. SPEAK is the only honest verdict."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

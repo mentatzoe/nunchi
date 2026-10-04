@@ -1,0 +1,43 @@
+{
+  "id": "litmus-m-constant-confidence-mixed-support",
+  "title": "Constant confidence: ACK-leaning trigger inside PASS-leaning context must lower the winner's confidence",
+  "source": "evals/verdict_suite/fixtures/multica/m-constant-confidence-mixed-support.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected ACK or PASS. V1 rationale: The trigger explicitly requests acknowledgement (ACK support) while the context says a peer already covered it and the thread is resolved (PASS support). Whichever verdict wins must carry lower confidence than the clean unambiguous baseline in its verdict class (m-baseline-ack-broadcast / m-baseline-pass-adapter-resolved at the 0.85 baseline used by invariants.check_confidence_not_constant).",
+  "platform": "issue-thread",
+  "participants": [
+    "turnaware-dalgos"
+  ],
+  "actors": {
+    "peer": {
+      "display_name": "Peer",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "ctx-already-covered",
+      "author": "peer",
+      "text": "Already acknowledged the cutover notice on the whole team's behalf earlier today; the thread is resolved and no further responses are needed."
+    },
+    {
+      "id": "mixed-ack-trig",
+      "author": "zoe",
+      "text": "@All members please acknowledge that you saw the cutover notice."
+    }
+  ],
+  "moments": [
+    {
+      "event": "mixed-ack-trig",
+      "step1": "pass",
+      "fitting": [
+        "mhm",
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

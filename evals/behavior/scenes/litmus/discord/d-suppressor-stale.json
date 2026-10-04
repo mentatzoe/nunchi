@@ -1,0 +1,40 @@
+{
+  "id": "litmus-d-suppressor-stale",
+  "title": "Stale suppressor: operator closed session since trigger",
+  "source": "evals/verdict_suite/fixtures/discord/d-suppressor-stale.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: A subsequent '!stop' invalidates the prior trigger; engaging it would be off-session noise.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-stop",
+      "author": "zoe",
+      "at": "0s",
+      "text": "!stop — closing the session for the day."
+    },
+    {
+      "id": "msg-trigger-stale",
+      "author": "zoe",
+      "at": "-30s",
+      "text": "What's your take on the deploy plan?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-trigger-stale",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

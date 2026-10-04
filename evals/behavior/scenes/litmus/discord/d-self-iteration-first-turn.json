@@ -1,0 +1,63 @@
+{
+  "id": "litmus-d-self-iteration-first-turn",
+  "title": "Self-iteration loop, first turn; agent must SPEAK its own review",
+  "source": "evals/verdict_suite/fixtures/discord/d-self-iteration-first-turn.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected SPEAK. V1 rationale: The operator asks all bots to re-read the finished story and iterate until happy. Dalgos has not yet contributed a review, so the honest first-turn verdict is SPEAK.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "castor": {
+      "display_name": "Castor",
+      "kind": "bot"
+    },
+    "vigil": {
+      "display_name": "Vigil",
+      "kind": "bot"
+    },
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-pilot-1778634850255",
+      "author": "castor",
+      "at": "-87s",
+      "text": "The story is complete and saved to `MYSTERY_STORY.md`. We followed the coordinated plan: I provided the setup, Vigil handled the investigation, and Dalgos brought it to a thoughtful resolution.\n\nWe successfully navigated the initial coordination snarl, converged on a single premise and filename, and delivered the finished draft. The mystery of the \"Ghost in the Benchmark\" is resolved—both in the fiction and in our actual workflow."
+    },
+    {
+      "id": "msg-pilot-1778634856064",
+      "author": "vigil",
+      "at": "-81s",
+      "text": "Verified. The completed story is saved at MYSTERY_STORY.md, and SCRATCHPAD.md marks Phase 3 complete with the Castor -> Vigil -> Dalgos contributions.\n\nThe full draft is now done on disk: Castor opening, Vigil investigation, Dalgos resolution."
+    },
+    {
+      "id": "msg-pilot-1778634937867",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Can y'all please re-read the story you've produced and tell me if you're satisfied with the output? If you're not, how would you improve it? Iterate until you're all happy with it."
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-pilot-1778634937867",
+      "step1": "pass",
+      "fitting": [
+        "contribute"
+      ],
+      "misses": [
+        {
+          "move": "stay_quiet",
+          "why": "V1 expected a turn. The operator asks all bots to re-read the finished story and iterate until happy. Dalgos has not yet contributed a review, so the honest first-turn verdict is SPEAK."
+        },
+        {
+          "move": "mhm",
+          "why": "V1 expected a turn; a nod alone leaves the ask unanswered."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "litmus-d-suppressor-duplicate",
+  "title": "Duplicate suppressor: own prior message already says what would be said",
+  "source": "evals/verdict_suite/fixtures/discord/d-suppressor-duplicate.json",
+  "review": "draft: converted from the V1 litmus corpus; V1 expected PASS. V1 rationale: Dalgos already weighed in on the cache topic; repeating itself is noise.",
+  "platform": "discord",
+  "participants": [
+    "dalgos"
+  ],
+  "actors": {
+    "zoe": {
+      "display_name": "Zoe",
+      "kind": "human"
+    }
+  },
+  "events": [
+    {
+      "id": "msg-own-prior",
+      "author": "dalgos",
+      "at": "-30s",
+      "text": "I'd say the in-process LRU is the right call; Redis adds a network hop."
+    },
+    {
+      "id": "msg-trigger-dup",
+      "author": "zoe",
+      "at": "0s",
+      "text": "Anyone want to weigh in on the cache thing?"
+    }
+  ],
+  "moments": [
+    {
+      "event": "msg-trigger-dup",
+      "step1": "pass",
+      "fitting": [
+        "stay_quiet"
+      ],
+      "misses": []
+    }
+  ]
+}

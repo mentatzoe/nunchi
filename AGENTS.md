@@ -169,11 +169,14 @@ redirect any work.
 ```sh
 python3 -m unittest
 python3 -m evals.verdict_suite.runner --list
+python3 -m evals.behavior.run --dry-run
 ```
 
 Deterministic tests are offline and prove deterministic behavior only. Whether
 an agent reads the room well is a behavioral question; it needs behavioral
 evaluation across realistic multi-turn conversations
-([#86](https://github.com/mentatzoe/nunchi/issues/86)). Live provider and
+([#86](https://github.com/mentatzoe/nunchi/issues/86)). The scenes are in
+`evals/behavior/`; the manual `behavior-eval` workflow runs them against real
+models. Live provider and
 platform runs need explicit credentials and must record the installed version,
 identity, configuration, command, and complete result.
