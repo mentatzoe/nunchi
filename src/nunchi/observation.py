@@ -810,38 +810,47 @@ class ObservationProvider:
 
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
-        # Retained messages that directly address this participant (exact
-        # actor mention, or a reply to one of its own messages) stay as
-        # context ahead of newer chatter.  This surfaces transport facts only;
-        # it does not decide relevance or mark anything handled.
+        # The newest messages of the participant's direct exchange stay in the
+        # snapshot even when older than the window: messages that mention it
+        # or reply to it, and its own messages, so the model can also see
+        # whether it answered.  At most a quarter of the event cap, so recent
+        # context still dominates.  These are transport facts only; nothing
+        # here decides relevance or marks anything handled.
         self_id = self.binding.actor_id
         own_ids = {
             event["id"]
             for event in events
             if event["type"] == "message" and event["author_id"] == self_id
         }
-        addressed: set[int] = set()
-        for index, event in enumerate(events):
-            if (
-                index in required
-                or event["type"] != "message"
-                or event["author_id"] == self_id
-                or not (
-                    self_id in event["mentioned_actor_ids"]
-                    or event.get("reply_to_event_id") in own_ids
-                )
-            ):
-                continue
-            timestamp = _event_timestamp(event)
-            if timestamp is None or timestamp >= cutoff:
-                addressed.add(index)
-        selected |= addressed
+
+        def direct_exchange(event: Mapping[str, Any]) -> bool:
+            if event["type"] != "message":
+                return False
+            if event["author_id"] == self_id:
+                return True
+            return (
+                self_id in event["mentioned_actor_ids"]
+                or event.get("reply_to_event_id") in own_ids
+            )
+
+        exchange = [
+            index
+            for index, event in enumerate(events)
+            if index not in required
+            and direct_exchange(event)
+            and (
+                (timestamp := _event_timestamp(event)) is None
+                or timestamp >= cutoff
+            )
+        ]
+        protected = set(exchange[-max(1, self.limits.snapshot_events // 4):])
+        selected |= protected
 
         def removal_order() -> list[int]:
-            # Ordinary context goes first, then direct address; each oldest
-            # first, so the newest direct address is kept longest.
+            # Oldest first, protected exchange last (again oldest first, so
+            # its newest message is kept longest).
             optional = selected - required
-            return sorted(optional - addressed) + sorted(optional & addressed)
+            return sorted(optional - protected) + sorted(optional & protected)
 
         truncated: set[str] = set()
         if len(selected) > self.limits.snapshot_events:
@@ -937,15 +946,30 @@ class ObservationProvider:
                 "trigger_event_id": trigger_event_id,
                 "coverage": coverage,
             }
-            if continuation and (retained_more_before or retained_more_after):
+            # Interior gaps (left by relation closure, kept older exchange, or
+            # age and byte cuts) stay fetchable even when both ends are covered.
+            included = set(indices)
+            trigger_index = next(
+                index
+                for index in indices
+                if all_events[index]["id"] == trigger_event_id
+            )
+            fetch_before = any(
+                index not in included for index in range(trigger_index)
+            )
+            fetch_after = any(
+                index not in included
+                for index in range(trigger_index + 1, len(all_events))
+            )
+            if continuation and (fetch_before or fetch_after):
                 request["continuation"] = self._issue_continuation(
                     request_id=rid,
                     trigger_event_id=trigger_event_id,
                     events=all_events,
                     actors=self._actors,
                     delivered_event_ids={event["id"] for event in events},
-                    can_fetch_before=retained_more_before,
-                    can_fetch_after=retained_more_after,
+                    can_fetch_before=fetch_before,
+                    can_fetch_after=fetch_after,
                 )
             checked = validate_attention_request(request)
             body = {

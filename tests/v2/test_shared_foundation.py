@@ -520,7 +520,101 @@ class ObservationTests(unittest.TestCase):
 
         snapshot = pipeline.observation.build_snapshot("e27")
         ids = [event["id"] for event in snapshot["events"]]
-        self.assertEqual(["e-reply", *(f"e{index}" for index in range(5, 28))], ids)
+        self.assertEqual(
+            ["e-own", "e-reply", *(f"e{index}" for index in range(6, 28))], ids
+        )
+
+    def test_older_mention_keeps_the_participants_answer(self):
+        pipeline, _, _, _ = foundation()
+        actors = {"human:zoe": {"display_name": "Zoe", "kind": "human"}}
+        pipeline.observation.observe(
+            delivery_id="d-ask",
+            event=message("e-ask", text="Vigil, can you check X?",
+                          mentioned_actor_ids=["discord:bot:9"]),
+            actors=actors,
+        )
+        pipeline.observation.observe(
+            delivery_id="d-answer",
+            event=message("e-answer", "discord:bot:9", "X is fine."),
+            actors={"discord:bot:9": {"display_name": "Vigil", "kind": "bot"}},
+        )
+        for index in range(30):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}", text=f"message {index}"),
+                actors=actors,
+            )
+
+        ids = [
+            event["id"]
+            for event in pipeline.observation.build_snapshot("e29")["events"]
+        ]
+        self.assertEqual(
+            ["e-ask", "e-answer", *(f"e{index}" for index in range(8, 30))], ids
+        )
+
+    def test_direct_exchange_never_displaces_recent_context(self):
+        # Zoe mentions Vigil in every message while Castor answers between
+        # them: the newest window is already the conversation, so nothing
+        # older may push Castor's answers out.
+        pipeline, _, _, _ = foundation()
+        actors = {
+            "human:zoe": {"display_name": "Zoe", "kind": "human"},
+            "discord:bot:7": {"display_name": "Castor", "kind": "bot"},
+        }
+        events = []
+        for index in range(40):
+            if index % 2:
+                event = message(f"e{index}", "discord:bot:7", f"answer {index}")
+            else:
+                event = message(f"e{index}", text=f"question {index}",
+                                mentioned_actor_ids=["discord:bot:9"])
+            events.append(event["id"])
+            pipeline.observation.observe(
+                delivery_id=f"d{index}", event=event, actors=actors
+            )
+
+        snapshot = pipeline.observation.build_snapshot("e39")
+        self.assertEqual(events[-24:], [event["id"] for event in snapshot["events"]])
+        self.assertFalse(snapshot["coverage"]["has_gaps"])
+
+    def test_interior_gap_stays_fetchable(self):
+        limits = ObservationLimits(snapshot_events=4)
+        pipeline, _, _, _ = foundation(limits=limits)
+        actors = {"human:zoe": {"kind": "human"}}
+        pipeline.observation.observe(
+            delivery_id="d-first",
+            event=message("e-first", text="first",
+                          mentioned_actor_ids=["discord:bot:9"]),
+            actors=actors,
+        )
+        for index in range(6):
+            pipeline.observation.observe(
+                delivery_id=f"d{index}",
+                event=message(f"e{index}", text=f"message {index}"),
+                actors=actors,
+            )
+
+        request = pipeline.observation.build_snapshot("e5")
+        self.assertEqual(
+            ["e-first", "e3", "e4", "e5"],
+            [event["id"] for event in request["events"]],
+        )
+        self.assertFalse(request["coverage"]["has_more_before"])
+        self.assertTrue(request["coverage"]["has_gaps"])
+        page = pipeline.observation.fetch_context(
+            {
+                "request_id": request["request_id"],
+                "handle_id": request["continuation"]["handle_id"],
+                "direction": "before",
+                "max_events": 10,
+                "max_bytes": 10_000,
+            },
+            host_context=request["continuation"]["bound_to"],
+        )
+        self.assertEqual(
+            ["e0", "e1", "e2"], [event["id"] for event in page["events"]]
+        )
 
     def test_direct_address_is_kept_newest_first_within_budgets(self):
         stale = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()

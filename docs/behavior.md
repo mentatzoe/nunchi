@@ -197,7 +197,7 @@ this behavior. The rules replaced so far:
 | Step 1 suppresses only non-conversation | Attention can also suppress when the agent is "neither addressed nor useful" |
 | Step 2 gives a social reading with reasons | A wake/no-wake decision; at most an optional advice note reaches the agent |
 | The agent's turn carries social context | A generic "contribute naturally or stay silent" prompt |
-| Conversation memory | None between judgments; a window of the newest 24 events, plus older messages that mention the agent or reply to it |
+| Conversation memory | None between judgments; a window of the newest 24 events, plus up to 6 older messages of the agent's direct exchange (mentions of it, replies to it, its own messages) |
 | Pace and pauses | No current time; nothing happens when someone stops talking |
 | The agent sends its own "mhm" | Nunchi adds 👂 itself, on the newest event |
 
