@@ -1492,12 +1492,17 @@ class AuthorizationTests(unittest.TestCase):
                 "impact": "high",
             }
         )
-        loaded = threading.Event()
+        load_started = threading.Event()
+        release_load = threading.Event()
+        proposal_done = threading.Event()
+        self.addCleanup(release_load.set)
 
-        class DelayedApprovalPolicy:
+        class BlockingApprovalPolicy:
             def load(inner):
-                time.sleep(0.08)
-                loaded.set()
+                # Hold the load open until the host deadline has passed, so the
+                # deadline lands mid-load however slow the runner is.
+                load_started.set()
+                release_load.wait(10)
                 return PolicySnapshot(
                     "policy",
                     "delayed-approval",
@@ -1505,10 +1510,19 @@ class AuthorizationTests(unittest.TestCase):
                     ("operator:zoe",),
                 )
 
-        coordinator = self.coordinator(policy=DelayedApprovalPolicy())
+        coordinator = self.coordinator(policy=BlockingApprovalPolicy())
+        execute = coordinator.execute_proposal
+
+        def tracked_execute(**kwargs):
+            try:
+                return execute(**kwargs)
+            finally:
+                proposal_done.set()
+
+        coordinator.execute_proposal = tracked_execute
         self.pipeline.host.privileged = coordinator
-        self.pipeline.host.host_timeout_seconds = 0.03
-        self.pipeline.host.participant_timeout_seconds = 0.03
+        self.pipeline.host.host_timeout_seconds = 0.5
+        self.pipeline.host.participant_timeout_seconds = 0.5
         self.pipeline.host.participant = lambda **_: {
             "kind": "privileged",
             "origin_event_id": "e2",
@@ -1527,7 +1541,11 @@ class AuthorizationTests(unittest.TestCase):
             outcome.opportunities[0].transport.delivery,
             ("failed", "unknown"),
         )
-        self.assertTrue(loaded.wait(1))
+        self.assertTrue(
+            load_started.is_set(), "the policy load did not start before the deadline"
+        )
+        release_load.set()
+        self.assertTrue(proposal_done.wait(5))
         self.assertEqual((), coordinator.pending_for_operator())
         self.assertEqual([], self.native_calls)
 
