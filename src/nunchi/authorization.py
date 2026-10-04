@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -216,6 +217,7 @@ class AuthorizationJournal:
             self._load()
 
     def _load(self) -> None:
+        open_commits: set[str] = set()
         try:
             with self.path.open(encoding="utf-8") as handle:
                 for line_number, line in enumerate(handle, 1):
@@ -229,7 +231,10 @@ class AuthorizationJournal:
                         self._idempotency_keys[record["effect_fingerprint"]] = record[
                             "idempotency_key"
                         ]
+                    if record["kind"] in ("effect_commit", "effect_retry_commit"):
+                        open_commits.add(record["effect_fingerprint"])
                     if record["kind"] == "effect_result":
+                        open_commits.discard(record["effect_fingerprint"])
                         if record["outcome"] == "UNKNOWN":
                             self._unknown_effects.add(record["effect_fingerprint"])
                         elif record["outcome"] == "CONFIRMED":
@@ -238,6 +243,11 @@ class AuthorizationJournal:
             raise AuthorizationError(
                 f"authorization journal is not trustworthy at startup: {exc}"
             ) from exc
+        # Every commit that never reached its executor is closed as not
+        # attempted, so a commit left open means the process stopped during
+        # the native call. The effect may exist: it is UNKNOWN, which keeps
+        # replay refused and makes an approved retry possible.
+        self._unknown_effects |= open_commits
 
     @staticmethod
     def _validate_record(record: Any, *, line_number: int | None = None) -> None:
@@ -737,34 +747,43 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(moment),
             }
         )
-        if cancel.is_set():
-            return TransportResult("failed", "privileged work cancelled before native effect")
         # Persistence can itself consume the remaining grant lifetime or
         # overlap a policy revocation. Reload every deterministic authority
         # fact after that blocking boundary and immediately before the effect.
-        current_policy = self.policy_source.load()
-        moment = _now()
-        outcome, reason, current_rule = self._evaluate(
-            binding=binding,
-            policy=current_policy,
-            now=moment,
-            committed_recheck=True,
-        )
-        if (
-            outcome != "ALLOW"
-            or reason != "policy-allow"
-            or current_rule != rule
-            or current_policy.provenance != decision["policy_provenance"]
-            or moment >= _parse_time(decision["expires_at"])
-            or self.observation.resolve_event(binding["origin_event_id"]) is None
-            or canonical_operation_digest(operation) != binding["action_digest"]
-            # Origin lookup and digest work can also consume the deadline.
-            or cancel.is_set()
-        ):
-            return TransportResult(
-                "failed",
-                "authorization changed before native effect",
+        # Every exit before the executor closes the commit as not attempted.
+        try:
+            refusal = None
+            if cancel.is_set():
+                refusal = "privileged work cancelled before native effect"
+            else:
+                current_policy = self.policy_source.load()
+                moment = _now()
+                outcome, reason, current_rule = self._evaluate(
+                    binding=binding,
+                    policy=current_policy,
+                    now=moment,
+                    committed_recheck=True,
+                )
+                if (
+                    outcome != "ALLOW"
+                    or reason != "policy-allow"
+                    or current_rule != rule
+                    or current_policy.provenance != decision["policy_provenance"]
+                    or moment >= _parse_time(decision["expires_at"])
+                    or self.observation.resolve_event(binding["origin_event_id"]) is None
+                    or canonical_operation_digest(operation) != binding["action_digest"]
+                    # Origin lookup and digest work can also consume the deadline.
+                    or cancel.is_set()
+                ):
+                    refusal = "authorization changed before native effect"
+        except BaseException:
+            self._record_not_attempted(
+                fingerprint, binding["action_id"], "authority recheck failed"
             )
+            raise
+        if refusal is not None:
+            self._record_not_attempted(fingerprint, binding["action_id"], refusal)
+            return TransportResult("failed", refusal)
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
         except BaseException:
@@ -786,6 +805,29 @@ class AuthorizationCoordinator:
             }
         )
         return result
+
+    def _record_not_attempted(self, fingerprint: str, action_id: str, reason: str) -> None:
+        """Close a committed effect that never reached its executor.
+
+        Without this record a refused or cancelled commit is indistinguishable
+        from a crash during dispatch. FAILED keeps the grant consumed and does
+        not clear an earlier UNKNOWN, so replay and retry rules are unchanged.
+        Recording is best-effort: if it cannot be persisted, the commit stays
+        open, which is the conservative reading.
+        """
+        try:
+            self.journal.append(
+                {
+                    "kind": "effect_result",
+                    "effect_fingerprint": fingerprint,
+                    "action_id": action_id,
+                    "outcome": "FAILED",
+                    "detail": f"privileged effect was not attempted: {reason}",
+                    "recorded_at": _iso(_now()),
+                }
+            )
+        except (AuthorizationError, ValidationError):
+            pass
 
     def _retry_unknown_effect(
         self,
@@ -850,39 +892,47 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
-        if cancel.is_set():
-            return TransportResult("failed", "unknown-effect retry was cancelled before native effect")
-        policy = self.policy_source.load()
-        now = _now()
-        outcome, reason, current_rule = self._evaluate(
-            binding=binding,
-            policy=policy,
-            now=now,
-            retry_unknown=True,
-        )
-        authority_matches = (
-            (authenticated_approval and outcome in {"ALLOW", "APPROVAL_REQUIRED"})
-            or (
-                not authenticated_approval
-                and outcome == "ALLOW"
-                and reason == "policy-allow"
-                and rule.target_idempotency
+        try:
+            refusal = None
+            if cancel.is_set():
+                refusal = "unknown-effect retry was cancelled before native effect"
+            else:
+                policy = self.policy_source.load()
+                now = _now()
+                outcome, reason, current_rule = self._evaluate(
+                    binding=binding,
+                    policy=policy,
+                    now=now,
+                    retry_unknown=True,
+                )
+                authority_matches = (
+                    (authenticated_approval and outcome in {"ALLOW", "APPROVAL_REQUIRED"})
+                    or (
+                        not authenticated_approval
+                        and outcome == "ALLOW"
+                        and reason == "policy-allow"
+                        and rule.target_idempotency
+                    )
+                )
+                if (
+                    not authority_matches
+                    or current_rule != rule
+                    or policy.provenance != decision["policy_provenance"]
+                    or now >= _parse_time(decision["expires_at"])
+                    or self.observation.resolve_event(binding["origin_event_id"]) is None
+                    or canonical_operation_digest(operation) != binding["action_digest"]
+                    or self.journal.idempotency_key(fingerprint) != expected_key
+                    or cancel.is_set()
+                ):
+                    refusal = "unknown-effect retry authority changed before native effect"
+        except BaseException:
+            self._record_not_attempted(
+                fingerprint, binding["action_id"], "retry authority recheck failed"
             )
-        )
-        if (
-            not authority_matches
-            or current_rule != rule
-            or policy.provenance != decision["policy_provenance"]
-            or now >= _parse_time(decision["expires_at"])
-            or self.observation.resolve_event(binding["origin_event_id"]) is None
-            or canonical_operation_digest(operation) != binding["action_digest"]
-            or self.journal.idempotency_key(fingerprint) != expected_key
-            or cancel.is_set()
-        ):
-            return TransportResult(
-                "failed",
-                "unknown-effect retry authority changed before native effect",
-            )
+            raise
+        if refusal is not None:
+            self._record_not_attempted(fingerprint, binding["action_id"], refusal)
+            return TransportResult("failed", refusal)
         try:
             result = self.executors[binding["capability"]](operation, expected_key)
         except BaseException:
@@ -917,6 +967,12 @@ class AuthorizationCoordinator:
         deadline: float | None = None,
     ) -> TransportResult:
         """Authorize one proposal; optional deadline uses time.monotonic()."""
+        if deadline is not None and (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline)
+        ):
+            return TransportResult("failed", "privileged proposal deadline is invalid")
         lifetime = _AuthorizationLifetime(cancel, deadline)
         if lifetime.is_set():
             return TransportResult("failed", "privileged proposal was already cancelled")
@@ -1007,7 +1063,11 @@ class AuthorizationCoordinator:
                     challenge=challenge,
                     operation=operation,
                     effect_fingerprint=fingerprint,
-                    cancel=lifetime,
+                    # The turn deadline bounds publication only. A published
+                    # challenge lives until its own expires_at (approval TTL),
+                    # an explicit cancel, or restart, so an operator has the
+                    # window the challenge advertises.
+                    cancel=_AuthorizationLifetime(cancel, None),
                     unknown_retry=unknown_retry,
                 )
                 if lifetime.is_set():
@@ -1230,30 +1290,38 @@ class AuthorizationCoordinator:
                 "committed_at": _iso(now),
             }
         )
-        if cancel.is_set():
-            return TransportResult("failed", "approved work was cancelled before native effect")
-        policy = self.policy_source.load()
-        now = _now()
-        outcome, reason, current_rule = self._evaluate(
-            binding=binding,
-            policy=policy,
-            now=now,
-            committed_recheck=True,
-        )
-        if (
-            outcome != "APPROVAL_REQUIRED"
-            or reason != "approval-required"
-            or current_rule != rule
-            or policy.provenance != decision["policy_provenance"]
-            or now >= _parse_time(decision["expires_at"])
-            or self.observation.resolve_event(binding["origin_event_id"]) is None
-            or canonical_operation_digest(operation) != binding["action_digest"]
-            or cancel.is_set()
-        ):
-            return TransportResult(
-                "failed",
-                "approved authority changed before native effect",
+        try:
+            refusal = None
+            if cancel.is_set():
+                refusal = "approved work was cancelled before native effect"
+            else:
+                policy = self.policy_source.load()
+                now = _now()
+                outcome, reason, current_rule = self._evaluate(
+                    binding=binding,
+                    policy=policy,
+                    now=now,
+                    committed_recheck=True,
+                )
+                if (
+                    outcome != "APPROVAL_REQUIRED"
+                    or reason != "approval-required"
+                    or current_rule != rule
+                    or policy.provenance != decision["policy_provenance"]
+                    or now >= _parse_time(decision["expires_at"])
+                    or self.observation.resolve_event(binding["origin_event_id"]) is None
+                    or canonical_operation_digest(operation) != binding["action_digest"]
+                    or cancel.is_set()
+                ):
+                    refusal = "approved authority changed before native effect"
+        except BaseException:
+            self._record_not_attempted(
+                fingerprint, binding["action_id"], "approved authority recheck failed"
             )
+            raise
+        if refusal is not None:
+            self._record_not_attempted(fingerprint, binding["action_id"], refusal)
+            return TransportResult("failed", refusal)
         try:
             result = self.executors[binding["capability"]](operation, idempotency_key)
         except BaseException:
@@ -1282,8 +1350,9 @@ class AuthorizationCoordinator:
     def cancel(self) -> None:
         """Discard pending approvals; durable consumed effects remain blocked."""
         with self._lock:
-            for pending in self._pending.values():
-                pending.cancel.set()
+            # Dropping the entries is enough: a pending approval is only
+            # reachable through _pending. Setting their events would also set
+            # the scheduler token they wrap and strand the room.
             self._pending.clear()
 
     restart = cancel

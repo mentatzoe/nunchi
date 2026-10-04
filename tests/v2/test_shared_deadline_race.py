@@ -166,17 +166,33 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         self.assertEqual("failed", self._approve(coordinator, challenge).delivery)
         self.assertEqual(1, len(self.case.native_calls))
 
-    def test_expired_host_approval_is_not_listed_after_scheduler_completion(self):
+    def test_published_approval_outlives_the_participant_turn_deadline(self):
+        # The turn deadline bounds how long the host waits on the model, not
+        # how long a human operator has to decide. A published challenge stays
+        # usable for the window its expires_at advertises.
         coordinator, challenge = self._approval()
-        self.clock[0] = 1000.03
+        self.clock[0] = 1000.03 + 60
+        pending = coordinator.pending_for_operator()
+        self.assertEqual(1, len(pending))
+        self.assertEqual("sent", self._approve(coordinator, challenge).delivery)
+        self.assertEqual(1, len(self.case.native_calls))
+
+    def test_cancelled_approval_cannot_be_used(self):
+        coordinator, challenge = self._approval()
+        self.case.pipeline.cancel()
         self.assertEqual((), coordinator.pending_for_operator())
         self.assertEqual("failed", self._approve(coordinator, challenge).delivery)
         self.assertEqual([], self.case.native_calls)
 
-    def test_expired_host_approval_cannot_be_used_without_listing_first(self):
+    def test_approval_past_its_own_expiry_cannot_be_used(self):
         coordinator, challenge = self._approval()
-        self.clock[0] = 1000.03
-        self.assertEqual("failed", self._approve(coordinator, challenge).delivery)
+        expires_at = coordinator.pending_for_operator()[0]["challenge"]["expires_at"]
+        later = fixtures.datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        with mock.patch(
+            "nunchi.authorization._now",
+            return_value=later + fixtures.timedelta(seconds=1),
+        ):
+            self.assertEqual("failed", self._approve(coordinator, challenge).delivery)
         self.assertEqual([], self.case.native_calls)
 
     def test_deadline_during_challenge_persistence_prevents_publication(self):
@@ -211,11 +227,35 @@ class SharedDeadlineRaceTests(unittest.TestCase):
         self.assertEqual("failed", retry.delivery)
         self.assertEqual([], self.case.native_calls)
 
-    def test_deadline_during_approved_commit_prevents_effect(self):
+    def test_expiry_during_approved_commit_prevents_effect_and_closes_commit(self):
         coordinator, challenge = self._approval()
-        self._expire_on_record("effect_commit")
+        expires_at = coordinator.pending_for_operator()[0]["challenge"]["expires_at"]
+        after = fixtures.datetime.fromisoformat(
+            expires_at.replace("Z", "+00:00")
+        ) + fixtures.timedelta(seconds=1)
+        real_now = fixtures.datetime.now
+        moments = {"expired": False}
+        append = self.case.journal.append
+
+        def expiring_append(record):
+            result = append(record)
+            if record["kind"] == "effect_commit":
+                moments["expired"] = True
+            return result
+
+        def now():
+            return after if moments["expired"] else real_now(fixtures.timezone.utc)
+
+        self.enterContext(mock.patch.object(
+            self.case.journal, "append", side_effect=expiring_append,
+        ))
+        self.enterContext(mock.patch("nunchi.authorization._now", side_effect=now))
         self.assertEqual("failed", self._approve(coordinator, challenge).delivery)
         self.assertEqual([], self.case.native_calls)
+        last = self.case.journal.records()[-1]
+        self.assertEqual("effect_result", last["kind"])
+        self.assertEqual("FAILED", last["outcome"])
+        self.assertTrue(last["detail"].startswith("privileged effect was not attempted"))
 
     def test_deadline_during_final_policy_reload_prevents_direct_effect(self):
         load = self.case.policy.load

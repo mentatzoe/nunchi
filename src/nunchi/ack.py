@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import threading
@@ -140,8 +141,10 @@ class AckJournal:
             if fcntl is None:
                 raise PersistenceError("durable ACK journal requires process locking")
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if self.path.exists():
-                self._load()
+            # Load under both locks so a concurrent writer's in-progress
+            # append (or its withdrawal) is never read half-finished.
+            with self._lock, self._process_lock():
+                pass
 
     @contextmanager
     def _process_lock(self, *, timeout: float | None = None) -> Iterator[None]:
@@ -160,15 +163,19 @@ class AckJournal:
         locker = fcntl
         acquired = False
         try:
-            self._acquire_flock(fd, timeout)
+            try:
+                self._acquire_flock(fd, timeout)
+            except OSError as exc:
+                raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
             acquired = True
             if self.path.exists():
                 self._load()
             else:
                 self._records = {}
-            yield
-        except OSError as exc:
-            raise PersistenceError(f"could not lock ACK journal: {exc}") from exc
+            try:
+                yield
+            except OSError as exc:
+                raise PersistenceError(f"ACK journal operation failed: {exc}") from exc
         finally:
             if acquired:
                 locker.flock(fd, locker.LOCK_UN)
@@ -327,9 +334,13 @@ class AckJournal:
             return
         existed = self.path.exists()
         payload = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-        fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            fd = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        except OSError as exc:
+            raise PersistenceError(f"could not open ACK journal: {exc}") from exc
         offset = None
         writing = False
+        committed = False
         try:
             offset = os.fstat(fd).st_size
             check()
@@ -339,7 +350,9 @@ class AckJournal:
             check()
             os.fsync(fd)
             check()
-            if not existed:
+            # An empty file can be left by an earlier append that aborted
+            # before its directory entry was synced; sync it on first content.
+            if not existed or offset == 0:
                 directory_fd = os.open(self.path.parent, os.O_RDONLY)
                 try:
                     check()
@@ -351,13 +364,22 @@ class AckJournal:
                 # The observer accepts the durable commit here, not when an
                 # executor future is eventually delivered to the event loop.
                 confirm()
-        except (OSError, PersistenceError) as exc:
-            if writing and offset is not None:
+            committed = True
+        except BaseException as exc:
+            if writing and offset is not None and not committed:
                 # No other journal writer can append while we own both locks.
                 # Never remove the previously durable reservation on settlement.
-                os.ftruncate(fd, offset)
-                os.fsync(fd)
-            raise PersistenceError(f"could not durably append ACK state: {exc}") from exc
+                try:
+                    os.ftruncate(fd, offset)
+                    os.fsync(fd)
+                except OSError as rollback:
+                    raise PersistenceError(
+                        "ACK journal withdrawal failed; journal tail is uncertain: "
+                        f"{rollback}"
+                    ) from exc
+            if isinstance(exc, (OSError, PersistenceError)):
+                raise PersistenceError(f"could not durably append ACK state: {exc}") from exc
+            raise
         finally:
             os.close(fd)
 
@@ -369,7 +391,11 @@ class AckJournal:
         """Return one monotonic budget. A relative timeout must not extend it."""
 
         if deadline is not None:
-            if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+            if (
+                isinstance(deadline, bool)
+                or not isinstance(deadline, (int, float))
+                or not math.isfinite(deadline)
+            ):
                 raise PersistenceError("ACK journal deadline is invalid")
             return deadline
         if timeout is None:
@@ -377,6 +403,7 @@ class AckJournal:
         if (
             isinstance(timeout, bool)
             or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout)
             or timeout < 0
         ):
             raise PersistenceError("ACK journal lock timeout is invalid")
@@ -389,8 +416,7 @@ class AckJournal:
             self._lock.acquire()
             return
         remaining = deadline - time.monotonic()
-        if remaining < 0:
-            remaining = 0
+        remaining = min(max(remaining, 0.0), threading.TIMEOUT_MAX)
         if not self._lock.acquire(timeout=remaining):
             raise PersistenceError(
                 "ACK journal lock was not acquired before the deadline"

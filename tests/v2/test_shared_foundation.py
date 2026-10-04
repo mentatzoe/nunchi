@@ -1416,10 +1416,20 @@ class AuthorizationTests(unittest.TestCase):
 
         self.assertEqual("failed", result.delivery)
         self.assertEqual([], self.native_calls)
-        self.assertEqual(
-            ["authorization_contract", "authorization_contract", "effect_commit"],
-            [record["kind"] for record in journal.records()],
-        )
+        records = journal.records()
+        kinds = [record["kind"] for record in records]
+        self.assertEqual(["authorization_contract", "authorization_contract"], kinds[:2])
+        # Expiry may land before or after the effect commit depending on disk
+        # speed (issue #37); both refuse the effect. A commit that was refused
+        # is closed as not attempted, never left looking like a lost dispatch.
+        if "effect_commit" in kinds:
+            self.assertEqual(["effect_commit", "effect_result"], kinds[2:])
+            self.assertEqual("FAILED", records[-1]["outcome"])
+            self.assertTrue(
+                records[-1]["detail"].startswith("privileged effect was not attempted")
+            )
+        else:
+            self.assertEqual(2, len(kinds))
 
     def test_revocation_during_effect_commit_makes_zero_calls(self):
         allowed = PolicySnapshot("policy", "r1", (self.rule,), ("operator:zoe",))
