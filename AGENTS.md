@@ -2,31 +2,49 @@
 
 ## What Nunchi is for
 
-Nunchi (눈치) gives an AI agent human-like conversational awareness in a live,
-multi-party, multi-turn conversation: the ability to read the room.
+Nunchi (눈치) is a social conversational gate for multi-turn conversations
+with many participants. It gives an AI agent the social awareness people use
+in a group conversation: the ability to read the room.
 
-A person in a group chat notices what is happening, judges whether it concerns
-them right now, and then joins in naturally or stays quiet. Nunchi gives each
-agent that same pre-attention, so several agents and people can share one
-conversation without the agents answering everything, talking over each other,
-or missing what matters.
+Agent harnesses answer every message they receive. That works one-to-one; in
+a group it makes agents talk over each other, answer what wasn't for them, and
+miss what matters. Nunchi gates the agent's attention and gives it a social
+reading of the room, so it can join in the way a socially aware person would.
+It translates one-to-one habits into a many-to-many conversation.
 
-Every change should make that more true. Judge a design by the conversation it
-produces, not by its mechanism.
+The behavior is defined in [`docs/behavior.md`](docs/behavior.md). Every
+change should make that behavior more true. Judge a design by the conversation
+it produces, not by its mechanism. Zoe, 2026-10-04: rules from earlier
+versions give way wherever they block this behavior
+([#94](https://github.com/mentatzoe/nunchi/issues/94)).
 
 Reading the room means:
 
+- **Two steps, then the agent.** Step 1 asks whether this is conversation a
+  participant like this one could take part in; it is conservative and never
+  suppresses a message just because it was addressed to someone else. Step 2
+  reads what is happening and recommends the kinds of response that could
+  fit, with reasons. The agent then decides.
 - **The participant judges for itself.** Only the participant's own delegated
-  model, shaped by its identity, instructions, and the room, decides whether a
-  moment deserves its attention. Deterministic code never decides relevance,
-  resolution, or obligation.
-- **A conversation is a current state, not a work queue.** Messages are
-  observations. Newer context can change what matters, and nothing is owed a
-  reply. There is no handled/open ledger, obligation queue, or inferred roster.
+  models, shaped by its identity, instructions, and the room, read the room
+  for it. Deterministic code never decides relevance, resolution, or
+  obligation.
+- **Every visible move is the agent's own act**, including a "mhm". Nunchi
+  never posts on the agent's behalf. (Today's ACK still does; #94.)
+- **A conversation has memory, not a work queue.** Each participant keeps a
+  memory of the conversation: who asked what, what was answered and by whom,
+  its own moves and why. Every fact points to the messages it came from and
+  none obliges a reply. There is no obligation queue or inferred roster.
+- **Rhythm matters.** Pace, pauses, someone mid-thought, and the agent's own
+  share of the conversation are part of reading the room.
 - **Silence is a normal, correct outcome.** A woken participant contributes
   directly or says nothing. It never sends a meta-answer about its attention.
 - **When unsure, pay attention.** Uncertainty wakes or defers. Wrongly
   suppressing something that mattered is the worst error.
+
+Today's code does not yet behave this way in several places; the table at the
+end of `docs/behavior.md` lists where. Treat each difference as a gap to close,
+not as the intended behavior.
 - **Context is bounded and honest.** The participant sees a bounded, truthful
   snapshot of the room, including what is missing, and its own earlier turns
   as factual history.
@@ -49,10 +67,12 @@ neutral interface instead.
 ## Read first
 
 1. This file. Zoe's decisions below take precedence over older documents.
-2. `docs/architecture/v2-selected-design.md` for the selected design.
-3. `docs/contracts/nunchi-v2.md` for the portable contract.
-4. `docs/v2-completion-goal.md` for what a complete release must prove.
-5. Source, schemas, tests, evaluations, evidence, and installed runtimes for
+2. `docs/behavior.md` for the behavior Nunchi exists for. Where an older
+   design, contract, or spec conflicts with it, the behavior wins.
+3. `docs/architecture/v2-selected-design.md` for the selected design.
+4. `docs/contracts/nunchi-v2.md` for the portable contract.
+5. `docs/v2-completion-goal.md` for what a complete release must prove.
+6. Source, schemas, tests, evaluations, evidence, and installed runtimes for
    what actually exists and works.
 
 Code and reproducible behavior determine implementation truth. Specs under
@@ -135,8 +155,9 @@ redirect any work.
   expandable; continuation authority stays host-only.
 - Observation, attention, participant-host, and transport receipts are
   immutable, request-correlated, and written only by their owning stage.
-- There is no social handled/open ledger, obligation queue, inferred roster, or
-  send-time social reclassification.
+- Conversation memory records facts with pointers to messages and never
+  obliges a reply. There is no obligation queue, inferred roster, or send-time
+  social reclassification.
 - A woken participant contributes directly or sends nothing.
 - Privileged effects require current, provenance-bound authorization for the
   exact action immediately before dispatch.
