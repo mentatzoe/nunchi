@@ -25,6 +25,7 @@ import urllib.parse
 import urllib.request
 from typing import Callable, Mapping
 
+from .hygiene import REDACTED
 from .ratelimit import RateLimiter
 
 logger = logging.getLogger("nunchi.mcp_discord.rest")
@@ -67,14 +68,23 @@ def _urllib_call(
         raise DiscordRestError(None, f"network error reaching Discord API: {exc.reason}") from None
 
 
-def _error_detail(body: bytes) -> str:
-    """Extract Discord's error message from a response body (never echoes headers)."""
+def _error_detail(body: bytes, token: str) -> str:
+    """Extract Discord's error message from a response body.
+
+    Never echoes headers, and redacts the token before truncating, so an
+    upstream that reflects credentials cannot leak them into error text.
+    """
     try:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError):
         return ""
     message = payload.get("message") if isinstance(payload, dict) else None
-    return str(message)[:200] if message else ""
+    if not message:
+        return ""
+    text = str(message)
+    if token:
+        text = text.replace(token, REDACTED)
+    return text[:200]
 
 
 def _permission_bits(value: object, label: str) -> int:
@@ -289,7 +299,7 @@ class DiscordRestClient:
 
             if status in (401, 403):
                 # Permanent auth/permission failure: abort immediately, no retry.
-                detail = _error_detail(resp_body)
+                detail = _error_detail(resp_body, self._token)
                 raise DiscordRestError(
                     status,
                     f"Discord API {status} on {route}: "
@@ -311,7 +321,7 @@ class DiscordRestClient:
                 continue
 
             if status >= 400:
-                detail = _error_detail(resp_body)
+                detail = _error_detail(resp_body, self._token)
                 raise DiscordRestError(status, f"Discord API {status} on {route}: {detail}")
 
             if not resp_body:

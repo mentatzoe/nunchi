@@ -10,9 +10,9 @@ result, notification payload, log line, or error message. Defenses:
 - :class:`TokenRedactionFilter` is installed on every root log handler as a
   last-resort backstop — any record whose formatted message contains the
   token is rewritten before it reaches a stream;
-- ``tests/test_mcp_discord_server.py`` asserts the token is absent from
-  serialized tool schemas, sample notifications, error strings, and captured
-  log output.
+- ``tests/v2/test_mcp_discord_token_hygiene.py`` asserts the token is absent
+  from tool schemas, configuration reprs, REST error text, and captured log
+  output, and that the redaction backstop rewrites a leaking line.
 """
 
 from __future__ import annotations

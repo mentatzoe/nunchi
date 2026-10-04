@@ -10,11 +10,10 @@ if str(SRC) not in sys.path:
 
 
 def load_tests(loader, _standard_tests, pattern):
-    """Atomic V2 suite.
+    """Load the V2 suite under ``tests/v2``.
 
-    Top-level ``tests/test_*.py`` files are retained only as the historical V1
-    coverage ledger. They are intentionally not executable product tests after
-    the V2 cutover. Current tests live under ``tests/v2``.
+    The V1 test corpus was removed on 2026-10-04; ``tests/V1-REPLACEMENT.md``
+    maps each retired V1 concern to its V2 coverage.
     """
     return loader.discover(
         str(ROOT / "tests" / "v2"),

@@ -126,8 +126,8 @@ python3 -m evals.verdict_suite.runner
 The first command runs source-level V2 schema, runtime, authorization,
 scheduling, transport, Codex, and adapter coverage. It does not prove a built
 package or installed runtime; those require a fresh package build and isolated
-installation. Historical V1 tests remain as a visible retirement ledger and
-are not part of the executable V2 product suite.
+installation. `tests/V1-REPLACEMENT.md` maps the removed V1 tests to their V2
+coverage.
 
 ## Product and integration documentation
 
