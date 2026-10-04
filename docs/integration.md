@@ -3,17 +3,39 @@
 Use [the platform interface](platform-v2.md). Integrations do not implement a
 second gate.
 
-The host constructs one exact `ParticipantBinding`, retains native observations
-through `ObservationProvider`, runs `AttentionEngine` with that participant's
-pinned profile and delegated model, schedules with
-`ConversationOpportunityScheduler`, and invokes the normal participant through
-`ParticipantTurnHost`.
+Every integration constructs one exact `ParticipantBinding`, retains native
+observations through `ObservationProvider`, runs `AttentionEngine` with that
+participant's pinned profile and delegated model, and schedules with
+`ConversationOpportunityScheduler`. It then takes one of two paths for the
+participant turn.
 
-The participant returns one ordinary room action, one privileged proposal, or
+## Nunchi-owned participant
+
+The host invokes the normal participant through `ParticipantTurnHost`. The
+participant returns one ordinary room action, one privileged proposal, or
 silence. The host validates origin visibility and current opportunity state.
 Ordinary output crosses one transport commit point. Privileged effects cross
 the same cancellation boundary and then the execution-time authorization
 coordinator.
+
+The generic reference runtime in `nunchi.adapters.runtime` is the shortest
+portable implementation. The Codex runner uses the same owners with a
+Codex-specific participant process and the shared Discord transport.
+
+## Native host pipeline
+
+Some hosts run their own participant pipeline: Hermes today, and a Claude
+Code mod next ([#43](https://github.com/mentatzoe/nunchi/issues/43)). They do
+not use `ParticipantTurnHost`. Instead they wrap their own turn with the shared
+owners: observation, attention, the scheduler, shared opportunity preparation
+and wake facts (`nunchi.pipeline.prepare_opportunity`), the ACK journal, and
+shared receipts (`participant_host_receipt_body`). Nunchi decides before the
+host starts visible work, hands an admitted turn the bounded wake facts, and
+records the lifecycle facts the host exposes. The host keeps its own prompt,
+model, tools, and delivery behind Nunchi's guards. See
+[Host-owned participant pipelines](platform-v2.md#host-owned-participant-pipelines).
+
+## Never
 
 Integrations must never:
 
@@ -25,7 +47,3 @@ Integrations must never:
 - let a participant call native room tools around the host;
 - classify composed output socially at send time;
 - revive pending work or approvals after restart.
-
-The generic reference runtime in `nunchi.adapters.runtime` is the shortest
-portable implementation. Codex uses the same owners with a Codex-specific
-participant process and the shared Discord transport.

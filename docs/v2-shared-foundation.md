@@ -1,9 +1,12 @@
 # Shared Nunchi V2 foundation
 
-This document is the platform-consumer and operator handoff for the shared
-foundation introduced for issues #55, #56, and #40. It describes candidate
-source behavior. It does not establish installed platform acceptance, live
-validation, release readiness, or V2 completion.
+This document is the platform-consumer and operator guide for the shared
+foundation introduced for issues #55, #56, and #40. That foundation merged in
+PR [#67](https://github.com/mentatzoe/nunchi/pull/67) on 2026-08-02, and later
+shared-core PRs (#88, #89, #90, #91) refined it. It is on `main` and is
+**merged, unverified**: deterministic tests and clean-install probes pass, but
+there is no installed operator-deployment or live proof since PR #67, no
+platform acceptance, no release, and no V2 completion.
 
 ## Shared interfaces
 
@@ -26,14 +29,32 @@ result must copy that protocol and binding exactly around one action. Unknown
 versions, changed bindings, invisible origins/targets, exceeded permissions,
 and excess expansion reject before an effect.
 
-Codex and Claude Code now supply only their isolated native model invocation,
-session continuity, cancellation, and result extraction. Reference platform
-transports supply authenticated capability facts and native effects. They do
-not own a prompt, parser, expansion policy, social decision, or participant
-turn protocol. Hermes consumes the same attention decision. When its
-authenticated adapter attests the configured reaction, it adds that one
-reaction and does not run the participant. Unsupported or unknown permission
-still widens ACK to DEFER.
+The Codex runner and the superseded Claude Code headless runner supply only
+their isolated native model invocation, session continuity, cancellation, and
+result extraction. Reference platform transports supply authenticated
+capability facts and native effects. They do not own a prompt, parser,
+expansion policy, social decision, or participant turn protocol. Hermes
+consumes the same attention decision. When its authenticated adapter attests
+the configured reaction, it adds that one reaction and does not run the
+participant. Unsupported or unknown permission still widens ACK to DEFER.
+
+## Attention model selection
+
+The participant's attention model is chosen by trusted configuration, not by
+the core. `attention_model_from_config(config, host_kinds=...)` selects an
+implementation by `kind`; the default `openai-compatible` kind needs an
+explicit `base_url` (there is no vendor default endpoint) and passes any
+provider-specific request fields through `extra_body`. An integration adds its
+own kinds through `host_kinds`. `HostTextAttentionModel` serves hosts whose
+completion returns plain text, such as a Claude Code mod running on the user's
+own plan; `HostStructuredAttentionModel` serves hosts with structured
+completion and takes the host's denial check (`is_denial`, `denied_detail`)
+and whether the host must attest the served model (`require_attestation`).
+The attention engine gives every kind the same core prompt and bounded
+observation and validates every judgment the same way. Provider and model
+names are opaque audit labels; a host-served kind may omit them. A guard test
+(`tests/v2/test_agnostic_core.py`) keeps host, vendor, and chat-platform names
+out of the shared core.
 
 ## Core outcomes
 
@@ -84,8 +105,12 @@ Setup writes private profile/config directories and commits the validated
 operator schema plus its SHA-256 integrity pin as one atomic envelope. Readers
 and writers share the same profile lock, so they cannot observe a config/digest
 split. Operators do not hand-write JSON or calculate hashes. The operator
-configuration names credential environment variables; it does not contain or
-return credential values.
+configuration may name credential environment variables (a host-served model
+needs none); it does not contain or return credential values. A model entry
+may carry a `kind`. A room may name any chat platform: the in-tree reference
+adapters register their platforms' capabilities, and a room on an unregistered
+platform is accepted with an `unregistered` status and a warning that its
+capabilities, including reactions, are unknown until measured at runtime.
 
 The CLI and `/api/v1/operator` dashboard endpoint return the same validated
 schema and snapshot: identity, rooms, models, attention policy, ACK policy,
@@ -125,14 +150,14 @@ and an explicit state-purge boundary.
 | Generic channel / Discord | full shared protocol; Discord MCP measures exact bot, room, roles, and permission overwrites before ACK | platform-specific live validation and acceptance |
 | Matrix | shared protocol; exact `whoami` and room power-level measurement before add-reaction ACK | platform-specific live validation and acceptance |
 | Telegram | shared protocol; unsupported ACK widens to DEFER | native ACK support only if a future verified adapter supplies it |
-| Codex | shared protocol and operator schema | platform-specific live/release gates outside this foundation |
-| Claude Code | shared protocol and operator schema | issue #39 live and supported-surface proof |
+| Codex | shared protocol and operator schema; the merged runner is reduced to Discord with Codex tools disabled | draft PR #71; parity issues #59–#65; live proof |
+| Claude Code | the merged headless runner uses the shared protocol, but it is superseded | the selected design, a Claude Code mod plus one Python gate per room with a dedicated session per room (issue #43), is not on `main`; then #57, #58, and live proof in #39 |
 | Hermes | shared attention ACK when the authenticated adapter attests the configured reaction; otherwise ACK widens to DEFER | issues #38, #42, and #44 platform closure |
 
 Issue #41 remains the combined acceptance gate. Security assurance, release
-work, final acceptance, and platform-specific live proof remain separate. This
-foundation must not be described as merged, platform-accepted, released, or
-V2-complete merely because its source and deterministic tests pass.
+work, final acceptance, and platform-specific live proof remain separate. Being
+merged does not make this foundation platform-accepted, released, or
+V2-complete.
 
 ## Verification
 

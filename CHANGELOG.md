@@ -1,32 +1,101 @@
 # Changelog
 
-## Unreleased
-
-- Implemented the shared V2 runtime: canonical bounded observation and
-  continuation, participant-shaped attention, coalescing opportunity
-  scheduler, participant wake/silence, staged receipts, execution-time
-  privileged authorization, shared Discord transport, CLI, Codex, and generic,
-  Discord, Matrix, and Telegram reference adapters.
-- Removed executable V1 verdict, adapter gate, Codex hook/send-gate/config-app,
-  installer, and compatibility entry points. Historical V1 tests and documents
-  remain only as an explicit retirement record.
-- Added deterministic lifecycle evaluation, adversarial runtime coverage,
-  stable private V2 state initialization, clean-artifact probes, and the
-  downstream platform interface/conformance contract.
-- Hermes and Claude Code V2 integrations remain explicitly outside this
-  candidate and are neither implemented nor armed.
-- Retired the executable SpecKit workflow, generated task/checklist control
-  plane, and slice lifecycle as implementation authority. Detailed product
-  specifications and technical plans remain reference material; V2 now uses
-  ordinary dependency-ordered implementation PRs governed by
-  `docs/v2-delivery.md` and the completion goal.
-
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+Nunchi V2 is on `main` and is **merged, unverified**: deterministic tests and
+installed stock-Hermes checks pass, but no surface has live real-room proof
+since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
+
+### Added
+
+- Shared V2 runtime: canonical bounded observation and continuation,
+  participant-shaped attention, a coalescing opportunity scheduler (one active
+  opportunity plus the newest pending event), participant wake and silence,
+  staged receipts, execution-time privileged authorization, the shared Discord
+  MCP transport, the CLI, and generic, Discord, Matrix, and Telegram reference
+  adapters.
+- Shared core and operator foundation (PR #67): one versioned participant
+  protocol (`nunchi.participant-turn` v1), first-class ACK that adds one exact
+  reaction or widens to DEFER when unsupported, one operator schema shared by
+  the CLI and dashboard, guided setup with automatic integrity pins, and
+  persistent `launchd`/`systemd` service supervision.
+- Hermes integration (PRs #36, #83, #84): a plugin around stock Hermes 0.19.0
+  or newer for configured Discord and Telegram rooms, with stock tools and
+  approvals behind plugin-owned guards, ACK, and a reversible stopped-profile
+  lifecycle. CI installs stock Hermes 0.19.0, 0.21.5, and current Hermes `main`
+  and runs the host-contract lanes, plus normal-attention and startup lanes on
+  Discord.
+- Codex room runner in a reduced mode: Discord only, with Codex tools, skills,
+  plugins, and MCP disabled.
+- Claude Code headless room runner (PR #32). It is superseded by the Claude
+  Code mod design (#43) and stays in the tree until that work replaces it.
+- Deterministic lifecycle evaluation (11 scenarios), adversarial runtime
+  coverage, clean-artifact probes, and the platform interface and conformance
+  contract.
+
+### Changed
+
+- `main` is the V2 working branch; `integration/v2` is retired. CI and the
+  Hermes host-contract workflow run on pushes to `main` and on PRs into it
+  (#88).
+- Attention failures are typed. Only the attention engine raises
+  cancellation or deadline errors, so provider text can no longer pose as a
+  cancellation and silently suppress. Duplicate evidence IDs are a provider
+  failure, which wakes by default, instead of a crash with no receipt. The
+  judgment schema matches the validator (#89).
+- Shared-core fixes for PR #83 (#90): a missed turn deadline no longer drops
+  the newest pending message; a published operator approval lives until its
+  own expiry (default 300 s), an explicit cancel, or restart, and the turn
+  deadline bounds only its publication; a commit that never reached its
+  executor is closed as FAILED "privileged effect was not attempted"; an open
+  commit found at startup loads as UNKNOWN, so replay stays refused and an
+  approved retry is possible; a core ACK result observed after its opportunity
+  ended is recorded as `unknown`; ACK journal rollback, diagnostics, directory
+  sync, and constructor locking are fixed; non-finite deadlines are refused;
+  cancelling the authorization coordinator no longer strands the scheduler.
+  Fixes #37.
+- The shared core is agent- and provider-agnostic (#91). Attention models are
+  selected by `kind` through `attention_model_from_config`, defaulting to
+  `openai-compatible`, which needs an explicit `base_url`; there is no vendor
+  default endpoint. `extra_body` replaces the vendor-specific `reasoning`
+  field, and temperature is optional. `HostTextAttentionModel` and
+  `decode_judgment_text` serve text-only hosts.
+  `HostStructuredAttentionModel` takes the host's denial check and attestation
+  setting. Provider and model are optional audit labels. Hermes-specific
+  attention setup text and its `PermissionError` convention moved to
+  `src/nunchi/integrations/hermes_attention_trust.py`. The
+  operator platform table holds only chat platforms, a room on an unregistered
+  platform is accepted with a warning, and `--platform` takes any name.
+  Operator model `credential_env` is optional and `kind` is accepted.
+  `tests/v2/test_agnostic_core.py` guards the boundary.
+
+### Fixed
+
+- Discord REST errors no longer echo the bot token into error text (#88).
+
+### Removed
+
+- Executable V1 verdict, adapter gate, Codex hook, send-gate, config app,
+  installer, and compatibility entry points.
+- Dead V1 tests, fixtures, and Codex shims (#88). V1 contract documents moved
+  to `docs/archive/v1/contracts/`; V1 verdict fixtures stay under
+  `evals/verdict_suite/fixtures/` as seed conversations for behavioral
+  evaluation (#86).
+- `HostStructuredParticipant` (#91).
+- The executable SpecKit workflow, generated task and checklist control plane,
+  and slice lifecycle as implementation authority. Specifications and plans
+  remain reference material.
+
+## V1 and SpecKit-era changes, 2026-07-02 to 2026-07-18 (history, never released)
+
+These entries were recorded under "Unreleased" after `v0.2.0`. They describe
+V1 behavior and the retired SpecKit process, which V2 replaced. None of this
+code or process is current.
 
 ### Changed — program and slice lifecycle replaces local-run framing
 

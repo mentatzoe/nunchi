@@ -4,6 +4,20 @@
 
 **Completion authority:** Zoe
 
+> **Decision, Zoe, 2026-10-04.** This supersedes how V2 reaches `main` and how
+> day-to-day work is reviewed. It does not change what complete means.
+>
+> - `main` holds V2 before completion. Work merges into `main` as it lands,
+>   before live proof; a current `main` is not a claim that V2 is complete.
+>   End condition 10's frozen candidate and atomic cutover now govern the
+>   release tag (`v*`), not the merge to `main`.
+> - Day-to-day delivery uses review scaled to the size and risk of each
+>   change. A self-review with subagents is acceptable when it says so.
+>   Cross-family independent review is not required for day-to-day delivery.
+> - The final completion decision and the release proof are unchanged: the
+>   end conditions, the proof standard, and the independent review of the
+>   frozen release candidate still apply, and Zoe alone accepts the result.
+
 ## Goal
 
 Deliver Nunchi V2 as one coherent, secure, installable product that lets
@@ -21,7 +35,7 @@ The product is complete only when repository truth, built artifacts, installed
 runtimes, documentation, and reproducible evidence all describe the same exact
 candidate.
 
-The binding decision chain is the **Authority order** in repository-root
+The binding decision chain is the **Read first** order in repository-root
 `AGENTS.md`, including the Zoe-selected Nunchi decisions and technical design
 recorded by Aleph Vault PR 67 (`bdd1ebb`), the contract clarification in PR 68
 (`c834e8c`), and the repository-owned selected design and contract. Zoe may

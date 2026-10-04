@@ -1,8 +1,11 @@
 # Privileged action authorization boundary
 
-`I-010F PrivilegedActionAuthorizationV2@1` is a tested portable contract, not a
-running authorization system. It defines the facts the host guard must
-correlate before a privileged effect. The guard itself is still missing.
+**Status: merged, unverified.** `AuthorizationCoordinator` in
+`src/nunchi/authorization.py` enforces the
+`I-010F PrivilegedActionAuthorizationV2@1` facts at the host's single
+effect-commit point. Deterministic tests cover it. What is still missing:
+most entry points ship no executor, there is no authenticated operator
+approval surface, and there is no live evidence.
 
 ## What is protected
 
@@ -34,7 +37,7 @@ participant proposal
   -> host resolves retained origin and action bytes
   -> I-010F request / decision facts
   -> optional host-only authenticated approval
-  -> I-040B rechecks policy, scope, digest, expiry, revocation, persistence
+  -> coordinator rechecks policy, scope, digest, expiry, revocation, persistence
   -> one effect, or no effect
 ```
 
@@ -42,37 +45,71 @@ participant proposal
 An allow is meaningful only for its exact bound request and only at the host's
 single effect-commit point.
 
-## Safe defaults and recovery
-
 High-impact work defaults to `APPROVAL_REQUIRED` unless trusted operator policy
 explicitly preauthorizes the exact actor, capability, and scope. The challenge
 is host-only, expiring, bound to the exact digest, and accepts only an exact
-authenticated approver. Approval must cause a fresh recheck before a new allow:
-the later authenticated decision must retain that recheck's policy, expiry,
-revocation, and persistence facts and be timestamped after it. The completion
-must follow the originating approval-required decision, and the recheck must
-keep the challenge's policy provenance.
+authenticated approver. Approval causes a fresh recheck before a new allow,
+and the allow cannot outlive the expiry that recheck set.
+
+## What the coordinator does
+
+- **Final recheck before dispatch.** Immediately before the effect it reloads
+  the pinned policy and rechecks the matching rule, policy revision, grant
+  expiry, revocation, retained origin event, operation digest, and
+  cancellation. It repeats that recheck after the commit write, because the
+  write itself can consume the deadline or overlap a revocation.
+- **One use.** The grant is consumed when the `effect_commit` record is
+  durably written. If that write is uncertain, no executor runs. A replay of
+  the same action is denied.
+- **Commits that never ran are closed.** A commit that does not reach its
+  executor (refused by the final recheck, cancelled, or a recheck that fails)
+  is closed with `effect_result` `FAILED`, detail
+  `privileged effect was not attempted: <reason>`. The grant stays consumed.
+  If that record cannot be written, the commit stays open, which is the
+  conservative reading.
+- **Open commits after restart are UNKNOWN.** A commit still open at startup
+  means the process stopped during the native call, so the effect may exist.
+  It loads as `UNKNOWN`: ordinary replay is refused. If the target supports
+  idempotency, a fresh policy check may retry with the original idempotency
+  key; otherwise a new authenticated approval that shows the exact operation,
+  origin, and duplicate-effect risk is required for one retry. A confirmed
+  retry closes the unknown state.
+- **Approval lifetime.** The turn deadline bounds only publication of an
+  approval challenge. Once published, the challenge lives until its own
+  `expires_at` (approval TTL, default 300 s), an explicit cancel, or restart.
+  Restart drops pending approvals; they are never rebuilt from room history.
+- **Deadlines must be finite.** A NaN, infinite, or non-numeric deadline is
+  refused before any audit or effect.
 
 The host executes nothing when any fact is missing, ambiguous, expired,
-revoked, mismatched, replayed, or not durably persisted. It drops pending
-approvals on restart instead of reconstructing them from room history. A full
-implementation must bound pending state and make cancellation race-safe; those
-runtime responsibilities belong to slice `040`.
+revoked, mismatched, replayed, or not durably persisted.
 
-## What the contract proves and does not prove
+## What is still missing
 
-The contract tests prove schema closure, digest shape, and deterministic correlation
-rules for supplied records, including substitution, contradictory reasons,
-multiple initial decisions, invalid approval prompts, wrong approvers, replay,
-approval-recheck drift, expiry, revocation, and unknown persistence. They do
-not prove that a platform delivery is authentic, an operator is authenticated,
-a policy is trusted, persistence actually succeeded, or an effect ran once.
-Those claims require the later guard, transport, integration, and live
-evidence.
+- **Executors.** The reference adapters wire the coordinator when an
+  `authorization` policy is configured but pass no executors, so every
+  privileged proposal is denied. The Codex runner disables privileged actions.
+  Hermes does not use the coordinator; its tools keep Hermes's native
+  approvals. Only the superseded headless Claude Code runner has an executor
+  (`workspace.file.write`, with a private `workspace_root`).
+- **Authenticated operator approval surface.** `pending_for_operator()` and
+  `complete_authenticated_approval()` are library methods. No shipped command,
+  dashboard, or transport calls them, so an `APPROVAL_REQUIRED` proposal
+  returns `unavailable` and expires.
+- **Live evidence.** No real-platform run has exercised a privileged effect.
 
-Run the focused deterministic checks with:
+## Tests
+
+The contract tests prove schema closure, digest shape, and deterministic
+correlation rules for supplied records, including substitution, contradictory
+reasons, multiple initial decisions, invalid approval prompts, wrong
+approvers, replay, approval-recheck drift, expiry, revocation, and unknown
+persistence. The coordinator tests exercise the runtime behavior above with
+in-process doubles. Neither proves that a platform delivery is authentic, an
+operator is authenticated, or an effect ran once on a real platform.
 
 ```sh
 python3 -m unittest tests.v2.contract.test_privileged_action_authorization
 uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' python -m unittest discover -s tests/v2/contract -p 'test_*.py'
+python3 -m unittest tests.v2.test_shared_foundation tests.v2.test_shared_deadline_race tests.v2.test_shared_deadline_continuity tests.v2.test_core_persistence_closure
 ```

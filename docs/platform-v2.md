@@ -42,6 +42,40 @@ judgment schema, policy, scheduling, and wake facts. For Nunchi-owned
 participants it also owns the normal-turn prompt and action schema. A platform
 plugin must not copy or rewrite those shared product behaviors.
 
+### Agent-agnostic core seams
+
+The shared core (`src/nunchi` outside `integrations/` and `adapters/`) names
+no agent host, chat platform, or model vendor.
+`tests/v2/test_agnostic_core.py` checks the top-level core modules for those
+names. Host- and vendor-specific behavior enters through these seams:
+
+- `attention_model_from_config(config, host_kinds=...)` builds the
+  participant's attention model from trusted configuration. `kind` selects
+  the implementation and defaults to `openai-compatible`, which requires an
+  explicit `base_url` (there is no default endpoint), takes optional
+  `temperature`, and passes provider-specific request fields through
+  `extra_body`. An integration adds its own kinds as `host_kinds`, a mapping
+  from kind name to factory. An unknown kind fails validation. No in-tree
+  integration registers a kind yet.
+- `HostTextAttentionModel(complete, ...)` is for hosts whose completion
+  returns text only, with no JSON-schema mode and no report of the served
+  model, such as a Claude Code mod running on the user's plan. The host's
+  `complete(system=..., prompt=..., timeout_seconds=...)` receives the same
+  prompt and observation bytes as every other implementation.
+  `decode_judgment_text` accepts the judgment object alone or in one Markdown
+  code fence; anything else is a provider failure, never a guessed judgment.
+- `HostStructuredAttentionModel(client, selection, is_denial=...,
+  denied_detail=..., require_attestation=...)` wraps a host's
+  `complete_structured` capability. `is_denial` recognises how that host
+  signals a refused model; such errors become `HostAttentionPermissionError`
+  carrying the integration's `denied_detail` repair text, and anything else
+  is a provider failure. With `require_attestation` (the default) the host
+  must report the provider and model it actually served. Hermes supplies its
+  denial check and repair text from
+  `src/nunchi/integrations/hermes_attention_trust.py`.
+- An attention model's `provider` and `model_id` are opaque audit labels.
+  `None` means the host does not report them, and the audit omits them.
+
 ### Host-owned participant pipelines
 
 Hermes owns the participant execution pipeline. Its Nunchi integration uses
@@ -205,7 +239,9 @@ cannot revive work. Before an effect, the host persists a participant-host
 write that consumes the deadline therefore makes zero native calls.
 Cancellation and expiry are rechecked after every blocking authorization
 boundary, and canceled or expired challenges are absent from the operator
-surface. Gap, cancellation, restart, and corrupt persistence cancel active and
+surface. The turn deadline bounds only the publication of an approval
+challenge; once published, it lives until its own expiry, an explicit cancel,
+or restart. Gap, cancellation, restart, and corrupt persistence cancel active and
 pending authority rather than promoting retained events.
 
 An unknown privileged effect remains consumed. If the target provides
@@ -225,7 +261,9 @@ uv run --offline --isolated --no-project --with 'jsonschema==4.26.0' \
 python3 -m unittest \
   tests.v2.test_shared_foundation \
   tests.v2.test_surfaces \
-  tests.v2.test_runtime_hardening
+  tests.v2.test_runtime_hardening \
+  tests.v2.test_agnostic_core \
+  tests.v2.test_native_host_primitives
 python3 -m evals.verdict_suite.runner
 ```
 

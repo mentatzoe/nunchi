@@ -43,8 +43,15 @@ dashboard installation, or runner supervision is required.
 /tmp/nunchi-v2-clean/bin/nunchi dashboard --profile vigil
 ```
 
+`--platform` takes any chat platform name. A platform without registered
+capabilities is accepted with a warning; see
+[platform capabilities](adapters.md#platform-capabilities-in-the-operator-surface).
+
 The operator configuration stores only credential environment-variable names.
-Set those credentials outside the dashboard. A persistent-service install
+Set those credentials outside the dashboard. Each model's `credential_env` is
+optional, for a host-served model that needs no credential; `nunchi setup`
+fills in `NUNCHI_ATTENTION_API_KEY` and `NUNCHI_PARTICIPANT_API_KEY`. A model
+entry also accepts optional `kind` and `base_url`. A persistent-service install
 resolves its declared environment sources into a private owner-only state file;
 the generated launchd/systemd definition and dashboard never contain or return
 the values. Re-run `nunchi service install` after rotating one of those values.
@@ -124,8 +131,11 @@ nunchi-install verify --config-root "$NUNCHI_CONFIG_ROOT"
 ```
 
 Both roots must be private to the operator (`0700`). Runtime journals and
-markers are created `0600`. The installer has no repository discovery and no
-Hermes or Claude Code artifact operations.
+markers are created `0600`. `nunchi-install` has no repository discovery and
+no host-artifact operations. Hermes profile cutover and rollback are the
+separate `nunchi-hermes-lifecycle` command. Claude Code installation and
+supervision are not built yet
+([#58](https://github.com/mentatzoe/nunchi/issues/58)).
 
 ## Trusted configuration
 
@@ -138,7 +148,13 @@ Every configured adapter uses a JSON file whose exact bytes are pinned by
 Trusted configuration owns:
 
 - exact participant, native self actor, platform, room, and continuity scope;
-- participant profile and delegated attention model;
+- participant profile and delegated attention model. The attention model's
+  `kind` selects its implementation (default `openai-compatible`). The
+  `openai-compatible` attention model and the reference adapters'
+  participant model each require an explicit `base_url`; there is no default
+  endpoint, and a configuration without one fails validation. Credentials
+  come from `api_key_env` (defaults `NUNCHI_ATTENTION_API_KEY` and
+  `NUNCHI_PARTICIPANT_API_KEY`);
 - attention suppression/recovery/margin/error policy;
 - bounded retention, snapshot, age, continuation-page, continuation-handle,
   and expiry limits; every byte bound includes the referenced actor IDs and
@@ -150,6 +166,17 @@ Trusted configuration owns:
   be one the participant turn can read;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
+
+An attention model block in an adapter or runner configuration looks like:
+
+```json
+{
+  "kind": "openai-compatible",
+  "base_url": "https://llm.example/v1",
+  "model": "provider/attention-model",
+  "api_key_env": "NUNCHI_ATTENTION_API_KEY"
+}
+```
 
 Room text cannot supply or override any of these values.
 

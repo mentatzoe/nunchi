@@ -8,27 +8,39 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 AGENTS = ROOT / "AGENTS.md"
 README = ROOT / "README.md"
+CHANGELOG = ROOT / "CHANGELOG.md"
 DELIVERY = ROOT / "docs" / "v2-delivery.md"
+COMPLETION_GOAL = ROOT / "docs" / "v2-completion-goal.md"
 PLATFORM = ROOT / "docs" / "platform-v2.md"
 EXECUTION_SPINE = ROOT / "docs" / "governance" / "execution-spine.md"
 SPECS_README = ROOT / "specs" / "README.md"
-FOUNDATION_COMMIT = "014546d2ec685341106b177bcf2f6e52e758e0a9"
+
+
+def _normalized(path: Path) -> str:
+    """Collapse whitespace and blockquote markers so wrapped phrases match."""
+    lines = (
+        line.lstrip().removeprefix(">")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    )
+    return " ".join(" ".join(lines).split())
 
 
 class V2DocumentationTruthfulnessTests(unittest.TestCase):
     def test_readme_describes_one_v2_path_and_platform_scope(self) -> None:
-        normalized = " ".join(README.read_text(encoding="utf-8").split())
+        normalized = _normalized(README)
         required = (
             "native event -> canonical observation -> participant-bound attention",
             "Conversation events are observations, not reply obligations",
             "Only the exact participant's delegated attention model",
             "There is no executable V1 `admit` command",
-            "incomplete Hermes and Claude Code V2 platform",
+            "V2 is on `main` and is partial: **merged, unverified**",
+            "No surface has passed a live real-room check",
+            "incomplete Hermes, Codex, and Claude Code integrations",
             "Historical Hermes evidence is not current proof",
-            "ordinary tools, native approval, ACK",
-            "Moving-main CI currently proves host contracts, not normal turns",
-            "live real-room evidence and supported-surface closure remain open",
-            "This candidate is partial",
+            "normal turns, ordinary tools, native approval, ACK",
+            "installed-runtime checks, not live ones",
+            "superseded and not live",
+            "issues/43",
             "issue #41",
             "issues/44",
             "Source review, clean-wheel installation, configured probes",
@@ -36,42 +48,88 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
         for phrase in required:
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
+        forbidden = (
+            "Moving-main CI currently proves host contracts, not normal turns",
+            "in candidate source",
+        )
+        for phrase in forbidden:
+            with self.subTest(forbidden=phrase):
+                self.assertNotIn(phrase, normalized)
 
-    def test_delivery_guide_is_product_first_and_handoff_is_ancestry_bound(
+    def test_delivery_guide_is_product_first_and_uses_the_working_agreement(
         self,
     ) -> None:
-        normalized = " ".join(DELIVERY.read_text(encoding="utf-8").split())
+        normalized = _normalized(DELIVERY)
         required = (
-            "Missing",
-            "Implemented, unverified",
-            "Landed, unverified",
-            "Verified",
-            "Integrated",
+            "**missing**",
+            "**implemented, unverified**",
+            "**merged, unverified**",
+            "**verified**",
+            "a current `main` is not a claim that V2 is complete",
             "issues/41",
+            "issues/43",
             "issues/44",
-            "Select the earliest missing product behavior",
+            "Pick the earliest missing behavior the product needs",
+            "Scale review to the size and risk of the change",
+            "Cross-family independent review is not required for day-to-day delivery",
+            "Merge when CI is green",
+            "run every consumer's tests in the same PR",
             "A packet, label, test file, or report does not pass merely by existing",
             "platform-owned",
             "non-author review",
-            "Neither unverified platform may be described as done",
-            FOUNDATION_COMMIT,
-            "git merge-base --is-ancestor",
+            "may be described as done, live, or parity-ready until its open gates pass",
             "docs/platform-v2.md",
             "tests/v2/contract",
         )
         for phrase in required:
             with self.subTest(required=phrase):
                 self.assertIn(phrase, normalized)
+        forbidden = (
+            "git merge-base --is-ancestor",
+            "Landed, unverified",
+            "**Integrated**",
+            "issues/40)",
+        )
+        for phrase in forbidden:
+            with self.subTest(forbidden=phrase):
+                self.assertNotIn(phrase, normalized)
+
+    def test_completion_goal_records_the_main_and_review_decision(self) -> None:
+        normalized = _normalized(COMPLETION_GOAL)
+        required = (
+            "Decision, Zoe, 2026-10-04",
+            "`main` holds V2 before completion",
+            "now govern the release tag (`v*`), not the merge to `main`",
+            "The final completion decision and the release proof are unchanged",
+        )
+        for phrase in required:
+            with self.subTest(required=phrase):
+                self.assertIn(phrase, normalized)
+
+    def test_changelog_has_one_unreleased_section_that_describes_main(
+        self,
+    ) -> None:
+        text = CHANGELOG.read_text(encoding="utf-8")
+        self.assertEqual(text.count("## [Unreleased]"), 1)
+        self.assertEqual(text.count("\n## Unreleased"), 0)
+        normalized = " ".join(text.split())
+        self.assertIn("is **merged, unverified**", normalized)
+        self.assertNotIn("neither implemented nor armed", normalized)
 
     def test_agent_guidance_cannot_turn_process_friction_into_a_stop_condition(
         self,
     ) -> None:
-        normalized = " ".join(AGENTS.read_text(encoding="utf-8").split())
+        normalized = _normalized(AGENTS)
         required = (
             "not by itself a blocker",
             "continue other unblocked product work",
             "Do not narrow supported behavior",
             "Ask Zoe only when a choice materially changes product behavior",
+            "`main` is the working branch and holds V2",
+            "Scale review to the size and risk of the change",
+            "Only the exact participant's delegated model may make a social suppression judgment",
+            "The shared core names no agent host, chat platform, or model vendor",
+            "**missing**, **implemented, unverified**, **merged, unverified**, and **verified**",
         )
         for phrase in required:
             with self.subTest(required=phrase):
@@ -81,7 +139,7 @@ class V2DocumentationTruthfulnessTests(unittest.TestCase):
     def test_platform_interface_keeps_social_judgment_and_authority_separate(
         self,
     ) -> None:
-        normalized = " ".join(PLATFORM.read_text(encoding="utf-8").split())
+        normalized = _normalized(PLATFORM)
         required = (
             "current downstream interface for Hermes and Claude Code",
             "Both platform implementations consume the shared owners",
