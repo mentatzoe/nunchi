@@ -223,6 +223,23 @@ def _context_byte_count(
     return len(_canonical_bytes({"actors": actors, "events": events}))
 
 
+# Actor values that carry no fact and never replace a known one.
+_UNINFORMATIVE_ACTOR_VALUES = {"display_name": "", "kind": "unknown"}
+
+
+def _merged_actor(
+    known: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge actor facts so a less informative record never erases known ones."""
+    merged = dict(known or {})
+    for name, value in incoming.items():
+        if name in merged and value == _UNINFORMATIVE_ACTOR_VALUES.get(name):
+            continue
+        merged[name] = value
+    return merged
+
+
 class ObservationProvider:
     """One participant/room observation provider.
 
@@ -636,7 +653,8 @@ class ObservationProvider:
                     insert_at = index
                     break
         self._events.insert(insert_at, retained)
-        self._actors.update(checked_actors)
+        for actor_id, actor in checked_actors.items():
+            self._actors[actor_id] = _merged_actor(self._actors.get(actor_id), actor)
         self._trim_retention()
 
     def _trim_retention(self) -> None:
@@ -790,9 +808,53 @@ class ObservationProvider:
                     selected.add(related)
                     pending.append(related)
 
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
+        # The newest messages of the participant's direct exchange stay in the
+        # snapshot even when older than the window: messages that mention it
+        # or reply to it, and its own messages, so the model can also see
+        # whether it answered.  At most a quarter of the event cap, so recent
+        # context still dominates.  These are transport facts only; nothing
+        # here decides relevance or marks anything handled.
+        self_id = self.binding.actor_id
+        own_ids = {
+            event["id"]
+            for event in events
+            if event["type"] == "message" and event["author_id"] == self_id
+        }
+
+        def direct_exchange(event: Mapping[str, Any]) -> bool:
+            if event["type"] != "message":
+                return False
+            if event["author_id"] == self_id:
+                return True
+            return (
+                self_id in event["mentioned_actor_ids"]
+                or event.get("reply_to_event_id") in own_ids
+            )
+
+        exchange = [
+            index
+            for index, event in enumerate(events)
+            if index not in required
+            and direct_exchange(event)
+            and (
+                (timestamp := _event_timestamp(event)) is None
+                or timestamp >= cutoff
+            )
+        ]
+        protected = set(exchange[-max(1, self.limits.snapshot_events // 4):])
+        selected |= protected
+
+        def removal_order() -> list[int]:
+            # Oldest first, protected exchange last (again oldest first, so
+            # its newest message is kept longest).
+            optional = selected - required
+            return sorted(optional - protected) + sorted(optional & protected)
+
         truncated: set[str] = set()
         if len(selected) > self.limits.snapshot_events:
-            removable = sorted(selected - required)
+            removable = removal_order()
             while len(selected) > self.limits.snapshot_events and removable:
                 selected.remove(removable.pop(0))
                 truncated.add("events")
@@ -802,8 +864,6 @@ class ObservationProvider:
                 "trigger relation closure exceeds the configured event budget"
             )
 
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(seconds=self.limits.snapshot_age_seconds)
         for index in sorted(selected - required):
             timestamp = _event_timestamp(events[index])
             if timestamp is not None and timestamp < cutoff:
@@ -824,7 +884,7 @@ class ObservationProvider:
                 <= self.limits.snapshot_bytes
             ):
                 break
-            removable = sorted(selected - required)
+            removable = removal_order()
             if not removable:
                 raise SnapshotUnavailable(
                     "trigger relation closure exceeds the configured byte budget"
@@ -886,15 +946,30 @@ class ObservationProvider:
                 "trigger_event_id": trigger_event_id,
                 "coverage": coverage,
             }
-            if continuation and (retained_more_before or retained_more_after):
+            # Interior gaps (left by relation closure, kept older exchange, or
+            # age and byte cuts) stay fetchable even when both ends are covered.
+            included = set(indices)
+            trigger_index = next(
+                index
+                for index in indices
+                if all_events[index]["id"] == trigger_event_id
+            )
+            fetch_before = any(
+                index not in included for index in range(trigger_index)
+            )
+            fetch_after = any(
+                index not in included
+                for index in range(trigger_index + 1, len(all_events))
+            )
+            if continuation and (fetch_before or fetch_after):
                 request["continuation"] = self._issue_continuation(
                     request_id=rid,
                     trigger_event_id=trigger_event_id,
                     events=all_events,
                     actors=self._actors,
                     delivered_event_ids={event["id"] for event in events},
-                    can_fetch_before=retained_more_before,
-                    can_fetch_after=retained_more_after,
+                    can_fetch_before=fetch_before,
+                    can_fetch_after=fetch_after,
                 )
             checked = validate_attention_request(request)
             body = {

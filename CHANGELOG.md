@@ -80,6 +80,17 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 ### Fixed
 
 - Discord REST errors no longer echo the bot token into error text (#88).
+- Three defects from #94.
+  - The attention snapshot keeps the newest messages of the participant's
+    direct exchange (messages that mention it or reply to it, and its own)
+    even when they are older than the newest-events window. They take at
+    most a quarter of the event cap and stay within the byte and age limits.
+    Before, a mention dropped out after 24 newer events. Gaps this leaves
+    inside the snapshot can be fetched through the continuation handle.
+  - An actor record with kind `unknown` or no display name, such as a
+    Discord reactor, no longer erases a known name or kind.
+  - ACK on a trigger that is not a message (a reaction or a join) widens to
+    DEFER as unsupported instead of reacting to that event.
 
 ### Removed
 

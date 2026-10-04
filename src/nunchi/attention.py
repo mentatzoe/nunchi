@@ -914,11 +914,21 @@ class AttentionEngine:
                 "policy_provenance": self.ack_policy.provenance,
                 "permissions_revision": capability.permissions_revision,
             }
+            # ACK reacts to the scheduling anchor; only a message can carry
+            # that reaction, so any other anchor makes ACK unsupported here.
+            anchor_is_message = any(
+                event["id"] == checked["trigger_event_id"]
+                and event["type"] == "message"
+                for event in checked["events"]
+            )
             if not self.ack_policy.enabled:
                 effective = "DEFER"
                 valve = "policy-defer"
                 override = "ack-disabled"
-            elif not capability.allows(self.ack_policy.reaction, "add"):
+            elif (
+                not capability.allows(self.ack_policy.reaction, "add")
+                or not anchor_is_message
+            ):
                 effective = "DEFER"
                 valve = "capability-defer"
                 override = "ack-unsupported"
