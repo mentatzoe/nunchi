@@ -60,6 +60,7 @@ class ConversationOpportunityScheduler:
         self._lifecycle_id = str(uuid4())
         self._cancel_event: threading.Event | None = None
         self._dispatch_committed = False
+        self._expired_generation: int | None = None
         self._lock = threading.RLock()
 
     def offer(self, anchor_event_id: str) -> OpportunityToken | None:
@@ -82,10 +83,25 @@ class ConversationOpportunityScheduler:
             )
 
     def complete(self, token: OpportunityToken) -> OpportunityToken | None:
-        """Finish exact current work and return one fresh pending opportunity."""
+        """Finish exact current work and return one fresh pending opportunity.
+
+        A token stopped through ``expire()`` still completes: expiry ends that
+        work, but the newest pending event must still get its own attention.
+        A token whose event was set any other way keeps the previous meaning
+        and does not complete. Cancellation bumps the generation, so a
+        cancelled token can never complete.
+        """
         with self._lock:
-            if not self._matches(token):
+            expired = (
+                self._active
+                and token.room_key == self.room_key
+                and token.generation == self._generation
+                and token.cancel_event is self._cancel_event
+                and self._expired_generation == token.generation
+            )
+            if not (expired or self._matches(token)):
                 return None
+            self._expired_generation = None
             pending = self._pending_anchor
             self._pending_anchor = None
             if pending is None:
@@ -115,6 +131,17 @@ class ConversationOpportunityScheduler:
             self._lifecycle_id = str(uuid4())
 
     restart = cancel
+
+    def expire(self, token: OpportunityToken) -> None:
+        """Stop this token's work at its deadline without dropping pending work."""
+        with self._lock:
+            if (
+                self._active
+                and token.generation == self._generation
+                and token.cancel_event is self._cancel_event
+            ):
+                self._expired_generation = token.generation
+                token.cancel_event.set()
 
     def _matches(self, token: OpportunityToken) -> bool:
         return (
@@ -160,7 +187,11 @@ class ConversationOpportunityScheduler:
         cannot be relabelled by a later cancellation.
         """
 
-        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+        if (
+            isinstance(deadline, bool)
+            or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline)
+        ):
             return False
         with self._lock:
             if (
@@ -587,6 +618,13 @@ class ParticipantTurnHost:
                     result = TransportResult("unknown", "ACK dispatch acknowledgement was lost")
                 if not isinstance(result, TransportResult):
                     result = TransportResult("unknown", "ACK transport result was unattested")
+                if token.cancel_event.is_set() or time.monotonic() >= deadline:
+                    # A result observed after the opportunity ended is never
+                    # recorded as sent; the reservation still fences replay.
+                    result = TransportResult(
+                        "unknown",
+                        "ACK acknowledgement arrived after the opportunity ended",
+                    )
             self.ack_journal.settle(
                 ack_id,
                 delivery=result.delivery,
@@ -632,6 +670,12 @@ class ParticipantTurnHost:
             if deadline is None
             else deadline
         )
+        if (
+            isinstance(effective_deadline, bool)
+            or not isinstance(effective_deadline, (int, float))
+            or not math.isfinite(effective_deadline)
+        ):
+            raise ParticipantError("host deadline must be a finite monotonic time")
         checked_request = validate_attention_request(request)
         checked_decision = validate_attention_decision(
             decision,
@@ -654,13 +698,13 @@ class ParticipantTurnHost:
         if not self.scheduler.is_current(token):
             return None
         if time.monotonic() >= effective_deadline:
-            self.scheduler.cancel()
+            self.scheduler.expire(token)
             return TransportResult("failed", "host total deadline exceeded")
         wake = self._make_wake(checked_request, checked_decision)
         if wake is None:
             return None
         if time.monotonic() >= effective_deadline:
-            self.scheduler.cancel()
+            self.scheduler.expire(token)
             return TransportResult("failed", "host total deadline exceeded")
         host_continuation = request.get("continuation")
         expansion_calls = 0
@@ -678,7 +722,7 @@ class ParticipantTurnHost:
             if token.cancel_event.is_set() or not self.scheduler.is_current(token):
                 raise ParticipantError("context expansion cancelled")
             if time.monotonic() >= effective_deadline:
-                self.scheduler.cancel()
+                self.scheduler.expire(token)
                 raise ParticipantError("context expansion deadline exceeded")
             if not host_continuation:
                 raise ParticipantError("context expansion is unavailable")
@@ -779,7 +823,7 @@ class ParticipantTurnHost:
             if remaining <= 0:
                 if self.scheduler.is_current(token):
                     settle_host("unknown")
-                    self.scheduler.cancel()
+                    self.scheduler.expire(token)
                 else:
                     token.cancel_event.set()
                     settle_host("unknown")
@@ -792,7 +836,7 @@ class ParticipantTurnHost:
         if time.monotonic() >= effective_deadline:
             if self.scheduler.is_current(token):
                 settle_host("unknown")
-                self.scheduler.cancel()
+                self.scheduler.expire(token)
             else:
                 settle_host("unknown")
             return TransportResult("failed", "host total deadline exceeded")
@@ -841,7 +885,7 @@ class ParticipantTurnHost:
             # attest sent/failed/unknown/unavailable.
             if time.monotonic() >= effective_deadline:
                 settle_host("unknown")
-                self.scheduler.cancel()
+                self.scheduler.expire(token)
                 return TransportResult(
                     "failed",
                     "host total deadline exceeded before dispatch",
@@ -851,7 +895,7 @@ class ParticipantTurnHost:
                 token.cancel_event.is_set()
                 or time.monotonic() >= effective_deadline
             ):
-                self.scheduler.cancel()
+                self.scheduler.expire(token)
                 return TransportResult(
                     "failed",
                     "host total deadline exceeded before native dispatch",
@@ -902,7 +946,7 @@ class ParticipantTurnHost:
             while True:
                 remaining = effective_deadline - time.monotonic()
                 if remaining <= 0:
-                    self.scheduler.cancel()
+                    self.scheduler.expire(token)
                     return TransportResult(
                         "unknown",
                         "host total deadline exceeded during dispatch",
@@ -917,13 +961,13 @@ class ParticipantTurnHost:
                 # scheduled again. Never accept a result observed too late.
                 if time.monotonic() >= effective_deadline:
                     token.cancel_event.set()
-                    self.scheduler.cancel()
+                    self.scheduler.expire(token)
                     return TransportResult(
                         "unknown",
                         "host total deadline exceeded during dispatch",
                     )
                 if status == "deadline":
-                    self.scheduler.cancel()
+                    self.scheduler.expire(token)
                     return value
                 if status == "error":
                     raise value
