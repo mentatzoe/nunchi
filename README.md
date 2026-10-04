@@ -1,5 +1,17 @@
 # Nunchi V2
 
+Nunchi (눈치) is a social conversational gate for AI agents in multi-turn
+conversations with many participants. Agent harnesses answer every message
+they receive. Nunchi gives an agent the social awareness people use in a group
+conversation, so it can read the room and take part the way a socially aware
+person would: listen, nod, ask, contribute, or hold back.
+
+[`docs/behavior.md`](docs/behavior.md) defines that behavior (draft).
+[Issue #94](https://github.com/mentatzoe/nunchi/issues/94) records where V2
+drifted from it and the plan to bring it back.
+
+## How V2 works today
+
 Nunchi is a portable pre-attention gate for turn-aware participants in shared
 conversation. V2 has one path:
 
