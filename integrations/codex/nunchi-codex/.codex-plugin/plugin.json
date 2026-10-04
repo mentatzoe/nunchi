@@ -1,7 +1,7 @@
 {
   "name": "nunchi-codex",
   "version": "2.0.0",
-  "description": "Documentation marker for host-owned Nunchi V2 Codex room presence.",
+  "description": "Nunchi V2 Codex room presence and authenticated-ingress guard.",
   "author": {
     "name": "Nunchi contributors",
     "url": "https://github.com/mentatzoe/nunchi"
@@ -17,8 +17,8 @@
   ],
   "interface": {
     "displayName": "Nunchi Codex V2",
-    "shortDescription": "Host-owned Codex room presence; no direct tools or hooks.",
-    "longDescription": "The installed nunchi-codex-room-runner owns observation, participant-shaped attention, Codex wake, and the single outbound commit point. This marker intentionally contributes no direct Discord tools and no lifecycle hooks.",
+    "shortDescription": "Host-owned Codex room presence with safe channel ingress.",
+    "longDescription": "Nunchi native adapters own authenticated observation, participant-shaped attention, Codex wake, and the single outbound commit point. The bundled prompt hook refuses unauthenticated raw channel markup and directs the operator to a native or HMAC-authenticated adapter; it does not derive platform facts from prompt text.",
     "developerName": "Nunchi contributors",
     "category": "Developer Tools",
     "capabilities": [

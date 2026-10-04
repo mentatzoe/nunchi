@@ -1027,7 +1027,14 @@ class InstalledSurfaceTests(unittest.TestCase):
                 / ".mcp.json"
             ).read_text()
         )
-        self.assertEqual({"hooks": {}}, hooks)
+        self.assertEqual({"UserPromptSubmit"}, set(hooks["hooks"]))
+        prompt_handlers = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
+        self.assertEqual(1, len(prompt_handlers))
+        self.assertEqual("command", prompt_handlers[0]["type"])
+        self.assertEqual(
+            "nunchi-codex-ingress-hook",
+            prompt_handlers[0]["command"],
+        )
         self.assertEqual({"mcpServers": {}}, tools)
 
 

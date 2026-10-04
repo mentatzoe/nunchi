@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -18,6 +19,7 @@ from nunchi.adapters.v2 import (
     normalize_matrix_event,
     normalize_telegram_update,
 )
+from nunchi.adapters.runtime import ReferenceAdapterRuntime
 from nunchi.adapters.matrix import MatrixTransport
 from nunchi.adapters.telegram import TelegramTransport
 from nunchi.adapters.discord import DiscordPyTransport, DurableGatewaySequence
@@ -26,7 +28,10 @@ from nunchi.attention import ParticipantProfile
 from nunchi.integrations.codex_v2 import (
     CodexParticipant,
     CodexRoomRuntime,
+    CodexTaskReceiptJournal,
+    _atomic_write,
     MCPDiscordTransport,
+    _credential_binding,
     _parse_codex_output,
 )
 from nunchi.integrations.mcp_client import StreamableMCPClient
@@ -887,6 +892,29 @@ class CodexSurfaceTests(unittest.TestCase):
         )
 
     @staticmethod
+    def _persistent_runtime(directory, **overrides):
+        root = Path(directory)
+        codex_home = root / "codex-home"
+        codex_home.mkdir(exist_ok=True)
+        binary = root / "codex"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o700)
+        identity = {
+            "provider": "openai",
+            "account_id": "workspace:test-account",
+            "credential_scope": "chatgpt:test-workspace",
+            "auth_mode": "chatgpt",
+            "codex_home": str(codex_home),
+            "continuity_generation": 1,
+        }
+        (codex_home / "auth.json").write_text(
+            json.dumps({"tokens": {"account_id": identity["account_id"]}}),
+            encoding="utf-8",
+        )
+        identity.update(overrides)
+        return binary, identity
+
+    @staticmethod
     def _wake():
         return {
             "request_id": "r",
@@ -1203,23 +1231,707 @@ class CodexSurfaceTests(unittest.TestCase):
     def test_codex_persistent_task_is_bound_to_profile_actor_room_and_behavior(self):
         profile, binding = self._codex_identity()
         thread_id = "019f9432-9300-7dd1-8225-d7f10f921968"
+        with tempfile.TemporaryDirectory() as directory:
+            binary, identity = self._persistent_runtime(directory)
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.shutil.which",
+                    return_value=str(binary),
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_version",
+                    return_value="codex-cli test",
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_auth_mode",
+                    return_value="chatgpt",
+                ),
+            ):
+                first = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-a",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+                first._save_session(thread_id)
+                self.assertEqual(thread_id, first._load_session())
+                first._consume_committed_session()
+                self.assertFalse(first.session_path.exists())
+                self.assertTrue(first.inflight_session_path.exists())
+                first.stage_task("accepted-request", thread_id)
+                first.commit_task("accepted-request")
+                self.assertEqual(thread_id, first._load_session())
+                self.assertFalse(first.inflight_session_path.exists())
+                changed = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-b",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+                with self.assertRaises(RuntimeError):
+                    changed._load_session()
+                with self.assertRaisesRegex(ValidationError, "account differs"):
+                    CodexParticipant(
+                        profile=profile,
+                        config={
+                            "session_mode": "persistent",
+                            "model": "model-a",
+                            "runtime_identity": {
+                                **identity,
+                                "account_id": "workspace:different-account",
+                                "continuity_generation": 2,
+                            },
+                        },
+                        binding=binding,
+                        state_directory=directory,
+                    )
+
+    def test_codex_persistent_mode_requires_an_exact_runtime_identity(self):
+        profile, binding = self._codex_identity()
         with tempfile.TemporaryDirectory() as directory, self._installed_codex():
-            first = CodexParticipant(
+            with self.assertRaisesRegex(
+                ValidationError,
+                "requires a pinned runtime_identity",
+            ):
+                CodexParticipant(
+                    profile=profile,
+                    config={"session_mode": "persistent", "model": "model-a"},
+                    binding=binding,
+                    state_directory=directory,
+                )
+
+    def test_codex_credential_binding_checks_the_file_backed_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            (codex_home / "auth.json").write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "chatgpt",
+                        "tokens": {
+                            "account_id": "account-1",
+                            "access_token": "secret-token",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            digest = _credential_binding(
+                codex_home,
+                auth_mode="chatgpt",
+                expected_account_id="account-1",
+                provider="openai",
+                credential_scope="chatgpt:workspace-1",
+            )
+            self.assertEqual(64, len(digest))
+            self.assertNotIn("secret-token", digest)
+            with self.assertRaisesRegex(ValidationError, "account differs"):
+                _credential_binding(
+                    codex_home,
+                    auth_mode="chatgpt",
+                    expected_account_id="account-2",
+                    provider="openai",
+                    credential_scope="chatgpt:workspace-1",
+                )
+
+    def test_codex_atomic_state_failure_preserves_prior_committed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "session.json"
+            state.write_bytes(b"prior")
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.os.write",
+                    side_effect=OSError("write failed"),
+                ),
+                self.assertRaisesRegex(OSError, "write failed"),
+            ):
+                _atomic_write(state, b"replacement")
+            self.assertEqual(b"prior", state.read_bytes())
+
+    def test_codex_runtime_identity_is_rechecked_before_execution(self):
+        profile, binding = self._codex_identity()
+        with tempfile.TemporaryDirectory() as directory:
+            binary, identity = self._persistent_runtime(directory)
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.shutil.which",
+                    return_value=str(binary),
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_version",
+                    return_value="codex-cli test",
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_auth_mode",
+                    return_value="chatgpt",
+                ),
+            ):
+                participant = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-a",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+                binary.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                    participant._verify_runtime_identity()
+
+    def test_codex_uses_shared_authenticated_reference_adapters(self):
+        class Transport:
+            def ordinary_action_capabilities(self):
+                return ("message", "reply", "reaction")
+
+            def reaction_capability(self):
+                return None
+
+            def dispatch(self, *, action, wake):
+                return TransportResult("sent", "test")
+
+        cases = {
+            "discord": (
+                "discord:actor:9",
+                "42",
+                {
+                    "t": "MESSAGE_CREATE",
+                    "s": 1,
+                    "delivery_epoch": "gateway-a",
+                    "d": {
+                        "id": "100",
+                        "channel_id": "42",
+                        "author": {"id": "7", "username": "Zoe", "bot": False},
+                        "content": "hello",
+                        "mentions": [],
+                        "mention_everyone": False,
+                    },
+                },
+            ),
+            "matrix": (
+                "matrix:actor:@vigil:example",
+                "!room:example",
+                {
+                    "room_id": "!room:example",
+                    "event": {
+                        "event_id": "$event",
+                        "type": "m.room.message",
+                        "sender": "@zoe:example",
+                        "content": {"msgtype": "m.text", "body": "hello"},
+                    },
+                },
+            ),
+            "telegram": (
+                "telegram:actor:9",
+                "-42",
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 100,
+                        "chat": {"id": -42},
+                        "from": {"id": 7, "first_name": "Zoe", "is_bot": False},
+                        "text": "hello",
+                    },
+                },
+            ),
+            "channel": (
+                "custom:actor:9",
+                "room-42",
+                {
+                    "delivery_id": "custom:delivery:1",
+                    "room_id": "room-42",
+                    "event": {
+                        "id": "custom:message:100",
+                        "type": "message",
+                        "author_id": "custom:actor:7",
+                        "text": "hello",
+                        "mentioned_actor_ids": [],
+                        "mentions_room": False,
+                    },
+                    "actors": {"custom:actor:7": {"kind": "human"}},
+                },
+            ),
+        }
+        ingress_key = "i" * 32
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            binary.chmod(0o700)
+            for surface, (actor_id, room_id, payload) in cases.items():
+                with self.subTest(surface=surface):
+                    case_root = root / surface
+                    case_root.mkdir()
+                    profile_path = case_root / "profile.json"
+                    profile_bytes = json.dumps(
+                        {
+                            "profile_id": "vigil",
+                            "participant_id": "vigil",
+                            "actor_id": actor_id,
+                            "instructions": "Contribute carefully.",
+                            "provenance": "trusted:test",
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                    profile_path.write_bytes(profile_bytes)
+                    binding_platform = "custom" if surface == "channel" else surface
+                    config = {
+                        "schema_version": 2,
+                        "binding": {
+                            "participant_id": "vigil",
+                            "actor_id": actor_id,
+                            "platform": binding_platform,
+                            "room_id": room_id,
+                            "continuity_scope_id": f"{binding_platform}:{room_id}",
+                        },
+                        "profile": {
+                            "path": str(profile_path),
+                            "sha256": hashlib.sha256(profile_bytes).hexdigest(),
+                        },
+                        "attention": {
+                            "policy": {
+                                "preattention_enabled": False,
+                                "suppression_enabled": False,
+                            },
+                            "model": {},
+                        },
+                        "codex": {"session_mode": "fresh"},
+                        "limits": {},
+                        "state_directory": str(case_root / "state"),
+                        **(
+                            {
+                                "ingress_auth": {
+                                    "source_id": "trusted-channel-plugin",
+                                    "hmac_key_env": "TEST_NUNCHI_INGRESS_KEY",
+                                }
+                            }
+                            if surface == "channel"
+                            else {}
+                        ),
+                    }
+                    submitted = payload
+                    if surface == "channel":
+                        payload_sha256 = hashlib.sha256(
+                            json.dumps(
+                                payload,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                                ensure_ascii=False,
+                            ).encode()
+                        ).hexdigest()
+                        material = (
+                            b"nunchi.channel.ingress.v1\0trusted-channel-plugin\0"
+                            + payload_sha256.encode()
+                        )
+                        submitted = {
+                            "payload": payload,
+                            "authorization": {
+                                "schema_version": 1,
+                                "source_id": "trusted-channel-plugin",
+                                "payload_sha256": payload_sha256,
+                                "mac": hmac.new(
+                                    ingress_key.encode(),
+                                    material,
+                                    hashlib.sha256,
+                                ).hexdigest(),
+                            },
+                        }
+                    with (
+                        mock.patch.dict(
+                            os.environ,
+                            {"TEST_NUNCHI_INGRESS_KEY": ingress_key},
+                            clear=False,
+                        ),
+                        mock.patch(
+                            "nunchi.integrations.codex_v2.shutil.which",
+                            return_value=str(binary),
+                        ),
+                    ):
+                        runtime = ReferenceAdapterRuntime(
+                            surface=surface,
+                            config=config,
+                            transport=Transport(),
+                        )
+                        first = runtime.process(submitted, live=False)
+                        second = runtime.process(submitted, live=False)
+                    self.assertEqual("codex", runtime.probe()["participant_backend"])
+                    self.assertEqual("fresh", runtime.probe()["codex"]["session_mode"])
+                    self.assertTrue(first.observation.wake_eligible)
+                    self.assertFalse(second.observation.wake_eligible)
+                    self.assertEqual(1, len(runtime.pipeline.observation.retained_events()))
+
+    def test_generic_channel_rejects_unsigned_prompt_markup(self):
+        from nunchi.adapters.runtime import ChannelIngressAuthenticator
+
+        with mock.patch.dict(
+            os.environ,
+            {"TEST_NUNCHI_INGRESS_KEY": "i" * 32},
+            clear=False,
+        ):
+            authenticator = ChannelIngressAuthenticator(
+                {
+                    "source_id": "trusted-channel-plugin",
+                    "hmac_key_env": "TEST_NUNCHI_INGRESS_KEY",
+                }
+            )
+        with self.assertRaisesRegex(ValidationError, "authenticated payload"):
+            authenticator.unwrap(
+                {
+                    "delivery_id": "raw-prompt",
+                    "room_id": "room-42",
+                    "event": {"text": "<channel>hello</channel>"},
+                    "actors": {},
+                }
+            )
+
+    def test_codex_prompt_hook_blocks_raw_channel_markup_with_adapter_option(self):
+        from nunchi.integrations.codex_ingress_hook import evaluate, main
+
+        self.assertIsNone(
+            evaluate(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "review this repository",
+                }
+            )
+        )
+        decision = evaluate(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": '<channel source="discord">hello</channel>',
+            }
+        )
+        self.assertEqual("block", decision["decision"])
+        self.assertIn("nunchi-discord", decision["reason"])
+
+        stderr = io.StringIO()
+        self.assertEqual(
+            2,
+            main(
+                stdin=io.StringIO("not-json"),
+                stdout=io.StringIO(),
+                stderr=stderr,
+            ),
+        )
+        self.assertIn("could not validate", stderr.getvalue())
+
+        hooks = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "integrations"
+                / "codex"
+                / "nunchi-codex"
+                / "hooks"
+                / "hooks.json"
+            ).read_text(encoding="utf-8")
+        )
+        command = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        self.assertEqual("nunchi-codex-ingress-hook", command)
+
+    def test_codex_task_is_staged_until_host_acceptance(self):
+        profile, binding = self._codex_identity()
+        wake = self._wake()
+        opportunity = {
+            "generation": 1,
+            "lifecycle_id": "lifecycle-1",
+            "deadline_id": "deadline-1",
+            "permissions": {
+                "revision": "permissions-1",
+                "ordinary_actions": ["message", "reply", "reaction"],
+                "privileged_proposals": True,
+            },
+        }
+        protocol = ParticipantTurnProtocol(
+            profile=profile,
+            wake=wake,
+            opportunity=opportunity,
+        )
+        action = {
+            "protocol": protocol.request["protocol"],
+            "binding": protocol.request["binding"],
+            "action": {"kind": "silence"},
+        }
+        task_id = "019f9432-9300-7dd1-8225-d7f10f921968"
+        stdout = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": task_id}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "agent_message",
+                            "text": json.dumps(
+                                {"action_json": json.dumps(action)}
+                            ),
+                        },
+                    }
+                ),
+            )
+        )
+
+        class Process:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+            def communicate(self):
+                return stdout, ""
+
+        with tempfile.TemporaryDirectory() as directory:
+            binary, identity = self._persistent_runtime(directory)
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.shutil.which",
+                    return_value=str(binary),
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_version",
+                    return_value="codex-cli test",
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_auth_mode",
+                    return_value="chatgpt",
+                ),
+            ):
+                participant = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-a",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+            with mock.patch(
+                "nunchi.integrations.codex_v2.subprocess.Popen",
+                return_value=Process(),
+            ), mock.patch.object(participant, "_verify_runtime_identity"):
+                self.assertIsNone(
+                    participant.run_protocol(
+                        wake=wake,
+                        opportunity=opportunity,
+                        expand=lambda **_: {},
+                        cancel=threading.Event(),
+                    )
+                )
+            self.assertEqual(1, participant.pending_task_count)
+            self.assertFalse(participant.session_path.exists())
+
+            journal = object.__new__(CodexTaskReceiptJournal)
+            journal.participant = participant
+            accepted = {
+                "request_id": "r",
+                "stage": "participant-host",
+                "writer": "participant-host",
+                "body": {"outcome": "silent"},
+            }
+            with mock.patch(
+                "nunchi.integrations.codex_v2.ReceiptJournal.append",
+                return_value=accepted,
+            ):
+                CodexTaskReceiptJournal.append(
+                    journal,
+                    accepted,
+                    writer="participant-host",
+                )
+            self.assertEqual(0, participant.pending_task_count)
+            self.assertEqual(task_id, participant._load_session())
+
+    def test_failed_or_malformed_codex_turn_never_stages_task_state(self):
+        profile, binding = self._codex_identity()
+        wake = self._wake()
+        opportunity = {
+            "generation": 1,
+            "lifecycle_id": "lifecycle-1",
+            "deadline_id": "deadline-1",
+            "permissions": {
+                "revision": "permissions-1",
+                "ordinary_actions": ["message", "reply", "reaction"],
+                "privileged_proposals": True,
+            },
+        }
+        protocol = ParticipantTurnProtocol(
+            profile=profile,
+            wake=wake,
+            opportunity=opportunity,
+        )
+        action = {
+            "protocol": protocol.request["protocol"],
+            "binding": protocol.request["binding"],
+            "action": {"kind": "silence"},
+        }
+        task_id = "019f9432-9300-7dd1-8225-d7f10f921968"
+
+        class Process:
+            def __init__(self, returncode, final_text):
+                self.returncode = returncode
+                self.final_text = final_text
+
+            def poll(self):
+                return self.returncode
+
+            def communicate(self):
+                return (
+                    "\n".join(
+                        (
+                            json.dumps(
+                                {"type": "thread.started", "thread_id": task_id}
+                            ),
+                            json.dumps(
+                                {
+                                    "type": "item.completed",
+                                    "item": {
+                                        "type": "agent_message",
+                                        "text": self.final_text,
+                                    },
+                                }
+                            ),
+                        )
+                    ),
+                    "failed",
+                )
+
+        cases = (
+            Process(7, json.dumps({"action_json": json.dumps(action)})),
+            Process(0, json.dumps({"action_json": "not-json"})),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            binary, identity = self._persistent_runtime(directory)
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.shutil.which",
+                    return_value=str(binary),
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_version",
+                    return_value="codex-cli test",
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_auth_mode",
+                    return_value="chatgpt",
+                ),
+            ):
+                participant = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-a",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+            for process in cases:
+                with (
+                    self.subTest(returncode=process.returncode),
+                    mock.patch(
+                        "nunchi.integrations.codex_v2.subprocess.Popen",
+                        return_value=process,
+                    ),
+                    mock.patch.object(participant, "_verify_runtime_identity"),
+                    self.assertRaises(RuntimeError),
+                ):
+                    participant.run_protocol(
+                        wake=wake,
+                        opportunity=opportunity,
+                        expand=lambda **_: {},
+                        cancel=threading.Event(),
+                    )
+                self.assertEqual(0, participant.pending_task_count)
+                self.assertFalse(participant.session_path.exists())
+
+            participant._save_session(task_id)
+            malformed_resume = Process(
+                0,
+                json.dumps({"action_json": "not-json"}),
+            )
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.subprocess.Popen",
+                    return_value=malformed_resume,
+                ),
+                mock.patch.object(participant, "_verify_runtime_identity"),
+                self.assertRaises(RuntimeError),
+            ):
+                participant.run_protocol(
+                    wake=wake,
+                    opportunity=opportunity,
+                    expand=lambda **_: {},
+                    cancel=threading.Event(),
+                )
+            self.assertFalse(participant.session_path.exists())
+            self.assertTrue(participant.inflight_session_path.exists())
+            self.assertEqual("reset-required", participant.session_status()["status"])
+
+    def test_fresh_mode_and_reduced_capability_are_reported_truthfully(self):
+        profile, binding = self._codex_identity()
+        with tempfile.TemporaryDirectory() as directory, self._installed_codex():
+            participant = CodexParticipant(
                 profile=profile,
-                config={"session_mode": "persistent", "model": "model-a"},
+                config={"session_mode": "fresh", "capability_mode": "reduced"},
                 binding=binding,
                 state_directory=directory,
             )
-            first._save_session(thread_id)
-            self.assertEqual(thread_id, first._load_session())
-            changed = CodexParticipant(
-                profile=profile,
-                config={"session_mode": "persistent", "model": "model-b"},
-                binding=binding,
-                state_directory=directory,
-            )
-            with self.assertRaises(RuntimeError):
-                changed._load_session()
+            self.assertEqual("fresh", participant.session_status()["mode"])
+            self.assertFalse(participant.session_path.exists())
+            with self.assertRaisesRegex(
+                ValidationError,
+                "final-effect bridge",
+            ):
+                CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "fresh",
+                        "capability_mode": "configured",
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+
+    def test_corrupt_task_state_is_reported_as_incompatible(self):
+        profile, binding = self._codex_identity()
+        with tempfile.TemporaryDirectory() as directory:
+            binary, identity = self._persistent_runtime(directory)
+            with (
+                mock.patch(
+                    "nunchi.integrations.codex_v2.shutil.which",
+                    return_value=str(binary),
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_version",
+                    return_value="codex-cli test",
+                ),
+                mock.patch(
+                    "nunchi.integrations.codex_v2._codex_auth_mode",
+                    return_value="chatgpt",
+                ),
+            ):
+                participant = CodexParticipant(
+                    profile=profile,
+                    config={
+                        "session_mode": "persistent",
+                        "model": "model-a",
+                        "runtime_identity": identity,
+                    },
+                    binding=binding,
+                    state_directory=directory,
+                )
+            participant.session_path.write_text("not-json", encoding="utf-8")
+            status = participant.session_status()
+            self.assertEqual("incompatible", status["status"])
+            self.assertFalse(status["compatible"])
+            self.assertIn("quarantine", status["repair"])
 
     def test_codex_registers_and_rejects_wrong_target_before_observation(self):
         secret = "s" * 32
@@ -1302,6 +2014,11 @@ class CodexSurfaceTests(unittest.TestCase):
                 self._installed_codex(),
             ):
                 runtime = CodexRoomRuntime(config, Client())
+            probe = runtime.probe()
+            self.assertEqual("fresh", probe["session_mode"])
+            self.assertFalse(probe["persistent_session"])
+            self.assertEqual("reduced", probe["capability_mode"])
+            self.assertTrue(probe["disabled_capabilities"])
             runtime.register_transport()
             before = runtime.pipeline.observation.retained_events()
             with self.assertRaises(ValidationError):

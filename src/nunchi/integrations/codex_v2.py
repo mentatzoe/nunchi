@@ -10,7 +10,9 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -72,6 +74,184 @@ _DISABLED_CODEX_FEATURES = (
     "unified_exec",
     "workspace_dependencies",
 )
+_MAX_PENDING_TASKS = 8
+_MAX_AUTH_DOCUMENT_BYTES = 1_048_576
+_RUNTIME_IDENTITY_FIELDS = {
+    "provider",
+    "account_id",
+    "credential_scope",
+    "auth_mode",
+    "codex_home",
+    "continuity_generation",
+}
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _atomic_write(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
+    """Durably replace one private state file without following symlinks."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(
+        temporary,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+        mode,
+    )
+    try:
+        try:
+            if os.write(fd, payload) != len(payload):
+                raise OSError(f"short write to {path}")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _identity_environment(codex_home: Path) -> dict[str, str]:
+    environment = {
+        key: os.environ[key]
+        for key in (
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "LOGNAME",
+            "PATH",
+            "TMPDIR",
+            "USER",
+        )
+        if key in os.environ
+    }
+    environment["CODEX_HOME"] = str(codex_home)
+    return environment
+
+
+def _codex_version(binary: str, environment: Mapping[str, str]) -> str:
+    try:
+        completed = subprocess.run(
+            [binary, "--version"],
+            env=dict(environment),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValidationError(f"Codex runtime version is unavailable: {exc}") from exc
+    version = (completed.stdout or completed.stderr).strip()
+    if completed.returncode != 0 or not version:
+        raise ValidationError("Codex runtime version is unavailable")
+    return version
+
+
+def _codex_auth_mode(binary: str, environment: Mapping[str, str]) -> str:
+    try:
+        completed = subprocess.run(
+            [binary, "login", "status"],
+            env=dict(environment),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValidationError(f"Codex authentication status is unavailable: {exc}") from exc
+    reported = f"{completed.stdout}\n{completed.stderr}".lower()
+    if completed.returncode != 0:
+        return "absent"
+    if "chatgpt" in reported:
+        return "chatgpt"
+    if "api key" in reported or "api-key" in reported:
+        return "api-key"
+    if "access token" in reported or "access-token" in reported:
+        return "access-token"
+    return "unknown"
+
+
+def _credential_binding(
+    codex_home: Path,
+    *,
+    auth_mode: str,
+    expected_account_id: str,
+    provider: str,
+    credential_scope: str,
+) -> str:
+    """Return a non-secret binding for the exact credential used by Codex."""
+
+    auth_path = codex_home / "auth.json"
+    try:
+        fd = os.open(auth_path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("auth.json is not a regular file")
+            with os.fdopen(fd, encoding="utf-8") as source:
+                fd = -1
+                raw = source.read(_MAX_AUTH_DOCUMENT_BYTES + 1)
+            if len(raw.encode("utf-8")) > _MAX_AUTH_DOCUMENT_BYTES:
+                raise OSError("auth.json exceeds the identity read limit")
+            document = json.loads(raw)
+        finally:
+            if fd >= 0:
+                os.close(fd)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValidationError(
+            "persistent Codex mode requires readable file-backed credential identity: "
+            f"{exc}"
+        ) from exc
+    if not isinstance(document, Mapping):
+        raise ValidationError("Codex auth.json identity has an invalid shape")
+    tokens = document.get("tokens")
+    tokens = tokens if isinstance(tokens, Mapping) else {}
+    stored_account_id = tokens.get("account_id")
+    if isinstance(stored_account_id, str) and stored_account_id:
+        if stored_account_id != expected_account_id:
+            raise ValidationError(
+                "Codex credential account differs from pinned runtime_identity"
+            )
+        material = (
+            f"{provider}\0{auth_mode}\0{stored_account_id}\0{credential_scope}"
+        )
+        return hashlib.sha256(material.encode()).hexdigest()
+
+    secret = None
+    for candidate in (
+        document.get("OPENAI_API_KEY"),
+        document.get("api_key"),
+        tokens.get("access_token"),
+    ):
+        if isinstance(candidate, str) and candidate:
+            secret = candidate
+            break
+    if secret is None:
+        raise ValidationError(
+            "Codex credential identity is unavailable for persistent continuity; "
+            "use fresh mode or file-backed authentication"
+        )
+    secret_digest = hashlib.sha256(secret.encode()).hexdigest()
+    material = f"{provider}\0{auth_mode}\0{secret_digest}\0{credential_scope}"
+    return hashlib.sha256(material.encode()).hexdigest()
 
 
 def _strip_json_fence(text: str) -> str:
@@ -139,7 +319,13 @@ class CodexParticipant:
         binding: ParticipantBinding,
         state_directory: str | Path,
     ) -> None:
-        allowed = {"model", "timeout_seconds", "session_mode"}
+        allowed = {
+            "model",
+            "timeout_seconds",
+            "session_mode",
+            "runtime_identity",
+            "capability_mode",
+        }
         if set(config) - allowed:
             raise ValidationError("Codex participant config has unexpected fields")
         self.profile = profile
@@ -159,12 +345,105 @@ class CodexParticipant:
         self.timeout_seconds = float(config.get("timeout_seconds", 300))
         if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValidationError("Codex timeout must be positive and finite")
-        self.session_mode = str(config.get("session_mode", "persistent"))
+        self.session_mode = str(config.get("session_mode", "fresh"))
         if self.session_mode not in ("persistent", "fresh"):
             raise ValidationError("Codex session_mode must be persistent or fresh")
+        if self.session_mode == "persistent" and self.model is None:
+            raise ValidationError("persistent Codex mode requires an exact model")
+        self.capability_mode = str(config.get("capability_mode", "reduced"))
+        if self.capability_mode != "reduced":
+            raise ValidationError(
+                "Codex configured capabilities are not yet secured by a final-effect "
+                "bridge; use explicit capability_mode='reduced'"
+            )
         self.session_path = state_root / "codex-v2-session.json"
+        self.inflight_session_path = state_root / "codex-v2-session.inflight.json"
         self.output_schema_path = state_root / "codex-v2-action.schema.json"
         self._write_output_schema()
+
+        identity_raw = config.get("runtime_identity")
+        if self.session_mode == "persistent" and identity_raw is None:
+            raise ValidationError(
+                "persistent Codex mode requires a pinned runtime_identity"
+            )
+        if identity_raw is not None:
+            if not isinstance(identity_raw, Mapping) or set(identity_raw) != _RUNTIME_IDENTITY_FIELDS:
+                raise ValidationError("Codex runtime_identity has an invalid closed shape")
+            strings = {
+                key: identity_raw[key]
+                for key in (
+                    "provider",
+                    "account_id",
+                    "credential_scope",
+                    "auth_mode",
+                    "codex_home",
+                )
+            }
+            if any(not isinstance(value, str) or not value for value in strings.values()):
+                raise ValidationError("Codex runtime_identity strings must be non-empty")
+            generation = identity_raw["continuity_generation"]
+            if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+                raise ValidationError(
+                    "Codex continuity_generation must be a positive integer"
+                )
+            if strings["auth_mode"] not in {
+                "chatgpt",
+                "api-key",
+                "access-token",
+            }:
+                raise ValidationError("Codex runtime_identity auth_mode is unsupported")
+            configured_home = Path(strings["codex_home"])
+            if not configured_home.is_absolute():
+                raise ValidationError("Codex runtime_identity codex_home must be absolute")
+            try:
+                self.codex_home = configured_home.resolve(strict=True)
+            except OSError as exc:
+                raise ValidationError(
+                    f"Codex runtime_identity codex_home is unavailable: {exc}"
+                ) from exc
+            if not self.codex_home.is_dir():
+                raise ValidationError("Codex runtime_identity codex_home must be a directory")
+            try:
+                binary_path = Path(self.binary).resolve(strict=True)
+                binary_sha256 = _sha256_file(binary_path)
+            except OSError as exc:
+                raise ValidationError(
+                    f"Codex executable identity is unavailable: {exc}"
+                ) from exc
+            self.binary = str(binary_path)
+            identity_environment = _identity_environment(self.codex_home)
+            version = _codex_version(self.binary, identity_environment)
+            expected_auth_mode = strings["auth_mode"]
+            observed_auth_mode = _codex_auth_mode(self.binary, identity_environment)
+            if observed_auth_mode != expected_auth_mode:
+                raise ValidationError(
+                    "Codex authenticated runtime differs from pinned runtime_identity"
+                )
+            credential_binding_sha256 = _credential_binding(
+                self.codex_home,
+                auth_mode=expected_auth_mode,
+                expected_account_id=strings["account_id"],
+                provider=strings["provider"],
+                credential_scope=strings["credential_scope"],
+            )
+            self.runtime_identity: dict[str, Any] = {
+                **dict(identity_raw),
+                "codex_home": str(self.codex_home),
+                "binary_path": str(binary_path),
+                "binary_sha256": binary_sha256,
+                "codex_version": version,
+                "credential_binding_sha256": credential_binding_sha256,
+            }
+        else:
+            ambient_home = os.environ.get("CODEX_HOME")
+            self.codex_home = Path(
+                ambient_home if ambient_home else Path.home() / ".codex"
+            ).resolve()
+            self.runtime_identity = {
+                "bound": False,
+                "codex_home": str(self.codex_home),
+                "binary_path": self.binary,
+            }
         behavior = {
             "profile_sha256": self.profile.sha256,
             "participant_id": self.binding.participant_id,
@@ -172,17 +451,17 @@ class CodexParticipant:
             "room_id": self.binding.room_id,
             "continuity_scope_id": self.binding.continuity_scope_id,
             "model": self.model,
+            "runtime_identity": self.runtime_identity,
+            "capability_mode": self.capability_mode,
             "disabled_features": list(_DISABLED_CODEX_FEATURES),
             "sandbox": "read-only",
         }
         self.behavior_sha256 = hashlib.sha256(
-            json.dumps(
-                behavior,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
+            _canonical_json(behavior).encode()
         ).hexdigest()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._pending_lock = threading.Lock()
+        self._pending_tasks: dict[str, str] = {}
 
     def _write_output_schema(self) -> None:
         schema = {
@@ -200,26 +479,14 @@ class CodexParticipant:
             },
             "required": ["action_json"],
         }
-        payload = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()
-        temporary = self.output_schema_path.with_suffix(".tmp")
-        fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-        try:
-            if os.write(fd, payload) != len(payload):
-                raise OSError("short Codex output-schema write")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temporary, self.output_schema_path)
-        directory_fd = os.open(self.output_schema_path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _atomic_write(self.output_schema_path, _canonical_json(schema).encode())
 
     def _load_session(self) -> str | None:
         if self.session_mode == "fresh" or not self.session_path.exists():
             return None
         try:
+            if self.session_path.is_symlink():
+                raise OSError("session state is a symlink")
             state = json.loads(self.session_path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Codex session state is not trustworthy: {exc}") from exc
@@ -232,6 +499,9 @@ class CodexParticipant:
             "continuity_scope_id",
             "profile_sha256",
             "behavior_sha256",
+            "model",
+            "capability_mode",
+            "runtime_identity",
         }
         if not isinstance(state, dict) or set(state) != expected:
             raise RuntimeError("Codex session state has an invalid closed shape")
@@ -243,16 +513,53 @@ class CodexParticipant:
             or state["continuity_scope_id"] != self.binding.continuity_scope_id
             or state["profile_sha256"] != self.profile.sha256
             or state["behavior_sha256"] != self.behavior_sha256
+            or state["model"] != self.model
+            or state["capability_mode"] != self.capability_mode
+            or state["runtime_identity"] != self.runtime_identity
             or not isinstance(state["thread_id"], str)
             or not _THREAD_ID.fullmatch(state["thread_id"])
         ):
             raise RuntimeError("Codex session state binding is invalid")
         return state["thread_id"]
 
+    def stage_task(self, request_id: str, thread_id: str) -> None:
+        """Hold a task ID until the core-owned host accepts this turn."""
+
+        if (
+            self.session_mode != "persistent"
+            or not isinstance(request_id, str)
+            or not _THREAD_ID.fullmatch(thread_id)
+        ):
+            return
+        with self._pending_lock:
+            self._pending_tasks.pop(request_id, None)
+            self._pending_tasks[request_id] = thread_id
+            while len(self._pending_tasks) > _MAX_PENDING_TASKS:
+                self._pending_tasks.pop(next(iter(self._pending_tasks)))
+
+    def commit_task(self, request_id: str) -> None:
+        """Persist one staged task after host acceptance is durably recorded."""
+
+        with self._pending_lock:
+            thread_id = self._pending_tasks.pop(request_id, None)
+        if thread_id is not None:
+            with self._lock:
+                self._save_session(thread_id)
+                self._clear_inflight_session()
+
+    def discard_task(self, request_id: str | None) -> None:
+        if not isinstance(request_id, str):
+            return
+        with self._pending_lock:
+            self._pending_tasks.pop(request_id, None)
+
+    @property
+    def pending_task_count(self) -> int:
+        with self._pending_lock:
+            return len(self._pending_tasks)
+
     def _save_session(self, thread_id: str) -> None:
-        self.session_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.session_path.with_suffix(".tmp")
-        payload = json.dumps(
+        payload = _canonical_json(
             {
                 "schema_version": 2,
                 "thread_id": thread_id,
@@ -262,23 +569,147 @@ class CodexParticipant:
                 "continuity_scope_id": self.binding.continuity_scope_id,
                 "profile_sha256": self.profile.sha256,
                 "behavior_sha256": self.behavior_sha256,
+                "model": self.model,
+                "capability_mode": self.capability_mode,
+                "runtime_identity": self.runtime_identity,
             },
-            sort_keys=True,
-            separators=(",", ":"),
         ).encode()
-        fd = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-        try:
-            if os.write(fd, payload) != len(payload):
-                raise OSError("short Codex session-state write")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temporary, self.session_path)
+        _atomic_write(self.session_path, payload)
+
+    def _consume_committed_session(self) -> None:
+        """Make a resumed task non-authoritative before Codex can mutate it.
+
+        Codex has no non-interactive transactional resume seam. Moving the pin
+        first means a crash, malformed result, cancellation, expiry, or host
+        rejection resets safely instead of resuming a task whose failed turn
+        may already have changed its internal history. Host acceptance writes a
+        fresh committed pin and then clears this recoverable diagnostic marker.
+        """
+
+        if not self.session_path.exists():
+            return
+        os.replace(self.session_path, self.inflight_session_path)
         directory_fd = os.open(self.session_path.parent, os.O_RDONLY)
         try:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+    def _clear_inflight_session(self) -> None:
+        try:
+            os.unlink(self.inflight_session_path)
+        except FileNotFoundError:
+            return
+        directory_fd = os.open(self.inflight_session_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+    def session_status(self) -> dict[str, Any]:
+        with self._lock:
+            if self.session_mode == "fresh":
+                return {
+                    "mode": "fresh",
+                    "status": "new-task",
+                    "compatible": True,
+                    "committed_task_id": None,
+                    "reset_reason": "fresh-mode",
+                }
+            try:
+                thread_id = self._load_session()
+            except RuntimeError as exc:
+                return {
+                    "mode": "persistent",
+                    "status": "incompatible",
+                    "compatible": False,
+                    "committed_task_id": None,
+                    "reset_reason": str(exc),
+                    "repair": (
+                        "quarantine codex-v2-session.json after inspection, then "
+                        "restart to create a new task under the pinned runtime identity"
+                    ),
+                }
+            if thread_id is None and self.inflight_session_path.exists():
+                return {
+                    "mode": "persistent",
+                    "status": "reset-required",
+                    "compatible": True,
+                    "committed_task_id": None,
+                    "reset_reason": (
+                        "the prior committed task was consumed before a turn that "
+                        "did not reach host acceptance"
+                    ),
+                    "repair": (
+                        "the next accepted opportunity will create and commit a new task"
+                    ),
+                }
+            return {
+                "mode": "persistent",
+                "status": "committed" if thread_id is not None else "new-task",
+                "compatible": True,
+                "committed_task_id": thread_id,
+                "reset_reason": None if thread_id is not None else "not-created",
+            }
+
+    def runtime_status(self) -> dict[str, Any]:
+        identity = self.runtime_identity
+        if identity.get("bound") is False:
+            return {
+                "bound": False,
+                "codex_home": identity["codex_home"],
+                "binary_path": identity["binary_path"],
+            }
+        account_binding = hashlib.sha256(
+            (
+                f"{identity['provider']}\0{identity['account_id']}\0"
+                f"{identity['credential_scope']}"
+            ).encode()
+        ).hexdigest()
+        return {
+            "bound": True,
+            "provider": identity["provider"],
+            "auth_mode": identity["auth_mode"],
+            "credential_scope": identity["credential_scope"],
+            "account_binding_sha256": account_binding,
+            "codex_home": identity["codex_home"],
+            "binary_path": identity["binary_path"],
+            "binary_sha256": identity["binary_sha256"],
+            "codex_version": identity["codex_version"],
+            "credential_binding_sha256": identity["credential_binding_sha256"],
+            "continuity_generation": identity["continuity_generation"],
+        }
+
+    def _environment(self) -> dict[str, str]:
+        return _identity_environment(self.codex_home)
+
+    def _verify_runtime_identity(self) -> None:
+        """Re-attest persistent identity immediately before native execution."""
+
+        identity = self.runtime_identity
+        if identity.get("bound") is False:
+            return
+        try:
+            binary_path = Path(self.binary).resolve(strict=True)
+            binary_sha256 = _sha256_file(binary_path)
+        except OSError as exc:
+            raise RuntimeError(f"Codex executable identity is unavailable: {exc}") from exc
+        environment = self._environment()
+        observed = {
+            "binary_path": str(binary_path),
+            "binary_sha256": binary_sha256,
+            "codex_version": _codex_version(self.binary, environment),
+            "auth_mode": _codex_auth_mode(self.binary, environment),
+            "credential_binding_sha256": _credential_binding(
+                self.codex_home,
+                auth_mode=identity["auth_mode"],
+                expected_account_id=identity["account_id"],
+                provider=identity["provider"],
+                credential_scope=identity["credential_scope"],
+            ),
+        }
+        if any(identity[key] != value for key, value in observed.items()):
+            raise RuntimeError("Codex runtime identity changed before execution")
 
     def _prompt(self, protocol: ParticipantTurnProtocol) -> str:
         """Compatibility accessor; the prompt bytes are owned by core."""
@@ -292,7 +723,10 @@ class CodexParticipant:
             opportunity=opportunity,
         )
         with self._lock:
+            self._verify_runtime_identity()
             active_thread = self._load_session()
+            if active_thread is not None:
+                self._consume_committed_session()
             extra = [
                 "--ignore-user-config",
                 "--ignore-rules",
@@ -336,26 +770,14 @@ class CodexParticipant:
                 process = subprocess.Popen(
                     command,
                     cwd=self.working_directory,
-                    env={
-                        key: os.environ[key]
-                        for key in (
-                            "CODEX_HOME",
-                            "HOME",
-                            "LANG",
-                            "LC_ALL",
-                            "LOGNAME",
-                            "PATH",
-                            "TMPDIR",
-                            "USER",
-                        )
-                        if key in os.environ
-                    },
+                    env=self._environment(),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                 )
                 while process.poll() is None:
                     if cancel.is_set() or time.monotonic() >= deadline:
+                        self.discard_task(protocol.request_id)
                         process.terminate()
                         try:
                             process.wait(timeout=2)
@@ -371,12 +793,6 @@ class CodexParticipant:
                         f"expected {active_thread}"
                     )
                 active_thread = thread_id or active_thread
-                if self.session_mode == "persistent":
-                    if active_thread is None:
-                        raise RuntimeError(
-                            "Codex did not report a persistent task ID"
-                        )
-                    self._save_session(active_thread)
                 if process.returncode != 0:
                     raise RuntimeError(
                         (stderr or f"Codex exited {process.returncode}")[-500:]
@@ -387,6 +803,12 @@ class CodexParticipant:
                     )
                 done, action = protocol.consume(raw_action, expand=expand)
                 if done:
+                    if self.session_mode == "persistent":
+                        if active_thread is None:
+                            raise RuntimeError(
+                                "Codex did not report a persistent task ID"
+                            )
+                        self.stage_task(protocol.request_id, active_thread)
                     return action
                 if active_thread is None:
                     raise RuntimeError(
@@ -409,6 +831,26 @@ class CodexParticipant:
             expand=expand,
             cancel=cancel,
         )
+
+
+class CodexTaskReceiptJournal(ReceiptJournal):
+    """Commit Codex task continuity only after the host accepts the turn."""
+
+    def __init__(self, path, *, participant: CodexParticipant | None = None, **kwargs) -> None:
+        super().__init__(path, **kwargs)
+        self.participant = participant
+
+    def append(self, record, *, writer):
+        appended = super().append(record, writer=writer)
+        participant = self.participant
+        if participant is None:
+            return appended
+        if appended["stage"] == "transport":
+            participant.commit_task(appended["request_id"])
+        elif appended["stage"] == "participant-host":
+            if appended["body"].get("outcome") == "silent":
+                participant.commit_task(appended["request_id"])
+        return appended
 
 
 class CodexRoomRuntime:
@@ -464,7 +906,16 @@ class CodexRoomRuntime:
         limits = ObservationLimits(**config["limits"])
         state = Path(config["state_directory"])
         state.mkdir(parents=True, exist_ok=True)
-        receipts = ReceiptJournal(state / "codex-v2-receipts.jsonl")
+        participant = CodexParticipant(
+            profile=profile,
+            config=config["codex"],
+            binding=self.binding,
+            state_directory=state,
+        )
+        receipts = CodexTaskReceiptJournal(
+            state / "codex-v2-receipts.jsonl",
+            participant=participant,
+        )
         observation = ObservationProvider(
             self.binding,
             limits=limits,
@@ -478,12 +929,6 @@ class CodexRoomRuntime:
         )
         scheduler = ConversationOpportunityScheduler(
             f"{self.binding.participant_id}:{self.binding.continuity_scope_id}"
-        )
-        participant = CodexParticipant(
-            profile=profile,
-            config=config["codex"],
-            binding=self.binding,
-            state_directory=state,
         )
         try:
             ack_policy = AckPolicy(**dict(config.get("ack", {})))
@@ -522,6 +967,7 @@ class CodexRoomRuntime:
         )
         self.lane = AsyncDeliveryLane(self.pipeline)
         self.client = client
+        self.participant = participant
         self.output_secret = self._output_secret(config["transport"])
 
     @staticmethod
@@ -625,6 +1071,7 @@ class CodexRoomRuntime:
         )
 
     def probe(self):
+        session = self.participant.session_status()
         return {
             "product": "nunchi",
             "product_version": __version__,
@@ -633,7 +1080,16 @@ class CodexRoomRuntime:
             "participant_id": self.binding.participant_id,
             "actor_id": self.binding.actor_id,
             "room_id": self.binding.room_id,
-            "persistent_session": True,
+            "session_mode": self.participant.session_mode,
+            "persistent_session": self.participant.session_mode == "persistent",
+            "task_state": session,
+            "runtime_identity": self.participant.runtime_status(),
+            "capability_mode": self.participant.capability_mode,
+            "disabled_capabilities": list(_DISABLED_CODEX_FEATURES),
+            "capability_limitation": (
+                "normal Codex effect-bearing capabilities remain unavailable until "
+                "they have a version-checked final-effect bridge"
+            ),
             "shared_discord_transport": True,
             "send_time_social_judgment": False,
             "v1_fallback": False,
