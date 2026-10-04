@@ -19,12 +19,15 @@ The integration is a Claude Code mod plus one Python gate per room
 - The participant is a dedicated Claude Code session per room that uses the
   user's normal configuration, memory, tools, MCP servers, and skills.
 - The gate owns transport, observation, attention, scheduling, authority, and
-  receipts. The mod starts a turn on `WAKE`, gives the session the only
-  room-send tool, and reports how each turn ended.
+  receipts. On `WAKE` it writes one turn into the session over stream-json.
+  The mod registers the room tools, binds each turn to its wake, and forwards
+  room tool calls to the gate over a private socket. Silence counts only for a
+  turn the mod bound.
 - Native tools follow the user's Claude Code permission rules, plus an optional
   configured deny list applied when the session starts.
-- The earlier headless subprocess runner and channel-plugin designs are
-  superseded.
+- The earlier headless subprocess runner is removed; the channel-plugin
+  designs are superseded. Code: `src/nunchi/integrations/claude_code_v2.py`,
+  `claude_code_gate.py`, and the mod in `claude_code_mod/`.
 
 ## Habits
 

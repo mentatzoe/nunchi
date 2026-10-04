@@ -41,9 +41,10 @@ Not verified:
 - **Hermes CI scope.** The stock-Hermes lanes use isolated homes, a loopback
   model, and captured platform output. They are installed-runtime evidence, not
   live model or platform delivery. Telegram has the contract lane only.
-- **Claude Code.** Only the superseded headless runner is on `main`; its
-  deterministic tests and entry-point probe pass. The mod design
-  ([#43](https://github.com/mentatzoe/nunchi/issues/43)) is not on `main`.
+- **Claude Code.** The gate and mod
+  ([#43](https://github.com/mentatzoe/nunchi/issues/43)) pass deterministic
+  tests and the mod's `claude plugin` checks. A real model turn through the
+  mod has not run.
 - **Codex.** Only the reduced Discord runner is on `main`; draft PR
   [#71](https://github.com/mentatzoe/nunchi/pull/71) is not merged.
 - **Behavior.** Whether agents read the room well needs behavioral evaluation

@@ -22,7 +22,6 @@ from nunchi.attention import ParticipantProfile
 from nunchi.dashboard import dashboard_handler, serve_dashboard
 from nunchi.errors import ValidationError
 from nunchi.install import InstallError, rollback, uninstall_state, upgrade, verify
-from nunchi.integrations.claude_code_v2 import ClaudeCodeParticipant
 from nunchi.integrations.codex_v2 import CodexParticipant
 from nunchi.operator import (
     OperatorStore,
@@ -36,7 +35,6 @@ from nunchi.participant_model import (
     ParticipantTurnProtocol,
     parse_participant_action,
     participant_action_schema,
-    participant_turn_prompt,
 )
 
 
@@ -260,13 +258,11 @@ class ParticipantProtocolTests(unittest.TestCase):
             self.protocol.consume(expansion, expand=lambda **_: {"events": []})
         self.assertEqual(3, len(calls))
 
-    def test_codex_and_claude_are_native_invokers_of_the_same_core_bytes(self):
-        claude = object.__new__(ClaudeCodeParticipant)
-        claude.profile = PROFILE
+    def test_codex_is_a_native_invoker_of_the_core_bytes(self):
+        # Claude Code acts through tools; its turn uses the core tool-turn
+        # text instead (tests/v2/test_claude_code.py).
         codex = object.__new__(CodexParticipant)
         codex.profile = PROFILE
-        self.assertEqual(participant_turn_prompt(PROFILE), claude.system_prompt())
-        self.assertEqual(self.protocol.text, claude._turn_prompt(self.protocol))
         self.assertEqual(self.protocol.text, codex._prompt(self.protocol))
 
 

@@ -63,6 +63,19 @@ jobs:
           /tmp/venv/bin/nunchi-matrix --probe
           /tmp/venv/bin/nunchi-telegram --probe
           /tmp/venv/bin/nunchi-codex-room-runner --probe
-          /tmp/venv/bin/nunchi-claude-code-room-runner --probe
+          /tmp/venv/bin/nunchi-claude-code-room-runner --probe | /tmp/venv/bin/python -c "import json, sys; assert json.load(sys.stdin)['mod_version'], 'the Claude Code mod is missing from the wheel'"
           /tmp/venv/bin/nunchi-hermes-dashboard --help
           echo "packaging smoke OK"
+
+  claude-code-mod:
+    name: Claude Code mod
+    runs-on: ubuntu-latest
+    env:
+      # The mod needs the mods API; keep this at or above MINIMUM_CLAUDE_CODE.
+      CLAUDE_CODE_VERSION: "2.1.289"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate the mod against the pinned Claude Code
+        run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin validate --strict src/nunchi/integrations/claude_code_mod
+      - name: Run the mod's tests against the pinned Claude Code
+        run: npx --yes "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" plugin test src/nunchi/integrations/claude_code_mod

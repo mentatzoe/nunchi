@@ -1,0 +1,6 @@
+{
+  "name": "nunchi",
+  "version": "2.0.0",
+  "description": "Connects a dedicated Claude Code session to its Nunchi room gate. Does nothing in any session the gate did not start.",
+  "author": { "name": "Nunchi contributors", "url": "https://github.com/mentatzoe/nunchi" }
+}

@@ -162,8 +162,9 @@ Trusted configuration owns:
 - participant model, or fixed Codex or Claude Code model/session settings;
 - Hermes keeps its own participant model and prompt, while Nunchi keeps the
   shared attention prompt, model selection, and lifecycle behavior;
-- for Claude Code, the transport output-key variable name, which may not
-  be one the participant turn can read;
+- for Claude Code, the transport output-key variable name; the gate keeps
+  that variable, and every `NUNCHI_*` variable, out of the session's
+  environment;
 - stable state directory and optional pinned privileged-action policy;
 - native transport endpoint and credential environment-variable names.
 

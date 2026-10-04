@@ -29,9 +29,10 @@ result must copy that protocol and binding exactly around one action. Unknown
 versions, changed bindings, invisible origins/targets, exceeded permissions,
 and excess expansion reject before an effect.
 
-The Codex runner and the superseded Claude Code headless runner supply only
-their isolated native model invocation, session continuity, cancellation, and
-result extraction. Reference platform transports supply authenticated
+The Codex runner supplies only its isolated native model invocation, session
+continuity, cancellation, and result extraction. The Claude Code gate supplies
+its dedicated session and the mod that turns room tool calls into actions
+through the core's tool-turn helpers. Reference platform transports supply authenticated
 capability facts and native effects. They do not own a prompt, parser,
 expansion policy, social decision, or participant turn protocol. Hermes
 consumes the same attention decision. When its authenticated adapter attests
@@ -46,8 +47,8 @@ implementation by `kind`; the default `openai-compatible` kind needs an
 explicit `base_url` (there is no vendor default endpoint) and passes any
 provider-specific request fields through `extra_body`. An integration adds its
 own kinds through `host_kinds`. `HostTextAttentionModel` serves hosts whose
-completion returns plain text, such as a Claude Code mod running on the user's
-own plan; `HostStructuredAttentionModel` serves hosts with structured
+completion returns plain text, such as a mod running attention on the user's
+own plan (not built); `HostStructuredAttentionModel` serves hosts with structured
 completion and takes the host's denial check (`is_denial`, `denied_detail`)
 and whether the host must attest the served model (`require_attestation`).
 The attention engine gives every kind the same core prompt and bounded
@@ -151,7 +152,7 @@ and an explicit state-purge boundary.
 | Matrix | shared protocol; exact `whoami` and room power-level measurement before add-reaction ACK | platform-specific live validation and acceptance |
 | Telegram | shared protocol; unsupported ACK widens to DEFER | native ACK support only if a future verified adapter supplies it |
 | Codex | shared protocol and operator schema; the merged runner is reduced to Discord with Codex tools disabled | draft PR #71; parity issues #59–#65; live proof |
-| Claude Code | the merged headless runner uses the shared protocol, but it is superseded | the selected design, a Claude Code mod plus one Python gate per room with a dedicated session per room (issue #43), is not on `main`; then #57, #58, and live proof in #39 |
+| Claude Code | the per-room gate, dedicated session, and mod (issue #43) use the shared host and the core tool-turn helpers | Discord only; #57, #58, and live proof in #39 |
 | Hermes | shared attention ACK when the authenticated adapter attests the configured reaction; otherwise ACK widens to DEFER | issues #38, #42, and #44 platform closure |
 
 Issue #41 remains the combined acceptance gate. Security assurance, release

@@ -59,7 +59,8 @@ names. Host- and vendor-specific behavior enters through these seams:
   integration registers a kind yet.
 - `HostTextAttentionModel(complete, ...)` is for hosts whose completion
   returns text only, with no JSON-schema mode and no report of the served
-  model, such as a Claude Code mod running on the user's plan. The host's
+  model, such as a mod running attention on the user's own plan (not built
+  yet). The host's
   `complete(system=..., prompt=..., timeout_seconds=...)` receives the same
   prompt and observation bytes as every other implementation.
   `decode_judgment_text` accepts the judgment object alone or in one Markdown
@@ -75,6 +76,18 @@ names. Host- and vendor-specific behavior enters through these seams:
   `src/nunchi/integrations/hermes_attention_trust.py`.
 - An attention model's `provider` and `model_id` are opaque audit labels.
   `None` means the host does not report them, and the audit omits them.
+- A participant that acts through tools inside its own agent loop uses the
+  core tool-turn helpers in `nunchi.participant_model`.
+  `participant_tool_roles(request)` lists the roles this turn's permissions
+  allow (`send`, `react`, `propose`, `context`); `PARTICIPANT_TOOL_SPECS`
+  holds each role's description and closed input schema;
+  `participant_tool_turn_text(profile, request, tools=...)` renders the turn
+  with the names the host registered; `participant_tool_action` turns one
+  call into one bound action, checked against permissions and visible events;
+  `participant_tool_expansion` turns a context call into expansion arguments.
+  The host still commits the action through `ParticipantTurnHost`. The Claude
+  Code gate is the first user
+  ([`integrations/claude-code/README.md`](../integrations/claude-code/README.md)).
 
 ### Host-owned participant pipelines
 

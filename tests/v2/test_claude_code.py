@@ -2,14 +2,18 @@
 
 `docs/platform-v2.md` names the platform-specific matrix a downstream
 candidate must add on top of the shared suites.  These tests drive the real
-`ClaudeCodeRoomRuntime` wiring — a real subprocess participant, the shared
-Discord consumer transport, the shared attention engine, scheduler, host, and
-privileged-action coordinator — so what passes here is the assembled surface,
-not a mock standing in for it.
+`ClaudeCodeRoomRuntime` wiring: the gated participant, the shared Discord
+consumer transport, the shared attention engine, scheduler, host, and
+privileged-action coordinator.
 
-The `claude` executable is replaced by a recording stub so the argument vector,
-the process environment, and the session continuity contract are all
-observable.  Nothing here establishes installed or live behaviour; see
+The dedicated Claude Code session is replaced in two ways.  Most tests use a
+scripted session that does what the Nunchi mod does inside a real one: it
+binds each turn to its wake and calls the room tools.  `RealSessionTests` run
+the real session manager and gate socket against a stub `claude` executable
+that speaks stream-json and calls the socket the way the mod does.  The mod's
+own tests run with `claude plugin test`.
+
+Nothing here establishes installed or live behaviour; see
 `evidence/v2/claude-code/` for what is and is not proven.
 """
 
@@ -17,29 +21,40 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import http.client
 import json
+import math
 import os
 from pathlib import Path
+import re
+import secrets
+import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
 
+from nunchi import __version__
 from nunchi.attention import ParticipantProfile
 from nunchi.errors import ValidationError
-from nunchi.integrations.claude_code_v2 import (
-    _PARTICIPANT_ENV_ALLOWLIST,
-    ClaudeCodeParticipant,
-    ClaudeCodeParticipantError,
-    ClaudeCodeRoomRuntime,
-    parse_claude_result,
+from nunchi.integrations import claude_code_v2
+from nunchi.integrations.claude_code_gate import (
+    SESSION_ENV,
+    SOCKET_ENV,
+    WAKE_MARKER,
+    ClaudeCodeGateError,
+    GatedParticipant,
+    GateServer,
+    SecretGuard,
+    full_tool_name,
 )
+from nunchi.integrations.claude_code_v2 import MOD_DIRECTORY, ClaudeCodeRoomRuntime
 from nunchi.integrations.discord_participant_transport import MCPDiscordTransport
-from nunchi.observation import ParticipantBinding
 from nunchi.participant import TransportResult
-from nunchi.participant_model import ParticipantTurnProtocol
+from nunchi.participant_model import participant_tool_turn_prompt
 
 
 PARTICIPANT_ID = "vigil"
@@ -48,14 +63,6 @@ ROOM_ID = "42"
 SCOPE_ID = "discord:channel:42"
 OUTPUT_KEY_ENV = "TEST_NUNCHI_CLAUDE_OUTPUT_KEY"
 OUTPUT_SECRET = "k" * 48
-
-BINDING = ParticipantBinding(
-    participant_id=PARTICIPANT_ID,
-    actor_id=ACTOR_ID,
-    platform="discord",
-    room_id=ROOM_ID,
-    continuity_scope_id=SCOPE_ID,
-)
 
 PROFILE = ParticipantProfile(
     profile_id="vigil-default",
@@ -66,29 +73,14 @@ PROFILE = ParticipantProfile(
     sha256="a" * 64,
 )
 
-
-# The real CLI echoes back the session ID the host pinned via --session-id or
-# --resume.  A stub answer carrying this sentinel is rewritten by the stub the
-# same way, so tests exercise the host's real session-binding check.
-ECHO = "__echo_session__"
-
-
-def result_document(action, *, session_id=ECHO, subtype="success", is_error=False):
-    document = {
-        "type": "result",
-        "subtype": subtype,
-        "is_error": is_error,
-        "session_id": session_id,
-        "result": "",
-    }
-    if action is not None:
-        document["structured_output"] = {"action_json": json.dumps(action)}
-        document["result"] = json.dumps(document["structured_output"])
-    return json.dumps(document)
+_WAKE = re.compile(r'^<nunchi_wake id="([A-Za-z0-9_-]{16,64})"/>')
+SEND = full_tool_name("send")
+REACT = full_tool_name("react")
+CONTEXT = full_tool_name("context")
 
 
 def test_wake(request_id="r1"):
-    """One complete core wake for direct participant-runner tests."""
+    """One complete core wake for direct participant tests."""
 
     return {
         "request_id": request_id,
@@ -114,7 +106,7 @@ def test_wake(request_id="r1"):
         ],
         "trigger_event_id": "e1",
         "coverage": {
-            "has_more_before": False,
+            "has_more_before": True,
             "has_more_after": False,
             "has_gaps": False,
             "truncated_by": [],
@@ -125,886 +117,150 @@ def test_wake(request_id="r1"):
     }
 
 
-def direct_protocol(request_id="r1"):
-    return ParticipantTurnProtocol(
-        profile=PROFILE,
-        wake=test_wake(request_id),
-        opportunity={
-            "generation": 1,
-            "lifecycle_id": "direct-library-call",
-            "deadline_id": "direct-library-call",
-            "permissions": {
-                "revision": "direct-library-call",
-                "ordinary_actions": ["message", "reply", "reaction"],
-                "privileged_proposals": True,
-            },
-        },
+OPPORTUNITY = {
+    "generation": 1,
+    "lifecycle_id": "lifecycle-1",
+    "deadline_id": "deadline-1",
+    "permissions": {
+        "revision": "rev-1",
+        "ordinary_actions": ["message", "reply", "reaction"],
+        "privileged_proposals": False,
+    },
+}
+
+
+def result_document(action, *, ok=True, detail="success", bind=True):
+    """One scripted session turn: what the participant does, then how it ends.
+
+    `action` is a core action (or a list of them); silence and anything that
+    is not a room action make no tool call.
+    """
+
+    return {"action": action, "ok": ok, "detail": detail, "bind": bind}
+
+
+def tool_call(action):
+    """The room tool call that carries one core action."""
+
+    kind = action.get("kind")
+    origin = (
+        {"origin_event_id": action["origin_event_id"]}
+        if "origin_event_id" in action
+        else {}
     )
-
-
-class ClaudeStub:
-    """A recording stand-in for the `claude` executable on PATH."""
-
-    #: `claude auth status` is a diagnostic, not a turn.  The stub answers it
-    #: without recording an invocation so it cannot shift the replay index or
-    #: appear in a test's assertions about participant turns.
-    AUTH_DEFAULT = {
-        "loggedIn": True,
-        "authMethod": "oauth_token",
-        "apiProvider": "firstParty",
-    }
-
-    def __init__(self, directory: Path, *, script: str) -> None:
-        self.directory = directory
-        self.binary = directory / "claude"
-        self.record_path = directory / "invocations.jsonl"
-        self.auth_path = directory / "auth-status.txt"
-        self.set_auth(self.AUTH_DEFAULT)
-        self.binary.write_text(script, encoding="utf-8")
-        self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
-
-    def set_auth(self, payload) -> None:
-        """Set what `claude auth status` answers; a string is emitted raw."""
-        raw = payload if isinstance(payload, str) else json.dumps(payload)
-        self.auth_path.write_text(raw, encoding="utf-8")
-
-    def invocations(self) -> list[dict]:
-        if not self.record_path.exists():
-            return []
-        return [
-            json.loads(line)
-            for line in self.record_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-
-    @classmethod
-    def replaying(cls, directory: Path, documents: list[str]) -> "ClaudeStub":
-        """A stub that answers with each document in turn."""
-        answers = directory / "answers.json"
-        answers.write_text(json.dumps(documents), encoding="utf-8")
-        script = f"""#!{os.sys.executable}
-import json, os, sys
-if sys.argv[1:2] == ["auth"]:
-    sys.stdout.write(open({json.dumps(str(directory / "auth-status.txt"))}).read())
-    sys.exit(0)
-record = {json.dumps(str(directory / "invocations.jsonl"))}
-answers = json.loads(open({json.dumps(str(answers))}).read())
-argv = sys.argv[1:]
-with open(record, "a") as handle:
-    handle.write(json.dumps({{"argv": argv, "env": dict(os.environ),
-                             "cwd": os.getcwd()}}) + "\\n")
-index = sum(1 for _ in open(record)) - 1
-answer = answers[min(index, len(answers) - 1)]
-pinned = None
-for flag in ("--session-id", "--resume"):
-    if flag in argv:
-        pinned = argv[argv.index(flag) + 1]
-if pinned is not None:
-    answer = answer.replace({json.dumps(ECHO)}, pinned)
-# Existing platform tests name only the inner action.  The recording model
-# fixture behaves like a conforming model: it copies the exact version and
-# binding from this invocation's core-owned request before returning it.
-try:
-    marker = "<nunchi_participant_turn_v1>"
-    prompt = argv[-1]
-    start = prompt.index(marker) + len(marker)
-    end = prompt.index("</nunchi_participant_turn_v1>", start)
-    turn = json.loads(prompt[start:end])["participant_turn"]
-    parsed = json.loads(answer)
-    output = parsed.get("structured_output")
-    if isinstance(output, dict) and set(output) == {{"action_json"}}:
-        inner = json.loads(output["action_json"])
-        if isinstance(inner, dict) and set(inner) not in (
-            {{"protocol", "binding", "action"}},
-        ):
-            envelope = {{
-                "protocol": turn["protocol"],
-                "binding": turn["binding"],
-                "action": inner,
-            }}
-            output["action_json"] = json.dumps(envelope)
-            parsed["result"] = json.dumps(output)
-            answer = json.dumps(parsed)
-except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-    pass
-sys.stdout.write(answer)
-"""
-        return cls(directory, script=script)
-
-    @classmethod
-    def sleeping(cls, directory: Path, seconds: float) -> "ClaudeStub":
-        script = f"""#!{os.sys.executable}
-import json, os, sys, time
-if sys.argv[1:2] == ["auth"]:
-    sys.stdout.write(open({json.dumps(str(directory / "auth-status.txt"))}).read())
-    sys.exit(0)
-with open({json.dumps(str(directory / "invocations.jsonl"))}, "a") as handle:
-    handle.write(json.dumps({{"argv": sys.argv[1:], "env": dict(os.environ),
-                             "cwd": os.getcwd()}}) + "\\n")
-time.sleep({seconds!r})
-"""
-        return cls(directory, script=script)
-
-
-def on_path(directory: Path):
-    return mock.patch.dict(
-        os.environ,
-        {"PATH": f"{directory}{os.pathsep}{os.environ.get('PATH', '')}"},
-        clear=False,
-    )
-
-
-class ParticipantIsolationTests(unittest.TestCase):
-    """The headless turn cannot reach the room or the host's secrets."""
-
-    def _participant(self, directory, stub, **config):
-        with on_path(stub.directory):
-            return ClaudeCodeParticipant(
-                profile=PROFILE,
-                config={"session_mode": "fresh", **config},
-                binding=BINDING,
-                state_directory=directory,
-            )
-
-    def test_turn_runs_with_no_tools_no_mcp_and_no_inherited_settings(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(
-                root / "bin",
-                [
-                    result_document(
-                        {"kind": "silence"}
-                    )
-                ],
-            )
-            participant = self._participant(root / "state", stub)
-            self.assertIsNone(
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            )
-            argv = stub.invocations()[0]["argv"]
-            self.assertIn("--print", argv)
-            self.assertEqual("", argv[argv.index("--tools") + 1])
-            self.assertIn("--strict-mcp-config", argv)
-            self.assertEqual(
-                '{"mcpServers":{}}', argv[argv.index("--mcp-config") + 1]
-            )
-            self.assertEqual("", argv[argv.index("--setting-sources") + 1])
-            self.assertIn("--disable-slash-commands", argv)
-            # Ambient CLAUDE.md / CLAUDE.local.md discovery must be off.  Both
-            # barriers are asserted so removing either is a test failure.
-            self.assertIn("--safe-mode", argv)
-            self.assertEqual("manual", argv[argv.index("--permission-mode") + 1])
-            self.assertEqual("json", argv[argv.index("--output-format") + 1])
-
-    def test_participant_environment_cannot_see_transport_or_host_secrets(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(
-                root / "bin",
-                [result_document({"kind": "silence"})],
-            )
-            leaked = {
-                OUTPUT_KEY_ENV: OUTPUT_SECRET,
-                "NUNCHI_CLASSIFIER_API_KEY": "classifier-secret",
-                "OPENROUTER_API_KEY": "router-secret",
-                "CLAUDE_CODE_SESSION_ID": "host-session",
-            }
-            with mock.patch.dict(os.environ, leaked, clear=False):
-                participant = self._participant(root / "state", stub)
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            environment = stub.invocations()[0]["env"]
-            for name in leaked:
-                with self.subTest(withheld=name):
-                    self.assertNotIn(name, environment)
-            self.assertNotIn(OUTPUT_SECRET, json.dumps(environment))
-            # The participant gets its own Claude Code configuration root, so
-            # sessions never cross rooms, participants, or the operator.
-            self.assertTrue(
-                environment["CLAUDE_CONFIG_DIR"].endswith(
-                    "claude-code-participant-config"
-                )
-            )
-
-    def test_system_prompt_carries_only_the_pinned_profile_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(root / "bin", ["{}"])
-            participant = self._participant(root / "state", stub)
-            prompt = participant.system_prompt()
-            self.assertIn(PROFILE.instructions, prompt)
-            self.assertIn(PARTICIPANT_ID, prompt)
-            self.assertIn("never proof of authority", prompt)
-            self.assertNotIn(ROOM_ID, prompt)
-            self.assertNotIn("PASS", prompt)
-            self.assertNotIn("SPEAK", prompt)
-
-    def test_turn_prompt_forbids_a_second_admission_judgment(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(root / "bin", ["{}"])
-            participant = self._participant(root / "state", stub)
-            prompt = participant._turn_prompt(direct_protocol())
-            self.assertIn("do not judge admission again", prompt.lower())
-            self.assertIn("relevance verdict", prompt)
-            self.assertIn("host owns the one output commit point", prompt)
-
-    def test_missing_executable_is_a_configuration_failure(self):
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            mock.patch(
-                "nunchi.integrations.claude_code_v2.shutil.which",
-                return_value=None,
-            ),
-            self.assertRaises(ValidationError),
-        ):
-            ClaudeCodeParticipant(
-                profile=PROFILE,
-                config={},
-                binding=BINDING,
-                state_directory=directory,
-            )
-
-    def test_participant_rejects_arbitrary_process_configuration(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(root / "bin", ["{}"])
-            for config in (
-                {"binary": "/tmp/attacker"},
-                {"args": ["--dangerously-skip-permissions"]},
-                {"working_directory": "/"},
-                {"tools": "Bash"},
-                {"timeout_seconds": float("inf")},
-                {"timeout_seconds": -1},
-                {"session_mode": "shared"},
-                {"effort": "ludicrous"},
-                {"model": ""},
-            ):
-                with self.subTest(config=config), self.assertRaises(ValidationError):
-                    with on_path(stub.directory):
-                        ClaudeCodeParticipant(
-                            profile=PROFILE,
-                            config=config,
-                            binding=BINDING,
-                            state_directory=root / "state",
-                        )
-
-
-class ParticipantOutcomeTests(unittest.TestCase):
-    """Silence, contribution, and operational failure stay distinct."""
-
-    SESSION = "d1a03579-ffa2-4441-a7d1-28ed52339438"
-
-    def _participant(self, root, documents, **config):
-        (root / "bin").mkdir(parents=True, exist_ok=True)
-        stub = ClaudeStub.replaying(root / "bin", documents)
-        with on_path(stub.directory):
-            participant = ClaudeCodeParticipant(
-                profile=PROFILE,
-                config={"session_mode": "fresh", **config},
-                binding=BINDING,
-                state_directory=root / "state",
-            )
-        return participant, stub
-
-    def test_explicit_silence_is_silence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            participant, _ = self._participant(
-                Path(directory),
-                [result_document({"kind": "silence"})],
-            )
-            self.assertIsNone(
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            )
-
-    def test_contribution_is_returned_to_the_host_not_sent(self):
-        action = {"kind": "message", "origin_event_id": "e1", "text": "on it"}
-        with tempfile.TemporaryDirectory() as directory:
-            participant, _ = self._participant(
-                Path(directory),
-                [result_document(action)],
-            )
-            self.assertEqual(
-                action,
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                ),
-            )
-
-    def test_malformed_output_is_an_operational_failure_never_silence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for document in (
-                "not json at all",
-                json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                            "session_id": ECHO, "result": "I think I'll pass."}),
-                result_document(None),
-                result_document({"kind": "silence"},
-                                is_error=True),
-                result_document({"kind": "silence"},
-                                subtype="error_max_turns"),
-            ):
-                with self.subTest(document=document[:40]):
-                    with tempfile.TemporaryDirectory() as run:
-                        participant, _ = self._participant(Path(run), [document])
-                        with self.assertRaises(ClaudeCodeParticipantError):
-                            participant(
-                                wake=test_wake(),
-                                expand=None,
-                                cancel=threading.Event(),
-                            )
-
-    def test_own_budget_overrun_is_an_error_while_cancellation_is_closed_work(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.sleeping(root / "bin", 30)
-            with on_path(stub.directory):
-                participant = ClaudeCodeParticipant(
-                    profile=PROFILE,
-                    config={"session_mode": "fresh", "timeout_seconds": 0.5},
-                    binding=BINDING,
-                    state_directory=root / "state",
-                )
-            # No cancellation: an overrun is operational failure, so the host
-            # records `unknown` rather than fabricating participant silence.
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            # Host-ordered cancellation closes the turn without an answer.
-            cancel = threading.Event()
-            cancel.set()
-            self.assertIsNone(
-                participant(
-                    wake=test_wake("r2"),
-                    expand=None,
-                    cancel=cancel,
-                )
-            )
-
-    def test_expansion_is_host_mediated_and_capped(self):
-        expand_page = {"events": [], "coverage": {}, "has_next_page": False}
-        calls = []
-
-        def expand(**kwargs):
-            calls.append(kwargs)
-            return expand_page
-
-        expansion = {
-            "kind": "expand",
-            "direction": "before",
-            "anchor_event_id": "e1",
-            "max_events": 5,
-            "max_bytes": 1024,
+    if kind == "message":
+        return "send", {"text": action["text"], **origin}
+    if kind == "reply":
+        return "send", {
+            "text": action["text"],
+            "reply_to_event_id": action["target_event_id"],
+            **origin,
         }
-        with tempfile.TemporaryDirectory() as directory:
-            participant, _ = self._participant(
-                Path(directory),
-                [result_document(expansion)] * 5,
-            )
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=expand,
-                    cancel=threading.Event(),
-                )
-            self.assertEqual(3, len(calls))
-            self.assertEqual("before", calls[0]["direction"])
-            self.assertEqual(5, calls[0]["max_events"])
-
-    def test_expansion_request_shape_is_closed(self):
-        expansion = {
-            "kind": "expand",
-            "direction": "sideways",
-            "anchor_event_id": "e1",
+    if kind == "reaction":
+        return "react", {
+            "target_event_id": action["target_event_id"],
+            "reaction": action["reaction"],
+            "operation": action["operation"],
+            **origin,
         }
-        with tempfile.TemporaryDirectory() as directory:
-            participant, _ = self._participant(
-                Path(directory),
-                [result_document(expansion)],
-            )
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=lambda **_: {},
-                    cancel=threading.Event(),
-                )
-
-
-class SessionContinuityTests(unittest.TestCase):
-    SESSION = "d1a03579-ffa2-4441-a7d1-28ed52339438"
-    OTHER = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-    def _participant(self, root, documents, **config):
-        (root / "bin").mkdir(parents=True, exist_ok=True)
-        stub = ClaudeStub.replaying(root / "bin", documents)
-        with on_path(stub.directory):
-            participant = ClaudeCodeParticipant(
-                profile=PROFILE,
-                config=config,
-                binding=BINDING,
-                state_directory=root / "state",
-            )
-        return participant, stub
-
-    def test_persistent_session_is_created_then_resumed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, stub = self._participant(
-                root,
-                [result_document({"kind": "silence"})],
-                session_mode="persistent",
-            )
-            # The stub echoes a fixed session ID; the host pins its own and
-            # rejects a mismatch, so make the first turn establish it.
-            participant._save_session(self.SESSION)
-            participant(
-                wake=test_wake(),
-                expand=None,
-                cancel=threading.Event(),
-            )
-            argv = stub.invocations()[-1]["argv"]
-            self.assertEqual(self.SESSION, argv[argv.index("--resume") + 1])
-            self.assertNotIn("--session-id", argv)
-
-    def test_fresh_session_mode_never_resumes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, stub = self._participant(
-                root,
-                [result_document({"kind": "silence"})],
-                session_mode="fresh",
-            )
-            participant(
-                wake=test_wake(),
-                expand=None,
-                cancel=threading.Event(),
-            )
-            argv = stub.invocations()[-1]["argv"]
-            self.assertNotIn("--resume", argv)
-            self.assertIn("--session-id", argv)
-            self.assertFalse(participant.session_path.exists())
-
-    def test_answer_on_another_session_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, _ = self._participant(
-                root,
-                [result_document({"kind": "silence"}, session_id=self.OTHER)],
-                session_mode="persistent",
-            )
-            participant._save_session(self.SESSION)
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-
-    def test_session_state_bound_to_profile_room_and_behavior(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, _ = self._participant(
-                root,
-                [result_document({"kind": "silence"})],
-                session_mode="persistent",
-            )
-            participant._save_session(self.SESSION)
-            stored = json.loads(participant.session_path.read_text())
-            for mutation in (
-                {"profile_sha256": "f" * 64},
-                {"room_id": "99"},
-                {"continuity_scope_id": "discord:channel:99"},
-                {"participant_id": "someone-else"},
-                {"actor_id": "discord:actor:99"},
-                {"behavior_sha256": "0" * 64},
-                {"schema_version": 1},
-                {"session_id": "not-a-uuid"},
-            ):
-                with self.subTest(mutation=mutation):
-                    participant.session_path.write_text(
-                        json.dumps({**stored, **mutation})
-                    )
-                    with self.assertRaises(ClaudeCodeParticipantError):
-                        participant._load_session()
-            participant.session_path.write_text("{ not json")
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant._load_session()
-
-    def test_materially_different_instructions_change_the_bound_turn(self):
-        """Room facts held constant, a different valid profile is different."""
-        other = ParticipantProfile(
-            profile_id="vigil-quiet",
-            participant_id=PARTICIPANT_ID,
-            actor_id=ACTOR_ID,
-            instructions="Only speak when directly named.",
-            provenance="trusted:test",
-            sha256="b" * 64,
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir()
-            stub = ClaudeStub.replaying(root / "bin", ["{}"])
-            with on_path(stub.directory):
-                first = ClaudeCodeParticipant(
-                    profile=PROFILE,
-                    config={},
-                    binding=BINDING,
-                    state_directory=root / "one",
-                )
-                second = ClaudeCodeParticipant(
-                    profile=other,
-                    config={},
-                    binding=BINDING,
-                    state_directory=root / "two",
-                )
-            self.assertNotEqual(first.system_prompt(), second.system_prompt())
-            self.assertIn("Only speak when directly named.", second.system_prompt())
-            # A swapped profile cannot silently inherit the other's session.
-            self.assertNotEqual(first.behavior_sha256, second.behavior_sha256)
-
-
-class SessionPinIntegrityTests(unittest.TestCase):
-    """Only a turn that produced a valid outcome may become continuation."""
-
-    OTHER = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-    def _participant(self, root, documents):
-        (root / "bin").mkdir(parents=True, exist_ok=True)
-        stub = ClaudeStub.replaying(root / "bin", documents)
-        with on_path(stub.directory):
-            participant = ClaudeCodeParticipant(
-                profile=PROFILE,
-                config={"session_mode": "persistent"},
-                binding=BINDING,
-                state_directory=root / "state",
-            )
-        return participant, stub
-
-    def _assert_no_pin(self, documents):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, _ = self._participant(root, documents)
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            self.assertFalse(
-                participant.session_path.exists(),
-                "a failed turn must not become resumable continuation",
-            )
-
-    def test_a_malformed_turn_does_not_become_persistent_continuation(self):
-        self._assert_no_pin([result_document(None)])
-
-    def test_a_non_envelope_turn_does_not_become_persistent_continuation(self):
-        self._assert_no_pin(
-            [
-                json.dumps(
-                    {
-                        "type": "result",
-                        "subtype": "success",
-                        "is_error": False,
-                        "session_id": ECHO,
-                        "result": "sure, I'll stay quiet",
-                    }
-                )
-            ]
-        )
-
-    def test_an_unattested_session_does_not_become_persistent_continuation(self):
-        # The CLI reports no session at all.
-        self._assert_no_pin(
-            [
-                json.dumps(
-                    {
-                        "type": "result",
-                        "subtype": "success",
-                        "is_error": False,
-                        "result": json.dumps(
-                            {"action_json": json.dumps({"kind": "silence"})}
-                        ),
-                    }
-                )
-            ]
-        )
-
-    def test_a_foreign_session_does_not_become_persistent_continuation(self):
-        self._assert_no_pin(
-            [result_document({"kind": "silence"}, session_id=self.OTHER)]
-        )
-
-    def test_an_errored_turn_does_not_become_persistent_continuation(self):
-        self._assert_no_pin(
-            [result_document({"kind": "silence"}, subtype="error_max_turns")]
-        )
-
-    def test_exceeding_the_expansion_cap_does_not_pin_the_session(self):
-        expansion = {
-            "kind": "expand",
-            "direction": "before",
-            "anchor_event_id": "e1",
-            "max_events": 5,
-            "max_bytes": 1024,
+    if kind == "privileged":
+        return "propose", {
+            "capability": action["capability"],
+            "resource": action["resource"],
+            "operation": action["operation"],
+            **origin,
         }
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, _ = self._participant(
-                root, [result_document(expansion)] * 6
+    if kind == "expand":
+        return "context", {key: value for key, value in action.items() if key != "kind"}
+    return None
+
+
+class ScriptedSession:
+    """Does what the Nunchi mod does inside a real dedicated session."""
+
+    def __init__(self, documents=()):
+        self.documents = list(documents)
+        self.on_turn_end = None
+        self.participant = None
+        self.answers = []
+        self.interrupts = 0
+        self.stopped = False
+        self._invocations = []
+        self._lock = threading.Lock()
+        self._idle = threading.Event()
+        self._idle.set()
+
+    def invocations(self):
+        with self._lock:
+            return list(self._invocations)
+
+    def wait_idle(self, cancel):
+        while not self._idle.wait(0.02):
+            if cancel.is_set():
+                return False
+        return not cancel.is_set()
+
+    def submit(self, text):
+        with self._lock:
+            index = len(self._invocations)
+            self._invocations.append({"text": text})
+        if self.documents:
+            script = self.documents[min(index, len(self.documents) - 1)]
+        else:
+            script = result_document({"kind": "silence"})
+        if not isinstance(script, dict):
+            script = result_document({"kind": "silence"})
+        self._idle.clear()
+        threading.Thread(
+            target=self._turn, args=(index, text, script), daemon=True
+        ).start()
+
+    def _turn(self, index, text, script):
+        turn_id = f"turn-{index}"
+        participant = self.participant
+        if script["bind"]:
+            match = _WAKE.match(text)
+            participant.bind_turn(
+                turn_id=turn_id, wake_id=match.group(1) if match else None
             )
-            with self.assertRaises(ClaudeCodeParticipantError):
-                participant(
-                    wake=test_wake(),
-                    expand=lambda **_: {"events": [], "has_next_page": False},
-                    cancel=threading.Event(),
-                )
-            self.assertFalse(participant.session_path.exists())
-
-    def test_direct_invocation_alone_never_pins(self):
-        """Nothing accepted the turn, so nothing may become resumable."""
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant, _ = self._participant(
-                root, [result_document({"kind": "silence"})]
-            )
-            self.assertIsNone(
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            )
-            self.assertFalse(participant.session_path.exists())
-
-
-class StagedPinBoundTests(unittest.TestCase):
-    """Closed work must not accumulate staged continuation state."""
-
-    def _participant(self, root, documents):
-        (root / "bin").mkdir(parents=True, exist_ok=True)
-        stub = ClaudeStub.replaying(root / "bin", documents)
-        with on_path(stub.directory):
-            return ClaudeCodeParticipant(
-                profile=PROFILE,
-                config={"session_mode": "persistent"},
-                binding=BINDING,
-                state_directory=root / "state",
-            )
-
-    def test_repeated_unaccepted_turns_stay_bounded(self):
-        action = {"kind": "message", "origin_event_id": "e1", "text": "hi"}
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant = self._participant(root, [result_document(action)] * 64)
-            for index in range(32):
-                participant(
-                    wake=test_wake(f"r{index}"),
-                    expand=None,
-                    cancel=threading.Event(),
-                )
-            # Nothing accepted any of them, so nothing is durable...
-            self.assertFalse(participant.session_path.exists())
-            # ...and the staged store did not grow without bound.
-            self.assertLessEqual(participant.pending_pin_count, 8)
-
-    def test_a_cancelled_turn_discards_its_staged_pin(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "bin").mkdir(parents=True, exist_ok=True)
-            stub = ClaudeStub.sleeping(root / "bin", 30)
-            with on_path(stub.directory):
-                participant = ClaudeCodeParticipant(
-                    profile=PROFILE,
-                    config={"session_mode": "persistent", "timeout_seconds": 30},
-                    binding=BINDING,
-                    state_directory=root / "state",
-                )
-            cancel = threading.Event()
-            cancel.set()
-            self.assertIsNone(
-                participant(
-                    wake=test_wake(),
-                    expand=None,
-                    cancel=cancel,
-                )
-            )
-            self.assertEqual(0, participant.pending_pin_count)
-            self.assertFalse(participant.session_path.exists())
-
-    def test_a_staged_pin_is_consumed_not_left_behind_on_acceptance(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            participant = self._participant(
-                root, [result_document({"kind": "silence"})]
-            )
-            participant(
-                wake=test_wake(),
-                expand=None,
-                cancel=threading.Event(),
-            )
-            self.assertEqual(1, participant.pending_pin_count)
-            participant.commit_pin("r1")
-            self.assertEqual(0, participant.pending_pin_count)
-            self.assertTrue(participant.session_path.exists())
-
-
-class SessionPinAcceptanceTests(unittest.TestCase):
-    """Continuity becomes durable only once the host accepts the turn."""
-
-    EVENT = "discord:message:1"
-
-    def _harness(self, directory, action):
-        return RuntimeHarness(
-            directory,
-            documents=[result_document(action)] * 4,
-            model=FixtureModel("WAKE"),
-            policy={"preattention_enabled": True},
-            claude={"session_mode": "persistent"},
-            payloads={
-                "send_message": {
-                    "message": {
-                        "message_id": "777",
-                        "channel_id": ROOM_ID,
-                        "author_id": "9",
-                        "author_is_bot": True,
-                        "content": "on it",
-                        "reply_to_message_id": None,
-                    }
-                }
-            },
-        )
-
-    @staticmethod
-    def _session_path(directory):
-        return Path(directory) / "state" / "claude-code-v2-session.json"
-
-    def _deliver(self, harness):
-        harness.runtime.handle(
-            notification(
-                "d1",
-                message_event(self.EVENT, author="discord:actor:42"),
-                {"discord:actor:42": {"display_name": "Zoe", "kind": "human"}},
-            )
-        )
-        self.assertTrue(harness.runtime.lane.drain(timeout=30))
-
-    def test_accepted_silence_pins_the_session(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with self._harness(directory, {"kind": "silence"}) as harness:
-                self._deliver(harness)
-                host = [
-                    r
-                    for r in harness.runtime.pipeline.observation.receipts.all_records()
-                    if r["stage"] == "participant-host"
-                ]
-                self.assertEqual("silent", host[-1]["body"]["outcome"])
-                self.assertTrue(self._session_path(directory).exists())
-
-    def test_an_accepted_and_dispatched_contribution_pins_the_session(self):
-        action = {
-            "kind": "message",
-            "origin_event_id": self.EVENT,
-            "text": "on it",
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            with self._harness(directory, action) as harness:
-                self._deliver(harness)
-                self.assertEqual(1, len(harness.client.outbound()))
-                self.assertTrue(self._session_path(directory).exists())
-
-    def test_an_action_the_host_rejects_leaves_no_resumable_state(self):
-        """An invisible origin is rejected after the participant returned."""
-        action = {
-            "kind": "message",
-            "origin_event_id": "discord:message:999",
-            "text": "on it",
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            with self._harness(directory, action) as harness:
-                self._deliver(harness)
-                self.assertEqual([], harness.client.outbound())
-                self.assertFalse(self._session_path(directory).exists())
-
-    def test_cancellation_before_the_commit_point_leaves_no_resumable_state(self):
-        action = {
-            "kind": "message",
-            "origin_event_id": self.EVENT,
-            "text": "on it",
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            with self._harness(directory, action) as harness:
-                runtime = harness.runtime
-                started = threading.Event()
-                released = threading.Event()
-                real = runtime.pipeline.host.participant
-
-                def blocking(*, wake, expand, cancel):
-                    started.set()
-                    released.wait(20)
-                    return real(wake=wake, expand=expand, cancel=cancel)
-
-                runtime.pipeline.host.participant = blocking
-                runtime.handle(
-                    notification(
-                        "d1",
-                        message_event(self.EVENT, author="discord:actor:42"),
-                        {"discord:actor:42": {"kind": "human"}},
+        steps = script["action"] if isinstance(script["action"], list) else [script["action"]]
+        for step in steps:
+            call = tool_call(step) if isinstance(step, dict) else None
+            if call is not None:
+                role, arguments = call
+                self.answers.append(
+                    participant.call_tool(
+                        turn_id=turn_id, tool=full_tool_name(role), arguments=arguments
                     )
                 )
-                self.assertTrue(started.wait(15))
-                runtime.pipeline.cancel()
-                released.set()
-                self.assertTrue(runtime.lane.drain(timeout=30))
-                self.assertEqual([], harness.client.outbound())
-                self.assertFalse(self._session_path(directory).exists())
+        self.on_turn_end(ok=script["ok"], detail=script["detail"])
+        self._idle.set()
 
-    def test_uncertain_persistence_leaves_no_resumable_state(self):
-        """A failed directory sync must not leave a loadable session file."""
-        from nunchi.integrations import claude_code_v2 as module
+    def interrupt(self):
+        self.interrupts += 1
 
-        with tempfile.TemporaryDirectory() as directory:
-            with self._harness(directory, {"kind": "silence"}) as harness:
-                real_fsync = os.fsync
-                path = self._session_path(directory)
+    def stop(self):
+        self.stopped = True
 
-                def failing_fsync(fd):
-                    # Fail only the directory sync that follows the rename.
-                    try:
-                        if stat.S_ISDIR(os.fstat(fd).st_mode) and path.exists():
-                            raise OSError("directory sync is uncertain")
-                    except OSError as exc:
-                        if "uncertain" in str(exc):
-                            raise
-                    return real_fsync(fd)
 
-                with mock.patch.object(module.os, "fsync", failing_fsync):
-                    self._deliver(harness)
-                self.assertFalse(
-                    path.exists(),
-                    "an uncertain session write must not remain resumable",
-                )
+class ManualSession:
+    """A session the test plays by hand, one step at a time."""
+
+    def __init__(self):
+        self.on_turn_end = None
+        self.submitted = []
+        self.interrupts = 0
+        self.submitted_event = threading.Event()
+
+    def wait_idle(self, cancel):
+        return not cancel.is_set()
+
+    def submit(self, text):
+        self.submitted.append(text)
+        self.submitted_event.set()
+
+    def interrupt(self):
+        self.interrupts += 1
 
 
 class AtomicWriteTests(unittest.TestCase):
@@ -1240,55 +496,6 @@ class AtomicWriteTests(unittest.TestCase):
                 self.assertEqual("PWNED", (workspace / "note.txt").read_text())
 
 
-class ResultParserTests(unittest.TestCase):
-    SESSION = "d1a03579-ffa2-4441-a7d1-28ed52339438"
-
-    def test_structured_output_is_preferred_and_result_text_is_the_fallback(self):
-        action = {"kind": "message", "origin_event_id": "e1", "text": "hi"}
-        self.assertEqual(
-            (self.SESSION, action),
-            parse_claude_result(result_document(action, session_id=self.SESSION)),
-        )
-        fallback = json.dumps(
-            {
-                "type": "result",
-                "subtype": "success",
-                "is_error": False,
-                "session_id": self.SESSION,
-                "result": json.dumps({"action_json": json.dumps(action)}),
-            }
-        )
-        self.assertEqual((self.SESSION, action), parse_claude_result(fallback))
-
-    def test_non_result_and_open_envelopes_are_rejected(self):
-        for document in (
-            json.dumps({"type": "assistant", "session_id": self.SESSION}),
-            json.dumps(
-                {
-                    "type": "result",
-                    "subtype": "success",
-                    "is_error": False,
-                    "session_id": self.SESSION,
-                    "structured_output": {
-                        "action_json": json.dumps({"kind": "silence"}),
-                        "note": "extra",
-                    },
-                }
-            ),
-            json.dumps(
-                {
-                    "type": "result",
-                    "subtype": "success",
-                    "is_error": False,
-                    "session_id": self.SESSION,
-                    "structured_output": {"action_json": "[1,2,3]"},
-                }
-            ),
-        ):
-            with self.subTest(document=document[:50]):
-                self.assertIsNone(parse_claude_result(document)[1])
-
-
 class FixtureModel:
     name = "fixture-participant-attention"
     provider = "fixture"
@@ -1380,7 +587,7 @@ def notification(delivery_id, event, actors, **overrides):
 
 
 class RuntimeHarness:
-    """Build a real `ClaudeCodeRoomRuntime` over a stub CLI and MCP client."""
+    """Build a real `ClaudeCodeRoomRuntime` over a scripted session and MCP client."""
 
     def __init__(
         self,
@@ -1392,10 +599,12 @@ class RuntimeHarness:
         authorization=None,
         payloads=None,
         claude=None,
+        session=None,
+        environment=None,
     ):
         self.root = Path(directory)
-        (self.root / "bin").mkdir(parents=True, exist_ok=True)
-        self.stub = ClaudeStub.replaying(self.root / "bin", documents)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.session = session if session is not None else ScriptedSession(documents)
         profile_body = {
             "profile_id": "vigil-default",
             "participant_id": PARTICIPANT_ID,
@@ -1439,10 +648,7 @@ class RuntimeHarness:
         patches = [
             mock.patch.dict(
                 os.environ,
-                {
-                    OUTPUT_KEY_ENV: OUTPUT_SECRET,
-                    "PATH": f"{self.stub.directory}{os.pathsep}{os.environ.get('PATH', '')}",
-                },
+                {OUTPUT_KEY_ENV: OUTPUT_SECRET, **(environment or {})},
                 clear=False,
             )
         ]
@@ -1454,11 +660,25 @@ class RuntimeHarness:
                 )
             )
         self._patches = patches
+        self.runtime = None
 
     def __enter__(self):
         for patch in self._patches:
             patch.start()
-        self.runtime = ClaudeCodeRoomRuntime(self.config, self.client)
+        try:
+            self.runtime = ClaudeCodeRoomRuntime(
+                self.config,
+                self.client,
+                session=self.session if isinstance(self.session, ScriptedSession) else None,
+            )
+        except BaseException:
+            for patch in reversed(self._patches):
+                patch.stop()
+            raise
+        if isinstance(self.session, ScriptedSession):
+            self.session.participant = self.runtime.participant
+        else:
+            self.session = self.runtime.session
         return self
 
     def __exit__(self, *exc):
@@ -1468,6 +688,7 @@ class RuntimeHarness:
             if not self.runtime.lane.drain(timeout=30):
                 self.runtime.lane.cancel()
                 self.runtime.lane.drain(timeout=10)
+            self.runtime.close()
         finally:
             for patch in reversed(self._patches):
                 patch.stop()
@@ -1597,7 +818,7 @@ class NativeIngressTests(unittest.TestCase):
                     )
                 )
                 self.assertFalse(outcome.observation.wake_eligible)
-                self.assertEqual([], harness.stub.invocations())
+                self.assertEqual([], harness.session.invocations())
                 self.assertEqual([], harness.client.outbound())
                 # It remains available as later factual context.
                 self.assertIn(
@@ -1675,7 +896,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 # Suppression ends the stream at attention: no participant, no
                 # participant-host stage, and no native call of any kind.
                 self.assertEqual([], self._stage(harness, "participant-host"))
-                self.assertEqual([], harness.stub.invocations())
+                self.assertEqual([], harness.session.invocations())
                 self.assertEqual([], harness.client.outbound())
 
     def test_wake_contribution_reaches_exactly_one_native_send(self):
@@ -1694,7 +915,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 self._deliver(harness)
                 attention = self._stage(harness, "attention")[-1]
                 self.assertEqual("WAKE", attention["body"]["effective_disposition"])
-                self.assertEqual(1, len(harness.stub.invocations()))
+                self.assertEqual(1, len(harness.session.invocations()))
                 outbound = harness.client.outbound()
                 self.assertEqual(1, len(outbound))
                 self.assertEqual("send_message", outbound[0][0])
@@ -1715,7 +936,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 policy={"preattention_enabled": True},
             ) as harness:
                 self._deliver(harness)
-                self.assertEqual(1, len(harness.stub.invocations()))
+                self.assertEqual(1, len(harness.session.invocations()))
                 host = self._stage(harness, "participant-host")[-1]
                 self.assertTrue(host["body"]["invoked"])
                 # Participant silence is distinct from model suppression.
@@ -1755,7 +976,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 self.assertEqual("margin-defer", body["routing_audit"]["valve"])
                 self.assertEqual("margin", body["routing_audit"]["override_cause"])
                 # Uncertainty widens attention: the participant is woken.
-                self.assertEqual(1, len(harness.stub.invocations()))
+                self.assertEqual(1, len(harness.session.invocations()))
 
     def test_preattention_bypass_fabricates_no_model_judgment(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1770,7 +991,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 self.assertNotIn("classifier_disposition", body)
                 self.assertNotIn("effective_disposition", body)
                 # Bypass is non-social but still runs the ordinary path.
-                self.assertEqual(1, len(harness.stub.invocations()))
+                self.assertEqual(1, len(harness.session.invocations()))
                 self.assertEqual(
                     "PREATTENTION_BYPASS",
                     self._stage(harness, "participant-host")[-1]["body"]["wake_source"],
@@ -1786,7 +1007,7 @@ class AttentionLifecycleTests(unittest.TestCase):
                 self._deliver(harness)
                 body = self._stage(harness, "attention")[-1]["body"]
                 self.assertIn("error", body)
-                self.assertEqual(1, len(harness.stub.invocations()))
+                self.assertEqual(1, len(harness.session.invocations()))
                 self.assertEqual(
                     "ERROR_FALLBACK",
                     self._stage(harness, "participant-host")[-1]["body"]["wake_source"],
@@ -1804,8 +1025,49 @@ class AttentionLifecycleTests(unittest.TestCase):
                 # An explicit operator NO_WAKE override is operational policy,
                 # never a social disposition, and produces no effect at all.
                 self.assertEqual([], self._stage(harness, "participant-host"))
-                self.assertEqual([], harness.stub.invocations())
+                self.assertEqual([], harness.session.invocations())
                 self.assertEqual([], harness.client.outbound())
+
+
+class GatedHostFailureTests(unittest.TestCase):
+    def test_a_host_failure_after_the_send_is_reported_as_uncertain(self):
+        action = {"kind": "message", "origin_event_id": "discord:message:1", "text": "on it"}
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=[result_document(action)],
+                payloads={
+                    "send_message": {
+                        "message": {
+                            "message_id": "777",
+                            "channel_id": ROOM_ID,
+                            "author_id": "9",
+                            "author_is_bot": True,
+                            "content": "on it",
+                            "reply_to_message_id": None,
+                        }
+                    }
+                },
+            ) as harness:
+                def broken_receipt(*_args, **_kwargs):
+                    raise OSError("disk full")
+
+                harness.runtime.pipeline.host._append_transport_receipt = broken_receipt
+                harness.runtime.handle(
+                    notification(
+                        "d1",
+                        message_event("discord:message:1", author="discord:actor:42"),
+                        {"discord:actor:42": {"kind": "human"}},
+                    )
+                )
+                harness.runtime.lane.drain(timeout=30)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not harness.session.answers:
+                    time.sleep(0.05)
+                self.assertEqual(1, len(harness.client.outbound()))
+                ok, text = harness.session.answers[0]
+                self.assertTrue(ok)
+                self.assertIn("uncertain", text)
 
 
 class SchedulingAndCancellationTests(unittest.TestCase):
@@ -2717,14 +1979,744 @@ class TransportAcknowledgementTests(unittest.TestCase):
         self.assertEqual("failed", result.delivery)
 
 
+class GatedParticipantTests(unittest.TestCase):
+    """The gate's side of one turn: wake, binding, one action, and its end."""
+
+    def _participant(self, *, values=(), privileged=False):
+        session = ManualSession()
+        participant = GatedParticipant(
+            profile=PROFILE,
+            session=session,
+            guard=SecretGuard(values),
+            privileged_enabled=privileged,
+            result_wait_seconds=5,
+        )
+        session.on_turn_end = participant.turn_ended
+        return participant, session
+
+    def _start(self, participant, session, *, expand=None, opportunity=OPPORTUNITY):
+        cancel = threading.Event()
+        box = {}
+
+        def run():
+            try:
+                box["action"] = participant.run_protocol(
+                    wake=test_wake(),
+                    opportunity=deepcopy(opportunity),
+                    expand=expand or (lambda **_: {"events": []}),
+                    cancel=cancel,
+                )
+            except BaseException as exc:  # noqa: BLE001 - recorded for assertions
+                box["error"] = exc
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.assertTrue(session.submitted_event.wait(5))
+        wake_id = _WAKE.match(session.submitted[-1]).group(1)
+        return thread, box, wake_id, cancel
+
+    def _act(self, participant, tool, arguments, turn_id="t1"):
+        answer = {}
+        thread = threading.Thread(
+            target=lambda: answer.setdefault(
+                "value",
+                participant.call_tool(turn_id=turn_id, tool=tool, arguments=arguments),
+            ),
+            daemon=True,
+        )
+        thread.start()
+        return thread, answer
+
+    def test_the_wake_is_the_core_tool_turn_behind_a_wake_marker(self):
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session)
+        marker, _, body = session.submitted[0].partition("\n")
+        self.assertEqual(WAKE_MARKER.format(wake_id), marker)
+        self.assertTrue(
+            body.startswith(
+                participant_tool_turn_prompt(
+                    PROFILE, tools={"send": SEND, "react": REACT, "context": CONTEXT}
+                )
+            )
+        )
+        self.assertIn("<nunchi_participant_turn_v1>", body)
+        self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=wake_id))
+        participant.turn_ended(ok=True, detail="success")
+        thread.join(5)
+        self.assertEqual({"action": None}, box)
+
+    def test_a_turn_the_mod_never_bound_is_a_failure_never_silence(self):
+        participant, session = self._participant()
+        thread, box, _, _ = self._start(participant, session)
+        participant.turn_ended(ok=True, detail="success")
+        thread.join(5)
+        self.assertIsInstance(box.get("error"), ClaudeCodeGateError)
+        self.assertIn("did not bind", str(box["error"]))
+
+    def test_an_errored_turn_is_a_failure_never_silence(self):
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        participant.turn_ended(ok=False, detail="error_during_execution")
+        thread.join(5)
+        self.assertIsInstance(box.get("error"), ClaudeCodeGateError)
+        self.assertIn("error_during_execution", str(box["error"]))
+
+    def test_a_room_action_goes_to_the_host_and_its_result_back_to_the_tool(self):
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        acting, answer = self._act(participant, SEND, {"text": "on it"})
+        thread.join(5)
+        self.assertEqual(
+            {"kind": "message", "origin_event_id": "e1", "text": "on it"},
+            box["action"],
+        )
+        self.assertNotIn("value", answer, "the tool must wait for the host")
+        participant.settle("r1", TransportResult("sent", "discord:message:777"))
+        acting.join(5)
+        self.assertEqual((True, "Done: the room accepted this action."), answer["value"])
+
+    def test_a_host_that_commits_nothing_reaches_the_tool_as_not_posted(self):
+        participant, session = self._participant()
+        thread, _, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        acting, answer = self._act(participant, SEND, {"text": "on it"})
+        thread.join(5)
+        participant.settle("r1", None)
+        acting.join(5)
+        ok, text = answer["value"]
+        self.assertFalse(ok)
+        self.assertIn("Nothing was posted", text)
+
+    def test_one_room_action_per_turn(self):
+        participant, session = self._participant()
+        thread, _, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        acting, _ = self._act(participant, SEND, {"text": "first"})
+        thread.join(5)
+        participant.settle("r1", TransportResult("sent", "x"))
+        acting.join(5)
+        ok, text = participant.call_tool(
+            turn_id="t1", tool=REACT, arguments={"target_event_id": "e1", "reaction": "👀"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("already", text)
+
+    def test_calls_from_another_turn_or_for_unknown_tools_are_refused(self):
+        participant, session = self._participant()
+        _, _, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        for turn_id, tool in (("t2", SEND), (None, SEND), ("t1", "mcp__nunchi__other")):
+            with self.subTest(turn_id=turn_id, tool=tool):
+                ok, _ = participant.call_tool(
+                    turn_id=turn_id, tool=tool, arguments={"text": "hi"}
+                )
+                self.assertFalse(ok)
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_a_stale_or_missing_wake_id_does_not_bind(self):
+        participant, session = self._participant()
+        _, _, wake_id, _ = self._start(participant, session)
+        self.assertFalse(participant.bind_turn(turn_id="t1", wake_id="x" * 24))
+        self.assertFalse(participant.bind_turn(turn_id="t1", wake_id=None))
+        self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=wake_id))
+        self.assertFalse(participant.bind_turn(turn_id="t2", wake_id=wake_id))
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_a_continuation_turn_inside_the_wake_keeps_the_room_tools(self):
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session)
+        self.assertTrue(participant.bind_turn(turn_id="t1", wake_id=wake_id))
+        self.assertTrue(participant.bind_turn(turn_id="t2", wake_id=None))
+        self._act(participant, SEND, {"text": "after compaction"}, turn_id="t2")
+        thread.join(5)
+        self.assertEqual("after compaction", box["action"]["text"])
+        participant.settle("r1", TransportResult("sent", "x"))
+        participant.turn_ended(ok=True, detail="success")
+        # Once the wake ends, a turn without a marker binds to nothing.
+        self.assertFalse(participant.bind_turn(turn_id="t3", wake_id=None))
+
+    def test_a_secret_is_found_however_it_would_be_escaped(self):
+        secret = 'quote"and\\slash-0123456789'
+        participant, session = self._participant(values=[secret])
+        _, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, _ = participant.call_tool(turn_id="t1", tool=SEND, arguments={"text": secret})
+        self.assertFalse(ok)
+        self.assertNotIn("action", box)
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_secret_text_is_refused_and_the_turn_can_still_act(self):
+        secret = "s3cr3t-" + "v" * 24
+        participant, session = self._participant(values=[secret])
+        thread, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(
+            turn_id="t1", tool=SEND, arguments={"text": f"the key is {secret}"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("secret", text)
+        self.assertNotIn("action", box)
+        self._act(participant, SEND, {"text": "I cannot share that."})
+        thread.join(5)
+        self.assertEqual("I cannot share that.", box["action"]["text"])
+        participant.settle("r1", TransportResult("sent", "x"))
+
+    def test_a_bot_token_is_refused_even_when_not_configured(self):
+        participant, session = self._participant()
+        _, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        token = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA." + "GabCdE" + "." + "a" * 38
+        ok, _ = participant.call_tool(turn_id="t1", tool=SEND, arguments={"text": token})
+        self.assertFalse(ok)
+        self.assertNotIn("action", box)
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_an_action_naming_an_unseen_event_is_refused(self):
+        participant, session = self._participant()
+        _, box, wake_id, _ = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(
+            turn_id="t1",
+            tool=SEND,
+            arguments={"text": "yes", "reply_to_event_id": "e404"},
+        )
+        self.assertFalse(ok)
+        self.assertIn("absent", text)
+        self.assertNotIn("action", box)
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_a_context_page_extends_the_visible_facts(self):
+        pages = []
+
+        def expand(**kwargs):
+            pages.append(kwargs)
+            return {
+                "events": [
+                    {
+                        "id": "e0",
+                        "type": "message",
+                        "author_id": "discord:actor:42",
+                        "text": "earlier",
+                        "mentioned_actor_ids": [],
+                        "mentions_room": False,
+                    }
+                ],
+                "has_next_page": False,
+            }
+
+        participant, session = self._participant()
+        thread, box, wake_id, _ = self._start(participant, session, expand=expand)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(
+            turn_id="t1", tool=CONTEXT, arguments={"direction": "before"}
+        )
+        self.assertTrue(ok)
+        self.assertEqual("e0", json.loads(text)["events"][0]["id"])
+        self.assertEqual(
+            [{"direction": "before", "max_events": 12, "max_bytes": 16384}], pages
+        )
+        self._act(participant, SEND, {"text": "re: that", "reply_to_event_id": "e0"})
+        thread.join(5)
+        self.assertEqual("reply", box["action"]["kind"])
+        participant.settle("r1", TransportResult("sent", "x"))
+
+    def test_cancellation_interrupts_the_session_and_is_closed_work(self):
+        participant, session = self._participant()
+        thread, box, wake_id, cancel = self._start(participant, session)
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        cancel.set()
+        thread.join(5)
+        self.assertEqual({"action": None}, box)
+        self.assertEqual(1, session.interrupts)
+        ok, _ = participant.call_tool(turn_id="t1", tool=SEND, arguments={"text": "late"})
+        self.assertFalse(ok)
+
+    def test_permissions_limit_the_tools_offered_in_a_turn(self):
+        opportunity = deepcopy(OPPORTUNITY)
+        opportunity["permissions"]["ordinary_actions"] = ["message", "reply"]
+        participant, session = self._participant()
+        _, _, wake_id, _ = self._start(participant, session, opportunity=opportunity)
+        self.assertNotIn(REACT, session.submitted[0])
+        participant.bind_turn(turn_id="t1", wake_id=wake_id)
+        ok, text = participant.call_tool(
+            turn_id="t1", tool=REACT, arguments={"target_event_id": "e1", "reaction": "👀"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("not available", text)
+        participant.turn_ended(ok=True, detail="success")
+
+    def test_the_privileged_tool_exists_only_when_privileged_actions_do(self):
+        disabled, _ = self._participant()
+        enabled, _ = self._participant(privileged=True)
+        self.assertEqual(
+            ["room_send", "room_react", "room_context"],
+            [spec["name"] for spec in disabled.tool_specs()],
+        )
+        self.assertEqual(
+            ["room_send", "room_react", "room_propose", "room_context"],
+            [spec["name"] for spec in enabled.tool_specs()],
+        )
+
+
+class _UnixConnection(http.client.HTTPConnection):
+    def __init__(self, path):
+        super().__init__("nunchi-gate", timeout=10)
+        self._path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(self._path)
+
+
+def gate_post(socket_path, route, body, secret):
+    connection = _UnixConnection(str(socket_path))
+    headers = {"Content-Type": "application/json"}
+    if secret is not None:
+        headers["X-Nunchi-Session"] = secret
+    connection.request("POST", route, json.dumps(body), headers)
+    response = connection.getresponse()
+    data = response.read()
+    connection.close()
+    return response.status, json.loads(data)
+
+
+class GateServerTests(unittest.TestCase):
+    """The mod's only way in is the private socket with the launch secret."""
+
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp(prefix="ncc"))
+        self.addCleanup(lambda: os.path.isdir(self.directory) and os.rmdir(self.directory))
+        self.secret = secrets.token_urlsafe(32)
+        session = ManualSession()
+        self.participant = GatedParticipant(
+            profile=PROFILE,
+            session=session,
+            guard=SecretGuard(()),
+            privileged_enabled=False,
+        )
+        self.socket_path = self.directory / "gate.sock"
+        self.server = GateServer(
+            self.participant, socket_path=self.socket_path, session_secret=self.secret
+        )
+        self.server.start()
+        self.addCleanup(self.server.close)
+
+    def test_a_caller_without_the_launch_secret_is_refused(self):
+        for secret in (None, "wrong"):
+            with self.subTest(secret=secret):
+                status, _ = gate_post(self.socket_path, "/v1/attach", {}, secret)
+                self.assertEqual(401, status)
+        self.assertFalse(self.participant.attached)
+
+    def test_attach_declares_the_room_tools(self):
+        status, body = gate_post(self.socket_path, "/v1/attach", {}, self.secret)
+        self.assertEqual(200, status)
+        self.assertEqual(
+            ["room_send", "room_react", "room_context"],
+            [tool["name"] for tool in body["tools"]],
+        )
+        self.assertTrue(self.participant.attached)
+
+    def test_a_tool_call_with_no_open_opportunity_posts_nothing(self):
+        status, body = gate_post(
+            self.socket_path,
+            "/v1/tool",
+            {"turn_id": "t1", "tool": SEND, "input": {"text": "hi"}},
+            self.secret,
+        )
+        self.assertEqual(200, status)
+        self.assertFalse(body["ok"])
+        self.assertIn("Nothing was posted", body["error"])
+
+    def test_the_socket_and_its_directory_are_private(self):
+        self.assertEqual(0o700, stat.S_IMODE(os.stat(self.directory).st_mode))
+        self.assertEqual(0o600, stat.S_IMODE(os.stat(self.socket_path).st_mode))
+
+
+STUB_SESSION_ID = "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
+STUB = r'''#!{python}
+import http.client, json, os, re, socket, sys
+record = os.environ["STUB_RECORD"]
+def note(entry):
+    with open(record, "a") as handle:
+        handle.write(json.dumps(entry) + "\n")
+note({"argv": sys.argv[1:], "env": dict(os.environ), "cwd": os.getcwd()})
+if sys.argv[1:2] == ["--version"]:
+    print(os.environ.get("STUB_VERSION", "2.1.289 (Claude Code)"))
+    sys.exit(0)
+scenario = os.environ.get("STUB_SCENARIO", "silence")
+
+class Connection(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(os.environ["NUNCHI_CLAUDE_CODE_GATE_SOCKET"])
+
+def post(path, body):
+    connection = Connection("nunchi-gate", timeout=60)
+    connection.request("POST", path, json.dumps(body), {
+        "content-type": "application/json",
+        "x-nunchi-session": os.environ["NUNCHI_CLAUDE_CODE_GATE_SESSION"],
+    })
+    answer = json.loads(connection.getresponse().read())
+    connection.close()
+    return answer
+
+def emit(message):
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
+
+def result(subtype="success"):
+    emit({"type": "result", "subtype": subtype, "is_error": subtype != "success",
+          "session_id": "''' + STUB_SESSION_ID + r'''", "result": ""})
+
+post("/v1/attach", {})
+turn = 0
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("type") == "control_request":
+        note({"control": message["request"]["subtype"]})
+        result("error_during_execution")
+        continue
+    if message.get("type") != "user":
+        continue
+    turn += 1
+    text = message["message"]["content"][0]["text"]
+    match = re.match(r'<nunchi_wake id="([A-Za-z0-9_-]+)"/>', text)
+    turn_id = "stub-turn-%d" % turn
+    post("/v1/turn-start", {"turn_id": turn_id, "wake_id": match.group(1) if match else None})
+    if scenario == "exit":
+        sys.stderr.write("stub session crashed\n")
+        sys.exit(7)
+    if scenario == "hang":
+        continue
+    if scenario == "send":
+        note({"answer": post("/v1/tool", {"turn_id": turn_id, "tool": "mcp__nunchi__room_send",
+                                          "input": {"text": "on it"}})})
+    result()
+'''
+
+SENT = {
+    "send_message": {
+        "message": {
+            "message_id": "777",
+            "channel_id": ROOM_ID,
+            "author_id": "9",
+            "author_is_bot": True,
+            "content": "on it",
+            "reply_to_message_id": None,
+        }
+    }
+}
+
+
+class RealSessionTests(unittest.TestCase):
+    """The real session manager and gate socket, with a stub `claude`."""
+
+    def _harness(self, directory, *, scenario, claude=None, environment=None):
+        root = Path(directory)
+        (root / "bin").mkdir(parents=True, exist_ok=True)
+        stub = root / "bin" / "claude"
+        stub.write_text(STUB.replace("{python}", sys.executable), encoding="utf-8")
+        stub.chmod(0o700)
+        self.record = root / "record.jsonl"
+        return RuntimeHarness(
+            directory,
+            documents=(),
+            session="real",
+            payloads=SENT,
+            claude={
+                "executable": str(stub),
+                "working_directory": str(root / "work"),
+                **(claude or {}),
+            },
+            environment={
+                "STUB_RECORD": str(self.record),
+                "STUB_SCENARIO": scenario,
+                **(environment or {}),
+            },
+        )
+
+    def _records(self):
+        if not self.record.exists():
+            return []
+        return [json.loads(line) for line in self.record.read_text().splitlines()]
+
+    def _starts(self):
+        return [
+            entry for entry in self._records()
+            if "argv" in entry and entry["argv"][:1] != ["--version"]
+        ]
+
+    @staticmethod
+    def _deliver(harness, index=1):
+        harness.runtime.handle(
+            notification(
+                f"d{index}",
+                message_event(f"discord:message:{index}", author="discord:actor:42"),
+                {"discord:actor:42": {"display_name": "Zoe", "kind": "human"}},
+            )
+        )
+        return harness.runtime.lane.drain(timeout=30)
+
+    @staticmethod
+    def _stage(harness, stage):
+        return [
+            record
+            for record in harness.runtime.pipeline.observation.receipts.all_records()
+            if record["stage"] == stage
+        ]
+
+    def test_a_wake_reaches_one_native_send_through_the_session_and_socket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario="send") as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness))
+                outbound = harness.client.outbound()
+                self.assertEqual(1, len(outbound))
+                self.assertEqual("on it", outbound[0][1]["content"])
+                self.assertEqual(
+                    "sent", self._stage(harness, "transport")[-1]["body"]["delivery"]
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not any(
+                    "answer" in entry for entry in self._records()
+                ):
+                    time.sleep(0.05)
+                answers = [entry["answer"] for entry in self._records() if "answer" in entry]
+                self.assertEqual(
+                    [{"ok": True, "text": "Done: the room accepted this action."}],
+                    answers,
+                )
+
+    def test_the_session_runs_with_the_mod_and_without_nunchi_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(
+                directory,
+                scenario="silence",
+                claude={"disallowed_tools": ["WebFetch"], "withhold_env": ["MY_TOKEN"]},
+                environment={
+                    "NUNCHI_DISCORD_TOKEN": "t" * 30,
+                    "MY_TOKEN": "m" * 30,
+                    "KEEP_ME": "1",
+                },
+            ) as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness))
+                start = self._starts()[0]
+                argv, env = start["argv"], start["env"]
+                self.assertEqual(
+                    ["-p", "--input-format", "stream-json", "--output-format",
+                     "stream-json", "--verbose", "--plugin-dir",
+                     str(harness.runtime.mod_directory)],
+                    argv[:8],
+                )
+                for relative in claude_code_v2.MOD_FILES:
+                    self.assertEqual(
+                        (MOD_DIRECTORY / relative).read_bytes(),
+                        (harness.runtime.mod_directory / relative).read_bytes(),
+                    )
+                self.assertFalse(
+                    (harness.runtime.mod_directory / "hooks" / "register.test.ts").exists()
+                )
+                state = Path(harness.config["state_directory"]).resolve()
+                rules = argv[argv.index("--disallowedTools") + 1:]
+                self.assertEqual("WebFetch", rules[0])
+                self.assertIn(f"Read(/{state}/**)", rules)
+                self.assertIn(f"Edit(/{state}/**)", rules)
+                for name in (OUTPUT_KEY_ENV, "NUNCHI_DISCORD_TOKEN", "MY_TOKEN"):
+                    self.assertNotIn(name, env)
+                self.assertEqual("1", env["KEEP_ME"])
+                self.assertEqual(str(harness.runtime.socket_path), env[SOCKET_ENV])
+                self.assertEqual(harness.runtime.session_secret, env[SESSION_ENV])
+                self.assertEqual(
+                    os.path.realpath(Path(directory) / "work"),
+                    os.path.realpath(start["cwd"]),
+                )
+                host = self._stage(harness, "participant-host")[-1]
+                self.assertEqual("silent", host["body"]["outcome"])
+
+    def test_a_persistent_session_is_resumed_after_it_restarts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(
+                directory, scenario="silence", claude={"session_mode": "persistent"}
+            ) as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness, 1))
+                harness.runtime.session.stop()
+                self.assertTrue(self._deliver(harness, 2))
+                starts = self._starts()
+                self.assertEqual(2, len(starts))
+                self.assertNotIn("--resume", starts[0]["argv"])
+                resume = starts[1]["argv"]
+                self.assertEqual(STUB_SESSION_ID, resume[resume.index("--resume") + 1])
+
+    def test_a_session_that_dies_mid_turn_fails_the_wake_and_restarts_next_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario="exit") as harness:
+                harness.runtime.start()
+                self.assertTrue(self._deliver(harness, 1))
+                self.assertEqual([], harness.client.outbound())
+                host = self._stage(harness, "participant-host")[-1]
+                self.assertEqual("unknown", host["body"]["outcome"])
+                self.assertIn(
+                    "stub session crashed", " ".join(harness.runtime.session.diagnostics)
+                )
+                self.assertTrue(self._deliver(harness, 2))
+                self.assertEqual(2, len(self._starts()))
+
+    def test_a_session_that_dies_before_its_reader_reports_never_blocks_the_next_wake(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario="hang") as harness:
+                session = harness.runtime.session
+                ended = []
+                session.on_turn_end = lambda **kwargs: ended.append(kwargs)
+                self.assertTrue(session.wait_idle(threading.Event()))
+                session.submit("hello")
+                # Hold the old reader back, as a slow thread would be.
+                session._turn_ended = lambda *args, **kwargs: None
+                old = session._process
+                old.kill()
+                old.wait(10)
+                del session._turn_ended
+                session.start()
+                self.assertEqual(1, len(ended))
+                self.assertFalse(ended[0]["ok"])
+                self.assertIn("mid-turn", ended[0]["detail"])
+                self.assertTrue(session.wait_idle(threading.Event()))
+                session.stop()
+
+    def test_cancellation_interrupts_the_running_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._harness(directory, scenario="hang") as harness:
+                harness.runtime.start()
+                harness.runtime.handle(
+                    notification(
+                        "d1",
+                        message_event("discord:message:1", author="discord:actor:42"),
+                        {"discord:actor:42": {"kind": "human"}},
+                    )
+                )
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline and not any(
+                    turn.turn_id for turn in harness.runtime.participant._recent
+                ):
+                    time.sleep(0.05)
+                harness.runtime.pipeline.cancel()
+                self.assertTrue(harness.runtime.lane.drain(timeout=30))
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline and not any(
+                    "control" in entry for entry in self._records()
+                ):
+                    time.sleep(0.05)
+                self.assertIn(
+                    {"control": "interrupt"},
+                    [entry for entry in self._records() if "control" in entry],
+                )
+                self.assertEqual([], harness.client.outbound())
+
+
+class RuntimeConfigTests(unittest.TestCase):
+    """The dedicated session's configuration is closed and keeps secrets out."""
+
+    def test_the_session_config_shape_is_closed(self):
+        for claude in (
+            {"effort": "high"},
+            {"working_directory": "relative/path"},
+            {"executable": "claude"},
+            {"timeout_seconds": math.inf},
+            {"timeout_seconds": 0},
+            {"session_mode": "sometimes"},
+            {"withhold_env": ["NOT-A-NAME"]},
+            {"disallowed_tools": "Bash"},
+            {"protect_nunchi_files": "yes"},
+            {"model": ""},
+        ):
+            with self.subTest(claude=claude):
+                with tempfile.TemporaryDirectory() as directory:
+                    with self.assertRaises(ValidationError):
+                        with RuntimeHarness(directory, documents=(), claude=claude):
+                            pass
+
+    def test_the_workspace_sits_beside_the_protected_state_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(directory, documents=()) as harness:
+                state = Path(harness.config["state_directory"])
+                self.assertEqual(
+                    state.parent / f"{state.name}-workspace",
+                    harness.runtime.settings["working_directory"],
+                )
+            inside = str(Path(directory) / "state" / "work")
+            with self.assertRaises(ValidationError):
+                with RuntimeHarness(
+                    directory, documents=(), claude={"working_directory": inside}
+                ):
+                    pass
+            with RuntimeHarness(
+                directory,
+                documents=(),
+                claude={"working_directory": inside, "protect_nunchi_files": False},
+            ) as harness:
+                self.assertEqual(Path(inside), harness.runtime.settings["working_directory"])
+
+    def test_nunchi_secrets_never_enter_the_session_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            harness = RuntimeHarness(
+                directory,
+                documents=(),
+                claude={"withhold_env": ["MY_TOKEN"]},
+                environment={
+                    "NUNCHI_DISCORD_TOKEN": "t" * 30,
+                    "MY_TOKEN": "m" * 30,
+                    "ATTENTION_KEY": "a" * 30,
+                    "KEEP_ME": "1",
+                },
+            )
+            harness.config["attention"]["model"] = {"api_key_env": "ATTENTION_KEY"}
+            with harness:
+                environment = harness.runtime.session_environment()
+                for name in (
+                    OUTPUT_KEY_ENV,
+                    "NUNCHI_DISCORD_TOKEN",
+                    "MY_TOKEN",
+                    "ATTENTION_KEY",
+                ):
+                    with self.subTest(name=name):
+                        self.assertNotIn(name, environment)
+                self.assertEqual("1", environment["KEEP_ME"])
+                self.assertEqual(str(harness.runtime.socket_path), environment[SOCKET_ENV])
+                guard = harness.runtime.participant.guard
+                for value in (OUTPUT_SECRET, "m" * 30, "a" * 30):
+                    with self.subTest(value=value[:4]):
+                        self.assertIsNotNone(guard.refusal({"text": f"x {value} y"}))
+                self.assertIsNone(guard.refusal({"text": "an ordinary message"}))
+
+    def test_nunchi_files_are_denied_to_native_tools_unless_turned_off(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory, documents=(), claude={"disallowed_tools": ["WebFetch"]}
+            ) as harness:
+                state = Path(harness.config["state_directory"]).resolve()
+                self.assertEqual(
+                    ("WebFetch", f"Read(/{state}/**)", f"Edit(/{state}/**)"),
+                    harness.runtime.disallowed_tools,
+                )
+        with tempfile.TemporaryDirectory() as directory:
+            with RuntimeHarness(
+                directory,
+                documents=(),
+                claude={"disallowed_tools": ["WebFetch"], "protect_nunchi_files": False},
+            ) as harness:
+                self.assertEqual(("WebFetch",), harness.runtime.disallowed_tools)
+
+
 class InstalledSurfaceTests(unittest.TestCase):
     """What a clean installed artifact reports about this surface."""
 
     def test_unconfigured_probe_is_v2_and_declares_no_v1_fallback(self):
         import io
         from contextlib import redirect_stdout
-
-        from nunchi.integrations import claude_code_v2
 
         output = io.StringIO()
         with redirect_stdout(output):
@@ -2733,93 +2725,112 @@ class InstalledSurfaceTests(unittest.TestCase):
         self.assertEqual(2, probe["generation"])
         self.assertEqual("claude-code", probe["surface"])
         self.assertFalse(probe["configured"])
+        self.assertEqual(__version__, probe["mod_version"])
         self.assertFalse(probe["v1_fallback"])
 
     def test_configured_probe_reports_the_exact_binding_and_guarantees(self):
         with tempfile.TemporaryDirectory() as directory:
-            with RuntimeHarness(
-                directory,
-                documents=[result_document({"kind": "silence"})],
-            ) as harness:
-                probe = harness.runtime.probe()
+            with RuntimeHarness(directory, documents=()) as harness:
+                with mock.patch.object(
+                    claude_code_v2.shutil, "which", return_value=None
+                ):
+                    probe = harness.runtime.probe()
                 self.assertEqual("claude-code", probe["surface"])
                 self.assertEqual(PARTICIPANT_ID, probe["participant_id"])
                 self.assertEqual(ACTOR_ID, probe["actor_id"])
                 self.assertEqual(ROOM_ID, probe["room_id"])
+                self.assertEqual("claude-code-session", probe["participant"])
+                self.assertIsNone(probe["claude_code_executable"])
+                self.assertFalse(probe["claude_code_supported"])
+                self.assertEqual([SEND, REACT, CONTEXT], probe["room_tools"])
+                self.assertEqual("claude-code-permission-rules", probe["native_tools"])
                 self.assertTrue(probe["shared_discord_transport"])
-                # The probe must report the configured mode, not a constant.
                 self.assertEqual("fresh", probe["session_mode"])
                 self.assertFalse(probe["persistent_session"])
                 self.assertFalse(probe["send_time_social_judgment"])
-                self.assertFalse(probe["participant_tools_enabled"])
+                self.assertFalse(probe["privileged_actions_enabled"])
                 self.assertFalse(probe["v1_fallback"])
 
-    def test_runner_requires_a_pinned_configuration_digest(self):
-        from nunchi.integrations import claude_code_v2
+    def test_the_configured_probe_works_without_claude_code_installed(self):
+        import io
+        from contextlib import redirect_stdout
 
+        with tempfile.TemporaryDirectory() as directory:
+            harness = RuntimeHarness(directory, documents=())
+            path = Path(directory) / "config.json"
+            raw = json.dumps(harness.config).encode()
+            path.write_bytes(raw)
+            output = io.StringIO()
+            with mock.patch.dict(os.environ, {OUTPUT_KEY_ENV: OUTPUT_SECRET}), mock.patch.object(
+                claude_code_v2.shutil, "which", return_value=None
+            ), redirect_stdout(output):
+                code = claude_code_v2.main(
+                    [
+                        "--config",
+                        str(path),
+                        "--config-sha256",
+                        hashlib.sha256(raw).hexdigest(),
+                        "--probe",
+                    ]
+                )
+            self.assertEqual(0, code)
+            probe = json.loads(output.getvalue())
+            self.assertTrue(probe["configured"])
+            self.assertIsNone(probe["claude_code_executable"])
+            self.assertFalse(probe["claude_code_supported"])
+
+    def test_runner_requires_a_pinned_configuration_digest(self):
         self.assertEqual(3, claude_code_v2.main(["--config", "/nonexistent.json"]))
 
-    def test_credential_status_asks_under_the_participant_configuration_root(self):
+    def test_claude_code_older_than_the_mod_minimum_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stub = root / "claude"
+            stub.write_text(STUB.replace("{python}", sys.executable), encoding="utf-8")
+            stub.chmod(0o700)
+            environment = {"STUB_RECORD": str(root / "record.jsonl")}
             with RuntimeHarness(
                 directory,
-                documents=[result_document({"kind": "silence"})],
+                documents=(),
+                claude={"executable": str(stub)},
+                environment={**environment, "STUB_VERSION": "2.1.286 (Claude Code)"},
             ) as harness:
-                participant = harness.runtime.participant
-                status = participant.credential_status()
-                self.assertEqual("authenticated", status["state"])
-                self.assertEqual("oauth_token", status["detail"]["auth_method"])
-                # The diagnostic must not be recorded as a participant turn,
-                # or it would shift replay indexes and pollute turn assertions.
-                self.assertEqual([], harness.stub.invocations())
-
-    def test_credential_status_separates_an_expired_login_from_an_absent_one(self):
-        with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(ValidationError):
+                    harness.runtime.require_supported_claude_code()
             with RuntimeHarness(
                 directory,
-                documents=[result_document({"kind": "silence"})],
+                documents=(),
+                claude={"executable": str(stub)},
+                environment=environment,
             ) as harness:
-                participant = harness.runtime.participant
-                harness.stub.set_auth({"loggedIn": False})
-                self.assertEqual("absent", participant.credential_status()["state"])
-                stored = participant.config_directory / ".credentials.json"
-                stored.write_text("{}", encoding="utf-8")
-                self.assertEqual(
-                    "logged-out", participant.credential_status()["state"]
-                )
+                self.assertEqual((2, 1, 289), harness.runtime.require_supported_claude_code())
 
-    def test_credential_status_never_raises_and_reports_unknown_instead(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with RuntimeHarness(
-                directory,
-                documents=[result_document({"kind": "silence"})],
-            ) as harness:
-                participant = harness.runtime.participant
-                for answer in ("", "not json", json.dumps({"loggedIn": "yes"})):
-                    with self.subTest(answer=answer):
-                        harness.stub.set_auth(answer)
-                        self.assertEqual(
-                            "unknown", participant.credential_status()["state"]
-                        )
+    def test_the_mod_ships_inside_the_package(self):
+        manifest = json.loads(
+            (MOD_DIRECTORY / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual("nunchi", manifest["name"])
+        self.assertEqual(__version__, manifest["version"])
+        hooks = json.loads((MOD_DIRECTORY / "hooks" / "hooks.json").read_text())
+        self.assertEqual({"modules": ["./register.ts"]}, hooks)
+        module = (MOD_DIRECTORY / "hooks" / "register.ts").read_text(encoding="utf-8")
+        self.assertIn(f"'{SOCKET_ENV}'", module)
+        self.assertIn(f"'{SESSION_ENV}'", module)
+        # The mod's wake pattern must accept every marker the gate writes.
+        pattern = re.search(r"const WAKE = /(.+)/\n", module).group(1).replace("\\/", "/")
+        for _ in range(20):
+            self.assertRegex(WAKE_MARKER.format(secrets.token_urlsafe(18)), pattern)
 
-    def test_probe_reports_the_participant_credential_state(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with RuntimeHarness(
-                directory,
-                documents=[result_document({"kind": "silence"})],
-            ) as harness:
-                self.assertEqual(
-                    "authenticated", harness.runtime.probe()["participant_credential"]
-                )
-                harness.stub.set_auth({"loggedIn": False})
-                self.assertEqual(
-                    "absent", harness.runtime.probe()["participant_credential"]
-                )
-
-    def test_output_key_env_may_not_be_readable_by_the_participant(self):
-        for name in _PARTICIPANT_ENV_ALLOWLIST:
-            with self.subTest(name=name), self.assertRaises(ValidationError):
-                ClaudeCodeRoomRuntime._output_secret({"output_key_env": name})
+    def test_the_headless_runner_is_gone(self):
+        for retired in (
+            "ClaudeCodeParticipant",
+            "parse_claude_result",
+            "SessionPinningReceiptJournal",
+            "_ISOLATION_ARGUMENTS",
+            "_PARTICIPANT_ENV_ALLOWLIST",
+        ):
+            with self.subTest(retired=retired):
+                self.assertFalse(hasattr(claude_code_v2, retired))
 
     def test_no_v1_claude_code_gate_remains_in_the_tree(self):
         root = Path(__file__).resolve().parents[2]

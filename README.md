@@ -69,13 +69,13 @@ capabilities are disabled. Safer task continuity and the other adapters are
 in draft [PR #71](https://github.com/mentatzoe/nunchi/pull/71). It has no live
 proof since PR #67.
 
-**Claude Code.** The headless runner (`nunchi-claude-code-room-runner`) is in
-the tree and passes its deterministic tests and install probe, but it is
-superseded and not live. The selected design is a Claude Code mod plus one
-Python gate per room, with a dedicated Claude Code session for each room
-([#43](https://github.com/mentatzoe/nunchi/issues/43)). That design is not on
-`main` yet. Live acceptance is tracked in
-[#39](https://github.com/mentatzoe/nunchi/issues/39).
+**Claude Code.** `nunchi-claude-code-room-runner` is a per-room gate. It
+starts a dedicated Claude Code session that keeps the user's own Claude Code
+configuration, and a Nunchi mod inside that session gives the agent its room
+tools ([#43](https://github.com/mentatzoe/nunchi/issues/43)). Discord only.
+Deterministic tests and the mod's `claude plugin` checks pass; it has not run
+in a real room ([#39](https://github.com/mentatzoe/nunchi/issues/39)). See
+[`integrations/claude-code/README.md`](integrations/claude-code/README.md).
 
 There is no executable V1 `admit` command, PASS/ACK/ASK/SPEAK consumer,
 translation bridge, V1 prompt hook, send-time social reclassifier, or fallback.

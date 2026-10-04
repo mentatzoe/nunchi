@@ -22,11 +22,18 @@ The generic reference runtime in `nunchi.adapters.runtime` is the shortest
 portable implementation. The Codex runner uses the same owners with a
 Codex-specific participant process and the shared Discord transport.
 
+A participant can also act through tools inside its own agent loop. The core
+renders that turn (`participant_tool_turn_text`) and turns each tool call into
+one bound action (`participant_tool_action`, `participant_tool_expansion`).
+The Claude Code gate works this way: its participant writes the wake into a
+dedicated Claude Code session, and the room tool call it receives back becomes
+the action `ParticipantTurnHost` commits. See
+[`integrations/claude-code/README.md`](../integrations/claude-code/README.md).
+
 ## Native host pipeline
 
-Some hosts run their own participant pipeline: Hermes today, and a Claude
-Code mod next ([#43](https://github.com/mentatzoe/nunchi/issues/43)). They do
-not use `ParticipantTurnHost`. Instead they wrap their own turn with the shared
+Some hosts run their own participant pipeline, as Hermes does. They do not
+use `ParticipantTurnHost`. Instead they wrap their own turn with the shared
 owners: observation, attention, the scheduler, shared opportunity preparation
 and wake facts (`nunchi.pipeline.prepare_opportunity`), the ACK journal, and
 shared receipts (`participant_host_receipt_body`). Nunchi decides before the
