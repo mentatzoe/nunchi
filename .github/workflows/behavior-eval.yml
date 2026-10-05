@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: Comma-separated OpenRouter model IDs
+        description: Comma-separated OpenRouter model IDs (typesafe/ models go through the Decisions API)
         required: true
-        default: google/gemini-3.8-flash,openai/gpt-6-luna,qwen/qwen3.8-flash,anthropic/claude-haiku-4.5,z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash
+        default: google/gemini-3.8-flash,openai/gpt-6-luna,qwen/qwen3.8-flash,anthropic/claude-haiku-4.5,z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash,typesafe/jev-1.13
       runs:
         description: Runs per moment and model
         required: true

@@ -30,7 +30,11 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
   reading a second time on the same wake without it, graded but never sent,
   so a run shows what the reading changed. `--ack agent` turns off Nunchi's
   own nod, so an ACK judgment gives the agent a turn and any "mhm" is its
-  own. The manual `behavior-eval` workflow runs it through OpenRouter.
+  own. Models named `typesafe/...` go to Jev, a typed decision model, through
+  OpenRouter's Decisions API: a prototype route that answers six typed
+  questions about the judged message and writes the agent's reading from
+  them, so Jev's speed and fit can be compared with the LLM routes. The
+  manual `behavior-eval` workflow runs it through OpenRouter, Jev included.
 - Shared V2 runtime: canonical bounded observation and continuation,
   participant-shaped attention, a coalescing opportunity scheduler (one active
   opportunity plus the newest pending event), participant wake and silence,
