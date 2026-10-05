@@ -139,6 +139,12 @@ since PR #67, and V2 is not released. The last release tag is `v0.2.0`.
 
 ### Fixed
 
+- A participant reply in a code fence followed by the model's own note is
+  now read as the fenced envelope; the note is dropped and never posted.
+  Before, the whole turn failed. In a behavior run after #94 step 2, 16 of
+  18 rejected agent replies were a valid fenced silence followed by an
+  explanation of why the agent stayed quiet. Any other text beside the
+  envelope is still a malformed reply.
 - The OpenAI-compatible participant used by the reference adapters now
   sends the action schema its prompt promises, bound to the turn's exact
   binding. Before, the prompt said "matching the supplied action schema" but

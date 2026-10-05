@@ -1,6 +1,6 @@
 {
   "id": "answered-while-composing",
-  "title": "Someone answers while the agent is still composing",
+  "title": "Someone answers while the agent is still composing an answer it knows",
   "source": "docs/behavior.md (looking again before speaking, #94 step 3)",
   "review": "draft: written for plan step 3; ranges need Zoe's review",
   "platform": "discord",
@@ -14,6 +14,12 @@
     }
   },
   "events": [
+    {
+      "id": "v1",
+      "author": "vigil",
+      "at": "-1d",
+      "text": "Heads up: the gateway's TLS certificate expires tonight at 23:00 UTC. Deploys after that will fail the handshake until it's rotated."
+    },
     {
       "id": "q1",
       "author": "zoe",
@@ -38,6 +44,12 @@
       "step1": "pass",
       "notice": [
         {
+          "fact": "Vigil warned yesterday that the gateway certificate would expire",
+          "events": [
+            "v1"
+          ]
+        },
+        {
           "fact": "Zoe asked the whole room",
           "events": [
             "q1"
@@ -54,7 +66,12 @@
         "stay_quiet",
         "mhm"
       ],
-      "misses": []
+      "misses": [
+        {
+          "move": "speak",
+          "why": "Castor already gave the cause and the fix; repeating it adds nothing"
+        }
+      ]
     }
   ]
 }
