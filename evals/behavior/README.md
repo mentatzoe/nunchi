@@ -83,7 +83,9 @@ agent by default; one fixed agent model keeps differences between runs down
 to attention.
 
 Each agent turn records how the agent got it (a wake, or a defer and why)
-and whether attention's reading came with it. Two options measure the
+and whether attention's reading came with it. When the turn protocol rejects
+the agent's reply, the record keeps that reply under `raw_reply`, so the
+failure can be read. Two options measure the
 agent's side of the room:
 
 - `--paired` plays every turn that carried a reading a second time, on the
