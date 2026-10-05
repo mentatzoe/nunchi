@@ -76,5 +76,16 @@ once. The `behavior-eval` workflow uses `anthropic/claude-haiku-4.5` as the
 agent by default; one fixed agent model keeps differences between runs down
 to attention.
 
+Each agent turn records how the agent got it (a wake, or a defer and why)
+and whether attention's reading came with it. Two options measure the
+agent's side of the room:
+
+- `--paired` plays every turn that carried a reading a second time, on the
+  same wake without the reading. That second move is graded but never sent,
+  so the summary shows what the reading changed at the same moment.
+- `--ack agent` turns off Nunchi's own nod. An ACK judgment then gives the
+  agent a turn, and any "mhm" is the agent's own. The default, `nunchi`,
+  is today's behavior.
+
 Moments that need a pause, such as "five minutes later, nobody has
 answered", have no route in today's V2 and are reported as not supported.

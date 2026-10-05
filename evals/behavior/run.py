@@ -78,7 +78,7 @@ AGENT_TIMEOUT_SECONDS = 90.0
 
 
 class OfflineModel:
-    """Always wakes; checks the plumbing without a network."""
+    """Always wakes with a one-line reading; checks the plumbing without a network."""
 
     name = "participant-attention"
     provider = "offline"
@@ -92,6 +92,9 @@ class OfflineModel:
             "reasons": ["offline dry run"],
             "evidence_event_ids": [projection["trigger_event_id"]],
             "legacy_verdict_confidences": {"PASS": 0, "ACK": 0, "ASK": 0, "SPEAK": 1},
+            "attention_advice": [
+                {"note": "offline dry run", "evidence_event_ids": [projection["trigger_event_id"]]}
+            ],
         }
 
 
@@ -131,26 +134,74 @@ class OfflineAgent:
 
 
 class RecordingAgent:
-    """Pass-through for the simulated agent that keeps its action and any error."""
+    """Pass-through for the simulated agent that keeps what it saw and did.
 
-    def __init__(self, inner: Any) -> None:
+    It keeps the wake's attention block, every context page the agent asked
+    for, its action, and any error. With ``paired``, a turn whose wake
+    carries a reading is played a second time on the same wake with the
+    reading removed and the source kept. That second action is recorded and
+    graded but never dispatched, so each turn shows what the reading changed
+    at the same moment.
+    """
+
+    def __init__(self, inner: Any, *, paired: bool = False) -> None:
         self.inner = inner
+        self.paired = paired
         self.called = False
         self.action: Any = None
         self.error: str | None = None
         self.latency_ms: int | None = None
+        self.attention: Mapping[str, Any] | None = None
+        self.expansions: list[dict[str, Any]] = []
+        self.without_reading: dict[str, Any] | None = None
 
-    def run_protocol(self, **kwargs: Any) -> Any:
+    def run_protocol(self, *, wake: Mapping[str, Any], expand: Any, **kwargs: Any) -> Any:
         self.called = True
+        self.attention = deepcopy(dict(wake.get("attention", {})))
         started = time.monotonic()
         try:
-            self.action = self.inner.run_protocol(**kwargs)
-            return self.action
+            self.action = self.inner.run_protocol(
+                wake=wake, expand=self._recorded(expand, "with reading"), **kwargs
+            )
         except BaseException as exc:
             self.error = _describe_error(exc)
             raise
         finally:
             self.latency_ms = int((time.monotonic() - started) * 1000)
+        if self.paired and self.attention.get("advice"):
+            self.without_reading = self._play_without_reading(wake, expand, kwargs)
+        return self.action
+
+    def _play_without_reading(
+        self, wake: Mapping[str, Any], expand: Any, kwargs: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        bare = deepcopy(dict(wake))
+        bare["attention"] = {"source": wake["attention"]["source"]}
+        played: dict[str, Any] = {}
+        started = time.monotonic()
+        try:
+            played["action"] = self.inner.run_protocol(
+                wake=bare, expand=self._recorded(expand, "without reading"), **kwargs
+            )
+        except Exception as exc:
+            # The paired turn is a measurement; it never changes the real one.
+            played["error"] = _describe_error(exc)
+        played["latency_ms"] = int((time.monotonic() - started) * 1000)
+        return played
+
+    def _recorded(self, expand: Any, arm: str) -> Callable[..., Any]:
+        def recorded(**request: Any) -> Any:
+            entry: dict[str, Any] = {"arm": arm, "request": dict(request)}
+            self.expansions.append(entry)
+            try:
+                page = expand(**request)
+            except Exception as exc:
+                entry["error"] = _describe_error(exc)
+                raise
+            entry["events"] = len(page.get("events", ())) if isinstance(page, Mapping) else None
+            return page
+
+        return recorded
 
 
 class RecordingEngine(AttentionEngine):
@@ -197,6 +248,17 @@ def agent_move(calls: list[Mapping[str, Any]]) -> str:
     if kinds:
         return "other"
     return "stay_quiet"
+
+
+def _attention_summary(attention: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """What the agent was told about attention: the source and the reading's size."""
+
+    if attention is None:
+        return None
+    return {
+        "source": attention.get("source"),
+        "reading_items": len(attention.get("advice", ())),
+    }
 
 
 def _describe_error(exc: BaseException) -> str:
@@ -318,6 +380,8 @@ def judge_moment(
     *,
     timeout_seconds: float,
     agent_factory: AgentFactory | None = None,
+    ack: str = "nunchi",
+    paired: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one moment through the production pipeline and grade what the room saw.
@@ -325,7 +389,9 @@ def judge_moment(
     Observation, attention, the participant host, and ACK are Nunchi's own.
     With an agent factory, a model plays the woken agent's turn through the
     shared participant protocol; without one, a woken agent counts as
-    "agent decides".
+    "agent decides". With ``ack="agent"``, Nunchi never nods itself: an ACK
+    judgment gives the agent a turn, and any "mhm" is the agent's own. With
+    ``paired``, a turn that carried a reading is also played without it.
     """
 
     scene, moment, participant = job.scene, job.moment, job.participant
@@ -373,7 +439,7 @@ def judge_moment(
     receipts = ReceiptJournal()
     observation = ObservationProvider(binding, receipts=receipts)
     transport = EvalTransport()
-    ack_policy = AckPolicy(reaction=ACK_REACTION)
+    ack_policy = AckPolicy(reaction=ACK_REACTION, enabled=ack == "nunchi")
     model = RecordingModel(factory(job.model))
     engine = RecordingEngine(
         profile=profile,
@@ -383,7 +449,9 @@ def judge_moment(
         ack_policy=ack_policy,
         reaction_capability_provider=transport.reaction_capability,
     )
-    agent = RecordingAgent(agent_factory(profile)) if agent_factory is not None else None
+    agent = (
+        RecordingAgent(agent_factory(profile), paired=paired) if agent_factory is not None else None
+    )
     scheduler = ConversationOpportunityScheduler(f"{participant}:eval:{scene.id}")
     host = ParticipantTurnHost(
         observation=observation,
@@ -391,7 +459,8 @@ def judge_moment(
         transport=transport,
         scheduler=scheduler,
         receipts=receipts,
-        participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS,
+        # A paired turn plays the agent twice before the real action is sent.
+        participant_timeout_seconds=timeout_seconds + AGENT_TIMEOUT_SECONDS * (2 if paired else 1),
         ack_policy=ack_policy,
     )
     pipeline = NunchiV2Pipeline(
@@ -456,13 +525,23 @@ def judge_moment(
         record["agent"] = {
             "action": agent.action,
             "latency_ms": agent.latency_ms,
+            "attention": _attention_summary(agent.attention),
         }
+        if agent.expansions:
+            record["agent"]["expansions"] = agent.expansions
         if failed:
             provider_error = True
             record["agent"]["error"] = agent.error or transport_result.detail
         else:
             result = agent_move(transport.calls)
             by = "agent"
+        if agent.without_reading is not None:
+            unread = dict(agent.without_reading)
+            if "error" not in unread:
+                action = unread.get("action")
+                unread["move"] = agent_move([action] if action else [])
+                unread["grade"] = grade(moment, unread["move"], attention=attention)["visible"]
+            record["agent"]["without_reading"] = unread
 
     evidence = set(decision.get("evidence_event_ids", []))
     record.update(
@@ -543,6 +622,90 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def turn_source(record: Mapping[str, Any]) -> str:
+    """How the agent got its turn: the wake source, and for DEFER, why."""
+
+    source = ((record.get("agent") or {}).get("attention") or {}).get("source") or "unknown"
+    if source != "DEFER":
+        return source
+    decision = record.get("decision", {})
+    judged = decision.get("classifier_disposition", "?")
+    valve = decision.get("routing_audit", {}).get("valve", "?")
+    return "DEFER (model)" if judged == "DEFER" else f"{judged} widened to DEFER ({valve})"
+
+
+def _agent_turn_sections(records: list[dict[str, Any]], *, paired: bool) -> list[str]:
+    turns = [record for record in records if "agent" in record]
+    lines = [
+        "",
+        "## What the agent saw",
+        "",
+        "Every agent turn by how it got its turn. *Reading* counts turns whose wake",
+        "carried attention's reading.",
+        "",
+        "| Wake | Turns | Reading | Spoke | Quiet | Mhm | Fits | Miss | Errors |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in turns:
+        by_source[turn_source(record)].append(record)
+    for source in sorted(by_source):
+        mine = by_source[source]
+        moves = Counter(record["result"] for record in mine if record.get("by") == "agent")
+        grades = Counter(record["grade"]["visible"] for record in mine if record.get("by") == "agent")
+        lines.append(
+            f"| {source} | {len(mine)} | "
+            f"{sum(1 for record in mine if (record['agent'].get('attention') or {}).get('reading_items'))} | "
+            f"{moves['speak']} | {moves['stay_quiet']} | {moves['mhm']} | {grades['fits']} | {grades['miss']} | "
+            f"{sum(1 for record in mine if 'error' in record['agent'])} |"
+        )
+    if not paired:
+        return lines
+    pairs = [
+        record
+        for record in turns
+        if record.get("by") == "agent"
+        and "grade" in (record["agent"].get("without_reading") or {})
+    ]
+    lines += [
+        "",
+        "## The reading, paired",
+        "",
+        "Each turn that carried a reading was played again on the same wake without it.",
+        "The second move is graded but never sent.",
+        "",
+        "| Wake | Pairs | Fits with / without | Miss with / without | Spoke with / without | Move changed |",
+        "|---|---|---|---|---|---|",
+    ]
+    if not pairs:
+        return lines[:-2] + ["No agent turn carried a reading."]
+    by_source = defaultdict(list)
+    for record in pairs:
+        by_source[turn_source(record)].append(record)
+    for source in sorted(by_source):
+        mine = by_source[source]
+        unread = [record["agent"]["without_reading"] for record in mine]
+        lines.append(
+            "| {} | {} | {} / {} | {} / {} | {} / {} | {} |".format(
+                source,
+                len(mine),
+                sum(1 for record in mine if record["grade"]["visible"] == "fits"),
+                sum(1 for item in unread if item["grade"] == "fits"),
+                sum(1 for record in mine if record["grade"]["visible"] == "miss"),
+                sum(1 for item in unread if item["grade"] == "miss"),
+                sum(1 for record in mine if record["result"] == "speak"),
+                sum(1 for item in unread if item["move"] == "speak"),
+                sum(1 for record, item in zip(mine, unread) if record["result"] != item["move"]),
+            )
+        )
+    failed = sum(
+        1 for record in turns if "error" in (record["agent"].get("without_reading") or {})
+    )
+    if failed:
+        lines += ["", f"{failed} paired turn(s) without the reading failed and are left out."]
+    return lines
+
+
 def summarize(
     scenes: list[Scene],
     models: list[str],
@@ -561,6 +724,16 @@ def summarize(
         f"- Command: `{meta['command']}`",
         "",
     ]
+    if meta.get("agent_model"):
+        lines[-1:-1] = [
+            "- Mhm: "
+            + (
+                "the agent's own; an ACK judgment gives the agent a turn"
+                if meta.get("ack") == "agent"
+                else "sent by Nunchi on an ACK judgment"
+            )
+            + ("; each turn with a reading is also played without it" if meta.get("paired") else ""),
+        ]
     if meta.get("agent_model"):
         lines += [
             f"Each moment runs through Nunchi's pipeline. When attention wakes the agent,",
@@ -633,6 +806,8 @@ def summarize(
                 int(statistics.median(latencies)) if latencies else "-",
             )
         )
+    if meta.get("agent_model"):
+        lines += _agent_turn_sections(records, paired=bool(meta.get("paired")))
     if together:
         lines += ["", "## Collective checks", ""]
         for item in together:
@@ -711,6 +886,17 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="model that plays the woken agent's turn; empty grades attention alone",
     )
+    parser.add_argument(
+        "--ack",
+        choices=("nunchi", "agent"),
+        default="nunchi",
+        help="who sends the mhm on an ACK judgment: Nunchi itself, or the agent in its own turn",
+    )
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="also play each agent turn that carried a reading without it, on the same wake",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
@@ -724,6 +910,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.runs < 1 or args.workers < 1 or args.per_model < 1:
         parser.error("--runs, --workers and --per-model must be positive")
+    if args.paired and not args.agent_model:
+        parser.error("--paired needs --agent-model")
 
     agent_factory: AgentFactory | None = None
     if args.dry_run:
@@ -750,7 +938,12 @@ def main(argv: list[str] | None = None) -> int:
     def run_job(job: Job) -> dict[str, Any]:
         with slots[job.model]:
             return judge_moment(
-                job, factory, timeout_seconds=args.timeout, agent_factory=agent_factory
+                job,
+                factory,
+                timeout_seconds=args.timeout,
+                agent_factory=agent_factory,
+                ack=args.ack,
+                paired=args.paired,
             )
 
     started = datetime.now(timezone.utc)
@@ -774,6 +967,8 @@ def main(argv: list[str] | None = None) -> int:
         "command": " ".join(["python3 -m evals.behavior.run", *(argv if argv is not None else sys.argv[1:])]),
         "models": models,
         "agent_model": (DRY_RUN_AGENT if args.dry_run else args.agent_model) if args.agent_model else None,
+        "ack": args.ack,
+        "paired": args.paired,
         "runs": args.runs,
         "temperature": None if args.dry_run else args.temperature,
         "timeout_seconds": args.timeout,
